@@ -102,6 +102,28 @@ class ShellLayoutSuite extends FunSuite {
     }
   }
 
+  test("theBrandLinkFollowsTheDeploymentBasePath") {
+    // Behind a reverse proxy that mounts KUI at `/kafka`, every gateway route carries that prefix.
+    // A brand link that says `/ui/` is a link to a path no route matches, so clicking the product
+    // name in the top bar lands the user on a 404 and throws away the state of the running SPA.
+    // A `<base href>` does not save it: `<base>` only rewrites *relative* URLs, and `/ui/` is
+    // root-relative.
+    val element = Shell.app(
+      Bootstrap("/kafka", "/kafka/api/v1", "1.2.3"),
+      "http://localhost:8080/kafka/ui/",
+      "http://localhost:8080"
+    )
+    mounted(element) { root =>
+      assertEquals(root.querySelector("[data-testid='brand-link']").getAttribute("href"), "/kafka/ui/")
+    }
+  }
+
+  test("theBrandLinkIsTheUiRootWhenThereIsNoDeploymentPrefix") {
+    mounted(app("http://localhost:8080/ui/")) { root =>
+      assertEquals(root.querySelector("[data-testid='brand-link']").getAttribute("href"), "/ui/")
+    }
+  }
+
   test("anUnknownAddressRendersTheNotFoundPageWithTheNavigationIntact") {
     mounted(app("http://localhost:8080/ui/nope")) { root =>
       assert(root.querySelector("[data-testid='page-not-found']") != null)

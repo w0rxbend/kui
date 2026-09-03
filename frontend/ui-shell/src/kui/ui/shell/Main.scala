@@ -146,7 +146,7 @@ object Shell {
 
     Layout(
       sidebar = Sidebar(router, Navigation.items(states, hideForbidden = false)),
-      header = Header(buildVersion.signal, Theme.choice),
+      header = Header(uiPrefix, buildVersion.signal, Theme.choice),
       content = content(router, buildVersion.signal, states, api, uiPrefix),
       fullScreen = ShellHealth.connectivity.map {
         case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
