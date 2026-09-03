@@ -123,6 +123,22 @@ object ApplicationError {
     val code: ErrorCode = ErrorCode.Validation
     override val details: List[FieldError] = fields
   }
+
+  /** A business failure another KUI process already classified, carried across the boundary verbatim.
+    *
+    * The gateway proxies calls to services and has to hand the caller back what the service said. Every other
+    * case here computes its own `message` from its fields, which is right when this process is the one that
+    * noticed the problem and wrong when it is not: re-deriving "topic 'orders' does not exist" from a code
+    * alone is impossible, and picking the nearest constructor loses the topic name the user needs to read.
+    *
+    * It is an `ApplicationError` and not an `InfrastructureError` because that split is what the capability
+    * registry keys on (ADR-039 §6): a business failure must never dim a capability, whichever process decided
+    * it was one.
+    */
+  final case class Remote(code: ErrorCode, message: String, fields: List[FieldError])
+      extends ApplicationError {
+    override val details: List[FieldError] = fields
+  }
 }
 
 /** Something KUI depends on failed: a broker, a schema registry, a Connect cluster, ksqlDB. */
@@ -164,4 +180,44 @@ object InfrastructureError {
     val code: ErrorCode = ErrorCode.UpstreamUnavailable
     val message: String = s"calls to $upstream are suspended while it recovers"
   }
+
+  /** The infrastructure half of `ApplicationError.Remote`: a transport-level failure another KUI process
+    * reported, carried across the boundary with its code and message intact.
+    */
+  final case class Remote(code: ErrorCode, message: String, fields: List[FieldError])
+      extends InfrastructureError {
+    override val details: List[FieldError] = fields
+  }
+}
+
+object KuiError {
+
+  /** The codes that describe a failure of a *system*, as opposed to a failure of a request.
+    *
+    * The list is short and closed on purpose. Everything not named here is a statement about what the caller
+    * asked for — a bad field, a missing resource, a forbidden operation — and so is an `ApplicationError`.
+    * Getting this classification wrong has a visible consequence: ADR-039 §6 reports only infrastructure
+    * failures to the capability registry, so a code wrongly listed here would let any user dim a feature for
+    * everyone else by typing a bad URL.
+    */
+  val InfrastructureCodes: Set[ErrorCode] =
+    Set(
+      ErrorCode.UpstreamUnavailable,
+      ErrorCode.UpstreamAuth,
+      ErrorCode.UpstreamKsql,
+      ErrorCode.Timeout,
+      ErrorCode.Internal
+    )
+
+  /** Rebuilds the error another KUI process reported, on the correct side of the application / infrastructure
+    * split.
+    *
+    * Used by the gateway when it decodes an `ErrorEnvelope` from a service it called. Keeping the
+    * classification here rather than at the call site means every consumer of a proxied error — the route
+    * that answers the browser and the capability registry that decides whether to dim a feature — agrees
+    * about what kind of failure it was.
+    */
+  def remote(code: ErrorCode, message: String, fields: List[FieldError] = Nil): KuiError =
+    if InfrastructureCodes.contains(code) then InfrastructureError.Remote(code, message, fields)
+    else ApplicationError.Remote(code, message, fields)
 }
