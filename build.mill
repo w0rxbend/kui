@@ -34,6 +34,8 @@ object Versions {
   val ciris           = "3.15.0"
   val iron            = "3.3.2"
   val macwire         = "2.6.7"
+  val chimney         = "2.0.0-RC1"
+  val apispec         = "0.11.10"
   val log4cats        = "2.8.0"
   val slf4j           = "2.0.18"
   val logback         = "1.6.3"
@@ -887,6 +889,74 @@ object services extends Module {
         object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
       }
     }
+
+    /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification and
+      * the OpenAPI document (`ARCHITECTURE.md` §3).
+      *
+      * This is the only layer allowed to see both an application type and a wire type, which is what makes
+      * the mapping between them (ADR-033) possible without rule A3 failing the build.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        // The circe encoders for the OpenAPI model. `tapir-openapi-docs` builds the document; this is
+        // what turns it into the JSON that is committed beside this module.
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        // ADR-033: DTO mapping, in the layer ADR-041 puts it in.
+        mvn"io.scalaland::chimney::${Versions.chimney}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** Where the generated document is committed. It lives beside the module rather than under `docs/`
+        * because GW-007 merges the services' documents by walking the module tree.
+        */
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.cluster.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.cluster.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // The stub interpreter runs the real interceptor chain and the real routes without a socket.
+          // A bound port would add seconds per case and prove nothing this module is responsible for.
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          // A real meter, in memory: `kui.principal.rejected` is only proven emitted by reading it back
+          // off a recording meter, not by asserting against a fake that could agree with a bug.
+          mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}"
+        )
+      }
+    }
+
   }
 
   /** The one process a browser ever talks to (ADR-004 §3).
@@ -1046,12 +1116,19 @@ object services extends Module {
       * anything concrete (ADR-010).
       */
     object app extends KuiJvmModule {
-      def moduleDeps = Seq(api, libs.config, libs.observability, libs.http)
+      def moduleDeps = Seq(api, application, libs.config, libs.observability, libs.http)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
         mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
         mvn"com.softwaremill.macwire::util::${Versions.macwire}",
+        // The real HTTP transport under every upstream call. It is named only here, in the composition
+        // root (ADR-010): `SttpServiceClient` is handed a backend rather than building one, which is what
+        // lets its suite exercise the whole assembly against a stub.
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
       )
 

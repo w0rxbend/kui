@@ -1,0 +1,339 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI Cluster Registry service",
+    "version" : "1.0.0"
+  },
+  "paths" : {
+    "/internal/v1/ping" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Echo endpoint used to prove the contract -> client -> gateway -> browser chain",
+        "operationId" : "cluster.ping",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "message",
+            "in" : "query",
+            "description" : "Echoed back, 1..128 characters",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PingResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: query parameter message",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live" : {
+      "get" : {
+        "description" : "Whether the process should be restarted. Never depends on an upstream.",
+        "operationId" : "health.live",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LivenessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready" : {
+      "get" : {
+        "description" : "Whether the service can serve requests now, and which checks say otherwise.",
+        "operationId" : "health.ready",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities" : {
+      "get" : {
+        "description" : "What this service can currently do, per cluster.",
+        "operationId" : "capabilities",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceCapabilities"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CheckResult" : {
+        "title" : "CheckResult",
+        "description" : "One readiness check and its result",
+        "type" : "object",
+        "required" : [
+          "name",
+          "healthy"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "healthy" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterCapability" : {
+        "title" : "ClusterCapability",
+        "type" : "object",
+        "required" : [
+          "configured",
+          "status"
+        ],
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "features" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "status" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "LivenessReport" : {
+        "title" : "LivenessReport",
+        "description" : "Whether the process should be restarted",
+        "type" : "object",
+        "required" : [
+          "alive",
+          "at"
+        ],
+        "properties" : {
+          "alive" : {
+            "type" : "boolean"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "Map_ClusterId_ClusterCapability" : {
+        "title" : "Map_ClusterId_ClusterCapability",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/ClusterCapability"
+        }
+      },
+      "PingResponse" : {
+        "title" : "PingResponse",
+        "description" : "The echoed message, the instant the service saw it, and which service answered",
+        "type" : "object",
+        "required" : [
+          "message",
+          "at",
+          "service"
+        ],
+        "properties" : {
+          "message" : {
+            "type" : "string"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "service" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ReadinessReport" : {
+        "title" : "ReadinessReport",
+        "description" : "Whether the service can serve requests now",
+        "type" : "object",
+        "required" : [
+          "ready",
+          "at"
+        ],
+        "properties" : {
+          "ready" : {
+            "type" : "boolean"
+          },
+          "checks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CheckResult"
+            }
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ServiceCapabilities" : {
+        "title" : "ServiceCapabilities",
+        "type" : "object",
+        "required" : [
+          "service",
+          "clusters"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "clusters" : {
+            "$ref" : "#/components/schemas/Map_ClusterId_ClusterCapability"
+          }
+        }
+      }
+    }
+  }
+}

@@ -54,6 +54,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | com.softwaremill.sttp.client4 | fs2_3 | 4.0.26 | main | libs/http | ADR-003 |
 | com.softwaremill.sttp.client4 | circe_3 | 4.0.26 | shared | libs/http | ADR-007 |
 | com.softwaremill.sttp.apispec | jsonschema-circe_3 | 0.11.10 | main | services/message/infrastructure | ADR-014 |
+| com.softwaremill.sttp.apispec | openapi-circe_3 | 0.11.10 | main | services/*/api | ADR-003 |
 
 ## JSON, config, validation, mapping, wiring
 
@@ -69,7 +70,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | io.github.iltotore | iron-circe_3 | 3.3.2 | shared | libs/contracts-core, services/*/contract | ADR-007 |
 | io.github.iltotore | iron-cats_3 | 3.3.2 | shared | libs/kernel, services/*/domain | ADR-007 |
 | io.github.iltotore | iron-ciris_3 | 3.3.2 | main | libs/config | ADR-013 |
-| io.scalaland | chimney_3 | 2.0.0-RC1 | main | services/*/application | ADR-033 |
+| io.scalaland | chimney_3 | 2.0.0-RC1 | main | services/*/api, services/*/application | ADR-033 |
 | com.softwaremill.macwire | macros_3 | 2.6.7 | main (provided) | services/*/app, apps/allinone | ADR-010 |
 | com.softwaremill.macwire | util_3 | 2.6.7 | main | services/*/app, apps/allinone | ADR-010 |
 

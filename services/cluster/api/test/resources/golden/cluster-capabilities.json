@@ -1,0 +1,12 @@
+{
+  "service" : "cluster",
+  "clusters" : {
+    "prod-eu" : {
+      "configured" : true,
+      "features" : [
+        "CLUSTER_TOPOLOGY"
+      ],
+      "status" : "available"
+    }
+  }
+}
