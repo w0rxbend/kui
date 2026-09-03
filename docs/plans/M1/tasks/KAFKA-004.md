@@ -476,4 +476,64 @@ this task states the request in `CLIENT-CHOICE.md` so CFGOP-008 has text to work
 
 ## Deviations
 
-*(filled in by the implementer, in the same commit)*
+Recorded by the implementer, in the same commit.
+
+1. **`AdminClientPool.resourceWith` takes the client factory as a parameter**, and `resource` is
+   `resourceWith(metrics, defaultFactory, log)`. The spec's own test list asks for "a fake client
+   factory injected — no broker", and there was no seam in the published signature to inject one
+   through. `Factory[F] = (ClusterConnection, ClientId, ClientProperties) => Resource[F, Admin]` is
+   that seam. It is also the reason the suite can assert what properties actually reached the
+   client, which is how `theAdminTuningTimeoutsAndTheClientIdReachTheClient` and
+   `anOperatorOverrideBeatsTheAdminTuningDefault` exist at all.
+
+2. **`AdminMetrics` lives in its own file and gained `noop`, `otel` and `outcomeOf`.** The spec
+   declares the trait beside `AdminClientPool`; splitting it out keeps the pool file about the pool.
+   `outcomeOf` is public because it is the mapping from a Kafka throwable to the `UpstreamOutcome`
+   vocabulary, and KAFKA-005's error mapper should agree with it rather than restate it.
+
+3. **`FakeAdminMetrics` is in `libs/kafka`'s test sources, not in `libs/testkit`.** The spec puts it
+   in the testkit. It cannot go there: `AdminMetrics` is a `libs/kafka` type, `libs/testkit` is on
+   the test classpath of modules that layering rule A10 forbids from seeing a Kafka client, and
+   putting it in the testkit would make `libs/testkit → libs/kafka` an edge that A10's build test
+   will reject when CFGOP-003 lands.
+
+4. **A `KafkaClientConfigurationFailure` wrapper was added.** `run` returns `F[A]` and can only fail
+   with a `Throwable`, but the failure it has to report for a bad keystore or a missing login module
+   is a `KuiError`. Flattening it to a message would lose the error code that decides the HTTP
+   status; the wrapper keeps the original, and KAFKA-005's mapper can unwrap it.
+
+5. **`ConsumerFactory.settings` and `ProducerFactory.settings` return
+   `Resource[F, Either[KuiError, Settings]]`**, not `Resource[F, Settings]`. They call
+   `ConnectionProperties.resource`, whose result is an `Either` for the reasons KAFKA-003 records;
+   the alternative was to raise inside the resource, which would make a misconfigured cluster an
+   exception at a point where every other configuration failure in M1 is a value.
+
+6. **All three factories take an optional `log: Option[Logger[F]] = None`**, for the same reason
+   KAFKA-003's `ConnectionProperties` does: `libs/kafka` has a `Logger` type available but no
+   `LoggerFactory` and no SLF4J binding of its own, and making the logger a required parameter would
+   change the signature every caller — including ones other agents are writing right now — has to
+   use.
+
+7. **`withAdminSettings` re-applies `connection.overrides` after the tuning defaults.** The spec's
+   assembly order puts the operator's `properties` last, and `AdminTuning`'s timeouts are applied
+   after the renderer has already finished, so without the re-application a cluster that set
+   `request.timeout.ms` by hand would silently lose it. A test pins it.
+
+8. **`snappy-java` and `lz4-java` are declared at runtime scope as the spec says, but the lz4
+   coordinate `at.yawk.lz4:lz4-java:1.11.2` from `DEPENDENCY_MATRIX.md` was not verified to
+   resolve** — `runMvnDeps` are not fetched by `compile` or by `test`, and nothing in M1 reads a
+   compressed topic yet. CFGOP-006, which builds the container images, is the first task that will
+   actually fetch them; if the coordinate is wrong it will find out there. Recorded here rather than
+   left silent.
+
+9. **`AdminMetrics.otel` has no test.** Asserting on a recorded histogram needs the OpenTelemetry
+   SDK and its in-memory exporter, which `libs/observability`'s own suite already carries and this
+   module does not. `everyRunIsMeasured` asserts through `FakeAdminMetrics` that the pool measures
+   every call on both the success and the failure path, which is the behaviour that can regress; the
+   otel4s call itself is four lines with no branching.
+
+10. **A cancellation test was added** (`aCancelledPoolStillClosesEveryClientItOpened`), following the
+    gate review's F-07 condition. The pool's `Resource` release is the only thing between a
+    cancelled startup and a process that keeps a Kafka network thread alive for its lifetime, and
+    `create` is `uncancelable` from the moment the keystore files exist to the moment the entry is
+    in the map — which is exactly the window F-07 named.
