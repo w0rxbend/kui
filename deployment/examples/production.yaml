@@ -134,10 +134,12 @@ kui:
   # -------------------------------------------------------------------------------------------
   # The clusters to manage.
   #
-  # NOT READ YET -- the cluster registry is M1. The loader accepts anything under `kui.clusters`
-  # so that a file written for M1 loads today, but nothing acts on it and KUI will not connect to
-  # these brokers until M1 ships. The shape below is the one M1 implements (ADR-022), so this
-  # section is written the way it will be read.
+  # Each entry is one Kafka cluster KUI connects to. Nothing here is checked against a broker at
+  # start-up: reachability is not knowable from a file, and a cluster that is spelled correctly and
+  # unreachable shows as `Unavailable` on the dashboard rather than stopping KUI from starting.
+  #
+  # Every problem that IS knowable is reported at once -- a bad address, an unknown mechanism, a
+  # missing password, a duplicate id -- so a mistake costs one restart and not one per mistake.
   # -------------------------------------------------------------------------------------------
   clusters:
     # An unsecured cluster on a trusted network: the shortest form there is.
@@ -146,15 +148,16 @@ kui:
 
     # A secured cluster: SASL over TLS, with SCRAM-SHA-512.
     #
-    # `saslSsl` is the protocol (authenticate AND encrypt); `scramSha512` is the mechanism (how the
-    # password is proved without sending it). The pair people get wrong is `saslPlaintext`, which
-    # authenticates but does NOT encrypt -- it sends your credentials in the clear. Use
-    # `saslPlaintext` only inside a network you already trust completely.
+    # `SASL_SSL` is the protocol (authenticate AND encrypt); `SCRAM-SHA-512` is the mechanism (how
+    # the password is proved without sending it). The spellings are Kafka's own, upper-case, so they
+    # can be copied straight out of Kafka's documentation. The pair people get wrong is
+    # `SASL_PLAINTEXT`, which authenticates but does NOT encrypt -- it sends your credentials in the
+    # clear. Use it only inside a network you already trust completely.
     - name: "analytics"
       bootstrapServers: "kafka-analytics-1:9093,kafka-analytics-2:9093"
       security:
-        protocol: saslSsl
-        mechanism: scramSha512
+        protocol: SASL_SSL
+        mechanism: SCRAM-SHA-512
         username: "kui"
         # Never a literal. See the header of this file for how this variable is delivered.
         password: "env:KUI_ANALYTICS_PASSWORD"
@@ -165,14 +168,28 @@ kui:
           verifyHostname: true
           # Only needed when the brokers use a private certificate authority that the container's
           # trust store does not already know about.
-          truststore: "file:/etc/kui/certs/kafka-ca.p12"
+          truststore:
+            location: "/etc/kui/certs/kafka-ca.p12"
+            password: "env:KUI_ANALYTICS_TRUSTSTORE_PASSWORD"
+            type: PKCS12
+
+      # How KUI talks to this one cluster's brokers. Every key is optional and every default is a
+      # number the reference Kafka tools arrived at empirically; raise the timeouts for a cluster
+      # that is far away, and lower `chunkSize` before raising `requestTimeout` for one that is
+      # large -- a smaller request that succeeds beats a larger one that eventually does not.
+      admin:
+        requestTimeout: 30s
+        apiTimeout: 60s
+        chunkSize: 200
+        parallelism: 4
 
       # The escape hatch: raw Kafka client properties, applied last, on top of everything above.
       # It exists so a new broker setting does not have to wait for a KUI release. Prefer the
-      # typed keys above wherever one exists -- they are validated and their secrets are redacted,
-      # and anything set here is neither.
+      # typed keys above wherever one exists -- they are validated, and a value whose key looks
+      # like a credential is redacted in logs either way. These keys can only be set in a file:
+      # a Kafka property name contains dots that the KUI_* environment mapping cannot spell back.
       properties:
-        request.timeout.ms: "30000"
+        connections.max.idle.ms: "540000"
 
   # -------------------------------------------------------------------------------------------
   # The metadata store: where KUI keeps its own state -- registered clusters, settings, uploaded

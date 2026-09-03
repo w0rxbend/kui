@@ -39,27 +39,19 @@ kui:
   # ---------------------------------------------------------------------------------------------
   # The broker this quickstart starts.
   #
-  # BE CLEAR ABOUT WHAT HAPPENS TODAY: nothing reads this yet. Kafka connectivity is Milestone 1,
-  # which is being planned as this is written, and the current release has no Kafka client in it at
-  # all. The configuration loader accepts everything under `kui.clusters` and ignores it — that is
-  # a deliberate rule in libs/config (`kui.clusters.**` is on its known-keys list), so that a file
-  # written for the version you will upgrade to still loads on the version you are running. Without
-  # that rule the loader would reject this file at start-up, because it rejects any key it does not
-  # recognise rather than silently ignoring your typo.
-  #
-  # So this entry exists for one reason: when M1 lands, the same `quickstart.sh` must show a real
-  # cluster with nothing new to type. Today it changes nothing you can see.
-  #
   # `kafka:9092` and not `localhost:9092`: KUI reaches the broker across the Compose network by
   # container name. The port published on your machine is for your own tools.
   #
-  # The field names follow the cluster record M1's design documents describe
-  # (docs/plans/M1/tasks/STORE-001.md). They are not frozen yet — M1's own configuration task owns
-  # the final shape — so if a name changes there, it changes in this file too, and the command a
-  # newcomer types stays the same.
+  # `id` is optional. Without it KUI derives one from the name — `Quickstart (local)` would become
+  # `quickstart-local` — and that derived id appears in every URL. Setting it explicitly here means
+  # the name can be edited later without breaking a bookmark.
+  #
+  # There is no `security` block, so this cluster is PLAINTEXT: no authentication and no encryption,
+  # which is what the broker this quickstart starts offers. See
+  # docs/operations/configuration.md for the SASL and TLS keys a real cluster needs.
   clusters:
-    - id: "quickstart"
-      displayName: "Quickstart (local)"
+    - name: "Quickstart (local)"
+      id: "quickstart"
       bootstrapServers:
         - "kafka:9092"
 
