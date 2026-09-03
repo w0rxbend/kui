@@ -319,25 +319,63 @@ object CapabilityRegistry {
 
     /** Offers to every subscriber without ever waiting for one.
       *
-      * `tryOffer` and not `offer`: a full mailbox means that subscriber has stopped reading, and the only two
-      * options are to drop its oldest event or to stop the registry. Dropping is right — the subscriber will
-      * resynchronise from the next snapshot it asks for — and it is logged, because a subscriber that drops
-      * events regularly is a bug somewhere else.
+      * `tryOffer` and not `offer`: a full mailbox means that subscriber has stopped reading, and blocking on
+      * it would let one suspended laptop stall the sidebar of everyone else in the building.
       */
     private def publish(change: CapabilityChange): F[Unit] =
       subscribers.get.flatMap(_.values.toList.traverse_(offer(_, change)))
 
+    /** Makes room in a full mailbox by collapsing it, never by forgetting a key.
+      *
+      * The mailbox used to drop its oldest event, on the reasoning that the subscriber would resynchronise
+      * from the next snapshot it asked for. For this stream there is no next snapshot: a client is sent one
+      * snapshot when it connects and deltas forever after, and it patches one key at a time. Dropping the
+      * oldest event keeps the newest state per *queue*, which is not the same as the newest state per key --
+      * if the dropped event was the only queued change for the topic service, that browser's topic entry was
+      * wrong for as long as the tab stayed open, with the stream still healthy and nothing to tell it.
+      *
+      * So the backlog is coalesced instead: everything queued is taken out, at most the latest change per key
+      * is put back, and the new change goes on the end. Nothing a subscriber has not yet seen about any key
+      * is lost, and replaying what it does receive still reproduces the registry. The only case that still
+      * has to drop is a backlog holding more distinct keys than the mailbox has slots, and that is logged,
+      * because a subscriber that falls that far behind is a bug somewhere else.
+      */
     private def offer(subscriber: Subscriber[F], change: CapabilityChange): F[Unit] =
       subscriber.queue.tryOffer(Some(change)).flatMap {
         case true => Async[F].unit
-        case false =>
-          subscriber.queue.tryTake *>
-            logger.warn(
-              Map(MetricNames.Attr.Service -> change.entry.key.service.value)
-            )(
-              "a capability subscriber is not keeping up; its oldest change was dropped"
-            ) *>
-            subscriber.queue.tryOffer(Some(change)).void
+        case false => coalesce(subscriber, change)
+      }
+
+    private def coalesce(subscriber: Subscriber[F], change: CapabilityChange): F[Unit] =
+      for {
+        queued <- drain(subscriber, Vector.empty)
+        // `distinctBy` keeps the first of each key, so the vector is reversed, deduplicated and reversed
+        // back: the *latest* change per key survives, in the order the changes happened.
+        collapsed = (queued :+ change).reverse.distinctBy(_.entry.key).reverse
+        offered <- collapsed.traverse(pending => subscriber.queue.tryOffer(Some(pending)))
+        dropped = offered.count(!_)
+        _ <- Async[F].whenA(dropped > 0)(
+          logger.warn(
+            Map(
+              MetricNames.Attr.Service -> change.entry.key.service.value,
+              "dropped" -> dropped.toString
+            )
+          )(
+            "a capability subscriber is not keeping up; changes were dropped from its mailbox"
+          )
+        )
+      } yield ()
+
+    private def drain(
+        subscriber: Subscriber[F],
+        taken: Vector[CapabilityChange]
+    ): F[Vector[CapabilityChange]] =
+      subscriber.queue.tryTake.flatMap {
+        case Some(Some(queued)) => drain(subscriber, taken :+ queued)
+        // The end-of-stream marker is put straight back: a subscriber that is being released must still
+        // see its stream end, and it is the last thing in the queue in any case.
+        case Some(None) => subscriber.queue.tryOffer(None).as(taken)
+        case None => taken.pure[F]
       }
   }
 

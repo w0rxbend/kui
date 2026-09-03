@@ -129,6 +129,9 @@ final class CapabilityRegistrySuite extends CatsEffectSuite {
               )
             ) *> IO.sleep(250.milliseconds)
           }
+          // A moment past the last report, so the debounce timer scheduled by the first of them has
+          // certainly fired rather than racing the end of the program.
+          _ <- IO.sleep(2.seconds)
           changes <- seen.get
           _ <- reader.cancel
         } yield changes.toList
@@ -223,6 +226,55 @@ final class CapabilityRegistrySuite extends CatsEffectSuite {
       assertEquals(snapshot, 20)
       assertEquals(healthy, 20)
       assert(warnings > 0, "dropping a slow subscriber's events must be logged")
+    }
+  }
+
+  test("aBackloggedSubscriberStillLearnsTheLatestStateOfEveryKey") {
+    // The mailbox used to make room by dropping its oldest event, justified by the subscriber
+    // "resynchronising from the next snapshot". There is no next snapshot on this stream: a client gets one
+    // on connect and deltas forever after, patching one key at a time. So an outage that happened to be the
+    // oldest queued event was lost for good, while later events for a chattier key survived, and that
+    // browser showed the wrong state for the quiet key with the stream still healthy.
+    val config = RegistryConfig.Default.copy(subscriberQueueSize = 2, debounce = 1.millisecond)
+
+    val program = registry(config).flatMap { (resource, _) =>
+      resource.use { registry =>
+        for {
+          seen <- Ref.of[IO, Vector[CapabilityChange]](Vector.empty)
+          // A subscriber that takes a second over every event it reads -- a tab in the background. It is
+          // subscribed from the start, so nothing is missed for want of a subscription; it simply cannot
+          // keep up with the reports below, and its mailbox holds two.
+          reader <- registry.changes
+            .evalMap(change => seen.update(_ :+ change) *> IO.sleep(1.second))
+            .compile
+            .drain
+            .start
+          _ <- IO.sleep(1.second)
+          _ <- registry.report(cluster, CapabilityState.Available)
+          _ <- registry.report(cluster, outage)
+          // The chatty key fills the mailbox several times over while the quiet key's outage waits in it.
+          _ <- (1 to 10).toList.traverse_ { n =>
+            registry.report(
+              topic,
+              if n % 2 == 0 then CapabilityState.Available else CapabilityState.NotConfigured
+            ) *> IO.sleep(1.millisecond)
+          }
+          _ <- IO.sleep(60.seconds)
+          received <- seen.get
+          _ <- reader.cancel
+        } yield received.toList
+      }
+    }
+
+    TestControl.executeEmbed(program).map { received =>
+      val latest = received.foldLeft(Map.empty[CapabilityKey, CapabilityState])((acc, change) =>
+        acc.updated(change.entry.key, change.entry.state)
+      )
+      assertEquals(
+        latest.get(cluster),
+        Some(outage),
+        s"the quiet key's outage never reached the subscriber: $received"
+      )
     }
   }
 
