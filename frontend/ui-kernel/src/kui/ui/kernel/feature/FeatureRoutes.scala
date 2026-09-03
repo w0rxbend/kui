@@ -39,8 +39,14 @@ trait FeatureRoutes {
     */
   def landing: Page
 
-  /** Every URL this feature owns, as patterns. Registered with the router at start-up. */
-  def routes: List[Route[? <: Page, ?]]
+  /** Every URL this feature owns, as patterns. Registered with the router at start-up.
+    *
+    * @param uiPrefix
+    *   what every one of this feature's paths hangs off, e.g. `/ui` — or `/kafka/ui` in a deployment mounted
+    *   under a prefix. A parameter rather than a constant because only the shell knows where the deployment
+    *   put KUI, and a feature that hard-coded `/ui` would silently match nothing under any other prefix.
+    */
+  def routes(uiPrefix: String): List[Route[? <: Page, ?]]
 
   /** This feature's contribution to the `history.state` codec.
     *

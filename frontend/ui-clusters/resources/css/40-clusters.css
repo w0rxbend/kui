@@ -1,0 +1,52 @@
+/* The clusters feature (task UI-012).
+ *
+ * Numbered 40 so it lands after the kernel (20s) and the shell (30s) in the concatenated
+ * stylesheet: a feature may override the shell, and the shell may override the kernel, and the
+ * cascade makes that true without a single `!important` (ADR-024). Every feature that follows
+ * uses 40+ for the same reason.
+ *
+ * Note that this file ships in `kui.css` for every user, even one who never opens the feature —
+ * CSS is concatenated at build time while the *JavaScript* is split per feature. That is a
+ * deliberate trade: a stylesheet is small and a flash of unstyled content when a lazily loaded
+ * module arrives is not worth avoiding it. Keep feature stylesheets small enough that this stays
+ * true. */
+
+.kui-clusters {
+  max-width: 60rem;
+  padding: var(--kui-space-5);
+}
+
+.kui-clusters__lead {
+  max-width: 44rem;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-clusters__form {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--kui-space-3);
+  margin-bottom: var(--kui-space-4);
+}
+
+.kui-clusters__error {
+  margin: 0 0 var(--kui-space-3) 0;
+  color: var(--kui-color-danger);
+}
+
+.kui-clusters__stale {
+  margin: 0 0 var(--kui-space-2) 0;
+  color: var(--kui-color-text-muted);
+}
+
+/* ADR-032's stale-data rule, drawn: what was fetched successfully stays on screen and is dimmed,
+ * rather than being cleared. Never the only signal — the sentence above the table says the same
+ * thing in words, because dimming alone is invisible to anyone who cannot compare it with the
+ * undimmed version they are no longer looking at. */
+.kui-clusters__table--stale {
+  opacity: 0.6;
+}
+
+.kui-clusters__fallback {
+  margin: 0;
+  max-width: 44rem;
+}

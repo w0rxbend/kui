@@ -7,28 +7,18 @@ import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 
 import kui.ui.kernel.api.ApiError
+import kui.ui.kernel.state.HealthReporting
 
-/** Whose request failed.
+/** The shell's name for the kernel's `CallScope`.
   *
-  * This distinction is the whole point of `ShellHealth`, and it is worth stating plainly because getting it
-  * wrong is both easy and very visible. The full-screen "cannot reach gateway" state takes the entire
-  * application away from the user. It is the right thing to do when the gateway is genuinely not there —
-  * nothing works, and pretending otherwise wastes the user's time — and it is a catastrophe when it is
-  * triggered by one feature's endpoint being down, because everything *else* still worked and the user has
-  * just been thrown out of it.
-  *
-  * So a call declares which it is, and only the shell's own calls — `/auth/me`, `/info`, the capability
-  * endpoints — can lead to the full-screen state. A feature's failure is the feature's fallback panel's job
-  * (ADR-032).
+  * The enum itself moved to `kui.ui.kernel.state` when the first feature module needed to report the outcome
+  * of its own calls (UI-012): a feature cannot depend on the shell, because the shell depends on every
+  * feature. These aliases keep `kui.ui.shell.CallScope` working for every call site and every suite that
+  * already names it, so the move is not a rename anybody has to absorb.
   */
-enum CallScope {
+type CallScope = kui.ui.kernel.state.CallScope
 
-  /** The shell's own calls. Their failure means KUI itself cannot talk to the gateway. */
-  case Shell
-
-  /** A feature's call. Its failure means that feature cannot show its data, and nothing more. */
-  case Feature
-}
+val CallScope: kui.ui.kernel.state.CallScope.type = kui.ui.kernel.state.CallScope
 
 /** Whether KUI can talk to the gateway at all.
   *
@@ -206,6 +196,14 @@ object ShellHealth {
 
   /** Tells the tracker how to attempt contact. Called once by the shell, with its own start-up calls. */
   def onRetry(action: () => Unit): Unit = retryAction = action
+
+  /** Makes this tracker the one every feature's reports reach. Called once, during start-up.
+    *
+    * Without it a feature's successful call would not count as evidence that the gateway is reachable, and a
+    * user whose shell calls had all failed would sit on the full-screen "cannot reach gateway" state while a
+    * feature beside it was happily fetching data.
+    */
+  def install(): Unit = HealthReporting.install(report)
 
   def connectivity: Signal[ShellConnectivity] = current.connectivity
 

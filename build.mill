@@ -774,19 +774,50 @@ object frontend extends Module {
     // `services.gateway.contract.js` brings the capability endpoints: the snapshot the store polls
     // with and the probe the "Retry now" button calls (UI-010). They are cross-compiled, so the
     // browser calls exactly the endpoints the gateway serves, from the same source.
-    def moduleDeps = Seq(uiKernel, services.gateway.contract.js)
+    // `uiClusters` is a compile-time dependency and a *run-time* one only through
+    // `js.dynamicImport`: the shell names `ClustersRoutes` (static data) directly and
+    // `ClustersFeature` only inside the import thunk, which is what lets the linker put the
+    // feature in a module of its own (ADR-012). `checkBundleShape` fails the build if that line
+    // is ever crossed.
+    def moduleDeps = Seq(uiKernel, uiClusters, services.gateway.contract.js)
 
     def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
+
+    /** The feature microfrontends that must end up in JavaScript modules of their own. */
+    def bundleFeatures = Seq(
+      BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters")
+    )
 
     object test extends ScalaJSTests with KuiJsDomTests {
       def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
     }
   }
 
+  /** The first feature microfrontend, and the shape every later one copies.
+    *
+    * It depends on `ui-kernel` for the design system and on the cluster service's cross-compiled
+    * contract, so the browser decodes exactly what the service encodes, from the same source. It
+    * depends on the shell not at all, and it must not: the shell depends on every feature, and the
+    * reverse edge would be a cycle as well as the end of lazy loading.
+    */
+  object uiClusters extends KuiFrontendModule {
+
+    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
+    def moduleDir = super.moduleDir / os.up / "ui-clusters"
+
+    def moduleDeps = Seq(uiKernel, services.cluster.contract.js)
+
+    /** Plain Node, not jsdom: `ClustersStateSuite` is about a state machine and touches no
+      * `document`. Running it without a DOM keeps it fast and makes the absence of DOM assertions a
+      * fact about the module rather than a convention somebody has to remember.
+      */
+    object test extends ScalaJSTests with KuiJsTests
+  }
+
   /** Every frontend module whose `resources/css` directory contributes to `kui.css`, in no
     * particular order — `CssPipeline` decides the cascade, not this list.
     */
-  private def cssModules: Seq[KuiFrontendModule] = Seq(uiKernel, uiShell)
+  private def cssModules: Seq[KuiFrontendModule] = Seq(uiKernel, uiShell, uiClusters)
 
   /** Concatenates every module's CSS into one `kui.css` (ADR-024).
     *

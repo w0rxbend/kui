@@ -26,15 +26,17 @@ import kui.ui.kernel.feature.{FeatureId, FeatureRoutes, KuiFeature}
   */
 object FeatureRegistryImpl {
 
-  /** What this build can load, and how.
-    *
-    * Empty until UI-012 adds the clusters feature.
-    */
-  def thunks: Map[FeatureId, () => js.Promise[KuiFeature]] = Map.empty
+  /** What this build can load, and how. */
+  def thunks: Map[FeatureId, () => js.Promise[KuiFeature]] =
+    Map(
+      FeatureId.Clusters -> (() => js.dynamicImport(new kui.ui.clusters.ClustersFeature()))
+    )
 
   /** Each feature's navigation entry, route patterns and `history.state` codec.
     *
-    * Empty until UI-012 adds the clusters feature.
+    * Named directly, unlike the thunks above, and that is correct rather than an inconsistency: all of this
+    * is data, it must be available before anything is downloaded, and linking against it pulls no feature
+    * code into `main.js`.
     */
-  def staticRoutes: List[FeatureRoutes] = Nil
+  def staticRoutes: List[FeatureRoutes] = List(kui.ui.clusters.ClustersRoutes)
 }

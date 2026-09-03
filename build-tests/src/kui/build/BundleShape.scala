@@ -25,6 +25,20 @@ object BundleShape {
     */
   def emittedSymbol(className: String): String = "L" + className.replace('.', '_')
 
+  /** The symbol that appears exactly where the linker **defines** the class.
+    *
+    * `$c_` is Scala.js's prefix for a class's constructor and prototype — the class itself. Everything else
+    * built on the mangled name (`$p_` for a private method, `$f_` for a default method, a method symbol
+    * embedding the class name) can legitimately appear in another module: the optimiser is allowed to inline
+    * a small method across a module boundary, and it does. Only `$c_` says "the class lives here".
+    *
+    * That distinction is what makes rule 2 mean what it claims. Matching the bare mangled name flags a
+    * one-line inlined accessor exactly as loudly as a feature that really did ship with the shell, and a
+    * check that cries wolf is a check somebody turns off. What the rule is defending is the property the user
+    * feels: `main.js` cannot construct the feature, so the browser must fetch its module first.
+    */
+  def definitionSymbol(className: String): String = "$c_" + emittedSymbol(className)
+
   /** One feature microfrontend the shell expects to load lazily.
     *
     * @param entryClass
@@ -108,9 +122,9 @@ object BundleShape {
   /** Rule 2: no feature's code ended up inside the shell's own module. */
   private def leakedFeatureSymbols(output: LinkerOutput, features: Seq[Feature]): Seq[String] =
     features
-      .filter(feature => output.mainJsContent.contains(emittedSymbol(feature.entryClass)))
+      .filter(feature => output.mainJsContent.contains(definitionSymbol(feature.entryClass)))
       .map(feature =>
-        s"$mainJsFileName contains ${emittedSymbol(feature.entryClass)}, the linked form of " +
+        s"$mainJsFileName contains ${definitionSymbol(feature.entryClass)}, the linked definition of " +
           s"${feature.entryClass}, so the feature ships with the shell instead of being loaded on " +
           "demand; look for a direct reference to the feature from shell code"
       )

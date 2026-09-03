@@ -21,6 +21,23 @@ resolve before that feature's module exists, or the very first URL the router se
 match and the user gets a 404 for a page that does exist. Patterns are data — path shapes — so they
 cost a few bytes in `main.js` and do not drag the feature's code in with them (ADR-012 amendment 2).
 
+## The reference implementation
+
+`frontend/ui-clusters` is a complete, working example of everything below, and it is the file to read
+before writing a new feature rather than after. It is deliberately small — its page has one button —
+but it is not a toy: it is downloaded lazily, it calls a real service through a client generated from
+that service's contract, it renders a real response, it disables its write action when its service is
+down, it keeps its previous results on screen when a call fails, and it contributes its own paragraph
+to the shell's fallback panel. Five files:
+
+| file | what it shows |
+| --- | --- |
+| `ClustersFeature.scala` | the `KuiFeature` implementation — the class named only inside the import thunk |
+| `ClustersRoutes.scala` | the **static** half: nav entry, route patterns, `history.state` codec |
+| `ClustersState.scala` | feature state as a class of `Var`s, and the stale-data rule |
+| `ClustersPage.scala` | the view, using kernel primitives only |
+| `ClustersApi.scala` | the browser's view of the service's contract |
+
 ## The four steps
 
 ### 1. Implement `KuiFeature`
@@ -67,15 +84,31 @@ The service id is the name the gateway's capability registry uses. Carrying it h
 feature's service healthy?" is a field access rather than a lookup table maintained in two places.
 The two words are not always the same, which is why guessing one from the other would not work.
 
-### 3. Add the thunk to `FeatureRegistry.default`
+### 3. Register both halves in `kui.ui.shell.FeatureRegistryImpl`
+
+A feature is registered **twice**, and the difference between the two entries is the whole of ADR-012.
 
 ```scala
-def default: Map[FeatureId, () => js.Promise[KuiFeature]] = Map(
+def thunks: Map[FeatureId, () => js.Promise[KuiFeature]] = Map(
+  FeatureId.Clusters -> (() => js.dynamicImport(new kui.ui.clusters.ClustersFeature())),
   FeatureId.Topics -> (() => js.dynamicImport(new kui.ui.topics.TopicsFeature()))
 )
+
+def staticRoutes: List[FeatureRoutes] = List(kui.ui.clusters.ClustersRoutes, kui.ui.topics.TopicsRoutes)
 ```
 
-**Write it exactly like that.** The body of the thunk must be the `js.dynamicImport` expression and
+The **dynamic** half is the feature's code, and it is downloaded when the user first needs it. The
+**static** half — a label, a sort order, path shapes, a JSON tag — is ordinary data the shell links
+against normally, and it is named directly because all of it has to be known *before* anything is
+downloaded (ADR-012 amendment 2): the sidebar draws a link on first paint, a bookmarked deep link
+must resolve before the module exists, and the browser hands back `history.state` synchronously when
+the user presses Back.
+
+The map lives in the shell rather than in the kernel because the kernel is *below* every feature —
+`frontend.uiKernel` depending on `frontend.uiClusters` would be a cycle — and the shell installs it
+into `FeatureRegistry` during start-up.
+
+**Write the thunk exactly like that.** Its body must be the `js.dynamicImport` expression and
 nothing else. Assigning the constructor to a `val`, mentioning `TopicsFeature` in a type signature,
 or naming the class anywhere outside this import makes it reachable from the shell, and the linker
 then puts the whole feature into `main.js` — downloaded by everyone, always. Nothing about the code

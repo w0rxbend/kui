@@ -44,8 +44,8 @@ class NavigationSuite extends FunSuite {
     val landing: Page = StubPage
     val nav: NavEntry =
       NavEntry(id, label, () => Icon.dot, order = sortOrder, requiresCluster = false)
-    val routes: List[Route[? <: Page, ?]] =
-      List(Route.static(StubPage, root / "stub" / endOfSegments, "/ui"))
+    def routes(uiPrefix: String): List[Route[? <: Page, ?]] =
+      List(Route.static(StubPage, root / "stub" / endOfSegments, uiPrefix))
     def encodePage(page: Page): Option[Json] = None
     def decodePage(tag: String, cursor: HCursor): Option[Page] = None
   }
@@ -62,7 +62,7 @@ class NavigationSuite extends FunSuite {
   private def routerFor(states: List[(FeatureRoutes, Signal[FeatureState])]): Router[Page] =
     ShellRouter.make(
       "",
-      states.flatMap((registration, _) => registration.routes),
+      states.flatMap((registration, _) => registration.routes("/ui")),
       "http://localhost:8080/ui/",
       "http://localhost:8080"
     )

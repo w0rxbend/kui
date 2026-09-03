@@ -20,6 +20,17 @@ import kui.security.SignedPrincipal
   */
 object ClusterEndpoints {
 
+  /** The last path segment of [[ping]], and the name of its query parameter.
+    *
+    * Named constants rather than literals typed twice, because the gateway serves this endpoint at a
+    * *rewritten* path (`/api/v1/ping`) and the browser's client is built from a separate endpoint value
+    * describing that address. Two literals in two files is exactly the drift ADR-003 exists to prevent, and
+    * it is the kind that compiles cleanly and 404s in production.
+    */
+  val PingPath: String = "ping"
+
+  val PingMessageParam: String = "message"
+
   /** Echoes a message back with the time the service saw it.
     *
     * It exists to prove the whole chain end to end — contract to server route, contract to gateway client,
@@ -29,8 +40,8 @@ object ClusterEndpoints {
     */
   val ping: Endpoint[SignedPrincipal, String, ErrorEnvelope, PingResponse, Any] =
     KuiEndpoint.internal.get
-      .in("internal" / "v1" / "ping")
-      .in(query[String]("message").description("Echoed back, 1..128 characters"))
+      .in("internal" / "v1" / PingPath)
+      .in(query[String](PingMessageParam).description("Echoed back, 1..128 characters"))
       .out(jsonBody[PingResponse])
       .name("cluster.ping")
       .summary("Echo endpoint used to prove the contract -> client -> gateway -> browser chain")

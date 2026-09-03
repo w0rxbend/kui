@@ -112,6 +112,8 @@ jobs:
       - name: Link the frontend with the optimising linker
         run: ./mill frontend.__.fullLinkJS
       # ADR-012's lazy feature loading only exists if the linker actually emitted separate modules.
-      # The check skips, loudly, until UI-012 creates the first feature package.
+      # `uiShell` is the module that is checked, because it is the one with an entry point and
+      # therefore the one the linker produces a `main.js` for; `uiKernel` is a library and has no
+      # feature list of its own, so its check would skip and prove nothing.
       - name: Check the bundle shape
-        run: ./mill frontend.uiKernel.checkBundleShape
+        run: ./mill frontend.uiShell.checkBundleShape

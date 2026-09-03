@@ -59,11 +59,24 @@ final class BundleShapeSuite extends FunSuite {
   }
 
   test("a feature symbol inside main.js fails, even though the source name is absent") {
-    val leaked = output(mainJsContent = "function Lkui_ui_clusters_ClustersFeature() {}")
+    val leaked = output(mainJsContent = "function $c_Lkui_ui_clusters_ClustersFeature() {}")
 
     val problems = failureOf(BundleShape.check(leaked, Seq(clusters), budget))
 
     assert(problems.exists(_.contains("ships with the shell")), problems.toString)
+  }
+
+  test("a method the optimiser inlined across the module border does not fail the check") {
+    // The linker is allowed to copy a small method into `main.js` while the class itself stays in its
+    // own module, and it does. What rule 2 defends is that `main.js` cannot *construct* the feature,
+    // so only the class-definition symbol counts. Flagging an inlined accessor as loudly as a real
+    // leak is how a check ends up switched off.
+    val inlined = output(mainJsContent = "$p_Lkui_ui_clusters_ClustersFeature__page__O(x)")
+
+    BundleShape.check(inlined, Seq(clusters), budget) match {
+      case Result.Passed(_) => ()
+      case other => fail(s"expected a pass, got $other")
+    }
   }
 
   test("the source name in a comment does not fail the check") {
@@ -98,7 +111,7 @@ final class BundleShapeSuite extends FunSuite {
   test("every broken rule is reported in one run") {
     val broken = output(
       fileNames = Seq("main.js"),
-      mainJsContent = "Lkui_ui_clusters_ClustersFeature",
+      mainJsContent = "$c_Lkui_ui_clusters_ClustersFeature",
       mainJsSizeBytes = budget + 1L
     )
 

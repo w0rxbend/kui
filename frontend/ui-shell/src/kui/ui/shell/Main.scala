@@ -55,7 +55,11 @@ object Shell {
     Theme.install()
     ErrorReporting.install()
 
-    val api = ApiClient.make(bootstrap, AuthState.current)
+    ShellHealth.install()
+
+    // Based at the deployment root, not at `apiBase`: every contract endpoint already carries the full
+    // `/api/v1/...` path. See `Bootstrap.gatewayRoot`.
+    val api = ApiClient.make(Bootstrap.gatewayRoot(bootstrap), AuthState.current)
 
     // The capability picture is what the whole navigation is drawn from, so it is started before the
     // first paint. Nothing waits for it: an empty picture renders as `Degraded(Starting)`, which is
@@ -108,9 +112,13 @@ object Shell {
     // page restores it rather than decoding to "not found".
     val features: List[FeatureRoutes] = FeatureRegistry.staticRoutes
 
+    // Where the frontend is mounted, deployment prefix included. Feature patterns are declared relative
+    // to it, because only the shell knows where the deployment put KUI.
+    val uiPrefix = bootstrap.basePath.stripSuffix("/") + ShellRouter.UiPath
+
     val router = ShellRouter.make(
       basePath = bootstrap.basePath,
-      featureRoutes = features.flatMap(_.routes),
+      featureRoutes = features.flatMap(_.routes(uiPrefix)),
       initialUrl = initialUrl,
       origin = origin,
       featureCodecs = features
@@ -139,7 +147,7 @@ object Shell {
     Layout(
       sidebar = Sidebar(router, Navigation.items(states, hideForbidden = false)),
       header = Header(buildVersion.signal, Theme.choice),
-      content = content(router, buildVersion.signal, states, api),
+      content = content(router, buildVersion.signal, states, api, uiPrefix),
       fullScreen = ShellHealth.connectivity.map {
         case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
         case ShellConnectivity.Connected(_) => None
@@ -152,10 +160,11 @@ object Shell {
       router: Router[Page],
       buildVersion: Signal[String],
       states: List[(FeatureRoutes, Signal[FeatureState])],
-      api: Option[ApiClient]
+      api: Option[ApiClient],
+      uiPrefix: String
   )(using Owner): Signal[HtmlElement] = {
     val banner = CapabilityBanner(CapabilityStore.connection, degradedLabels(states))
-    render(router, buildVersion, states, api).map(page => div(banner, page))
+    render(router, buildVersion, states, api, uiPrefix).map(page => div(banner, page))
   }
 
   /** Which element is in the content area, for the current page.
@@ -173,7 +182,8 @@ object Shell {
       router: Router[Page],
       buildVersion: Signal[String],
       states: List[(FeatureRoutes, Signal[FeatureState])],
-      api: Option[ApiClient]
+      api: Option[ApiClient],
+      uiPrefix: String
   )(using Owner): Signal[HtmlElement] = {
     // `collectStatic` takes its view *by name* and re-evaluates it every time the page signal emits
     // that page — including when it re-emits the page already on screen. A `lazy val` is what turns
@@ -201,7 +211,7 @@ object Shell {
       // shell may not name a feature's page type.
       .collect[Page] { page =>
         gates
-          .collectFirst { case (registration, gate) if owns(registration, page) => gate }
+          .collectFirst { case (registration, gate) if owns(registration, page, uiPrefix) => gate }
           .fold(ErrorReporting.renderSafely(() => NotFoundPage(Val(pathOf(router, page)), router)))(gate =>
             div(child <-- gate)
           )
@@ -239,8 +249,8 @@ object Shell {
     * a route that produced it. This is how the shell dispatches to the right feature without ever naming a
     * feature's page type.
     */
-  private def owns(registration: FeatureRoutes, page: Page): Boolean =
-    registration.routes.exists(route => route.relativeUrlForPage(page).isDefined)
+  private def owns(registration: FeatureRoutes, page: Page, uiPrefix: String): Boolean =
+    registration.routes(uiPrefix).exists(route => route.relativeUrlForPage(page).isDefined)
 
   /** The other features that are currently working, by label — the "what still works" list. */
   private def readyLabels(

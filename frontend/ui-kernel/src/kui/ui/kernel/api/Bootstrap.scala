@@ -67,6 +67,20 @@ object Bootstrap {
       bootstrap.apiBase
     else s"${origin.stripSuffix("/")}/${bootstrap.apiBase.stripPrefix("/")}"
 
+  /** The same bootstrap, based at the deployment's root rather than at `/api/v1`.
+    *
+    * Every endpoint value KUI's contract modules publish to the browser already carries the full public path,
+    * `/api/v1/...` included — the gateway's own endpoints declare it, and a proxied service endpoint gets it
+    * when the gateway rewrites the service's `/internal/v1` prefix. A client based at `apiBase` would
+    * therefore append one prefix to another and ask for `/api/v1/api/v1/capabilities`.
+    *
+    * So a client that is handed *contract endpoints* is built from this, and `apiBase` stays what it is: the
+    * one place that states where the API lives, for anything that needs to print or build that address
+    * itself. The deployment prefix is kept, because that genuinely is a prefix over everything KUI serves.
+    */
+  def gatewayRoot(bootstrap: Bootstrap): Bootstrap =
+    bootstrap.copy(apiBase = bootstrap.basePath.stripSuffix("/"))
+
   /** Written out rather than derived, for the same reason every other KUI codec is (ADR-007): every field is
     * optional and falls back to [[Fallback]]'s value, so a gateway that learns to send a fourth field, or
     * forgets to send the third, does not stop the browser from starting.
