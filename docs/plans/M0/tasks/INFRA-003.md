@@ -1,7 +1,7 @@
-# INFRA-003 — Developer loop: dev server, proxy and README
+# INFRA-003 — Developer loop: dev server and README
 
 - **ID:** INFRA-003
-- **Title:** Developer loop: dev server, proxy and README
+- **Title:** Developer loop: dev server and README
 - **Milestone / Feature:** M0 / KU-008
 - **Owner role:** Infrastructure Lead
 - **Size:** S
@@ -35,9 +35,8 @@ configuration beyond documenting `./mill mill.bsp.BSP/install` for Metals.
 
 ## Design references
 
-ADR-012 ("Dev loop: `fastLinkJS` output served statically with `/api` proxied to the gateway;
-no Vite step" — and because the gateway serves the assets itself, no proxy is needed at all,
-which is simpler than the ADR anticipated; record this simplification),
+ADR-012 amendment 1 (the gateway serves the `fastLinkJS` output itself, so assets and API
+share an origin and no proxy is needed),
 `research/scala/frontend-research.md` §4 "Recommended M0 setup", PLAN §51.
 
 ## Files to create

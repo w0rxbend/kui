@@ -110,14 +110,14 @@ Behavioural, asserted in tests against a real bound port:
 ```
 $ curl -i localhost:8080/does-not-exist
 HTTP/1.1 404
-{"code":"KUI-INTERNAL"...}          # NO — must be a 404 with a route-not-found envelope
+{"code":"KUI-ROUTE-NOT-FOUND","message":"No route for GET /does-not-exist",...}
 ```
 
 The exact expected bodies are golden files:
 
 | Situation | Status | `code` |
 | --- | --- | --- |
-| unknown route | 404 | `KUI-INTERNAL` is wrong; use `KUI-VALIDATION`? **No** — a new code is not introduced; Tapir's default 404 body is replaced by an envelope with `KUI-INTERNAL` only if the route exists. For an unmatched route the server returns `404` with `{"code":"KUI-NOT-FOUND-ROUTE"...}` — **decision:** add `ErrorCode.RouteNotFound = "KUI-ROUTE-NOT-FOUND" (404)` in this task and regenerate `docs/api/error-codes.md` |
+| unknown route | 404 | `KUI-ROUTE-NOT-FOUND` — `ErrorCode.RouteNotFound` (KERN-002, ADR-034 amendment 1). Neither `KUI-INTERNAL` nor `KUI-VALIDATION` is used for an unmatched route: `KUI-INTERNAL` would tell the caller a server fault occurred, and `KUI-VALIDATION` would imply the request body was wrong |
 | body fails to decode | 400 | `KUI-VALIDATION` with `details[0].field` |
 | path parameter fails `ClusterId.from` | 400 | `KUI-VALIDATION` |
 | server logic returns `ApplicationError.NotFound` | 404 | that error's code |
@@ -151,5 +151,4 @@ exits non-zero — it never retries silently on another port.
 
 ## Docs to update
 
-`docs/api/error-codes.md` (regenerated after adding `KUI-ROUTE-NOT-FOUND`).
 `ARCHITECTURE.md` §15: note the interceptor is the single mapping point.

@@ -31,7 +31,7 @@ browser-facing process and must be safe by default and scalable behind a load ba
 ## Evidence
 
 - `research/scala/security-research.md` §1.1 "Session model", "CSRF", §1.2 (Kouncil), §5
-  threat table (CSRF, session fixation, open redirect, wildcard CORS), §6.2, ADR-017 candidate.
+  threat table (CSRF, session fixation, open redirect, wildcard CORS), §6.2, ADR-019 candidate.
 - `research/kafbat/api-analysis.md` Finding 7 (single-replica sessions).
 
 ## Consequences

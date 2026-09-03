@@ -98,6 +98,9 @@ Restating the roadmap, and adding the boundaries workers most often cross by acc
 | ADR-034 error envelope | `KuiError`, envelope shape, code table |
 | ADR-035 streaming envelope | named SSE events, `heartbeat`, one terminal event |
 | ADR-037 upstream resilience | `UpstreamClient.make`, circuit state stream into the registry |
+| ADR-039 capability fold | the registry's four inputs, precedence, sticky `since`, asymmetric debounce |
+| ADR-040 edge header policy | the gateway generates correlation ids and strips every inbound `X-Kui-*` |
+| ADR-041 layering, machine-enforced | the `checkArchitecture` rule table; `application` never touches the wire |
 
 `ARCHITECTURE.md` sections: §1 topology, §3 module layout, §4 shared library APIs (§4.1 kernel
 types, §4.5 `CapabilityRegistry`, §4.6 `PrincipalCodec`), §5 headers, §6 capability registry and
@@ -139,7 +142,9 @@ depend on `libs/config` (config is passed in as already-parsed case classes).
 ### 5.3 Services
 
 `services/cluster` is the **sample service** of the roadmap: in M0 it has no domain logic
-beyond a `ping`. It is built with the full six-layer skeleton so M1 only adds content.
+beyond a `ping`. It is built with five of the six layers of `ARCHITECTURE.md` §3 — `infrastructure` is the
+sixth and arrives in M1 with the first adapter, since M0's sample service talks to nothing —
+so M1 only adds content.
 
 | Path | Mill id | Depends on | Purpose |
 | --- | --- | --- | --- |
@@ -148,14 +153,19 @@ beyond a `ping`. It is built with the full six-layer skeleton so M1 only adds co
 | `services/cluster/contract` | `services.cluster.contract.{jvm,js}` | `libs.contractsCore.{jvm,js}` | Tapir endpoints `/internal/v1/ping`, `/capabilities`, `/health/*` and their DTOs |
 | `services/cluster/api` | `services.cluster.api` | `services.cluster.{application,contract.jvm}`, `libs.http`, `libs.securityCore.jvm` | server logic, `KuiError` → envelope, principal verification, OpenAPI document |
 | `services/cluster/app` | `services.cluster.app` | `services.cluster.api`, `libs.config`, `libs.observability`, macwire, logback | `ClusterWiring.make`, `main`, Netty listener |
-| `services/gateway/application` | `services.gateway.application` | `libs.kernel.jvm`, `libs.contractsCore.jvm`, `libs.http`, `libs.securityCore.jvm`, cats-effect, fs2 | capability registry, `ServiceClient[F]`, session store, aggregation helpers |
+| `services/gateway/application` | `services.gateway.application` | `libs.kernel.jvm`, `libs.securityCore.jvm`, cats-effect, fs2 | capability registry (own types), `ServiceClient[F]` port, session store, aggregation helpers |
 | `services/gateway/contract` | `services.gateway.contract.{jvm,js}` | `libs.contractsCore.{jvm,js}` | `/api/v1/capabilities`, `/api/v1/capabilities/stream`, `/api/v1/info`, `/api/v1/auth/me` |
-| `services/gateway/api` | `services.gateway.api` | `services.gateway.{application,contract.jvm}`, `services.cluster.contract.jvm`, `libs.http`, tapir-files, tapir-swagger-ui-bundle | routing derived from contracts, static assets, OpenAPI merge, CSRF and session middleware |
+| `services/gateway/api` | `services.gateway.api` | `services.gateway.{application,contract.jvm}`, `services.cluster.contract.jvm`, `libs.contractsCore.jvm`, `libs.http`, tapir-files, tapir-swagger-ui-bundle | routing derived from contracts, static assets, OpenAPI merge, CSRF and session middleware |
 | `services/gateway/app` | `services.gateway.app` | `services.gateway.api`, `libs.config`, `libs.observability`, macwire, logback | `GatewayWiring.make`, `main`, Netty listener |
 
 The gateway depends on each service's **`contract`** module and on nothing else from a service
 (`ARCHITECTURE.md` §3). A `moduleDeps` edge from the gateway to `services.cluster.application`
 is an architecture violation and CI must fail on it (BUILD-005).
+
+No `application` module — the gateway's included — depends on `libs.contractsCore`, `libs.http`,
+tapir or circe (ADR-041). The gateway's capability registry therefore owns its own state types
+and `services.gateway.api` maps them to the `libs/contracts-core` DTOs on the way out, the same
+way `services.cluster.api` maps `CapabilityReport` to `ServiceCapabilities` (SVC-001).
 
 ### 5.4 Frontend
 
@@ -220,13 +230,13 @@ a hand-written JSON fixture and switches to the live stream in UI-010).
 | [KERN-007](tasks/KERN-007.md) | `libs/testkit`: generators, fakes and golden files | M | KERN-004 | B |
 | [KERN-008](tasks/KERN-008.md) | Generated `docs/api/error-codes.md` | S | KERN-004 | B |
 | [CFG-001](tasks/CFG-001.md) | `libs/config`: Ciris model, loaders and precedence | L | KERN-002 | C |
-| [CFG-002](tasks/CFG-002.md) | Secret redaction proof across log, trace and JSON | S | CFG-001, OBS-001, KERN-004 | C |
 | [OBS-001](tasks/OBS-001.md) | `libs/observability`: telemetry bootstrap and logger | M | KERN-002 | C |
 | [OBS-002](tasks/OBS-002.md) | `libs/observability`: Tapir interceptors and metric names | M | OBS-001, KERN-004 | C |
+| [CFG-002](tasks/CFG-002.md) | Secret redaction proof across log, trace and JSON | S | CFG-001, OBS-001, KERN-004 | C |
 | [HTTP-001](tasks/HTTP-001.md) | `libs/http`: Netty server, error interceptor, CORS, base path | L | KERN-004, OBS-002 | C |
 | [HTTP-002](tasks/HTTP-002.md) | `libs/http`: health, readiness and capabilities endpoints | M | HTTP-001, KERN-005 | C |
 | [HTTP-003](tasks/HTTP-003.md) | `libs/http`: `UpstreamClient` resilience factory | L | HTTP-001, KERN-002 | C |
-| [HTTP-004](tasks/HTTP-004.md) | `libs/http`: SSE helpers and heartbeat discipline | M | HTTP-001, KERN-005 | C |
+| [HTTP-004](tasks/HTTP-004.md) | `libs/http`: SSE helpers and heartbeat discipline | M | HTTP-001, KERN-005, BUILD-006 | C |
 | [SVC-001](tasks/SVC-001.md) | `services/cluster`: domain and application skeleton | S | KERN-002 | D |
 | [SVC-002](tasks/SVC-002.md) | `services/cluster/contract`: endpoints and DTOs | M | KERN-005, SVC-001 | D |
 | [SVC-003](tasks/SVC-003.md) | `services/cluster/api`: server logic and OpenAPI | M | SVC-002, HTTP-002, KERN-006 | D |
@@ -253,28 +263,33 @@ a hand-written JSON fixture and switches to the live stream in UI-010).
 | [UI-010](tasks/UI-010.md) | Capability-driven navigation, `FeatureGate`, fallback panel | L | UI-008, UI-009, GW-005 | F |
 | [UI-011](tasks/UI-011.md) | Error pages: 403, 404, gateway-unreachable | S | UI-009 | F |
 | [UI-012](tasks/UI-012.md) | `frontend/ui-clusters` sample feature and bundle-shape check | M | UI-010, SVC-002, BUILD-006 | F |
-| [UI-013](tasks/UI-013.md) | Follow-up: re-derive tokens from the design import | S | UI-002 | F |
+| [UI-013](tasks/UI-013.md) | Follow-up: re-derive tokens from the design import | S | UI-002, BLOCKERS B-001 | F |
 | [AIO-001](tasks/AIO-001.md) | `apps/allinone` composition root and in-process client | L | SVC-004, GW-006, GW-009 | G |
 | [AIO-002](tasks/AIO-002.md) | Frontend assets packaged into the all-in-one image | M | AIO-001, UI-012, GW-008 | G |
 | [INFRA-001](tasks/INFRA-001.md) | Docker images for gateway, cluster and all-in-one | M | SVC-004, GW-010, AIO-001 | G |
 | [INFRA-002](tasks/INFRA-002.md) | Docker Compose development environment | M | INFRA-001 | G |
-| [INFRA-003](tasks/INFRA-003.md) | Developer loop: dev server, proxy, README | S | UI-009, INFRA-002 | G |
+| [INFRA-003](tasks/INFRA-003.md) | Developer loop: dev server and README | S | UI-009, INFRA-002 | G |
 | [INFRA-004](tasks/INFRA-004.md) | Milestone documentation and feature-matrix update | S | everything | G |
 | [E2E-001](tasks/E2E-001.md) | Playwright + MUnit harness against all-in-one | L | AIO-002 | H |
 | [E2E-002](tasks/E2E-002.md) | Fault-isolation scenario: stop the sample service | L | E2E-001, INFRA-002 | H |
 
 ### 6.3 Critical path
 
+The longest chain of real dependencies in §6.2 — every arrow below is an edge that table
+actually declares, so nothing here can be reordered or parallelised:
+
 ```
-BUILD-001 → BUILD-002 → BUILD-003 → KERN-001 → KERN-002 → KERN-004 → KERN-005
-   → HTTP-001 → HTTP-002 → SVC-003 → SVC-004
+BUILD-001 → BUILD-002 → BUILD-003 → KERN-001 → KERN-002 → OBS-001 → OBS-002 → HTTP-001
    → GW-001 → GW-002 → GW-003 → GW-005
-   → UI-010 → UI-012 → AIO-001 → AIO-002 → E2E-001 → E2E-002
+   → UI-010 → UI-012 → AIO-002 → E2E-001 → E2E-002
 ```
 
-22 tasks, roughly 70 working hours of single-threaded effort. Everything else fits in the
-slack around it: lane C (config, observability, resilience) and lane F's primitive work
-(UI-002 … UI-009) are the two largest parallel blocks.
+17 tasks, roughly 70 working hours of single-threaded effort, and it runs through the
+observability library rather than the kernel contracts, because `libs/http` cannot be built
+before its Tapir interceptors exist. Everything else fits in the slack around it: lane C
+(config and resilience) and lane F's primitive work (UI-002 … UI-009) are the two largest
+parallel blocks, and the whole of lane D (SVC-001 … SVC-004) sits off the path, joining it
+only through GW-006 and AIO-001.
 
 Three tasks are worth starting first even though they are not on the critical path, because
 they answer open questions that could invalidate later work: **BUILD-006** (does long-lived
@@ -290,7 +305,7 @@ fakes live in `libs/testkit`.
 | Suite | Where | Runner | What it covers |
 | --- | --- | --- | --- |
 | Kernel unit and property | `libs.kernel.{jvm,js}.test` | MUnit + ScalaCheck + discipline-munit | id validation round-trips, `Secret` redaction, paging arithmetic, `ErrorCode` totality |
-| Contract codec golden files | `libs.contractsCore.jvm.test` | MUnit | every DTO encodes to a committed golden JSON file under `libs/contracts-core/src/test/resources/golden/`; a shape change fails the build |
+| Contract codec golden files | `libs.contractsCore.jvm.test` | MUnit | every DTO encodes to a committed golden JSON file under `libs/contracts-core/test/resources/golden/`; a shape change fails the build |
 | Cross-platform parity | `libs.contractsCore.js.test` | MUnit under Node | the same golden files decode identically on Scala.js |
 | Config | `libs.config.test` | MUnit + ScalaCheck | precedence CLI → env → YAML → default, accumulated errors, unknown-key rejection, `Secret` never printed |
 | Observability | `libs.observability.test` | MUnit + `otel4s-oteljava-testkit` | spans carry `correlation.id` / `service.name` / `operation`; MDC bridge populates log context; metric names match the constant list |

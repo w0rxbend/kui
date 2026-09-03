@@ -32,7 +32,7 @@ SQL, CEL), a JSON viewer, charts, and a table that survives thousands of rows.
 ## Evidence
 
 - `research/scala/frontend-research.md` §5 (no maintained CM6/uPlot facades; Monaco size;
-  ScalablyTyped guidance; Kafbat/Kouncil table facts), ADR-020 candidate; §1.3 (Kafbat has no
+  ScalablyTyped guidance; Kafbat/Kouncil table facts), ADR-025 candidate; §1.3 (Kafbat has no
   virtualization).
 - `research/kafbat/ui-analysis.md` IA.4 (kernel component inventory).
 

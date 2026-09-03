@@ -142,8 +142,16 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 | metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `BrokerMetricsScraper[F]`, `MetricsStore[F]`, `TopicSnapshotSource[F]`, `GroupSnapshotSource[F]` | JMX, Prometheus HTTP, contract clients |
 | identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `IdentityProviderPort[F]`, `OidcProviderPort[F]`, `SessionStore[F]`, `RolePolicySource[F]`, `AuditSink[F]` | UnboundID LDAP, nimbus OIDC, bcrypt users, in-memory/Kafka session and audit sinks |
 
-The gateway has `application` (aggregations, capability registry, session cache), `api`,
-`app` and depends on every service's `contract` module and on nothing else from a service.
+The gateway has `contract` (its own `/api/v1` endpoint definitions, cross-compiled JVM/JS so
+the frontend derives typed clients from them), `application` (aggregations, capability
+registry, session cache), `api` and `app`. It depends on every service's `contract` module and
+on nothing else from a service. It has no `domain` and no `infrastructure`: it holds no
+business rules (ADR-004) and its only outbound adapters are contract clients.
+
+The layering rules above are checked by `./mill checkArchitecture` on every build, not by
+review (ADR-041). In particular no `application` module — the gateway's included — may depend
+on `libs/contracts-core`, `libs/http`, Tapir or Circe; the `api` layer maps between
+application-owned types and wire DTOs.
 
 ## 4. Shared libraries and their public APIs
 
@@ -154,7 +162,7 @@ the *shape*; exact signatures are finalized in the M0 tasks. Scala 3, opaque typ
 | Module | Content | ADR |
 | --- | --- | --- |
 | `libs/kernel` (`kui-kernel`) | shared-kernel types below, `KuiError` hierarchy, paging/sorting primitives, `Validated` helpers. Pure, cross-compiled JVM/JS. | ADR-004, ADR-034 |
-| `libs/contracts-core` | error envelope DTO, `Page` DTOs, `Section[A]` envelope, SSE event DTOs, capability DTOs, Tapir codecs for kernel types. JVM/JS. | ADR-034, ADR-035, ADR-006 |
+| `libs/contracts-core` | error envelope DTO, `Page` DTOs, `Section[A]` envelope, SSE event DTOs, capability DTOs, Tapir codecs for kernel types. JVM/JS. | ADR-003, ADR-007, ADR-034, ADR-035 |
 | `libs/kafka` (+ `libs/kafka-auth`) | `KafkaAdminPort` family over fs2-kafka `KafkaAdminClient`, consumer/producer factories, `KafkaErrorMapper`, batching, client property assembly from `ClusterProfile`; cloud SASL handlers as optional runtime modules | ADR-006, ADR-022, ADR-030 |
 | `libs/serde` (+ `libs/serde-confluent`) | `Serde[F]` SPI, built-ins, registry/resolution, Kafbat bridge; Confluent wire-format serializers isolated | ADR-028, ADR-014 |
 | `libs/filter` | `MessageFilterPort[F]` over cel-java | ADR-017 |
@@ -330,10 +338,16 @@ trait ClusterSerdes[F[_]]:
 Deserialization failures never abort a stream: the record is emitted with the fallback
 `String` result and a `deserializeError` (ADR-035).
 
-### 4.5 `CapabilityRegistry` (gateway `application`, DTOs in `contracts-core`)
+### 4.5 `CapabilityRegistry` (gateway `application`)
+
+The shapes below live in two places on purpose (ADR-041): the registry's own types belong to
+the gateway's `application` layer, and the wire DTOs of the same name belong to
+`libs/contracts-core`, where they carry Tapir schemas and Circe codecs. `services/gateway/api`
+maps between them. The two differ where the wire needs it: the DTO spells durations as
+milliseconds, because JSON has no duration type.
 
 ```scala
-package kui.gateway.capability
+package kui.gateway.application.capability
 
 final case class CapabilityKey(service: ServiceId, cluster: Option[ClusterId])   // None = cluster-independent
 
@@ -353,9 +367,17 @@ trait CapabilityRegistry[F[_]]:
   def probeNow(service: ServiceId): F[Unit]                   // POST /api/v1/capabilities/{service}/probe
 ```
 
+The wire counterparts in `libs/contracts-core` (`package kui.contracts.capability`, task
+KERN-005) mirror these case for case, with `ServiceId`/`ClusterId` carried through the Tapir
+codecs from KERN-004 rather than degraded to bare `String`, and with
+`suggestedPollIntervalMs: Option[Long]` / `p95Ms: Option[Long]` in place of the two
+`FiniteDuration`s.
+
 Inputs: each service's `GET /capabilities` (which lists, per cluster, the features it
 currently supports and whether the cluster has the upstream configured), readiness polling,
-and the gateway's circuit breaker state per upstream (§6).
+the gateway's circuit breaker state per upstream (§6), and observed p95 latency. How the four
+combine — the precedence order, the sticky `since`, the asymmetric debounce, and the rule that
+a business error never dims a capability — is ADR-039.
 
 ### 4.6 `Rbac.decide` and the signed principal (`libs/security-core`)
 
@@ -405,13 +427,15 @@ Read-only clusters are enforced inside `decide` through `ClusterFlags.readOnly` 
 | Header | Content | Required |
 | --- | --- | --- |
 | `X-Kui-Principal` | compact JWS from `PrincipalCodec.sign` (ADR-020); omitted in all-in-one, where the principal is passed in-process | yes (distributed) |
-| `X-Kui-Correlation-Id` | gateway request id; echoed in every log, span and error envelope | yes |
+| `X-Kui-Correlation-Id` | gateway request id, always generated by the gateway and never taken from an inbound request (ADR-040); echoed in every log, span and error envelope | yes |
 | `traceparent`, `tracestate` | W3C trace context from otel4s | yes |
 | `X-Kui-Cluster-Id` | the `ClusterId` from the path, for adapters that log/metric outside the route layer | when cluster-scoped |
 | `Accept: text/event-stream` | for streaming endpoints; the gateway re-streams | streams |
 
 Services strip any inbound `X-Kui-*` header that did not pass `PrincipalCodec.verify`; the
-gateway strips all inbound `X-Kui-*` headers from browsers at the edge.
+gateway strips every inbound header whose name begins `X-Kui-` at the edge, by prefix rather
+than by an enumerated list, before routing, authentication or logging (ADR-040). `traceparent`
+and `tracestate` are outside that family and are handled by otel4s.
 
 - Synchronous calls carry per-service timeout, bounded concurrency (bulkhead), retry only
   for idempotent reads, and a circuit breaker with half-open probing (`libs/http`, ADR-037).
@@ -502,7 +526,7 @@ both whenever it has a smart filter, so a replica that has not compiled the filt
 it on demand (ADR-017). Cursors expire (default 1 h) and are bound to the cluster and topic.
 - Kouncil-style table paging is a separate non-streaming endpoint
   (`GET /topics/{topic}/messages/page`) with per-partition newest-first pages; it needs no
-  server state at all (ADR-029 companion, `research/kouncil/architecture.md` D2).
+  server state at all (ADR-026, `research/kouncil/architecture.md` D2).
 
 ## 9. State, caching and refresh schedulers per service
 

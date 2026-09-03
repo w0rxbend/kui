@@ -36,7 +36,7 @@ offers `ALL | FIRST_5 | LAST_5`.
 ## Evidence
 
 - `research/scala/security-research.md` §4 (audit and masking behaviour, rule by rule), §5
-  "Audit topic tampering", ADR-021 candidate.
+  "Audit topic tampering", ADR-023 candidate.
 - `research/kouncil/architecture.md` D9; `research/kafbat/feature-matrix.md` D-6.
 - `research/provectus/diff.md` open question 2 (default `ALTER_ONLY` kept).
 

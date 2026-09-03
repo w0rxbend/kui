@@ -23,8 +23,39 @@ in the UI requires that an unavailable feature is never downloaded and never bre
   module file exists per feature package (guards against accidental static references).
 - Option A is the documented fallback (`FewestModules` + eager thunks); Option C is deferred
   to a post-M8 "Plugin SDK" ADR with a Web Component boundary for third-party plugins.
-- Dev loop: `fastLinkJS` output served statically with `/api` proxied to the gateway; no Vite
-  step unless npm ES modules (CodeMirror, uPlot) are bundled rather than import-mapped.
+- Dev loop: `fastLinkJS` output served statically by the gateway itself, so a frontend change
+  is `./mill frontend.uiShell.fastLinkJS` plus a browser refresh. No Vite step unless npm ES
+  modules (CodeMirror, uPlot) are bundled rather than import-mapped. See amendment 1.
+
+## Amendments
+
+Settled during M0 grooming (G5) and reviewed at the G6 gate on 2026-09-03. Both are
+clarifications of Option B, not changes to it.
+
+**Amendment 1 — the dev loop needs no proxy.**
+
+The original wording described serving the linker output from a separate static server with
+`/api` proxied through to the gateway, which is how a Vite- or webpack-based frontend is
+normally developed. KUI does not need that step. The gateway already serves the production
+frontend assets itself (`ARCHITECTURE.md` §12, task GW-008), so pointing it at the
+`fastLinkJS` output directory instead of the packaged one gives assets and API the same
+origin. With one origin there is nothing to proxy, and no second process to run, no port
+mapping to remember, and no CORS configuration that exists only in development and therefore
+only breaks in development. Implemented as `./mill dev` and `./mill devWatch` by task
+INFRA-003.
+
+**Amendment 2 — route patterns are static; only rendering is dynamically imported.**
+
+A deep link (a bookmarked or pasted URL that lands directly on a feature page) must resolve
+before that feature's module has been downloaded — otherwise the very first thing the router
+sees is a URL it cannot match, and the user gets a 404 for a page that exists. Therefore each
+registry entry carries two things: a small static `List[RoutePattern]` describing which URLs
+the feature owns, which the shell links against normally, and the `js.dynamicImport` thunk
+that produces the feature and its render functions, which is called only once the route
+matches. The static half is data (path shapes), not code, so it costs a few bytes in
+`main.js` and does not pull the feature's classes in with it; the bundle-shape check in task
+BUILD-006 still fails the build if a real class reference leaks. Implemented by tasks UI-007
+and UI-009, documented in `docs/frontend/features.md`.
 
 ## Evidence
 

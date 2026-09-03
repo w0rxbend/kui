@@ -20,9 +20,10 @@ A Mill task `./mill docs.errorCodes` that renders every `ErrorCode` case to a Ma
 (code, HTTP status, retryable, area, meaning) and writes `docs/api/error-codes.md`; plus a
 `--check` mode used by CI that fails when the committed file differs from the generated one.
 
-The "meaning" column comes from a Scaladoc comment on each enum case, extracted at build time
-is over-engineering — instead, keep an explicit `description: String` field on `ErrorCode`
-added in this task, so the table has one source and the compiler enforces completeness.
+The "meaning" column comes from the `description: String` field that `ErrorCode` already
+carries (KERN-002). Extracting Scaladoc comments at build time was rejected as
+over-engineering: a plain field gives the table one source, and because it is a constructor
+parameter the compiler refuses a new case that has no description.
 
 ## Non-goals
 
@@ -31,14 +32,13 @@ feature, English only).
 
 ## Design references
 
-ADR-034 ("The full table lives in `docs/api/error-codes.md` and is generated from the
+ADR-034 and its amendment 2 ("The full table lives in `docs/api/error-codes.md` and is generated from the
 `ErrorCode` enum"), PLAN §35 (documentation requirements).
 
 ## Files to create or change
 
 ```
 build.mill                                          (docs.errorCodes task)
-libs/kernel/src/kui/kernel/error/ErrorCode.scala    (add `description`)
 tools/error-codes/src/kui/tools/ErrorCodeDoc.scala  (the renderer, a plain function)
 tools/error-codes/test/src/kui/tools/ErrorCodeDocSuite.scala
 docs/api/error-codes.md                             (generated, committed)

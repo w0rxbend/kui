@@ -49,7 +49,12 @@ libs/kernel/test/src/kui/kernel/SecretSuite.scala
 ```scala
 package kui.kernel.error
 
-enum ErrorCode(val wire: String, val httpStatus: Int, val retryable: Boolean):
+enum ErrorCode(val wire: String, val httpStatus: Int, val retryable: Boolean, val description: String):
+  // `description` is one sentence, written for an operator reading `docs/api/error-codes.md`.
+  // It lives on the enum rather than in a side table so a new case cannot be added without one
+  // (KERN-008 generates the document from this field; ADR-034 amendment 2).
+  // The description argument is elided from every case below to keep this sketch readable;
+  // the implementation supplies one for each.
   case ClusterNotFound     extends ErrorCode("KUI-CLUSTER-NOT-FOUND", 404, false)
   case TopicNotFound       extends ErrorCode("KUI-TOPIC-NOT-FOUND", 404, false)
   case SchemaNotFound      extends ErrorCode("KUI-SCHEMA-NOT-FOUND", 404, false)
@@ -68,7 +73,9 @@ enum ErrorCode(val wire: String, val httpStatus: Int, val retryable: Boolean):
   case Unauthenticated     extends ErrorCode("KUI-UNAUTHENTICATED", 401, false)
   case CursorExpired       extends ErrorCode("KUI-CURSOR-EXPIRED", 400, false)
   case CursorInvalid       extends ErrorCode("KUI-CURSOR-INVALID", 400, false)
+  case CursorTooLarge      extends ErrorCode("KUI-CURSOR-TOO-LARGE", 400, false)
   case ConfigVersionConflict extends ErrorCode("KUI-CONFIG-VERSION-CONFLICT", 409, false)
+  case RouteNotFound       extends ErrorCode("KUI-ROUTE-NOT-FOUND", 404, false)
   case Internal            extends ErrorCode("KUI-INTERNAL", 500, false)
 
 object ErrorCode:

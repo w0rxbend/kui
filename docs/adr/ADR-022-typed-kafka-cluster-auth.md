@@ -41,7 +41,7 @@ properties: Map[String, String]   # override layer, applied last, secret-redacte
 ## Evidence
 
 - `research/scala/security-research.md` §3 (mechanism table, Kafbat raw properties and JAAS
-  leak, Kouncil JAAS injection), ADR-020 candidate.
+  leak, Kouncil JAAS injection), ADR-022 candidate.
 - `research/kafbat/feature-matrix.md` D-7; `research/scala/ecosystem-mapping.md` F9 (handler
   versions and weight).
 

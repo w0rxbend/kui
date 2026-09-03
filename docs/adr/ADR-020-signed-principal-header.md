@@ -33,7 +33,7 @@ has no such boundary.
 ## Evidence
 
 - `research/scala/security-research.md` §5 "Header injection / spoofed principal", §6.3,
-  ADR-018 candidate; PLAN §31.
+  ADR-020 candidate; PLAN §31.
 
 ## Consequences
 

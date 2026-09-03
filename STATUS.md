@@ -10,10 +10,10 @@
 | --- | --- | --- | --- |
 | G1 Research | Research agents A–H | `research/**` | **Complete** (agent I blocked, see below) |
 | G2 Domain model | Domain Architects | `docs/domain/*.md` | In progress: `docs/domain/kafka-glossary.md` drafted; per-context models not started |
-| G3 Architecture | Chief Architect + CTO | `ARCHITECTURE.md`, `docs/adr/` | In progress: no ADR Accepted yet; candidates listed in every research report |
+| G3 Architecture | Chief Architect + CTO | `ARCHITECTURE.md`, `docs/adr/` | **Complete**: ADR-001 … ADR-041 Accepted and indexed in `DECISIONS.md` |
 | G4 Roadmap | CEO + Program Lead | `docs/ROADMAP.md`, `docs/FEATURE_MATRIX.md` | **Complete** (this pass) |
-| G5 Technical dev plan | Planner + Domain Architects + Principal Scala Engineer | `docs/plans/M0/DEVPLAN.md` + task specs | Not started |
-| G6 Gate | CTO + CEO | sign-off in this file | Not started |
+| G5 Technical dev plan | Planner + Domain Architects + Principal Scala Engineer | `docs/plans/M0/DEVPLAN.md` + 57 task specs | **Complete** for M0 |
+| G6 Gate | CTO + CEO | `docs/plans/M0/GATE-REVIEW.md`, sign-off in this file | **Complete** for M0: APPROVED WITH CONDITIONS |
 
 ## Research reports (G1)
 
@@ -59,12 +59,50 @@ smart-filter test execution and connector plugin validation gain RBAC checks.
   implied); M5: audit records carry an anonymous principal until M6.
 - §9A profile: neither Kafbat nor Provectus ships an AWS Glue serde; Kafbat still ships the ODD
   exporter (research B).
+- §16.6: "except through the gateway's contracts" is ambiguous. `ARCHITECTURE.md` §5 reads it
+  as "through the gateway-*visible* contracts" and permits direct service→service calls on
+  `/internal/v1` (every Kafka-facing service → cluster-service; metrics → topic and consumer
+  snapshots). PLAN §3's own wording is satisfied either way, but §16.6 should say plainly which
+  it means. Raised at the G6 gate (finding F-06); must be settled before the first M1 task that
+  makes such a call, and recorded in ADR-004.
+- §18: `domain` is listed as depending on "nothing but Scala stdlib and cats-core", which would
+  forbid `libs/kernel` — the shared kernel that `ARCHITECTURE.md` §3, `docs/domain/context-map.md`
+  and every M0 task spec give it. §18 should read "Scala stdlib, cats-core and `kui-kernel`
+  (which is itself pure, and depends only on cats-core and Iron)".
+
+## Gate review
+
+**G6, 2026-09-03, reviewer: CTO.** Full record in `docs/plans/M0/GATE-REVIEW.md`.
+
+Reviewed `ARCHITECTURE.md`, `docs/domain/context-map.md`, all 38 ADRs, `DECISIONS.md`,
+`DEPENDENCY_MATRIX.md`, `TECH_DEBT.md`, `docs/ROADMAP.md`, `docs/FEATURE_MATRIX.md`,
+`docs/plans/M0/DEVPLAN.md` and its 57 task specs, against `PLAN.md` and the `research/`
+reports.
+
+**Verdict: APPROVED WITH CONDITIONS.** M0 implementation may start at BUILD-001.
+
+17 findings: 1 blocker, 8 major, 8 minor. The blocker (the gateway's `application` module was
+given dependencies that the architecture test forbids, so the build could not have stayed
+green) and seven of the eight majors are fixed. Three ADRs were written for decisions the M0
+plan had taken that no ADR covered — **ADR-039** (capability fold), **ADR-040** (edge header
+policy), **ADR-041** (machine-enforced layering) — and six further such decisions were folded
+into ADR-012, ADR-032 and ADR-034 as amendments. The task graph was verified to be a DAG whose
+stated order never places a task before its dependencies.
+
+Conditions, none of which gate the first commit:
+
+1. An ADR settles the OT-004 shared-database conflict with PLAN §3 before M6 grooming closes
+   (`TECH_DEBT.md` TD-014); no store shared by two services in the meantime.
+2. PLAN §16.6 is amended and ADR-004 updated before the first M1 service→service call.
+3. M0 closes with NX-007 `PARTIAL` and TD-007 open; no M0 task depends on the design import.
+4. `./mill checkArchitecture` is proven to fail on a deliberate violating edge, with the
+   message recorded in BUILD-005's Implementation Report.
 
 ## Next step
 
-G5: technical dev plan for M0 (`docs/plans/M0/DEVPLAN.md` and one task spec per task), which
-requires G3 to produce Accepted ADR-001 … ADR-013, ADR-018, ADR-019, ADR-020 first. Details in
-`NEXT.md`.
+Implementation of M0, starting at BUILD-001. `docs/plans/M0/DEVPLAN.md` §6.2 is the order;
+BUILD-006, CFG-001 and KERN-006 are worth pulling forward because they answer the open
+questions that could invalidate later work.
 
 ## Milestone acceptance log
 

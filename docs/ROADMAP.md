@@ -53,9 +53,12 @@ later may be able to take that away.**
   CW-001, NX-005 NX-006 NX-007, OT-005.
   Modules: `libs/{kernel,contracts-core,http,observability,config,security-core(skeleton),
   testkit}`, `services/gateway`, `services/cluster` as an empty shell (health, capabilities,
-  one `ping` endpoint), `frontend/{ui-kernel,ui-shell}`, `apps/allinone`, `deployment/compose`.
-  ADRs: 001–013 and 018 (PLAN §43) plus the frontend ADRs 019 (CSS) and 020 (facades) proposed
-  in `research/scala/frontend-research.md`; ADR-012 decides Option B.
+  one `ping` endpoint), `frontend/{ui-kernel,ui-shell,ui-clusters}`, `apps/allinone`,
+  `deployment/{docker,compose}`, `e2e`.
+  ADRs: 001–013 and 018 (PLAN §43), 019 (session and CSRF) and 020 (signed principal), plus
+  the frontend ADRs 024 (CSS) and 025 (facades) proposed in
+  `research/scala/frontend-research.md`; ADR-012 decides Option B. ADR-032 and ADR-034 … ADR-037
+  are also load-bearing for M0; ADR-039 … ADR-041 were added at the G6 gate.
 - **Non-goals.** No Kafka `AdminClient`. No login. No real screens beyond the shell, the
   settings stub and the fallback panels. No metrics collection (self-metrics only).
 - **Exit criteria.**
@@ -79,7 +82,11 @@ later may be able to take that away.**
   pin 17.2.1 / 9.0.0 and schedule the upgrade. Mill 1.x plugin compatibility for
   ScalablyTyped needs a time-boxed spike.
 - **Introduces.** Services: `gateway`, `cluster` (shell). Microfrontends: `ui-kernel`,
-  `ui-shell`. Libraries: all of `libs/` except `kafka`, `kafka-auth`, `serde`.
+  `ui-shell`, `ui-clusters` (as the sample feature that proves the split bundle; it gains real
+  screens in M1). Libraries:
+  `libs/{kernel,contracts-core,http,observability,config,security-core,testkit}` — matching the
+  module list above; `cache`, `filter`, `serde*` and `kafka*` arrive with the milestones that
+  need them.
 
 ### M1 — Cluster connectivity
 
@@ -90,9 +97,11 @@ later may be able to take that away.**
 - **Scope.** CL-001 CL-002 CL-003 CL-005 CL-007 CL-009, BR-001 BR-002 BR-005, PA-003,
   AU-005 (theme, timezone; no logout yet), OT-001 OT-003, KU-010 KU-011 (dashboard) KU-012
   KU-033 (first scenario).
-  Modules: `libs/{kafka,kafka-auth}`, `services/cluster` complete, `frontend/ui-clusters`.
-  ADRs: 014 (schema registry client strategy, needed by M3 serdes), 015–017 as candidates
-  from the security research, 020 (typed cluster auth), plus the merge decisions DR-20/21.
+  Modules: `libs/{kafka,kafka-auth}`, `services/cluster` complete, `frontend/ui-clusters`
+  fleshed out from its M0 stub.
+  ADRs: 014 (schema registry client strategy, needed by M3 serdes), 022 (typed cluster auth),
+  030 (minimum broker version), 031 (cluster id). The service-merge questions DR-20 and DR-21
+  were settled by ADR-004 before M1: security stays separate, config is dissolved.
 - **Non-goals.** No topics, messages, consumers. No broker config edits. No metrics columns
   (bytes in/out render as `—`). No login.
 - **Exit criteria.**
@@ -109,8 +118,8 @@ later may be able to take that away.**
 - **Risks.** JAAS generation for every mechanism (GSSAPI, OAUTHBEARER, AWS MSK IAM, Azure)
   cannot all be integration-tested locally; PLAIN, SCRAM and SSL are tested, the rest are
   unit-tested against known-good property strings and flagged in docs.
-- **Introduces.** Service: `cluster` (complete). Microfrontend: `ui-clusters`. Libraries:
-  `kafka`, `kafka-auth`.
+- **Introduces.** Service: `cluster` (complete). Microfrontend: `ui-clusters` (real screens;
+  the stub is M0). Libraries: `kafka`, `kafka-auth`.
 
 ### M2 — Topic explorer (read-only)
 
@@ -227,7 +236,8 @@ later may be able to take that away.**
 - **Scope.** AU-001 … AU-004, RB-001 … RB-004, AD-002, DM-002, CW-006, NX-001, OT-004,
   KU-017 … KU-021.
   Modules: `services/identity`, `frontend/ui-admin`, `libs/security-core` complete, the
-  persistence adapter of OT-004. ADRs: 015, 017, 018, 019 (RBAC) from the security research.
+  persistence adapter of OT-004. ADRs: 015 (application auth), 019 (session and CSRF),
+  020 (signed principal), 021 (RBAC), 023 (audit and masking).
   Threat model written; `kui.internal.events` research (PLAN §45) done here.
 - **Non-goals.** Bearer-token access is P2 and may slip. SAML/CAS out of scope.
 - **Exit criteria.**
@@ -271,7 +281,7 @@ later may be able to take that away.**
     query within one heartbeat.
 - **Risks.** Largest milestone by rows (34) but the rows are shallow and the services are
   independent, so four parallel lanes. ksqlDB grammar classification is the one deep item.
-- **Introduces.** Services: `schema`, `connect`, `ksql`, `security` (or merged per DR-20).
+- **Introduces.** Services: `schema`, `connect`, `ksql`, `security` (separate, per ADR-004).
   Microfrontends: `ui-schemas`, `ui-connect`, `ui-ksql`, `ui-security`.
 
 ### M8 — Metrics and production hardening
@@ -283,7 +293,8 @@ later may be able to take that away.**
   from Kafbat environment variables, release process.
 - **Scope.** MT-001 … MT-005, CL-004 CL-006, BR-004, CW-002 … CW-005, NX-003, OT-006,
   MC-001, KU-024 … KU-028.
-  Modules: `services/{metrics,config}`, `frontend/ui-metrics`, `deployment/helm`, `tools/`.
+  Modules: `services/metrics`, `frontend/ui-metrics`, `deployment/helm`, `tools/`. The config
+  wizard is built into `services/cluster` and the gateway, not a service (ADR-004).
 - **Non-goals.** Push sinks, ODD, alerting, plugin SDK (all M9).
 - **Exit criteria.**
   - Metrics from JMX (mock), Prometheus text format and inferred sources agree on a
@@ -301,7 +312,8 @@ later may be able to take that away.**
   - SBOM published with the release; dependency scan has no unresolved critical findings.
 - **Risks.** JMX over SSL is hard to test; metrics inference without JMX is the fallback that
   must always work.
-- **Introduces.** Services: `metrics`, `config` (or gateway-hosted per DR-21). Microfrontend:
+- **Introduces.** Service: `metrics`. Config management is split between `services/cluster`,
+  `services/identity` and the gateway (ADR-004, ADR-036), not a service. Microfrontend:
   `ui-metrics`.
 
 ### M9 — Beyond parity (research first)

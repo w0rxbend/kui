@@ -40,7 +40,7 @@ controls consistently with the server without re-implementing the rules in anoth
 ## Evidence
 
 - `research/scala/security-research.md` §2 (model, matrix, evaluation algorithm, frontend
-  permission set), §6.5, ADR-019 candidate.
+  permission set), §6.5, ADR-021 candidate.
 - `research/kafbat/architecture.md` D9; `research/kouncil/architecture.md` D8;
   `research/kafbat/feature-matrix.md` D-5 and open question 1 (Kafbat vocabulary chosen).
 

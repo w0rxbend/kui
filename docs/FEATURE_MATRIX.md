@@ -46,8 +46,8 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | CL-003 | Cluster stats (dashboard numbers) served from a refreshed cache | Kafbat, Provectus | P0 | cluster | ui-clusters | M1 | M | RESEARCHING | Stats stay servable while the cluster is momentarily unreachable. |
 | CL-004 | Cluster-level aggregated metrics (JMX/Prometheus) | Kafbat, Provectus | P1 | metrics | ui-clusters | M8 | M | RESEARCHING | Dashboard cell shows `—` until M8. |
 | CL-005 | Force statistics cache refresh | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | S | RESEARCHING | `POST /clusters/{id}/refresh`, 202 Accepted. |
-| CL-006 | Dynamic cluster CRUD from the UI, persisted, with connection test | Kouncil | P1 | config (+cluster registry) | ui-admin | M8 | L | RESEARCHING | Merged with the config wizard (CW-002..005). Needs OT-004 persistence. |
-| CL-007 | Typed cluster security config (SASL/SSL/SCRAM/IAM/OAUTHBEARER) with `properties` escape hatch | Kafbat, Provectus, Kouncil | P0 | cluster (typed config in `kui-config`) | ui-admin (form in M8) | M1 | M | RESEARCHING | Decision D-7 / ADR-020 candidate. JAAS strings generated from typed fields, never accepted verbatim. |
+| CL-006 | Dynamic cluster CRUD from the UI, persisted, with connection test | Kouncil | P1 | cluster | ui-admin | M8 | L | RESEARCHING | Merged with the config wizard (CW-002..005). Needs OT-004 persistence. Owner is `cluster`, not a config service: ADR-004 dissolved `kui-config-service`. |
+| CL-007 | Typed cluster security config (SASL/SSL/SCRAM/IAM/OAUTHBEARER) with `properties` escape hatch | Kafbat, Provectus, Kouncil | P0 | cluster (typed config in `kui-config`) | ui-admin (form in M8) | M1 | M | RESEARCHING | Decision D-7 / ADR-022. JAAS strings generated from typed fields, never accepted verbatim. |
 | CL-008 | Failover across multiple SR / Connect / ksql URLs | Kafbat, Provectus | P2 | schema, connect, ksql (shared lib) | — | M7 | M | RESEARCHING | |
 | CL-009 | Per-cluster colour tag and status dot in navigation | Kafbat | P2 | — | shell | M1 | S | RESEARCHING | Colour stored client-side (`LocalPrefs`). |
 | CL-010 | Favourites: pin topics and groups to the top of lists | Kouncil | P2 | — | kernel | M2 | S | RESEARCHING | localStorage, keyed by cluster + name. |
@@ -175,7 +175,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | KS-001 | Execute statement → query id → SSE result stream | Kafbat, Provectus | P1 | ksql | ui-ksql | M7 | L | RESEARCHING | Two-step design kept (EventSource cannot POST); push queries stream until disconnect. |
 | KS-002 | List tables / streams | Kafbat, Provectus | P1 | ksql | ui-ksql | M7 | S | RESEARCHING | |
-| KS-003 | Query editor UI with streams properties and result table | Kafbat, Provectus | P1 | — | ui-ksql | M7 | M | RESEARCHING | CodeMirror SQL mode (ADR-020 candidate). |
+| KS-003 | Query editor UI with streams properties and result table | Kafbat, Provectus | P1 | — | ui-ksql | M7 | M | RESEARCHING | CodeMirror SQL mode (ADR-025). |
 | KS-004 | ksql auth (basic) and SSL | Kafbat, Provectus | P1 | ksql | ui-admin (form in M8) | M7 | S | RESEARCHING | |
 
 ## ACLs (AC)
@@ -201,7 +201,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | MT-001 | JMX metrics scraping (SSL, auth) per broker | Kafbat, Provectus, Kouncil | P1 | metrics | — | M8 | L | RESEARCHING | |
 | MT-002 | Prometheus endpoint scraping | Kafbat, Provectus | P1 | metrics | — | M8 | M | RESEARCHING | |
 | MT-003 | Inferred metrics without JMX, IO rate scanner | Kafbat | P1 | metrics | — | M8 | M | RESEARCHING | Makes dashboards work on clusters without JMX. |
-| MT-004 | Graph descriptions and Prometheus query proxy with templated PromQL | Kafbat | P2 | metrics | ui-metrics | M8 | L | RESEARCHING | Typed `GraphData` instead of raw PromQL passthrough. uPlot facade (ADR-020 candidate). |
+| MT-004 | Graph descriptions and Prometheus query proxy with templated PromQL | Kafbat | P2 | metrics | ui-metrics | M8 | L | RESEARCHING | Typed `GraphData` instead of raw PromQL passthrough. uPlot facade (ADR-025). |
 | MT-005 | Prometheus exposition `/metrics`, `/metrics/clusters/{id}` | Kafbat | P2 | metrics | — | M8 | M | RESEARCHING | Outside `/api/v1`, allow-listed, no session auth. |
 | MT-006 | Push-gateway / remote-write sinks | Kafbat | P3 | metrics | — | M9 | M | DEFERRED(pull-based MT-005 covers monitoring) | CEO decision DR-3. |
 | MT-007 | KUI self-metrics (JVM, HTTP, per-service) | Kafbat, Provectus | P0 | all services | — | M0 | S | RESEARCHING | otel4s, PLAN §30. |
@@ -211,9 +211,9 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | CW-001 | App info: build info, enabled features | Kafbat, Provectus, Kouncil | P1 | gateway | shell | M0 | S | RESEARCHING | `GET /info`. Release check is OT-006 (opt-in). |
-| CW-002 | Read current config (redacted) and apply a new one with hot reload | Kafbat, Provectus | P1 | config | ui-admin | M8 | L | RESEARCHING | No process restart: config distribution to services. |
-| CW-003 | Validate a config with per-component connectivity probes | Kafbat, Provectus, Kouncil | P1 | config | ui-admin | M8 | M | RESEARCHING | Probe URLs pass the SSRF policy (KU-024). |
-| CW-004 | Upload related files (truststore, keystore, proto) | Kafbat, Provectus | P2 | config | ui-admin | M8 | S | RESEARCHING | |
+| CW-002 | Read current config (redacted) and apply a new one with hot reload | Kafbat, Provectus | P1 | cluster + identity, aggregated by gateway | ui-admin | M8 | L | RESEARCHING | No process restart: config distribution to services. `/api/v1/config` is a gateway aggregation over the two owners (ADR-004, ADR-036). |
+| CW-003 | Validate a config with per-component connectivity probes | Kafbat, Provectus, Kouncil | P1 | cluster | ui-admin | M8 | M | RESEARCHING | Probe URLs pass the SSRF policy (KU-024). |
+| CW-004 | Upload related files (truststore, keystore, proto) | Kafbat, Provectus | P2 | cluster | ui-admin | M8 | S | RESEARCHING | |
 | CW-005 | Cluster config wizard UI (bootstrap, auth, SR, Connect, ksql, metrics, serdes, masking) | Kafbat, Provectus, Kouncil | P1 | — | ui-admin | M8 | L | RESEARCHING | Screens 28–29 of the IA proposal. |
 | CW-006 | First-launch onboarding: temporary admin, removed on logout | Kouncil | P2 | identity | shell | M6 | M | RESEARCHING | DC-H12. |
 
@@ -221,10 +221,10 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AU-001 | Auth types: disabled, login form, OAuth2/OIDC (GitHub, GitLab, Google, Cognito, Azure Entra, generic), LDAP / AD | Kafbat, Provectus, Kouncil | P0 | identity (+gateway session) | shell | M6 | L | RESEARCHING | ADR-015 candidate. Sign-in screen 1 of the IA proposal. |
+| AU-001 | Auth types: disabled, login form, OAuth2/OIDC (GitHub, GitLab, Google, Cognito, Azure Entra, generic), LDAP / AD | Kafbat, Provectus, Kouncil | P0 | identity (+gateway session) | shell | M6 | L | RESEARCHING | ADR-015. Sign-in screen 1 of the IA proposal. |
 | AU-002 | In-memory users with default accounts and forced password change | Kouncil | P2 | identity | shell | M6 | M | RESEARCHING | Dev / demo installs. |
 | AU-003 | SSO provider list and GitHub org/team role source | Kouncil | P2 | identity | — | M6 | M | RESEARCHING | Overlaps RB-002 GitHub extractor; implement once. |
-| AU-004 | CSRF protection for the SPA | Kouncil | P0 | gateway | — | M6 | S | RESEARCHING | `X-KUI-CSRF` header + `Sec-Fetch-Site`, `POST` logout (ADR-017 candidate). |
+| AU-004 | CSRF protection for the SPA | Kouncil | P0 | gateway | — | M6 | S | RESEARCHING | `X-KUI-CSRF` header + `Sec-Fetch-Site`, `POST` logout (ADR-019). |
 | AU-005 | User menu: logout, theme auto/light/dark, timezone | Kafbat | P1 | — | shell | M1 | S | RESEARCHING | Theme tokens exist from M0; logout item appears in M6. |
 
 ## Authorization: RBAC and read-only (RB)
@@ -307,8 +307,8 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | OT-001 | Admin-client timeout, batching and concurrency knobs | Kafbat | P1 | cluster, topic, consumer | — | M1 | S | RESEARCHING | Shared `kui-kafka` settings. |
 | OT-002 | CSV formatting knobs | Kafbat | P2 | shared lib | — | M5 | S | RESEARCHING | With the first CSV export. |
-| OT-003 | Per-cluster consumer / producer / admin property overrides | Kafbat, Provectus | P0 | config | — | M1 | S | RESEARCHING | The escape hatch of CL-007. |
-| OT-004 | Relational persistence (PostgreSQL, embedded for dev) with migrations | Kouncil | P1 | config, identity | — | M6 | M | RESEARCHING | D-10. File-only mode must keep working. |
+| OT-003 | Per-cluster consumer / producer / admin property overrides | Kafbat, Provectus | P0 | `libs/config` + cluster | — | M1 | S | RESEARCHING | The escape hatch of CL-007. |
+| OT-004 | Relational persistence (PostgreSQL, embedded for dev) with migrations | Kouncil | P1 | cluster, identity (**separate stores**) | — | M6 | M | RESEARCHING | D-10. File-only mode must keep working. PLAN §3 forbids a shared database and ADR-036 rejects a relational store outright, so this row cannot be built as one PostgreSQL behind two services: it needs an ADR that either supersedes ADR-036 with a store per owning context, or defers the row. Raised at the G6 gate; decide in M6 grooming. |
 | OT-005 | Uniform error envelope with stable `KUI-*` codes and correlation id | Kouncil, Kafbat | P0 | all | kernel | M0 | S | RESEARCHING | PLAN §26; code list in `research/kafbat/api-analysis.md`. |
 | OT-006 | Release check phone-home and installation id | Kafbat, Provectus, Kouncil | P3 | gateway | — | M8 | S | RESEARCHING | Opt-in only, default off (CEO decision DR-7). |
 
@@ -336,7 +336,7 @@ security research flagged.
 | KU-014 | SSE envelope with named events (`phase`, `message`, `consumed`, `done`, `error`, `heartbeat`) and `id:` for `Last-Event-ID` reconnect; kernel `SseStream` wrapper | KUI-new | P0 | message, gateway | kernel | M3 | M | RESEARCHING | Kernel wrapper is exercised by KU-001 in M0; the full envelope lands with MS-001. |
 | KU-015 | Self-describing signed browse cursor (survives gateway restarts and multiple replicas) | KUI-new | P0 | message | — | M3 | M | RESEARCHING | Replaces Kafbat's process-local cursor cache. |
 | KU-016 | Smart-filter test execution is cluster-scoped and requires `TOPIC:MESSAGES_READ` | KUI-new | P1 | gateway | ui-messages | M3 | S | RESEARCHING | RBAC gap: Kafbat lets any authenticated user execute arbitrary CEL. Enforced from M6 when RBAC exists; the endpoint shape is fixed in M3. |
-| KU-017 | Signed principal header gateway → services (request-bound, short expiry, per-service audience); services reject unsigned requests except in all-in-one mode | KUI-new | P0 | gateway, all services | — | M6 | M | RESEARCHING | PLAN §31; ADR-018 candidate in the security research. |
+| KU-017 | Signed principal header gateway → services (request-bound, short expiry, per-service audience); services reject unsigned requests except in all-in-one mode | KUI-new | P0 | gateway, all services | — | M6 | M | RESEARCHING | PLAN §31; ADR-020. |
 | KU-018 | Pluggable server-side session store (in-memory default, shared store adapter) | KUI-new | P1 | gateway | — | M6 | M | RESEARCHING | Multi-replica gateway. |
 | KU-019 | RBAC view: who can do what, per cluster and resource | KUI-new | P1 | gateway (read model) | ui-admin | M6 | M | RESEARCHING | Screen 30. Kafbat only exposes this through 403s. |
 | KU-020 | Audit log viewer | KUI-new | P1 | identity | ui-admin | M6 | M | RESEARCHING | Screen 31. Reads the AD-001 sink. |
@@ -386,8 +386,8 @@ Rulings on the open questions that affect milestone scope:
 | DR-17 | Connector plugin validation without RBAC (KC-008 research note) | Requires `CONNECTOR:CREATE` or `CONNECTOR:EDIT` and is audited (KU-022). |
 | DR-18 | Async tracking sanity limit: per request or server knob? (feature-matrix Q2) | Both: a server-side hard maximum and a per-request `limit` that cannot exceed it. Same rule as browse. |
 | DR-19 | UI-editable masking policies in M3 or later? (kouncil ui-analysis open question) | File-configured masking in M3 (DM-001); UI policies need user groups, so M6 (DM-002). |
-| DR-20 | Merge `kui-security-service` into `kui-cluster-service`? (D-8) | Not decided here; Chief Architect records an ADR in M1 grooming. The matrix keeps `security` as owner and changes only the label if merged. |
-| DR-21 | `kui-config-service` merged into the gateway? (PLAN §15) | Same treatment as DR-20; decided by ADR before M8. |
+| DR-20 | Merge `kui-security-service` into `kui-cluster-service`? (D-8) | **Settled by ADR-004: no.** It has its own capability gate, its own failure signature and functionality that is not cluster topology; merging a slow optional feature into the one Core service would break fault isolation. Owner stays `security`. |
+| DR-21 | `kui-config-service` merged into the gateway? (PLAN §15) | **Settled by ADR-004: dissolved, not merged into one place.** Configuration is three ownerships — cluster configuration to `cluster`, auth and RBAC to `identity`, gateway configuration to the gateway — and `/api/v1/config` is a gateway aggregation over them. Owner columns above were updated accordingly at the G6 gate. |
 
 ## Counts
 

@@ -69,7 +69,7 @@ final case class DegradedReason(
     p95Ms: Option[Long]
 )
 
-final case class CapabilityKey(service: String, cluster: Option[String])
+final case class CapabilityKey(service: ServiceId, cluster: Option[ClusterId])
 
 enum CapabilityState:
   case Available
@@ -83,8 +83,8 @@ final case class CapabilityChange(entry: CapabilityEntry, previous: Option[Capab
 
 /** The per-service GET /capabilities response of ARCHITECTURE.md §6. */
 final case class ServiceCapabilities(
-    service: String,
-    clusters: Map[String, ClusterCapability]
+    service: ServiceId,
+    clusters: Map[ClusterId, ClusterCapability]
 )
 final case class ClusterCapability(configured: Boolean, features: List[String], status: String)
 ```

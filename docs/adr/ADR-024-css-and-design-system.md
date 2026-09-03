@@ -34,7 +34,7 @@ visual source of truth and its token extraction (Research Agent I) has not been 
 ## Evidence
 
 - `research/scala/frontend-research.md` §6 (ScalaCSS unmaintained since 2022; Kafbat theming
-  model; token list; Shoelace/UI5 bindings), ADR-019 candidate; `research/scala/ecosystem-mapping.md` F12.
+  model; token list; Shoelace/UI5 bindings), ADR-024 candidate; `research/scala/ecosystem-mapping.md` F12.
 - PLAN §21 "Visual design reference" (design project is the UI source of truth; no design
   CSS copied).
 

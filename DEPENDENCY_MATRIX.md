@@ -38,7 +38,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | --- | --- | --- | --- | --- | --- |
 | com.softwaremill.sttp.tapir | tapir-core_3 | 1.13.31 | shared | libs/contracts-core, services/*/contract | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-json-circe_3 | 1.13.31 | shared | libs/contracts-core, services/*/contract | ADR-003, ADR-007 |
-| com.softwaremill.sttp.tapir | tapir-iron_3 | 1.13.31 | shared | services/*/contract | ADR-003, ADR-007 |
+| com.softwaremill.sttp.tapir | tapir-iron_3 | 1.13.31 | shared | libs/contracts-core, services/*/contract | ADR-003, ADR-007 |
 | com.softwaremill.sttp.tapir | tapir-cats-effect_3 | 1.13.31 | main | services/*/api, services/gateway | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-netty-server-cats_3 | 1.13.31 | main | libs/http, services/*/app, apps/allinone | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-files_3 | 1.13.31 | main | services/gateway | ADR-003, ADR-012 |
@@ -65,7 +65,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | is.cir | ciris_3 | 3.15.0 | main | libs/config | ADR-013 |
 | is.cir | ciris-circe-yaml_3 | 3.15.0 | main | libs/config | ADR-013 |
 | io.github.iltotore | iron_3 | 3.3.2 | shared | libs/kernel, services/*/domain, services/*/contract | ADR-007 |
-| io.github.iltotore | iron-circe_3 | 3.3.2 | shared | services/*/contract | ADR-007 |
+| io.github.iltotore | iron-circe_3 | 3.3.2 | shared | libs/contracts-core, services/*/contract | ADR-007 |
 | io.github.iltotore | iron-cats_3 | 3.3.2 | shared | libs/kernel, services/*/domain | ADR-007 |
 | io.github.iltotore | iron-ciris_3 | 3.3.2 | main | libs/config | ADR-013 |
 | io.scalaland | chimney_3 | 2.0.0-RC1 | main | services/*/application | ADR-033 |
@@ -105,9 +105,9 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | org.msgpack | msgpack-core | 0.9.12 | main | libs/serde | ADR-028 |
 | io.kafbat.ui | serde-api | see open questions | main | libs/serde-kafbat-bridge (M6+) | ADR-028 |
 | dev.cel | cel | 0.14.0 | main | libs/filter | ADR-017 |
-| org.apache.datasketches | datasketches-java | 8.0.0 | main | services/topic/infrastructure | ADR-001, ADR-006 |
+| org.apache.datasketches | datasketches-java | 8.0.0 | main | services/topic/infrastructure | ADR-001 |
 | com.github.ben-manes.caffeine | caffeine | 3.2.4 | main | libs/cache | ADR-016 |
-| org.gnieh | fs2-data-csv_3 | 1.14.1 | main | services/security/infrastructure, libs/http (CSV responses) | ADR-004 |
+| org.gnieh | fs2-data-csv_3 | 1.14.1 | main | services/security/infrastructure, libs/http (CSV responses) | ADR-023 (ACL CSV sync); no ADR admits it explicitly — raise one in M5 grooming |
 
 ## Identity and cluster authentication
 
@@ -131,7 +131,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | com.raquo | waypoint_sjs1_3 | 9.0.0 | js | frontend/ui-shell, frontend/ui-kernel | ADR-011 |
 | be.doeraene | url-dsl_sjs1_3 | 0.7.0 | js | frontend/ui-shell (transitive) | ADR-011 |
 | org.scala-js | scalajs-dom_sjs1_3 | 2.8.1 | js | frontend/* | ADR-011 |
-| io.github.cquiroz | scala-java-time_sjs1_3 | 2.7.0 | js | services/*/contract (JS side), frontend/ui-kernel | ADR-011 |
+| io.github.cquiroz | scala-java-time_sjs1_3 | 2.7.0 | js | libs/contracts-core (JS side), services/*/contract (JS side), frontend/ui-kernel | ADR-011 |
 | com.raquo | domtestutils_sjs1_3 | 19.0.0 | test | frontend/* | ADR-018 |
 | npm: codemirror (@codemirror/state, view, lang-json, lang-sql, legacy-modes, lint, search) | — | 6.x, pinned in `frontend/package.json` | js (static ESM via import map) | frontend/ui-kernel | ADR-025 |
 | npm: uplot | — | pinned in `frontend/package.json` | js (static ESM) | frontend/ui-kernel | ADR-025 |
@@ -166,14 +166,14 @@ WireMock, Mockito, Groovy, the official Java MCP SDK, datasketches 9.0.0, Chimne
 | --- | --- | --- | --- |
 | Scala 3.9.0 | Confirm the scala-lang.org announcement and GitHub release object are published before the first M0 commit; otherwise start on 3.3.8 and bump (ADR-001). | Principal Scala Engineer | M0 start |
 | Chimney 2.0.0 | Final release date; verify `hearth` macros compile under `-Werror -Wunused:all` in an M0 spike (ADR-033). | Principal Scala Engineer | M0 |
-| fs2-kafka 4.0.0 | Which of `describeMetadataQuorum`, `listGroups`, `describeProducers`, `describeShareGroups` need the raw `Admin` escape hatch on the pinned tag (ADR-006). | Kafka Specialist | M1 |
+| fs2-kafka 4.0.0 | Which of `describeMetadataQuorum`, `listGroups`, `describeProducers`, `describeShareGroups` need the raw `Admin` escape hatch on the pinned tag (ADR-006 lists the first three; `describeShareGroups` was added here and the ADR has not caught up). | Kafka Specialist | M1 |
 | kafka-clients 4.3.1 | KIP-848 `GroupState`/`targetAssignment` exposure; defensive mapping for classic vs consumer groups (ADR-006, ADR-030). | Kafka Specialist | M1 |
 | lz4-java | Whether upstream `org.lz4:lz4-java 1.8.1` already fixes CVE-2025-12183; the `at.yawk.lz4` fork stays until confirmed. | Security Engineer | M1 |
 | Confluent 8.3.1 | Community License review documented in `docs/operations`; confirm optional-classpath packaging (ADR-014). | CTO | M3 |
 | io.kafbat.ui:serde-api | Exact published version and Maven coordinates for the bridge module (ADR-028). | Kafka Specialist | M6 |
 | at.favre.lib:bcrypt | Latest version and Java 21 compatibility (ADR-015). | Security Engineer | M6 |
-| com.microsoft.playwright | Latest JVM Playwright version and browser bundle pinning in CI (ADR-018). | QA Engineer | M0 |
-| tapir-netty-server-cats | Spike: long-lived SSE responses on Netty 4.2 with fs2 backpressure; http4s-ember is the fallback (ADR-003). | Principal Scala Engineer | M0 |
+| com.microsoft.playwright | Latest JVM Playwright version and browser bundle pinning in CI (ADR-018). Resolved by task BUILD-006, which must land before E2E-001. | QA Engineer | M0 (BUILD-006) |
+| tapir-netty-server-cats | Spike: long-lived SSE responses on Netty 4.2 with fs2 backpressure; http4s-ember is the fallback (ADR-003). Resolved by task BUILD-006, which blocks HTTP-004. | Principal Scala Engineer | M0 (BUILD-006) |
 | Mill 1.2.0 | Stay on 1.1.8 until 1.2.0 final; re-check `mill-contrib-docker` API then. | Infrastructure Lead | ongoing |
 | mill-scalablytyped | Compatibility with Mill 1.1.x for the one-off facade generation (ADR-025). | Frontend Architect | M0 |
 | Laminar 18 / Waypoint 10 | Upgrade task once both are final (ADR-011). | Frontend Architect | after release |

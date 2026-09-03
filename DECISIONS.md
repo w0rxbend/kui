@@ -43,6 +43,17 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR (PLAN §39
 | [ADR-036](docs/adr/ADR-036-dynamic-config-ownership.md) | Dynamic configuration: ownership, store and distribution without restart | Accepted | 2026-09-03 |
 | [ADR-037](docs/adr/ADR-037-upstream-http-resilience.md) | Upstream HTTP clients: failover, retry, circuit breaker and bulkheads in one place | Accepted | 2026-09-03 |
 | [ADR-038](docs/adr/ADR-038-search-in-memory-first.md) | Name search: in-memory index first, Lucene deferred | Accepted | 2026-09-03 |
+| [ADR-039](docs/adr/ADR-039-capability-fold.md) | Capability fold: inputs, precedence, debounce and what must not feed it | Accepted | 2026-09-03 |
+| [ADR-040](docs/adr/ADR-040-edge-header-policy.md) | Edge header policy: the gateway generates correlation ids and trusts no inbound `X-Kui-*` | Accepted | 2026-09-03 |
+| [ADR-041](docs/adr/ADR-041-layering-rules-machine-enforced.md) | Layering rules are machine-enforced, and `application` never depends on the wire | Accepted | 2026-09-03 |
+
+ADR-039 … ADR-041 were written at the G6 grooming gate (2026-09-03) to record decisions the
+M0 development plan had made that no ADR covered. Three further such decisions were folded
+into the ADRs they belong to rather than given numbers of their own: the `KUI-ROUTE-NOT-FOUND`
+code and the `ErrorCode.description` field became **ADR-034 amendments 1 and 2**; the
+proxy-free dev loop and the static route patterns beside dynamic imports became **ADR-012
+amendments 1 and 2**; the `Forbidden` precedence rule and `Degraded(Starting)` became
+**ADR-032 amendments 1 and 2**.
 
 ## Mapping from PLAN §43
 
@@ -61,3 +72,5 @@ were renumbered to ADR-019..025 above to avoid collisions.
 | Shared session store adapter (Kafka compacted topic) | single gateway replica acceptable until M6 | M6 |
 | Internal events topic `kui.internal.events` | polling suffices for M0–M5 | M6 |
 | Persisting topic analysis results | memory only, as Kafbat | when a store need appears |
+| `ui-clusters` page composition and feature-local state shape | one trivial page in M0; the pattern is worth deciding against a real screen | M2 grooming |
+| Whether `PLAN` §16.6 permits direct service→service `/internal/v1` calls (`ARCHITECTURE.md` §5 assumes it does; no ADR states it) | no service→service call exists before M1 | M1 grooming — see `STATUS.md` "Amendments to PLAN.md required" |

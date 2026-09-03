@@ -24,7 +24,7 @@ declared module graph and fails on any of these edges:
 | --- | --- |
 | A1 | `services/*/domain` → anything except `libs.kernel.jvm` and `cats-core` |
 | A2 | `services/*/contract` → `services/*/domain` or `services/*/application` |
-| A3 | `services/*/application` → `libs.http`, tapir, circe, or any `infrastructure` module |
+| A3 | `services/*/application` → `libs.http`, `libs.contractsCore`, tapir, circe, or any `infrastructure` module (ADR-041; the gateway is not an exception) |
 | A4 | `services.gateway.*` → any `services.<other>.{domain,application,infrastructure,api,app}` (only `contract` is allowed) |
 | A5 | `libs/*` → any `services/*` or `frontend/*` module |
 | A6 | `libs.kernel`, `libs.contractsCore`, `libs.securityCore` → any JVM-only dependency in their shared source set |
@@ -40,7 +40,8 @@ that matter). No bundle shape (BUILD-006).
 
 ## Design references
 
-PLAN §18, PLAN §19, ADR-004 §3 ("the gateway has no domain logic"), `ARCHITECTURE.md` §3,
+ADR-041 (this task is its enforcement mechanism), PLAN §18, PLAN §19,
+ADR-004 §3 ("the gateway has no domain logic"), `ARCHITECTURE.md` §3,
 `docs/domain/context-map.md` ("No context imports another context's `domain` module").
 
 ## Files to create
