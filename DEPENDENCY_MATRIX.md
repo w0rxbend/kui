@@ -17,6 +17,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | com.lihaoyi | mill-contrib-docker_3 | 1.1.8 | build | services/*/app, apps/allinone | ADR-001, ADR-005 |
 | org.scalameta | scalafmt-core_2.13 | 3.11.5 | build | root | ADR-001 |
 | ch.epfl.scala | scalafix-core_2.13 | 0.14.7 | build | root | ADR-001 |
+| com.goyeau | mill-scalafix_mill1_3 | 0.6.2 | build | root | ADR-001 (BUILD-002: Mill 1.1.8 has no built-in scalafix support, so the scalafix gate needs this plugin) |
 | org.scala-js | scalajs-library_2.13 | 1.22.0 | js | frontend/* | ADR-001, ADR-011 |
 
 ## Runtime core

@@ -57,6 +57,30 @@ including the CI machine — builds with the same tool.
 ./mill libs.kernel.jvm.compile    # compiles one module
 ```
 
+### The quality gates
+
+```
+./mill __.compile        # compiles everything; a warning is an error (see below)
+./mill __.reformat       # rewrites sources to the project's formatting
+./mill __.checkFormat    # fails if anything is not formatted
+./mill __.fix            # applies the lint rules that can be applied automatically
+./mill __.fix --check    # fails if a lint rule is violated, changing nothing
+```
+
+`__` is Mill's wildcard: it means "every module".
+
+**`-Werror` is not negotiable, per module or otherwise.** Every module compiles with
+`-Werror`, which promotes every compiler warning — an unused import, a discarded result, a
+deprecated call — into a build failure. No module may switch it off. The reason is not
+perfectionism: a warning that can be ignored *is* ignored, and a project that tolerates a
+hundred of them can no longer see the one that matters. Fixing each warning as it appears costs
+seconds; clearing a backlog of them costs weeks and nobody ever does it.
+
+Formatting is [scalafmt](https://scalameta.org/scalafmt/), configured in `.scalafmt.conf`.
+Linting is [scalafix](https://scalacenter.github.io/scalafix/), configured in `.scalafix.conf`,
+which forbids `null`, `throw`, `return` and `asInstanceOf` everywhere. `libs/` and every service's
+`domain` module get a stricter set from `.scalafix-pure.conf`, which additionally forbids `var`.
+
 `resolveAll` is worth knowing about: it exists purely to fail fast. It asks the build to download
 every library version listed in [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md), even ones no module
 uses yet, so that a wrong version number is caught in seconds instead of surfacing weeks later when

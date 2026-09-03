@@ -1,7 +1,12 @@
+//| mvnDeps:
+//| - com.goyeau::mill-scalafix::0.6.2
+
 package build
 
 import mill.*
 import mill.scalalib.*
+import mill.scalalib.scalafmt.ScalafmtModule
+import com.goyeau.mill.scalafix.ScalafixModule
 
 /** Every third-party version KUI pins, in one place.
   *
@@ -43,16 +48,46 @@ object Versions {
   val domtestutils    = "19.0.0"
 }
 
-/** Settings every KUI Scala module shares. Modules inherit strictness rather than opting into it. */
-trait KuiModule extends ScalaModule {
+/** Settings every KUI Scala module shares. Modules inherit strictness rather than opting into it.
+  *
+  * `-Werror` turns every warning into a compile error. That is deliberate and not negotiable per
+  * module: a warning that can be ignored is ignored, and the backlog is never paid off.
+  */
+trait KuiModule extends ScalaModule with ScalafmtModule with ScalafixModule {
   def scalaVersion = Versions.scala
+
+  def scalacOptions = Seq(
+    // Opt in to the next language version's semantics, so the codebase never accumulates a
+    // migration debt it has to pay all at once.
+    "-source:future",
+    // Braces, not significant indentation: unambiguous diffs and copy-paste that survives.
+    "-no-indent",
+    "-deprecation",
+    "-feature",
+    "-unchecked",
+    "-Wunused:all",
+    // A discarded non-Unit value is almost always a forgotten effect. Both of these catch it.
+    "-Wvalue-discard",
+    "-Wnonunit-statement",
+    "-Werror"
+  )
+}
+
+/** A module that additionally forbids `var`: everything under `libs`, and every service's `domain`
+  * module (ADR-041 rule A1).
+  *
+  * scalafix has no way to scope a rule to a path from one config file, so the stricter rule set
+  * lives in its own file and the modules that want it point at that file.
+  */
+trait KuiPureModule extends KuiModule {
+  def scalafixConfig = Task { Some(mill.api.BuildCtx.workspaceRoot / ".scalafix-pure.conf") }
 }
 
 object libs extends Module {
 
   /** Shared, platform-neutral vocabulary. KERN-001 fills it in; today it only has to compile. */
   object kernel extends Module {
-    object jvm extends KuiModule {
+    object jvm extends KuiPureModule {
       def sources = Task.Sources(moduleDir / os.up / "src")
     }
   }
