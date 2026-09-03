@@ -28,9 +28,11 @@ import sttp.tapir.{statusCode, AttributeKey, EndpointOutput}
 import kui.contracts.{ErrorEnvelope, HttpHeaders}
 import kui.contracts.ErrorEnvelope.given
 import kui.gateway.application.session.{Session, SessionId, SessionRef, SessionStore}
+import kui.gateway.contract.GatewayEndpoints
+import kui.http.BasePath
 import kui.kernel.error.ErrorCode
 import kui.observability.Correlation
-import kui.security.Principal
+import kui.security.{Principal, PrincipalKind}
 
 /** The session and CSRF boundary every request passes through (ADR-019).
   *
@@ -43,7 +45,9 @@ import kui.security.Principal
   *   1. **Attach a session** ([[RequestInterceptor.transformServerRequest]]). The cookie the request carries
   *      is looked up; a missing, unrecognised or expired one gets a fresh anonymous session instead of a
   *      failure — anonymous mode issues a session to every browser precisely so the CSRF machinery is
-  *      exercised in CI for six milestones before login exists. The session is attached to the request as an
+  *      exercised in CI for six milestones before login exists. That applies to the gateway's own API only: a
+  *      static asset or a health probe carries no session unless it presented a valid cookie of its own, and
+  *      [[ensureSession]] says why. The session, when there is one, is attached to the request as an
   *      attribute ([[SessionMiddleware.Attribute]]), which both later steps and `AuthRoutes` read.
   *   1. **Enforce CSRF on a mutation** (an [[EndpointInterceptor]], which alone has a [[Responder]] in hand
   *      to answer with something other than the endpoint's own logic). [[CsrfCheck.verdict]] is applied once
@@ -51,8 +55,9 @@ import kui.security.Principal
   *      endpoint's logic ever running, and is logged at `WARN` — a CSRF rejection is a signal worth alerting
   *      on, not a client error to note and move past.
   *   1. **Stamp `Set-Cookie`** ([[RequestInterceptor.transformResultEffect]]), reading the same attribute
-  *      back off the request once a response exists, on every endpoint — so a new or rotated session's cookie
-  *      reaches the browser without every route having to declare it as an output.
+  *      back off the request once a response exists, on every endpoint that has one — so a new or rotated
+  *      session's cookie reaches the browser without every route having to declare it as an output, and a
+  *      response with no session behind it is left alone.
   *
   * Installed as a block, after `EdgeHeaders` and before `KuiInterceptors`, in `GatewayWiring`'s chain:
   * `Cookie` is not an `X-Kui-*` header so the edge strip does not touch it, and this decision belongs beside
@@ -82,21 +87,66 @@ object SessionMiddleware {
       secureCookies: Boolean
   ): List[Interceptor[F]] =
     List(
-      attachInterceptor[F](store),
+      attachInterceptor[F](store, basePath),
       CsrfInterceptor[F](logger),
       stampCookieInterceptor[F](basePath, secureCookies)
     )
 
-  /** Ensures a request carries a valid session, creating one when it does not. */
-  def ensureSession[F[_]: Sync](store: SessionStore[F], request: ServerRequest, now: Instant): F[Session] =
+  /** The session this request should carry, if it should carry one at all.
+    *
+    * A valid cookie always resolves to its session, whatever the request is for. A request with no usable
+    * cookie gets a *new* anonymous session only when it is addressed to the gateway's own API, and that
+    * restriction is doing two jobs.
+    *
+    * The first is cache poisoning. Every response the gateway produces used to have `Set-Cookie` appended to
+    * it, static assets included -- and a hashed asset is served `Cache-Control: public, max-age=31536000,
+    * immutable`. A response that is both publicly cacheable for a year and carries a per-user credential is a
+    * session-fixation bug waiting for a shared cache or CDN to store it, after which every visitor is handed
+    * the first visitor's session. KUI supports running behind a reverse proxy (`server.basePath` exists for
+    * it), so that topology is not hypothetical. A request that never gets a session never gets a
+    * `Set-Cookie`, whatever its cache headers say.
+    *
+    * The second is the session store. It is bounded at `SessionConfig.maxSessions` and evicts the
+    * least-recently-used entry when it is full, so anything that mints a session per request lets an
+    * unauthenticated client evict every real session by fetching `/ui/` in a loop -- no credentials, no API
+    * knowledge. Static assets, health probes and unmatched paths need no session and no longer create one.
+    */
+  def ensureSession[F[_]: Sync](
+      store: SessionStore[F],
+      request: ServerRequest,
+      basePath: String,
+      now: Instant
+  ): F[Option[Session]] =
     cookieValue(request) match {
-      case None => store.create(Principal.Anonymous, now)
+      case None => mint[F](store, request, basePath, now)
       case Some(raw) =>
         store.get(SessionId.unsafe(raw), now).flatMap {
-          case Some(session) => session.pure[F]
-          case None => store.create(Principal.Anonymous, now)
+          case Some(session) => session.some.pure[F]
+          case None => mint[F](store, request, basePath, now)
         }
     }
+
+  private def mint[F[_]: Sync](
+      store: SessionStore[F],
+      request: ServerRequest,
+      basePath: String,
+      now: Instant
+  ): F[Option[Session]] =
+    if needsSession(request, basePath) then store.create(Principal.Anonymous, now).map(_.some)
+    else none[Session].pure[F]
+
+  /** Whether a request with no session of its own should be given one.
+    *
+    * The gateway's own API, and nothing else. Health probes are excluded even though they live under the same
+    * prefix: they are called by an orchestrator on a timer, forever, and have no user behind them.
+    */
+  def needsSession(request: ServerRequest, basePath: String): Boolean =
+    request.uri.path.toList.filter(_.nonEmpty).drop(BasePath.segments(basePath).size) match {
+      case api if api.startsWith(ApiSegments) => !api.drop(ApiSegments.size).startsWith(List("health"))
+      case _ => false
+    }
+
+  private val ApiSegments: List[String] = BasePath.segments(GatewayEndpoints.ApiPrefix)
 
   /** The `kui_session` cookie's value from the request's `Cookie` header, if present and well-formed.
     *
@@ -130,12 +180,15 @@ object SessionMiddleware {
   // 1. Attach a session, ahead of any endpoint's own input decoding.
   // -----------------------------------------------------------------------------------------------
 
-  private def attachInterceptor[F[_]: Sync](store: SessionStore[F]): RequestInterceptor[F] =
+  private def attachInterceptor[F[_]: Sync](
+      store: SessionStore[F],
+      basePath: String
+  ): RequestInterceptor[F] =
     RequestInterceptor.transformServerRequest[F] { request =>
       for {
         now <- Clock[F].realTimeInstant
-        session <- ensureSession[F](store, request, now)
-      } yield request.attribute(Attribute, session)
+        session <- ensureSession[F](store, request, basePath, now)
+      } yield session.fold(request)(request.attribute(Attribute, _))
     }
 
   // -----------------------------------------------------------------------------------------------
@@ -152,28 +205,26 @@ object SessionMiddleware {
         def onDecodeSuccess[A, U, I](ctx: DecodeSuccessContext[F, A, U, I])(using
             monad: MonadError[F],
             bodyListener: BodyListener[F, B]
-        ): F[sttp.tapir.server.model.ServerResponse[B]] =
-          ctx.request.attribute(Attribute) match {
-            case None =>
-              // Unreachable once `attachInterceptor` is installed ahead of this one — every request has an
-              // attribute by the time an endpoint has matched. If it is ever missing, failing open (letting
-              // the endpoint run unchecked) would be the CSRF equivalent of a fail-open firewall; refusing
-              // outright is the safe direction for a bug to fail in.
-              CsrfInterceptor.internalError[F, B](responder, ctx.request)
-            case Some(session) =>
-              val verdict = CsrfCheck.verdict(
-                method = ctx.request.method.method,
-                authKind = session.principal.kind,
-                headerToken = ctx.request.header(CsrfHeaderName),
-                sessionSecret = Some(session.csrfSecret.value),
-                secFetchSite = ctx.request.header("Sec-Fetch-Site")
-              )
-              verdict match {
-                case CsrfCheck.Verdict.Allowed => delegate.onDecodeSuccess(ctx)
-                case CsrfCheck.Verdict.Denied(reason) =>
-                  CsrfInterceptor.forbidden[F, B](responder, logger, ctx.request, session, reason)
-              }
+        ): F[sttp.tapir.server.model.ServerResponse[B]] = {
+          // A request can legitimately arrive with no session at all: static assets and health probes
+          // are never given one. `CsrfCheck` already has the right answer for that -- a safe method is
+          // allowed, and a mutation with no session to check the token against is denied. Passing the
+          // absence through rather than special-casing it keeps every CSRF decision in the one function
+          // whose table is the specification, and keeps the fail-closed direction for a mutation.
+          val session = ctx.request.attribute(Attribute)
+          val verdict = CsrfCheck.verdict(
+            method = ctx.request.method.method,
+            authKind = session.fold(PrincipalKind.Anonymous)(_.principal.kind),
+            headerToken = ctx.request.header(CsrfHeaderName),
+            sessionSecret = session.map(_.csrfSecret.value),
+            secFetchSite = ctx.request.header("Sec-Fetch-Site")
+          )
+          verdict match {
+            case CsrfCheck.Verdict.Allowed => delegate.onDecodeSuccess(ctx)
+            case CsrfCheck.Verdict.Denied(reason) =>
+              CsrfInterceptor.forbidden[F, B](responder, logger, ctx.request, session, reason)
           }
+        }
 
         def onSecurityFailure[A](ctx: SecurityFailureContext[F, A])(using
             monad: MonadError[F],
@@ -198,7 +249,7 @@ object SessionMiddleware {
         responder: Responder[F, B],
         logger: StructuredLogger[F],
         request: ServerRequest,
-        session: Session,
+        session: Option[Session],
         reason: String
     ): F[sttp.tapir.server.model.ServerResponse[B]] =
       for {
@@ -206,23 +257,11 @@ object SessionMiddleware {
           Map(
             "path" -> request.uri.path.mkString("/", "/", ""),
             "secFetchSite" -> request.header("Sec-Fetch-Site").getOrElse("absent"),
-            "session.ref" -> SessionRef.of(session.id).value
+            "session.ref" -> session.fold("-")(active => SessionRef.of(active.id).value)
           )
         )(s"CSRF rejected: $reason")
         response <- respond[F, B](responder, request, StatusCode.Forbidden, ErrorCode.Forbidden.wire, reason)
       } yield response
-
-    def internalError[F[_]: Sync, B](
-        responder: Responder[F, B],
-        request: ServerRequest
-    ): F[sttp.tapir.server.model.ServerResponse[B]] =
-      respond[F, B](
-        responder,
-        request,
-        StatusCode.InternalServerError,
-        ErrorCode.Internal.wire,
-        "no session was attached to the request"
-      )
 
     private def respond[F[_]: Sync, B](
         responder: Responder[F, B],

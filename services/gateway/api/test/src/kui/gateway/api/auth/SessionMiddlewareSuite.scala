@@ -118,6 +118,33 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
     }
   }
 
+  test("noSessionCookieIsStampedOntoAStaticAssetOrAHealthProbe") {
+    // Two problems, one cause. A hashed asset is served `Cache-Control: public, max-age=31536000,
+    // immutable`; a response that is simultaneously cacheable by a shared proxy for a year and carrying a
+    // per-user session credential hands every later visitor the first visitor's session. And because a
+    // session was minted for every cookie-less request, an unauthenticated client could evict every real
+    // session out of the bounded store just by fetching `/ui/` in a loop.
+    GatewayTestServer.resource().use { server =>
+      for {
+        asset <- server.get("/ui/main-a1b2c3d4.js")
+        index <- server.get("/ui/")
+        health <- server.get(s"${GatewayEndpoints.ApiPrefix}/health/live")
+        unmatched <- server.get("/nothing-here")
+        api <- server.get(meUri)
+      } yield {
+        // `/ui/main-<hash>.js` is the shape a linker-hashed asset has, and `StaticRoutesSuite` proves
+        // that shape is served `public, max-age=31536000, immutable`. (This fixture has no linked
+        // frontend, so the path falls through to the SPA shell; the subject here is the cookie.)
+        assertEquals(asset.header("Set-Cookie"), None, "an immutably cacheable asset carries a session")
+        assertEquals(index.header("Set-Cookie"), None, "the SPA shell carries a session")
+        assertEquals(health.header("Set-Cookie"), None, "a health probe mints a session")
+        assertEquals(unmatched.header("Set-Cookie"), None, "an unmatched path mints a session")
+        // The gateway's own API still issues one, which is what the CSRF machinery runs on.
+        assert(api.header("Set-Cookie").isDefined, "the API stopped issuing sessions")
+      }
+    }
+  }
+
   test("everyInboundXKuiHeaderIsStrippedBeforeTheHandler") {
     // The two boundaries compose: a forged principal header does not survive to influence which session
     // this request gets, because `EdgeHeaders` runs first in the chain `GatewayWiring` builds.
