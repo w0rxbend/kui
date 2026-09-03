@@ -45,6 +45,7 @@ here waiting for it.
 | --- | --- | --- |
 | `kui-quickstart-kafka` | `apache/kafka:4.3.1` | one Kafka node in KRaft mode: it is its own controller and there is no ZooKeeper |
 | `kui-quickstart-seed`  | `apache/kafka:4.3.1` | a one-shot container that creates topics, publishes messages and sets consumer-group offsets, then exits |
+| `kui-quickstart-consumer` | `apache/kafka:4.3.1` | a long-lived consumer, so one consumer group is genuinely live rather than merely a set of committed offsets |
 | `kui-quickstart-kui`   | `kui-allinone:0.1.0-SNAPSHOT` | KUI, gateway and every service in one process (ADR-005) |
 
 ### Why Kafka 4.3.1 and not `apache/kafka:latest`
@@ -63,26 +64,40 @@ today. Upgrading it is then a deliberate commit somebody tested, which is exactl
 
 ### What is in the broker
 
-Created by [`seed.sh`](seed.sh), which runs inside the Kafka image and uses Kafka's own
-command-line tools, so nothing extra is installed and no extra image is pulled:
+Created by [`seed/seed.sh`](seed/seed.sh), which runs inside the Kafka image and uses Kafka's own
+command-line tools, so nothing extra is installed and no extra image is pulled. The topics it makes
+are listed in [`seed/topics.tsv`](seed/topics.tsv) and the messages in `seed/data/`;
+[`seed/README.md`](seed/README.md) explains what each one is for.
 
 | Topic | Partitions | What is in it |
 | --- | --- | --- |
-| `orders` | 6 | 120 JSON order records, keyed by order id, with nested line items |
-| `payments` | 3 | 60 JSON payments referencing those orders |
-| `customer-events` | 3 | 45 JSON lifecycle events, keyed by customer |
-| `inventory-snapshots` | 1 | a compacted topic — a table, one current value per key — written twice so compaction has something to do |
-| `orders.DLQ` | 1 | 4 dead-letter records with the deserialization error that put them there |
+| `orders.v1` | 6 | keyed JSON orders with headers — the shape most people's busiest topic has |
+| `payments.transactions` | 3 | keyed JSON payments, no headers |
+| `analytics.pageviews` | 12 | unkeyed JSON events: the high-volume firehose |
+| `customers.profiles` | 3 | compacted, so it reads as a table: repeated keys and a tombstone |
+| `inventory.stock-levels` | 4 | `cleanup.policy=compact,delete` — compaction and a retention window together |
+| `audit.log.raw` | 1 | deliberately **not** JSON: logfmt and plain log lines, so the message viewer has something it cannot parse |
+| `orders.v1.DLQ` | 3 | dead letters whose headers point at real offsets in `orders.v1` |
+| `_schemas` | 1 | an internal topic, the kind a UI hides behind "show internal topics" |
 
-Two consumer groups, so there is something to look at when the consumer-group screens arrive:
+Three consumer groups, in the three states an operator actually has to tell apart:
 
-- `analytics-pipeline` sits at offset 12 on every partition of `orders`, about 50 messages behind;
-- `dlq-alerter` is caught up on `orders.DLQ`, so there is a healthy group to compare it with.
+- `order-fulfilment` is **stopped and behind** on `orders.v1`, with uneven lag across partitions;
+- `payments-ledger-sync` is **stopped and caught up**, so zero lag is not the same as no group;
+- `analytics-indexer` is **live**: a real consumer process in the `kui-quickstart-consumer`
+  container, holding the group open with one member and no lag.
 
-The offsets are written directly with `kafka-consumer-groups.sh --reset-offsets` rather than by
-running a consumer for a few seconds and stopping it. A consumer racing a timer produces different
-lag on a fast laptop than on a loaded machine, and a demonstration whose numbers change every run is
-one nobody trusts.
+That last one has to be a separate long-lived container rather than a line in the seed script,
+because a group has members only while some process is holding a session open with the broker. A
+seed job exits, and the group it created goes empty the moment it does.
+
+The stopped groups' offsets are written directly with `kafka-consumer-groups.sh --reset-offsets`
+rather than by running a consumer for a few seconds and stopping it. A consumer racing a timer
+produces different lag on a fast laptop than on a loaded machine, and a demonstration whose numbers
+change every run is one nobody trusts.
+
+Running the seed again changes nothing: it creates only missing topics, writes messages only into a
+topic that has none, and never resets the offsets of a group that already exists.
 
 ## Waiting for Kafka properly
 

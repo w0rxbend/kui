@@ -86,6 +86,10 @@ services:
 
   # ---------------------------------------------------------------------------------------------
   # A one-shot container that puts something worth looking at into the broker, then exits.
+  #
+  # The script, the topic table and the message files all live in ./seed; see ./seed/README.md for
+  # what it creates and why. It runs in the stock Kafka image because that image already carries
+  # Kafka's shell tools, so the quickstart never has to build or pull a second image.
   # ---------------------------------------------------------------------------------------------
   seed:
     image: apache/kafka:4.3.1
@@ -93,14 +97,42 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    entrypoint: ["/bin/bash", "/opt/kui/seed.sh"]
+    entrypoint: ["/bin/bash", "/seed/seed.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     volumes:
-      - ./seed.sh:/opt/kui/seed.sh:ro
+      - ./seed:/seed:ro
     networks:
       - kui-quickstart
     # A seed that failed and was restarted would seed twice. It is written to be safe to re-run,
     # but a restart loop hiding a real error is worse than a visible failure.
     restart: "no"
+
+  # ---------------------------------------------------------------------------------------------
+  # The one consumer group that is actually alive.
+  #
+  # seed.sh can write the committed offsets of a group that has STOPPED, because a stopped group is
+  # nothing but those offsets sitting in Kafka. It cannot fake a RUNNING one: a group has members
+  # only while some process is holding a session open with the broker, and a seed job exits. So the
+  # live group is a container that keeps running and reads a topic forever.
+  #
+  # It matters because the two states look completely different on a consumer-groups screen, and a
+  # newcomer who only ever sees dead groups has no idea which of them is the broken one.
+  # ---------------------------------------------------------------------------------------------
+  consumer:
+    image: apache/kafka:4.3.1
+    container_name: kui-quickstart-consumer
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/seed/consume.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./seed:/seed:ro
+    networks:
+      - kui-quickstart
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------------------------
   # KUI itself, in its all-in-one shape: the gateway and every service in one process (ADR-005).
