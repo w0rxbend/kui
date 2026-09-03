@@ -1054,6 +1054,32 @@ object services extends Module {
       }
     }
 
+    /** The adapters. The only module in the cluster tree with a Kafka client on its classpath
+      * (rule A10), and the only one `app` is allowed to see (rule A9).
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps =
+        Seq(domain, libs.kafka, libs.config, libs.cache, libs.kernel.jvm, libs.observability)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+        def mvnDeps =
+          super.mvnDeps() ++ Seq(
+            mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+            mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}",
+            mvn"com.dimafeng::testcontainers-scala-kafka::${Versions.testcontainers}"
+          )
+      }
+    }
+
     /** The published wire shape: Tapir endpoints, their DTOs and the codecs for them.
       *
       * Cross-compiled, because the browser decodes exactly what this service encodes, from the
