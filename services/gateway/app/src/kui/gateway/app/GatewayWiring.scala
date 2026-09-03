@@ -11,7 +11,7 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
 import kui.contracts.capability.ServiceCapabilities
-import kui.gateway.api.{EdgeHeaders, GatewayApi}
+import kui.gateway.api.{EdgeHeaders, GatewayApi, InfoRoutes}
 import kui.http.health.ReadinessCheck
 import kui.http.{Cors, ErrorInterceptor}
 import kui.observability.{KuiInterceptors, Telemetry}
@@ -86,7 +86,7 @@ object GatewayWiring {
         .serverInterceptors[F](telemetry, GatewayApi.ServiceName)
         .map { instrumentation =>
           GatewayServer(
-            routes = GatewayApi.routes[F](readiness, capabilities[F]),
+            routes = GatewayApi.routes[F](config.view, readiness, capabilities[F]),
             interceptors = Cors.interceptor[F](config.gateway.cors).toList ++
               EdgeHeaders.interceptors[F] ++
               instrumentation ++
@@ -116,8 +116,12 @@ object GatewayWiring {
   def capabilities[F[_]: cats.Applicative]: F[ServiceCapabilities] =
     ServiceCapabilities(GatewayApi.Id, Map.empty).pure[F]
 
-  /** The one INFO line every KUI process writes as it starts, so a log and the `/api/v1/info` endpoint can be
-    * cross-checked without guessing (GW-010 fills in the build fields).
+  /** The one INFO line every KUI process writes as it starts.
+    *
+    * The build fields are the same values `GET /api/v1/info` reports, from the same object, so a log line and
+    * the endpoint can be cross-checked rather than compared and hoped about. That matters in exactly the
+    * situation the fields exist for: someone has two log files and an endpoint response and is trying to work
+    * out which of three containers is the old one.
     */
   def startupLog[F[_]](
       logger: StructuredLogger[F],
@@ -130,7 +134,13 @@ object GatewayWiring {
         "port" -> config.server.port.value.toString,
         "basePath" -> config.server.basePath,
         "services" -> config.gateway.services.keys.map(_.value).toList.sorted.mkString(","),
+        "version" -> InfoRoutes.buildInfo.version,
+        "gitCommit" -> InfoRoutes.buildInfo.gitCommitShort,
+        "gitDirty" -> InfoRoutes.buildInfo.gitDirty.toString,
+        "builtAt" -> InfoRoutes.buildInfo.builtAt.toString,
         "startedAt" -> at.toString
       )
-    )(s"starting ${GatewayApi.ServiceName}")
+    )(
+      s"starting ${GatewayApi.ServiceName} ${InfoRoutes.buildInfo.version} (${InfoRoutes.buildInfo.gitCommitShort})"
+    )
 }

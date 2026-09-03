@@ -166,6 +166,37 @@ Caching: `~/.cache/coursier`, `~/.cache/mill` and `out/` are cached, keyed on `b
 `.mill-version` and `mill-build/build.mill`, so a dependency change invalidates the cache instead of
 reusing a stale classpath.
 
+## Checking which version is running
+
+A support conversation starts with "which version are you running?", and a container tag is not a
+reliable answer — a tag can be moved, rebuilt, or typed by hand. The gateway reports what it was
+actually compiled from:
+
+```
+$ curl -s localhost:8080/api/v1/info | jq .build
+{
+  "version": "0.1.0-SNAPSHOT",
+  "gitCommit": "44a33c1cd587efe016f95f554f36b57dfcd9f742",
+  "gitCommitShort": "44a33c1",
+  "gitDirty": false,
+  "builtAt": "2026-09-03T13:00:34.000Z",
+  "scalaVersion": "3.9.0",
+  "jdkVersion": "21.0.10"
+}
+```
+
+`gitDirty` is the field worth knowing about: it is `true` when the build was made from a working
+tree with uncommitted changes, which is what explains the otherwise impossible situation where "it
+works on the commit you gave me" and "it does not work for you" are both true.
+
+The endpoint needs no authentication, so a health dashboard can read it. For that reason it contains
+no URL, no hostname and no key id — `services` lists configured service *ids* only. The same values
+appear in the one INFO line the process logs at startup, so a log file and a live endpoint can be
+cross-checked rather than compared and hoped about.
+
+A build made outside a git checkout — a release tarball, say — reports `"unknown"` for the git
+fields rather than failing or leaving them blank.
+
 ## Reading the design
 
 | Document | What it covers |

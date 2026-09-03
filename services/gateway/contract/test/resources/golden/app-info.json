@@ -1,0 +1,19 @@
+{
+  "build" : {
+    "version" : "0.1.0-SNAPSHOT",
+    "gitCommit" : "0000000000000000000000000000000000000000",
+    "gitCommitShort" : "0000000",
+    "gitDirty" : false,
+    "builtAt" : "1970-01-01T00:00:00.000Z",
+    "scalaVersion" : "3.9.0",
+    "jdkVersion" : "21"
+  },
+  "authType" : "disabled",
+  "basePath" : "",
+  "services" : [
+    "cluster"
+  ],
+  "features" : {
+    "cors" : false
+  }
+}

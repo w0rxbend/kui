@@ -50,5 +50,5 @@ object GatewayEndpoints {
     * Empty here and filled in by the endpoint objects beside it, so that adding an endpoint to the product
     * and adding it to the published documentation are the same edit.
     */
-  val all: List[AnyEndpoint] = Nil
+  val all: List[AnyEndpoint] = InfoEndpoints.all
 }

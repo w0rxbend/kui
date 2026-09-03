@@ -10,7 +10,7 @@ import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.model.Uri
 import sttp.tapir.server.ServerEndpoint
 
-import kui.config.ServerConfig
+import kui.config.{GatewayConfig, ServerConfig}
 import kui.http.health.ReadinessCheck
 import kui.http.{ErrorInterceptor, KuiServer}
 import kui.kernel.{Host, Port}
@@ -58,12 +58,19 @@ object GatewayTestServer {
     for {
       logger <- Resource.eval(FakeStructuredLogger[IO])
       readiness = List(ReadinessCheck.always[IO]("process"))
-      routes = GatewayApi.routes[IO](readiness, gatewayCapabilities) ++ extraRoutes
+      routes = GatewayApi.routes[IO](configView(basePath), readiness, gatewayCapabilities) ++ extraRoutes
       interceptors = EdgeHeaders.interceptors[IO] ++ ErrorInterceptor.interceptors[IO](logger)
       config = ServerConfig(Host.unsafe("localhost"), Port.unsafe(0), basePath)
       binding <- KuiServer.resource[IO](config, routes, interceptors, logger, gracefulShutdown = 10.millis)
       backend <- HttpClientFs2Backend.resource[IO]()
     } yield Running(binding, backend, logger)
+
+  /** The configuration the routes read: this deployment's server settings, and no upstream services. */
+  private def configView(basePath: String): GatewayServiceConfigView =
+    GatewayServiceConfigView(
+      ServerConfig(Host.unsafe("localhost"), Port.unsafe(0), basePath),
+      GatewayConfig.Default
+    )
 
   /** The same placeholder document `GatewayWiring` serves, so the suites exercise the shipped shape. */
   private def gatewayCapabilities: IO[kui.contracts.capability.ServiceCapabilities] =

@@ -11,7 +11,7 @@ import mill.scalajslib.api.{JsEnvConfig, ModuleKind, ModuleSplitStyle}
 import com.goyeau.mill.scalafix.ScalafixModule
 
 // Compiled into the meta-build by `mill-build/build.mill`, and into `build-tests` for its unit tests.
-import kui.build.{ArchitectureRules, BundleShape, CssPipeline, CssSource, ModuleFacts}
+import kui.build.{ArchitectureRules, BuildFacts, BundleShape, CssPipeline, CssSource, ModuleFacts}
 
 /** Every third-party version KUI pins, in one place.
   *
@@ -547,6 +547,68 @@ object libs extends Module {
   */
 def kuiVersion: T[String] = Task { "0.1.0-SNAPSHOT" }
 
+/** When this build ran, as an RFC 3339 instant in UTC.
+  *
+  * A `Task`, so every generated `BuildInfo` in one build agrees about it rather than each recording
+  * the moment its own module happened to be compiled. Truncated to whole seconds: sub-second
+  * precision in a build timestamp is noise, and the value is rendered in a UI footer and read aloud
+  * in support conversations.
+  */
+def builtAt: T[String] = Task {
+  java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString
+}
+
+/** What git says about the working tree, or `None` when it cannot be asked.
+  *
+  * Both commands may fail for perfectly good reasons — a release tarball has no `.git` directory, and
+  * a build container often does not either — so a failure becomes `None` rather than a failed build.
+  * `kui.build.BuildFacts` decides what a `None` means, and its suite covers the states a build machine
+  * can be in that a test cannot arrange for real.
+  */
+private def git(arguments: String*): Option[String] =
+  scala.util
+    .Try(os.proc("git" +: arguments).call(cwd = mill.api.BuildCtx.workspaceRoot, check = false))
+    .toOption
+    .filter(_.exitCode == 0)
+    .map(_.out.text())
+
+/** A module that has the build's own facts compiled into it as `object BuildInfo`.
+  *
+  * A running process cannot look them up: a container has no git checkout and a browser has no
+  * filesystem. The only way for `GET /api/v1/info` to answer "which version are you running?" is for
+  * the build to hand the answer over as source.
+  *
+  * Mill's ready-made `BuildInfo` lives in a contrib plugin. Generating seven string literals by hand
+  * is smaller than taking that dependency, and it keeps the generated shape visible here and its
+  * rules unit-tested in `build-tests`.
+  */
+trait KuiBuildInfoModule extends KuiModule {
+
+  /** The package the generated object lands in. Each module names its own, so two deployables never
+    * collide on the classpath.
+    */
+  def buildInfoPackage: String
+
+  def buildInfoObject: String = "BuildInfo"
+
+  def buildInfoSource: T[PathRef] = Task {
+    val facts = BuildFacts.of(
+      version = kuiVersion(),
+      revParse = git("rev-parse", "HEAD"),
+      status = git("status", "--porcelain"),
+      builtAt = builtAt(),
+      scalaVersion = Versions.scala,
+      jdkVersion = System.getProperty("java.version", BuildFacts.Unknown)
+    )
+
+    val file = Task.dest / s"${buildInfoObject}.scala"
+    os.write(file, BuildFacts.render(buildInfoPackage, buildInfoObject, facts))
+    PathRef(file)
+  }
+
+  def generatedSources = Task { super.generatedSources() :+ buildInfoSource() }
+}
+
 /** Everything that runs in a browser.
   *
   * `ui-kernel` is the design system and the shell's plumbing: tokens, primitives, the feature
@@ -905,7 +967,10 @@ object services extends Module {
       * routes from endpoint values another team published, so a path it serves cannot drift from the path
       * that service serves.
       */
-    object api extends KuiJvmModule {
+    object api extends KuiJvmModule with KuiBuildInfoModule {
+      def buildInfoPackage = "kui.gateway.api"
+      def buildInfoObject = "GatewayBuildInfo"
+
       def moduleDeps = Seq(
         application,
         contract.jvm,

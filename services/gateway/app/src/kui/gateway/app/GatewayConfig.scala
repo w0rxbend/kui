@@ -1,6 +1,7 @@
 package kui.gateway.app
 
 import kui.config.{GatewayConfig, KuiConfig, ServerConfig, TelemetryConfig}
+import kui.gateway.api.GatewayServiceConfigView
 
 /** Everything the gateway process reads out of the configuration, and nothing else.
   *
@@ -27,7 +28,17 @@ final case class GatewayServiceConfig(
     server: ServerConfig,
     gateway: GatewayConfig,
     telemetry: TelemetryConfig
-)
+) {
+
+  /** The two sections `GatewayApi.routes` reads.
+    *
+    * The route list is assembled in the `api` module, which this one depends on, so `api` cannot name this
+    * type. Handing it a narrow view rather than the whole configuration is the better shape anyway: the
+    * signature then says which settings assembling a route list actually involves — not the telemetry
+    * exporters, and not the signing keys.
+    */
+  def view: GatewayServiceConfigView = GatewayServiceConfigView(server, gateway)
+}
 
 object GatewayServiceConfig {
 
