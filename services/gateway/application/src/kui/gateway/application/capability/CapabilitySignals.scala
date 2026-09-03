@@ -22,30 +22,53 @@ import kui.kernel.ServiceId
 final class CapabilitySignals[F[_]: Async] private (
     config: RegistryConfig,
     registry: CapabilityRegistry[F],
-    store: Ref[F, Map[ServiceId, CapabilityInputs]]
+    store: Ref[F, Map[CapabilityKey, CapabilityInputs]]
 ) {
 
-  /** Applies one observation, refolds, and reports the result. */
-  def update(service: ServiceId)(observe: CapabilityInputs => CapabilityInputs): F[Unit] =
+  /** Applies one observation, refolds, and reports the result.
+    *
+    * Keyed by `(service, cluster)` rather than by service alone. The service-wide key is
+    * `CapabilityKey(service, None)`, and it is the one a transport failure and a circuit breaker write to: a
+    * connection that could not be made says something about the service, never about one of its clusters.
+    * What a service reports *about* one cluster is content of a healthy answer, and belongs on that cluster's
+    * key.
+    *
+    * The distinction is the whole reason this signature changed. Folding a cluster's state into the service's
+    * meant one unreachable Kafka cluster dimmed the cluster feature for everybody, which is exactly the
+    * failure DEVPLAN D4 and ADR-039 §6 exist to prevent.
+    */
+  def update(key: CapabilityKey)(observe: CapabilityInputs => CapabilityInputs): F[Unit] =
     for {
       inputs <- store.updateAndGet(current =>
-        current.updated(service, observe(current.getOrElse(service, CapabilityInputs.unknown)))
+        current.updated(key, observe(current.getOrElse(key, CapabilityInputs.unknown)))
       )
       now <- Clock[F].realTimeInstant
-      key = CapabilityKey(service, None)
       previous <- registry.snapshot.map(_.get(key))
       folded = CapabilityFold.fold(
         previous,
-        inputs.getOrElse(service, CapabilityInputs.unknown),
+        inputs.getOrElse(key, CapabilityInputs.unknown),
         now,
         config.degradedP95Threshold
       )
       _ <- registry.report(key, folded)
     } yield ()
 
-  /** What is currently known about one service. Used by tests and by `probeNow`'s caller. */
-  def inputs(service: ServiceId): F[CapabilityInputs] =
-    store.get.map(_.getOrElse(service, CapabilityInputs.unknown))
+  /** The service-wide key of one service, for the callers that only ever mean that one. */
+  def updateService(service: ServiceId)(observe: CapabilityInputs => CapabilityInputs): F[Unit] =
+    update(CapabilityKey(service, None))(observe)
+
+  /** What is currently known about one key. Used by tests and by `probeNow`'s caller. */
+  def inputs(key: CapabilityKey): F[CapabilityInputs] =
+    store.get.map(_.getOrElse(key, CapabilityInputs.unknown))
+
+  /** Every key currently known for one service: the service key, plus one per cluster it last reported.
+    *
+    * The poller reads it to retire a cluster that has disappeared from configuration. A cluster removed by an
+    * operator must stop appearing in the switcher; leaving its last state behind is how a deleted cluster
+    * stays on screen until someone restarts the gateway.
+    */
+  def keysOf(service: ServiceId): F[Set[CapabilityKey]] =
+    store.get.map(_.keySet.filter(_.service == service))
 }
 
 object CapabilitySignals {
@@ -56,14 +79,14 @@ object CapabilitySignals {
       services: List[ServiceId]
   ): F[CapabilitySignals[F]] =
     for {
-      store <- Ref.of[F, Map[ServiceId, CapabilityInputs]](
-        services.map(_ -> CapabilityInputs.unknown).toMap
+      store <- Ref.of[F, Map[CapabilityKey, CapabilityInputs]](
+        services.map(service => CapabilityKey(service, None) -> CapabilityInputs.unknown).toMap
       )
       signals = new CapabilitySignals[F](config, registry, store)
       // Every configured service is reported before the first poll runs, as degraded-and-starting. A
       // service that is missing from the snapshot and one that is present but not yet checked look
       // identical to a browser, and the second is the truth: the gateway knows about it and has not
       // asked it anything yet.
-      _ <- services.traverse_(service => signals.update(service)(identity))
+      _ <- services.traverse_(service => signals.updateService(service)(identity))
     } yield signals
 }

@@ -537,7 +537,14 @@ GET /capabilities ->
 ```
 
 The gateway folds readiness polling (every 10 s, configurable), the per-upstream circuit
-breaker and these reports into `CapabilityState` per `(service, cluster)`; publishes them at
+breaker and these reports into `CapabilityState` per `(service, cluster)`. The per-cluster half
+is **real as of M1**: readiness and the circuit are written to the service key
+`(service, None)`, and what a service reports about one of its clusters is written to that
+cluster's key. **A cluster's state is never folded into its service's.** The M0 code took the
+worst of a service's clusters as the service's own verdict, which meant one unreachable Kafka
+cluster dimmed the cluster feature for every other cluster's users — the failure ADR-039 §6 and
+the M1 plan's decision D4 both exist to prevent. A cluster the service stops reporting is
+retired as `not_configured` rather than left behind. The gateway publishes them at
 `GET /api/v1/capabilities` and `GET /api/v1/capabilities/stream` (SSE, full snapshot on
 connect, deltas afterwards); accepts `POST /api/v1/capabilities/{service}/probe`.
 

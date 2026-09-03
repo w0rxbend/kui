@@ -10,7 +10,7 @@ import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
-import kui.contracts.capability.{ClusterCapability, ReasonCode}
+import kui.contracts.capability.{CapabilityKey, ClusterCapability, ReasonCode}
 import kui.contracts.health.ReadinessReport
 import kui.gateway.application.client.{CallContext, ServiceClient, ServiceClients}
 import kui.http.health.HealthEndpoints
@@ -209,38 +209,98 @@ object ReadinessPoller {
           case Right(_) => ReadinessSignal.Ready
         }
 
-        signals.update(service) { inputs =>
-          inputs.copy(
-            readiness = Some(signal),
-            serviceReport = capabilities.toOption
-              .map(reported => summarise(reported))
-              .orElse(inputs.serviceReport),
-            p95 = latency
-          )
-        }
+        val serviceKey = CapabilityKey(service, None)
+
+        for {
+          _ <- signals.update(serviceKey) { inputs =>
+            inputs.copy(
+              readiness = Some(signal),
+              serviceReport = capabilities.toOption
+                .map(reported => summarise(reported))
+                .orElse(inputs.serviceReport),
+              p95 = latency
+            )
+          }
+          // Whether or not the capability call answered, the readiness verdict reaches every cluster key
+          // this service has: a service that cannot answer cannot vouch for any of its clusters, and a
+          // sidebar showing three healthy clusters belonging to a service that is not there is a lie.
+          _ <- capabilities.toOption match {
+            case Some(reported) => perCluster(reported, signal, latency)
+            case None => carryReadiness(signal, latency)
+          }
+        } yield ()
       }
 
-    /** The gateway keys capabilities on the service today; per-cluster keys arrive in M1 with clusters. Until
-      * then a service's clusters are folded into one verdict, taking the worst.
+    /** What the service says about itself, as opposed to about its clusters.
+      *
+      * **It no longer takes the worst of the clusters, and that is a behaviour change.** The M0 version
+      * folded every cluster into one verdict and reported `unavailable` if any single one was; combined with
+      * the capability fold, one unreachable Kafka cluster dimmed the cluster feature for every user of every
+      * other cluster - the exact failure DEVPLAN D4 forbids and the reason ADR-039 §6 is worded the way it
+      * is. The service's own status now comes from its readiness and its circuit; each cluster's status lives
+      * on that cluster's key.
+      *
+      * `configured` still reflects whether the service has any cluster at all, because a service with none
+      * genuinely has nothing cluster-scoped to offer, and `features` is the union: a feature any cluster
+      * supports is a feature the service can perform.
       */
     private def summarise(
         reported: kui.contracts.capability.ServiceCapabilities
     ): ClusterCapability =
-      if reported.clusters.isEmpty then ClusterCapability(configured = true, Nil, "available")
-      else {
-        val clusters = reported.clusters.values.toList
-        val status =
-          if clusters.exists(_.status == CapabilityFold.Status.Unavailable) then
-            CapabilityFold.Status.Unavailable
-          else if clusters.exists(_.status == CapabilityFold.Status.Degraded) then
-            CapabilityFold.Status.Degraded
-          else CapabilityFold.Status.Available
-        ClusterCapability(
-          configured = clusters.exists(_.configured),
-          features = clusters.flatMap(_.features).distinct.sorted,
-          status = status
+      ClusterCapability(
+        // A service that reports no clusters at all is still configured *as a service*: the M0 rule, kept.
+        // A KUI nobody has configured a cluster in has a perfectly working cluster service, and reporting
+        // it as not configured would grey the feature out on a deployment where nothing is wrong.
+        configured = reported.clusters.isEmpty || reported.clusters.values.exists(_.configured),
+        features = reported.clusters.values.toList.flatMap(_.features).distinct.sorted,
+        status = CapabilityFold.Status.Available
+      )
+
+    /** One key per cluster the service reported, and a retirement for every cluster it stopped reporting.
+      *
+      * A service that cannot answer cannot vouch for any of its clusters, so its readiness signal is written
+      * to every cluster key as well: the alternative is a sidebar showing three healthy clusters belonging to
+      * a service that is not there.
+      */
+    private def perCluster(
+        reported: kui.contracts.capability.ServiceCapabilities,
+        signal: ReadinessSignal,
+        latency: Option[FiniteDuration]
+    ): F[Unit] = {
+      val live = reported.clusters.map((id, capability) => CapabilityKey(service, Some(id)) -> capability)
+
+      for {
+        _ <- live.toList.traverse_((key, capability) =>
+          signals.update(key)(
+            _.copy(readiness = Some(signal), serviceReport = Some(capability), p95 = latency)
+          )
         )
-      }
+        known <- signals.keysOf(service)
+        // Anything this service used to report and no longer does. Reported as not configured rather than
+        // dropped: ADR-032 is explicit that "not configured" is not a failure, and the switcher greys such
+        // a cluster with no error styling instead of leaving it looking broken for ever.
+        retired = known.filter(key => key.cluster.isDefined && !live.contains(key))
+        _ <- retired.toList.traverse_(key =>
+          signals.update(key)(
+            _.copy(serviceReport = Some(ClusterCapability(configured = false, Nil, "not_configured")))
+          )
+        )
+      } yield ()
+    }
+
+    /** The readiness verdict, onto every cluster key already known, leaving each one's last payload alone.
+      *
+      * Keeping the payload is the existing rule applied per key: losing it would turn a momentary blip into
+      * "this service can do nothing for any cluster", which is a much stronger claim than the evidence
+      * supports.
+      */
+    private def carryReadiness(signal: ReadinessSignal, latency: Option[FiniteDuration]): F[Unit] =
+      signals
+        .keysOf(service)
+        .flatMap(
+          _.filter(_.cluster.isDefined).toList
+            .traverse_(key => signals.update(key)(_.copy(readiness = Some(signal), p95 = latency)))
+        )
 
     private def notReadyMessage(report: ReadinessReport): String = {
       val failed = report.checks.filterNot(_.healthy).map(_.name)

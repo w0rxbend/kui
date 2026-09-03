@@ -127,7 +127,7 @@ object ClusterOverviewUseCase {
       */
     private def report(error: KuiError, now: Instant): F[Unit] = error match {
       case infrastructure: InfrastructureError =>
-        signals.update(clusters.service)(
+        signals.updateService(clusters.service)(
           _.copy(readiness =
             Some(ReadinessSignal.NotReady(reasonOf(infrastructure), infrastructure.message, now))
           )

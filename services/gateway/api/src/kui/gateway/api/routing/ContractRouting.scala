@@ -198,7 +198,7 @@ object ContractRouting {
     error match {
       case infrastructure: InfrastructureError =>
         Clock[F].realTimeInstant.flatMap { now =>
-          signals.update(service)(
+          signals.updateService(service)(
             _.copy(readiness =
               Some(ReadinessSignal.NotReady(reasonOf(infrastructure), infrastructure.message, now))
             )

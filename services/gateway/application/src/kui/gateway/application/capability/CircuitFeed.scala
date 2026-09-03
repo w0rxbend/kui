@@ -32,5 +32,6 @@ object CircuitFeed {
     * event for a name that is not a service id is dropped rather than guessed at.
     */
   def report[F[_]](event: CircuitEvent, signals: CapabilitySignals[F]): F[Unit] =
-    signals.update(ServiceId.unsafe(event.upstream))(_.copy(circuit = Some(event.state)))
+    // The service key, always: a breaker is about the connection to a service, not about a cluster.
+    signals.updateService(ServiceId.unsafe(event.upstream))(_.copy(circuit = Some(event.state)))
 }
