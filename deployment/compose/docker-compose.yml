@@ -1,0 +1,105 @@
+# KUI in its distributed shape: the gateway and the cluster service as separate containers.
+#
+# THIS IS A DEVELOPMENT AND TEST ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. The signing key comes
+# from an environment variable with a default in this file, there is no TLS, and the session cookie
+# is served without `Secure` so that plain HTTP on localhost works. Every one of those is wrong for
+# a deployment anyone else can reach.
+#
+# What it is for is the thing the all-in-one shape cannot demonstrate: real process isolation.
+# `docker compose stop kui-cluster` kills an actual process, and the gateway has to keep serving the
+# UI and report the cluster service as unavailable rather than falling over with it. That is KUI's
+# central promise, and this file is where it stops being a claim.
+#
+#   docker compose -f deployment/compose/docker-compose.yml up -d
+#   docker compose -f deployment/compose/docker-compose.yml stop kui-cluster
+#   docker compose -f deployment/compose/docker-compose.yml start kui-cluster
+#   docker compose -f deployment/compose/docker-compose.yml down -v
+#
+# Add `-f deployment/compose/docker-compose.observability.yml` to any of those to send both
+# processes' traces to a collector that prints them.
+#
+# See README.md in this directory for what each of those demonstrates.
+
+name: kui
+
+services:
+  # The one process a browser talks to. It is the only container with a published port.
+  kui-gateway:
+    image: kui-gateway:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-gateway
+    command: ["--config", "/etc/kui/kui.yaml"]
+    ports:
+      - "${KUI_PORT:-8080}:8080"
+    environment:
+      # The shared signing key. Both containers must derive the same bytes from the same string, or
+      # every call the gateway makes is refused with a 401 (ADR-020). This is what makes the signed
+      # principal path real here rather than only in the unit tests.
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Human-readable log lines. `docker compose logs` is read by a person here, not shipped to a
+      # log system; the images default to JSON, which is right for the latter and unreadable for
+      # the former.
+      KUI_TELEMETRY_LOGFORMAT: text
+      # Plain HTTP on localhost, so the session cookie cannot carry `Secure` or the browser will
+      # refuse to send it back. The gateway warns loudly about this on every start, and the warning
+      # is correct: never set it anywhere the network can reach.
+      KUI_SERVER_DEVINSECURECOOKIES: "true"
+    volumes:
+      - ./kui.yaml:/etc/kui/kui.yaml:ro
+    # Nothing outside /tmp is ever written. See ../docker/README.md.
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/v1/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      kui-cluster:
+        # Ordered, not gated. `required: false` means Compose starts the cluster service first and
+        # waits for it, but does not refuse to start the gateway when it never becomes healthy.
+        #
+        # A hard gate here would contradict the gateway's central design property: it has no
+        # mandatory upstream, on purpose, because it is the only thing a browser can reach. A
+        # gateway that refused to start until every service was healthy would turn one service's
+        # outage into a blank page — at exactly the moment an operator needs a working UI to find
+        # out what is wrong. The `--scale kui-cluster=0` case in README.md is the test of that.
+        condition: service_healthy
+        required: false
+
+  # An internal service. It has no published port and must not get one: services are reachable only
+  # from inside this network, and only by the gateway, which is the same rule ARCHITECTURE.md §14
+  # states for a real deployment.
+  kui-cluster:
+    image: kui-cluster:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-cluster
+    command: ["--config", "/etc/kui/kui-cluster.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-cluster.yaml:/etc/kui/kui-cluster.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    # NO RESTART POLICY, DELIBERATELY. The fault-isolation demo and the E2E test both stop this
+    # container and then assert that the UI degrades. A restart policy would race them: the
+    # container would come back before the assertion ran, and the test would fail intermittently
+    # for a reason nobody would find quickly.
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+networks:
+  kui:
+    driver: bridge

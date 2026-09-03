@@ -1,0 +1,48 @@
+# Traces and metrics from both KUI processes, printed where a developer can read them.
+#
+# An overlay on docker-compose.yml rather than a profile inside it, and the reason is worth stating
+# because a profile was the obvious choice. Starting the collector is only half the job: the two KUI
+# processes also have to be *told* to export to it, and Compose profiles can add a container but
+# cannot change another container's environment. Doing it with a profile would therefore have meant
+# leaving `kui.telemetry.otlpEndpoint` switched on in the configuration files all the time, so every
+# ordinary `docker compose up` would spend its first minute retrying connections to a collector that
+# is not running and filling the log with exporter stack traces. An overlay turns both halves on
+# together and leaves the default start silent.
+#
+#   docker compose \
+#     -f deployment/compose/docker-compose.yml \
+#     -f deployment/compose/docker-compose.observability.yml \
+#     up -d
+#
+#   curl -s 'localhost:8080/api/v1/ping?message=trace-me' > /dev/null
+#   docker compose -f ... logs otel-collector | grep -A1 'Trace ID'
+#
+# What to look for: one trace id appearing under both `service.name: kui-gateway` and
+# `service.name: kui-cluster`. That is the evidence that the correlation id and `traceparent`
+# propagation of GW-002 actually survive a process boundary — something the all-in-one shape cannot
+# demonstrate at all, because it has no boundary to cross.
+
+services:
+  kui-gateway:
+    environment:
+      KUI_TELEMETRY_OTLPENDPOINT: "http://otel-collector:4317"
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+  kui-cluster:
+    environment:
+      KUI_TELEMETRY_OTLPENDPOINT: "http://otel-collector:4317"
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: kui-otel-collector
+    command: ["--config", "/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/config.yaml:ro
+    networks:
+      - kui
+    restart: "no"

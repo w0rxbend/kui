@@ -1,0 +1,52 @@
+# The cluster service's configuration in the distributed Compose topology.
+#
+# It is a separate file from `kui.yaml` on purpose, and the reason is worth reading before anyone
+# merges the two. A service and the gateway are different processes with different jobs, and giving
+# each the whole deployment's configuration would mean a service container holding settings it has
+# no business acting on — the CORS posture, the cookie policy, the list of every other service's
+# address. Two files make the split visible.
+#
+# What they must agree about is exactly one thing: `kui.gateway.principalKeys`. That list is not a
+# gateway setting despite where it is spelled; it is the shared key set of one deployment. The
+# gateway signs the `X-Kui-Principal` header with the newest key whose `notBefore` has passed, and
+# every service accepts any key in the set (ADR-020). Both files therefore name the same key id and
+# read the same secret from the same environment variable, and Compose passes that variable to both
+# containers. Get this wrong and every call the gateway makes comes back 401.
+
+kui:
+  server:
+    # Every network interface. The container's own address is not knowable in advance and binding
+    # 127.0.0.1 inside a container makes the process unreachable from the network it is on.
+    host: "0.0.0.0"
+    # The same port the gateway container uses. They are different containers, so there is no
+    # collision, and one port for every KUI image is one less thing to remember.
+    port: 8080
+    basePath: "/"
+
+  gateway:
+    # The only section of `kui.gateway` this process reads. See the note above for why the key set
+    # lives under a name that looks like it belongs to somebody else.
+    #
+    # `env:KUI_PRINCIPAL_KEY` rather than a literal: a secret written into a file in version control
+    # is a secret nobody can rotate and everybody can read.
+    principalKeys:
+      - kid: "compose-1"
+        key: "env:KUI_PRINCIPAL_KEY"
+        notBefore: "2026-01-01T00:00:00Z"
+
+  auth:
+    # The only value M0 accepts. Real authentication arrives with the identity service in M6.
+    type: disabled
+
+  telemetry:
+    # Uncomment together with the `observability` profile in docker-compose.yml to send this
+    # process's spans and metrics to the collector, where they appear beside the gateway's.
+    # otlpEndpoint: "http://otel-collector:4317"
+
+    # Overridden to `text` by the Compose file, because `docker compose logs` is read by a person.
+    logFormat: json
+
+    hashUserIds: true
+
+  clusters: []
+  rbac: {}

@@ -1,0 +1,51 @@
+# An OpenTelemetry collector that prints what it receives, and sends it nowhere else.
+#
+# It exists so that a developer can see traces without standing up Jaeger, Tempo or a vendor
+# account. The one thing worth looking at here is that a single browser request produces spans from
+# *both* KUI containers under one trace id — which is the evidence that the correlation id and
+# `traceparent` propagation of GW-002 survive a process boundary. In the all-in-one shape that
+# cannot be checked at all, because there is no boundary to cross.
+#
+#   docker compose -f deployment/compose/docker-compose.yml --profile observability up -d
+#   curl -s 'localhost:8080/api/v1/ping?message=trace-me' > /dev/null
+#   docker compose -f deployment/compose/docker-compose.yml logs otel-collector
+
+receivers:
+  otlp:
+    protocols:
+      # gRPC on 4317 is what the KUI images actually speak: the OpenTelemetry Java SDK's
+      # autoconfigure mechanism defaults `otel.exporter.otlp.protocol` to grpc, and pointing it at
+      # 4318 produces a stream of "endpoint port is likely incorrect" warnings and no data.
+      grpc:
+        endpoint: 0.0.0.0:4317
+      # HTTP as well, so that a developer can check the collector is alive with curl, and so that a
+      # process configured the other way round still works.
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Small batches and a short timeout: this collector is read by a human watching a log, and a
+  # thirty-second batch window would make it look broken.
+  batch:
+    timeout: 1s
+    send_batch_size: 64
+
+exporters:
+  debug:
+    # Every attribute of every span. Far too much for a real collector and exactly right for one
+    # whose whole job is to answer "did the attribute I expected actually arrive?".
+    verbosity: detailed
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

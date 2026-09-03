@@ -1,0 +1,43 @@
+# The all-in-one deployment's configuration.
+#
+# It is short because this shape has almost nothing to be told. There are no service addresses —
+# every service runs inside the one process and is called in memory (ADR-005) — and there are no
+# signing keys, because nothing is signed when nothing leaves the process. Handing it `kui.yaml`
+# instead would work, and the process would then spend its first two log lines explaining that it
+# was ignoring half of it.
+#
+# The file exists at all, rather than the container starting with no configuration, because "the
+# configuration is mounted, never baked in" is a convention every KUI image follows (INFRA-001), and
+# a shape that quietly opted out of it would be the one nobody thinks to check when a setting does
+# not take effect.
+
+kui:
+  server:
+    # Every interface: binding 127.0.0.1 inside a container makes the process unreachable from
+    # outside it.
+    host: "0.0.0.0"
+    port: 8080
+    basePath: "/"
+
+    # Plain HTTP on localhost, so the session cookie cannot carry `Secure` or the browser will
+    # refuse to send it back. The process warns about this on every start and the warning is
+    # correct: never set it anywhere the network can reach.
+    devInsecureCookies: true
+
+  auth:
+    # The only value M0 accepts. Real authentication arrives with the identity service in M6.
+    type: disabled
+
+  telemetry:
+    # Uncomment to send this process's spans to the collector in docker-compose.yml's
+    # `observability` profile. It is off by default so that a first run has no exporter warnings in
+    # it.
+    # otlpEndpoint: "http://otel-collector:4318"
+
+    # Overridden to `text` by the Compose file, because `docker compose logs` is read by a person.
+    logFormat: json
+
+    hashUserIds: true
+
+  clusters: []
+  rbac: {}

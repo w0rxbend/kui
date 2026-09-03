@@ -1,0 +1,42 @@
+# KUI in its all-in-one shape: the gateway and every service in one container (ADR-005).
+#
+# THIS IS A DEVELOPMENT ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. There is no TLS and the session
+# cookie is served without `Secure` so that plain HTTP on localhost works.
+#
+# This is the fastest way to see KUI running: one image, one container, one port.
+#
+#   docker compose -f deployment/compose/docker-compose.allinone.yml up -d
+#   open http://localhost:8080/ui/
+#   docker compose -f deployment/compose/docker-compose.allinone.yml down
+#
+# What it cannot show you is fault isolation between processes, because there is only one process.
+# Use docker-compose.yml for that; see README.md.
+
+name: kui-allinone
+
+services:
+  kui:
+    image: kui-allinone:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-allinone
+    command: ["--config", "/etc/kui/kui-allinone.yaml"]
+    ports:
+      - "${KUI_PORT:-8080}:8080"
+    environment:
+      # Human-readable log lines: `docker compose logs` is read by a person here, and the images
+      # default to JSON, which is right for a log collector and unreadable for a terminal.
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      # `kui-allinone.yaml` and not `kui.yaml`: this shape has no service addresses and no signing
+      # keys, and pointing it at the distributed configuration only earns two warnings about the
+      # half of the file it is ignoring.
+      - ./kui-allinone.yaml:/etc/kui/kui-allinone.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/v1/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s

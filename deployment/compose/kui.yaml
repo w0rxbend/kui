@@ -64,7 +64,7 @@ kui:
   telemetry:
     # Where traces and metrics are exported. Comment it out and the process still starts and still
     # serves: a monitoring outage must never take KUI down.
-    # otlpEndpoint: "http://otel-collector:4318"
+    # otlpEndpoint: "http://otel-collector:4317"
 
     # An extra port serving *this process's own* telemetry in Prometheus format. This is not the
     # product's Kafka-cluster metrics endpoint; ADR-009 keeps those two deliberately separate.
