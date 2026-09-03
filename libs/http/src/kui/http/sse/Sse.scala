@@ -228,17 +228,29 @@ object Sse {
       instruments: Instruments[F]
   ): Stream[F, SseEvent] =
     Stream.eval(Queue.bounded[F, Option[SseEvent]](math.max(1, config.bufferSize))).flatMap { queue =>
-      // The terminator has to go in without ever waiting for room. This runs as a stream
+      // The terminator has to go in without ever waiting *forever* for room. This runs as a stream
       // finaliser, and fs2 runs finalisers uncancelably: when the client disconnects, `concurrently`
-      // interrupts the producer and then waits for exactly this. A blocking `offer` against a full
-      // queue that no longer has a reader never completes, so the request fiber, the queue and
-      // whatever the source held open — a registry subscription, a Kafka consumer — would leak,
-      // one per disconnect. Making room the same way the overflow path does keeps it non-blocking
-      // and still delivers the terminator when the reader is alive.
+      // interrupts the producer and then waits for exactly this. A plain blocking `offer` against a
+      // full queue that no longer has a reader never completes, so the request fiber, the queue and
+      // whatever the source held open — a registry subscription, a Kafka consumer — would leak, one
+      // per disconnect.
+      //
+      // Making room the way the overflow path does would be non-blocking, but it would also throw
+      // away the last event the reader has not taken yet — and on a stream whose final act is a
+      // `done` event sitting alone in the buffer, that discarded event *is* the terminal event
+      // ADR-035 promises. So: offer without waiting first, which is the ordinary case; failing
+      // that, wait a bounded moment for the reader to take one, which is all a live reader needs;
+      // and only once that moment has passed with nothing drained start dropping to force the
+      // terminator through. A reader that is gone costs one `TerminateGrace` and then finishes.
       def terminate: F[Unit] =
         queue.tryOffer(None).flatMap {
           case true => Temporal[F].unit
-          case false => queue.tryTake *> instruments.dropped *> terminate
+          case false =>
+            Temporal[F].timeoutTo(
+              queue.offer(None),
+              TerminateGrace,
+              queue.tryTake *> instruments.dropped *> terminate
+            )
         }
 
       val producer = source
@@ -301,4 +313,12 @@ object Sse {
     * series and can be graphed against each other.
     */
   val DroppedEvent: String = "dropped"
+
+  /** How long the terminator waits for room in a full buffer before it starts making room itself.
+    *
+    * Short enough that a disconnected client cannot pin a request fiber for any length of time, and long
+    * enough that a reader which is merely between takes is never mistaken for one that has gone away. It is
+    * only ever reached when the buffer is full at the exact moment the stream ends.
+    */
+  private val TerminateGrace: FiniteDuration = 1.second
 }
