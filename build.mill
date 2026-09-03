@@ -300,14 +300,18 @@ object libs extends Module {
       )
     }
 
+    // `security-core` is here for one type: `KuiEndpoint.internal` puts the signed principal on
+    // every `/internal/v1` endpoint, and `SignedPrincipal` is security-core's. The edge points the
+    // only way it can — security-core knows nothing about the wire, and both modules are
+    // cross-compiled, so a browser-side contract still compiles.
     object jvm extends Shared with KuiJvmModule {
-      def moduleDeps = Seq(kernel.jvm)
+      def moduleDeps = Seq(kernel.jvm, securityCore.jvm)
 
       object test extends ScalaTests with KuiTests with KuiCrossTests
     }
 
     object js extends Shared with KuiJsModule {
-      def moduleDeps = Seq(kernel.js)
+      def moduleDeps = Seq(kernel.js, securityCore.js)
       def mvnDeps =
         super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
 
@@ -596,6 +600,40 @@ object services extends Module {
 
       object test extends ScalaTests with KuiTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The published wire shape: Tapir endpoints, their DTOs and the codecs for them.
+      *
+      * Cross-compiled, because the browser decodes exactly what this service encodes, from the
+      * same source (ADR-003). That is also why rule A2 forbids it any edge to `domain` or
+      * `application`: a contract that reached into the domain would drag the domain into the
+      * browser build.
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+      object js extends Shared with KuiJsModule {
+        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
+        def mvnDeps =
+          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
       }
     }
   }
