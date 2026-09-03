@@ -393,4 +393,49 @@ committed golden fixtures are that evidence.
   The operator-facing consequence is documented by CFGOP-008: such a password must be supplied
   through the `properties` override layer, where the operator owns the quoting.
 
-*(further deviations filled in by the implementer, in the same commit)*
+### Further deviations, recorded by the implementer
+
+2. **`LoginModules` gained a seventh constant, `GcpManagedKafkaCallbackHandler`.** The mechanism
+   table's GCP row says "the handler library's own callback handler class" without naming it, and
+   the renderer cannot emit a class it has no name for. It is
+   `com.google.cloud.hosted.kafka.auth.GcpLoginCallbackHandler`, from
+   `managed-kafka-auth-login-handler`, recorded in the golden fixture.
+
+3. **Azure Entra and GCP Managed Kafka render a login module with no options.** Both vendor handlers
+   obtain the token themselves from the ambient credential — a managed identity, an application
+   default credential — so there is nothing for the JAAS entry to carry. Rendering an option anyway
+   would have been inventing a contract. `Jaas.module` therefore has to handle an empty option list,
+   and it renders `<module> required;`.
+
+4. **An inline PEM keystore is split into its key and its certificate blocks.** Kafka takes an
+   inline PEM keystore as two properties — `ssl.keystore.key` for the private key and
+   `ssl.keystore.certificate.chain` for the certificates — while every tool that produces one emits
+   a single file containing both. The renderer splits on the PEM block markers and fails with a
+   named error when either half is missing, rather than putting the whole bundle in both properties
+   and letting the client fail with a parse error that names neither the cluster nor the field.
+
+5. **`render` fills in a blank `clientId` from the purpose and the cluster id**
+   (`kui-admin-<clusterId>`). The signature takes both a `purpose` and a `clientId`, and a caller
+   with nothing better to say would otherwise pass the empty string, which makes Kafka generate an
+   anonymous id and defeats the attribution the `ClientPurpose` parameter exists for.
+
+6. **Three golden fixtures beyond the five the spec lists** — `properties-sasl-ssl-plain`,
+   `properties-sasl-ssl-scram256`, `properties-ssl-only` and `properties-plaintext`. The spec's list
+   omits the two mechanisms that *are* integration-tested and the two non-SASL protocols; a golden
+   file for those is what makes a regression in the TLS block or in the "no SASL block at all" case
+   a readable diff rather than an assertion buried in a suite.
+
+7. **The fixtures are read from the test classpath, not from `test/resources/golden` as a path.**
+   Mill runs a test in a sandbox working directory, so the relative path `kui.testkit.Golden` uses
+   resolves to an empty sandbox. `libs/contracts-core`'s `GoldenFilesSuite` already reads its
+   samples through `getResourceAsStream`, and this suite follows it.
+
+8. **The `client.id` is set from `render`'s parameter rather than derived here**, and
+   `ClientPurpose.prefix` is the vocabulary KAFKA-004 builds it from. `defaultsFor(purpose)` is an
+   empty hook in M1: no non-security default is known yet, and the exhaustive `match` in it means a
+   later task adding one cannot forget a purpose.
+
+9. **`build.mill`'s `kafkaAuth` module object and the `kafkaClients` / `fs2Kafka` version entries
+   were added by this task but landed in another agent's commit** (`aaa882f`, the STORE lane's
+   file-adapter commit), which staged `build.mill` wholesale. The content is exactly what this spec
+   dictates; it is recorded here so that a reader looking for the module's introduction finds it.
