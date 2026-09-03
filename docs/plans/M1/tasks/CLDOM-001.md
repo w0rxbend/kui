@@ -425,3 +425,28 @@ If KAFKA-001 has not landed when this task starts, do not stub `kui.kernel.clust
 CLDOM-002's model work first: a local stub would be a second definition of the ADT, which is
 precisely the outcome DEVPLAN §10 D1 exists to prevent, and it would be discovered only when the
 two disagree.
+
+## Deviations
+
+1. **`AdminTuning` is what KAFKA-001 actually shipped, not what this spec sketched.** The kernel's
+   type has `Int` chunk sizes (not `PositiveInt`), a `default` value (not `Default`), and two extra
+   fields (`metadataRefresh`, `capabilityRefresh`). `ClusterProfile.from` runs its `validate` and
+   folds the failures into the same accumulated `DomainError` as everything else, so a profile can
+   never carry tuning the kernel would reject.
+2. **`ClientProperties` values are `PropertyValue`, not `Secret[String]`.** KAFKA-001 made the map
+   classify its own keys. The reserved-key check therefore reads `properties.keys` and needs no
+   knowledge of which values are secret.
+3. **`ClusterProfile` keeps four separate connection fields and exposes `def connection`.** The
+   spec listed the fields individually; `ClusterConnection`'s own scaladoc says it exists so that
+   `ClusterProfile` composes one field rather than four. Both are satisfied: the fields are stored
+   separately, because `from` validates them separately and the store encodes them separately, and
+   `connection` assembles them on demand so no adapter has to know the order.
+4. **`ClusterProfile.at(version, origin)` added.** The private constructor makes `copy` private, and
+   the registry's overlay needs to restamp origin and version on an already-valid profile.
+   Re-running `from` for a value that is already valid would be a second place the rules could drift.
+5. **`toString` is overridden** rather than relying on every field being a `Secret`. A generated
+   rendering is a wall of text nobody reads, and one future non-`Secret` field would leak silently.
+6. **`displayName` is a `String`, not an opaque `ClusterName`** — as the spec's own note argues.
+7. Test count is 11 as specified; the two redaction properties assert against the *actual* secrets
+   the shared generators produced (`ClusterGenerators.secretsOfSecurity`) rather than a canary token,
+   which is strictly stronger.

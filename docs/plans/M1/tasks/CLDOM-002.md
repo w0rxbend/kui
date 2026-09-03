@@ -559,3 +559,19 @@ the four "legal but surprising" cases of `ClusterDescription.from`, the `Cluster
 its probe and minimum version (copied from `admin-capabilities.md` §0 so the domain page is
 self-contained), and the "what M1 cannot fill" table verbatim — an operator reading `—` in the UI
 must be able to find out why in one hop.
+
+## Deviations
+
+1. **`ClusterTopology.features` is `ClusterFeatures`**, per the gate review's F-05 amendment, and
+   `ClusterFeatures.of(present, absent, at)` is the constructor a mapper should use: it puts
+   everything undecided into `unknown`, so `isTotal` holds by construction and cannot be broken by a
+   feature added later.
+2. **`LogDirError.Other` is built through `LogDirError.other`**, which replaces anything that is not
+   a bare class name with `"unknown"`. The spec asked for a property proving a message cannot reach a
+   screen; enforcing it in the constructor is what makes that property true rather than hoped for.
+3. **`ClusterDescription.brokerIds` added** — the sorted `NonEmptyList[BrokerId]` the log-directory
+   call takes. Without it every caller would sort, and two callers would eventually sort differently.
+4. **`KafkaVersion.short` and `ConfigSource.token`/`isDynamic` added**; both are one-line derivations
+   that the layers above would otherwise each invent.
+5. `ClusterTopologySuite` has 12 tests rather than 10: the two extra assert the feature partition
+   invariant on this side of the boundary, which the F-05 amendment requires.

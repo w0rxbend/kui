@@ -337,3 +337,21 @@ is correct *because* the freshness field carries the reason. That is the whole a
 `docs/domain/cluster.md` gains a "Broker detail" section: the live-vs-snapshot table with its
 rationale, the log-dirs fallback rule and why configuration has none, the "empty list labelled
 unavailable" case, and a note that broker configuration is read-only in M1 with a pointer to M5.
+
+## Deviations
+
+1. **An unknown broker id is reported as `ApplicationError.Invalid` with a `brokerId` field, not
+   `ApplicationError.NotFound`.** `libs/kernel`'s `ErrorCode` has no broker-not-found code, and
+   `ErrorCode.scala` is outside this area's boundary (M1 gate review F-20 assigns it to STORE-001).
+   Reusing a 404 code whose documented meaning is something else — `KUI-ROUTE-NOT-FOUND` says "no
+   endpoint matches this method and path" — would put a wrong sentence in the error-code table an
+   operator reads. The branch is still `ApplicationError`, which is the part that matters: a mistyped
+   path segment must not dim a capability. **Owed:** a `KUI-BROKER-NOT-FOUND` code, and this call
+   site changed to `NotFound`, in the milestone that next edits `ErrorCode.scala`.
+2. **`PartitionSizes.of` added** as the single reshaping function, so the two callers cannot produce
+   two different orderings of the same data.
+3. **A fallback log-directory read is always `Stale`**, even when the snapshot itself is `Fresh`: the
+   live call is the thing that failed, and labelling the answer fresh because the snapshot happens to
+   be current would tell the user the directories were read a moment ago when they were not.
+4. `BrokerDetailUseCaseSuite` has 16 tests rather than 15 — the extra one is the no-controller broker
+   list, which the spec folds into test 2 but which deserves its own name.

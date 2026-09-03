@@ -466,3 +466,16 @@ service dim itself for every user on a cluster that is working perfectly.
 the `PartialResult` invariant, the degraded table above verbatim (it is the contract an adapter
 author needs and it must not live only in a plan file), and one paragraph recording the
 `fs2-core`-in-`domain` decision and its outcome.
+
+## Deviations
+
+1. **`onChange`, not `changes`** — the gate review's F-02 fallback. `services.cluster.domain` gained
+   no `mvnDeps` and `checkArchitecture` stayed green throughout.
+2. **`ClusterAdmin.capabilities` returns `ClusterFeatures`**, per F-05.
+3. **`SkipReason.describe` and `Connectivity.isReachable` added** — display text and the one derived
+   question, defined once so the API layer does not invent a second wording.
+4. **`PartialResult.from` filters to the requested key set** as well as filling the gaps, so a value
+   for a key nobody asked about cannot appear in the result.
+5. `PartialResultSuite` asserts `SkipReason.Failed`'s *display text* (`describe`) rather than its
+   `toString`: `KuiError` is a case class, so its generated `toString` prints constructor arguments
+   and not the message the spec expected to find there.

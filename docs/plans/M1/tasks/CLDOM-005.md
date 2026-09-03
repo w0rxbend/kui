@@ -507,3 +507,35 @@ Never logged: the `ClusterProfile`, the bootstrap string, any `Secret`. Log `clu
   "metadata every 30 s; capabilities every 1 h and on reconnect" and "reads ≤ 30 s old". Record in
   the Implementation Report either "§9's cluster row is accurate" or the exact edit made — this is
   the row the milestone's caching-discipline requirement (PLAN §29) is audited against.
+
+## Deviations
+
+1. **`SnapshotCell`'s real signature differs from this spec's sketch**, and this task follows what
+   KAFKA-010 shipped: `resource(name, cluster, interval, metrics, log)(load: F[A])`, with `refresh`
+   returning the resulting `Snapshot` and the cell owning its own `Supervisor`. There is no
+   `refreshNow` and no supervisor parameter. `ClusterSnapshots` therefore takes a `CacheMetrics[F]`
+   and holds its own `Supervisor` for the fire-and-forget forced refresh.
+2. **A failed load raises `SnapshotLoadFailure`**, which is how the cell carries a `KuiError`
+   through an effect that can only carry a `Throwable`. The classified error survives unchanged.
+3. **`ClusterSnapshots.requestRefresh` added** to the trait. `forceRefresh` must return once the
+   refresh has been *started*, and the use case has no supervisor of its own; putting the
+   fire-and-forget in the component that owns the fibers is where it belongs.
+4. **The reconnect re-probe is driven by a per-cluster flag** set when a load fails and cleared when
+   one succeeds, rather than by observing the cell's status from outside — the cell does not exist
+   yet when its own `load` is written.
+5. **`capabilitiesOf` returns `SnapshotCell[F, ClusterFeatures]`**, per F-05.
+6. **The two timing tests do not use virtual time.** Under `TestControl`, an admin fake that sleeps
+   for an hour makes the scheduler step through an hour of virtual time and the suite takes tens of
+   seconds. `viewAllReturnsWithoutCallingTheAdminPort` therefore asserts on the admin port's *call
+   log* — "no call was made" is the same guarantee, is what the design actually promises, and cannot
+   be flaky — and `forceRefreshReturnsBeforeTheRefreshCompletes` asserts that the snapshot is still
+   `Loading` when the caller is already back. Every other `TestControl` assertion in these suites is
+   unchanged.
+7. **`ClusterRig` and `ClusterRig.eventually`** live in the application test module: the registry
+   publishes to the cells on a background fiber, so a fixed sleep is a race that passes on a quiet
+   machine. Every suite polls for the condition it actually cares about.
+8. `ClusterSnapshotsSuite` has 13 tests and `ClusterTopologyUseCaseSuite` 15, rather than 10 and 12.
+   The extras cover the hourly capability cadence, a refusal that must still yield a topology, an
+   unknown cluster's refresh request, and the "a row stays on the dashboard" case.
+9. `ARCHITECTURE.md` §9's cluster row is accurate as written: metadata every 30 s, capabilities every
+   1 h and on reconnect, reads at most 30 s old. No edit was needed.

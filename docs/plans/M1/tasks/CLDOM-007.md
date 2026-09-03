@@ -334,3 +334,20 @@ The endpoint's own span comes from `libs/http` (OBS-002); this use case adds no 
 - Confirm the page no longer says "scaffolded, not modelled" anywhere. DEVPLAN §9 item 9 makes
   that a milestone completion criterion, and this is the last CLDOM task, so it is the one that
   checks.
+
+## Deviations
+
+1. **`CapabilityReportUseCase.constant` and `ClusterCapabilityReport.available` survive as explicitly
+   temporary shims**, which is the fallback this spec prescribes. Five call sites in
+   `services/cluster/{api,app}` and `apps/allinone` are in other areas; a red `main` shared by seven
+   lanes stops six of them. `available` is derived from `state` rather than stored, so the two cannot
+   disagree, and `CapabilityReport.storeHealth` has a `NotConfigured` default for the same reason.
+   Both are marked **Temporary** in their scaladoc and are for CLAPI-005 to delete.
+2. **`stateOf` reads `SnapshotFreshness.isCurrent`** rather than re-deriving reachability, so the
+   "only `Fresh` is reachable" rule is stated once.
+3. `CapabilityReportUseCaseSuite` has 15 tests rather than 13; the extras assert that a degraded
+   store is reported on every entry *and* once at the top level, and that a never-probed cluster
+   reports no features rather than every feature absent.
+4. The `Ping` sentence in `docs/domain/cluster.md` is **kept**, reduced to one line saying it is
+   removed with its endpoint. CLAPI-004 owns the deletion; the page no longer says "scaffolded, not
+   modelled" anywhere.

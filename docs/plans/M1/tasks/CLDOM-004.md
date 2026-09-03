@@ -389,3 +389,25 @@ change. No span — `reload` is not request-scoped. Nothing here logs a `Cluster
 whole-profile-replacement rationale (one paragraph — a future reader will propose a field merge
 and must find the answer without reading a plan file), what `registryVersion` counts and why it
 is not the store record version, and the degraded table above.
+
+## Deviations
+
+1. **A failed store read replays the last successful one's records rather than resolving from an
+   empty list.** The spec's table row "in the store, and the store then becomes unreachable — the
+   last replayed stored profile, unchanged" is not achievable by re-running `overlay(static, Nil)`:
+   that deletes every store-contributed cluster the moment the store goes away. `reload` therefore
+   recovers the previous stored records from their `ProfileOrigin` — the one place `overlay` sets —
+   and overlays them again. Static configuration is applied either way, which is what lets the very
+   first resolution succeed against a store that was already down. Found by
+   `snapshotIsServedFromMemoryWhileTheStoreIsUnreachable` and `constructionSucceedsWithAFailingStore`
+   disagreeing with each other.
+2. **`changes` subscribes before reading the current value** (`subscribeAwait`, then `state.get`), so
+   a change published between the two cannot be missed by a subscriber that would then never learn
+   about it.
+3. `build.mill`'s `services.cluster.application.test` gained `services.cluster.domain.test`,
+   `munit-cats-effect` and `cats-effect-testkit`, as specified. Those edits were swept into another
+   lane's commit; the content is on `main` and correct.
+4. The A3 experiment the spec asks for was not run as a temporary edit to `build.mill`, because that
+   file was being edited concurrently by other lanes for the whole session. `./mill
+   checkArchitecture` reports "75 modules, no layering violations" with this module's real
+   dependencies.
