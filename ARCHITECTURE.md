@@ -759,21 +759,43 @@ object KafkaConfigStore:
 
 ## 11. All-in-one composition
 
-`apps/allinone` depends on every service's `application`, `infrastructure` and `api` modules
-plus the gateway's. One MacWire composition root (ADR-010) builds one `IO` runtime, one
-Netty server, one otel4s provider:
+**Implemented (AIO-001).** `apps/allinone` depends on every service's `application`,
+`infrastructure` and `api` modules plus the gateway's. One composition root (ADR-010) builds one
+`IO` runtime, one Netty server, one otel4s provider:
 
-- The gateway's per-service client is `TapirInProcessClient(endpoints, serverLogic)`, so the
-  gateway code path (routing, RBAC pre-check, capability registry, aggregation) is byte-for-byte
-  the one used in distributed mode; only the transport differs.
-- `PrincipalCodec` is `PrincipalCodec.inProcess` (no signing); `Principal` is passed as a
-  value. `kui.gateway.principalKey` is ignored with a warning.
-- Services do not open listeners of their own; only the gateway port is exposed.
+- The gateway's per-service client is `InProcessServiceClient`, which builds a transport out of
+  Tapir's stub interpreter over the service's own routes *and its own interceptors*, and hands it
+  to the very same `SttpServiceClient` the distributed deployment uses. So the gateway code path
+  (routing, RBAC pre-check, capability registry, aggregation) is not merely equivalent to the
+  distributed one — it is the same objects running the same lines, and only the backend underneath
+  differs. `InProcessServiceClientSuite` asserts that by asking both transports the same questions
+  and comparing the answers, failures included.
+- `PrincipalCodec` is `PrincipalCodec.inProcess` (no signing); `Principal` is passed as a value.
+  `kui.gateway.principalKeys` and `kui.gateway.services` are both ignored, each with its own
+  warning naming the key and saying what to do instead.
+- Services do not open listeners of their own, and their routes are not mounted on the gateway's
+  listener either: they are reachable only through the gateway's proxied routes, which is the same
+  rule a distributed deployment enforces with a network policy (§14). One consequence is worth
+  recording because the alternative design does not have it — the eleven services' identical
+  `/health/live`, `/health/ready` and `/capabilities` paths never share a router, so no prefixing
+  scheme is needed and none was invented.
 - Session store, `RbacPolicy` and the capability registry are single in-memory instances. The
   config store and audit sink are the real Kafka adapters pointed at the single dev broker when
   `kui.store.kafka.*` is set, and the file adapter otherwise; all-in-one works either way (§10.1).
 - Fault isolation still holds at the code level: a failing use case returns a `KuiError`
   that the capability registry records exactly as it would from a remote 5xx.
+
+### 11.1 What all-in-one does not give you
+
+**It is one failure domain, by construction.** Everything above is about the *code*: a use case
+that fails degrades one feature and the rest of the UI keeps working, and a developer can
+reproduce that on a laptop in seconds (`FaultIsolationSuite`). None of it is process isolation. One
+JVM holds the gateway and every service, so an out-of-memory kill, an unhandled error in the
+runtime, or a `docker stop` takes all of it down together.
+
+Anyone who needs a service to survive another service's death runs the distributed deployment
+(`deployment/compose/docker-compose.yml`). Nobody should read the shared capability registry and
+the graceful degradation in this shape as evidence of more than that.
 
 ## 12. Frontend shell and microfrontends
 

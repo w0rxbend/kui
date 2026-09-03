@@ -771,7 +771,10 @@ object frontend extends Module {
     // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
     def moduleDir = super.moduleDir / os.up / "ui-shell"
 
-    def moduleDeps = Seq(uiKernel)
+    // `services.gateway.contract.js` brings the capability endpoints: the snapshot the store polls
+    // with and the probe the "Retry now" button calls (UI-010). They are cross-compiled, so the
+    // browser calls exactly the endpoints the gateway serves, from the same source.
+    def moduleDeps = Seq(uiKernel, services.gateway.contract.js)
 
     def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
 
@@ -1223,6 +1226,86 @@ object services extends Module {
           mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
         )
       }
+    }
+  }
+}
+
+/** Deployable processes assembled out of the modules above.
+  *
+  * A service's own `app` module is one deployable; this is the other kind — a process that composes
+  * several services rather than serving one. `apps/allinone` is the only member in M0 and the only
+  * one planned: ADR-005's whole argument is that there should be exactly two deployment shapes, and
+  * that both should run the same code.
+  *
+  * It is deliberately not under `services`, and the layering rules of ADR-041 are why. Rule A4 forbids
+  * anything under `services.gateway` from reaching into another service's private layers, which is what
+  * keeps the gateway a composition layer over published contracts. The all-in-one process must do exactly
+  * that reaching — it constructs each service's server logic in its own JVM — so it cannot live inside the
+  * gateway, and it is not a service either. `apps` is the honest name for what it is: a composition root
+  * one level above every service, which is the only place in the build allowed to know all of them.
+  */
+object apps extends Module {
+
+  /** The whole product in one process, on one port (ADR-005, AIO-001).
+    *
+    * It depends on the gateway's composition root and on every service's, because composing them is
+    * precisely its job. That set of dependencies grows by one service per milestone and nothing else
+    * about this module changes.
+    */
+  object allinone extends KuiJvmModule {
+    override def moduleDir = mill.api.BuildCtx.workspaceRoot / "apps" / "allinone"
+
+    def moduleDeps = Seq(
+      services.gateway.app,
+      services.gateway.api,
+      services.gateway.application,
+      services.cluster.app,
+      services.cluster.api,
+      libs.config,
+      libs.observability,
+      libs.http
+    )
+
+    def mvnDeps = Seq(
+      mvn"org.typelevel::cats-core::${Versions.cats}",
+      mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+      mvn"co.fs2::fs2-core::${Versions.fs2}",
+      mvn"com.softwaremill.macwire::util::${Versions.macwire}",
+      mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+      mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+      // The in-memory transport. `tapir-sttp-stub4-server` is what lets the gateway's own sttp client
+      // speak to a service's server logic without a socket, which is how ADR-005's "no second code
+      // path" is achieved rather than merely intended. It is a compile dependency of the production
+      // code here, not of a test: in this deployment shape it *is* the transport.
+      mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+      mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+      mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+      mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+      mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+      mvn"com.softwaremill.sttp.tapir::tapir-netty-server-cats::${Versions.tapir}"
+    )
+
+    /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+      * telemetry exporters. None is named in code — Logback is configured by the XML in
+      * `libs/observability`'s resources and the exporters by OpenTelemetry's autoconfigure mechanism —
+      * so they stay off the compile classpath.
+      */
+    def runMvnDeps = Seq(
+      mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+      mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+      mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+      mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+    )
+
+    object test extends ScalaTests with KuiTests {
+      def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+      def mvnDeps = super.mvnDeps() ++ Seq(
+        mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}",
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
+      )
     }
   }
 }

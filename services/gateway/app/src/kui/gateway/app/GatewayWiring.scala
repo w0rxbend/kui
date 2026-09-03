@@ -100,6 +100,27 @@ object GatewayWiring {
       config: GatewayServiceConfig,
       telemetry: Telemetry[F],
       logger: StructuredLogger[F]
+  ): Resource[F, GatewayServer[F]] =
+    over[F](config, telemetry, logger, httpUpstreams[F](config, telemetry, logger))
+
+  /** The same gateway, over whichever set of service clients the composition root hands it.
+    *
+    * This is the seam ADR-005 needs and ADR-010 asks every service to expose. The distributed process builds
+    * `httpUpstreams`; the all-in-one process (AIO-001) builds in-process clients over the very same services'
+    * server logic. Everything after this parameter — the registry, the readiness poller, the circuit feed,
+    * the contract-derived proxy routes, the merged documentation — is the same code in both shapes, because
+    * there is only one copy of it and both callers reach it through here.
+    *
+    * @param clients
+    *   one client per service this deployment can reach. A `Resource` rather than a value because the HTTP
+    *   shape owns a connection pool and a circuit breaker that have to be released; the in-process shape
+    *   hands over a `Resource.pure`.
+    */
+  def over[F[_]: {Async, Parallel}](
+      config: GatewayServiceConfig,
+      telemetry: Telemetry[F],
+      logger: StructuredLogger[F],
+      clients: Resource[F, ServiceClients[F]]
   ): Resource[F, GatewayServer[F]] = {
     val readiness = readinessChecks[F]
 
@@ -107,11 +128,15 @@ object GatewayWiring {
       _ <- Resource.eval(warnIfInsecureCookies[F](logger, config))
       sessions <- InMemorySessionStore.resource[F](SessionConfig.Default)
       registry <- CapabilityRegistry.resource[F](RegistryConfig.Default, telemetry, logger)
+      clients <- clients
+      // The service list comes from the clients rather than from `config.gateway.services`, because those
+      // two are the same list only in the distributed shape. All-in-one configures no upstream URLs at all
+      // and still reaches every service, so reading the configuration here would report a deployment that
+      // works perfectly as one that knows about nothing.
+      routed = clients.all.map(_.service)
       signals <- Resource.eval(
-        CapabilitySignals.make[F](RegistryConfig.Default, registry, config.gateway.services.keys.toList)
+        CapabilitySignals.make[F](RegistryConfig.Default, registry, routed)
       )
-      backend <- HttpClientFs2Backend.resource[F]()
-      clients <- upstreams[F](config, telemetry, logger, backend)
       trigger <- ReadinessPoller.resource[F](
         clients,
         signals,
@@ -123,7 +148,7 @@ object GatewayWiring {
       docs <- Resource.eval(
         Async[F].fromEither(
           DocsRoutes
-            .document[F](config.gateway.services.keys.toList, List(publicBaseUrl(config)))
+            .document[F](routed, List(publicBaseUrl(config)))
             .leftMap(BadContract.apply)
         )
       )
@@ -195,6 +220,20 @@ object GatewayWiring {
 
   final case class BadContract(problem: String)
       extends Exception(s"the gateway cannot derive routes from a service contract: $problem")
+
+  /** Every configured service, reached over HTTP, with the process-wide connection pool underneath.
+    *
+    * The pool is opened here and nowhere else. It is the distributed shape's one piece of real transport, so
+    * this is also the whole of what the all-in-one shape replaces.
+    */
+  def httpUpstreams[F[_]: Async](
+      config: GatewayServiceConfig,
+      telemetry: Telemetry[F],
+      logger: StructuredLogger[F]
+  ): Resource[F, ServiceClients[F]] =
+    HttpClientFs2Backend
+      .resource[F]()
+      .flatMap(backend => upstreams[F](config, telemetry, logger, backend))
 
   /** One client per configured service, each with its own bulkhead and circuit breaker (PLAN §16.4). */
   def upstreams[F[_]: Async](

@@ -73,7 +73,45 @@ object SttpServiceClient {
   ): Resource[F, ServiceClient[F]] =
     UpstreamClient
       .resource[F](upstreamConfig(service, config), underlying, telemetry, service, logger)
-      .map(new Impl[F](service, config, principals, _, underlying))
+      .map(upstream =>
+        new Impl[F](
+          service,
+          config.url.value,
+          principals,
+          calls = upstream.backend,
+          streaming = underlying,
+          circuits = upstream.circuitStates
+        )
+      )
+
+  /** The same client over a backend that needs no resilience wrapper.
+    *
+    * `resource` above puts every request/response call inside a bulkhead, a circuit breaker, a retry policy
+    * and a call timeout, because on the far side of those calls is a network and another machine. When the
+    * far side is an object in this JVM — the all-in-one deployment of ADR-005 — none of those protections
+    * has anything to protect against: there is no connection to refuse, no socket to hang, and no second
+    * process whose slowness could exhaust this one's threads independently of its own work. Wrapping an
+    * in-memory call in a circuit breaker would only add a way for the process to stop calling itself.
+    *
+    * Everything above the transport is unchanged, and that is the point of the method existing at all. The
+    * signing, the header decoration, the response decoding and the error mapping are the very same lines,
+    * so a response cannot differ between the two deployment shapes — which is exactly what ADR-005 says must
+    * be impossible.
+    *
+    * @param baseUrl
+    *   the address requests are built against. In the in-process shape nothing dials it, but the path it
+    *   produces is what gets hashed into the request digest, so it still has to be a well-formed URL.
+    * @param backend
+    *   where a built request is sent. For the all-in-one that is Tapir's stub interpreter over the service's
+    *   own routes and interceptors; for a suite it can be any stub at all.
+    */
+  def over[F[_]: Async](
+      service: ServiceId,
+      baseUrl: String,
+      principals: PrincipalCodec[F],
+      backend: StreamBackend[F, Fs2Streams[F]]
+  ): ServiceClient[F] =
+    new Impl[F](service, baseUrl, principals, calls = backend, streaming = backend, circuits = Stream.empty)
 
   /** The gateway's per-service upstream policy, derived from the two knobs an operator sets.
     *
@@ -111,18 +149,19 @@ object SttpServiceClient {
 
   final private class Impl[F[_]: Async](
       val service: ServiceId,
-      config: UpstreamServiceConfig,
+      baseUrl: String,
       principals: PrincipalCodec[F],
-      upstream: UpstreamClient[F],
-      streaming: StreamBackend[F, Fs2Streams[F]]
+      calls: Backend[F],
+      streaming: StreamBackend[F, Fs2Streams[F]],
+      circuits: Stream[F, CircuitEvent]
   ) extends ServiceClient[F] {
 
-    private val baseUri: Option[sttp.model.Uri] = uri"${config.url.value}".some
+    private val baseUri: Option[sttp.model.Uri] = uri"$baseUrl".some
 
     private val interpreter: SttpClientInterpreter = SttpClientInterpreter()
     private val streamInterpreter: StreamSttpClientInterpreter = StreamSttpClientInterpreter()
 
-    def circuitStates: Stream[F, CircuitEvent] = upstream.circuitStates
+    def circuitStates: Stream[F, CircuitEvent] = circuits
 
     def call[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any], input: I)(
         ctx: CallContext
@@ -248,7 +287,7 @@ object SttpServiceClient {
 
     private def send[O](request: Request[O]): F[Either[KuiError, Response[O]]] =
       request
-        .send(upstream.backend)
+        .send(calls)
         .attempt
         .map(_.leftMap(transportError))
   }
