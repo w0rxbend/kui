@@ -27,7 +27,17 @@ object Layout {
   /** The id the skip link targets, and the id of the `<main>` element. */
   val ContentId = "kui-content"
 
-  def apply(sidebar: HtmlElement, header: HtmlElement, content: Signal[HtmlElement]): HtmlElement =
+  /** @param fullScreen
+    *   what covers everything, when anything does. There is exactly one such state in KUI — "cannot reach the
+    *   gateway" (UI-011) — and it is a parameter rather than something `Layout` reaches for, so that the
+    *   frame has no opinion about connectivity and a suite can mount it with none.
+    */
+  def apply(
+      sidebar: HtmlElement,
+      header: HtmlElement,
+      content: Signal[HtmlElement],
+      fullScreen: Signal[Option[HtmlElement]] = Val(None)
+  ): HtmlElement =
     div(
       cls := KernelCss.Root,
       cls := ShellCss.Shell,
@@ -43,6 +53,7 @@ object Layout {
         tabIndex := -1,
         child <-- content
       ),
-      Toast(NotificationBus.current, NotificationBus.queued, Observer(NotificationBus.dismiss))
+      Toast(NotificationBus.current, NotificationBus.queued, Observer(NotificationBus.dismiss)),
+      child.maybe <-- fullScreen
     )
 }

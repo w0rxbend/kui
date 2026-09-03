@@ -198,3 +198,72 @@
     flex-wrap: wrap;
   }
 }
+
+/* The 403 and 404 pages. Narrow, because a page whose whole content is one message reads better in
+ * a column than across a wide window. */
+.kui-shell__error-page {
+  max-width: 40rem;
+}
+
+.kui-shell__error-page-detail {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-shell__error-page-detail code {
+  font-family: var(--kui-font-family-mono);
+  word-break: break-all;
+}
+
+/* The one full-screen state (KU-009, "Screen 33"). It covers everything, because by definition
+ * nothing behind it works.
+ *
+ * `position: fixed` and not `absolute`: the shell scrolls, and a state that scrolls away is a state
+ * the user can scroll past into an application that does not respond. */
+.kui-shell__unreachable {
+  position: fixed;
+  inset: 0;
+  z-index: var(--kui-z-modal, 1000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface);
+}
+
+.kui-shell__unreachable-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--kui-space-3);
+  max-width: 34rem;
+  padding: var(--kui-space-6);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-lg);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-shell__unreachable-icon {
+  font-size: var(--kui-font-size-xl);
+  color: var(--kui-color-warning);
+}
+
+/* The countdown is the proof that the page is doing something. A screen that says "cannot connect"
+ * and then sits still reads as frozen, and a frozen screen gets reloaded — which throws away every
+ * bit of state the application still had. Tabular figures stop it jittering as the number changes. */
+.kui-shell__unreachable-countdown {
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text);
+}
+
+.kui-shell__unreachable-last-contact {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* A link wearing the button class. The error pages use one so that "open in a new tab" and "copy
+ * link address" work on the way out of an error — a `<button>` supports neither. The browser's own
+ * underline for an anchor has to be turned off, or the control reads as a link inside a button. */
+a.kui-button {
+  text-decoration: none;
+}

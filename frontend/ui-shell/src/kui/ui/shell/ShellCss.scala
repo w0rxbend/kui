@@ -31,4 +31,13 @@ object ShellCss {
   val GalleryIconGrid = "kui-shell__gallery-icons"
   val GalleryIcon = "kui-shell__gallery-icon"
   val SettingsGroup = "kui-shell__settings-group"
+
+  val ErrorPage = "kui-shell__error-page"
+  val ErrorPageDetail = "kui-shell__error-page-detail"
+
+  val Unreachable = "kui-shell__unreachable"
+  val UnreachableCard = "kui-shell__unreachable-card"
+  val UnreachableIcon = "kui-shell__unreachable-icon"
+  val UnreachableCountdown = "kui-shell__unreachable-countdown"
+  val UnreachableLastContact = "kui-shell__unreachable-last-contact"
 }

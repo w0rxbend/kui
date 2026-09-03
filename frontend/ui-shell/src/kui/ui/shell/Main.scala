@@ -8,7 +8,14 @@ import kui.ui.kernel.api.Bootstrap
 import kui.ui.kernel.feature.Page
 import kui.ui.kernel.theme.Theme
 import kui.ui.shell.layout.{Header, Layout, Sidebar}
-import kui.ui.shell.page.{ForbiddenPage, GalleryPage, HomePage, NotFoundPage, SettingsPage}
+import kui.ui.shell.page.{
+  ForbiddenPage,
+  GalleryPage,
+  GatewayUnreachable,
+  HomePage,
+  NotFoundPage,
+  SettingsPage
+}
 
 /** The application's entry point, and the only one.
   *
@@ -69,10 +76,22 @@ object Shell {
     // the signal is here so that becomes a change of source and not a change of shape.
     val buildVersion = Var(bootstrap.buildVersion)
 
+    // Built once and shown or hidden, rather than built when it is needed: by the time it is
+    // needed, nothing is answering, and this is the worst possible moment to be constructing
+    // something for the first time.
+    val unreachable = GatewayUnreachable(
+      ShellHealth.connectivity,
+      Observer[Unit](_ => ShellHealth.retryNow())
+    )
+
     Layout(
       sidebar = Sidebar(router, Val(Sidebar.shellItems)),
       header = Header(buildVersion.signal, Theme.choice),
-      content = render(router, buildVersion.signal)
+      content = render(router, buildVersion.signal),
+      fullScreen = ShellHealth.connectivity.map {
+        case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
+        case ShellConnectivity.Connected(_) => None
+      }
     )
   }
 

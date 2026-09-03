@@ -310,6 +310,46 @@ is instead are two escape routes, and each has its own answer:
   content area blank with the shell still around it. `ErrorReporting.renderSafely` wraps every page's
   construction so that a page which throws shows a panel saying so.
 
+### Which error surface to use
+
+KUI has three, and picking the wrong one is the most likely future mistake here — so the rule is
+written down rather than left to judgement.
+
+| surface | when | who owns it |
+| --- | --- | --- |
+| **404 / 403 page** | the *address* is wrong, or the user may not see this *page* | the shell (`NotFoundPage`, `ForbiddenPage`) |
+| **feature fallback panel** | one feature's service is unavailable | the feature, through `KuiFeature.unavailableView` |
+| **full-screen "cannot reach gateway"** | the *shell's own* calls cannot reach the gateway | the shell (`GatewayUnreachable`) |
+
+The distinction that matters is the third row. The full-screen state takes the entire application
+away from the user. That is right when the gateway is genuinely not there — nothing works, and
+pretending otherwise wastes their time — and it is a catastrophe when it is triggered by one
+feature's endpoint being down, because everything else still worked and they have just been thrown
+out of it. So every call declares its scope, and only `CallScope.Shell` can lead to the full-screen
+state:
+
+```scala
+ShellHealth.report(CallScope.Shell, outcome)     // /auth/me, /info, the capability endpoints
+ShellHealth.report(CallScope.Feature, outcome)   // everything a feature asks for
+```
+
+Three further rules follow from what "unreachable" actually means:
+
+- **three consecutive failures, not one.** A laptop's wifi hiccups several times a day, and a
+  full-screen takeover per hiccup is worse than the hiccup. Any success resets the count.
+- **a `403` or a `404` is not unreachable.** The gateway answered, and answering is the opposite of
+  being unreachable; escalating one would hide a permission problem behind a network one. Only
+  `ApiError.Unreachable` and `ApiError.Timeout` count — `ApiError.isTransport` is that test.
+- **a success from a *feature* still counts as contact.** If a feature's request came back, the
+  gateway is reachable whatever the shell's last attempt did, and leaving the full-screen state on
+  top of a demonstrably working application would be absurd.
+
+The full-screen state retries by itself on a 2 s, 4 s, 8 s, 16 s, 30 s ladder, shows the countdown,
+offers a manual "Try again" that attempts at once and restarts the ladder, and says when contact was
+last made. It disappears on the first success with no reload — nothing is rebuilt, so whatever state
+the application held is still there. And it renders with no API data at all, which it has to: by
+definition nothing answered.
+
 ### The component gallery
 
 `/ui/gallery` shows every kernel primitive, every tone and every size on one page, in whichever theme
