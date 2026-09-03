@@ -303,3 +303,31 @@ cases are trivially distinguishable at the point they are caught.
 say that M1 creates `__kui_config` and `__kui_files` only and that `__kui_audit` arrives with
 audit in M5, and record that replication factor is not validated on an existing topic.
 `DEPENDENCY_MATRIX.md`: the `fs2-kafka` row's Modules column.
+
+## Deviations
+
+1. **`libs/config` gains a `libs.kafkaAuth` edge but not a `libs.kafka` one.** The spec asks for
+   both. Everything this task needs from the KAFKA lane is `ConnectionProperties.resource`, which
+   lives in `libs/kafka-auth`; the store builds its clients with fs2-kafka directly, exactly as
+   the spec's own "Cross-area contract" section says it should. Adding an edge to `libs/kafka` as
+   well would put a Kafka *admin port* the store never calls onto its classpath. If STORE-006 or
+   STORE-009 turns out to need one, it adds it then.
+2. **`StoreBootstrap.ensureTopics` takes a fourth parameter, `bootstrapServers: String`.** The
+   spec's signature has no way to name the store in a failure message, and
+   `StoreError.Unreachable` — which ADR-042 §8 requires to name the store's bootstrap servers —
+   needs it.
+3. **`StoreError` gains `Unreachable` here rather than in STORE-006.** The spec tells this task to
+   propagate an admin-client failure and let start-up report it, but it also requires the
+   authorization case to be distinguishable from the unreachable case at the point it is caught.
+   That distinction has to be a value to survive the trip, so `Unreachable(bootstrapServers, why)`
+   exists now. `why` is a short classification and an exception's class name, never its message: a
+   Kafka client's exception messages routinely carry hosts, ports and rendered property maps.
+4. **`KafkaProducer.resource` requires a `cats.Parallel` instance in fs2-kafka 4.0.0**, so
+   `StoreClients.producer` carries that context bound in addition to `Async` and `Files`.
+5. **`classify` has no `NonFatal` guard and does not rethrow.** The project's scalafix
+   configuration forbids `throw`, and there is nothing left to guard: every caller reaches
+   `classify` through cats-effect's `attempt`, which never hands over a fatal error as a value.
+6. **The replication-factor warning reads the replica count of the topic's single partition.**
+   Kafka has no topic-level replication factor after creation — it is a property of each
+   partition's assignment — and these topics have exactly one partition, so there is nothing to
+   reconcile.

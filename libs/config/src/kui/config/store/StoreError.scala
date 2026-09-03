@@ -55,6 +55,32 @@ enum StoreError(val code: ErrorCode, val message: String) extends Product, Seria
   /** Key material that is not 32 bytes, not valid base64, or carries an id that is not a slug. */
   case InvalidKeyMaterial(keyId: String, why: String)
       extends StoreError(ErrorCode.StoreCrypto, s"encryption key '$keyId' is unusable: $why")
+
+  /** A store topic already exists with a setting KUI cannot work with.
+    *
+    * The message is the one `docs/operations/metadata-store.md` §2 prints, word for word: the topic, the
+    * setting, what KUI expected, what it found, and what an operator can do about it. KUI never rewrites an
+    * existing topic's configuration, so the two ways out are to fix the topic or to point
+    * `kui.store.topicPrefix` somewhere else, and the message says both.
+    */
+  case TopicIncompatible(topic: String, setting: String, expected: String, found: String)
+      extends StoreError(
+        ErrorCode.StoreTopicIncompatible,
+        s"topic $topic has $setting=$found, expected $expected. KUI will not change an existing topic's " +
+          "configuration. Fix the topic or point kui.store.topicPrefix at a different prefix."
+      )
+
+  /** The store cluster could not be reached, or refused the operation.
+    *
+    * `why` is a short classification written by the adapter — "not authorized to create topics", "no broker
+    * answered" — and never an exception's message, which routinely carries hosts, ports and occasionally
+    * credentials.
+    */
+  case Unreachable(bootstrapServers: String, why: String)
+      extends StoreError(
+        ErrorCode.StoreUnavailable,
+        s"the metadata store at $bootstrapServers could not be used: $why"
+      )
 }
 
 /** A store failure on a path whose signature is `F[A]` rather than `F[Either[StoreError, A]]`.

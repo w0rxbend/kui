@@ -103,25 +103,33 @@ is what makes concurrent edits from several KUI replicas safe without any lock. 
 are rare, so a single partition is nowhere near a throughput concern. **Do not add partitions to
 `__kui_config` or `__kui_files`.** KUI refuses to start against a multi-partition config topic.
 
-Topic configuration KUI creates and validates:
+Topic configuration KUI creates, and which of those settings it refuses to differ on:
 
-```
-__kui_config, __kui_files
-  cleanup.policy         = compact
-  min.compaction.lag.ms  = 0
-  delete.retention.ms    = 86400000        # 24 h: how long a tombstone stays visible
-  segment.ms             = 604800000       # 7 days: compaction only runs on closed segments
-  min.cleanable.dirty.ratio = 0.1
-  max.message.bytes      = 5242880         # __kui_files only; > kui.store.maxFileBytes + envelope
-  min.insync.replicas    = kui.store.minInSyncReplicas
-  retention.ms           = -1              # compaction is the only thing that removes data
+| Topic | Setting | Class | Value KUI sets | Why it is in that class |
+| --- | --- | --- | --- | --- |
+| both | partition count | **required** | `1` | more than one destroys the total order every concurrent edit depends on |
+| both | `cleanup.policy` | **required** | `compact` | `delete` silently loses records from a topic whose whole design assumes compaction |
+| both | `min.insync.replicas` | **required** | `kui.store.minInSyncReplicas` | a lower value means `acks=all` does not mean what you think it means |
+| `__kui_files` | `max.message.bytes` | **required**, as a minimum | `kui.store.maxFileBytes` + 1 MiB | a file that cannot be produced fails at runtime with a broker-side message nobody can read. A *larger* limit than KUI needs passes |
+| both | `retention.ms` | advisory | `-1` | compaction is what keeps the data, so another value is harmless |
+| both | `delete.retention.ms` | advisory | `86400000` | affects only how long a tombstone stays visible to a consumer catching up |
+| both | `min.compaction.lag.ms` | advisory | `0` | |
+| both | `segment.ms` | advisory | `604800000` | compaction only runs on closed segments |
+| both | `min.cleanable.dirty.ratio` | advisory | `0.1` | |
+| both | replication factor | **not validated** | `kui.store.replicationFactor` on create | see below |
+| `__kui_audit` | everything | not created yet | `cleanup.policy=delete`, `retention.ms=7776000000` | created by the release that first writes an audit record |
 
-__kui_audit
-  cleanup.policy         = delete
-  retention.ms           = 7776000000      # 90 days
-  compression.type       = gzip
-  min.insync.replicas    = kui.store.minInSyncReplicas
-```
+A **required** setting that differs stops start-up. An **advisory** setting that differs is logged
+once, with both values, and KUI carries on: it is your cluster and your retention policy.
+
+**Replication factor is not validated on an existing topic**, only reported as a warning. If you
+ran KUI against a single broker and later grew the cluster, you have a perfectly good RF-1 topic
+and an RF-3 setting, and refusing to start would punish you for the upgrade.
+
+**KUI creates `__kui_config` and `__kui_files` only.** `__kui_audit` is described here because it
+is part of the design, but nothing writes an audit record yet, and creating a retention-based
+topic that nothing produces to would only leave you wondering why it is empty. It is created by
+the release that first needs it.
 
 `max.message.bytes` on `__kui_files` is the one that bites: a record has to hold the whole
 file plus its JSON envelope plus the encryption overhead, so the broker's topic-level
