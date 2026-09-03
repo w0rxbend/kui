@@ -107,6 +107,30 @@ do ship. `BrokerLoad.withSkew` computes every broker's skew from the whole set a
 brokers' numbers cannot be computed against different denominators and fail to add up on the page
 they are shown on together.
 
+### What the dashboard therefore draws
+
+The four `None` fields above are not an implementation gap the screen papers over; they are visible
+on it. The dashboard renders one row per configured cluster with:
+
+| Cell | Source | In M1 |
+| --- | --- | --- |
+| cluster name, `read only` tag, the link | configuration, outside the section | always present, even when the cluster is unreachable |
+| status chip | the row's section | `Online`, `Degraded: <reason>`, `Unavailable: <message>`, `Forbidden` |
+| version, brokers, controller, disk | the section's payload | present once a scrape has succeeded |
+| partitions, under-replicated, topics | — | always `—`, per the table above |
+| throughput | — | **no column at all** |
+
+The last two rows are the ones worth recording here, because they look like omissions and are
+decisions:
+
+- **The empty columns exist and read `—`.** A number the product will have one milestone from now
+  gets its column now, so that filling it is a data change rather than a re-layout, and an em dash
+  is an honest way to say "no value here".
+- **Throughput gets no column.** There is no metrics service until M8, and unlike a partition
+  count, a *zero* throughput is a meaningful reading. An empty column headed "Production" would be
+  read as "this cluster has no traffic" — a claim, not an absence — which is worse than the column
+  not being there.
+
 ## Ports
 
 Three traits, stated over an abstract `F[_]` with no bound at all, in domain types only.

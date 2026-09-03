@@ -584,6 +584,44 @@ claimed to be working.
 recycling a connection, a laptop's wifi blinking — and a banner that flickers every few minutes is
 one people learn to ignore.
 
+### Rendering a `Section`: the dashboard's row model, as the worked example
+
+Most of what KUI shows arrives inside a `Section` — a part of a response that is allowed to have
+failed without failing the response. The cluster dashboard is the worked example, and the rule it
+follows is worth copying rather than re-deriving on the next screen.
+
+The list of configured clusters comes from configuration and is available whenever the service is;
+only each cluster's *summary* needs a live broker. So a cluster nobody can reach costs one row's
+numbers, never the page.
+
+| section on the row | chip | data cells | row clickable | overlay |
+| --- | --- | --- | --- | --- |
+| `Ok(data, fetchedAt)` | `Online`, success | the data | yes | none |
+| `Stale(data, fetchedAt, reason)` | `Degraded: <reason>`, warning | the data, dimmed | yes | per-row dim, badged with `fetchedAt` |
+| `Unavailable(reason, message, since)` | `Unavailable: <message>`, danger | `—` | **yes** | none — there is nothing to keep |
+| `Forbidden` | `Forbidden`, neutral | `—` | yes | none |
+| `NotConfigured` | the row is **not rendered at all** | — | — | — |
+
+Four things in that table are decisions rather than details.
+
+- **`NotConfigured` hides the row**, exactly as it hides a navigation entry: this deployment has no
+  such thing, and showing it invites a click that can never work. Every other state stays visible,
+  because a user has to be able to tell "misconfigured" from "down".
+- **An `Unavailable` row is still a link**, and `DashboardPageSuite` asserts it in the DOM rather
+  than by reading the render function. The page it leads to is the only place the reason, the
+  `since` and a working retry exist; taking the link away strands the user on the one screen that
+  cannot explain what is wrong.
+- **Its data cells are `—` and never `0`.** A dead cluster reporting `0 brokers` reads as a fact.
+  This is the worst bug the screen can have and it has a test of its own.
+- **A `Stale` row keeps its numbers.** They are real data that is merely old; the chip says so.
+
+The same table decides what a *column* may claim. A figure the product cannot compute yet renders
+`—` with no tooltip promising a date — topic and partition counts need a `describeTopics` sweep
+that belongs to the topic service, so their columns exist and are empty, and filling them later is
+a data change rather than a layout change. A figure whose *zero is meaningful* gets no column at
+all: an empty "Production" column reads as "this cluster has no traffic", which is a claim, so
+throughput waits for the metrics service instead of being drawn blank.
+
 ### User preferences: what is stored, and the rule about reading it
 
 Four preferences, all of them browser-local. There is no per-user store on the server until M6, and

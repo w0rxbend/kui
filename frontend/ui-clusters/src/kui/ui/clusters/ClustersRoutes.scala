@@ -23,6 +23,15 @@ object ClustersPageId {
     */
   case object Overview extends ClustersPageId
 
+  /** One cluster's brokers.
+    *
+    * The id is a `String` and not a `ClusterId` because a page is data that has to survive a round trip
+    * through `history.state`, and a URL can hold anything a user types. The id is validated where it is used
+    * — a value that will not parse as a slug renders the page's own not-found state rather than failing to
+    * decode the whole history entry, which would strand the Back button.
+    */
+  final case class Brokers(clusterId: String) extends ClustersPageId
+
   given CanEqual[ClustersPageId, ClustersPageId] = CanEqual.derived
 }
 
@@ -46,6 +55,12 @@ object ClustersRoutes extends FeatureRoutes {
     */
   private val OverviewTag = "clusters.overview"
 
+  private val BrokersTag = "clusters.brokers"
+
+  private val BrokersSegment = "brokers"
+
+  private val ClustersSegment = "clusters"
+
   val id: FeatureId = FeatureId.Clusters
 
   val landing: Page = ClustersPageId.Overview
@@ -67,15 +82,25 @@ object ClustersRoutes extends FeatureRoutes {
     List(
       // `endOfSegments` is deliberate: without it the pattern matches a prefix, so `/ui/clusters` would
       // also claim `/ui/clusters/anything` and a mistyped sub-path would never produce a 404.
-      Route.static(ClustersPageId.Overview, root / "clusters" / endOfSegments, uiPrefix)
+      Route.static(ClustersPageId.Overview, root / ClustersSegment / endOfSegments, uiPrefix),
+      Route[ClustersPageId.Brokers, String](
+        encode = _.clusterId,
+        decode = ClustersPageId.Brokers(_),
+        pattern = root / ClustersSegment / segment[String] / BrokersSegment / endOfSegments,
+        basePath = uiPrefix
+      )
     )
 
   def encodePage(page: Page): Option[Json] =
     page match {
       case ClustersPageId.Overview => Some(Json.obj("page" -> Json.fromString(OverviewTag)))
+      case ClustersPageId.Brokers(clusterId) =>
+        Some(Json.obj("page" -> Json.fromString(BrokersTag), "clusterId" -> Json.fromString(clusterId)))
       case _ => None
     }
 
   def decodePage(tag: String, cursor: HCursor): Option[Page] =
-    if tag == OverviewTag then Some(ClustersPageId.Overview) else None
+    if tag == OverviewTag then Some(ClustersPageId.Overview)
+    else if tag == BrokersTag then cursor.get[String]("clusterId").toOption.map(ClustersPageId.Brokers(_))
+    else None
 }

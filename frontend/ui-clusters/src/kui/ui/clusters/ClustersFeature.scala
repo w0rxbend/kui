@@ -2,10 +2,15 @@ package kui.ui.clusters
 
 import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.Route
+import org.scalajs.dom
 
+import kui.kernel.ClusterId
+import kui.ui.clusters.brokers.BrokersPage
+import kui.ui.clusters.dashboard.DashboardPage
 import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
-import kui.ui.kernel.state.{AuthState, CapabilityStore}
+import kui.ui.kernel.prefs.Timezone
+import kui.ui.kernel.state.AuthState
 
 /** The clusters microfrontend.
   *
@@ -36,12 +41,62 @@ final class ClustersFeature extends KuiFeature {
 
   private val queries = new ClustersQueries(api)
 
-  /** This feature's health, for gating the Ping button while the page is open. */
-  private val capability = CapabilityStore.featureState(FeatureId.Clusters, None, Val(true))
+  // No capability signal is held here. M1's cluster screens are read-only, so there is no action to gate,
+  // and the shell already draws the banner and the fallback panel from the same store. Holding a second
+  // subscription would be a second opinion about the same state on the same screen.
 
-  // One element for the life of the page, so navigating away and back keeps the results, the typed
-  // message and the scroll position (ADR-011 §3.3).
-  private lazy val page: HtmlElement = ClustersPage(queries, capability)
+  /** Which of this feature's pages is on screen.
+    *
+    * The shell calls `render` with the page its router decoded, and a row click inside the dashboard sets
+    * this directly. Both paths end here, so the element below is built once and never rebuilt — which is what
+    * keeps a sort order, a scroll position and a toggle across a navigation.
+    */
+  private val current: Var[Page] = Var(ClustersRoutes.landing)
+
+  private lazy val root: HtmlElement =
+    div(
+      child <-- current.signal.map {
+        case ClustersPageId.Brokers(clusterId) =>
+          brokers(ClusterId.from(clusterId).toOption)
+        case _ => dashboard
+      }
+    )
+
+  private lazy val dashboard: HtmlElement =
+    DashboardPage(
+      queries = queries,
+      navigate = goToBrokers,
+      hrefFor = id => hrefOf(ClustersPageId.Brokers(id.value)),
+      zone = Timezone.choice.signal
+    )
+
+  /** The brokers page for one cluster, or the dashboard when the URL held something that is not a cluster id.
+    *
+    * A malformed id in a hand-typed URL lands the user back on the list rather than on a blank page: the
+    * dashboard is where they can see which ids exist, which is what they needed.
+    */
+  private def brokers(cluster: Option[ClusterId]): HtmlElement =
+    cluster.fold(dashboard)(id => BrokersPage(Val(id), queries, backHref = hrefOf(ClustersPageId.Overview)))
+
+  /** Moves to a cluster's brokers without reloading the application.
+    *
+    * The row is a real `<a>` with a real `href`, so copying it, bookmarking it and opening it in a new tab
+    * all work; an ordinary click is intercepted here, the URL is pushed, and the page swaps. The shell's
+    * router owns the browser's history for its own pages and this feature has no reference to it — see this
+    * task's recorded deviation, which owes a proper navigation port to the shell.
+    */
+  private def goToBrokers(cluster: ClusterId): Unit = {
+    val page = ClustersPageId.Brokers(cluster.value)
+    dom.window.history.pushState((), "", hrefOf(page))
+    current.set(page)
+  }
+
+  private def hrefOf(page: ClustersPageId): String =
+    ClustersRoutes
+      .routes(ClustersFeature.uiPrefix)
+      .flatMap(route => route.relativeUrlForPage(page))
+      .headOption
+      .getOrElse(ClustersFeature.uiPrefix)
 
   def id: FeatureId = FeatureId.Clusters
 
@@ -54,7 +109,10 @@ final class ClustersFeature extends KuiFeature {
     */
   def routes: List[Route[? <: Page, ?]] = ClustersRoutes.routes(ClustersFeature.uiPrefix)
 
-  def render(page: Page): HtmlElement = this.page
+  def render(page: Page): HtmlElement = {
+    current.set(page)
+    root
+  }
 
   /** This feature's own half of the shell's fallback panel.
     *

@@ -12,20 +12,9 @@
  * true. */
 
 .kui-clusters {
-  max-width: 60rem;
+  /* Wider than the M0 page: the dashboard is a nine-column table, not a paragraph. */
+  max-width: 84rem;
   padding: var(--kui-space-5);
-}
-
-.kui-clusters__lead {
-  max-width: 44rem;
-  color: var(--kui-color-text-muted);
-}
-
-.kui-clusters__form {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--kui-space-3);
-  margin-bottom: var(--kui-space-4);
 }
 
 .kui-clusters__error {
@@ -33,20 +22,66 @@
   color: var(--kui-color-danger);
 }
 
-.kui-clusters__stale {
-  margin: 0 0 var(--kui-space-2) 0;
-  color: var(--kui-color-text-muted);
-}
-
-/* ADR-032's stale-data rule, drawn: what was fetched successfully stays on screen and is dimmed,
- * rather than being cleared. Never the only signal — the sentence above the table says the same
- * thing in words, because dimming alone is invisible to anyone who cannot compare it with the
- * undimmed version they are no longer looking at. */
-.kui-clusters__table--stale {
-  opacity: 0.6;
-}
+/* The stale-data rule is drawn by the kernel's `StaleDataOverlay` now, not by a rule of this
+ * feature's own: dimming and the badge that explains it belong together, and one screen's private
+ * convention is how five screens end up disagreeing about what old data looks like. */
 
 .kui-clusters__fallback {
   margin: 0;
   max-width: 44rem;
+}
+
+/* --- Dashboard ------------------------------------------------------------------------------- */
+
+/* The summary strip: two figures and the time the list was read, on one line above the table. The
+ * figures are set large in the display face because they are the answer to the question somebody
+ * opens this page to ask; the labels under them are small and muted so the numbers carry the row. */
+.kui-clusters__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-6);
+  padding: var(--kui-space-4) 0;
+}
+
+.kui-clusters__summary-figure {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+}
+
+.kui-clusters__summary-value {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-2xl);
+  font-weight: var(--kui-font-weight-display);
+}
+
+.kui-clusters__summary-label {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* Pushed to the far end of the strip: it is the least urgent thing on the line and the most often
+ * looked for, so it gets a fixed place rather than a prominent one. */
+.kui-clusters__summary-fetched {
+  margin-left: auto;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-clusters__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding-bottom: var(--kui-space-3);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* --- Brokers page ---------------------------------------------------------------------------- */
+
+.kui-clusters__brokers-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  padding-bottom: var(--kui-space-4);
 }
