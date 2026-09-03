@@ -25,8 +25,8 @@ import sttp.tapir.server.interpreter.BodyListener
 import sttp.tapir.server.model.ValuedEndpointOutput
 import sttp.tapir.{statusCode, AttributeKey, EndpointOutput}
 
-import kui.contracts.{ErrorEnvelope, HttpHeaders}
 import kui.contracts.ErrorEnvelope.given
+import kui.contracts.{ErrorEnvelope, HttpHeaders}
 import kui.gateway.application.session.{Session, SessionId, SessionRef, SessionStore}
 import kui.gateway.contract.GatewayEndpoints
 import kui.http.BasePath
