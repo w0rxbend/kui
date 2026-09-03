@@ -1,0 +1,5 @@
+# `prot` is a typo for `port`. Before CFG-001 a file like this started a process on the default
+# port and told nobody; now it refuses to start and names the key.
+kui:
+  server:
+    prot: 8080

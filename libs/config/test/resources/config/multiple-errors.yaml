@@ -1,0 +1,10 @@
+# Three independent mistakes. A load must report all three, not stop at the first.
+kui:
+  server:
+    port: 0
+  gateway:
+    services:
+      cluster:
+        url: "ftp://x"
+  telemetry:
+    logFormat: yaml

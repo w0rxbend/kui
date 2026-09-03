@@ -1,0 +1,84 @@
+# The reference KUI configuration.
+#
+# This is the file the Docker Compose topology mounts into every process (INFRA-002), and it is
+# also the worked example `docs/operations/configuration.md` describes key by key. Everything here
+# is a value KUI would have used anyway: the file exists to show the shape and to give an operator
+# something to copy, not to change any default.
+#
+# Every key can also be set as an environment variable or a command-line flag. The environment name
+# is the key in capitals with the dots replaced by underscores (`kui.server.port` becomes
+# `KUI_SERVER_PORT`), and the flag is the key itself (`--kui.server.port=9090`). Flags beat the
+# environment, the environment beats this file, and this file beats the built-in defaults.
+
+kui:
+  server:
+    # 0.0.0.0 means "every network interface", which is what a container needs: binding 127.0.0.1
+    # inside a container makes the process unreachable from outside it.
+    host: "0.0.0.0"
+    port: 8080
+    # The path prefix everything is served under. "/" means no prefix. Set this to, say, "/kui"
+    # when a reverse proxy mounts KUI on a sub-path of a shared host name.
+    basePath: "/"
+
+  gateway:
+    # The other KUI services, by service id. In the all-in-one deployment this section is empty,
+    # because the gateway calls the services in its own process. The Compose topology runs them as
+    # separate containers, so each one needs an address.
+    services:
+      cluster:
+        url: "http://kui-cluster:8080"
+        # The whole-call budget. A caller may assume no upstream call ever takes longer than this.
+        timeout: "10s"
+        # The bulkhead: how many calls to this service may be in flight at once. It is what stops
+        # one slow service from consuming every thread and taking the others down with it.
+        maxConcurrent: 32
+
+    # How often the gateway asks each service whether it is ready, to keep the capability registry
+    # (and therefore the greyed-out parts of the UI) current.
+    readinessIntervalMs: 10000
+
+    # The keys the gateway signs the `X-Kui-Principal` header with (ADR-020). Several may be listed
+    # so a key can be rotated without downtime: the newest one whose `notBefore` has passed is used
+    # for signing, and services keep accepting the older ones until they are removed here.
+    #
+    # `key` accepts a literal, `env:NAME` or `file:/path`. Use one of the latter two in any real
+    # deployment: a literal here means the secret is in version control.
+    principalKeys:
+      - kid: "compose-1"
+        key: "env:KUI_PRINCIPAL_KEY"
+        notBefore: "2026-01-01T00:00:00Z"
+
+    # Cross-origin resource sharing is off, and should stay off for the shipped deployment: the
+    # gateway serves the single-page application itself, so the browser and the API are the same
+    # origin and CORS is not involved. Turn it on only to let some other site call this API, and
+    # then list the origins explicitly — "*" is refused at startup.
+    cors:
+      enabled: false
+      origins: []
+
+  auth:
+    # The only value M0 accepts. Real authentication arrives with the identity service in M6, and
+    # anything else here fails the load with a message saying so, rather than being ignored.
+    type: disabled
+
+  telemetry:
+    # Where traces and metrics are exported. Comment it out and the process still starts and still
+    # serves: a monitoring outage must never take KUI down.
+    # otlpEndpoint: "http://otel-collector:4318"
+
+    # An extra port serving *this process's own* telemetry in Prometheus format. This is not the
+    # product's Kafka-cluster metrics endpoint; ADR-009 keeps those two deliberately separate.
+    # prometheusPort: 9464
+
+    # json for machines, text for a human reading a terminal.
+    logFormat: json
+
+    # Log and trace `user.id` as a hash rather than the login name. An operator debugging a request
+    # almost never needs to know who it was, only that two entries concern the same person.
+    hashUserIds: true
+
+  # Declared so the shape exists. Nothing reads them yet: the cluster registry arrives in M1 and
+  # the authorization model in M6. Keys placed under them are accepted and ignored; keys anywhere
+  # else that KUI does not recognise fail the load.
+  clusters: []
+  rbac: {}

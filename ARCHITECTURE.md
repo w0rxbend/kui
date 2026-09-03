@@ -618,6 +618,14 @@ files → defaults, with Kafbat-compatible env keys mapped explicitly. Ownership
 | `kui.store.*` | static only (file/env), never in the store | the two store-connected services | restart of that process (§10.1) |
 | `kui.gateway`, `kui.server`, `kui.telemetry` | each process | — | restart of that process |
 
+**What exists today (M0, task CFG-001).** The `kui.server`, `kui.gateway` and `kui.telemetry`
+sections are implemented in `libs/config`, with the precedence chain (CLI → environment → YAML →
+defaults), accumulated problem reporting, unknown-key rejection, `env:`/`file:` secret references
+and the §14 outbound URL policy. `kui.auth` accepts only `type: disabled`, and `kui.clusters[]` and
+`kui.rbac` are recognised placeholders that nothing reads: they arrive with the cluster registry in
+M1 and the authorization model in M6. The key table for operators is
+`docs/operations/configuration.md` and the reference file is `deployment/compose/kui.yaml`.
+
 `ClusterProfile` is a value object of the Cluster Registry context and the *published
 language* every other context translates from: bootstrap servers, typed security (ADR-022),
 optional registry/connect/ksql/metrics endpoints with their auth, serde declarations,

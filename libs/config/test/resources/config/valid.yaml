@@ -1,0 +1,38 @@
+# A complete, valid M0 configuration. Every key the model knows about appears here, so a key
+# that is renamed without updating this file fails `ValidationSuite.everyKnownKeyLoads`.
+kui:
+  server:
+    host: "0.0.0.0"
+    port: 9090
+    basePath: "/kui"
+
+  gateway:
+    readinessIntervalMs: 5000
+    services:
+      cluster:
+        url: "http://kui-cluster:8080"
+        timeout: "3s"
+        maxConcurrent: 8
+      topic:
+        url: "https://kui-topic.internal"
+    principalKeys:
+      - kid: "k1"
+        key: "hunter2-DO-NOT-LEAK"
+        notBefore: "2026-01-01T00:00:00Z"
+    cors:
+      enabled: true
+      origins:
+        - "https://console.example.com"
+
+  auth:
+    type: disabled
+
+  telemetry:
+    otlpEndpoint: "http://collector.example.com:4318"
+    prometheusPort: 9464
+    logFormat: text
+    hashUserIds: false
+
+  # Declared empty: the cluster registry is M1 and the authorization model is M6.
+  clusters: []
+  rbac: {}
