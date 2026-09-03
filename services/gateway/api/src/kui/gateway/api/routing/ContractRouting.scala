@@ -14,7 +14,7 @@ import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.application.capability.{CapabilitySignals, ReadinessSignal}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.ErrorInterceptor
-import kui.kernel.error.{InfrastructureError, KuiError}
+import kui.kernel.error.{ApplicationError, FieldError, InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, CorrelationId, ServiceId}
 import kui.security.Principal
 
@@ -108,9 +108,10 @@ object ContractRouting {
 
       public
         .errorOut(statusCode)
-        .serverSecurityLogic[(Principal, CorrelationId), F](request => callerOf[F](request).map(Right(_)))
-        .serverLogic { case (principal, correlationId) =>
-          input => proxy(service, endpoint, typed, client, signals, rbac, principal, correlationId, input)
+        .serverSecurityLogic[(Principal, CorrelationId, Option[ClusterId]), F](callerOf[F])
+        .serverLogic { case (principal, correlationId, cluster) =>
+          input =>
+            proxy(service, endpoint, typed, client, signals, rbac, principal, correlationId, cluster, input)
         }
     }
 
@@ -158,10 +159,10 @@ object ContractRouting {
       rbac: RbacPreCheck[F],
       principal: Principal,
       correlationId: CorrelationId,
+      cluster: Option[ClusterId],
       input: Any
   ): F[Either[(ErrorEnvelope, StatusCode), Any]] =
     for {
-      cluster <- Async[F].pure(none[ClusterId])
       permitted <- rbac.check(principal, original, cluster)
       result <- permitted match {
         case Left(denied) => Async[F].pure(Left(denied))
@@ -225,18 +226,42 @@ object ContractRouting {
     * the `correlationId` a user quotes from an error body matches no log line anywhere, and that the id the
     * downstream service logs is not the id the gateway logged for the same request.
     */
-  private def callerOf[F[_]: Async](request: ServerRequest): F[(Principal, CorrelationId)] =
-    ErrorInterceptor
-      .correlationIdOf[F](request)
-      .map(correlationId =>
-        (
-          request
-            .attribute(SessionMiddleware.Attribute)
-            .map(_.principal)
-            .getOrElse(Principal.Anonymous),
-          correlationId
-        )
-      )
+  /** Which cluster the request is about is decided here too, and a malformed id fails *here*.
+    *
+    * The security logic runs before the endpoint's own input decoding finishes and before `client.call`, so a
+    * request that cannot be about any cluster costs the cluster service nothing - the same place, and the
+    * same reason, as an RBAC denial.
+    *
+    * The id always comes from the path. An inbound `X-Kui-Cluster-Id` header is stripped at the edge by
+    * prefix (ADR-040) and is never read, so a caller cannot label another cluster's metrics as its own.
+    */
+  private def callerOf[F[_]: Async](
+      request: ServerRequest
+  ): F[Either[(ErrorEnvelope, StatusCode), (Principal, CorrelationId, Option[ClusterId])]] =
+    ErrorInterceptor.correlationIdOf[F](request).flatMap { correlationId =>
+      val principal = request
+        .attribute(SessionMiddleware.Attribute)
+        .map(_.principal)
+        .getOrElse(Principal.Anonymous)
+
+      ClusterScope.of(request.uri.path.toList) match {
+        case ClusterScope.Scope.Malformed(raw, error) =>
+          Clock[F].realTimeInstant.map { now =>
+            val invalid: KuiError = ApplicationError.Invalid(
+              s"'$raw' is not a cluster id",
+              List(FieldError(Some(ClusterIdField), List(error.message)))
+            )
+
+            Left((ErrorEnvelope.of(invalid, correlationId, now), StatusCode(ErrorEnvelope.statusOf(invalid))))
+          }
+
+        case scope =>
+          Async[F].pure(Right((principal, correlationId, ClusterScope.clusterOf(scope))))
+      }
+    }
+
+  /** The field a malformed cluster id is reported against, matching the contract's path parameter name. */
+  val ClusterIdField: String = kui.cluster.contract.ClusterEndpoints.ClusterIdParam
 
 }
 

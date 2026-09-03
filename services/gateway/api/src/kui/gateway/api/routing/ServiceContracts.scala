@@ -22,4 +22,19 @@ object ServiceContracts {
     Map(ServiceId.unsafe("cluster") -> ClusterEndpoints.all)
 
   def of(service: ServiceId): List[AnyEndpoint] = byService.getOrElse(service, Nil)
+
+  /** Endpoints the gateway serves **itself**, as an aggregation, and must therefore not derive a proxy route
+    * for.
+    *
+    * Keyed by the endpoint `name` the contract fixes rather than by its path, because the name is stable and
+    * the path is a string the derivation is already deriving. There is exactly one entry in M1: the cluster
+    * list, which the gateway answers with per-row status and its own last-known fallback. Two routes for one
+    * path is a collision nobody sees in a route list, so the exclusion is data rather than an accident of
+    * ordering.
+    */
+  val aggregated: Set[String] = Set("cluster.list")
+
+  /** The endpoints of one service that the gateway proxies verbatim. */
+  def proxied(service: ServiceId): List[AnyEndpoint] =
+    of(service).filterNot(_.info.name.exists(aggregated.contains))
 }
