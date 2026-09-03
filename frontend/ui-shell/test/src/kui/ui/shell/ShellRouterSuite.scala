@@ -181,4 +181,38 @@ class ShellRouterSuite extends FunSuite {
       dom.document.body.removeChild(container): Unit
     }
   }
+
+  // --- A cluster in the URL --------------------------------------------------------------------
+
+  test("aClusterInTheUrlOverridesTheStoredSelection") {
+    // A link is usually pasted by a colleague, and the recipient has to see what the sender saw.
+    assertEquals(
+      ShellRouter.clusterInUrl("https://kui.example/ui/clusters/prod-eu/brokers", "/ui").map(_.value),
+      Some("prod-eu")
+    )
+    assertEquals(
+      ShellRouter.clusterInUrl("https://kui.example/ui/clusters/prod-eu", "/ui").map(_.value),
+      Some("prod-eu")
+    )
+    // Under a deployment prefix, too: the shell knows where its own prefix ends.
+    assertEquals(
+      ShellRouter.clusterInUrl("https://kui.example/kafka/ui/clusters/local/brokers/1", "/kafka/ui").map(_.value),
+      Some("local")
+    )
+  }
+
+  test("aUrlThatNamesNoClusterLeavesTheStoredSelectionAlone") {
+    assertEquals(ShellRouter.clusterInUrl("https://kui.example/ui/settings", "/ui"), None)
+    assertEquals(ShellRouter.clusterInUrl("https://kui.example/ui/clusters", "/ui"), None)
+    // Not a slug, so not a cluster id: an unparseable value is "no cluster named here" rather than a
+    // selection that nothing downstream can use.
+    assertEquals(ShellRouter.clusterInUrl("https://kui.example/ui/clusters/NOT A SLUG/brokers", "/ui"), None)
+  }
+
+  test("aQueryStringOrFragmentDoesNotConfuseTheClusterInTheUrl") {
+    assertEquals(
+      ShellRouter.clusterInUrl("https://kui.example/ui/clusters/local/brokers?tab=x#top", "/ui").map(_.value),
+      Some("local")
+    )
+  }
 }

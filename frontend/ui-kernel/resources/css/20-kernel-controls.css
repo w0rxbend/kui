@@ -462,3 +462,45 @@
   color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-sm);
 }
+
+/* --- Per-cluster colour tag -------------------------------------------------------------------- */
+
+/* A small filled chip, deliberately a rounded rectangle and not a circle: the status dot beside it
+ * is a circle, and one shape doing both jobs would make a red "production" marker indistinguishable
+ * from a failing cluster.
+ *
+ * Every variant is a container colour with its paired text colour, so all six are legible in light
+ * and dark without a single value being written here. */
+.kui-cluster-tag {
+  display: inline-block;
+  width: var(--kui-space-3);
+  height: var(--kui-space-3);
+  border-radius: var(--kui-radius-xs);
+  background-color: transparent;
+  /* The unset case still occupies its space, so choosing a colour does not shift the row it is in. */
+  border: 1px solid transparent;
+}
+
+.kui-cluster-tag--none {
+  border-color: var(--kui-color-border);
+}
+
+.kui-cluster-tag--primary {
+  background-color: var(--kui-color-primary-container);
+}
+
+.kui-cluster-tag--success {
+  background-color: var(--kui-color-success-container);
+}
+
+.kui-cluster-tag--warning {
+  background-color: var(--kui-color-warning-container);
+}
+
+.kui-cluster-tag--danger {
+  background-color: var(--kui-color-danger-container);
+}
+
+.kui-cluster-tag--accent {
+  background-color: var(--kui-color-accent-container);
+}

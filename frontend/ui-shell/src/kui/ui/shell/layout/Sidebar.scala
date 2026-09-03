@@ -46,7 +46,17 @@ object Sidebar {
     *   cannot be left to the injected `<base href>`: a `<base>` only rewrites *relative* URLs, and a
     *   hard-coded `/ui/` would send a user behind a prefix to a path no gateway route matches.
     */
-  def apply(router: Router[Page], items: Signal[List[NavItem]], uiPrefix: String): HtmlElement =
+  /** @param switcher
+    *   the cluster switcher, mounted between the wordmark and the destinations. Passed in rather than built
+    *   here, so that a suite can render the frame without a capability store — and because from the next
+    *   milestone every destination below it is scoped by it, which is why it sits above them.
+    */
+  def apply(
+      router: Router[Page],
+      items: Signal[List[NavItem]],
+      uiPrefix: String,
+      switcher: Option[HtmlElement] = None
+  ): HtmlElement =
     navTag(
       cls := ShellCss.Sidebar,
       // Named, because a page can hold more than one navigation region — this one and the
@@ -54,6 +64,7 @@ object Sidebar {
       // nothing about which is which.
       aria.label := "Main",
       wordmark(uiPrefix),
+      switcher,
       ul(
         cls := ShellCss.SidebarList,
         children <-- items.split(_.testId)((_, initial, item) => entry(router, initial, item))

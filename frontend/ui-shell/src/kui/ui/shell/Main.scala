@@ -2,6 +2,7 @@ package kui.ui.shell
 
 import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.{Router, SplitRender}
+import io.circe.Json
 import org.scalajs.dom
 
 import kui.gateway.contract.dto.AuthMeResponse
@@ -12,11 +13,11 @@ import kui.ui.kernel.api.{ApiClient, ApiError, Bootstrap}
 import kui.ui.kernel.feature.{FeatureRegistry, FeatureRoutes, Page}
 import kui.ui.kernel.prefs.{RefreshRate, Timezone}
 import kui.ui.kernel.state.FeatureState.*
-import kui.ui.kernel.state.{Auth, AuthInfo, AuthState, CapabilityStore, FeatureState}
+import kui.ui.kernel.state.{Auth, AuthInfo, AuthState, CapabilityStore, CurrentCluster, FeatureState}
 import kui.ui.kernel.theme.{Accent, Density, Theme}
 import kui.ui.shell.feature.{CapabilityBanner, FeatureGate}
 import kui.ui.shell.layout.{Header, Layout, Sidebar}
-import kui.ui.shell.nav.Navigation
+import kui.ui.shell.nav.{ClusterEntry, ClusterSwitcher, Navigation}
 import kui.ui.shell.page.{
   ForbiddenPage,
   GalleryPage,
@@ -188,6 +189,12 @@ object Shell {
     // to it, because only the shell knows where the deployment put KUI.
     val uiPrefix = bootstrap.basePath.stripSuffix("/") + ShellRouter.UiPath
 
+    // A cluster named in the URL wins over the stored selection, and is applied before anything reads it: a
+    // pasted link has to show the recipient what the sender saw.
+    ShellRouter
+      .clusterInUrl(initialUrl, uiPrefix)
+      .foreach(cluster => CurrentCluster.selected.set(Some(cluster)))
+
     val router = ShellRouter.make(
       basePath = bootstrap.basePath,
       featureRoutes = features.flatMap(_.routes(uiPrefix)),
@@ -217,7 +224,18 @@ object Shell {
       )
 
     Layout(
-      sidebar = Sidebar(router, Navigation.items(states, hideForbidden = false), uiPrefix),
+      sidebar = Sidebar(
+        router = router,
+        items = Navigation.items(states, hideForbidden = false),
+        uiPrefix = uiPrefix,
+        switcher = Some(
+          ClusterSwitcher(
+            entries = CapabilityStore.states.map(ClusterEntry.of),
+            current = CurrentCluster.selected,
+            open = cluster => router.pushState(clusterPage(features, cluster))
+          )
+        )
+      ),
       header = Header(buildVersion.signal, Theme.choice),
       content = content(router, buildVersion.signal, states, api, uiPrefix),
       fullScreen = ShellHealth.connectivity.map {
@@ -226,6 +244,31 @@ object Shell {
       }
     )
   }
+
+  /** The tag the clusters feature stores its brokers page under in `history.state`.
+    *
+    * A string rather than a type, and that is the point: the shell may not name a feature's page classes,
+    * because a static reference is what pulls the whole feature into the bundle every user downloads. What it
+    * *can* do is ask the feature's own codec to build one, which is the same mechanism the Back button
+    * already uses to restore a feature page before that feature has been downloaded.
+    *
+    * If the feature does not recognise the tag — an older or newer build — the switcher navigates to the
+    * feature's landing page instead. It degrades to "the cluster list" rather than to nothing.
+    */
+  private val BrokersPageTag = "clusters.brokers"
+
+  /** Where choosing a cluster in the switcher goes. */
+  private def clusterPage(features: List[FeatureRoutes], cluster: kui.kernel.ClusterId): Page =
+    features.view
+      .flatMap(registration =>
+        registration.decodePage(
+          BrokersPageTag,
+          Json.obj("clusterId" -> Json.fromString(cluster.value)).hcursor
+        )
+      )
+      .headOption
+      .orElse(features.headOption.map(_.landing))
+      .getOrElse(ShellPage.Home)
 
   /** The content area: the capability banner, and under it whatever the current page is. */
   private def content(

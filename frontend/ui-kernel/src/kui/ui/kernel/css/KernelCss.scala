@@ -158,6 +158,17 @@ object KernelCss {
   val MagnitudeTrack = "kui-magnitude__track"
   val MagnitudeFill = "kui-magnitude__fill"
 
+  /** The per-cluster colour marker (`ClusterColors`). A filled chip, deliberately a rounded rectangle rather
+    * than a circle, so it cannot be mistaken for the round status dot beside it.
+    */
+  val ClusterTag = "kui-cluster-tag"
+  val ClusterTagNone = "kui-cluster-tag--none"
+  val ClusterTagPrimary = "kui-cluster-tag--primary"
+  val ClusterTagSuccess = "kui-cluster-tag--success"
+  val ClusterTagWarning = "kui-cluster-tag--warning"
+  val ClusterTagDanger = "kui-cluster-tag--danger"
+  val ClusterTagAccent = "kui-cluster-tag--accent"
+
   /** The stale-data overlay (ADR-032 DC-H3). `StaleActive` is what dims the content; nothing in Scala
     * computes an opacity.
     */

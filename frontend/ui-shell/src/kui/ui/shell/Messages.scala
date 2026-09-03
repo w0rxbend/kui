@@ -53,6 +53,24 @@ object Messages {
       "KUI reads each cluster on its own schedule, and the refresh button on a page is what asks " +
       "for that to happen now. Off by default."
 
+  // --- The cluster switcher -------------------------------------------------------------------------
+
+  val ClusterSwitcherLabel: String = "Cluster"
+
+  val NoClusters: String = "No clusters configured"
+
+  val ClusterOnline: String = "Online"
+
+  val ClusterDegraded: String = "Degraded"
+
+  val ClusterUnavailable: String = "Unavailable"
+
+  val ClusterForbidden: String = "You do not have permission to use this cluster."
+
+  val ClusterNotConfigured: String = "Not configured in this deployment."
+
+  def colourFor(cluster: String): String = s"Colour for $cluster"
+
   /** The sidebar tooltip on a `Forbidden` entry. */
   def notPermitted(featureLabel: String): String = s"You do not have permission to view $featureLabel"
 

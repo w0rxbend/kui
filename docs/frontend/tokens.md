@@ -279,6 +279,10 @@ now fails the suite ("every documented pair names a token that exists").
 | `--kui-color-success` | `--kui-color-success-container` | 4.5 |
 | `--kui-color-warning` | `--kui-color-warning-container` | 4.5 |
 | `--kui-color-danger` | `--kui-color-danger-container` | 4.5 |
+<!-- The per-cluster colour tag (`ClusterColors`) introduces no row of its own: it is a small filled
+     square with no text on it, and every one of its six fills is a container colour already checked
+     above against its paired text colour. That is why the palette is six semantic tokens rather than
+     ten invented values — ten hexes would be ten colours no theme controls and no row here checks. -->
 | `--kui-color-primary` | `--kui-color-surface` | 4.5 |
 | `--kui-color-accent` | `--kui-color-surface` | 4.5 |
 | `--kui-color-success` | `--kui-color-surface` | 4.5 |

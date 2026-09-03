@@ -3,6 +3,7 @@ package kui.ui.shell
 import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.*
 
+import kui.kernel.ClusterId
 import kui.ui.kernel.feature.{FeatureRoutes, Page}
 
 /** The one router, over every page in the application.
@@ -28,6 +29,29 @@ object ShellRouter {
     * means (ARCHITECTURE.md §12).
     */
   val UiPath = "/ui"
+
+  /** The path segment a cluster-scoped URL starts with. */
+  private val ClustersSegment = "clusters"
+
+  /** The cluster named by a URL, if it names one.
+    *
+    * Read from the path rather than from a decoded page, because the shell may not name a feature's page
+    * types — that is what keeps the feature's code out of the bundle every user downloads. The shape
+    * `/ui/clusters/<id>/…` is a route the shell already routes *through*, so recognising it here is not the
+    * shell knowing what a cluster is; it is the shell knowing where its own prefix ends.
+    *
+    * A URL naming a cluster wins over the stored selection on load. A link is usually pasted by a colleague,
+    * and the recipient has to see what the sender saw.
+    */
+  def clusterInUrl(url: String, uiPrefix: String): Option[ClusterId] = {
+    val path = url.takeWhile(character => character != '?' && character != '#')
+    val relative = path.split("://").lastOption.getOrElse(path).dropWhile(_ != '/')
+    val segments = relative.stripPrefix(uiPrefix).split('/').filter(_.nonEmpty).toList
+    segments match {
+      case ClustersSegment :: candidate :: _ => ClusterId.from(candidate).toOption
+      case _ => None
+    }
+  }
 
   /** The shell's own routes, in the order they are tried.
     *

@@ -173,3 +173,120 @@
   padding: var(--kui-space-6) var(--kui-space-5);
   color: var(--kui-color-text-muted);
 }
+
+/* --- The cluster switcher --------------------------------------------------------------------- */
+
+/* Directly under the wordmark and above the destinations, because from M2 onward every destination
+ * below it is scoped to the chosen cluster, and a control that scopes the things under it belongs
+ * above them. */
+.kui-shell__cluster-switcher {
+  position: relative;
+  padding: 0 var(--kui-space-3) var(--kui-space-3);
+}
+
+.kui-shell__cluster-switcher-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-2);
+  width: 100%;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-raised);
+  color: var(--kui-color-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.kui-shell__cluster-switcher-trigger:hover {
+  background-color: var(--kui-color-state-layer);
+}
+
+.kui-shell__cluster-switcher-caret {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-shell__cluster-switcher-list {
+  position: absolute;
+  left: var(--kui-space-3);
+  right: var(--kui-space-3);
+  z-index: var(--kui-z-dropdown);
+  max-height: 18rem;
+  margin-top: var(--kui-space-1);
+  padding: var(--kui-space-1);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+  box-shadow: var(--kui-shadow-md);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.kui-shell__cluster-switcher-option {
+  padding: var(--kui-space-2);
+  border-radius: var(--kui-radius-md);
+  cursor: pointer;
+}
+
+.kui-shell__cluster-switcher-option:hover,
+.kui-shell__cluster-switcher-option:focus-visible {
+  background-color: var(--kui-color-state-layer);
+}
+
+/* The current cluster is marked the way the design marks an active destination: the secondary
+ * container colour, not a tick, so it reads at a glance. */
+.kui-shell__cluster-switcher-option--current {
+  background-color: var(--kui-color-selected);
+  color: var(--kui-color-selected-contrast);
+}
+
+.kui-shell__cluster-switcher-row {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-shell__cluster-switcher-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-shell__cluster-switcher-empty {
+  padding: var(--kui-space-2);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-shell__cluster-switcher-colour {
+  border: 0;
+  background: none;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+/* A circle, where the colour tag beside it is a rounded rectangle. One shape doing both jobs would
+ * make a red "production" marker indistinguishable from a failing cluster. */
+.kui-shell__cluster-dot {
+  display: inline-flex;
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-shell__cluster-dot--ready {
+  color: var(--kui-color-success);
+}
+
+.kui-shell__cluster-dot--degraded {
+  color: var(--kui-color-warning);
+}
+
+.kui-shell__cluster-dot--unavailable {
+  color: var(--kui-color-danger);
+}
+
+.kui-shell__cluster-dot--neutral {
+  color: var(--kui-color-text-muted);
+}

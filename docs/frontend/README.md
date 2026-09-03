@@ -629,6 +629,36 @@ in by the function that builds all the rows together. The alternative — each r
 skew — would need every row to know the others, and two rows computed against different denominators
 would fail to add up on the page they are shown on together.
 
+### Shell chrome reads the capability registry, never a feature's service
+
+The cluster switcher at the top of the drawer lists every cluster and says whether each one is
+answering. It gets both from the **capability registry** — the same store the sidebar's entries come
+from, already subscribed, already streaming — and it never calls the cluster service. That is the
+rule for anything in the shell's chrome, and M2's cluster-scoped navigation follows it.
+
+Three reasons, and together they are the design:
+
+- **The shell must not hold a feature's data.** It sees a feature only through its static route
+  declarations; everything else goes through a dynamic import so the linker can keep the feature out
+  of the bundle every user downloads. A shell that fetched cluster DTOs would put the cluster
+  contract's decoders into that first bundle, including for deployments that have no cluster service
+  at all.
+- **Status is a health question, and health lives in the registry by construction.** Reading it
+  anywhere else gives the switcher and the sidebar two different opinions about the same cluster.
+- **The stream is already open**, already pushes changes and already debounces transitions, so live
+  status costs no new connection.
+
+The consequence worth stating: when the cluster service is stopped, the switcher still lists every
+cluster, each with an unavailable dot, and choosing one still navigates — to a page that explains
+what is missing. A switcher that needed the cluster service would disappear exactly when somebody
+needed it to find out why.
+
+Two smaller rules the switcher establishes. **A cluster is as healthy as its worst service**: one
+cluster usually has several registry entries, one per service scoped to it, and a dot reporting the
+best of them would be reassuring and wrong. And **the colour tag and the status dot are two marks
+with two shapes** — a rounded rectangle and a circle — because one element doing both jobs would
+make a red "production" marker indistinguishable from a failing cluster.
+
 ### Watching an accepted-but-asynchronous action: the 202 pattern
 
 Some of what KUI asks a server to do does not finish while the request is open. The forced cluster
