@@ -553,6 +553,15 @@ and permission failures before the stream starts are ordinary HTTP error envelop
 `Last-Event-ID` on reconnect is accepted as a cursor; tailing emits no `done`; UI-facing
 tailing throughput is rate-limited (default 20 events/s) in the service.
 
+**What exists today (M0, task HTTP-004).** `libs/http`'s `kui.http.sse.Sse` implements the kernel
+of this: heartbeat discipline, the at-most-one-terminal-event rule, a bounded drop-oldest buffer,
+cancellation, and the `kui.stream.active`/`kui.stream.events` metrics. The normative example of the
+wire format — byte for byte, including field order (`event`, then `id`, then `data` last) — is
+`SseSuite.goldenWireFormat` in `libs/http/test/src/kui/http/sse/SseSuite.scala`; the browser-side
+parser in `frontend/ui-kernel` is tested against the same bytes, so the two halves cannot drift
+apart. `phase`, `message` and `consumed` are domain events added by the services that own them
+(M3); this module only guarantees that whatever a caller emits behaves the way every stream must.
+
 ## 8. Paging: offset pages and signed cursors
 
 - Lists with in-memory sort (topics, consumer groups, schemas, connectors): offset paging

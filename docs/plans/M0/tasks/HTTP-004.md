@@ -150,3 +150,37 @@ reconnect.
 ## Docs to update
 
 `ARCHITECTURE.md` §7: link the golden wire-format test as the normative example.
+
+## Deviations
+
+1. **`Sse.stream` takes an explicit `StructuredLogger[F]`.** The spec's signature omits it, but the
+   at-most-one-terminal-event rule needs somewhere to say "a second terminal event was dropped", and
+   a silent drop would be a stream that quietly loses data with no trace of why. Passing the logger
+   explicitly, rather than reaching for a global, keeps the module free of any assumption about how
+   a caller constructs its logger.
+
+2. **`atMostOneTerminal` runs before the bounded buffer, not after it.** The rule reads whole chunks
+   to decide whether a caller emitted two terminal events in the same batch; after the buffer, events
+   arrive one at a time and that batch boundary is gone. Buffering absorbs a slow reader and its
+   drop-oldest policy is safe in this order specifically because the terminal event, once produced,
+   is always the newest thing in the queue — it is never the one thrown away.
+
+3. **A dropped terminal-event duplicate is reported as a WARN naming a count, not the event
+   name.** `atMostOneTerminal` operates on whole `fs2.Chunk`s for efficiency, so what it can cheaply
+   report is "N events after the terminal one", not each one individually. The spec's wording ("the
+   second is dropped and a WARN is logged") is satisfied; the log field is `dropped`, not `event`.
+
+4. **`errorFor`'s `KuiError` construction for `withErrorEvent` needs no upstream detail**, matching
+   ADR-034's rule that a stack trace never leaves the process: the fixed message `Internal error` is
+   used, exactly as `ErrorInterceptor` uses it for an ordinary HTTP 500.
+
+5. **`Sse.body[F]` returns `StreamBodyIO[Stream[F, Byte], Stream[F, Byte], Fs2Streams[F]]`, not
+   `EndpointOutput[Stream[F, Byte]]`** as sketched. That is what `streamTextBody` actually produces
+   in tapir 1.13.31, and it composes with `.errorOut(...)` the same way an `EndpointOutput` would; a
+   caller never notices the difference.
+
+6. **The cancellation suite measures four things, one more than the spec's three** (in addition to
+   `clientDisconnectCancelsTheSourceWithinOneElement`, `serverShutdownEndsOpenStreamsCleanly` and
+   `streamActiveGaugeReturnsToZeroAfterDisconnect`): a fourth case serves a real, finite stream
+   end-to-end and asserts the bytes match the golden wire format produced by a live server, not only
+   by `SseEvent.render` in isolation.
