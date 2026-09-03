@@ -316,3 +316,57 @@ This component *is* the degraded behaviour, so its own failure modes are what ma
 - `docs/frontend/tokens.md` — if the badge introduces a foreground/background pair that the contrast
   table does not already list, add the row. `ContrastSuite` reads that table and will fail without
   it.
+
+## Deviations
+
+Recorded at implementation time, per the plan's rule that a worker decides and records rather than
+asks. Commit `aa7c8e6`.
+
+1. **`Timestamps.absolute` does not format through `scala-java-time`.** The spec asks for
+   `DateTimeFormatter` so that the JVM and the browser produce the same characters from the same
+   instant. That was implemented first and immediately failed its own required test: `scala-java-time`
+   ships no time-zone database, so `ZoneId.of("Europe/Warsaw")` throws and the fallback renders UTC.
+   The three-zone assertion the spec names is therefore unsatisfiable as written, and — much worse —
+   the timezone preference CLUI-007 is about to build would have been a setting that changed nothing.
+   The two ways out are shipping `scala-java-time-tzdb`, roughly a megabyte of compiled zone data in
+   the browser bundle, or using the database the browser already has. The implementation takes the
+   second: `Intl.DateTimeFormat.formatToParts` supplies the wall-clock fields with every component
+   pinned to a numeric width under `hourCycle: "h23"`, and this file assembles the string. `Intl` is
+   used as a *zone database*, not as a *formatter*, so the character-level assertion the spec wanted
+   is still there and still passes. The offset is derived (the zone's wall clock minus the instant),
+   so daylight saving comes from the browser's database rather than from this file. `relative` and
+   `lastUpdated` are pure arithmetic on `Instant` and are unchanged.
+
+2. **`aria-busy` is always present, `"false"` when fresh.** The spec's
+   `freshContentHasNoBadgeAndNoAriaBusy` asks for the attribute to be absent. `aria-busy="false"` is
+   the standard ARIA spelling of "this region is not busy", and a reader that has already been told
+   the region went busy needs to be told it came back. Laminar writes the attribute for both boolean
+   values; removing it on `false` would mean poking the DOM by hand for no gain. The test asserts
+   `Some("false")` and still asserts that no badge exists and that the stale class is absent, which
+   is what the case is actually protecting.
+
+3. **`QueryState.lastGoodAt` stays a `js.Date`, as the spec's signature says, while
+   `StaleDataOverlay.fetchedAt` takes an `Instant`.** The cache's clock is a `js.Date` and the
+   formatter's currency is an `Instant`; rather than change either, `Timestamps.instantOf` is the one
+   conversion, so no screen writes millisecond arithmetic of its own.
+
+4. **`StaleReason` gained a `summary` method** (`"Unavailable: connection refused"`), so that the
+   state word and the reason are joined in one place instead of at every call site.
+
+5. **`docs/frontend/tokens.md` was not changed.** The badge uses `--kui-color-warning` on
+   `--kui-color-warning-container`, and that pair is already row-for-row in the contrast table;
+   `ContrastSuite` passes unchanged.
+
+## Implementation report
+
+```
+./mill frontend.uiKernel.compile        SUCCESS
+./mill frontend.uiKernel.test           0 failed
+                                        StaleDataOverlaySuite  7
+                                        TimestampsSuite        6
+                                        QueryCacheSuite       13 (8 pre-existing + 5 new)
+./mill frontend.uiKernel.checkFormat    SUCCESS
+./mill frontend.uiKernel.fix --check    SUCCESS
+./mill checkArchitecture                75 modules, no layering violations
+./mill __.compile                       SUCCESS
+```
