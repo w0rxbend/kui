@@ -238,3 +238,22 @@ and that is correct rather than a placeholder.
 `ARCHITECTURE.md` §6: replace "the gateway folds … into `CapabilityState` per `(service,
 cluster)`" — which was aspirational in M0 — with a note that the per-cluster half is now real,
 and name the rule from decision 1 so nobody re-introduces the fold.
+
+## Deviations
+
+1. **`CapabilitySignals.updateService` exists alongside `update`.** Three callers - the circuit feed,
+   the proxy's transport-failure reporting and the dashboard aggregation - only ever mean the service
+   key, and spelling `CapabilityKey(service, None)` at each of them is three chances to write
+   `Some(...)` by mistake.
+2. **A service reporting no clusters at all is still `configured`.** The spec's poller table implies
+   `configured = clusters.nonEmpty`; that would report a KUI with nothing configured as
+   not-configured and grey the feature out on a deployment where nothing is wrong. M0's rule is
+   kept and the existing suite asserts it.
+3. **The readiness verdict reaches every known cluster key even when the capability call failed.**
+   Without it, a service that went down left its clusters at their last healthy state, because the
+   per-cluster write only happened on a successful capability report.
+4. **`ClusterFeatures`' third set** was already implemented by the CLDOM lane before this task ran;
+   nothing here changed it.
+5. `ReadinessPollerSuite`'s existing expectations did not need changing: they assert the service key,
+   which still behaves as it did for a service with no clusters. The behaviour change is asserted by
+   the new `PerClusterCapabilitySuite`.

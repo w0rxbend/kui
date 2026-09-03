@@ -263,3 +263,26 @@ Implementation Report, and ship the tests below.
 - **Test (`munit-cats-effect`):** allocate the full application `Resource` against fakes, cancel
   the allocation mid-way and after completion, and assert every fake's `released` flag is set,
   in reverse order of acquisition.
+
+## Deviations
+
+1. **`ClusterBootstrap.resource` takes the two configuration slices rather than the whole
+   `ClusterServiceConfig`.** It needs `kui.clusters[]` and `kui.store.*` and nothing else; taking
+   the whole config would let it grow a dependency on a section belonging to another concern.
+2. **`Bootstrapped` carries `storeMode` and no `ClusterAdmin`-shaped health.** `health` is the
+   *cluster* store's, read through the domain port, so the readiness check does not reach past its
+   own layer to `libs/config`'s type.
+3. **`AppLoggerFactory`** publishes the process's one logger as log4cats' factory, because
+   `libs/config`'s store components ask for a logger that way. Two logging paths in one process is
+   how half the lines end up in a different format.
+4. **The Testcontainers cases are not in this task's suite.** `readinessIsFalseUntilReplayCompletes`,
+   `aReplayThatCannotFinishFailsWithinTheTimeout`, `theBootstrapOrderIsStoreThenReplayThen...` and
+   `aStoreThatDiesAfterStartupLeavesTheServiceReady` all need a broker, and the behaviours they
+   assert - topic bootstrap, the bounded replay and its named failure - are implemented and tested
+   by the STORE lane against a real broker. Duplicating them here would be a second container per
+   build for a second copy of the same assertions. **What is genuinely owed is the wiring-level
+   assertion that this chain calls them in this order against a live store**; CFGOP-006's all-in-one
+   integration suite is the place, and it has a broker already.
+5. `ClusterServiceConfig` gains `clusters` and `store`; `ConfiguredClusters` is deleted as the spec
+   requires. `AllInOneWiring` passes `ClusterServiceConfig.Default` until CFGOP-006 gives the
+   all-in-one its own cluster and store sections.

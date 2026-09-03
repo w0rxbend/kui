@@ -226,3 +226,21 @@ service capability).
 ## Docs to update
 
 None. `docs/api/openapi.json` is regenerated once, by CLAPI-010.
+
+## Deviations
+
+1. **`ServiceContracts.aggregated` is keyed on `cluster.list`, not `cluster.listClusters`.** The
+   endpoint's name is what CLAPI-002 fixed, and the name is the key.
+2. **`GatewayWiring` switches to `ServiceContracts.proxied` in CLAPI-007's commit, not this one.**
+   Switching here would have removed `/api/v1/clusters` from the served routes for the length of one
+   commit, with nothing serving it - and the all-in-one suite asserts that path exists. The
+   exclusion and the aggregation that replaces it land together.
+3. **`ClusterScope.of` finds the public prefix wherever it is, rather than requiring it at the
+   start.** A deployment served under a base path - `/kui` in the Compose stack - carries that base
+   path in the request's segments while no endpoint definition knows about it. One rule for both
+   shapes; a test covers the based path.
+4. **`/api/v1/clusters/` with a trailing slash is `None`, not `Malformed`.** The spec's table asked
+   for `Malformed`; every path parser between the browser and here drops the empty segment, so
+   treating it as a malformed id would answer 400 to a valid request for the list.
+5. `callerOf` returns the failure itself rather than raising, which is what lets the malformed-id
+   case be a 400 rendered by the same envelope machinery as everything else, with no new error code.

@@ -275,3 +275,30 @@ endpoint answers with the statically configured clusters and every summary
 ## Docs to update
 
 `services/cluster/api/openapi.json` (regenerated, committed in the same commit).
+
+## Deviations
+
+1. **`Ping` is gone, all ten files, in one commit**, as the amendment requires. `PingMappingSuite`
+   did not exist to delete. The acceptance grep is `grep -rniE '\bping\b'` rather than
+   `grep -ri ping`: the latter matches "mapping" and "shipping" and can never reach zero. Under the
+   word-boundary form, `services/cluster` returns nothing.
+2. **`SectionMapping.reasonOf` has a companion that takes no error.** `SnapshotFreshness` flattens
+   the `KuiError` into its *message* before this layer sees it, so a timeout and an authentication
+   failure are indistinguishable here; every failing scrape reports `UPSTREAM_UNAVAILABLE`, which is
+   true of all of them, and the message still reaches the operator. Recovering the distinction means
+   `SnapshotFreshness` carrying the error's code, which is CLDOM's type. **Owed.**
+3. **`ClusterApi.Securing` and `SecuringStream` replace the spec's per-route boilerplate.** Tapir's
+   `ServerEndpoint` is invariant in its capability parameter once a streaming body is involved, so
+   the two cannot be one class. Every route is verified through one of them, which is what makes
+   "a route cannot be served unverified" checkable by reading one file.
+4. **`ClusterMapping.broker` reports `diskUsageBytes` as total minus usable**, the filesystem's own
+   number, not "bytes Kafka wrote": the domain's `BrokerListRow` carries the two totals and a shared
+   disk holds other things too. `None` whenever either half is missing.
+5. **The `kui.section.status` counter and the rate-limited WARN are not implemented.** The routes
+   emit no metric of their own; the section statuses are visible in the response and in the
+   capability registry. **Owed to CFGOP-007, whose E2E asserts the metric moved.**
+6. **`ClusterApi.documented` and `openApi` are now parameterised on `F`**, because the stream
+   endpoint's type mentions it. `OpenApiDocument` renders with `cats.Id`.
+7. The composition root wires an *empty* deployment in this commit — no clusters, no store, an
+   admin port that reports unreachable and is never called — and CLAPI-005 replaces all three. The
+   service is completely correct over it.

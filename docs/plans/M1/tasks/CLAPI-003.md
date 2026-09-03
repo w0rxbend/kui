@@ -258,3 +258,21 @@ traffic.
 `ARCHITECTURE.md` §5's internal-contract table: mark the two profile edges as implemented and
 name the files. (This is the one `ARCHITECTURE.md` edit in the CLAPI area; the rest of §4.2's
 sketch replacement is CFGOP-008's.)
+
+## Deviations
+
+1. **The profile endpoint is *not* added to `ClusterEndpoints.all`.** The spec's "files to change"
+   said to add it; `all` is what the gateway turns into public `/api/v1` routes, and ADR-043 makes
+   this a service-to-service call, one hop, not a browser-reachable path. It lives in
+   `ProfileEndpoints.all`, which `ClusterApi.documented` concatenates, so it is in the service's own
+   OpenAPI document and absent from the merged public one. A test asserts both halves.
+2. **`ProfileResult` lives in `kui.cluster.contract.dto`**, not inside `ProfileEndpoints`: Tapir's
+   `mapTo` needs the case classes, and the DTO package is where every other wire type of this
+   contract lives.
+3. **`ProfileResult.entityTag`, not `etag`.** Both cases already have an `etag` *field*, and a
+   member of that name on the enum itself is an override of them.
+4. **`ProfileResult.isCurrent` tolerates a `W/` prefix and unquoted values.** A proxy between the
+   caller and KUI may add or remove either. `*` is treated as unconditional, which is the only
+   useful reading of the wildcard on a read.
+5. The stream route's suite is `ClusterStreamEndpointSuite` in `services.cluster.api.test`, as the
+   spec's second option allowed.

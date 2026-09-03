@@ -269,3 +269,22 @@ the fake.
 `docs/operations/metadata-store.md` gains a "Changing a cluster at runtime" paragraph with the
 curl transcript above; if that file does not exist yet, the content goes in the Implementation
 Report for CFGOP-008 to place.
+
+## Deviations
+
+1. **`ClusterWriteUseCase` is created in `services/cluster/application` by this task.** The spec says
+   "CLDOM-004 / CLADP-003 supply it"; neither did, and there was none. The alternative was an `api`
+   module orchestrating a domain port directly, which puts a use case in the wrong layer to avoid
+   crossing a task boundary. One new file, in the shape the rest of that module uses.
+2. **The permission check compares role *names* against `ApplicationConfig.Edit`.** `kui.security`
+   has no `Rbac.decide` in M1, and the role vocabulary is M6's. The check exists, fails for an
+   anonymous principal, and is one function for M6 to replace.
+3. **The `If-Match` version is mapped in `ClusterWriteMapping.versionOf`**, tolerating quotes and a
+   `W/` prefix, for the same proxy reason as the profile endpoint's ETag comparison.
+4. **`AdminTuningWrite.timeoutMs` also caps the per-request timeout.** A caller sets one number - how
+   long a whole admin call may take - and a per-round-trip default larger than it can never be
+   reached, which the domain refuses. Capping is refusing a number the caller never wrote.
+5. **`kui.config.write` and `kui.config.write.duration` are not implemented.** One INFO per
+   successful write, with the cluster id and both versions, is. **Owed.**
+6. The concurrency exit criterion is asserted by the STORE lane against a real broker, as the spec
+   directs; this suite asserts that the conflict the store reports becomes a 409 with the right code.

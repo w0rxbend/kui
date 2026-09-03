@@ -171,3 +171,18 @@ None: this task produces files.
 The three generated files listed above. Their content is generated; the commit message says what
 changed in the API and why, because a diff of a generated JSON document is not readable and the
 commit body is the only place a reviewer will get the summary.
+
+## Deviations
+
+1. **`DocsRoutes.documentation` now uses `ServiceContracts.proxied` and includes
+   `ClusterOverviewEndpoints.all` in the gateway's own list.** Without the first, the cluster
+   service's list endpoint would be published with the response shape a caller never receives, and
+   the write endpoint would be published with no route behind it.
+2. **`theWriteEndpointIsPresentInTheClusterServiceDocument` lives in `ClusterApiSuite`**, not in the
+   gateway's suite: the gateway must not depend on another service's `api` module. The gateway's
+   half asserts the endpoint exists and is excluded by the routing rather than missing.
+3. **`thePublicClusterPathsEqualTheDerivedSet` compares path *templates*.**
+   `ContractRouting.publicPathOf` reports fixed segments only, so it cannot distinguish
+   `/api/v1/clusters` from `/api/v1/clusters/{clusterId}` - which is worth knowing about that
+   function, and is why the collision assertion elsewhere uses templates too.
+4. `docs/api/error-codes.md` gained the six store codes another lane added; this area added none.
