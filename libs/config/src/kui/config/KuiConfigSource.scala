@@ -537,14 +537,46 @@ object KuiConfigSource {
     )
   }
 
-  private def decodePrincipalKeys[F[_]: Async](layers: Layers): F[Problems[List[KeyDraft]]] =
-    layers
-      .childrenOf("kui.gateway.principalKeys")
-      .toList
-      .flatMap(_.toIntOption)
-      .sorted
+  /** The signing keys, which are a *list*: their children are the list indices.
+    *
+    * A child that is not a number means the section was written as a map — an indentation slip that turns
+    * `- kid: k1` into `k1:` — and every such child used to be dropped by a `flatMap(_.toIntOption)` that said
+    * nothing. The result was an empty key list from a file with keys plainly written in it: the cluster
+    * service then refused to start with "no principal signing keys are configured" while the operator was
+    * looking straight at one, and the gateway started from the same file and signed nothing. Naming the
+    * offending child is the whole difference between a five-minute fix and an evening.
+    */
+  private def decodePrincipalKeys[F[_]: Async](layers: Layers): F[Problems[List[KeyDraft]]] = {
+    val prefix = "kui.gateway.principalKeys"
+    val (notIndices, indices) =
+      layers.childrenOf(prefix).toList.partitionMap(name => name.toIntOption.toRight(name))
+    val misshapen = notIndices.sorted.map(name =>
+      ConfigProblem(
+        s"$prefix.$name",
+        s"is not a list entry; '$prefix' is a list of keys, so each entry is written as a '- ' item " +
+          "rather than as a named child",
+        sourceOfPrincipalKey(layers, name)
+      )
+    )
+    indices.sorted
       .traverse(index => decodePrincipalKey[F](layers, index))
       .map(_.sequence)
+      .map(decoded =>
+        misshapen match {
+          case Nil => decoded
+          case first :: rest => decoded *> NonEmptyList(first, rest).invalid
+        }
+      )
+  }
+
+  /** Where the operator wrote the misshapen entry, so the message can point at the right file. */
+  private def sourceOfPrincipalKey(layers: Layers, name: String): ConfigSourceName = {
+    val prefix = s"kui.gateway.principalKeys.$name"
+    List("kid", "key", "notBefore")
+      .flatMap(leaf => layers.first(s"$prefix.$leaf").map(_._1))
+      .headOption
+      .getOrElse(ConfigSourceName.Default)
+  }
 
   private def decodePrincipalKey[F[_]: Async](layers: Layers, index: Int): F[Problems[KeyDraft]] = {
     val prefix = s"kui.gateway.principalKeys.$index"

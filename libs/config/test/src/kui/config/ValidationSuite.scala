@@ -143,6 +143,28 @@ final class ValidationSuite extends KuiSuite {
     assertEquals(found.map(_.key), List("kui.telemetry"))
   }
 
+  test("a signing key written as a named child is reported, not silently dropped") {
+    // An indentation slip turns the list `- kid: k1` into the map `k1:`. Those children used to be
+    // filtered out for not being numbers, leaving an empty key list from a file with a key plainly
+    // written in it: the cluster service refuses to start saying no signing keys are configured,
+    // while the operator is looking straight at one.
+    val file = ConfigFixtures.yaml(
+      """kui:
+        |  gateway:
+        |    principalKeys:
+        |      first:
+        |        kid: "k1"
+        |        key: "s3cret"
+        |""".stripMargin
+    )
+
+    val found = problems(load(List(file)))
+
+    assertEquals(found.map(_.key), List("kui.gateway.principalKeys.first"))
+    assert(found.head.problem.contains("is not a list entry"), found.head.problem)
+    assert(!found.head.render.contains("s3cret"), found.head.render)
+  }
+
   test("a YAML syntax error never echoes the line it choked on") {
     // The parser's own message ends with the offending source line. That happens before anything is
     // decoded, so nothing is a `Secret` yet and the redaction that protects every other error path
