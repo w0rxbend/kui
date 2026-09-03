@@ -20,7 +20,7 @@ final class GoldenFilesSuite extends FunSuite {
       })(stream => Source.fromInputStream(stream, "UTF-8").mkString)
       .stripLineEnd
 
-  GoldenDocuments.all.foreach { document =>
+  (GoldenDocuments.all ++ kui.contracts.cluster.ClusterGoldenDocuments.all).foreach { document =>
     test(s"${document._1} on disk matches the constant the cross-platform suites assert") {
       assertNoDiff(read(document._1), document._2)
     }

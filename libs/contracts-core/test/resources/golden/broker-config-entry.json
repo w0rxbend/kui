@@ -1,0 +1,12 @@
+{
+  "name" : "log.retention.hours",
+  "value" : "168",
+  "source" : "STATIC_BROKER_CONFIG",
+  "isSensitive" : false,
+  "isReadOnly" : true,
+  "documentation" : "The number of hours to keep a log file before deleting it",
+  "synonyms" : [
+    "log.retention.hours",
+    "log.retention.ms"
+  ]
+}

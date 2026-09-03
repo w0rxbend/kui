@@ -1,0 +1,6 @@
+{
+  "protocol" : "SASL_SSL",
+  "mechanism" : "SCRAM-SHA-512",
+  "truststoreConfigured" : true,
+  "keystoreConfigured" : false
+}

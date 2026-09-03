@@ -1,0 +1,16 @@
+{
+  "kafkaClusterId" : "MkU3OEVBNTcwNTJENDM2Qk",
+  "version" : "4.0.0",
+  "controllerId" : 1,
+  "controllerKind" : "kraft",
+  "brokerCount" : 3,
+  "onlinePartitionCount" : null,
+  "offlinePartitionCount" : null,
+  "underReplicatedPartitionCount" : null,
+  "totalDiskUsageBytes" : 549755813888,
+  "features" : [
+    "DESCRIBE_LOG_DIRS",
+    "DESCRIBE_QUORUM"
+  ],
+  "scrapedAt" : "2026-09-03T10:11:12.000Z"
+}

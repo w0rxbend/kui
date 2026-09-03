@@ -1,0 +1,9 @@
+{
+  "brokerId" : 1,
+  "path" : "/var/lib/kafka/data",
+  "error" : null,
+  "totalBytes" : 549755813888,
+  "usableBytes" : 366503875925,
+  "topicCount" : 12,
+  "partitionCount" : 48
+}
