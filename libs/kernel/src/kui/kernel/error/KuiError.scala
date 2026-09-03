@@ -206,7 +206,17 @@ object KuiError {
       ErrorCode.UpstreamAuth,
       ErrorCode.UpstreamKsql,
       ErrorCode.Timeout,
-      ErrorCode.Internal
+      ErrorCode.Internal,
+      // KUI's own metadata store is an upstream like any other: when it cannot be reached, the features
+      // that depend on it are genuinely unavailable and the capability that carries them should say so.
+      //
+      // Two neighbouring store codes are deliberately absent. `StoreNotConfigured` is a deployment
+      // choice, not a failure — a deployment that runs from files has no store to lose. And
+      // `ConfigVersionConflict` is a user's stale form. Either one listed here would let an ordinary
+      // action dim a feature for everybody else, which is exactly what this classification exists to
+      // prevent (ADR-039 §6).
+      ErrorCode.StoreUnavailable,
+      ErrorCode.StoreReplayTimeout
     )
 
   /** Rebuilds the error another KUI process reported, on the correct side of the application / infrastructure

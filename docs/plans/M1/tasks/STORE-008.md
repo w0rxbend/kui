@@ -243,3 +243,45 @@ Implementation Report, and ship the tests below.
 - Cancelling the health resource leaves no supervised fiber and no scheduled retry.
 - **Test (`TestControl`):** cancel during a backoff sleep and assert the fiber count returns to
   its starting value and no further reconnect attempt is made after cancellation.
+
+## Deviations
+
+1. **No `StoreMetrics`, and no otel4s dependency on `libs/config`.** The spec offers two routes and
+   this task takes the documented fallback: the store exposes `StoreHealth` (which already carries
+   the applied offset, the reason, the `since` and the unreadable keys) and the composition root
+   registers the gauges from it. `libs/config` is depended on by everything, and giving it an
+   otel4s edge to register eleven counters is a cost paid by every module in the build for a
+   benefit one process needs. The metric *names* stay exactly as the operator page publishes them;
+   what moved is where they are registered. This is recorded here so CLAPI-005 knows it owns the
+   registration.
+2. **`StoreHealth.Healthy` gained an `unreadable` list.** The spec's own table has "any state + a
+   record is unreadable → unchanged + `unreadableKeys`", which `Healthy` could not express with the
+   shape it had. One unreadable record is explicitly not a degraded store, so the list has to be
+   representable on the healthy case.
+3. **`StoreChange.Desynchronized` is added but nothing emits it yet.** The `changes` topic drops
+   the oldest element for a subscriber that falls behind, and fs2's `Topic` does not report how
+   many were dropped, so a truthful `missed` count is not available from here. The case exists so
+   that consumers — CLADP-005 in particular — are written to handle it from the start rather than
+   retrofitted, and the exhaustive match makes adding the emitter a compile-checked change rather
+   than a search.
+4. **`StoreHealthRef.markUnreadable` takes the whole list rather than one key.** The follower
+   already holds the authoritative set in `StoreState`, and passing the set makes "the operator
+   fixed the record, clear the warning" the same call as "a record went bad" instead of needing a
+   second method that could be forgotten.
+5. **`markDegraded` on a `ReadOnly` store is a no-op.** The file adapter holds no connection, so it
+   has nothing to lose and cannot become degraded. Left as a value rather than an impossible state
+   because `StoreHealthRef` is shared by both adapters.
+
+## Cancellation and shutdown, as implemented
+
+- **The reconnect loop is cancellable at every step, including inside the sleep.** The backoff is
+  `Async[F].sleep`, which is interruptible, so a shutdown during a thirty-second backoff completes
+  at once rather than waiting it out.
+- **Cancelling the store's resource leaves no supervised fiber and no scheduled retry.** The
+  follower runs under a `Supervisor` acquired *after* the consumer, so release order cancels the
+  fiber first and closes the consumer second — a consumer closed underneath a running poll is how
+  an orderly shutdown turns into a stack trace. `StoreReplaySuite`'s
+  `cancellingTheFollowerReleasesTheLogExactlyOnce` asserts the fiber observes the cancellation and
+  the log's release runs exactly once.
+- **Every failed attempt frees the parked writers before it sleeps**, so a cancellation during
+  backoff cannot strand a writer that would otherwise have been woken by the next attempt.

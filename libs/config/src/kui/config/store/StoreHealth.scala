@@ -11,8 +11,12 @@ import java.time.Instant
   */
 enum StoreHealth {
 
-  /** Live and caught up. `lastAppliedOffset` is `-1` for a store that has no log. */
-  case Healthy(lastAppliedOffset: Long, since: Instant)
+  /** Live and caught up. `lastAppliedOffset` is `-1` for a store that has no log.
+    *
+    * It can still carry unreadable keys: KUI keeping up with the log perfectly and one entry of that log
+    * being unusable are different facts, and one bad record is not a degraded store.
+    */
+  case Healthy(lastAppliedOffset: Long, since: Instant, unreadable: List[StoreKey])
 
   /** Reachable no more. Reads serve the last replayed state; writes are rejected rather than buffered,
     * because a buffered write has no version to check against and would silently overwrite whatever another
@@ -24,7 +28,7 @@ enum StoreHealth {
   case ReadOnly(reason: String, unreadable: List[StoreKey])
 
   def writable: Boolean = this match {
-    case Healthy(_, _) => true
+    case Healthy(_, _, _) => true
     case Degraded(_, _, _, _) => false
     case ReadOnly(_, _) => false
   }
@@ -36,7 +40,7 @@ enum StoreHealth {
     * reader that had thrown would have given them a stack trace and no list.
     */
   def unreadableKeys: List[StoreKey] = this match {
-    case Healthy(_, _) => Nil
+    case Healthy(_, _, unreadable) => unreadable
     case Degraded(_, _, _, unreadable) => unreadable
     case ReadOnly(_, unreadable) => unreadable
   }

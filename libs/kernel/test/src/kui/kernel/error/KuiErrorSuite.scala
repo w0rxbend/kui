@@ -100,6 +100,23 @@ final class KuiErrorSuite extends FunSuite {
     )
   }
 
+  test("storeCodesAreInfrastructureCodes") {
+    // KUI's own metadata store is an upstream like any other: unreachable, the features that depend on it
+    // are genuinely unavailable, so the capability carrying them should dim.
+    assert(KuiError.InfrastructureCodes.contains(ErrorCode.StoreUnavailable))
+    assert(KuiError.InfrastructureCodes.contains(ErrorCode.StoreReplayTimeout))
+
+    // These two must never dim a capability. A store that is not configured is a deployment choice, not
+    // a failure; a version conflict is somebody's stale form. Listing either would let one user's
+    // ordinary action grey out a feature for everyone else, which is the failure mode this
+    // classification exists to prevent (ADR-039 §6).
+    assert(!KuiError.InfrastructureCodes.contains(ErrorCode.StoreNotConfigured))
+    assert(!KuiError.InfrastructureCodes.contains(ErrorCode.ConfigVersionConflict))
+
+    assertEquals(KuiError.remote(ErrorCode.StoreUnavailable, "gone").isInstanceOf[InfrastructureError], true)
+    assertEquals(KuiError.remote(ErrorCode.StoreNotConfigured, "no store").isInstanceOf[ApplicationError], true)
+  }
+
   test("a rejected value object becomes a domain error that keeps the field it was about") {
     val rejected = ValidationError.Range("partitionId", Some("0"), None, "-1")
     val error    = DomainError.fromValidation(rejected)

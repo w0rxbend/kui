@@ -291,9 +291,19 @@ KUI does not fall over and it does not quietly lose your edits.
 | Two operators editing the same cluster at once | One write wins; the other gets `KUI-CONFIG-VERSION-CONFLICT` and is told to reload and retry. Both KUI replicas converge on the winner's record. |
 | A write that times out | `KUI-TIMEOUT` (408, retryable). **The write may still have been applied** — what expired is KUI's wait for the record to come back around the log, not the write itself. Re-read the record to find out. Retrying the same edit at the same base version is safe either way: if it landed, the retry is a version conflict and changes nothing; if it did not, the retry is a fresh write. |
 
-Watch `kui.store.replay.lag`, `kui.store.write.errors` and the store capability's state in the
-capability registry. A store capability that has been `Degraded` for more than one refresh
-interval is worth an alert.
+| One record unreadable | That one key is missing and everything else works. The record is skipped, its key is named in a `WARN` and reported in the store's health, and a write to that key repairs it. KUI stays healthy: keeping up with the log perfectly and one entry of that log being unusable are different facts, and one bad record must not grey out a feature for everybody. |
+
+Watch `kui.store.replay.lag`, `kui.store.write.errors` (labelled by `reason`:
+`conflict`, `timeout`, `degraded`, `crypto`), the `kui.store.health` gauge (`healthy`,
+`degraded`, `read_only`) and the store capability's state in the capability registry. A store
+capability that has been `Degraded` for more than one refresh interval is worth an alert.
+
+**`Degraded` is sticky about when it started.** A retry that fails again does not reset the
+timestamp, so "this store has been unreachable for twenty minutes" is a sentence you can write an
+alert against. KUI reconnects for ever — one second, doubling to thirty, with jitter so that a
+fleet of replicas does not come back in lockstep and knock the broker over again — and resumes
+from the offset it had reached rather than replaying the whole log. Restarting a broker for twenty
+minutes never requires restarting KUI as well.
 
 ## 7. Running without the store
 

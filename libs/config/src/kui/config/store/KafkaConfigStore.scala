@@ -79,6 +79,9 @@ object KafkaConfigStore {
       state <- Resource.eval(Ref.of[F, StoreState](StoreState.empty))
       changes <- Resource.eval(Topic[F, StoreChange])
       waiter <- Resource.eval(WriteWaiter.create[F])
+      health <- Resource.eval(
+        StoreHealthRef.of[F](StoreHealth.Healthy(-1L, java.time.Instant.EPOCH, Nil))
+      )
       producer <- StoreClients.producer[F](kafka, clientId)
       consumer <- StoreClients.consumer[F](kafka, clientId)
       log = kafkaLog(consumer, topic, partition)
@@ -88,27 +91,14 @@ object KafkaConfigStore {
       // The follower is started under a supervisor owned by this resource, so releasing the resource
       // cancels the fiber *before* the consumer resource above it is finalized. A consumer closed
       // underneath a running poll is how an orderly shutdown turns into a stack trace.
+      _ <- Resource.eval(health.markHealthy(endOffset - 1L))
       supervisor <- Supervisor[F]
       _ <- Resource.eval(
         supervisor.supervise(
-          follow(log, state, changes, crypto, Some(waiter), logger)
-            .handleErrorWith(error =>
-              logger.error(
-                s"store tail follower stopped: topic=$topic reason=${error.getClass.getSimpleName}; " +
-                  "reads continue from the last replayed state and writes will be rejected"
-              ) *>
-                // Free every parked writer at once rather than leaving each to wait out its own timeout
-                // against a log nobody is reading any more.
-                waiter.fail(
-                  StoreError.Unreachable(
-                    kafka.bootstrapServers.value,
-                    s"the tail follower stopped with ${error.getClass.getSimpleName}"
-                  )
-                )
-            )
+          followForever(log, state, changes, crypto, waiter, health, kafka.bootstrapServers.value, logger)
         )
       )
-    } yield writable(state, changes, waiter, producer, crypto, topic, config.writeTimeout, logger)
+    } yield writable(state, changes, waiter, health, producer, crypto, topic, config.writeTimeout, logger)
   }
 
   /** Assign the single partition, rewind, and find out where the log ends.
@@ -209,6 +199,48 @@ object KafkaConfigStore {
   ): F[Unit] =
     log.records.through(applyEach(state, changes, crypto, waiter, logger)).compile.drain
 
+  /** The follower, restarted for ever with bounded backoff.
+    *
+    * It never gives up. An operator restarting a broker for twenty minutes must not have to restart KUI as
+    * well, and a store that gave up would leave reads working and writes failing with no way back except a
+    * deployment. Between attempts the store is `Degraded`: reads keep serving the last state, writes are
+    * rejected rather than queued — a queued write applied minutes later lands on top of somebody else's edit
+    * — and every parked writer is freed at once instead of each waiting out its own timeout.
+    *
+    * Every step is cancellable, including the sleep: a shutdown must not have to wait out a thirty-second
+    * backoff.
+    */
+  private def followForever[F[_]: Async](
+      log: StoreLog[F],
+      state: Ref[F, StoreState],
+      changes: Topic[F, StoreChange],
+      crypto: FieldCrypto[F],
+      waiter: WriteWaiter[F],
+      health: StoreHealthRef[F],
+      bootstrapServers: String,
+      logger: Logger[F]
+  ): F[Unit] = {
+    def attempt(number: Int): F[Unit] =
+      follow(log, state, changes, crypto, Some(waiter), logger).attempt.flatMap {
+        case Right(_) =>
+          // The log ended, which for a live topic means the client was closed under us.
+          logger.info("store tail follower completed; the store is closing")
+        case Left(error) =>
+          val reason = StoreHealthRef.classify(error)
+          val pause = StoreRetryPolicy.Default.delay(number, scala.util.Random.nextDouble())
+          health.markDegraded(reason) *>
+            waiter.fail(StoreError.Unreachable(bootstrapServers, reason)) *>
+            logger.warn(
+              s"store tail follower failed: reason=$reason attempt=${number + 1} delayMs=${pause.toMillis}; " +
+                "reads continue from the last replayed state and writes are rejected until it recovers"
+            ) *>
+            Async[F].sleep(pause) *>
+            attempt(number + 1)
+      }
+
+    attempt(0)
+  }
+
   /** Decodes, decrypts and folds one record, publishing what changed. Yields each record's offset.
     *
     * Every failure here costs one key and no more. One record that will not decode, or that was encrypted
@@ -303,6 +335,7 @@ object KafkaConfigStore {
       state: Ref[F, StoreState],
       changeTopic: Topic[F, StoreChange],
       waiter: WriteWaiter[F],
+      healthRef: StoreHealthRef[F],
       producer: KafkaProducer[F, String, Option[String]],
       crypto: FieldCrypto[F],
       topic: String,
@@ -317,10 +350,33 @@ object KafkaConfigStore {
 
       def changes: Stream[F, StoreChange] = changeTopic.subscribe(ChangeBufferSize)
 
+      /** The health value, assembled from the two things that know a piece of it: the follower's own
+        * lifecycle (is the store reachable, and since when) and the replayed state (how far the log has been
+        * applied, and which keys were unusable).
+        */
       def health: F[StoreHealth] =
-        state.get.map(current => StoreHealth.Healthy(current.lastAppliedOffset, java.time.Instant.EPOCH))
+        (healthRef.get, state.get).mapN((reported, current) =>
+          reported match {
+            case StoreHealth.Healthy(_, since, _) =>
+              StoreHealth.Healthy(current.lastAppliedOffset, since, current.unreadableKeys)
+            case StoreHealth.Degraded(reason, since, _, _) =>
+              StoreHealth.Degraded(reason, since, current.lastAppliedOffset, current.unreadableKeys)
+            case StoreHealth.ReadOnly(reason, _) => StoreHealth.ReadOnly(reason, current.unreadableKeys)
+          }
+        )
 
       def put(
+          key: StoreKey,
+          payload: Json,
+          baseVersion: Option[Long],
+          updatedBy: String
+      ): F[Either[KuiError, StoreRecord]] =
+        rejectIfNotWritable.flatMap {
+          case Some(rejection) => Async[F].pure(Left(rejection))
+          case None => putWhenWritable(key, payload, baseVersion, updatedBy)
+        }
+
+      private def putWhenWritable(
           key: StoreKey,
           payload: Json,
           baseVersion: Option[Long],
@@ -357,6 +413,30 @@ object KafkaConfigStore {
         }
 
       def delete(key: StoreKey, baseVersion: Long, updatedBy: String): F[Either[KuiError, Unit]] =
+        rejectIfNotWritable.flatMap {
+          case Some(rejection) => Async[F].pure(Left(rejection))
+          case None => deleteWhenWritable(key, baseVersion, updatedBy)
+        }
+
+      /** A store that has lost its cluster rejects writes rather than queueing them. Queueing would mean a
+        * write applied minutes later on top of somebody else's edit, with nobody able to see it coming.
+        */
+      private def rejectIfNotWritable: F[Option[KuiError]] =
+        healthRef.get.flatMap {
+          case StoreHealth.Healthy(_, _, _) => Async[F].pure(None)
+          case StoreHealth.Degraded(reason, _, _, _) =>
+            logger.warn(s"store write rejected: reason=degraded ($reason)") *>
+              Async[F].pure(Some(toKuiError(StoreError.Unreachable(topic, reason))))
+          case StoreHealth.ReadOnly(_, _) =>
+            logger.warn("store write rejected: reason=not-configured") *>
+              Async[F].pure(Some(ConfigStore.notConfigured))
+        }
+
+      private def deleteWhenWritable(
+          key: StoreKey,
+          baseVersion: Long,
+          updatedBy: String
+      ): F[Either[KuiError, Unit]] =
         state.get.flatMap { current =>
           current.get(key) match {
             // Deleting a key that is already gone is a success: the caller's intent — "this key must not
