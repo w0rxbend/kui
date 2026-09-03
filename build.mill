@@ -1227,11 +1227,16 @@ object services extends Module {
       def buildInfoPackage = "kui.cluster.app"
       def buildInfoObject = "ClusterBuildInfo"
 
-      def moduleDeps = Seq(api, libs.config, libs.observability, libs.http)
+      // `infrastructure` is here and nowhere else: rule A9 lets a service's `app` module - and only its
+      // `app` module - see its own adapters, because the composition root is the one place that is
+      // supposed to know which adapter implements which port.
+      def moduleDeps =
+        Seq(api, infrastructure, libs.cache, libs.config, libs.kafka, libs.observability, libs.http)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
         mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
         mvn"com.softwaremill.macwire::util::${Versions.macwire}",
         mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
         mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",

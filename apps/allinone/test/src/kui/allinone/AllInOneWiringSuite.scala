@@ -8,6 +8,7 @@ import cats.effect.IO
 import cats.effect.kernel.Resource
 import cats.syntax.all.*
 
+import kui.cluster.app.ClusterServiceConfig
 import kui.config.{GatewayConfig, PrincipalKeyConfig, SafeUrl, ServerConfig, UpstreamServiceConfig}
 import kui.gateway.api.routing.ContractRouting
 import kui.gateway.app.GatewayServer
@@ -79,7 +80,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
     // Nothing forces it to agree with `services`, so this is what forces it.
     FakeStructuredLogger[IO].flatMap { logger =>
       AllInOneWiring
-        .services[IO](Telemetry.noop[IO], AllInOneFixture.principals, logger)
+        .services[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], AllInOneFixture.principals, logger)
         .use(clients => IO(assertEquals(clients.all.map(_.service), AllInOneWiring.Services)))
     }
   }

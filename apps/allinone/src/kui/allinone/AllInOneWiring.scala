@@ -8,7 +8,9 @@ import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
 import kui.cluster.api.ClusterApi
-import kui.cluster.app.ClusterWiring
+import fs2.io.file.Files
+
+import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
 import kui.gateway.api.InfoRoutes
 import kui.gateway.app.{GatewayServer, GatewayWiring}
 import kui.gateway.application.client.{ServiceClient, ServiceClients}
@@ -88,7 +90,7 @@ object AllInOneWiring {
     *   the process logger. `service.name` stays distinct per service on the log lines the services themselves
     *   write, so filtering by service works identically in both deployment shapes.
     */
-  def resource[F[_]: {Async, Parallel}](
+  def resource[F[_]: {Async, Parallel, Files}](
       config: AllInOneConfig,
       telemetry: Telemetry[F],
       logger: StructuredLogger[F]
@@ -96,7 +98,10 @@ object AllInOneWiring {
     for {
       _ <- Resource.eval(warnAboutIgnoredKeys[F](logger, config))
       principals = PrincipalCodec.inProcess[F]
-      clients <- services[F](telemetry, principals, logger)
+      // The cluster service's own configuration. The all-in-one does not yet read `kui.clusters[]` or
+      // `kui.store.*` - CFGOP-006 adds them to `AllInOneConfig` - so it starts with no configured cluster
+      // and no metadata store, which is the shape the fault-isolation suites exercise.
+      clients <- services[F](ClusterServiceConfig.Default, telemetry, principals, logger)
       gateway <- GatewayWiring.over[F](
         config.gatewayView,
         telemetry,
@@ -121,13 +126,14 @@ object AllInOneWiring {
     * here. Nothing else in this file or in the gateway changes, which is the property ADR-005 was written to
     * buy.
     */
-  def services[F[_]: {Async, Parallel}](
+  def services[F[_]: {Async, Parallel, Files}](
+      cluster: ClusterServiceConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
   ): Resource[F, ServiceClients[F]] =
     ClusterWiring
-      .make[F](telemetry, principals, logger)
+      .make[F](cluster, telemetry, principals, logger)
       .map(cluster =>
         ServiceClients.of[F](
           List[ServiceClient[F]](

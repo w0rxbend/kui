@@ -20,7 +20,7 @@ final class ClusterWiringSuite extends CatsEffectSuite {
 
   private def wiring =
     FakeStructuredLogger[IO].toResource.flatMap(logger =>
-      ClusterWiring.make[IO](Telemetry.noop[IO], PrincipalCodec.inProcess[IO], logger)
+      ClusterWiring.make[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], PrincipalCodec.inProcess[IO], logger)
     )
 
   test("wiringProducesEveryEndpointInTheContract") {
@@ -77,9 +77,10 @@ final class ClusterWiringSuite extends CatsEffectSuite {
         .report[IO](server.readiness)
         .map { report =>
           assert(report.ready, report.toString)
-          // Named rather than empty: a readiness report with no checks in it reads like a bug,
-          // while one naming `process` says plainly that this service depends on nothing to serve.
-          assertEquals(report.checks.map(_.name), List("process"))
+          // Three named checks, and deliberately no fourth per cluster: an unready cluster service dims
+          // the `cluster` capability for every cluster at once, so one unreachable broker would take the
+          // other clusters' pages down with it. Per-cluster health is reported per cluster instead.
+          assertEquals(report.checks.map(_.name), List("process", "config", "store"))
         }
     }
   }

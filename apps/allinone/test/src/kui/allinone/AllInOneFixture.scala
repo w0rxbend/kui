@@ -7,7 +7,7 @@ import cats.effect.kernel.Resource
 import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 
 import kui.cluster.api.ClusterApi
-import kui.cluster.app.{ClusterServer, ClusterWiring}
+import kui.cluster.app.{ClusterServer, ClusterServiceConfig, ClusterWiring}
 import kui.config.ServerConfig
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.application.client.{CallContext, ServiceClient}
@@ -52,7 +52,7 @@ object AllInOneFixture {
       logger: FakeStructuredLogger[IO],
       codec: PrincipalCodec[IO] = principals
   ): Resource[IO, ClusterServer[IO]] =
-    ClusterWiring.make[IO](Telemetry.noop[IO], codec, logger)
+    ClusterWiring.make[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], codec, logger)
 
   /** A client that calls the given service without a socket. */
   def inProcessClient(

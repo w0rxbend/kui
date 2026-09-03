@@ -2,29 +2,18 @@ package kui.cluster.app
 
 import java.time.Instant
 
-import scala.concurrent.duration.*
-
 import cats.Parallel
 import cats.effect.kernel.{Async, Clock, Resource}
-import org.typelevel.log4cats.StructuredLogger
+import fs2.io.file.Files
+import org.typelevel.log4cats.{LoggerFactory, StructuredLogger}
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
 import kui.cluster.api.{ClusterApi, PrincipalVerification}
-import kui.cache.CacheMetrics
-import kui.cluster.application.{
-  BrokerDetailUseCase,
-  CapabilityReportUseCase,
-  ClusterRegistry,
-  ClusterSnapshots,
-  ClusterTopologyUseCase
-}
-import kui.cluster.domain.*
+import kui.cluster.domain.ClockPort
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
-import kui.kernel.error.*
-import kui.kernel.{BrokerId, ClusterId}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 
@@ -67,54 +56,49 @@ object ClusterWiring {
 
   /** Builds everything except the listener.
     *
-    * Nothing here contacts anything. The service has no upstream in M0 — M1 adds the Kafka `AdminClient` and
-    * with it a readiness check that can fail — so `make` cannot fail for an external reason, and the resource
-    * it returns holds one thing that has to be released: the background fiber behind the unsigned codec's
-    * warning, which is owned by whoever built the codec and passed in here already running.
+    * ==What it does contact==
     *
-    * ==It takes no configuration, and that is temporary==
+    * M0's version contacted nothing. This one does: it opens the metadata store's Kafka clients, creates or
+    * validates the store topics and replays `__kui_config` to its end offset before it returns
+    * ([[ClusterBootstrap]] holds the ordering and the reasoning). That is the point at which a
+    * misconfiguration becomes visible, and it is deliberately the point *before* the listener binds — a
+    * service that answered while it was still reading its own configuration would report an empty cluster
+    * list that is indistinguishable from a KUI nobody has configured.
     *
-    * There is nothing in `ClusterServiceConfig` this layer reads in M0: the listener's settings belong to
-    * `KuiServer`, the telemetry settings were spent building the `Telemetry` handed in here, and the signing
-    * keys were spent building the codec. The parameter returns in M1 with `kui.clusters[]`, which is the
-    * first setting the wiring itself has to act on. It is absent rather than ignored because `-Werror` with
-    * `-Wunused` refuses an unused parameter — and rightly: a parameter that exists only to be dropped tells a
-    * reader something false about what this function depends on.
+    * It still binds no port, starts nothing outside the returned `Resource`, and is reusable unchanged by the
+    * all-in-one deployment, which is ADR-010's requirement and the reason `make` stops here.
     *
+    * @param config
+    *   the process's slice of the loaded configuration. `kui.clusters[]` is the registry's static base and
+    *   `kui.store.*` decides whether there is a metadata store at all
     * @param principals
     *   built by the caller rather than here, because whether this deployment is allowed to run without
     *   signing keys is a decision about the *process* (see [[PrincipalCodecs]]), and the all-in-one hands in
     *   a different codec entirely.
     */
-  def make[F[_]: {Async, Parallel}](
+  def make[F[_]: {Async, Parallel, Files}](
+      config: ClusterServiceConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
   ): Resource[F, ClusterServer[F]] = {
-    val readiness = readinessChecks[F]
-    val capabilities = capabilityUseCase[F]
+    // The store's own components ask for a logger through log4cats' factory rather than taking one as a
+    // parameter, so the process's single logger is published as that factory here. Two logging paths in one
+    // process is how half the lines end up in a different format from the other half.
+    given LoggerFactory[F] = AppLoggerFactory.of(logger)
 
     for {
       meter <- Resource.eval(telemetry.meter(Instrumentation))
       rejections <- Resource.eval(PrincipalVerification.rejectionCounter[F](meter))
       interceptors <- Resource.eval(ClusterApi.interceptors[F](telemetry, rejections, logger))
-      registry <- ClusterRegistry.make[F](StaticClusters, unconfiguredStore[F], clock[F], logger)
-      snapshots <- ClusterSnapshots.resource[F](
-        registry,
-        unreachableAdmin[F],
-        CacheMetrics.noop[F],
-        RefreshInterval,
-        CapabilityProbeInterval,
-        logger
-      )
-      topology = ClusterTopologyUseCase.make[F](registry, snapshots, logger)
-      brokers = BrokerDetailUseCase.make[F](registry, snapshots, unreachableAdmin[F], logger)
+      bootstrapped <- ClusterBootstrap.resource[F](config.clusters, config.store, telemetry, logger)
+      readiness = ClusterBootstrap.readiness[F](bootstrapped)
     } yield ClusterServer(
       routes = ClusterApi.routes[F](
-        registry,
-        topology,
-        brokers,
-        capabilities,
+        bootstrapped.registry,
+        bootstrapped.topology,
+        bootstrapped.brokers,
+        bootstrapped.capabilities,
         readiness,
         principals,
         rejections,
@@ -123,101 +107,15 @@ object ClusterWiring {
       ),
       interceptors = interceptors,
       readiness = readiness,
-      capabilities = ClusterApi.capabilityDocument[F](capabilities, logger)
+      capabilities = ClusterApi.capabilityDocument[F](bootstrapped.capabilities, logger)
     )
   }
 
-  /** How often a configured cluster is scraped, and how often its feature probe is repeated
-    * (`ARCHITECTURE.md` §9). Both become per-cluster settings in CLAPI-005, read from `kui.clusters[]`.
-    */
-  val RefreshInterval: FiniteDuration = 30.seconds
-
-  val CapabilityProbeInterval: FiniteDuration = 1.hour
-
-  /** The clusters this deployment knows about.
-    *
-    * **Empty, and temporary.** CLAPI-005 wires `kui.clusters[]`, the Kafka-backed metadata store and the real
-    * admin adapter into this file. Until then the service serves its endpoints correctly over an empty
-    * registry: every cluster-shaped question answers "no such cluster", which is the truth about a deployment
-    * that has been told about none.
-    */
-  val StaticClusters: List[ClusterProfile] = Nil
-
-  /** A store this deployment does not have. Reports `NotConfigured`, which the capability report renders as
-    * exactly that rather than as an outage. Replaced by the Kafka adapter in CLAPI-005.
-    */
-  private def unconfiguredStore[F[_]: cats.Applicative]: ClusterConfigStore[F] =
-    new ClusterConfigStore[F] {
-      private val unsupported: KuiError =
-        ApplicationError.Unsupported("this deployment has no metadata store configured")
-
-      def list: F[Either[KuiError, List[ClusterProfile]]] =
-        cats.Applicative[F].pure(Right(Nil))
-
-      def get(id: ClusterId): F[Either[KuiError, Option[ClusterProfile]]] =
-        cats.Applicative[F].pure(Right(None))
-
-      def put(profile: ClusterProfile, expected: ProfileVersion): F[Either[KuiError, ClusterProfile]] =
-        cats.Applicative[F].pure(Left(unsupported))
-
-      def onChange(handler: List[ClusterProfile] => F[Unit]): F[F[Unit]] =
-        cats.Applicative[F].pure(cats.Applicative[F].unit)
-
-      def health: F[StoreHealth] = cats.Applicative[F].pure(StoreHealth.NotConfigured)
-    }
-
-  /** An admin port with no cluster to talk to.
-    *
-    * Every method answers "unreachable". It is never called while [[StaticClusters]] is empty — snapshot
-    * cells are created per configured cluster — and it exists so that the wiring is total rather than
-    * partial. CLAPI-005 replaces it with `services/cluster/infrastructure`'s adapter.
-    */
-  private def unreachableAdmin[F[_]: cats.Applicative]: ClusterAdmin[F] =
-    new ClusterAdmin[F] {
-      private def unreachable[A]: F[Either[KuiError, A]] =
-        cats
-          .Applicative[F]
-          .pure(
-            Left(InfrastructureError.Unreachable("kafka", "no cluster is configured in this deployment"))
-          )
-
-      def describeCluster(profile: ClusterProfile): F[Either[KuiError, ClusterDescription]] = unreachable
-      def detectVersion(profile: ClusterProfile): F[Either[KuiError, Option[KafkaVersion]]] = unreachable
-      def describeQuorum(profile: ClusterProfile): F[Either[KuiError, Option[QuorumInfo]]] = unreachable
-      def brokerConfigs(
-          profile: ClusterProfile,
-          broker: BrokerId,
-          includeDocs: Boolean
-      ): F[Either[KuiError, List[ConfigEntry]]] = unreachable
-      def describeLogDirs(
-          profile: ClusterProfile,
-          brokers: cats.data.NonEmptyList[BrokerId]
-      ): F[Either[KuiError, PartialResult[BrokerId, List[LogDir]]]] = unreachable
-      def capabilities(profile: ClusterProfile): F[ClusterFeatures] =
-        cats.Applicative[F].pure(ClusterFeatures.unprobed(Instant.EPOCH))
-    }
-
-  /** What this service checks before it says it can serve.
-    *
-    * One check, and it is not a tautology worth removing: `/health/ready` has to answer with a report, and a
-    * report with no checks in it reads like a bug, while one naming `process` says plainly that this service
-    * depends on nothing else to serve. M1 adds a broker reachability check per configured cluster.
-    */
-  def readinessChecks[F[_]: cats.Applicative]: List[ReadinessCheck[F]] =
-    List(ReadinessCheck.always[F]("process"))
-
-  /** The capability use case, over the clusters this deployment is configured with.
-    *
-    * That set is empty in M0 and the report is therefore empty, which is correct rather than a placeholder: a
-    * KUI started before anyone has configured a cluster genuinely has no cluster-scoped capability to report,
-    * and the gateway must render that as "nothing configured yet" and not as an outage. `kui.clusters[]`
-    * becomes a real section in M1 and this is the line that will read it.
-    */
-  def capabilityUseCase[F[_]: cats.Applicative]: CapabilityReportUseCase[F] =
-    CapabilityReportUseCase.constant[F](ConfiguredClusters)
-
-  /** The clusters this deployment knows about. Empty until M1 reads `kui.clusters[]`. */
-  val ConfiguredClusters: Set[ClusterId] = Set.empty
+  /** Which metadata store this deployment has: `kafka`, `file`, or none at all. */
+  def storeModeOf(config: ClusterServiceConfig): String =
+    if config.store.kafka.isDefined then "kafka"
+    else if config.store.dir.isDefined then "file"
+    else "none"
 
   /** The domain's clock port, over the effect's own clock. */
   def clock[F[_]: Clock]: ClockPort[F] = new ClockPort[F] {
@@ -246,7 +144,10 @@ object ClusterWiring {
         "gitCommit" -> ClusterBuildInfo.gitCommitShort,
         "gitDirty" -> ClusterBuildInfo.gitDirty.toString,
         "builtAt" -> ClusterBuildInfo.builtAt,
-        "startedAt" -> at.toString
+        "startedAt" -> at.toString,
+        // Which store this process is running against, so that "why is my cluster list empty" can be
+        // answered from the first line of the log rather than from the configuration file.
+        "storeMode" -> storeModeOf(config)
       )
     )(
       s"starting ${ClusterApi.ServiceName} ${ClusterBuildInfo.version} " +

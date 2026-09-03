@@ -1,6 +1,6 @@
 package kui.cluster.app
 
-import kui.config.{KuiConfig, PrincipalKeyConfig, ServerConfig, TelemetryConfig}
+import kui.config.{ClusterConfig, KuiConfig, PrincipalKeyConfig, ServerConfig, StoreConfig, TelemetryConfig}
 
 /** Everything the cluster process reads out of the configuration, and nothing else.
   *
@@ -18,11 +18,21 @@ import kui.config.{KuiConfig, PrincipalKeyConfig, ServerConfig, TelemetryConfig}
   *   where traces and metrics go, and how log lines are rendered
   * @param principalKeys
   *   the keys this service will accept a signed `X-Kui-Principal` from (ADR-020)
+  * @param clusters
+  *   the clusters this deployment was told about in its configuration file. They are the *static base* of the
+  *   registry: a record in the metadata store overlays the entry with the same id, which is how a cluster
+  *   registered at runtime beats one written into the file it was copied from
+  * @param store
+  *   where KUI keeps its own state. With `kui.store.kafka.*` set this is a Kafka-backed store that is
+  *   replayed at startup; with only `kui.store.dir` set it is a read-only directory; with neither, there is
+  *   no store and the clusters above are all there are - which is a supported deployment, not a mistake
   */
 final case class ClusterServiceConfig(
     server: ServerConfig,
     telemetry: TelemetryConfig,
-    principalKeys: List[PrincipalKeyConfig]
+    principalKeys: List[PrincipalKeyConfig],
+    clusters: List[ClusterConfig],
+    store: StoreConfig
 )
 
 object ClusterServiceConfig {
@@ -42,7 +52,13 @@ object ClusterServiceConfig {
     * commit, not in this one.
     */
   def from(config: KuiConfig): ClusterServiceConfig =
-    ClusterServiceConfig(config.server, config.telemetry, config.gateway.principalKeys)
+    ClusterServiceConfig(
+      config.server,
+      config.telemetry,
+      config.gateway.principalKeys,
+      config.clusters,
+      config.store
+    )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry
     * exporter and — deliberately — no signing keys, which is a configuration that refuses to start in a

@@ -30,7 +30,11 @@ import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
   *   1. **Start telemetry.** This one never stops the process: an unreachable collector is a monitoring
   *      outage, and turning it into a KUI outage would mean a Friday-evening collector restart takes the
   *      product down.
-  *   1. **Wire the service.** Nothing is contacted and nothing is required (`ClusterWiring.make`).
+  *   1. **Wire the service, in the order ADR-042 fixes.** This is the step that grew in M1: the metadata
+  *      store's clients are opened, its topics are created or validated, and `__kui_config` is replayed to
+  *      its end offset before anything else is built (`ClusterBootstrap`). A store that cannot be replayed
+  *      stops the process here, with a named error - deliberately, because a service that started anyway
+  *      would serve an empty cluster list indistinguishable from a KUI nobody has configured.
   *   1. **Bind the port.** A port already in use stops the process with a message naming the port. KUI never
   *      quietly moves to another one: a server nothing can reach, whose health check passes, is far worse to
   *      diagnose than one that refused to start and said why.
@@ -86,7 +90,7 @@ object Main extends IOApp {
       _ <- Resource.eval(ClusterWiring.startupLog[IO](logger, config, startedAt))
       codec <- principals
       telemetry <- Telemetry.resource[IO](ClusterApi.ServiceName, config.telemetry)
-      cluster <- ClusterWiring.make[IO](telemetry, codec, logger)
+      cluster <- ClusterWiring.make[IO](config, telemetry, codec, logger)
       binding <- drainLogged(
         KuiServer.resource[IO](
           config.server,
