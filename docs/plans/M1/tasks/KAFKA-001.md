@@ -421,4 +421,41 @@ where the ADT lives is written by CFGOP-008, from decision D1 — do not edit th
 
 ## Deviations
 
-*(filled in by the implementer, in the same commit)*
+Recorded by the implementer, in the same commit.
+
+1. **The generators live in a new file, `libs/testkit/src/kui/testkit/ClusterGenerators.scala`,
+   not in `Generators.scala`.** The spec's "Files to change" names `Generators.scala`. Six other
+   agents are working in this repository at the same time and `Generators.scala` is the file every
+   one of them will want to append to; a new file for a new vocabulary avoids a merge conflict that
+   buys nothing. The object is `kui.testkit.ClusterGenerators`, which is the name the spec's "Tests
+   required" section already asked for.
+
+2. **Generated secrets carry a marker prefix (`ClusterGenerators.SecretMarker`, `"kUiS3cr3t"`).**
+   A leak assertion searches a rendered string for the secret it was given. A generated password of
+   `"a"` is a substring of the word `Sasl`, so the property failed on its 22nd sample for a reason
+   that was not a leak. Every generated secret now begins with a marker that cannot occur by
+   accident, and generated *property values* are additionally suffixed with their own key, so no two
+   generated values can be substrings of one another. The adversarial characters the JAAS injection
+   property (KAFKA-002) needs — quotes, backslashes, `=`, `;`, spaces, unicode — are all still
+   present after the marker.
+
+3. **Four members were added that the spec's signature block does not list**, each because its
+   absence would have forced a `match` on the ADT into a module that should not have one:
+   `StoreType.wireName` (the `ssl.keystore.type` value), `ClusterSecurity.saslMechanism`
+   (`Option[SaslMechanism]`, the mirror of the `tlsConfig` accessor the spec does list),
+   `ClientProperties.fromMap`, and `isEmpty` / `nonEmpty` / `size` on `ClientProperties`.
+   `PropertyValue.RedactedMarker` was named as a `val` rather than inlining `"***"` twice.
+
+4. **`ClusterSecurity.tlsConfig` answers `Some(TlsConfig.default)` for `Sasl(SaslSsl, _, None)`**
+   rather than `None`. A SASL connection over TLS with no `tls:` block is the common managed-cluster
+   case — a publicly trusted broker certificate and the JVM's default trust store — and returning
+   `None` there would make every caller write the same `getOrElse(TlsConfig.default)`, which is a
+   default duplicated at each call site and eventually inconsistent.
+
+5. **`BootstrapServers` takes the port from the *last* colon**, so a bracketed IPv6 literal
+   (`[::1]:9092`) parses. The spec did not mention IPv6; splitting on the first colon would have
+   refused it. A test row records the behaviour.
+
+6. **`AdminTuning.validate` blames fields with an `admin.` prefix** (`admin.topicChunkSize`, not
+   `topicChunkSize`), because CFGOP-001 nests these under `kui.clusters[].admin` and an
+   accumulated startup message must name the path an operator can find in their file.
