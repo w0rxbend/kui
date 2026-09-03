@@ -353,4 +353,50 @@ Kafka failure looks like" section.
   behaviours that matter — suppressibility and capability neutrality — are already right, and
   M2's consumer lane adds `KUI-GROUP-NOT-FOUND` and changes one row.
 
-*(further deviations filled in by the implementer, in the same commit)*
+### Further deviations, recorded by the implementer
+
+2. **`map` takes a third parameter, `apiTimeoutMs: Long = 0L`.** The table's timeout row renders
+   `InfrastructureError.Timeout(operation, afterMs)`, and the mapper has no way to know `afterMs`
+   from the exception — Kafka's `TimeoutException` does not carry the bound it exceeded. Passing it
+   in means the message names a number an operator can go and change (`AdminTuning.apiTimeout`)
+   rather than a number this file invented. It defaults, so a caller that does not know still gets a
+   correct classification and a slightly less useful message.
+
+3. **`InvalidTopicException` and `InvalidReplicationFactorException` are matched before
+   `InvalidConfigurationException`.** Both extend it in kafka-clients 4.3.1, so the table's row
+   order would have made two rows unreachable — which `-Werror` caught as a compile error. The
+   behaviour the table specifies is unchanged (all three are `KUI-VALIDATION`); the ordering is what
+   lets the message say *which* value was rejected.
+
+4. **`SkipReason.Failed` is produced for two request-level conditions the table marks
+   non-suppressible in the strict reading**: `KafkaStorageException` and `UnknownServerException`.
+   Both are per-key facts rather than call failures — one log directory being offline must not blank
+   the other eleven, and a broker that answers `UnknownServerException` about itself must not fail
+   the broker list it is one row of. The table's own "Suppressible per key" column already says
+   `yes — Failed` for both; this note records that the mapper implements it through
+   `FailureClass.Request` plus an explicit two-case match, not through the failure class alone.
+
+5. **`describe` never reads `t.getMessage`.** The sanitization rule says a mapped message is built
+   from KUI's own vocabulary; the implementation goes further and derives the detail text from the
+   exception's *class name* with the `Exception` suffix trimmed, so there is no code path through
+   which a broker's text can reach a response body even if a future row forgets. A property test
+   generates exceptions whose message is a distinctive token and asserts it never appears in the
+   mapped message or in the skip reason.
+
+6. **`BatchResult.combine` drops a skip entry for a key that succeeded on the other side.** The
+   spec describes `combine` over disjoint key sets. In practice a chunk that failed and a retry that
+   worked would otherwise leave the key in both halves and break the invariant the type exists for,
+   so a key present in `values` is removed from `skipped`. `combineChecked` still reports the
+   overlap for the caller that wants to know.
+
+7. **The deterministic ordering is `orderedValues` / `orderedSkipped` extension methods** rather
+   than the `given [K: Ordering, A]: ...` the spec sketches, which does not name a type class. A
+   `BatchResult` is a `Map` pair and has no canonical order of its own; the extensions give a caller
+   that needs a reproducible rendering — a golden file, a chunked merge — one, without imposing an
+   `Ordering` on every key type.
+
+8. **The logging rules of the Observability section are not implemented in this file.** They belong
+   at the call site that has both a logger and the cluster id, which is `ClusterAdmin`
+   (KAFKA-007…009) — this object is a pure function and taking a `Logger[F]` would make it an
+   effect. The vocabulary the rules need (`FailureClass`, `ErrorCode.wire`) is what this task
+   provides; KAFKA-007 applies the WARN/DEBUG split.
