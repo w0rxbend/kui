@@ -359,4 +359,58 @@ forward reference to M1 is rewritten in the past tense.
 
 ## Deviations
 
-Recorded during implementation.
+Recorded during implementation, 2026-09-04.
+
+**D-A — `properties` is a `ClientProperties`, not a `Map[String, Secret[String]]`.** The spec's
+signature predates KAFKA-001, which landed `kui.kernel.cluster.ClientProperties` whose own scaladoc
+says it *is* "the type of the ADR-022 override layer: `kui.clusters[].properties` is parsed into a
+`ClientProperties`". Using it means the secret classification, the redaction and the right-biased
+`++` that implements "applied last and wins" all exist once, in the kernel, rather than twice.
+`ClusterConfig.isSecretProperty` is kept as the spec names it and delegates to
+`ClientPropertyOverrides.isSecretKey`, which STORE-004 had already written for
+`kui.store.kafka.properties`; two patterns for one question is what that shared object exists to
+prevent. Its pattern list is broader than the spec's D-5 list (it adds `key`, `passwd` and `auth`),
+and broader is the safe direction.
+
+**D-B — `ClusterSecurityDecoder.scala` was not created; STORE-004 had already written it.** The
+decoder the spec asks for exists as `libs/config/src/kui/config/ClusterSecurityConfig.scala`, shared
+by the store slice and this one, with `keysUnder(prefix)` so both register the same keys with the
+unknown-key check. Writing a second one would have been the duplication ADR-013's "one hand-written
+loader" discipline exists to make visible. Two rules were added to it for this task: a `mechanism`
+under a non-SASL protocol is refused (the spec requires it, and the decoder silently ignored it), and
+`ssl.enabledProtocols` / `ssl.cipherSuites` are registered as sequences as well as scalars.
+
+**D-C — a cluster's secrets are resolved during decoding, not in `resolveSecrets`.** The loader has
+two phases and the second runs only when the first produced a value, so a missing
+`KUI_PROD_PASSWORD` on cluster 1 would have been hidden by an unrelated typo on cluster 0 and
+appeared only on the next restart. That is exactly the failure the accumulate-everything rule exists
+to prevent, and the milestone exit criterion names "a missing secret" alongside an unknown key.
+Since decoding a cluster is already effectful, resolving in place costs nothing.
+`decodeClusters` therefore returns `F[Problems[List[ClusterConfig]]]` rather than the spec's draft
+type, and there is no `resolveCluster`.
+
+**D-D — the four-line acceptance output is three lines from the file and one from the environment.**
+A YAML *list* cannot be sparse, and `Layers.at` reads a numeric path segment as an array index, so
+the gap case (`kui.clusters.0` and `kui.clusters.2` with no `1`) cannot be expressed in the fixture
+file at all. It is asserted in `sparseIndexIsRejected` from the environment, which is where a gap
+actually occurs — a mistyped `KUI_CLUSTERS_1_NAME`. `clusters-multiple-errors.yaml` therefore
+carries the other three problems, and `accumulatesEveryClusterProblem` asserts all three in key
+order.
+
+**D-E — the exact wording of the acceptance messages differs.** The messages come from the loader's
+existing `problemFor`, which renders `expected <expectation>; <detail> (found '<raw>')`. Matching the
+spec's hand-written strings verbatim would have meant a second message path for cluster keys only.
+The tests assert the *content* that matters — that the bootstrap message says `host:port`, that the
+mechanism message lists the legal spellings, that the secret message names the environment variable
+— rather than the exact sentence.
+
+**D-F — the startup log line is owed to CFGOP-006.** `AllInOneConfig` takes the three sections the
+all-in-one process reads and does not yet carry `clusters`; adding the cluster list to the startup
+line is part of the same wiring change that gives the process a cluster registry at all.
+`ClusterConfig.toString` already renders exactly what the spec asks the line to carry (id, name,
+bootstrap servers, protocol, mechanism, property keys with sensitive values redacted) and is
+asserted not to leak in `propertiesSurviveVerbatimAndAreRedactedByKeyPattern`.
+
+**D-G — no `SecretRedactionSuite` exists to extend.** Redaction is asserted in
+`ClusterConfigSuite.noProblemEchoesASecret` (no problem message echoes a configured password) and in
+the property-map case above.

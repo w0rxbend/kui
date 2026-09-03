@@ -184,4 +184,22 @@ than a larger one that eventually does not).
 
 ## Deviations
 
-Recorded during implementation.
+Recorded during implementation, 2026-09-04.
+
+**D-A — `chunkSize` sets both of `AdminTuning`'s chunk fields.** KAFKA-001's `AdminTuning` has
+`topicChunkSize` and `partitionChunkSize` as separate fields; the operator-facing key table has one
+`chunkSize`, and the spec says the key names win. One key therefore sets both. "How many things go
+in one admin request" is one question from the outside, and two knobs nobody could tell apart would
+be two support conversations.
+
+**D-B — `metadataRefresh` and `capabilityRefresh` are not operator-facing.** `AdminTuning` carries
+them and they keep their defaults. They are ADR-016's snapshot cadence rather than admin-client
+tuning, and a per-cluster override with no screen on which to observe its effect is a knob nobody
+could evaluate. If a deployment ever needs one, it is a key added with its first caller.
+
+**D-C — the cross-field message is worded from the effective values.** The spec's example message
+embeds the expectation and the range; the implementation reports
+`expected a duration at least as long as kui.clusters.0.admin.requestTimeout (30 seconds, which is
+the default); got 5 seconds`. The range check is a separate problem with its own message, so a value
+that is both out of range and shorter than `requestTimeout` produces one problem rather than a
+sentence carrying two rules.

@@ -392,4 +392,55 @@ for manual inspection, how to point the fixture at the 2.8 image (D-5), and the 
 
 ## Deviations
 
-Recorded during implementation.
+Recorded during implementation, 2026-09-04.
+
+**F-15 is settled: `org.testcontainers:kafka` does not exist at any version.** The module is
+published as `org.testcontainers:testcontainers-kafka`, which is what `DEPENDENCY_MATRIX.md` line
+153 already said. The three specs that write `org.testcontainers:kafka` (this one, KAFKA-007,
+CFGOP-005) are wrong. The matrix's open-questions row is closed in the same commit and the row
+records the answer.
+
+**D-A — the image is `apache/kafka:4.3.1`, not `4.1.0`.** It matches the pinned `kafka-clients`
+version, so a client-server incompatibility cannot be the explanation for a failure, and it is the
+tag the repository already pulls.
+
+**D-B — `org.testcontainers.kafka.KafkaContainer` is not used, for any mode.** Its listener map is
+fixed, so neither the SASL nor the TLS mode can be expressed through it. Using it for one mode and
+hand-rolling two would mean the three brokers differed in more than their security settings, which
+is the one thing the parity suite needs them not to do. All three go through one `GenericContainer`
+subclass that differs only in the environment it is given.
+
+**D-C — the broker's TLS settings are `KAFKA_SSL_KEYSTORE_LOCATION` and friends, not the
+`_FILENAME` / `_CREDENTIALS` pair the spec lists.** That indirection belongs to
+`confluentinc/cp-kafka`. The `apache/kafka` image maps `KAFKA_<PROPERTY>` straight onto
+`<property>` and ignores the Confluent spelling *silently*: the broker starts perfectly and then
+fails every handshake with `handshake_failure`. This cost an hour to find and is written down in
+`docs/testing.md` so it costs nobody else one.
+
+**D-D — the credential files are not written.** They exist only to serve the Confluent indirection
+above.
+
+**D-E — "a SASL broker refuses a client that presents no credentials" asserts a
+`TimeoutException`, and a second case covers `SaslAuthenticationException`.** A plaintext client
+against a SASL listener never authenticates and so never gets an authentication error: the broker
+waits for a SASL handshake, the client sends an API request, and nothing happens until the client's
+own timeout fires. The new case, `a SASL broker refuses a client whose password is wrong`, is the
+one that produces `SaslAuthenticationException`. Together they say the listener authenticates, and
+that it does so against the provisioned user rather than against anybody at all. Both assert a
+specific exception, which is the rule the spec sets.
+
+**D-F — `KAFKA_LOG_DIRS` is not set.** The image's default is already `/var/lib/kafka/data` and
+setting it added nothing.
+
+**Measurements (this machine, images already pulled).** Eight cases, six containers, 41 s wall
+clock in total. Certificate generation is inside the TLS fixture's start and is not separately
+measurable at this granularity; a run with no TLS mode and a run with two differ by roughly the
+container time alone. Every mode is well inside the spec's 45 s single-mode budget.
+
+**Edge added (D-6, as the spec requires recording).** `libs.testkit.jvm.moduleDeps` gains
+`libs.config`, and `libs.testkit.jvm.mvnDeps` gains `org.testcontainers:testcontainers-kafka` and
+`org.apache.kafka:kafka-clients`. Rule A10 names `libs/testkit` on its allow-list;
+`./mill checkArchitecture` passes.
+
+**Still owed by this task's area.** `docs/testing.md` was extended rather than created (CFGOP-007's
+E2E page already existed).

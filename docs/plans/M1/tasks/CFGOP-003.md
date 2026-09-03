@@ -233,4 +233,20 @@ a warning that can be ignored is ignored, which is the argument `-Werror` is alr
 
 ## Deviations
 
-Recorded during implementation.
+Recorded during implementation, 2026-09-04.
+
+**D-A — three existing cases now report two rules for one edge, and their assertions say so.** A9
+overlaps A3 on `services.<s>.application -> services.<s>.infrastructure`, and A10 overlaps A8 on
+every gateway Kafka edge. The spec anticipates the second (and argues it is right, because A8 and
+A10 answer different questions) and not the first. Removing the `infrastructure` clause from A3
+would have meant rewriting a rule this task is told not to touch, so both fire, and
+`ArchitectureSuite` gained an `expectViolations(edge)(rules*)` helper beside `expectOneViolation`.
+The rules themselves are unchanged.
+
+**D-B — `KafkaAllowListSuite` has a tenth case the spec does not list.** D-1 argues that `e2e` is
+deliberately off the allow-list; that argument is now a test, so removing the boundary breaks
+something with a name that says what was removed.
+
+**D-C — the ADR-041 amendment was already written.** The M1 gate review wrote Amendment 3 with A9,
+A10 and the refusal to widen A1 (finding F-13). This task added the two rows to `ARCHITECTURE.md`
+§3 and the paragraph explaining the allow-list, and wrote no new ADR text.
