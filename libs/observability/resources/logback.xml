@@ -1,0 +1,43 @@
+<!--
+  The JSON log configuration, and the default for every KUI process.
+
+  One line of JSON per entry, because a container's standard output is read by a machine before it
+  is read by a person: a parsed field can be searched and aggregated, a formatted sentence can only
+  be grepped. `logback-text.xml` beside this file is the human-readable alternative, selected by
+  `kui.telemetry.logFormat = text`.
+
+  Every field a KUI entry carries comes from the `StructuredLogger` context map (ADR-008), which
+  log4cats copies into SLF4J's MDC for the duration of the call. `includeMdcKeyName` is deliberately
+  absent: listing the keys here would mean adding a key in Scala and forgetting it here, and the
+  field would then be silently missing from production logs. Instead every MDC key is included, and
+  `libs/observability`'s ContextKeys is the single place that decides what they are called.
+-->
+<configuration>
+
+  <appender name="json" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <!-- Renamed so that the field names match the OpenTelemetry conventions the rest of the
+           observability stack already uses, rather than Logback's own spellings. -->
+      <fieldNames>
+        <timestamp>timestamp</timestamp>
+        <message>message</message>
+        <logger>logger</logger>
+        <thread>thread</thread>
+        <levelValue>[ignore]</levelValue>
+        <version>[ignore]</version>
+      </fieldNames>
+      <timeZone>UTC</timeZone>
+    </encoder>
+  </appender>
+
+  <!-- Netty and the Kafka clients are informative at DEBUG and deafening at TRACE; neither has
+       anything to say at INFO that an operator needs. Raising one of these while debugging is
+       expected, and is done with a `-D` rather than by editing this file. -->
+  <logger name="io.netty" level="WARN"/>
+  <logger name="org.apache.kafka" level="WARN"/>
+
+  <root level="INFO">
+    <appender-ref ref="json"/>
+  </root>
+
+</configuration>

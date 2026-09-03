@@ -384,8 +384,6 @@ object libs extends Module {
     def mvnDeps = Seq(
       mvn"org.typelevel::cats-core::${Versions.cats}",
       mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
-      mvn"co.fs2::fs2-core::${Versions.fs2}",
-      mvn"co.fs2::fs2-io::${Versions.fs2}",
       mvn"is.cir::ciris::${Versions.ciris}",
       mvn"io.circe::circe-core::${Versions.circe}",
       mvn"io.circe::circe-parser::${Versions.circe}",
@@ -394,6 +392,62 @@ object libs extends Module {
 
     object test extends ScalaTests with KuiTests {
       def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+    }
+  }
+
+  /** Traces, metrics and structured logs, set up the same way in every process.
+    *
+    * JVM only. The OpenTelemetry SDK and Logback exist only on the JVM, and nothing in the browser
+    * exports a span: the frontend's own diagnostics are a separate concern (ADR-009).
+    *
+    * The exporters and the log encoder are `runMvnDeps` rather than `mvnDeps` on purpose. Code in
+    * this module names none of them — it configures them through the OpenTelemetry autoconfigure
+    * mechanism and through `logback.xml` — so putting them on the compile classpath would let a
+    * future edit reach for a Logback or exporter class directly, which is exactly the coupling
+    * ADR-008 and ADR-009 keep out.
+    */
+  object observability extends KuiPureModule with KuiJvmModule {
+    def moduleDeps = Seq(kernel.jvm, config)
+
+    def mvnDeps = Seq(
+      mvn"org.typelevel::cats-core::${Versions.cats}",
+      mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+      mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+      mvn"org.typelevel::log4cats-slf4j::${Versions.log4cats}",
+      mvn"org.slf4j:slf4j-api:${Versions.slf4j}",
+      mvn"org.typelevel::otel4s-core::${Versions.otel4s}",
+      mvn"org.typelevel::otel4s-oteljava::${Versions.otel4s}",
+      mvn"io.opentelemetry:opentelemetry-sdk:${Versions.otelSdk}",
+      mvn"io.opentelemetry:opentelemetry-sdk-extension-autoconfigure:${Versions.otelSdk}",
+      mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+      mvn"com.softwaremill.sttp.tapir::tapir-otel4s-tracing::${Versions.tapir}",
+      mvn"com.softwaremill.sttp.tapir::tapir-opentelemetry-metrics::${Versions.tapir}",
+      mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}"
+    )
+
+    def runMvnDeps = Seq(
+      mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+      mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+      mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+      // TD-002: the only Prometheus exporter in the Java SDK line, and it is published as an
+      // alpha. ADR-009 accepts that knowingly rather than pulling in a second SDK for one endpoint.
+      mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+    )
+
+    object test extends ScalaTests with KuiTests {
+      def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+
+      // The suites assert against what was actually recorded rather than against a mock, so they
+      // need a real SDK with an in-memory exporter, and a real Logback to prove the MDC bridge.
+      def mvnDeps = super.mvnDeps() ++ Seq(
+        mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}",
+        mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        // Not only so the suites can capture output: `logback.xml` in this module's resources is on
+        // the test classpath, so Logback parses it during the run. A typo in it — or an encoder
+        // that is not on the classpath — fails the suite instead of failing in production.
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
+      )
     }
   }
 
