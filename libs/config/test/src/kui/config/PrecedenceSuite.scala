@@ -68,6 +68,23 @@ final class PrecedenceSuite extends KuiSuite {
     )
   }
 
+  test("--config=<path> names a file, exactly as --config <path> does") {
+    // The `=` spelling used to fall through to the generic `--key=value` branch and become a flag
+    // called `kui.config` that nothing reads. Nothing checks flag names, so the file was dropped in
+    // silence and the process started fully defaulted -- listening on the wrong port, with no
+    // upstreams and no signing keys, and not one word about the file it had been given.
+    val fromFlag = portFile(7777)
+    assertEquals(portOf(load(args = List(s"--config=${fromFlag.toString}"))), 7777)
+  }
+
+  test("both spellings of every flag agree, including --config") {
+    val file = portFile(8888)
+    assertEquals(
+      portOf(load(args = List("--config", file.toString))),
+      portOf(load(args = List(s"--config=${file.toString}")))
+    )
+  }
+
   // Every default in one place, so adding a field without deciding its default is visible here.
   private val defaults: List[(String, KuiConfig => Any, Any)] = List(
     ("kui.server.host", (c: KuiConfig) => c.server.host.value, "0.0.0.0"),

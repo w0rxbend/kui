@@ -134,8 +134,8 @@ object KuiConfigSource {
 
   private object CommandLine {
 
-    /** Accepts `--key=value`, `--key value` and `--config <path>`; ignores anything else, because a process
-      * may have arguments that are none of this loader's business.
+    /** Accepts `--key=value`, `--key value`, `--config <path>` and `--config=<path>`; ignores anything else,
+      * because a process may have arguments that are none of this loader's business.
       */
     def parse(args: List[String]): CommandLine = {
       val (flags, paths) = fold(args, Map.empty, Nil)
@@ -154,6 +154,14 @@ object KuiConfigSource {
         case "--config" :: path :: rest =>
           fold(rest, flags, Path.of(path) :: paths)
 
+        // Before the generic `--key=value` case below, which would otherwise turn `--config=/etc/kui.yaml`
+        // into a flag named `kui.config` that nothing reads. Flags are not checked against the recognised
+        // key names, so that flag was dropped without a word and the process started on its defaults with
+        // the operator's file unread. Every other key accepts both spellings, so `--config=` is the
+        // natural thing to type.
+        case flag :: rest if flag.startsWith(ConfigFlag) =>
+          fold(rest, flags, Path.of(flag.drop(ConfigFlag.length)) :: paths)
+
         case flag :: rest if flag.startsWith("--") && flag.contains('=') =>
           val (name, value) = flag.drop(2).span(_ != '=')
           fold(rest, flags.updated(canonical(name), value.drop(1)), paths)
@@ -163,6 +171,8 @@ object KuiConfigSource {
 
         case _ :: rest => fold(rest, flags, paths)
       }
+
+    private val ConfigFlag: String = "--config="
 
     /** `--server.port` and `--kui.server.port` name the same key. */
     private def canonical(name: String): String =
