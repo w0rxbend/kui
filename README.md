@@ -2,8 +2,10 @@
 
 A Kafka management and observability interface, written entirely in Scala 3.
 
-> **Status: design phase.** The architecture and the plan are complete and reviewable in this
-> repository. There is no runnable code yet. The first milestone builds the foundation; see
+> **Status: milestone 0.** There is running code: a gateway, one service, a browser shell, and both
+> deployment shapes. There are no Kafka features yet — the first of those arrive in M1. What M0
+> proves is the foundation: that the pieces compose, that a service can fail without taking the
+> interface down, and that the same code runs as one process or as several. See
 > [ROADMAP.md](docs/ROADMAP.md) for what lands when.
 
 ## What it is
@@ -36,6 +38,77 @@ of it flows from Kafka to the browser without buffering whole topics in memory.
 **It can be one process or eleven.** The same modules compose into a single JVM for local use, or
 into separate containers for production. No code changes between the two.
 
+## Quick start
+
+Two ways in. Both need only a JDK 21 and this repository; the second also needs Docker.
+
+### See the interface, and change it
+
+```
+git clone <this repository> && cd kui
+./mill dev
+```
+
+That builds everything, links the browser code, and starts the whole product — the gateway and every
+service — as one process on one port. Open <http://localhost:8080/ui/>. Stop it with Ctrl-C.
+
+To change something and see it:
+
+```
+./mill devStart                            # the same server, in the background
+./mill -w frontend.uiShell.fastLinkJS      # re-links every time you save
+```
+
+Now edit, say, `frontend/ui-shell/src/kui/ui/shell/layout/Header.scala`, save it, and refresh the
+browser. A re-link takes a few seconds and nothing restarts: the server reads the linker's output
+directory directly, so there is no copy step and no proxy in the way. `./mill devStop` when you are
+done.
+
+The port is 8080 unless you set `KUI_PORT`.
+
+### See it survive a service dying
+
+This is the demonstration worth two minutes of anyone's time, and it needs Docker.
+
+```
+./mill deployment.docker.__.build
+docker compose -f deployment/compose/docker-compose.yml up -d
+
+curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
+# available
+
+docker compose -f deployment/compose/docker-compose.yml stop kui-cluster
+sleep 12
+curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
+# unavailable
+curl -s localhost:8080/api/v1/info | jq -r .authType
+# disabled   <- the gateway is still answering
+
+docker compose -f deployment/compose/docker-compose.yml start kui-cluster
+sleep 12
+curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
+# available   <- it recovered by itself; nobody pressed anything
+
+docker compose -f deployment/compose/docker-compose.yml down -v
+```
+
+A process died and the interface stayed up, told you which part of the product was affected, and
+came back on its own. That is the promise the whole architecture exists to keep.
+`./deployment/compose/smoke.sh` runs that sequence and fails loudly if any step gives the wrong
+answer. [`deployment/compose/README.md`](deployment/compose/README.md) explains each command.
+
+### Where things are
+
+| You want to | Look in |
+| --- | --- |
+| Change the interface | `frontend/ui-shell` (pages, layout) and `frontend/ui-kernel` (the design system) |
+| Change what the gateway serves | `services/gateway` |
+| Add a service endpoint | `services/cluster/contract`, then `services/cluster/api` |
+| Run one test | `./mill libs.kernel.jvm.test`, or `./mill <module>.test.testOnly <SuiteName>` |
+| Understand a decision | [docs/adr/](docs/adr/) — one file per decision, with the alternatives that were rejected |
+| Understand the layout | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
 ## Building it
 
 ### Prerequisites
@@ -55,6 +128,12 @@ including the CI machine — builds with the same tool.
 ./mill --version                  # prints the pinned Mill version; also does the one-time download
 ./mill resolveAll                 # downloads every third-party library the project pins
 ./mill libs.kernel.jvm.compile    # compiles one module
+
+./mill dev                        # the whole product on one port, in the foreground
+./mill devStart                   # the same, in the background, so you can re-link while it runs
+./mill devStop                    # stop the background one
+
+./mill deployment.docker.__.build # the three container images
 ```
 
 ### The quality gates
@@ -65,6 +144,8 @@ including the CI machine — builds with the same tool.
 ./mill __.checkFormat    # fails if anything is not formatted
 ./mill __.fix            # applies the lint rules that can be applied automatically
 ./mill __.fix --check    # fails if a lint rule is violated, changing nothing
+./mill __.test           # every suite
+./mill checkArchitecture # fails if a module dependency breaks the layering rules of ADR-041
 ```
 
 `__` is Mill's wildcard: it means "every module".
@@ -251,11 +332,18 @@ that, `KUI_ALLOW_UNSIGNED=true` accepts unsigned headers and says so in the log 
 
 The gateway serves the shell from its own classpath at `GET /ui/**`, and the browser and the API
 share one origin — no CORS, no second server, no separate deployment step (ADR-011, ADR-012).
-`services/gateway/api/resources/web/index.html` is the committed template; a linked frontend's
-compiled assets (`main.js`, its split chunks, `styles.css`, and so on) land beside it. In M0 that
-linking step does not exist yet (INFRA-003 adds it), so a gateway built today serves only the
-template and an empty import map — a real deep link like `/ui/clusters/prod` still returns
-`index.html`, but there is no Laminar shell behind it to render the page.
+`services/gateway/api/resources/web/index.html` is the committed template, and it references
+`main.js` and `kui.css`. Where those two come from depends on how you started the process:
+
+- **`./mill dev` and `./mill devStart`** put the Scala.js linker's output directory and the CSS
+  pipeline's output directory on the classpath in front of everything else, so the server reads
+  whatever the linker most recently wrote. Nothing is copied, which is what makes "save, re-link,
+  refresh" the whole loop.
+- **A release build** has the assets bundled into the gateway's own resources beside `index.html`.
+
+Running the gateway with neither is not an error: it serves the template, and any file the template
+asks for that is not there falls through to `index.html`, so the page loads unstyled and without a
+shell rather than failing.
 
 Running the gateway without a linked frontend at all is not an error:
 

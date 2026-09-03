@@ -29,6 +29,24 @@ export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"
 
 Verify with `node --version` before running any task whose name contains `js`.
 
+### It is the daemon's path that counts, not your shell's
+
+Exporting `PATH` in a shell that already has a Mill daemon running does nothing, because the daemon
+was started with the old environment and it is the daemon that spawns `node`. The symptom is
+confusing in a specific way: `node --version` works in your terminal and the very next
+`./mill libs.kernel.js.test` still fails with `Cannot run program "node"`.
+
+```bash
+export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"
+./mill shutdown        # the daemon restarts with the environment you just set
+./mill __.test
+```
+
+The same applies to `NODE_PATH`, and to anything else read out of the environment by a *tool the
+build launches* rather than by a task itself. A task that reads `Task.env` — `./mill dev` and
+`./mill devStart` read `KUI_PORT` that way — sees the environment you typed the command in and needs
+no shutdown.
+
 ## The DOM test suites need jsdom
 
 Some frontend suites render real elements and therefore need a `document`. Plain Node has none, so

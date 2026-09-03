@@ -470,6 +470,50 @@ the DTO changes nothing below this line. The translation is
 deliberately: the kernel's primitives are the bottom of the frontend, and the bottom must not depend
 on the shape of one service's response.
 
+## The development loop
+
+There is no bundler, no dev server and no proxy. The gateway serves the browser code and the API
+from one origin, so the two cannot be out of step and there is no second process to keep running
+(ADR-012 amendment 1).
+
+```
+./mill devStart                            # the whole product, in the background, on :8080
+./mill -w frontend.uiShell.fastLinkJS      # re-links on every save
+```
+
+Edit a file, save it, refresh the browser. That is the entire loop. A re-link takes a few seconds;
+nothing restarts, and nothing is copied.
+
+### Why nothing is copied
+
+`StaticRoutes` serves `/ui/…` from the classpath under `/web`. `./mill devStart` puts two extra
+directories at the front of that classpath, each one containing a symbolic link named `web`:
+
+```
+out/dev-assets/js/web   ->  out/frontend/uiShell/fastLinkJS.dest   (main.js and every split chunk)
+out/dev-assets/css/web  ->  out/frontend/css.dest                  (kui.css)
+```
+
+A classloader takes the first entry that has the file, so `/web/main.js` resolves through the first
+link, `/web/kui.css` through the second, and `/web/index.html` — which is in neither — falls through
+to the gateway's own resources. The linker rewrites the files behind the first link in place, so the
+next request already sees them.
+
+### Scala.js has no hot module replacement
+
+A refresh is the loop, and that is not a temporary state of affairs: Scala.js compiles to a module
+graph the browser loads at startup, and there is no mechanism for swapping a class out of a running
+program. Anything that depends on in-page state — a form half filled in, a stream part way through —
+starts again on refresh. Structure a page so that is cheap rather than trying to avoid it.
+
+### Foreground or background
+
+`./mill dev` runs the same server in the foreground, with the log on screen and Ctrl-C to stop. It
+is the right thing for a first run and the wrong thing for editing, because Mill serialises its
+invocations on the output directory: while `./mill dev` holds the terminal, `./mill
+frontend.uiShell.fastLinkJS` waits for it instead of linking. `devStart` detaches, which releases
+that lock. Its log is in `out/dev.log`; `./mill devStop` ends it.
+
 ## Tests
 
 Frontend suites are MUnit, run under jsdom (a `document` implemented in JavaScript) rather than a

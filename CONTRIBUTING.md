@@ -2,6 +2,16 @@
 
 Thank you for considering a contribution. This guide assumes no prior knowledge of the project.
 
+## Getting it running first
+
+```
+./mill dev
+```
+
+builds everything and starts the whole product on <http://localhost:8080/ui/>. See the quick start
+in [README.md](README.md) for the edit-and-refresh loop and for the fault-isolation demonstration,
+which is the fastest way to understand what this project is actually for.
+
 ## Before you write code
 
 KUI is planned in the open. Two documents decide most questions before they reach the code:
@@ -15,6 +25,27 @@ KUI is planned in the open. Two documents decide most questions before they reac
 Work is tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) and scheduled in
 [docs/ROADMAP.md](docs/ROADMAP.md). Current state and the immediate next step live in
 [STATUS.md](STATUS.md) and [NEXT.md](NEXT.md).
+
+### Task specifications
+
+Every unit of work has a specification in `docs/plans/<milestone>/tasks/`, and each one states its
+goal, its scope, the files it creates, the tests it requires and how to tell it is done. Read the
+whole file before starting: the "degraded behavior" and "design references" sections are where the
+reasoning lives, and they are usually the parts that change how the code should be written.
+
+A specification is a plan written before the code existed, so it is sometimes wrong. When you have
+to depart from it, do it deliberately and record it: add a `## Deviations` section to the task file
+saying what you did instead and why. A reader six months from now will find the spec and the code
+disagreeing, and that section is the difference between "somebody thought about this" and "somebody
+did not read the spec".
+
+### Scratch files never enter the repository
+
+Notes to yourself, exploratory scripts, sample output, a `TODO.md` you wrote while working — none of
+it is committed. Stage explicitly (`git add <paths>`, never `git add -A`) and read
+`git diff --cached --stat` before you commit. Use a directory outside the repository for working
+files. The repository is read by people who were not there; anything in it should be something they
+were meant to find.
 
 ## The shape of the code
 
@@ -80,7 +111,12 @@ single task normally becomes several commits rather than one large one.
 ./mill __.test
 ./mill __.checkFormat
 ./mill __.fix --check
+./mill checkArchitecture # no module dependency may break the layering rules of ADR-041
 ```
+
+All five, every time. `checkArchitecture` is the one people forget, and it is the one that catches
+the mistake nobody spots in review: a reviewer reads a diff, not a dependency graph, so an edge
+added to a `build.mill` line is invisible until the structure it broke starts costing something.
 
 Describe the change for a reviewer who has never seen this codebase: what it does, why, how it
 works, and how to run it. Note anything surprising and anything you deliberately left out.

@@ -1655,6 +1655,176 @@ object deployment extends Module {
   }
 }
 
+// -------------------------------------------------------------------------------------------------
+// The developer loop (INFRA-003)
+// -------------------------------------------------------------------------------------------------
+
+/** Where `./mill devStart` writes the running process's id and its log. */
+private def devPidFile   = mill.api.BuildCtx.workspaceRoot / "out" / "dev.pid"
+private def devLogFile   = mill.api.BuildCtx.workspaceRoot / "out" / "dev.log"
+
+/** The whole product on one port, with the frontend served straight out of the linker's output
+  * directory.
+  *
+  * ==How the frontend gets served without being packaged==
+  *
+  * `StaticRoutes` serves `/ui/…` from the classpath under `/web`, so `/web/main.js` is what a browser
+  * asks for. In a release build those files are bundled into the gateway's resources. Bundling them
+  * for development would mean a copy step between "the linker wrote a new main.js" and "the server
+  * can see it", and that copy step is exactly the thing that makes a frontend loop feel slow.
+  *
+  * So no copying happens at all. Two extra classpath entries are put in *front* of the module
+  * classpath, each a directory whose `web` is a symbolic link to a task's output directory:
+  *
+  * {{{
+  * out/dev-assets/js/web   ->  out/frontend/uiShell/fastLinkJS.dest   (main.js and every chunk)
+  * out/dev-assets/css/web  ->  out/frontend/css.dest                  (kui.css)
+  * }}}
+  *
+  * A classloader searches classpath entries in order and takes the first hit, so `/web/main.js`
+  * resolves through the first link, `/web/kui.css` through the second, and `/web/index.html` — which
+  * is in neither — falls through to the gateway's own resources. Re-running the linker rewrites the
+  * files behind the first link, and a browser refresh is the whole loop: nothing is copied, nothing
+  * is restarted, and no proxy is involved because the assets and the API share an origin (ADR-012
+  * amendment 1).
+  *
+  * ==The log format==
+  *
+  * `text`, because a person is watching this. The images default to JSON, which is right when a log
+  * collector is reading and unreadable when a human is. No OTLP exporter is configured either, so a
+  * first run has no exporter warnings in it to explain away.
+  */
+def dev(): Task.Command[Unit] = Task.Command {
+  val classPath = devClassPath()
+  val port = devPortOf(Task.env)
+  println(devBanner(port))
+  os.proc(devCommand(classPath, port))
+    .call(cwd = mill.api.BuildCtx.workspaceRoot, stdout = os.Inherit, stderr = os.Inherit, check = false)
+  ()
+}
+
+/** The same server, detached, so that the frontend can be re-linked while it runs.
+  *
+  * This exists because of a constraint that is not obvious until it bites: Mill serialises
+  * invocations on its output directory. A `./mill dev` holding the terminal also holds that lock, so
+  * `./mill frontend.uiShell.fastLinkJS` in a second terminal waits instead of linking, and the loop
+  * the previous paragraph describes never gets to run. Detaching releases the lock.
+  *
+  * The pair is therefore:
+  *
+  * {{{
+  * ./mill devStart                            # the server, in the background
+  * ./mill -w frontend.uiShell.fastLinkJS      # re-links on every save; refresh the browser
+  * ./mill devStop                             # when you are done
+  * }}}
+  *
+  * `./mill dev` is still the right thing for a first run — it puts the log on the screen and stops
+  * with Ctrl-C — and this is the right thing once you are editing.
+  */
+def devStart(): Task.Command[Unit] = Task.Command {
+  stopDevServer()
+
+  val classPath = devClassPath()
+  val port = devPortOf(Task.env)
+  os.write.over(devLogFile, "")
+
+  val process = os
+    .proc(devCommand(classPath, port))
+    .spawn(
+      cwd = mill.api.BuildCtx.workspaceRoot,
+      stdout = devLogFile,
+      // Appended to the same file rather than discarded: a bind failure — the commonest way this
+      // command does not work — is written to standard error, and swallowing it would leave a
+      // developer with a server that is silently not there.
+      stderr = os.PathAppendRedirect(devLogFile),
+      stdin = os.Inherit
+    )
+
+  os.write.over(devPidFile, process.wrapped.pid().toString)
+
+  println(devBanner(port))
+  println(s"  running in the background as pid ${process.wrapped.pid()}")
+  println(s"  logs:  tail -f ${devLogFile.relativeTo(mill.api.BuildCtx.workspaceRoot)}")
+  println(s"  watch: ./mill -w frontend.uiShell.fastLinkJS")
+  println(s"  stop:  ./mill devStop")
+}
+
+/** Stops whatever `devStart` started. Saying nothing at all when there is nothing running, because a
+  * stop command that fails when the thing is already stopped is a stop command people wrap in `|| true`.
+  */
+def devStop(): Task.Command[Unit] = Task.Command {
+  if (stopDevServer()) println("stopped the development server") else println("nothing was running")
+}
+
+/** The classpath the development server runs on: the two live asset links, then everything the
+  * all-in-one process would normally have.
+  */
+private def devClassPath = Task.Anon {
+  val linked = frontend.uiShell.fastLinkJS().dest.path
+  val stylesheet = frontend.css().path
+
+  val js = devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "js", linked)
+  val css = devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "css", stylesheet / os.up)
+
+  (Seq(js, css) ++ apps.allinone.runClasspath().map(_.path)).mkString(java.io.File.pathSeparator)
+}
+
+/** Creates `<root>/web -> target` and answers `<root>`, which is what goes on the classpath.
+  *
+  * A symbolic link rather than a copy, because the point of the whole arrangement is that the server
+  * reads whatever the linker most recently wrote. A copy would be a snapshot, and a snapshot is a
+  * stale page.
+  */
+private def devAssetLink(root: os.Path, target: os.Path): os.Path = {
+  val link = root / "web"
+  os.remove.all(root)
+  os.makeDir.all(root)
+  os.symlink(link, target)
+  root
+}
+
+/** The port the development server listens on. `KUI_PORT` overrides it, because 8080 is the most
+  * contended port on a developer's machine and "it says nothing and answers nothing" is a miserable
+  * first experience of a project.
+  *
+  * `Task.env` and not `sys.env`: Mill runs tasks inside a long-lived daemon, so `sys.env` is the
+  * environment that daemon happened to be started with, not the one the developer just typed the
+  * command in. Reading the wrong one produces a variable that appears to be ignored — and works
+  * again, confusingly, after an unrelated `./mill shutdown`.
+  */
+private def devPortOf(env: Map[String, String]): String = env.getOrElse("KUI_PORT", "8080")
+
+private def devCommand(classPath: String, devPort: String): Seq[String] =
+  Seq(
+    s"${System.getProperty("java.home")}/bin/java",
+    "-cp",
+    classPath,
+    "kui.allinone.AllInOne",
+    s"--kui.server.port=$devPort",
+    // Readable on a terminal, and no exporter to fail to reach.
+    "--kui.telemetry.logFormat=text",
+    // Plain HTTP on localhost, so the session cookie cannot carry `Secure` or the browser will not
+    // send it back. The process says so loudly on every start, and the warning is right.
+    "--kui.server.devInsecureCookies=true"
+  )
+
+private def devBanner(devPort: String): String =
+  s"""kui development server
+     |  open   http://localhost:$devPort/ui/
+     |  assets out/frontend/uiShell/fastLinkJS.dest (served live; re-link and refresh)""".stripMargin
+
+/** Kills a previously started development server. Answers whether there was one. */
+private def stopDevServer(): Boolean =
+  if (!os.exists(devPidFile)) false
+  else {
+    val pid = scala.util.Try(os.read(devPidFile).trim.toLong).toOption
+    os.remove(devPidFile)
+    pid.exists { id =>
+      val handle = ProcessHandle.of(id)
+      handle.isPresent && handle.get().destroy()
+    }
+  }
+
 /** The commit this build is being run from, or `unknown` when there is no git checkout.
   *
   * `unknown` rather than a failed build, because a release tarball and many build containers have no
