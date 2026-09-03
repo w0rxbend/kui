@@ -1,0 +1,1 @@
+{"envelopeVersion":1,"key":"cluster/local","version":1,"updatedAt":"2026-09-03T09:00:00Z","updatedBy":"gitops","deleted":false,"payload":{"displayName":"Local","bootstrapServers":["localhost:9092"],"security":{"protocol":"SASL_PLAINTEXT","mechanism":"SCRAM-SHA-512","username":"kui","password":{"$secret":"file-adapter-canary"}}}}

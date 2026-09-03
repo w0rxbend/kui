@@ -271,6 +271,38 @@ designated as the store cluster.
 A Kubernetes ConfigMap or Secret mounted as a volume is just a path, so the file adapter reads
 it with no extra configuration. There is no separate Kubernetes adapter.
 
+**The directory layout.** Point `kui.store.dir` at a directory laid out as
+`<root>/<section>/<id>.json`, one record envelope (§2.1) per file:
+
+```
+/etc/kui/store/
+  cluster/
+    prod-eu.json
+    staging-us.json
+  settings/
+    global.json
+```
+
+It is one file per key rather than one large document for two reasons. A Kubernetes ConfigMap
+mounts as one file per data entry, so this layout is what a ConfigMap already produces. And a file
+that will not parse then costs one key instead of the whole store: KUI reads the directory once at
+startup, skips a file that is not readable JSON, whose envelope version it does not support, or
+whose embedded `key` disagrees with its path, logs a `WARN` naming the file and the reason, and
+starts anyway. The skipped keys are reported in the store's health, so an operator can see exactly
+which piece of their configuration is missing rather than inferring it from an empty page.
+
+A missing directory is an empty store, not an error — "no directory" and "an empty directory" are
+the same statement about a deployment.
+
+**The file adapter does not decrypt.** Its files are plaintext JSON, which is the point: this is
+the way to run KUI with no encryption key at all, and so with none of the "lose the key, lose the
+secrets" risk of §4.2. A secret in a file is written as `{"$secret":"..."}` and the file's own
+confidentiality is the filesystem's job — a mounted Secret with mode 0400 — exactly as it already
+is for `kui.clusters[].security` in the static YAML. A file that contains an *encrypted* field
+(`{"$enc":{...}}`) is therefore skipped and reported as unreadable rather than handed on, because
+passing a ciphertext along as though it were a password fails much later, at connection time, as
+an authentication error nobody can explain.
+
 ## 8. Migrating from the file store to the Kafka store
 
 You can move at any time; the two are not mutually exclusive during the move, because static

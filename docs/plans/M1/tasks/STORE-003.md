@@ -244,3 +244,20 @@ into `NotConfigured` for the store-backed write capability while leaving every r
 `docs/operations/metadata-store.md` §7: add the directory layout (`<root>/<section>/<id>.json`),
 the `kui.store.dir` key name STORE-004 introduces, and the sentence that a broken file costs one
 key rather than the store.
+
+## Deviations
+
+1. **`StoreHealth.ReadOnly` carries `unreadable`, and `Degraded` carries it too.** The spec's
+   signature block writes `ReadOnly(reason)` and says `unreadableKeys` is "empty in `ReadOnly`",
+   but the required test `brokenFileIsSkippedAndRecorded` asserts that a skipped file appears in
+   `health.unreadableKeys` while the file adapter's health is permanently `ReadOnly` (per the
+   spec's own "Degraded behavior" section). The two cannot both hold. The list is carried on both
+   cases, because the reason it exists — telling an operator which key went missing — applies
+   identically to a file that would not parse and to a record that would not decrypt. `Healthy`
+   keeps `Nil`: a store that is caught up and had nothing to skip has nothing to report.
+2. **`ConfigStore.readOnly` is shared by `empty` and by `FileConfigStore`.** The spec describes
+   them separately. Making the zero store and the file adapter one implementation over different
+   maps is what turns `emptyStoreSatisfiesTheSameContract` from a coincidence into a fact.
+3. **`libs/config` gains `co.fs2::fs2-core` and `org.typelevel::log4cats-core`.** The port's
+   `changes` is an `fs2.Stream` and the adapter logs what it skipped; the spec anticipated the
+   log4cats line and the fs2 one follows from its own signature block.
