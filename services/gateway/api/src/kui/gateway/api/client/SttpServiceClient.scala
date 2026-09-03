@@ -88,15 +88,15 @@ object SttpServiceClient {
     *
     * `resource` above puts every request/response call inside a bulkhead, a circuit breaker, a retry policy
     * and a call timeout, because on the far side of those calls is a network and another machine. When the
-    * far side is an object in this JVM — the all-in-one deployment of ADR-005 — none of those protections
-    * has anything to protect against: there is no connection to refuse, no socket to hang, and no second
-    * process whose slowness could exhaust this one's threads independently of its own work. Wrapping an
-    * in-memory call in a circuit breaker would only add a way for the process to stop calling itself.
+    * far side is an object in this JVM — the all-in-one deployment of ADR-005 — none of those protections has
+    * anything to protect against: there is no connection to refuse, no socket to hang, and no second process
+    * whose slowness could exhaust this one's threads independently of its own work. Wrapping an in-memory
+    * call in a circuit breaker would only add a way for the process to stop calling itself.
     *
     * Everything above the transport is unchanged, and that is the point of the method existing at all. The
-    * signing, the header decoration, the response decoding and the error mapping are the very same lines,
-    * so a response cannot differ between the two deployment shapes — which is exactly what ADR-005 says must
-    * be impossible.
+    * signing, the header decoration, the response decoding and the error mapping are the very same lines, so
+    * a response cannot differ between the two deployment shapes — which is exactly what ADR-005 says must be
+    * impossible.
     *
     * @param baseUrl
     *   the address requests are built against. In the in-process shape nothing dials it, but the path it
