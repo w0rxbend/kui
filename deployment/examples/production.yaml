@@ -1,0 +1,207 @@
+# KUI, a production shape: several clusters, one of them secured, no secret written in this file.
+#
+# This is the distributed topology -- a gateway process and one or more service processes, each in
+# its own container -- which is what you want when you need to scale or restart parts of KUI
+# independently. For a single process, start from `minimal.yaml` instead and add the sections you
+# need; the keys are identical, and a process ignores the sections that are not its business.
+#
+# This file is safe to commit. Every secret in it is a reference to an environment variable, not a
+# value. See "Secrets" below and in docs/operations/configuration.md.
+#
+# WHAT YOU WILL SEE TODAY (M0): KUI starts, serves its interface, and reports the cluster
+# capability as "not yet available". KUI does not connect to Kafka until M1, so the `kui.clusters`
+# section below is accepted and read by nothing yet. Everything else in this file -- the listener,
+# the gateway's upstreams, the signing keys, CORS, telemetry -- is live today and is exactly what a
+# real deployment uses.
+#
+# ---------------------------------------------------------------------------------------------
+# The environment variables this file requires. KUI fails to start, naming the variable, if any
+# of them is missing -- it does not fall back to an empty secret.
+#
+#   KUI_PRINCIPAL_KEY        the shared signing key (see the note on principalKeys below).
+#                            Required today: KUI refuses to start without it.
+#   KUI_ANALYTICS_PASSWORD   the SCRAM password for the `analytics` cluster. Required from M1,
+#                            when `kui.clusters` starts being read. Set it now anyway, so that
+#                            the upgrade is not the moment you discover it is missing.
+#
+# Deliver them however your platform delivers secrets. If yours mounts files rather than setting
+# variables -- which is what Kubernetes Secrets and Docker Compose secrets do -- use the `file:`
+# form instead: `key: "file:/run/secrets/kui-principal-key"`.
+# ---------------------------------------------------------------------------------------------
+
+kui:
+  server:
+    # 0.0.0.0 means every network interface. This is not a way of exposing KUI to the world: a
+    # container's own address is not knowable in advance, and binding 127.0.0.1 inside a container
+    # makes the process unreachable even from the container next to it. Control who can reach KUI
+    # with your network, not with this key.
+    host: "0.0.0.0"
+    port: 8080
+
+    # The path prefix every route is served under. Set this when a reverse proxy mounts KUI on a
+    # sub-path of a shared host name, for example https://tools.example.com/kui. "/" means no
+    # prefix, and is the default.
+    basePath: "/"
+
+  gateway:
+    # The other KUI processes, by service id, and how the gateway is allowed to call them.
+    #
+    # THE MISTAKE PEOPLE MAKE HERE: in production, KUI refuses a URL that points at a loopback or
+    # private-network *address literal* -- `http://127.0.0.1`, `http://10.0.0.4`, and above all
+    # `http://169.254.169.254`, the address a cloud instance uses to hand out its own credentials.
+    # KUI fetches the addresses in this file from its own network position, so an unchecked URL
+    # here is a way to read a private network through KUI. A host *name* like the ones below is
+    # always accepted; names are never resolved during validation, so this file validates the same
+    # way on every machine. If you must point KUI at a literal private address, set
+    # KUI_ALLOW_PRIVATE_UPSTREAMS=true -- and set it deliberately, in the process environment where
+    # an auditor can see it, which is why it is not a key in this file.
+    services:
+      cluster:
+        url: "http://kui-cluster.kui.svc.cluster.local:8080"
+
+        # The whole-call budget: no call to this service may take longer than this. Keep it well
+        # under whatever timeout sits in front of KUI, so that KUI is the one that gives up first
+        # and can say which upstream was slow.
+        timeout: "10s"
+
+        # The bulkhead: how many calls to this one service may be in flight at once. This is the
+        # setting that stops a service which has become slow from consuming every thread and
+        # taking the rest of KUI down with it. Raise it for a busy deployment; do not remove it.
+        maxConcurrent: 32
+
+    # How often the gateway asks each service whether it is ready. This is what keeps the
+    # interface honest about which parts of the product are currently working: a service that
+    # stops answering is greyed out within roughly this interval rather than failing under the
+    # user's hands.
+    readinessIntervalMs: 10000
+
+    # The keys the gateway signs the internal `X-Kui-Principal` header with, and that every
+    # service accepts (ADR-020).
+    #
+    # These look like a gateway setting and are not: this list is the SHARED key set of one
+    # deployment. Every KUI process -- gateway and services alike -- must be given the same list,
+    # reading the same secret. If they disagree, every call the gateway makes comes back 401.
+    #
+    # Listing more than one key is how a rotation happens without downtime. Add the new key to
+    # every process first, with a `notBefore` a little in the future; the gateway starts signing
+    # with it when that time arrives, while services still accept the old one; remove the old key
+    # afterwards. At no point is a service handed a token signed with a key it has never seen.
+    #
+    # THE MISTAKE PEOPLE MAKE HERE: a key that is too short. HS256 needs 256 bits, so the resolved
+    # secret must be at least 32 bytes. A shorter key would weaken every token without anything
+    # looking wrong, so KUI refuses to start rather than accepting it. Generate one with:
+    #
+    #     openssl rand -base64 48
+    principalKeys:
+      - kid: "2026-01"
+        key: "env:KUI_PRINCIPAL_KEY"
+        notBefore: "2026-01-01T00:00:00Z"
+
+    # Cross-origin resource sharing, off -- which is correct for almost every deployment. The
+    # gateway serves the interface itself, so the browser and the API are the same origin and CORS
+    # is not involved at all. Turn it on only to let some other site call this API, and then list
+    # the origins explicitly: "*" is refused at startup, because "*" combined with credentials is
+    # exactly the setting that lets any website read a signed-in user's Kafka data.
+    cors:
+      enabled: false
+      origins: []
+
+  auth:
+    # The only value KUI accepts today. Real authentication arrives with the identity service in
+    # M6. Anything else here fails the load with a message saying so, rather than being ignored --
+    # so a file that asks for authentication can never start a deployment that has none.
+    type: disabled
+
+  telemetry:
+    # Where traces and metrics go. If the collector is down or this is wrong, KUI still starts and
+    # still serves: a monitoring outage must never take the product down.
+    otlpEndpoint: "http://otel-collector.observability.svc.cluster.local:4318"
+
+    # An extra port exposing THIS PROCESS'S OWN telemetry in Prometheus format. This is not the
+    # product's Kafka-cluster metrics endpoint; ADR-009 keeps those two deliberately separate.
+    prometheusPort: 9464
+
+    # One JSON object per line, which is what a log system parses. Use `text` only for a human
+    # reading a terminal.
+    logFormat: json
+
+    # Log and trace `user.id` as a salted hash rather than the login name. An operator debugging a
+    # request almost never needs to know who someone was, only that two entries concern the same
+    # person. Turn this off only if you have decided you need the names and are allowed to have
+    # them.
+    hashUserIds: true
+
+  # -------------------------------------------------------------------------------------------
+  # The clusters to manage.
+  #
+  # NOT READ YET -- the cluster registry is M1. The loader accepts anything under `kui.clusters`
+  # so that a file written for M1 loads today, but nothing acts on it and KUI will not connect to
+  # these brokers until M1 ships. The shape below is the one M1 implements (ADR-022), so this
+  # section is written the way it will be read.
+  # -------------------------------------------------------------------------------------------
+  clusters:
+    # An unsecured cluster on a trusted network: the shortest form there is.
+    - name: "staging"
+      bootstrapServers: "kafka-staging-1:9092,kafka-staging-2:9092"
+
+    # A secured cluster: SASL over TLS, with SCRAM-SHA-512.
+    #
+    # `saslSsl` is the protocol (authenticate AND encrypt); `scramSha512` is the mechanism (how the
+    # password is proved without sending it). The pair people get wrong is `saslPlaintext`, which
+    # authenticates but does NOT encrypt -- it sends your credentials in the clear. Use
+    # `saslPlaintext` only inside a network you already trust completely.
+    - name: "analytics"
+      bootstrapServers: "kafka-analytics-1:9093,kafka-analytics-2:9093"
+      security:
+        protocol: saslSsl
+        mechanism: scramSha512
+        username: "kui"
+        # Never a literal. See the header of this file for how this variable is delivered.
+        password: "env:KUI_ANALYTICS_PASSWORD"
+        ssl:
+          # Whether the broker's certificate must match the host name you connected to. Leave this
+          # on. Turning it off to make a certificate error go away also removes the check that the
+          # broker is who it claims to be, which is most of what TLS was doing for you.
+          verifyHostname: true
+          # Only needed when the brokers use a private certificate authority that the container's
+          # trust store does not already know about.
+          truststore: "file:/etc/kui/certs/kafka-ca.p12"
+
+      # The escape hatch: raw Kafka client properties, applied last, on top of everything above.
+      # It exists so a new broker setting does not have to wait for a KUI release. Prefer the
+      # typed keys above wherever one exists -- they are validated and their secrets are redacted,
+      # and anything set here is neither.
+      properties:
+        request.timeout.ms: "30000"
+
+  # -------------------------------------------------------------------------------------------
+  # The metadata store: where KUI keeps its own state -- registered clusters, settings, uploaded
+  # keystores -- in Kafka itself, in topics named `__kui_*`. There is no database to install.
+  #
+  # THIS BLOCK IS COMMENTED OUT BECAUSE THESE KEYS DO NOT EXIST YET. `kui.store.*` arrives with
+  # M1. Unlike `kui.clusters`, it is NOT tolerated by today's loader: uncommenting this block now
+  # makes KUI refuse to start with "kui.store.topicPrefix: is not a KUI configuration key" and one
+  # line like it for every key below. Uncomment it when you upgrade to an M1 build.
+  #
+  # It is written out rather than omitted because the settings below are the ones that need
+  # thought before a deployment exists, not after: the replication factor of the topic holding
+  # every cluster's credentials cannot be raised comfortably once it has data in it, and
+  # `encryptionKey` is unrecoverable -- lose it and every secret in the store is permanently
+  # unreadable. Full detail: docs/operations/metadata-store.md.
+  # -------------------------------------------------------------------------------------------
+  # store:
+  #   topicPrefix: "__kui_"
+  #   replicationFactor: 3        # 1 only for a single-broker development cluster
+  #   minInSyncReplicas: 2        # must be less than replicationFactor to survive one broker loss
+  #   maxFileBytes: 4194304       # 4 MiB cap on one uploaded keystore or descriptor
+  #   encryptionKey: "env:KUI_STORE_ENCRYPTION_KEY"   # back this up; it cannot be recovered
+  #   kafka:
+  #     bootstrapServers: ["kafka-analytics-1:9093", "kafka-analytics-2:9093"]
+  #     security:
+  #       protocol: saslSsl
+  #       mechanism: scramSha512
+  #       username: "kui"
+  #       password: "env:KUI_STORE_PASSWORD"
+
+  # Declared so the shape exists; read by nothing yet. The authorization model is M6.
+  rbac: {}

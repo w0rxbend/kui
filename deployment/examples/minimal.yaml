@@ -1,0 +1,41 @@
+# KUI, the simplest thing that works: one cluster, no security.
+#
+# Copy this file, change the one line that matters (`bootstrapServers`), and start KUI:
+#
+#     docker run --rm -p 8080:8080 \
+#       -v "$PWD/minimal.yaml:/etc/kui/kui.yaml:ro" \
+#       ghcr.io/kui/kui-allinone:latest --config /etc/kui/kui.yaml
+#
+# Then open http://localhost:8080.
+#
+# Almost every KUI setting has a default that is already right for a single-process, single-broker
+# deployment, so this file is short on purpose. Everything omitted here is listed with its default
+# in docs/operations/configuration.md.
+#
+# WHAT YOU WILL SEE TODAY (M0): KUI starts, serves its interface, and reports the cluster
+# capability as "not yet available". That is expected and temporary. KUI does not connect to Kafka
+# until M1. The `kui.clusters` block below is accepted by the loader and read by nothing yet; when
+# M1 lands, this same file shows the cluster with no changes.
+
+kui:
+  # Authentication is disabled, and `disabled` is the only value KUI accepts today. Real
+  # authentication arrives with the identity service in M6. This line is not strictly required --
+  # `disabled` is also the default -- but writing it down makes the security posture of the file
+  # explicit rather than implied, which matters for the one setting nobody should have to guess.
+  auth:
+    type: disabled
+
+  # `text` writes a short human line per event. The default is `json`, which is right for a log
+  # system and unreadable in a terminal; this file is for someone watching a terminal.
+  telemetry:
+    logFormat: text
+
+  # The cluster to manage.
+  #
+  # NOT READ YET. The cluster registry is M1 (ADR-042). The loader deliberately accepts anything
+  # under `kui.clusters` so that a file written for M1 still loads today instead of failing on a
+  # key that does not exist yet -- but nothing acts on it, and KUI will not connect to this broker
+  # until M1 ships.
+  clusters:
+    - name: "local"
+      bootstrapServers: "localhost:9092"
