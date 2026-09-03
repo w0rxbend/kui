@@ -1,7 +1,10 @@
 package kui.ui.kernel.sse
 
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 import scala.scalajs.js
+import scala.scalajs.js.Thenable.Implicits.thenable2future
 
 import com.raquo.airstream.ownership.ManualOwner
 import io.circe.parser.decode
@@ -51,6 +54,23 @@ final class FakeEventSource extends EventSourceLike {
 
   private def dispatch(name: String, event: dom.Event): Unit =
     listeners.getOrElse(name, Nil).foreach(handler => handler(event))
+}
+
+/** A `fetch` response a test drives by hand.
+  *
+  * jsdom implements neither `fetch` nor `Response` nor `ReadableStream`, so this stands in for all three: the
+  * suite says "the server answered 403 with this body" or "the server answered 200 and then sent these
+  * chunks", and asserts what the kernel does about it.
+  */
+final class FakeStreamResponse(val status: Int, body: String, chunks: List[String] = Nil)
+    extends Sse.StreamResponse {
+
+  def text(): js.Promise[String] = js.Promise.resolve[String](body)
+
+  def readChunks(onChunk: String => Unit, onDone: () => Unit, onFailure: () => Unit): Unit = {
+    chunks.foreach(onChunk)
+    onDone()
+  }
 }
 
 class SseSuite extends FunSuite {
@@ -227,5 +247,57 @@ class SseSuite extends FunSuite {
       case SseError.Decode(SseEventName.Error, _) => true
       case _ => false
     })
+  }
+
+  /** Lets the promise callbacks the code under test registered run before the assertions. */
+  private def settled: Future[Unit] =
+    js.Promise.resolve[Unit](()).flatMap(_ => js.Promise.resolve[Unit](()))
+
+  test("aStreamTheServerRejectedIsReportedAsAnErrorRatherThanAsAStreamThatFinished") {
+    // `fetch` resolves for 403 exactly as it does for 200, and the rejection body is an ADR-034
+    // envelope with no `data:` lines in it. Without a status check the parser sees nothing, the body
+    // ends, and the caller is told the stream finished normally — a 403 becomes silence.
+    val envelope =
+      """{"code":"KUI-FORBIDDEN","message":"you may not browse this topic","details":[],
+        |"correlationId":"3b1fa9c2e4d54f0b","timestamp":"2026-09-03T10:11:12.000Z",
+        |"retryable":false}""".stripMargin.replace("\n", "")
+    val handle =
+      Sse.fetchStreamWith(
+        () => js.Promise.resolve[Sse.StreamResponse](new FakeStreamResponse(403, envelope)),
+        () => (),
+        () => false,
+        List("row")
+      )(decodeText)
+    val seen = subscribe(handle)
+
+    settled.map { _ =>
+      seen.toList match {
+        case Left(SseError.Server(decoded)) :: Nil => assertEquals(decoded.code, "KUI-FORBIDDEN")
+        case other => fail(s"expected the server's envelope, got $other")
+      }
+      assertEquals(
+        current(handle.connection),
+        SseConnection.Closed("the server rejected the stream with 403")
+      )
+    }
+  }
+
+  test("aStreamTheServerAcceptedIsReadAndItsEventsDelivered") {
+    val handle =
+      Sse.fetchStreamWith(
+        () =>
+          js.Promise.resolve[Sse.StreamResponse](
+            new FakeStreamResponse(200, "", List("event: row\ndata: \"hello\"\n\n"))
+          ),
+        () => (),
+        () => false,
+        List("row")
+      )(decodeText)
+    val seen = subscribe(handle)
+
+    settled.map { _ =>
+      assertEquals(seen.toList, List(Right("hello")))
+      assertEquals(current(handle.connection), SseConnection.Closed("the server closed the stream"))
+    }
   }
 }

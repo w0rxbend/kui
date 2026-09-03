@@ -277,6 +277,62 @@ object Sse {
       body: Option[String] = None
   )
 
+  /** The slice of a `fetch` response [[fetchStream]] uses.
+    *
+    * An interface rather than `dom.Response` directly, for the same reason [[EventSourceLike]] exists: jsdom,
+    * the fake document these suites run against, implements neither `fetch` nor `Response` nor
+    * `ReadableStream`, so everything this module does *around* the response — checking the status, decoding a
+    * rejection envelope, feeding chunks to the parser — could otherwise only be tested in a real browser.
+    */
+  private[sse] trait StreamResponse {
+
+    /** The HTTP status. `fetch` resolves for 4xx and 5xx exactly as it does for 200, so this is the only
+      * thing that tells a stream the server accepted from one it rejected.
+      */
+    def status: Int
+
+    /** The whole body as text. Used only on the rejection path, where the body is a small JSON envelope. */
+    def text(): js.Promise[String]
+
+    /** Pulls the body a chunk at a time, already decoded from UTF-8. */
+    def readChunks(onChunk: String => Unit, onDone: () => Unit, onFailure: () => Unit): Unit
+  }
+
+  /** The real thing, wrapping the browser's `Response`. */
+  final private class BrowserStreamResponse(response: dom.Response) extends StreamResponse {
+
+    def status: Int = response.status
+
+    def text(): js.Promise[String] = response.text()
+
+    /** Recursion through promises rather than a loop, because there is no way to block: each `read()`
+      * resolves when the network has more, and the continuation is the next iteration.
+      */
+    def readChunks(onChunk: String => Unit, onDone: () => Unit, onFailure: () => Unit): Unit = {
+      val reader = response.body.getReader()
+      val decoder = new TextDecoder()
+
+      def pump(): Unit =
+        reader
+          .read()
+          .`then`[Unit] { chunk =>
+            if chunk.done then onDone()
+            else {
+              onChunk(decoder.decode(chunk.value, js.Dynamic.literal(stream = true)))
+              pump()
+            }
+            ()
+          }
+          .`catch`[Unit] { _ =>
+            onFailure()
+            ()
+          }: Unit
+
+      try pump()
+      catch { case NonFatal(_) => onFailure() }
+    }
+  }
+
   /** Subscribes to a stream over `fetch`, so that it can `POST` and can be stopped.
     *
     * `close()` aborts the request, which propagates all the way down: the gateway's stream is cancelled, the
@@ -290,9 +346,35 @@ object Sse {
   def fetchStream[A](request: FetchRequest, eventNames: List[String])(
       decode: (String, String) => Either[SseError, A]
   ): SseHandle[A] = {
+    val aborter = new dom.AbortController()
+    fetchStreamWith(
+      () =>
+        dom
+          .fetch(request.url, requestInit(request, aborter.signal))
+          .`then`[StreamResponse](response => new BrowserStreamResponse(response)),
+      () => aborter.abort(),
+      () => aborter.signal.aborted,
+      eventNames
+    )(decode)
+  }
+
+  /** [[fetchStream]] against a transport a test supplies.
+    *
+    * @param send
+    *   performs the request.
+    * @param abort
+    *   cancels it, which is what `close()` does.
+    * @param aborted
+    *   whether the cancellation above has happened; a rejected promise that follows one is not a failure.
+    */
+  private[sse] def fetchStreamWith[A](
+      send: () => js.Promise[StreamResponse],
+      abort: () => Unit,
+      aborted: () => Boolean,
+      eventNames: List[String]
+  )(decode: (String, String) => Either[SseError, A]): SseHandle[A] = {
     val events = new EventBus[Either[SseError, A]]
     val connection = Var[SseConnection](SseConnection.Connecting)
-    val aborter = new dom.AbortController()
 
     def emit(value: Either[SseError, A]): Unit = events.writer.onNext(value)
 
@@ -308,16 +390,47 @@ object Sse {
         case _ => ()
       }
 
-    dom
-      .fetch(request.url, requestInit(request, aborter.signal))
+    /** The server refused the stream before it started. ADR-035 says that is an ordinary HTTP error response
+      * carrying the ADR-034 envelope, so it is reported as the same `SseError.Server` a mid-stream `error`
+      * event produces. Without this the body — which has no `data:` lines — parses to nothing, the reader
+      * reaches the end, and a 403 is indistinguishable from a stream that ran and finished.
+      */
+    def reject(response: StreamResponse): Unit =
+      response
+        .text()
+        .`then`[Unit] { body =>
+          emit(Left(decodeEnvelope(body)))
+          connection.set(SseConnection.Closed(s"the server rejected the stream with ${response.status}"))
+          ()
+        }
+        .`catch`[Unit] { _ =>
+          emit(Left(SseError.Transport(s"the server rejected the stream with ${response.status}")))
+          connection.set(SseConnection.Closed(s"the server rejected the stream with ${response.status}"))
+          ()
+        }: Unit
+
+    def accept(response: StreamResponse): Unit = {
+      connection.set(SseConnection.Open)
+      var state = ParserState.empty
+      response.readChunks(
+        onChunk = chunk => {
+          val (next, ready) = SseParser.feed(state, chunk)
+          state = next
+          ready.foreach(handle)
+        },
+        onDone = () => closeUnlessAlreadyClosed(connection, "the server closed the stream"),
+        onFailure = () => closeUnlessAlreadyClosed(connection, "the stream ended unexpectedly")
+      )
+    }
+
+    send()
       .`then`[Unit] { response =>
-        connection.set(SseConnection.Open)
-        readBody(response, handle, connection)
+        if response.status >= 200 && response.status < 300 then accept(response) else reject(response)
         ()
       }
       .`catch`[Unit] { cause =>
         // An abort is not a failure: it is what `close()` does, and the state is already `Closed`.
-        if !aborter.signal.aborted then {
+        if !aborted() then {
           emit(Left(SseError.Transport(String.valueOf(cause))))
           connection.set(SseConnection.Closed("the connection could not be established"))
         }
@@ -329,10 +442,19 @@ object Sse {
       connection = connection.signal,
       close = () => {
         connection.set(SseConnection.Closed("closed by the client"))
-        aborter.abort()
+        abort()
       }
     )
   }
+
+  /** Ends the stream, unless something already said why it ended — a `done` event or the client's own
+    * `close()` is a better explanation than "the body ran out".
+    */
+  private def closeUnlessAlreadyClosed(connection: Var[SseConnection], reason: String): Unit =
+    connection.update {
+      case SseConnection.Closed(existing) => SseConnection.Closed(existing)
+      case _ => SseConnection.Closed(reason)
+    }
 
   private def requestInit(request: FetchRequest, abortSignal: dom.AbortSignal): dom.RequestInit =
     new dom.RequestInit {
@@ -345,45 +467,4 @@ object Sse {
       request.body.foreach(payload => body = payload)
     }
 
-  /** Pulls chunks off the response body until it ends, feeding each to the parser.
-    *
-    * Recursion through promises rather than a loop, because there is no way to block: each `read()` resolves
-    * when the network has more, and the continuation is the next iteration.
-    */
-  private def readBody(
-      response: dom.Response,
-      handle: RawSseEvent => Unit,
-      connection: Var[SseConnection]
-  ): Unit = {
-    val reader = response.body.getReader()
-    val decoder = new TextDecoder()
-
-    def pump(state: ParserState): Unit =
-      reader
-        .read()
-        .`then`[Unit] { chunk =>
-          if chunk.done then {
-            connection.update {
-              case SseConnection.Closed(reason) => SseConnection.Closed(reason)
-              case _ => SseConnection.Closed("the server closed the stream")
-            }
-          } else {
-            val (next, ready) =
-              SseParser.feed(state, decoder.decode(chunk.value, js.Dynamic.literal(stream = true)))
-            ready.foreach(handle)
-            pump(next)
-          }
-          ()
-        }
-        .`catch`[Unit] { _ =>
-          connection.update {
-            case SseConnection.Closed(reason) => SseConnection.Closed(reason)
-            case _ => SseConnection.Closed("the stream ended unexpectedly")
-          }
-          ()
-        }: Unit
-
-    try pump(ParserState.empty)
-    catch { case NonFatal(_) => connection.set(SseConnection.Closed("the stream could not be read")) }
-  }
 }
