@@ -423,3 +423,68 @@ the last thing the user can still do, and disabling it would take away the only 
 - `docs/domain/cluster.md` — the dashboard's field list, and the two `—` decisions (topics until M2,
   no throughput until M8) recorded where a future reader will look for them.
 - `docs/frontend/README.md` — the row-model table, as the worked example of rendering a `Section`.
+
+## Deviations
+
+Commit `876e809`.
+
+1. **Row navigation pushes history itself instead of going through a router.** `KuiFeature` has no
+   navigation capability and a feature is constructed by `js.dynamicImport`, which cannot be passed a
+   router. The row is a real `<a>` with a real `href` — copy, bookmark and open-in-new-tab all work —
+   and an ordinary click is intercepted, `history.pushState` is called with the URL the feature's own
+   routes produce, and `ClustersFeature` swaps the page. **Owed:** a proper navigation port on
+   `KuiFeature`, supplied by the shell, which is CLUI-006's natural home since the cluster switcher
+   needs to navigate too. Until then, Back onto a brokers page relies on the URL rather than on the
+   pushed state.
+
+2. **The three partition columns render `—` unconditionally, and so does Topics.** Gate review F-20:
+   no field on the wire is ever filled in M1 (the DTOs model them as `Option`, always `None`). The
+   sort keys for those columns are still implemented, so the M2 change is data only.
+
+3. **The controller cell distinguishes "there isn't one" from "we do not know".** A KRaft cluster
+   mid-failover reports no controller, which is a fact worth seeing; it renders `none` in the warning
+   colour on a row that has data, and `—` on a row that has none.
+
+4. **`SectionChip` amends `Tag`'s tone class rather than taking a tone.** `Tag` takes its tone as a
+   constructor argument and a row's state changes while the row is on screen; rebuilding the chip on
+   every change would move focus off it mid-announcement.
+
+5. **`ClustersFeature` holds no capability signal.** M1's cluster screens are read-only, so there is
+   no action to gate, and the shell already draws the banner and the fallback panel from the same
+   store. A second subscription would be a second opinion about one state on one screen.
+
+6. **`ClustersPage.scala` deleted; `ClustersCss` moved to a file of its own** rather than living in
+   the page that no longer exists.
+
+7. **`DashboardPage` takes `hrefFor` as well as `navigate`.** The spec's signature has only
+   `navigate`, which cannot produce a row that is a real link; a suite asserting the criterion has to
+   see an `href`.
+
+8. **A test-only note worth recording, because it cost time.** A `MouseEvent` constructed without
+   `cancelable = true` ignores `preventDefault`, so jsdom tried to follow the row's link and killed
+   the whole test run with "Not implemented: navigation to another Document" *after* the suite had
+   passed. A browser's own clicks are always cancelable; a synthetic one is not unless it is asked to
+   be.
+
+## Implementation report
+
+```
+./mill frontend.uiClusters.compile         SUCCESS
+./mill frontend.uiClusters.test            0 failed, 30 tests
+                                           ClustersApiSuite       6
+                                           BytesSuite             5
+                                           DashboardRowSuite      8
+                                           DashboardPageSuite    11
+./mill frontend.uiClusters.checkFormat     SUCCESS
+./mill frontend.uiClusters.fix --check     SUCCESS
+./mill frontend.uiShell.compile            SUCCESS
+./mill frontend.uiShell.test               0 failed, 12 suites
+./mill frontend.uiShell.checkBundleShape   1 feature module split out, main.js 1139686 B of 1500000 B
+./mill checkArchitecture                   75 modules, no layering violations
+grep -rn "Ping" frontend/ui-clusters/      no matches
+```
+
+`./mill __.compile` is **not** clean, and neither failure is in this lane:
+`apps/allinone/test/src/kui/allinone/FaultIsolationSuite.scala` still names `PingUseCase`, which
+CLDOM deleted and CLAPI-004 owns removing; `libs/testkit/test/.../KafkaFixtureSuite.scala` is
+CFGOP-004's in-flight work and does not yet have Kafka on its classpath.

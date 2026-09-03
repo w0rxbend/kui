@@ -252,3 +252,45 @@ about avoiding.
 
 None. `docs/frontend/README.md` already describes how a feature builds clients from its contract;
 this task is that description being followed. `docs/api/*` is CLAPI-010's.
+
+## Deviations
+
+Commit `8018dd9`.
+
+1. **The DTO names in the spec's sketch are not the ones the contract publishes.** As the spec
+   instructed, the contract's names win: `ClustersResponse`, `ClusterDetailResponse`,
+   `BrokersResponse`, `BrokerConfigsResponse`, `LogDirsResponse`, `RefreshAcceptedDto`.
+
+2. **None of them is a `Section[...]`, and there is one more endpoint and one fewer than planned.**
+   The section sits *inside* the cluster list, one per row, because the list of configured clusters
+   is available whenever the service is and only each row's summary needs a broker — which is what
+   makes the "unavailable row stays clickable" criterion implementable at all. `getCluster` was added
+   (a deep link must not fetch forty rows to draw one header) and the planned
+   `/brokers/{id}/logdirs` is `GET /clusters/{id}/log-dirs?brokerId=`, one endpoint for the whole
+   cluster with an optional filter, because the brokers list needs every broker's totals in one call.
+   `brokerConfigs` carries the contract's `docs` flag, so its cache key is `(cluster, broker, docs)`.
+
+3. **`ClustersState` was deleted rather than trimmed.** Everything in it was the ping state.
+   `ClustersQueries` replaces it as the feature's server state, and CLUI-003 adds the selection state
+   the screens need. `ClustersStateSuite` went with it.
+
+4. **`HealthReporting` is called in `ClustersQueries`, not at the screens' call sites.** The spec put
+   the `CallScope.Feature` rule at the call sites and this file "because this is the file those call
+   sites go through" — so it is enforced here, in one private method every request passes through,
+   rather than repeated in three screens where the fourth would forget it.
+
+5. **`requestRefresh` answers `RefreshAcceptedDto`, not `Unit`.** The 202 carries the time the
+   request was taken, which is what CLUI-008's button has to show; discarding it would leave the
+   button with nothing truthful to say.
+
+## Implementation report
+
+```
+./mill frontend.uiClusters.compile          SUCCESS
+./mill frontend.uiClusters.test             ClustersApiSuite 6, 0 failed
+./mill frontend.uiClusters.checkFormat      SUCCESS
+./mill frontend.uiClusters.fix --check      SUCCESS
+./mill frontend.uiShell.compile             SUCCESS
+./mill frontend.uiShell.checkBundleShape    1 feature module split out
+grep -rn '"/api/v1' frontend/ui-clusters/src   only the scaladoc sentence forbidding it
+```
