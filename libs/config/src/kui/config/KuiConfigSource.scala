@@ -118,13 +118,25 @@ object KuiConfigSource {
               Left(
                 ConfigProblem(
                   "kui",
-                  s"is not valid YAML: ${failure.message}",
+                  s"is not valid YAML: ${firstLineOf(failure.message)}",
                   ConfigSourceName.File(path.toString)
                 )
               )
             case Right(json) => Right(Document(path.toString, json))
           }
       }
+
+  /** The first line of a parser message, and nothing after it.
+    *
+    * The YAML parser renders a failure as a sentence naming the line and column, followed by the source line
+    * it choked on. That echoed source line is the problem: KUI's promise is that a secret never reaches a log
+    * line or an error message, and it keeps that promise with the `Secret` type -- but a parse failure
+    * happens before anything is decoded, so nothing is a `Secret` yet and the redaction in `problemFor`
+    * cannot apply. An unclosed quote on the line holding a signing key would print the key into `docker logs`
+    * for anyone with log access. The first line still says exactly where to look.
+    */
+  private def firstLineOf(message: String): String =
+    message.linesIterator.map(_.trim).find(_.nonEmpty).getOrElse("the document could not be parsed")
 
   /** One parsed YAML file. */
   final private case class Document(path: String, json: Json)
