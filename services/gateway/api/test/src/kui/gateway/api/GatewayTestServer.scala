@@ -11,6 +11,8 @@ import sttp.model.Uri
 import sttp.tapir.server.ServerEndpoint
 
 import kui.config.{GatewayConfig, ServerConfig}
+import kui.gateway.api.auth.SessionMiddleware
+import kui.gateway.application.session.{InMemorySessionStore, SessionConfig, SessionStore}
 import kui.http.health.ReadinessCheck
 import kui.http.{ErrorInterceptor, KuiServer}
 import kui.kernel.{Host, Port}
@@ -33,15 +35,25 @@ object GatewayTestServer {
   final case class Running(
       binding: KuiServer.ServerBinding,
       backend: Backend[IO],
-      logger: FakeStructuredLogger[IO]
+      logger: FakeStructuredLogger[IO],
+      sessions: SessionStore[IO]
   ) {
 
     def at(path: String): Uri = Uri.unsafeParse(s"http://localhost:${binding.port}$path")
 
     /** A `GET`, with any headers a test wants to forge. */
     def get(path: String, headers: Map[String, String] = Map.empty): IO[Response[String]] =
+      request(basicRequest.get(at(path)), headers)
+
+    def post(path: String, headers: Map[String, String] = Map.empty): IO[Response[String]] =
+      request(basicRequest.post(at(path)), headers)
+
+    private def request(
+        builder: Request[Either[String, String]],
+        headers: Map[String, String]
+    ): IO[Response[String]] =
       headers
-        .foldLeft(basicRequest.get(at(path)))((request, header) => request.header(header._1, header._2))
+        .foldLeft(builder)((request, header) => request.header(header._1, header._2))
         .response(asStringAlways)
         .send(backend)
   }
@@ -53,17 +65,26 @@ object GatewayTestServer {
     */
   def resource(
       basePath: String = "/",
-      extraRoutes: List[ServerEndpoint[Fs2Streams[IO], IO]] = Nil
+      extraRoutes: List[ServerEndpoint[Fs2Streams[IO], IO]] = Nil,
+      devInsecureCookies: Boolean = true
   ): Resource[IO, Running] =
     for {
       logger <- Resource.eval(FakeStructuredLogger[IO])
+      sessions <- InMemorySessionStore.resource[IO](SessionConfig.Default)
       readiness = List(ReadinessCheck.always[IO]("process"))
-      routes = GatewayApi.routes[IO](configView(basePath), readiness, gatewayCapabilities) ++ extraRoutes
-      interceptors = EdgeHeaders.interceptors[IO] ++ ErrorInterceptor.interceptors[IO](logger)
+      routes = GatewayApi.routes[IO](
+        configView(basePath),
+        readiness,
+        gatewayCapabilities,
+        sessions
+      ) ++ extraRoutes
+      interceptors = EdgeHeaders.interceptors[IO] ++
+        SessionMiddleware.interceptors[IO](sessions, logger, basePath, secureCookies = !devInsecureCookies) ++
+        ErrorInterceptor.interceptors[IO](logger)
       config = ServerConfig(Host.unsafe("localhost"), Port.unsafe(0), basePath)
       binding <- KuiServer.resource[IO](config, routes, interceptors, logger, gracefulShutdown = 10.millis)
       backend <- HttpClientFs2Backend.resource[IO]()
-    } yield Running(binding, backend, logger)
+    } yield Running(binding, backend, logger, sessions)
 
   /** The configuration the routes read: this deployment's server settings, and no upstream services. */
   private def configView(basePath: String): GatewayServiceConfigView =

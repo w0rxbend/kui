@@ -74,19 +74,24 @@ object PrincipalKeyConfig {
   *   the signing keys above, newest last
   * @param cors
   *   the cross-origin posture
+  * @param devInsecureCookies
+  *   omits `Secure` from the session cookie, for `localhost` development over plain HTTP (ADR-019). Off by
+  *   default, and CFG-001 refuses it outright when the deployment's configured base URL is `https`: a flag
+  *   meant for a laptop must not be reachable in a configuration that could also describe production.
   */
 final case class GatewayConfig(
     services: Map[ServiceId, UpstreamServiceConfig],
     readinessInterval: FiniteDuration,
     principalKeys: List[PrincipalKeyConfig],
-    cors: CorsConfig
+    cors: CorsConfig,
+    devInsecureCookies: Boolean
 )
 
 object GatewayConfig {
   val DefaultReadinessInterval: FiniteDuration = 10.seconds
 
   val Default: GatewayConfig =
-    GatewayConfig(Map.empty, DefaultReadinessInterval, Nil, CorsConfig.Default)
+    GatewayConfig(Map.empty, DefaultReadinessInterval, Nil, CorsConfig.Default, devInsecureCookies = false)
 
   given CanEqual[GatewayConfig, GatewayConfig] = CanEqual.derived
 }

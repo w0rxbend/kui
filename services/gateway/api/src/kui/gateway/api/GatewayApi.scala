@@ -7,8 +7,10 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.config.{GatewayConfig, ServerConfig}
 import kui.contracts.capability.ServiceCapabilities
+import kui.gateway.api.auth.AuthRoutes
 import kui.gateway.api.static.{BootstrapConfig, StaticRoutes}
 import kui.gateway.application.Gateway
+import kui.gateway.application.session.SessionStore
 import kui.gateway.contract.GatewayEndpoints
 import kui.http.BasePath
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
@@ -46,7 +48,8 @@ object GatewayApi {
   def routes[F[_]: {Async, Parallel}](
       config: GatewayServiceConfigView,
       readiness: List[ReadinessCheck[F]],
-      capabilities: F[ServiceCapabilities]
+      capabilities: F[ServiceCapabilities],
+      sessions: SessionStore[F]
   ): List[ServerEndpoint[Fs2Streams[F], F]] =
     // Two kinds of route, prefixed differently, and the difference is worth stating rather than
     // discovering. The gateway's own endpoints are built from `GatewayEndpoints.base`, which already
@@ -61,6 +64,7 @@ object GatewayApi {
     // that parameter, so an endpoint requiring nothing fits wherever one that may require streaming does.
     BasePath.prefixAll(GatewayEndpoints.ApiPrefix, HealthEndpoints.make[F](readiness, capabilities)) ++
       InfoRoutes[F](config.server, config.gateway) ++
+      AuthRoutes[F](sessions) ++
       // Matched last: the static routes' `/ui/**` fallback answers `index.html` for any path that reaches
       // it, so any API route that had to come after it would never be seen at all.
       StaticRoutes[F](BasePath.normalize(config.server.basePath), bootstrapOf(config))

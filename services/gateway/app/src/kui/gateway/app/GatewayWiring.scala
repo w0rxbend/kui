@@ -11,9 +11,11 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
 import kui.contracts.capability.ServiceCapabilities
+import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.{EdgeHeaders, GatewayApi, InfoRoutes}
+import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
 import kui.http.health.ReadinessCheck
-import kui.http.{Cors, ErrorInterceptor}
+import kui.http.{BasePath, Cors, ErrorInterceptor}
 import kui.observability.{KuiInterceptors, Telemetry}
 
 /** Everything a gateway needs in order to be served, with no listener started.
@@ -67,7 +69,12 @@ object GatewayWiring {
     *      before anything tries to route it. It is off by default and the shipped deployment serves the shell
     *      from this same origin, so most installations have no CORS layer at all (ADR-019).
     *   1. `EdgeHeaders` next, because it decides what everything else is even allowed to see. If tracing ran
-    *      ahead of it, a span would carry a correlation id a browser chose (ADR-040).
+    *      ahead of it, a span would carry a correlation id a browser chose (ADR-040). `Cookie` is not an
+    *      `X-Kui-*` header, so it survives this step untouched for the session middleware to read.
+    *   1. `SessionMiddleware` next: attaches a session (creating one if the request had none) and, on a
+    *      mutation, applies the CSRF verdict before any endpoint's own logic runs (ADR-019). This has to sit
+    *      ahead of tracing and metrics for the same reason `EdgeHeaders` sits ahead of it — a request CSRF
+    *      rejects should not be traced as if some endpoint's logic had run at all.
     *   1. `KuiInterceptors` next: correlation, tracing, metrics, in that order, so that a failing request is
     *      still inside a span and still records its duration.
     *   1. `ErrorInterceptor` last, so it is innermost and sees the failure closest to where it happened. It
@@ -81,21 +88,44 @@ object GatewayWiring {
   ): Resource[F, GatewayServer[F]] = {
     val readiness = readinessChecks[F]
 
-    Resource.eval(
-      KuiInterceptors
-        .serverInterceptors[F](telemetry, GatewayApi.ServiceName)
-        .map { instrumentation =>
-          GatewayServer(
-            routes = GatewayApi.routes[F](config.view, readiness, capabilities[F]),
-            interceptors = Cors.interceptor[F](config.gateway.cors).toList ++
-              EdgeHeaders.interceptors[F] ++
-              instrumentation ++
-              ErrorInterceptor.interceptors[F](logger),
-            readiness = readiness
-          )
-        }
+    for {
+      _ <- Resource.eval(warnIfInsecureCookies[F](logger, config))
+      sessions <- InMemorySessionStore.resource[F](SessionConfig.Default)
+      instrumentation <- Resource.eval(
+        KuiInterceptors.serverInterceptors[F](telemetry, GatewayApi.ServiceName)
+      )
+    } yield GatewayServer(
+      routes = GatewayApi.routes[F](config.view, readiness, capabilities[F], sessions),
+      interceptors = Cors.interceptor[F](config.gateway.cors).toList ++
+        EdgeHeaders.interceptors[F] ++
+        SessionMiddleware.interceptors[F](
+          sessions,
+          logger,
+          BasePath.normalize(config.server.basePath),
+          secureCookies = !config.gateway.devInsecureCookies
+        ) ++
+        instrumentation ++
+        ErrorInterceptor.interceptors[F](logger),
+      readiness = readiness
     )
   }
+
+  /** The prominent warning ADR-019 requires whenever `server.devInsecureCookies` strips `Secure` off the
+    * session cookie. It is a `WARN` and not a `DEBUG` on purpose: it is the one line in a deployment's log
+    * that says its session cookie can be read by anyone on the same network, and it must be visible without
+    * anyone having had to turn on verbose logging first to notice.
+    */
+  def warnIfInsecureCookies[F[_]: cats.Applicative](
+      logger: StructuredLogger[F],
+      config: GatewayServiceConfig
+  ): F[Unit] =
+    if config.gateway.devInsecureCookies then
+      logger.warn(
+        "server.devInsecureCookies=true: the session cookie is served without Secure. " +
+          "This is meant for local development over plain HTTP only and must never be set in a " +
+          "deployment reachable over the network."
+      )
+    else cats.Applicative[F].unit
 
   /** What the gateway checks before it says it is ready.
     *

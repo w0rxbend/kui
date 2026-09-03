@@ -447,7 +447,16 @@ object KuiConfigSource {
       )
       keys <- decodePrincipalKeys[F](layers)
       cors <- decodeCors[F](layers)
-    } yield (services, readiness, keys, cors).mapN(GatewayDraft.apply)
+      devInsecureCookies <- read[F, Boolean](
+        field(
+          "kui.server.devInsecureCookies",
+          "true or false",
+          readBoolean,
+          GatewayConfig.Default.devInsecureCookies
+        ),
+        layers
+      )
+    } yield (services, readiness, keys, cors, devInsecureCookies).mapN(GatewayDraft.apply)
 
   private def decodeServices[F[_]: Async](
       layers: Layers,
@@ -598,7 +607,8 @@ object KuiConfigSource {
       services: Map[ServiceId, UpstreamServiceConfig],
       readinessInterval: FiniteDuration,
       principalKeys: List[KeyDraft],
-      cors: CorsConfig
+      cors: CorsConfig,
+      devInsecureCookies: Boolean
   )
 
   final private case class KeyDraft(kid: String, key: SecretRef, notBefore: Instant)
@@ -621,7 +631,8 @@ object KuiConfigSource {
                   value.gateway.services,
                   value.gateway.readinessInterval,
                   keys,
-                  value.gateway.cors
+                  value.gateway.cors,
+                  value.gateway.devInsecureCookies
                 ),
                 value.telemetry
               )

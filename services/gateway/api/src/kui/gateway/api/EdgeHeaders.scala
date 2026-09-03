@@ -52,9 +52,17 @@ object EdgeHeaders {
     * This set is **not** what [[isForbidden]] tests against, and that is the point: it is documentation and
     * error-message material, and a header missing from it is still stripped. It is kept beside the rule so
     * that a reader can see what the rule is protecting without going hunting through eleven services.
+    *
+    * The CSRF header (`X-Csrf-Token`, GW-009) is deliberately absent, and deliberately not named `X-Kui-*` at
+    * all. Every header in this family is one a browser must never be able to set — that is the whole point of
+    * stripping the family by prefix — but CSRF protection only works if the browser *can* set its header, so
+    * a `X-Kui-Csrf` header would be self-defeating: this very interceptor would erase it from every
+    * legitimate request before `SessionMiddleware` ever saw it. ADR-040 says this in so many words ("nothing
+    * that a browser is allowed to send may be named `X-Kui-*`"); the CSRF header's name is chosen to honour
+    * that rule rather than collide with it.
     */
   val Forbidden: Set[String] =
-    Set("x-kui-principal", "x-kui-correlation-id", "x-kui-cluster-id", "x-kui-csrf")
+    Set("x-kui-principal", "x-kui-correlation-id", "x-kui-cluster-id")
 
   /** Whether one header name belongs to the family KUI reserves for itself.
     *
