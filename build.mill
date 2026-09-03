@@ -60,6 +60,9 @@ object Versions {
   val munitCatsEffect = "2.2.0"
   val disciplineMunit = "2.0.0"
   val testcontainers  = "0.44.1"
+  // The Java artefact, resolved separately from the Scala wrapper above: `org.testcontainers:kafka`
+  // does not exist at any version; the module is published as `testcontainers-kafka` (M1 F-15).
+  val testcontainersJava = "2.0.5"
   // Playwright and the browser build it downloads are pinned together (BUILD-006 spike 3): the
   // library only speaks to the browser revision it shipped with, so bumping one means bumping both.
   val playwright        = "1.62.0"
@@ -352,15 +355,24 @@ object libs extends Module {
     }
 
     object jvm extends Shared with KuiJvmModule {
-      def moduleDeps = Seq(kernel.jvm, contractsCore.jvm)
+      // `libs.config` is here for one type: `ClusterConfigs.forBroker` hands a suite the
+      // `kui.clusters[]` entry that reaches a fixture broker. The alternative is every suite
+      // hand-building a `ClusterConfig`, which is exactly the hand-built profile the three-mode
+      // parity suite must not use — it would compare KUI against a value the test wrote itself.
+      // One edge, between two libraries, in the direction libraries already point (rule A5).
+      def moduleDeps = Seq(kernel.jvm, contractsCore.jvm, config)
 
       // Declared here and used from later tasks: the stub upstream (HTTP-002 onward), the
-      // Testcontainers topology (E2E-002) and the certificate helpers the TLS tests need (M1).
+      // Testcontainers topology (CFGOP-004) and the certificate helpers the TLS tests need.
+      // `kafka-clients` is on this classpath because a fixture that starts a broker has to be able
+      // to talk to it — rule A10 names `libs/testkit` on its allow-list for exactly that.
       def mvnDeps = super.mvnDeps() ++ Seq(
         mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
         mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
         mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
         mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}",
+        mvn"org.testcontainers:testcontainers-kafka:${Versions.testcontainersJava}",
+        mvn"org.apache.kafka:kafka-clients:${Versions.kafkaClients}",
         mvn"org.bouncycastle:bcpkix-jdk18on:${Versions.bouncycastle}"
       )
 

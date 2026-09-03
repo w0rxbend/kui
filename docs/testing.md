@@ -237,3 +237,92 @@ imported by `main.js`, so the browser downloads it during the first paint anyway
 MUnit's `.fail` marker is the honest way to record that: the suite stays green while the defect
 stands, and the day somebody fixes lazy loading the test fails *because it passed*, which makes them
 delete the marker instead of quietly reintroducing the regression.
+
+---
+
+## Running a suite against a real Kafka broker
+
+`libs/testkit` starts a single-node Kafka broker in a container, in one of three security
+configurations, and hands the suite everything a client needs to reach it:
+
+```scala
+import kui.testkit.kafka.{KafkaFixture, KafkaTopology}
+
+KafkaFixture[IO](KafkaTopology.SaslScram).use { broker =>
+  // broker.bootstrapServers  — "localhost:<mapped port>"
+  // broker.clientProperties  — properties that reach it, ready for an AdminClient
+  // ClusterConfigs.forBroker(broker, id) — the kui.clusters[] entry that reaches it
+  ...
+}
+```
+
+The three modes are `Plaintext`, `SaslScram` (`SASL_PLAINTEXT` with `SCRAM-SHA-512`) and `MutualTls`
+(`SSL` in both directions, hostname verification on). There is deliberately no `SaslSsl`: it is the
+union of the last two and renders no client property that neither of them renders, so a fourth
+container would cost every suite twenty seconds and assert nothing new.
+
+**Use `ClusterConfigs.forBroker` rather than building a cluster by hand.** It produces a real
+`ClusterConfig`, so the suite exercises KUI's own configuration decoder, property renderer and
+adapter. A hand-built profile that happens to work proves only that the test and the fixture agree
+with each other.
+
+### What it needs, and what happens without it
+
+A Docker daemon, and nothing else. Certificates are generated per run rather than committed — a
+checked-in keystore has an expiry date, and the build that starts failing on that date fails for a
+reason nobody will guess.
+
+A suite that needs a broker must check `KafkaFixture.dockerAvailable` and skip **loudly**, naming the
+mode that was not checked:
+
+```scala
+assume(
+  KafkaFixture.dockerAvailable,
+  s"Docker is not available, so the ${topology.label} broker was not started and this mode is UNVERIFIED"
+)
+```
+
+A security mode that could not be checked must never be reported as a pass. That is the difference
+between "the exit criterion holds" and "nothing contradicted it".
+
+### One broker per topology, shared
+
+Starting a container per test class costs roughly twenty seconds each. Share one through MUnit's
+`ResourceSuiteLocalFixture` and namespace anything a test creates on the broker with
+`broker.uniqueName("prefix")`, so two suites sharing a broker cannot collide in a way that only
+appears when they happen to interleave.
+
+### Pointing it at a different broker
+
+`KUI_TEST_KAFKA_IMAGE` overrides the pinned image. That is how the nightly job checks ADR-030's
+"2.8 or newer" promise against a real 2.8-era broker instead of asserting it:
+
+```
+KUI_TEST_KAFKA_IMAGE=apache/kafka:3.7.2 ./mill libs.testkit.jvm.test
+```
+
+### Keeping a broker alive to poke at it
+
+Testcontainers stops the container when the `Resource` closes. To inspect one, put a
+`IO.readLine.void` (or a long sleep) inside the `use` block and connect from another terminal with
+the address the fixture printed; `docker ps` shows the mapped port either way.
+
+### Four rules the linter enforces in this module
+
+`libs/testkit` is a `KuiPureModule`, which forbids `var`, `null`, `throw` and `asInstanceOf`. Each
+has one right answer when talking to a Java container API:
+
+| Instead of | Do this |
+| --- | --- |
+| a `var` for the container | build it in a `val`, start it inside `Resource.make` |
+| a `null` a Java API needs | name it once (`KeyStore.load` genuinely wants one — see `CertificateAuthority.noStream`) |
+| `throw` when a container will not start | `Resource.eval(F.raiseError(...))` naming the mode and the container's last log lines |
+| `asInstanceOf` for a self-typed builder | do not chain: call the builder methods as statements on a `val` |
+
+### Configuring the broker: one trap worth knowing
+
+The image is `apache/kafka`, whose entrypoint maps `KAFKA_<PROPERTY>` straight onto `<property>` in
+`server.properties`. Most Kafka container examples on the internet are written for
+`confluentinc/cp-kafka`, which has an extra indirection — `KAFKA_SSL_KEYSTORE_FILENAME` plus a
+credentials file — that this image ignores **silently**. The symptom is a broker that starts
+perfectly and then fails every TLS handshake with `handshake_failure`.

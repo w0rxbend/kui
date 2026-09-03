@@ -29,7 +29,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | co.fs2 | fs2-core_3 | 3.13.0 | main | all JVM | ADR-002 |
 | co.fs2 | fs2-io_3 | 3.13.0 | main | libs/http, libs/config, services/security | ADR-002 |
 | org.typelevel | fs2-kafka_3 | 4.0.0 | main | libs/kafka, libs/config | ADR-006, ADR-042 §5 |
-| org.apache.kafka | kafka-clients | 4.3.1 | main | libs/kafka (transitive override) | ADR-006 |
+| org.apache.kafka | kafka-clients | 4.3.1 | main | libs/kafka (transitive override), libs/testkit (the container fixture's own admin client) | ADR-006, ADR-041 A10 |
 | org.xerial.snappy | snappy-java | 1.1.10.8 | runtime | libs/kafka | ADR-006 |
 | at.yawk.lz4 | lz4-java | 1.11.2 | runtime | libs/kafka | ADR-006 |
 
@@ -150,7 +150,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | org.typelevel | discipline-munit_3 | 2.0.0 | test | libs/kernel | ADR-018 |
 | com.dimafeng | testcontainers-scala-munit_3 | 0.44.1 | test | libs/testkit, integration suites, e2e | ADR-018 |
 | com.dimafeng | testcontainers-scala-kafka_3 | 0.44.1 | test | libs/testkit | ADR-018 |
-| org.testcontainers | testcontainers-kafka | 2.0.5 | test | libs/testkit | ADR-018 |
+| org.testcontainers | testcontainers-kafka | 2.0.5 | test | libs/testkit | ADR-018 — **settled in CFGOP-004**: `org.testcontainers:kafka` does not resolve at any version; the module is published as `testcontainers-kafka`. Three M1 task specs write the wrong id and are wrong. |
 | com.microsoft.playwright | playwright | 1.62.0 | test | e2e | ADR-018 (BUILD-006 spike 3; pinned together with the browser build it downloads, Chromium 1234 / Chrome for Testing 151.0.7922.34 — the library only speaks to its own revision) |
 | org.bouncycastle | bcpkix-jdk18on | 1.85 | test | libs/testkit | ADR-018 |
 
@@ -170,7 +170,6 @@ WireMock, Mockito, Groovy, the official Java MCP SDK, datasketches 9.0.0, Chimne
 | Chimney 2.0.0 | Final release date; verify `hearth` macros compile under `-Werror -Wunused:all` in an M0 spike (ADR-033). | Principal Scala Engineer | M0 |
 | fs2-kafka 4.0.0 | Which of `describeMetadataQuorum`, `listGroups`, `describeProducers`, `describeShareGroups` need the raw `Admin` escape hatch on the pinned tag (ADR-006 lists the first three; `describeShareGroups` was added here and the ADR has not caught up). | Kafka Specialist | M1 |
 | kafka-clients 4.3.1 | KIP-848 `GroupState`/`targetAssignment` exposure; defensive mapping for classic vs consumer groups (ADR-006, ADR-030). | Kafka Specialist | M1 |
-| testcontainers 2.0.5 | Whether the Kafka module's artifact id is `org.testcontainers:kafka` (three M1 specs) or `org.testcontainers:testcontainers-kafka` (line 153 above). CFGOP-004 resolves it and corrects this file in the same commit. | QA Engineer | M1 |
 | lz4-java | Whether upstream `org.lz4:lz4-java 1.8.1` already fixes CVE-2025-12183; the `at.yawk.lz4` fork stays until confirmed. | Security Engineer | M1 |
 | Confluent 8.3.1 | Community License review documented in `docs/operations`; confirm optional-classpath packaging (ADR-014). | CTO | M3 |
 | io.kafbat.ui:serde-api | Exact published version and Maven coordinates for the bridge module (ADR-028). | Kafka Specialist | M6 |
