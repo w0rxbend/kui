@@ -1,0 +1,73 @@
+# The cluster service's configuration, with every default written out.
+#
+# THIS FILE IS NOT LOADED. It is documentation that lives next to the code it documents, so that
+# the defaults a reader sees are the ones the process actually uses. KUI deliberately has no
+# "reference configuration that is silently merged underneath yours": a file that is loaded
+# invisibly is a file that changes behaviour when someone edits it for a different deployment.
+# The defaults are in Scala — `ServerConfig.Default`, `TelemetryConfig.Default` — and this is a
+# copy for people, checked by `ClusterWiringSuite`.
+#
+# To use it, copy the parts you want into your own file and pass it with `--config`:
+#
+#     ./mill services.cluster.app.run -- --config deployment/compose/kui.yaml
+#
+# Every key can also be set as an environment variable or a command-line flag. The environment
+# name is the key in capitals with the dots replaced by underscores (`kui.server.port` becomes
+# `KUI_SERVER_PORT`), and the flag is the key itself (`--kui.server.port=9090`). Flags beat the
+# environment, the environment beats a file, and a file beats these defaults.
+
+kui:
+  server:
+    # 0.0.0.0 means "every network interface", which is what a container needs: binding 127.0.0.1
+    # inside a container makes the process unreachable from outside it. The service is reached
+    # only by the gateway, so put it on a private network rather than relying on the bind address.
+    host: "0.0.0.0"
+
+    # 8080 is the default for every KUI process. The Compose topology gives each container its own
+    # network namespace, so they do not collide; running two on one host does, and that is what
+    # this key is for.
+    port: 8080
+
+    # The path prefix everything is served under. "/" means no prefix.
+    basePath: "/"
+
+  gateway:
+    # The keys this service will accept a signed `X-Kui-Principal` from (ADR-020).
+    #
+    # They live under `kui.gateway` because they are the *shared* key set of one deployment: the
+    # gateway signs with the newest key whose `notBefore` has passed and every service accepts any
+    # key in the list, which is what makes a rotation a rolling change rather than an outage. One
+    # list, configured once, read by both sides.
+    #
+    # `key` accepts a literal, `env:NAME` or `file:/path`. Use one of the latter two in any real
+    # deployment: a literal here means the secret is in version control. It must be at least 32
+    # bytes — HS256 needs 256 bits and a shorter key is refused at startup rather than silently
+    # weakening every token.
+    #
+    # THERE IS NO DEFAULT. A service started with no keys refuses to start, because one that
+    # started anyway would trust an identity header from anyone who could reach its port. For
+    # local development only, `KUI_ALLOW_UNSIGNED=true` accepts unsigned headers and says so in
+    # the log every minute for as long as it is in effect.
+    principalKeys: []
+    # - kid: "compose-1"
+    #   key: "env:KUI_PRINCIPAL_KEY"
+    #   notBefore: "2026-01-01T00:00:00Z"
+
+  telemetry:
+    # Where traces and metrics are exported. Unset means export nothing, and the process still
+    # starts and still serves: a monitoring outage must never take KUI down.
+    # otlpEndpoint: "http://otel-collector:4318"
+
+    # An extra port serving *this process's own* telemetry in Prometheus format. This is not the
+    # product's Kafka-cluster metrics endpoint; ADR-009 keeps those two deliberately separate.
+    # prometheusPort: 9464
+
+    # `json` writes one JSON object per line, which is what a log system parses. `text` writes a
+    # short human line for a developer reading a terminal. The setting picks the Logback
+    # configuration at startup, before the first log line is written.
+    logFormat: json
+
+    # Log and trace `user.id` as a hash rather than the login name. An operator debugging a
+    # request almost never needs to know who it was, only that two entries concern the same
+    # person.
+    hashUserIds: true

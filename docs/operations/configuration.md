@@ -67,6 +67,45 @@ Keys under `kui.clusters` and `kui.rbac` are accepted and ignored, so a file wri
 later milestone still loads today. A key anywhere else that KUI does not recognise is an
 error.
 
+### What the cluster service reads
+
+Every KUI process loads the same file and takes its own slice of it. The cluster service's
+slice is three sections, and it is smaller than the gateway's on purpose — a process that
+read settings it does not use would be a process an operator could not reason about:
+
+| Section | What the cluster service does with it |
+| --- | --- |
+| `kui.server.*` | where it listens, and under which base path |
+| `kui.telemetry.*` | where traces and metrics go, and whether log lines are JSON or text |
+| `kui.gateway.principalKeys[]` | the keys it will accept a signed `X-Kui-Principal` from |
+
+The signing keys look like a gateway setting and are not: they are the **shared** key set of
+one deployment. The gateway signs with the newest key whose `notBefore` has passed and every
+service accepts any key in the list, which is what makes a key rotation a rolling change
+rather than an outage. One list, configured once, read by both sides.
+
+**A cluster service started with no keys configured refuses to start.** One that started
+anyway would trust an `X-Kui-Principal` header from anyone who could reach its port, and it
+would do it silently. For local development only, `KUI_ALLOW_UNSIGNED=true` accepts unsigned
+headers and writes a warning to the log every minute for as long as it is in effect:
+
+```
+$ ./mill services.cluster.app.run -- --config my.yaml
+kui-cluster cannot start; no principal signing keys are configured. A service that starts
+without them would trust an X-Kui-Principal header from anyone who can reach its port.
+Configure kui.gateway.principalKeys, or set KUI_ALLOW_UNSIGNED=true for local development only.
+```
+
+A signing key must be at least 32 bytes. HS256 needs 256 bits, and a shorter key produces a
+weaker signature without anything looking wrong afterwards — so it is refused at startup with
+a message naming the key.
+
+`services/cluster/app/resources/reference.yaml` is the same information as a commented file
+you can copy. It is **not** loaded: a reference configuration that was silently merged
+underneath yours is a file that changes behaviour when somebody edits it for a different
+deployment. `ClusterWiringSuite` asserts that its values are the defaults the code actually
+uses, so it cannot go stale unnoticed.
+
 ## Which URLs KUI will call
 
 Every URL-shaped key is checked before KUI will use it, because a URL in a configuration

@@ -197,6 +197,56 @@ cross-checked rather than compared and hoped about.
 A build made outside a git checkout — a release tarball, say — reports `"unknown"` for the git
 fields rather than failing or leaving them blank.
 
+## Running one service on its own
+
+Every service is an ordinary process with its own `main`. There is no orchestration to set up and
+nothing to install: point it at a configuration file and it starts.
+
+```
+$ export KUI_PRINCIPAL_KEY=0123456789abcdef0123456789abcdef
+$ ./mill services.cluster.app.run -- --config my-cluster.yaml
+{"timestamp":"...","message":"starting kui-cluster 0.1.0-SNAPSHOT (f62de3f)","level":"INFO",...}
+{"timestamp":"...","message":"listening on http://localhost:8081","level":"INFO",...}
+```
+
+with `my-cluster.yaml`:
+
+```yaml
+kui:
+  server:
+    host: "127.0.0.1"
+    port: 8081
+  gateway:
+    principalKeys:
+      - kid: "local-1"
+        key: "env:KUI_PRINCIPAL_KEY"
+        notBefore: "2026-01-01T00:00:00Z"
+```
+
+The three endpoints every KUI service serves need no credentials, because a probe has none to give:
+
+```
+$ curl -s localhost:8081/health/live
+{"alive":true,"at":"2026-09-03T16:48:38.581Z"}
+
+$ curl -s localhost:8081/capabilities
+{"service":"cluster","clusters":{}}
+```
+
+Everything under `/internal/v1` does. A service is only ever called by the gateway, which signs a
+short-lived principal for each call, so a request without one is refused — and refused identically
+however it is wrong, so that nobody can use the response to work out what to forge next:
+
+```
+$ curl -s localhost:8081/internal/v1/ping?message=hi
+{"code":"KUI-UNAUTHENTICATED","message":"Unauthenticated","details":[],"correlationId":"cde7...","timestamp":"...","retryable":false}
+```
+
+**A service started with no signing keys refuses to start.** For local development, and only for
+that, `KUI_ALLOW_UNSIGNED=true` accepts unsigned headers and says so in the log every minute.
+`docs/operations/configuration.md` has the whole configuration surface;
+`services/cluster/app/resources/reference.yaml` is a commented file to copy from.
+
 ## Running the gateway with a locally linked frontend
 
 The gateway serves the shell from its own classpath at `GET /ui/**`, and the browser and the API

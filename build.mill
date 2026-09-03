@@ -957,6 +957,54 @@ object services extends Module {
       }
     }
 
+    /** The composition root and the `main`. The only module allowed to name `IO` (ADR-010).
+      *
+      * It carries its own `BuildInfo` because a running process cannot look one up: a container has no git
+      * checkout, so the only way a startup log line can say which build it is is for the build to hand the
+      * answer over as source.
+      */
+    object app extends KuiJvmModule with KuiBuildInfoModule {
+      def buildInfoPackage = "kui.cluster.app"
+      def buildInfoObject = "ClusterBuildInfo"
+
+      def moduleDeps = Seq(api, libs.config, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"com.softwaremill.macwire::util::${Versions.macwire}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}",
+        mvn"com.softwaremill.sttp.tapir::tapir-netty-server-cats::${Versions.tapir}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code — Logback is configured by the XML in
+        * `libs/observability`'s resources and the exporters by OpenTelemetry's autoconfigure mechanism — so
+        * they stay off the compile classpath.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // `TestControl` is what makes the once-a-minute unsigned-codec warning testable: the
+          // suite advances two minutes of virtual time instead of waiting two real ones.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
+          mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+          mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
+        )
+      }
+    }
   }
 
   /** The one process a browser ever talks to (ADR-004 §3).
@@ -1084,6 +1132,28 @@ object services extends Module {
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
+
+      /** Where the merged, product-wide OpenAPI document is committed.
+        *
+        * `docs/api/openapi.json` and not a file beside this module, because it documents the whole product
+        * rather than one service: it is the artefact an integrator is pointed at, and it belongs with the
+        * rest of the published documentation.
+        */
+      private def openApiTarget: String =
+        (mill.api.BuildCtx.workspaceRoot / "docs" / "api" / "openapi.json").toString
+
+      /** Regenerates the committed document. */
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget)()
+      }
+
+      /** Fails when the committed document no longer matches the endpoints it was generated from. A
+        * generated file nobody regenerates is worse than no file: an integrator reads it, believes it, and
+        * builds against an API that changed three releases ago.
+        */
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget, "--check")()
+      }
 
       object test extends ScalaTests with KuiTests {
         // `services.gateway.application.test` is here for `FakeCapabilityRegistry`. The task asked for
