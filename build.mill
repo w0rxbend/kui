@@ -372,6 +372,31 @@ object libs extends Module {
     }
   }
 
+  /** The typed configuration model and the loader that fills it in.
+    *
+    * JVM only, and deliberately so: configuration is read from files, environment variables and
+    * command-line flags, none of which a browser has. Nothing in this module is shared with the
+    * frontend, so it is a plain module rather than a cross-compiled one.
+    */
+  object config extends KuiPureModule with KuiJvmModule {
+    def moduleDeps = Seq(kernel.jvm)
+
+    def mvnDeps = Seq(
+      mvn"org.typelevel::cats-core::${Versions.cats}",
+      mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+      mvn"co.fs2::fs2-core::${Versions.fs2}",
+      mvn"co.fs2::fs2-io::${Versions.fs2}",
+      mvn"is.cir::ciris::${Versions.ciris}",
+      mvn"io.circe::circe-core::${Versions.circe}",
+      mvn"io.circe::circe-parser::${Versions.circe}",
+      mvn"io.circe::circe-yaml::${Versions.circeYaml}"
+    )
+
+    object test extends ScalaTests with KuiTests {
+      def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+    }
+  }
+
   /** The security vocabulary: who a caller is, and how a service checks that claim.
     *
     * Cross-compiled like the kernel, because the browser renders what a principal may do. The JOSE
@@ -439,7 +464,11 @@ object frontend extends Module {
       */
     def moduleDir = super.moduleDir / os.up / "ui-kernel"
 
-    def moduleDeps = Seq(libs.kernel.js)
+    // `contracts-core` brings the error envelope and the capability DTOs the `ApiClient` and the
+    // capability store decode (UI-005, UI-008); `security-core` brings `Principal`, which is what
+    // `/auth/me` answers with. Both are cross-compiled, so the browser decodes exactly the shapes
+    // the gateway encodes, from the same source.
+    def moduleDeps = Seq(libs.kernel.js, libs.contractsCore.js, libs.securityCore.js)
 
     def mvnDeps = Seq(
       mvn"com.raquo::laminar::${Versions.laminar}",

@@ -21,9 +21,11 @@ up front:
 frontend/
   ui-kernel/            the design system and the shell's plumbing
     src/kui/ui/kernel/
+      api/              ApiClient, ApiError, Bootstrap — how the browser talks to the gateway
       component/        the primitives: button, input, dialog, table, …
       css/              KernelCss — the class names, as Scala constants
       feature/          KuiFeature, FeatureRegistry, LazyFeature, FeaturePanel
+      state/            the kernel-owned Vars: AuthState, NotificationBus
       theme/            Theme (light / dark / follow the system) and Tokens
     resources/css/      this module's stylesheets
     test/src/…          MUnit suites, run under jsdom
@@ -92,6 +94,84 @@ usable, not merely present. Concretely:
 Tabs are the usual place this rule gets broken: an implementation that renders every panel and hides
 the inactive ones with `display: none` shows all of them at once when the stylesheet is missing. KUI
 renders only the selected panel, so the failure mode is "unstyled but correct".
+
+## Talking to the gateway
+
+### How a feature makes an API call
+
+A feature never builds an HTTP request. It asks the kernel's `ApiClient` to run an *endpoint* — a
+value from a `contract` module that describes one URL, its inputs and its outputs, and that the
+gateway implements from the same source. Renaming a field in the contract is therefore a compile
+error in the browser and on the server at the same moment, which is the whole reason those modules
+are cross-compiled.
+
+```scala
+import kui.ui.kernel.api.{ApiClient, ApiError}
+
+// `client` is handed down from the shell. `ClusterApi.list` is an endpoint value from a
+// contract module; `()` is its input.
+val clusters: EventStream[Either[ApiError, List[ClusterSummary]]] =
+  client.call(ClusterApi.list, ())
+
+div(
+  child <-- clusters.map {
+    case Right(found)  => renderTable(found)
+    case Left(failure) => renderFailure(failure)   // never a blank page
+  }.toSignal(loadingPlaceholder)
+)
+```
+
+Three rules follow from that, and all three are enforced by the shape of the API rather than by
+review:
+
+1. **Features never construct a backend.** There is exactly one `sttp` backend in the frontend, made
+   by `ApiClient.make`, and it is the only thing configured with `credentials: "include"` — the
+   option that makes the session cookie travel. A feature that made its own would be unauthenticated
+   in production and would work perfectly in every test.
+2. **A call never fails the stream, it emits a `Left`.** An Airstream error propagates to the
+   unhandled-error handler and kills the subscription, so a page that was rendering a list stops
+   rendering anything at all. Every outcome is therefore an ordinary value of type
+   `Either[ApiError, O]` that a `Signal` can hold and a view can draw.
+3. **Nothing retries by itself.** A silent browser retry turns a five-minute outage into a
+   five-minute spinner. Retrying is an action the user takes (ADR-032's "Retry now").
+
+A call is also *lazy* and *memoised*: building the stream sends nothing, the first subscriber sends
+the request, and a second subscriber joins that request rather than issuing another.
+
+### The headers the kernel adds, so no feature has to
+
+| Header | On | Where it comes from |
+| --- | --- | --- |
+| `X-Kui-Csrf` | every request that is not a `GET` | `AuthState.csrfToken`, filled by `/auth/me` (ADR-019) |
+| `X-Kui-Request-Id` | every request | generated per call, for support correlation |
+
+The gateway still mints the authoritative correlation id (GW-001). `X-Kui-Request-Id` is a second
+thread to pull on when a user says "it failed at about ten past three", and it is not yet built on:
+treat it as a hook, not as a feature.
+
+### The four shapes a failure takes
+
+`ApiError` has four cases because a caller genuinely treats them differently.
+
+| Case | What happened | What the UI does |
+| --- | --- | --- |
+| `Envelope(code, message, …)` | the server answered and said what was wrong (ADR-034) | render `message`; offer a retry when `retryable` |
+| `Unreachable(cause)` | nothing answered — offline, DNS, gateway down | counts towards the full-screen state (UI-011) |
+| `Timeout` | nothing answered in time | as above |
+| `Decoding(cause)` | something answered, and it was not the contract | a bug, not an outage: never the full-screen state |
+
+`code` is a `String` and not the `ErrorCode` enum on purpose: a browser built today has to render a
+failure a gateway built tomorrow invented, rather than fail to parse it.
+
+### Where the base URL comes from
+
+Never from a constant. The gateway injects a `<script id="kui-bootstrap" type="application/json">`
+block into `index.html` (GW-008) carrying `basePath`, `apiBase` and `buildVersion`, and
+`Bootstrap.read()` reads it. An operator who mounts KUI at `https://tools.example.com/kafka/` needs
+every URL to gain that prefix, and neither the build nor a constant can know it.
+
+A missing or malformed block is not an error: it falls back to the root deployment
+(`apiBase = "/api/v1"`), which is what a development build opened without a gateway needs.
 
 ## Tests
 
