@@ -584,6 +584,53 @@ claimed to be working.
 recycling a connection, a laptop's wifi blinking — and a banner that flickers every few minutes is
 one people learn to ignore.
 
+### User preferences: what is stored, and the rule about reading it
+
+Four preferences, all of them browser-local. There is no per-user store on the server until M6, and
+none of these is an operator concern.
+
+| preference | `localStorage` key | default | how it takes effect |
+| --- | --- | --- | --- |
+| theme | `kui.theme` | follows the system | `data-theme` on `<html>`, stylesheet keys off it |
+| accent | `kui.accent` | Blue | `data-accent` on `<html>`; the default writes no attribute |
+| table density | `kui.density` | Comfortable | `data-density` on `<html>`; the default writes no attribute |
+| timezone | `kui.timezone` | the browser's own zone | passed into `Timestamps` by whoever renders a time |
+| refresh rate | `kui.refreshRate` | `Off` | a stream of ticks a screen may subscribe to |
+
+The first three are purely visual and therefore follow ADR-024 exactly: Scala writes an attribute
+and the stylesheet decides what it looks like. The last two are not matters of appearance, which is
+why they live in `kui.ui.kernel.prefs` rather than in `kui.ui.kernel.theme`.
+
+**Three behaviours that are deliberate, not incidental.**
+
+- **An unrecognised stored value reads as the default, silently, for all five.** `localStorage`
+  outlives upgrades, so a value written by a later build can be read by an earlier one. Of the two
+  ways to be wrong, starting in the default beats failing to start, and an error message on a
+  settings page is a page the user cannot use to fix the problem.
+- **`localStorage` being unavailable is not an error state.** In a private window, or under an
+  enterprise policy, every preference quietly becomes an in-memory value that works for the session
+  and is forgotten on reload. Nothing is shown to the user about it.
+- **The timezone is not written until the user chooses one.** The default is read fresh each time
+  from the browser. Persisting it at start-up would freeze yesterday's zone into a laptop that has
+  since been carried across an ocean.
+
+**The rule about reading a preference.** A component takes the preference it needs as a parameter;
+it never reaches for the singleton. The singletons are backed by real `localStorage` and are shared
+by the whole page, so a component that read one directly could not be tested without a browser
+storage and would leak state into the next test. `SettingsPage` takes all five as `Var`s and the
+shell is the one place that hands it the real ones — which is what makes
+`changingAControlWritesToItsVarAndNothingElse` possible to write at all.
+
+**The refresh rate, and the promise it makes.** KUI's browser does not poll clusters (M1 DEVPLAN
+§10 D10). What this setting re-reads is a snapshot the server has already computed: it costs one
+cached HTTP response, it cannot reach a broker, and it is off unless somebody turns it on. The
+shortest interval offered is thirty seconds, matching the server's own scrape cadence, because a
+faster one would return identical bytes. Two rules keep the distinction real: a tick never asks the
+server to re-scrape — that is the refresh *button* — and a refetch never puts a loader over rows
+that are already on screen. `RefreshRateSuite.offEmitsNothing` asserts that the `Off` setting starts
+no timer at all, rather than starting one and filtering it, because a filtered timer is still a
+browser waking up on somebody's laptop every thirty seconds.
+
 ### Data that has gone stale, and the one component that draws it
 
 A capability going down and a *screen's data* going stale are two different events, and the

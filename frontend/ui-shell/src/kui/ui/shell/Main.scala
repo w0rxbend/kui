@@ -10,6 +10,7 @@ import kui.kernel.{RoleName, UserName}
 import kui.security.{Principal, PrincipalKind}
 import kui.ui.kernel.api.{ApiClient, ApiError, Bootstrap}
 import kui.ui.kernel.feature.{FeatureRegistry, FeatureRoutes, Page}
+import kui.ui.kernel.prefs.{RefreshRate, Timezone}
 import kui.ui.kernel.state.FeatureState.*
 import kui.ui.kernel.state.{Auth, AuthInfo, AuthState, CapabilityStore, FeatureState}
 import kui.ui.kernel.theme.{Accent, Density, Theme}
@@ -262,7 +263,19 @@ object Shell {
     // once for the life of the application, which is what keeps its scroll position and any open
     // menu alive across a navigation away and back.
     lazy val home = ErrorReporting.renderSafely(() => HomePage())
-    lazy val settings = ErrorReporting.renderSafely(() => SettingsPage(Theme.choice, buildVersion))
+    // The zone list is read once, when the page is first built, rather than on every render: it is
+    // several hundred entries and the set does not change while a tab is open.
+    lazy val settings = ErrorReporting.renderSafely(() =>
+      SettingsPage(
+        theme = Theme.choice,
+        accent = Accent.choice,
+        density = Density.choice,
+        timezone = Timezone.choice,
+        zones = Timezone.available(),
+        refreshRate = RefreshRate.choice,
+        buildVersion = buildVersion
+      )
+    )
     lazy val gallery = ErrorReporting.renderSafely(() => GalleryPage())
 
     val gates = featureGates(router, states, api)

@@ -51,6 +51,19 @@ final class A11ySuite extends FunSuite with Mounted {
       List(present("label", "for"), present("select", "id"))
     ),
     (
+      "SearchableSelect",
+      SearchableSelect(Val(List("UTC" -> "UTC+00:00 UTC")), Var("UTC"), "Timezone"),
+      List(
+        present("label", "for"),
+        equalTo("input", "role", "combobox"),
+        present("input", "aria-controls"),
+        present("input", "aria-expanded"),
+        equalTo("ul", "role", "listbox"),
+        equalTo("li", "role", "option"),
+        equalTo("li", "aria-selected", "true")
+      )
+    ),
+    (
       "Tag",
       Tag(Val("Rebalancing"), tone = Tone.Warning, live = true, onRemove = Some(Observer.empty)),
       List(equalTo("[role='status']", "role", "status"), present("button", "aria-label"))

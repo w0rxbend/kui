@@ -59,6 +59,13 @@ object KernelCss {
   val TagDot = "kui-tag__dot"
   val TagRemove = "kui-tag__remove"
 
+  /** The searchable combobox, for a list too long for a native `<select>`. */
+  val Combobox = "kui-combobox"
+  val ComboboxList = "kui-combobox__list"
+  val ComboboxOption = "kui-combobox__option"
+  val ComboboxOptionActive = "kui-combobox__option--active"
+  val ComboboxEmpty = "kui-combobox__empty"
+
   val Card = "kui-card"
   val CardElevated = "kui-card--elevated"
   val CardHeader = "kui-card__header"

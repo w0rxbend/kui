@@ -32,6 +32,27 @@ object Messages {
       case ReasonCode.Unknown => "Something is wrong with this service, and KUI cannot say what."
     }
 
+  /** What "following the system" means, on the settings page. */
+  val themeHelp: String =
+    "\"Following the system\" changes with your operating system's own light and dark setting, " +
+      "including while KUI is open."
+
+  /** Why density is a switch and not a size scale. */
+  val densityHelp: String =
+    "Compact narrows the rows in every table so more of them fit on screen. It changes nothing " +
+      "else - not the type size, not the controls."
+
+  /** What the timezone preference applies to, and where it is kept. */
+  val timezoneHelp: String =
+    "Every time KUI shows - when a cluster was last read, when a service went down - is shown in " +
+      "this zone. It is remembered in this browser only."
+
+  /** The refresh-rate setting, and the promise it makes about broker load. */
+  val refreshRateHelp: String =
+    "How often a screen re-reads what KUI already knows. It never asks a cluster for anything: " +
+      "KUI reads each cluster on its own schedule, and the refresh button on a page is what asks " +
+      "for that to happen now. Off by default."
+
   /** The sidebar tooltip on a `Forbidden` entry. */
   def notPermitted(featureLabel: String): String = s"You do not have permission to view $featureLabel"
 

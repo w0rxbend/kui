@@ -80,6 +80,23 @@ object Timestamps {
     s"$local ${offsetOf(fields.offsetSeconds(at))}"
   }
 
+  /** How far a zone is from UTC at a given instant, in seconds, or `None` when the runtime does not recognise
+    * the zone.
+    *
+    * Public because the settings page has to label several hundred zones with their offsets and sort them by
+    * it, and because a control that offers a zone the runtime cannot resolve is a control that offers a
+    * broken choice.
+    */
+  def offsetSeconds(zone: String, at: Instant): Option[Int] =
+    partsOf(at, zone).map(_.offsetSeconds(at))
+
+  /** `UTC+02:00` for a zone at an instant; `UTC+00:00` for a zone the runtime does not know. */
+  def offsetLabel(zone: String, at: Instant): String =
+    offsetOf(offsetSeconds(zone, at).getOrElse(0))
+
+  /** Whether the runtime can resolve this zone id at all. */
+  def isKnownZone(zone: String): Boolean = offsetSeconds(zone, Instant.EPOCH).isDefined
+
   /** The wall-clock fields of one instant in one zone. */
   final private case class Fields(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) {
 

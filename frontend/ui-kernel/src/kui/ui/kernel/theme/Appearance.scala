@@ -109,8 +109,12 @@ object RootPreference {
     * `None` and the `Var` quietly behaves like an ordinary in-memory one. That is the required behaviour: a
     * user in a private window gets a working switcher that forgets the choice on reload, not an application
     * that fails to start.
+    *
+    * `private[kernel]` rather than `private[theme]`: the preferences in `kui.ui.kernel.prefs` — the timezone
+    * and the refresh rate — are stored the same way but are not matters of appearance, so they live in their
+    * own package and still need this.
     */
-  private[theme] def persisted[A](
+  private[kernel] def persisted[A](
       storage: WebStorageBuilder,
       encode: A => String,
       decode: String => A,

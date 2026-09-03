@@ -455,3 +455,12 @@ is written here: the static file stays the canonical base, and the store is one 
 in the same precedence chain. A cluster the store knows about but the file does not is added; a
 cluster both describe is replaced whole by the store's version, never merged field by field, so
 removing `security` from a stored record cannot silently inherit the file's credentials.
+
+## User preferences are not configuration
+
+The theme, the accent colour, the table density, the timezone and the screen refresh rate are set
+by each person in the interface and are stored in that person's own browser, under `kui.*` keys in
+`localStorage`. There is nothing to configure, nothing to deploy and nothing to back up: KUI has no
+per-user store on the server, and these values never leave the browser they were set in. Somebody
+who clears their browser data gets the defaults back, and a person on two machines sets their
+preferences twice.
