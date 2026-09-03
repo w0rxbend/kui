@@ -11,7 +11,7 @@ import mill.scalajslib.api.{JsEnvConfig, ModuleKind, ModuleSplitStyle}
 import com.goyeau.mill.scalafix.ScalafixModule
 
 // Compiled into the meta-build by `mill-build/build.mill`, and into `build-tests` for its unit tests.
-import kui.build.{ArchitectureRules, ModuleFacts}
+import kui.build.{ArchitectureRules, BundleShape, CssPipeline, CssSource, ModuleFacts}
 
 /** Every third-party version KUI pins, in one place.
   *
@@ -50,6 +50,10 @@ object Versions {
   val munitCatsEffect = "2.2.0"
   val disciplineMunit = "2.0.0"
   val testcontainers  = "0.44.1"
+  // Playwright and the browser build it downloads are pinned together (BUILD-006 spike 3): the
+  // library only speaks to the browser revision it shipped with, so bumping one means bumping both.
+  val playwright        = "1.62.0"
+  val playwrightBrowser = "chromium 151.0.7922.34 (playwright build 1234)"
   val domtestutils    = "19.0.0"
 }
 
@@ -119,6 +123,48 @@ trait KuiJsModule extends KuiModule with ScalaJSModule {
   */
 trait KuiFrontendModule extends KuiJsModule {
   def moduleSplitStyle = ModuleSplitStyle.SmallModulesFor("kui.ui.clusters")
+
+  /** The feature microfrontends that must be linked into modules of their own (ADR-012).
+    *
+    * Empty until UI-012 creates the first one. `checkBundleShape` skips on an empty list rather
+    * than passing, so an accidentally emptied list is visible in the build log instead of silently
+    * turning the check off. UI-012 adds
+    * `BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters")` here.
+    */
+  def bundleFeatures: Seq[BundleShape.Feature] = Seq.empty
+
+  /** The largest `main.js` the shell may ship, uncompressed.
+    *
+    * 1.5 MB is a starting budget, not a measurement: it is roughly what a Laminar shell plus its
+    * runtime costs today, with room to grow. Raising it is allowed; raising it without saying why
+    * in the commit body is how a budget stops meaning anything.
+    */
+  def bundleSizeBudgetBytes: T[Long] = Task { 1_500_000L }
+
+  /** Fails the build when the linked frontend is not shaped the way ADR-012 needs.
+    *
+    * Runs `fullLinkJS` first — the shape only exists in the optimised output, because the fast
+    * linker does not do the same module splitting — and then applies `kui.build.BundleShape`'s
+    * rules to what landed in the output directory.
+    */
+  def checkBundleShape(): Task.Command[Unit] = Task.Command {
+    val linked      = fullLinkJS().dest.path
+    val linkedFiles = os.list(linked).filter(os.isFile)
+    val mainJs      = linked / "main.js"
+
+    val output = BundleShape.LinkerOutput(
+      fileNames = linkedFiles.map(_.last).toSeq,
+      mainJsContent = if (os.exists(mainJs)) os.read(mainJs) else "",
+      mainJsSizeBytes = if (os.exists(mainJs)) os.size(mainJs) else 0L
+    )
+
+    BundleShape.check(output, bundleFeatures, bundleSizeBudgetBytes()) match {
+      case BundleShape.Result.Skipped(message) => println(message)
+      case BundleShape.Result.Passed(message)  => println(message)
+      case BundleShape.Result.Failed(problems) =>
+        Task.fail(s"checkBundleShape: ${problems.size} problem(s):\n${problems.map("  " + _).mkString("\n")}")
+    }
+  }
 }
 
 /** JVM tests. MUnit is the only test framework (ADR-018). */
@@ -167,6 +213,19 @@ trait KuiCrossTests extends JavaModule {
   */
 trait KuiJsDomTests extends ScalaJSModule with KuiJsTests {
   override def jsEnvConfig = Task { JsEnvConfig.JsDom() }
+
+  // jsdom loads the test binary the way a browser loads a classic `<script>` tag, so it accepts
+  // neither the ES modules the shipped frontend is linked as nor the CommonJS that `KuiJsTests`
+  // switches plain Node tests to. `NoModule` is the plain-script output, and it is the only input
+  // this environment supports (`JSDOMNodeJSEnv.validateInput`). Nothing about the artefact that
+  // ships is affected: this is the file handed to jsdom, not the one served to a browser.
+  override def moduleKind = ModuleKind.NoModule
+
+  // A single-file output cannot also be split into one module per feature, and the linker refuses
+  // the combination outright. Splitting is a production concern (ADR-012's lazy feature loading);
+  // `checkBundleShape` asserts it on the real `fullLinkJS` output, so nothing is lost by linking the
+  // test binary as one file.
+  override def moduleSplitStyle = ModuleSplitStyle.FewestModules
 }
 
 /** Runs the tests in a real browser engine, driven by Playwright.
@@ -210,6 +269,121 @@ object libs extends Module {
 
       object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
     }
+  }
+}
+
+/** The product version, shown in the shell footer and reported in bug reports.
+  *
+  * It lives here rather than in a file the application reads at runtime because the browser has no
+  * filesystem: the only way a Scala.js program can know which build it is, is for the build to
+  * compile the answer in (see `uiKernel`'s `BuildInfo`).
+  */
+def kuiVersion: T[String] = Task { "0.1.0-SNAPSHOT" }
+
+/** Everything that runs in a browser.
+  *
+  * `ui-kernel` is the design system and the shell's plumbing: tokens, primitives, the feature
+  * loading contract. Feature microfrontends (`ui-clusters`, `ui-topics`, …) arrive in later
+  * milestones as sibling modules; each adds its package to `KuiFrontendModule`'s split list and its
+  * CSS directory to `cssModules` below.
+  */
+object frontend extends Module {
+
+  object uiKernel extends KuiFrontendModule {
+
+    /** Mill names a module's directory after the Scala object, which would put these sources in
+      * `frontend/uiKernel`. Directories in this repository are kebab-case (`libs/kernel`,
+      * `services/gateway`, and `ui-clusters`, `ui-topics` to come), and a Scala identifier cannot
+      * contain a hyphen without backticks — which would then leak into every task name a developer
+      * types. Renaming the directory here keeps `frontend/ui-kernel` on disk and
+      * `frontend.uiKernel.compile` on the command line.
+      */
+    def moduleDir = super.moduleDir / os.up / "ui-kernel"
+
+    def moduleDeps = Seq(libs.kernel.js)
+
+    def mvnDeps = Seq(
+      mvn"com.raquo::laminar::${Versions.laminar}",
+      mvn"com.raquo::airstream::${Versions.laminar}",
+      mvn"com.raquo::waypoint::${Versions.waypoint}",
+      mvn"org.scala-js::scalajs-dom::${Versions.scalajsDom}",
+      mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+      mvn"com.softwaremill.sttp.tapir::tapir-sttp-client4::${Versions.tapir}",
+      // sttp's JS backend decodes timestamps with `java.time`, which the JVM supplies and the
+      // browser does not; this is the Scala.js re-implementation of it.
+      mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}"
+    )
+
+    /** Writes the build's own facts into a Scala source file that is compiled with the module.
+      *
+      * A browser has no filesystem and no environment variables, so the only way for frontend code
+      * to know which build it is, is for the build to hand it the answer as source. Mill's
+      * ready-made `BuildInfo` lives in a contrib plugin; generating one field by hand is smaller
+      * than taking that dependency, and keeps the generated code visible in this file.
+      */
+    def buildInfoSource: T[PathRef] = Task {
+      val file = Task.dest / "KernelBuildInfo.scala"
+      os.write(
+        file,
+        s"""package kui.ui.kernel
+           |
+           |/** Generated by `build.mill`. Do not edit; read it through `Kernel`. */
+           |private[kernel] object KernelBuildInfo {
+           |  val version: String = "${kuiVersion()}"
+           |}
+           |""".stripMargin
+      )
+      PathRef(file)
+    }
+
+    def generatedSources = Task { super.generatedSources() :+ buildInfoSource() }
+
+    /** Runs under jsdom, not plain Node, because almost everything in this module touches
+      * `document`. See `docs/development/toolchain.md` for the `NODE_PATH` jsdom needs.
+      */
+    object test extends ScalaJSTests with KuiJsDomTests {
+      def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
+
+      /** Compiles the token stylesheet and its documentation into the test binary as plain strings.
+        *
+        * `ContrastSuite` has to read both: the CSS to learn every colour's value, and
+        * `docs/frontend/tokens.md` to learn which foreground/background pairs are supposed to be
+        * legible. Code compiled by Scala.js has no filesystem — it runs inside a JavaScript engine —
+        * so a test cannot open either file at run time. Handing them to it as generated source is
+        * the way to keep the *documentation* as the single source of truth for the pair list, which
+        * is the point: adding a pair to the table makes the test check it, and adding a token
+        * without adding its pair leaves the omission visible in one place.
+        */
+    }
+  }
+
+  /** Every frontend module whose `resources/css` directory contributes to `kui.css`, in no
+    * particular order — `CssPipeline` decides the cascade, not this list.
+    */
+  private def cssModules: Seq[KuiFrontendModule] = Seq(uiKernel)
+
+  /** Concatenates every module's CSS into one `kui.css` (ADR-024).
+    *
+    * The ordering rules, and the reasoning behind them, live in `kui.build.CssPipeline` so that they
+    * can be unit-tested by `build-tests` rather than only observed by running the build.
+    */
+  def css: T[PathRef] = Task {
+    val resourceRoots = Task.traverse(cssModules)(_.resources)()
+
+    val sources = cssModules.zip(resourceRoots).flatMap { (module, roots) =>
+      val moduleName = module.moduleSegments.parts.last
+      roots
+        .map(_.path / "css")
+        .filter(os.exists)
+        .flatMap(directory => os.list(directory).filter(_.ext == "css"))
+        .sorted
+        .map(file => CssSource(moduleName, file.last, os.read(file)))
+    }.toList
+
+    val stylesheet = Task.dest / "kui.css"
+    os.write(stylesheet, CssPipeline.concatenate(sources))
+    println(s"frontend.css: ${sources.size} source file(s) -> $stylesheet")
+    PathRef(stylesheet)
   }
 }
 
@@ -356,6 +530,19 @@ def checkArchitecture(): Task.Command[Unit] = Task.Command {
 /** Downloads every coordinate M0 pins and prints how many were fetched. Exits non-zero on the first
   * version that does not exist, which is the whole point of the task.
   */
+/** The pinned versions that something outside the build has to read back.
+  *
+  * `Versions` above is a plain Scala object, evaluated while the build definition is being
+  * compiled, so `./mill show Versions.playwright` cannot work — Mill can only show a *task*. CI
+  * needs the Playwright numbers as text (it installs the browser before the e2e job runs), so those
+  * two are re-exported here as tasks. Everything else is read by the build itself and needs no
+  * external accessor.
+  */
+object versions extends Module {
+  def playwright: T[String]        = Task { Versions.playwright }
+  def playwrightBrowser: T[String] = Task { Versions.playwrightBrowser }
+}
+
 def resolveAll(): Task.Command[Int] = Task.Command {
   val jars = depsSmoke.resolvedMvnDeps()
   println(s"resolved ${jars.toSeq.size} artifacts for ${depsSmoke.mvnDeps().size} pinned coordinates")

@@ -29,6 +29,30 @@ export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"
 
 Verify with `node --version` before running any task whose name contains `js`.
 
+## The DOM test suites need jsdom, and need to be able to find it
+
+Some frontend suites render real elements and therefore need a `document`. Plain Node has none, so
+those suites run under [jsdom](https://github.com/jsdom/jsdom), a `document` implemented in
+JavaScript. It is an npm package, and it is not something Mill can download for you:
+
+```bash
+npm install -g jsdom
+```
+
+A globally installed package is not on Node's default lookup path, so the build also has to be told
+where the global packages live — and it has to be told *before Mill's background daemon starts*,
+because the daemon passes its own environment on to the `node` process it forks. Exporting the
+variable and then running a task against an already-running daemon has no effect:
+
+```bash
+export NODE_PATH="$(npm root -g)"
+./mill shutdown            # only needed if a daemon is already running without NODE_PATH set
+./mill frontend.uiKernel.test
+```
+
+The symptom of getting this wrong is `Error: Cannot find module 'jsdom'` from inside
+`codeWithJSDOMContext.js`, with the test run exiting before any test starts.
+
 Server-side work needs none of this. `./mill libs.kernel.jvm.test` and everything else on the
 JVM runs without Node present.
 
