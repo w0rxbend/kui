@@ -826,6 +826,174 @@ object services extends Module {
       }
     }
   }
+
+  /** The one process a browser ever talks to (ADR-004 §3).
+    *
+    * The gateway owns no domain and holds no Kafka client. It is edge concerns only: the header policy, the
+    * session and CSRF boundary, the capability registry, contract-derived routing to the other services, the
+    * static assets and the merged OpenAPI document. `checkArchitecture` rules A4 and A8 are what keep it
+    * that way — A4 forbids it any edge into another service's private layers, A8 forbids it a Kafka client.
+    *
+    * ADR-041's Amendment 1 exempts it from rule A3, which keeps a domain-owning service's `application`
+    * layer off the wire. The exemption is not a loosening: the gateway's subject matter *is* other services'
+    * published contracts, so an `application` layer that could not name a contract type would have nothing
+    * left to say.
+    */
+  object gateway extends Module {
+
+    /** The gateway's use cases: the capability fold (GW-003) and the ports the edge is stated in terms of.
+      *
+      * It sees `libs/contracts-core` because a capability state is a contract type, and the whole job of
+      * this layer is to decide what that document should say.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm, libs.contractsCore.jvm, libs.securityCore.jvm, libs.config)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
+        )
+      }
+    }
+
+    /** The gateway's own published wire shape: `/api/v1/info`, the `/api/v1/auth` endpoints and the capability
+      * endpoints. Cross-compiled for the same reason every other contract is (ADR-003): the browser decodes
+      * exactly what the gateway encodes, from the same source.
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+      object js extends Shared with KuiJsModule {
+        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
+        def mvnDeps =
+          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+      }
+    }
+
+    /** The edge itself: the header policy, the routes, the static assets and the OpenAPI document.
+      *
+      * It depends on `services.cluster.contract.jvm` and will depend on every other service's contract as
+      * they arrive. That is the only edge A4 allows, and it is the whole design: the gateway derives its
+      * routes from endpoint values another team published, so a path it serves cannot drift from the path
+      * that service serves.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        cluster.contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.config,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        // Declared now and used by GW-008 (static assets) and GW-007 (the merged OpenAPI document). They
+        // are here rather than added later so that a resolution failure surfaces on the first build of this
+        // module rather than on the day someone writes the code that needs them.
+        mvn"com.softwaremill.sttp.tapir::tapir-files::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-swagger-ui-bundle::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
+          // Several suites bind a real port and speak HTTP to it: a header that is stripped by an
+          // interceptor is only proven stripped by a request that really travelled through the server.
+          mvn"com.softwaremill.sttp.tapir::tapir-netty-server-cats::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+          mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
+        )
+      }
+    }
+
+    /** The composition root and the `main`. The only module allowed to name `IO` and to construct
+      * anything concrete (ADR-010).
+      */
+    object app extends KuiJvmModule {
+      def moduleDeps = Seq(api, libs.config, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"com.softwaremill.macwire::util::${Versions.macwire}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None of them is named in code — Logback is configured by `logback.xml` and
+        * the exporters by the OpenTelemetry autoconfigure mechanism — so they stay off the compile
+        * classpath, exactly as `libs/observability` explains.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+          mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
+        )
+      }
+    }
+  }
 }
 
 /** Small programs the build runs. They are ordinary modules so that their logic is unit-tested like
