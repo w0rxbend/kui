@@ -4,11 +4,14 @@ import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.{Router, SplitRender}
 import org.scalajs.dom
 
-import kui.gateway.contract.CapabilityEndpoints
-import kui.ui.kernel.api.{ApiClient, Bootstrap}
+import kui.gateway.contract.dto.AuthMeResponse
+import kui.gateway.contract.{AuthEndpoints, CapabilityEndpoints}
+import kui.kernel.{RoleName, UserName}
+import kui.security.{Principal, PrincipalKind}
+import kui.ui.kernel.api.{ApiClient, ApiError, Bootstrap}
 import kui.ui.kernel.feature.{FeatureRegistry, FeatureRoutes, Page}
 import kui.ui.kernel.state.FeatureState.*
-import kui.ui.kernel.state.{AuthState, CapabilityStore, FeatureState}
+import kui.ui.kernel.state.{Auth, AuthInfo, AuthState, CapabilityStore, FeatureState}
 import kui.ui.kernel.theme.Theme
 import kui.ui.shell.feature.{CapabilityBanner, FeatureGate}
 import kui.ui.shell.layout.{Header, Layout, Sidebar}
@@ -61,6 +64,9 @@ object Shell {
     // `/api/v1/...` path. See `Bootstrap.gatewayRoot`.
     val api = ApiClient.make(Bootstrap.gatewayRoot(bootstrap), AuthState.current)
 
+    // Before anything mutating can work. See `startSession`.
+    startSession(api, AuthState.current)(using unsafeWindowOwner)
+
     // The capability picture is what the whole navigation is drawn from, so it is started before the
     // first paint. Nothing waits for it: an empty picture renders as `Degraded(Starting)`, which is
     // the honest state — the features are usable and their health has not been established yet.
@@ -78,6 +84,65 @@ object Shell {
       app(bootstrap, dom.window.location.href, dom.window.location.origin, Some(api))
     )
   }
+
+  /** Establishes the browser's session, and re-establishes it after the server says it has lapsed.
+    *
+    * ## Why start-up has to do this
+    *
+    * Every mutating request KUI sends must carry the session's CSRF token in `X-Csrf-Token` (ADR-019). The
+    * `ApiClient` adds that header by itself, but only if it has a token to add, and the only place a token
+    * ever comes from is the body of `GET /api/v1/auth/me`. Nothing else calls that endpoint. Without this
+    * call the token stays `None` for the life of the page, the header is never sent, and the gateway refuses
+    * every non-`GET` with `403 KUI-FORBIDDEN` and "X-Csrf-Token is missing" — in M0 that is the "Retry now"
+    * button in the degraded-feature panel, which therefore never works.
+    *
+    * ## Why it also listens for expiry
+    *
+    * A session has an idle timeout. When it lapses, the next request comes back `401`, `ApiClient` reports
+    * that to [[Auth.markExpired]], and the token is cleared. Re-fetching `/auth/me` at that point is what
+    * gets the browser a working session again without the user reloading the page. `Auth.expired` emits at
+    * most once per expiry, so a page with five requests in flight makes one recovery attempt, not five.
+    *
+    * The refresh streams are subscribed on `unsafeWindowOwner` — the page's own lifetime — because the
+    * session outlives every element on screen.
+    *
+    * @param auth
+    *   the session to fill in. A parameter rather than `AuthState.current` so that a test can watch one
+    *   session without the application's singleton leaking into the next test.
+    */
+  def startSession(api: ApiClient, auth: Auth)(using Owner): Unit = {
+    // A thunk, and not a stream: `Auth.refresh` calls it once per attempt, and a stream built up front
+    // would be one request shared by every attempt rather than a fresh one each time.
+    val fetch: () => EventStream[Either[ApiError, AuthInfo]] =
+      () => api.call(AuthEndpoints.me, ()).map(_.map(toAuthInfo))
+
+    auth.refresh(fetch).foreach(_ => ()): Unit
+
+    // `flatMapSwitch` and not `flatMapMerge`: if a second expiry somehow arrives while a refresh is in
+    // flight, the newer attempt is the one whose answer should win.
+    auth.expired.flatMapSwitch(_ => auth.refresh(fetch)).foreach(_ => ()): Unit
+  }
+
+  /** Translates the gateway's wire shape into the kernel's.
+    *
+    * The kernel sits underneath every service contract and may not name one (ADR-041), so the shell — which
+    * is allowed to see both — is where the two meet. An unrecognised `kind` becomes `Anonymous` rather than a
+    * failure: a gateway that grows a new principal kind should not stop an older browser from starting.
+    */
+  private[shell] def toAuthInfo(response: AuthMeResponse): AuthInfo =
+    AuthInfo(
+      principal = Some(
+        Principal(
+          name = UserName.unsafe(response.principal.name),
+          roles = response.principal.roles.map(RoleName.unsafe).toSet,
+          kind = PrincipalKind.fromWire(response.principal.kind).getOrElse(PrincipalKind.Anonymous)
+        )
+      ),
+      // An empty token is no token. Sending `X-Csrf-Token: ` would be rejected exactly as a missing
+      // header is, but with a far more confusing message in the gateway's log.
+      csrfToken = Option(response.csrfToken).filter(_.nonEmpty),
+      authType = response.authType
+    )
 
   /** Where the capability stream lives.
     *
