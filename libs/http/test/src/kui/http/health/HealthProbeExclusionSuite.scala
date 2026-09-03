@@ -47,9 +47,9 @@ final class HealthProbeExclusionSuite extends FunSuite {
   }
 
   test("the capabilities endpoint is still measured, so the exclusion is not a blanket one") {
-    val capabilities = HealthEndpoints.capabilities
-    assert(KuiInterceptors.isMeasured(capabilities))
-    assert(KuiInterceptors.isMeasured(BasePath.prefix("/kui", capabilities.serverLogicSuccess[IO](_ => ???)).endpoint))
+    val served = HealthEndpoints.capabilities.serverLogicSuccess[IO](_ => IO.raiseError(new Exception))
+    assert(KuiInterceptors.isMeasured(served.endpoint))
+    assert(KuiInterceptors.isMeasured(BasePath.prefix("/kui", served).endpoint))
   }
 
   test("the operation ids observability excludes are the ids the endpoints declare") {
