@@ -115,6 +115,13 @@ object Sidebar {
       a(
         cls := ShellCss.SidebarLink,
         dataAttr("testid") := initial.testId,
+        // Which of ADR-032's five states this entry is in, as one machine-readable attribute.
+        //
+        // It exists for the end-to-end tests, which assert every one of those rules against a real
+        // browser (E2E-002), and it is deliberately not a class name. Class names belong to the
+        // visual design and change whenever the design does; this is a statement about state, and it
+        // has to stay true through any restyle or the test is asserting on the wrong thing.
+        dataAttr("state") <-- state.map(stateName),
         // A dimmed entry is still a link with a real address: that is what makes the fallback panel
         // reachable, bookmarkable and openable in a new tab.
         cls(ShellCss.SidebarLinkDimmed) <-- state.map(_.isDimmed),
@@ -175,6 +182,19 @@ object Sidebar {
           Some(if message.isEmpty then Messages.reason(code) else message)
         case FeatureState.Ready | FeatureState.NotConfigured => None
       }
+    }
+
+  /** The name written into `data-state`. Lower-case and hyphen-free so it reads as an attribute value rather
+    * than as a Scala constructor name, and total so a state added later cannot silently fall through to
+    * something misleading.
+    */
+  private def stateName(state: FeatureState): String =
+    state match {
+      case FeatureState.Ready => "ready"
+      case FeatureState.Degraded(_) => "degraded"
+      case FeatureState.Unavailable(_, _, _) => "unavailable"
+      case FeatureState.Forbidden => "forbidden"
+      case FeatureState.NotConfigured => "notconfigured"
     }
 
   private def isForbidden(state: FeatureState): Boolean =

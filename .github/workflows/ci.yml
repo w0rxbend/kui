@@ -117,3 +117,55 @@ jobs:
       # feature list of its own, so its check would skip and prove nothing.
       - name: Check the bundle shape
         run: ./mill frontend.uiShell.checkBundleShape
+
+  e2e:
+    name: end-to-end (browser)
+    runs-on: ubuntu-latest
+    # The slowest stage by a wide margin: it links the frontend with the optimising linker, assembles
+    # a jar, builds two container images and drives a real browser through two deployment shapes.
+    # Twenty-five minutes is a backstop against a hung browser, not a budget — the suite takes about
+    # three minutes when nothing is wrong.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+
+      # The browser Playwright drives is not in the runner image, and the library only speaks to the
+      # revision it shipped with, so this installs *the* browser rather than *a* browser. Caching it
+      # separately from the Mill caches, keyed on the Playwright version, is what stops every run
+      # paying a 300 MB download; `versions.playwright` is the same number `build.mill` pins.
+      - name: Read the pinned Playwright version
+        id: playwright
+        run: echo "version=$(./mill show versions.playwright | tr -d '\"')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Playwright browser cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+
+      # `--with-deps` installs the shared libraries a browser needs, which a fresh runner image does
+      # not have. It needs root, which the GitHub-hosted runner grants through passwordless sudo;
+      # Playwright escalates internally.
+      - name: Install the pinned Chromium build
+        run: ./mill e2e.installBrowser --with-deps
+
+      # E2E-002 stops one container of the distributed stack, so the images have to exist. They are
+      # built here rather than pulled: the point of the suite is to check the artefacts this commit
+      # produces, and a pulled image would be somebody else's commit.
+      - name: Build the container images the distributed stack runs
+        run: ./mill deployment.docker.gateway.docker.build deployment.docker.cluster.docker.build
+
+      - name: Run the end-to-end suites
+        run: ./mill e2e.test -v
+
+      # The four things that explain a browser failure without anyone reproducing it: the screenshot,
+      # the console, the failed requests and the server or container logs. Uploaded on failure only,
+      # because on success they are noise.
+      - name: Upload the failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: out/e2e-artifacts/**
+          if-no-files-found: ignore

@@ -844,6 +844,41 @@ object frontend extends Module {
     println(s"frontend.css: ${sources.size} source file(s) -> $stylesheet")
     PathRef(stylesheet)
   }
+
+  /** The linked frontend, laid out the way the classpath has to see it.
+    *
+    * `StaticRoutes` serves `/ui/...` from the classpath under `/web`, so a browser asking for
+    * `/ui/main.js` makes the server look for the classpath resource `web/main.js`. This task builds
+    * a directory containing exactly that `web` directory — every file the Scala.js linker produced
+    * (`main.js`, one module per split feature, and the source maps) plus `kui.css` — and hands it
+    * back as a resource root.
+    *
+    * A deployable adds it to its own `resources`, which is what puts those files inside the
+    * assembled jar and therefore inside the container image. Without it the images serve
+    * `index.html` and then answer the `main.js` request it points at with `index.html` again — the
+    * single-page fallback doing exactly what it is supposed to do for an unknown path — so the
+    * browser loads an HTML document as a JavaScript module and the application never starts. The
+    * API worked, which is why the Compose smoke test passed and nobody noticed until a real browser
+    * opened the page.
+    *
+    * `fullLinkJS` and not `fastLinkJS`, for two reasons: it is the optimised output a release is
+    * supposed to ship, and it is the only one that is actually split into per-feature modules, which
+    * is the ADR-012 behaviour E2E-001 asserts on. The development loop does not go through here at
+    * all — `devClassPath` puts symbolic links to the fast-linker output in front of everything, so a
+    * developer still gets a re-link and a refresh.
+    */
+  def bundle: T[PathRef] = Task {
+    val web = Task.dest / "web"
+    os.makeDir.all(web)
+
+    val linked = uiShell.fullLinkJS().dest.path
+    val jsFiles = os.list(linked).filter(os.isFile)
+    jsFiles.foreach(file => os.copy.into(file, web, replaceExisting = true))
+    os.copy.into(css().path, web, replaceExisting = true)
+
+    println(s"frontend.bundle: ${jsFiles.size} linker file(s) + kui.css -> $web")
+    PathRef(Task.dest)
+  }
 }
 
 /** The eleven services. Each is one module tree with the layers of `ARCHITECTURE.md` §3, and the
@@ -1224,6 +1259,12 @@ object services extends Module {
     object app extends KuiJvmModule {
       def moduleDeps = Seq(api, application, libs.config, libs.observability, libs.http)
 
+      /** The gateway's own resources, plus the linked frontend. See `frontend.bundle`: the gateway
+        * is the only process a browser talks to, so it is the one that has to carry the JavaScript
+        * and the stylesheet.
+        */
+      override def resources = Task { super.resources() :+ frontend.bundle() }
+
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
         mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
@@ -1299,6 +1340,11 @@ object apps extends Module {
       libs.http
     )
 
+    /** The frontend, in the jar, for the same reason the gateway carries it: this process serves the
+      * browser too. See `frontend.bundle`.
+      */
+    override def resources = Task { super.resources() :+ frontend.bundle() }
+
     def mvnDeps = Seq(
       mvn"org.typelevel::cats-core::${Versions.cats}",
       mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
@@ -1340,6 +1386,93 @@ object apps extends Module {
         mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
       )
     }
+  }
+}
+
+/** The end-to-end tests: a real browser, driven from Scala, against a really running KUI.
+  *
+  * ADR-018 chose JVM Playwright over the TypeScript one so that the tests are written in the same
+  * language and built by the same tool as everything else. There is therefore no `package.json`, no
+  * second dependency manager and no second CI toolchain here — `com.microsoft.playwright:playwright`
+  * is an ordinary Maven coordinate, and the browser it drives is downloaded once by
+  * `./mill e2e.installBrowser`.
+  *
+  * The module is split the way every other module is: `e2e/src` holds the reusable machinery (the
+  * fixtures, the page objects, the fault-isolation scenario) and `e2e/test/src` holds the suites.
+  * That is not ceremony. A page object is production-grade code that several suites and several
+  * milestones share, and keeping it out of the test source set is what stops it turning into
+  * copy-paste inside individual suites.
+  *
+  * It depends on no other module. The suites talk to KUI the way a user does — over HTTP, through a
+  * browser — and giving them the server's classes on the classpath would let an assertion quietly
+  * become a unit test against an object it should only be able to see through the wire.
+  */
+object e2e extends KuiJvmModule {
+
+  /** The one lint rule this module is exempt from is `DisableSyntax.noThrows`, and
+    * `.scalafix-e2e.conf` says at length why a test fixture is not production code in that respect.
+    */
+  def scalafixConfig = Task { Some(mill.api.BuildCtx.workspaceRoot / ".scalafix-e2e.conf") }
+
+  def mvnDeps = Seq(
+    mvn"com.microsoft.playwright:playwright:${Versions.playwright}",
+    // MUnit is a main dependency and not a test one because `BaseE2ESuite` — an ordinary class in
+    // this module that every suite extends — is written against it.
+    mvn"org.scalameta::munit::${Versions.munit}",
+    mvn"io.circe::circe-core::${Versions.circe}",
+    mvn"io.circe::circe-parser::${Versions.circe}"
+  )
+
+  /** Downloads the Chromium build this Playwright release speaks to.
+    *
+    * The two version numbers move together (`Versions.playwright` and `Versions.playwrightBrowser`),
+    * and the library refuses to drive any other revision, so this is not "install a browser" but
+    * "install *the* browser". It lands in `~/.cache/ms-playwright` and is shared by every later run,
+    * which is why CI caches that directory rather than paying the download on each job.
+    *
+    * `--with-deps` additionally installs the shared libraries the browser needs. It is what a fresh
+    * CI runner image requires and it needs root, so it is opt-in here: `./mill e2e.installBrowser
+    * --with-deps`.
+    */
+  def installBrowser(args: String*): Command[Unit] = Task.Command {
+    val classPath = runClasspath().map(_.path.toString).mkString(java.io.File.pathSeparator)
+    val arguments = Seq("install") ++ args ++ Seq("chromium")
+
+    os.proc(
+      Seq(s"${System.getProperty("java.home")}/bin/java", "-cp", classPath, "com.microsoft.playwright.CLI") ++
+        arguments
+    ).call(cwd = mill.api.BuildCtx.workspaceRoot, stdout = os.Inherit, stderr = os.Inherit)
+
+    println(s"e2e.installBrowser: ${Versions.playwrightBrowser}")
+  }
+
+  object test extends ScalaTests with KuiTests {
+
+    /** Everything the suites need to find, handed over as environment variables.
+      *
+      * A test cannot ask Mill for a task's output while it is running, so the two artefacts it
+      * drives — the assembled all-in-one jar and the Compose file — are resolved by the build and
+      * passed in. Declaring the jar here is also what makes `./mill e2e.test` build it first: the
+      * suite can never run against a stale binary, because there is a real dependency edge between
+      * the two rather than a convention that somebody remembers to rebuild.
+      */
+    override def forkEnv = Task {
+      super.forkEnv() ++ Map(
+        "KUI_E2E_ALLINONE_JAR" -> apps.allinone.assembly().path.toString,
+        "KUI_E2E_COMPOSE_FILE" ->
+          (mill.api.BuildCtx.workspaceRoot / "deployment" / "compose" / "docker-compose.yml").toString,
+        "KUI_E2E_COMPOSE_OVERRIDE" ->
+          (mill.api.BuildCtx.workspaceRoot / "deployment" / "compose" / "docker-compose.e2e.yml").toString,
+        "KUI_E2E_ARTIFACTS" -> (mill.api.BuildCtx.workspaceRoot / "out" / "e2e-artifacts").toString,
+        "JAVA_HOME" -> System.getProperty("java.home")
+      )
+    }
+
+    /** One suite at a time. Both Compose suites drive the same containers, by the fixed names the
+      * topology gives them, so two of them running at once would be one suite stopping the service
+      * the other had just asserted was up.
+      */
+    override def testParallelism = false
   }
 }
 
