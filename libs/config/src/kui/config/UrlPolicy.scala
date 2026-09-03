@@ -1,6 +1,6 @@
 package kui.config
 
-import java.net.URI
+import java.net.{InetAddress, URI}
 
 import scala.util.Try
 
@@ -145,11 +145,18 @@ object SafeUrl {
     else Right(())
 
   private def isLoopback(host: String): Boolean =
-    LoopbackNames.contains(host) || host.startsWith("127.")
+    LoopbackNames.contains(host) || host.startsWith("127.") ||
+      literalAddress(host).exists(address => address.isLoopbackAddress || address.isAnyLocalAddress)
 
   /** Private ranges, link-local ranges (which contain the cloud metadata addresses) and IPv6 unique-local
-    * addresses. Matched textually on purpose: resolving the name would make the answer depend on DNS at load
-    * time, and a configuration file must validate the same way everywhere.
+    * addresses.
+    *
+    * Two layers, because neither alone is enough. The textual prefixes catch a host *name* that happens to be
+    * spelled like a private address, and they never depend on DNS, so a configuration file validates the same
+    * way on every machine. The numeric layer catches the spellings of the same address that no prefix match
+    * can see: `2130706433`, `0x7f000001`, `017700000001` and `[::ffff:169.254.169.254]` all reach exactly the
+    * same host as `127.0.0.1` and `169.254.169.254`, and the operating system's resolver accepts every one of
+    * them. Only address *literals* are parsed here — a name is never resolved.
     */
   private def isNotPubliclyRoutable(host: String): Boolean =
     isLoopback(host) ||
@@ -157,7 +164,21 @@ object SafeUrl {
       host.startsWith("192.168.") ||
       host.startsWith("169.254.") ||
       isPrivateIpv6(host) ||
-      isCarrierGradeOrPrivate172(host)
+      isCarrierGradeOrPrivate172(host) ||
+      literalAddress(host).exists(addressIsNotPubliclyRoutable)
+
+  private def addressIsNotPubliclyRoutable(address: InetAddress): Boolean = {
+    val bytes = address.getAddress
+    val carrierGrade =
+      bytes.length == 4 && (bytes(0) & 0xff) == 100 && (bytes(1) & 0xff) >= 64 && (bytes(1) & 0xff) <= 127
+    val uniqueLocalIpv6 = bytes.length == 16 && (bytes(0) & 0xfe) == 0xfc
+    address.isLoopbackAddress ||
+    address.isAnyLocalAddress ||
+    address.isLinkLocalAddress ||
+    address.isSiteLocalAddress ||
+    carrierGrade ||
+    uniqueLocalIpv6
+  }
 
   /** IPv6 link-local (`fe80::/10`) and unique-local (`fc00::/7`) prefixes.
     *
@@ -178,4 +199,64 @@ object SafeUrl {
         }
       case _ => false
     }
+
+  /** The address `host` denotes, if and only if `host` is an address literal.
+    *
+    * A name is never passed to the resolver: `getByName` would perform a DNS lookup, which would make a
+    * configuration file valid on one machine and invalid on another, and would let whoever controls the name
+    * decide the answer. An IPv6 literal is recognised by the colon, which no host name may contain, so
+    * `getByName` is safe for it. An IPv4 literal is parsed here rather than handed to the JDK, because a
+    * string such as `cafe.dead` is made only of hexadecimal letters and dots and is nevertheless a name.
+    */
+  private def literalAddress(host: String): Option[InetAddress] =
+    if host.contains(':') then Try(InetAddress.getByName(host.stripPrefix("[").stripSuffix("]"))).toOption
+    else ipv4Literal(host).flatMap(bytes => Try(InetAddress.getByAddress(bytes)).toOption)
+
+  /** `inet_aton` semantics: one to four parts, each decimal, hexadecimal (`0x…`) or octal (`0…`), with the
+    * last part supplying every byte the earlier parts did not. This is what the C library, and therefore
+    * every operating system resolver, accepts — `2130706433`, `0x7f.1` and `127.1` are all `127.0.0.1`.
+    */
+  private def ipv4Literal(host: String): Option[Array[Byte]] = {
+    val parts = host.split("\\.", -1).toList
+    if parts.isEmpty || parts.sizeIs > 4 then None
+    else
+      allParts(parts).flatMap { values =>
+        val leading = values.init
+        val trailing = values.last
+        val trailingLimit = 1L << (8 * (4 - leading.size))
+        if leading.exists(_ > 255L) || trailing >= trailingLimit then None
+        else {
+          val packed = leading.zipWithIndex.foldLeft(trailing) { case (acc, (value, index)) =>
+            acc | (value << (8 * (3 - index)))
+          }
+          Some(
+            Array(
+              ((packed >> 24) & 0xff).toByte,
+              ((packed >> 16) & 0xff).toByte,
+              ((packed >> 8) & 0xff).toByte,
+              (packed & 0xff).toByte
+            )
+          )
+        }
+      }
+  }
+
+  private def unsignedPart(part: String): Option[Long] =
+    if part.isEmpty then None
+    else if part.startsWith("0x") || part.startsWith("0X") then digits(part.drop(2), 16)
+    else if part.startsWith("0") && part.length > 1 then digits(part.drop(1), 8)
+    else digits(part, 10)
+
+  private def digits(text: String, radix: Int): Option[Long] =
+    if text.isEmpty || text.length > 11 then None
+    else Try(java.lang.Long.parseLong(text, radix)).toOption.filter(_ >= 0L)
+
+  /** Every part parsed, or nothing at all if any one of them is not a number. */
+  private def allParts(parts: List[String]): Option[List[Long]] =
+    parts.foldRight(Option(List.empty[Long]))((part, accumulated) =>
+      for {
+        rest <- accumulated
+        value <- unsignedPart(part)
+      } yield value :: rest
+    )
 }

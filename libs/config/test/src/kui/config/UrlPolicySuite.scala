@@ -39,6 +39,38 @@ final class UrlPolicySuite extends KuiSuite {
     assert(accepted("https://registry.example.com:8081", UrlPolicy.Dev))
   }
 
+  /** The same two addresses as above, written the ways an attacker would write them.
+    *
+    * `2130706433` is `127.0.0.1` in plain decimal, `0x7f000001` the same number in hexadecimal and
+    * `017700000001` in octal; `127.1` is the short form the C library has always accepted. The
+    * `::ffff:` prefix is an IPv4-mapped IPv6 address, which every resolver unwraps back to the IPv4
+    * address inside it. Each of these reaches exactly the same host as the spelling above, so a
+    * check that refuses one and accepts another is not a check at all.
+    */
+  private val disguisedAddresses = List(
+    "http://2130706433:8080/",
+    "http://0x7f000001:8080/",
+    "http://017700000001:8080/",
+    "http://127.1:8080/",
+    "http://[::ffff:127.0.0.1]:8080/",
+    "http://[::ffff:169.254.169.254]/latest/meta-data/",
+    "http://2852039166/latest/meta-data/", // 169.254.169.254 in decimal
+    "http://0xa000001/", // 10.0.0.1 in hexadecimal
+    "http://[::ffff:0a00:0001]/" // 10.0.0.1 mapped into IPv6
+  )
+
+  disguisedAddresses.foreach { url =>
+    test(s"Strict refuses $url, which is a loopback or metadata address in disguise") {
+      assert(!accepted(url, UrlPolicy.Strict), s"$url was accepted under the strict policy")
+    }
+  }
+
+  test("a public address written in an unusual form is still accepted") {
+    // The disguise check must not swallow ordinary public addresses, in any spelling.
+    assert(accepted("https://93.184.216.34/", UrlPolicy.Strict))
+    assert(accepted("https://[2606:2800:220:1:248:1893:25c8:1946]/", UrlPolicy.Strict))
+  }
+
   test("a host name that merely starts with a private prefix is not mistaken for one") {
     // `fdn.example.com` starts with the letters of the IPv6 unique-local prefix, and `100.example`
     // with the carrier-grade one. Both are ordinary public names.
@@ -77,7 +109,16 @@ final class UrlPolicySuite extends KuiSuite {
   }
 
   private val hosts: Gen[String] =
-    Gen.oneOf("example.com", "registry.internal", "10.0.0.1", "localhost", "169.254.169.254")
+    Gen.oneOf(
+      "example.com",
+      "registry.internal",
+      "10.0.0.1",
+      "localhost",
+      "169.254.169.254",
+      "2130706433",
+      "0x7f000001",
+      "[::ffff:169.254.169.254]"
+    )
 
   private val userInfos: Gen[String] = Gen.oneOf("", "u@", "u:p@")
 
@@ -94,7 +135,7 @@ final class UrlPolicySuite extends KuiSuite {
   property("no accepted URL under the strict policy is a loopback or private address") {
     forAll(schemes, hosts) { (scheme, host) =>
       val raw = s"$scheme://$host/path"
-      val isPrivate = host == "10.0.0.1" || host == "localhost" || host == "169.254.169.254"
+      val isPrivate = host != "example.com" && host != "registry.internal"
       SafeUrl.from(raw, UrlPolicy.Strict).isLeft || !isPrivate
     }
   }
