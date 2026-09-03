@@ -174,3 +174,25 @@ Not applicable. Validation failures are values (`Either`), never exceptions.
 
 `docs/domain/context-map.md`: mark the implemented subset of the shared-kernel type list, and
 note that `NameIndex` and `Rack` are still pending with their milestones.
+
+## Deviations
+
+- **Iron is not used, and `libs/kernel` depends only on cats-core.** The task listed
+  `iron` and `iron-cats` as coordinates for "the numeric refinements". Adding them would have
+  given the kernel two vocabularies for the same job: Iron's constraint failures are its own
+  type, while every smart constructor here already returns `Either[ValidationError, _]`, and
+  `ValidationError` is what `libs/contracts-core` renders into the `details` array of the HTTP
+  error envelope (ADR-034). Callers would have had to translate between the two for no gain,
+  because none of these constraints are checked at compile time — the values all come from
+  configuration files, HTTP requests and Kafka responses at run time. Iron stays in the
+  dependency matrix and is still used where ADR-007 puts it: refining DTO fields in the
+  contract modules, where `iron-circe` and `tapir-iron` do real work.
+- **`OffsetRange`'s accessor for the failure field is `fieldName`, not `field`.** All three
+  `ValidationError` cases already have a constructor parameter called `field`, and a method of
+  that name on the enum itself does not compile.
+- **`SchemaId`, `TaskId`, `KafkaClusterId`, `ServiceId` and `Host` needed rules the task's
+  table did not give.** `SchemaId` and `TaskId` are `>= 0` like the other numeric ids;
+  `KafkaClusterId` is bounded like the other free-form names; `ServiceId` uses the same slug
+  rule as `ClusterId`, because both appear in URLs and in the signed principal's `aud` claim;
+  `Host` is bounded at 253 characters and refuses whitespace and path separators, which are
+  the shapes a mis-split configuration line produces.

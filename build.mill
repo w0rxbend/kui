@@ -187,7 +187,15 @@ object libs extends Module {
     * `PlatformScalaModule` wires those directories up from the submodule's name.
     */
   object kernel extends Module {
-    trait Shared extends KuiPureModule with PlatformScalaModule
+
+    /** cats-core is the kernel's only dependency, and it earns its place twice: `Validated` and
+      * `NonEmptyList` are what let a form report every bad field at once instead of the first one
+      * (`kui.kernel.Validation`), and cats is the vocabulary every layer above already speaks. It is
+      * pure Scala with a Scala.js build, so it does not compromise the cross-compilation.
+      */
+    trait Shared extends KuiPureModule with PlatformScalaModule {
+      def mvnDeps = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+    }
 
     object jvm extends Shared with KuiJvmModule {
       object test extends ScalaTests with KuiTests with KuiCrossTests

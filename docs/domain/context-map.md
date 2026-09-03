@@ -55,14 +55,19 @@ contract DTOs and is translated in the consumer's `application` layer.
 
 ## Shared-kernel type list (`libs/kernel`)
 
-Identifiers (opaque types with `from` validation and `value` extension):
+Implemented (KERN-001) — identifiers, all opaque types with `from` validation, an `unsafe`
+escape hatch for already-validated values, a `value` extension and an `Ordering`:
 `ClusterId`, `KafkaClusterId`, `TopicName`, `PartitionId`, `Offset`, `BrokerId`, `GroupId`,
 `Subject`, `SchemaId`, `ConnectName`, `ConnectorName`, `TaskId`, `CorrelationId`,
-`ServiceId`, `UserName`, `RoleName`.
+`ServiceId`, `UserName`, `RoleName`. The validation rule of each one is the table in
+`docs/plans/M0/tasks/KERN-001.md` and is binding on every service.
 
-Value objects: `TopicPartition`, `TopicPartitionReplica`, `OffsetRange`, `Host`, `Port`,
-`Rack`, `PositiveInt`, `PageSize`, `PageRequest`, `Page[A]`, `PageToken`, `SortOrder`,
-`Sort[Field]`, `TimestampType`, `ByteSize`, `NameIndex` (prefix/substring/trigram search).
+Implemented (KERN-001) — value objects: `TopicPartition`, `TopicPartitionReplica`,
+`OffsetRange` (half-open, start never after end), `Host`, `Port`, `PositiveInt`, `ByteSize`.
+
+Pending: `PageSize`, `PageRequest`, `Page[A]`, `PageToken`, `SortOrder`, `Sort[Field]`
+(KERN-003, M0); `TimestampType` (M3, with message browsing); `Rack` (M1, with the broker
+topology snapshot); `NameIndex` (prefix/substring/trigram search — M2, ADR-038).
 
 Errors: `KuiError`, `DomainError`, `ApplicationError` (`NotFound`, `Conflict`, `Forbidden`,
 `Unsupported`, `InvalidState`, `Invalid`), `InfrastructureError` (`Unreachable`, `Timeout`,
