@@ -1,5 +1,21 @@
 # Operating the KUI metadata store
 
+> **None of the `kui.store.*` settings on this page exist yet. Do not copy them into a
+> configuration file.**
+>
+> The metadata store is Milestone 1 work and the configuration loader has no `kui.store` section
+> today. Unknown keys are refused rather than ignored, so pasting the YAML block in §1 into a real
+> file stops KUI from starting, with eleven errors of the form:
+>
+> ```
+> kui.store.topicPrefix: is not a KUI configuration key
+> ```
+>
+> This page describes the shape the store *will* be configured in, so that the operational
+> reasoning — replication factors, in-sync replicas, message size limits — is written down while it
+> is being designed. It is not a guide you can follow against the current build. For what does load
+> today, see [`configuration.md`](configuration.md) and the examples in `deployment/examples/`.
+
 KUI keeps its own metadata — registered clusters and their connection settings, application
 settings, UI-managed roles and user groups, masking policies, uploaded files such as keystores
 and protobuf descriptors, and audit events — **in Kafka**, in a handful of internal topics whose
