@@ -284,3 +284,35 @@ Implementation Report, and ship the tests below.
 - **Test (`munit-cats-effect` + `TestControl`):** start the store's `Resource`, cancel it mid
   replay, assert the consumer's `close` ran exactly once and no fiber survives; start it again,
   cancel after replay while the follower is running, assert the same.
+
+## Deviations
+
+1. **A `StoreLog[F]` seam sits between the fold and fs2-kafka.** The spec has `replay` and `follow`
+   take the `KafkaConsumer` directly, and says the only tests of the adapter belong to STORE-009's
+   container suite. That would leave the milestone's highest-risk loop — the one whose failure mode
+   the risk register calls the worst possible startup shape — with no test that can express the
+   case that matters: *the log never produces the record replay is waiting for*. A container
+   cannot stage that; a two-method trait can. `StoreLog` has `endOffset` and `records`, the Kafka
+   implementation is six lines beside it, and `StoreReplaySuite` drives the timeout, the
+   end-offset bound and both cancellation paths under `TestControl` in a third of a second.
+   STORE-009 still proves the whole thing against a broker.
+2. **The cancellation test asserts the log's release ran exactly once, not the consumer's `close`.**
+   The spec names `close`, which is fs2-kafka's own finalizer and not KUI's code. With the seam
+   above, the assertion is on the release of the stream KUI owns, which is the same guarantee at
+   the level this task is responsible for.
+3. **`StoreError.Unreachable` was added in STORE-005, not here.** STORE-005's topic bootstrap needs
+   it to distinguish an authorization failure from an unreachable cluster; this task adds only
+   `ReplayTimeout`.
+4. **`StoreHealth` is always `Healthy` after a successful replay, with `Instant.EPOCH` as `since`.**
+   The degraded lifecycle, the real timestamp and the reconnect belong to STORE-008, which owns the
+   health surface. Reporting a fabricated `since` from here would be a value another task then has
+   to find and correct.
+5. **The follower does not run in a `Stream.compile.drain.background`; it runs under a `Supervisor`
+   acquired after the consumer.** Resource release runs in reverse acquisition order, so the
+   supervisor's release — which cancels the follower — happens before the consumer's. That is the
+   order the spec requires, and expressing it through acquisition order makes it impossible to get
+   wrong later by moving a line.
+6. **Replay verified against a broker:** not yet. The DEVPLAN names this as its first-mover
+   question, and the answer this task can give is that replay terminates, bounds itself and
+   cancels cleanly against a driven log, proved by eight tests. The broker-backed answer is
+   STORE-009's, which is the next task in this lane; if it finds a difference, it belongs here.

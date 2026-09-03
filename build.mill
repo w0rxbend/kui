@@ -417,7 +417,11 @@ object libs extends Module {
       def mvnDeps = super.mvnDeps() ++ Seq(
         mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}",
         mvn"com.dimafeng::testcontainers-scala-kafka::${Versions.testcontainers}",
-        mvn"org.apache.kafka:kafka-clients:${Versions.kafkaClients}"
+        mvn"org.apache.kafka:kafka-clients:${Versions.kafkaClients}",
+        // `TestControl` is what lets the store's replay loop be tested without a broker: a replay that
+        // never reaches the log's end has to fail inside its timeout, and asserting that against real
+        // time would mean a suite that waits thirty seconds to prove one line of code.
+        mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
       )
     }
   }

@@ -70,6 +70,20 @@ enum StoreError(val code: ErrorCode, val message: String) extends Product, Seria
           "configuration. Fix the topic or point kui.store.topicPrefix at a different prefix."
       )
 
+  /** Replay could not reach the log's end inside `kui.store.replayTimeout`.
+    *
+    * All three numbers are in the message on purpose. "Replayed 40000 of 41200 records in 30s" tells an
+    * operator to raise the timeout; "replay timed out" tells them nothing and costs them an hour. This error
+    * existing at all is the mitigation for the milestone's worst startup failure shape, which is a process
+    * that hangs rather than failing.
+    */
+  case ReplayTimeout(topic: String, reached: Long, endOffset: Long, afterMs: Long)
+      extends StoreError(
+        ErrorCode.StoreReplayTimeout,
+        s"replaying $topic reached offset $reached of $endOffset in ${afterMs}ms and did not finish; " +
+          "raise kui.store.replayTimeout, or check that the store cluster is keeping up"
+      )
+
   /** The store cluster could not be reached, or refused the operation.
     *
     * `why` is a short classification written by the adapter — "not authorized to create topics", "no broker
