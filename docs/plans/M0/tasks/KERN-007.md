@@ -137,3 +137,31 @@ Not applicable.
 
 `README.md` (testing section): how to run one suite, how to update a golden file, the rule
 that fakes live here and never in a service's test sources.
+
+## Deviations
+
+- **`libs/testkit` is cross-compiled, not a single JVM module.** The generators are needed by
+  suites that already run on both platforms (the kernel's and contracts-core's), so a JVM-only
+  testkit would have meant either duplicating them or giving up browser testing for anything
+  that uses one. The shared half holds the generators, the suite base classes and the fakes;
+  the JVM half holds everything that needs a filesystem or a JVM-only library — the golden-file
+  helper and the stub HTTP upstream. The acceptance command is therefore
+  `./mill libs.testkit.jvm.test` and `./mill libs.testkit.js.test` rather than
+  `./mill libs.testkit.test`.
+- **`FakeCapabilityRegistry` and `FakeServiceClient` are not written.** Both are fakes of ports
+  that do not exist yet: `CapabilityRegistry` belongs to the gateway's `application` layer
+  (GW-003) and `ServiceClient` to `libs/http` (HTTP-002). Writing them now would mean inventing
+  the port here, and rule A5 forbids `libs` from depending on a service in any case. The task's
+  own non-goal — "no fakes for ports that do not exist yet" — is the governing line; GW-003 and
+  HTTP-002 should add their fake to this module when they add their port.
+- **`Golden.assertJson` takes the golden directory and the update flag as parameters** (both
+  defaulted, so a caller writes `Golden.assertJson(json, "topic-list.json")` as specified). The
+  parameters exist so that `GoldenSuite` can prove the rewrite path against a scratch directory
+  instead of against a committed sample, which is the one test a golden helper most needs and
+  cannot otherwise have.
+- **`KuiIOSuite` extends `munit.CatsEffectSuite` only.** The task also named
+  `ScalaCheckEffectSuite`, which comes from `munit-scalacheck-effect` — a library that is not in
+  the dependency matrix and has no Scala 3 release matching the pinned MUnit. Effectful
+  properties can be written today by running the effect inside a `KuiSuite` property; if a task
+  in a later milestone genuinely needs the integration, adding it is a dependency-matrix change
+  with an owner.

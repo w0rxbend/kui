@@ -4,6 +4,8 @@ import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
+import kui.testkit.Generators
+
 /** What the identifiers of KERN-001 promise, checked rather than described.
   *
   * The two kinds of test here answer two different questions. The properties answer "does this hold

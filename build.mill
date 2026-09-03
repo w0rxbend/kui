@@ -45,6 +45,7 @@ object Versions {
   val scalajsDom      = "2.8.1"
   val scalaJavaTime   = "2.7.0"
   val nimbus          = "10.9.1"
+  val bouncycastle    = "1.85"
   val munit           = "1.3.6"
   val munitScalacheck = "1.3.1"
   val scalacheck      = "1.20.0"
@@ -258,7 +259,12 @@ object libs extends Module {
     }
 
     object jvm extends Shared with KuiJvmModule {
-      object test extends ScalaTests with KuiTests with KuiCrossTests
+      // The kernel's own suites use the shared generators, which live in `libs/testkit` so that every
+      // module gets them. That is a test-scope edge only: `libs.testkit` depends on the kernel, not
+      // the other way round.
+      object test extends ScalaTests with KuiTests with KuiCrossTests {
+        def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+      }
     }
 
     object js extends Shared with KuiJsModule {
@@ -268,7 +274,9 @@ object libs extends Module {
       // platforms instead of the JS half growing a parallel date type.
       def mvnDeps = super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
 
-      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests {
+        def moduleDeps = super.moduleDeps ++ Seq(testkit.js)
+      }
     }
   }
 
@@ -304,6 +312,59 @@ object libs extends Module {
         super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
 
       object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+    }
+  }
+
+  /** Test infrastructure every other module's suites share: generators, fakes, stub upstreams and
+    * the golden-file helper.
+    *
+    * It declares its test libraries as main dependencies rather than test ones, because this module
+    * *is* test infrastructure — a consumer depends on it from its own test scope. Cross-compiled, so
+    * a browser suite gets the same generators as a JVM one; the parts that need a filesystem or a
+    * JVM-only library (the golden files, the stub HTTP upstream) live in the JVM source set.
+    */
+  object testkit extends Module {
+    trait Shared extends KuiPureModule with PlatformScalaModule {
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
+        mvn"org.scalameta::munit::${Versions.munit}",
+        mvn"org.scalameta::munit-scalacheck::${Versions.munitScalacheck}",
+        mvn"org.scalacheck::scalacheck::${Versions.scalacheck}",
+        mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        mvn"org.typelevel::discipline-munit::${Versions.disciplineMunit}"
+      )
+    }
+
+    object jvm extends Shared with KuiJvmModule {
+      def moduleDeps = Seq(kernel.jvm, contractsCore.jvm)
+
+      // Declared here and used from later tasks: the stub upstream (HTTP-002 onward), the
+      // Testcontainers topology (E2E-002) and the certificate helpers the TLS tests need (M1).
+      def mvnDeps = super.mvnDeps() ++ Seq(
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+        mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}",
+        mvn"org.bouncycastle:bcpkix-jdk18on:${Versions.bouncycastle}"
+      )
+
+      object test extends ScalaTests with KuiTests with KuiCrossTests {
+        def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+      }
+    }
+
+    object js extends Shared with KuiJsModule {
+      def moduleDeps = Seq(kernel.js, contractsCore.js)
+      def mvnDeps =
+        super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests {
+        def moduleDeps = super.moduleDeps ++ Seq(testkit.js)
+      }
     }
   }
 
