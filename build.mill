@@ -1,5 +1,6 @@
 //| mvnDeps:
 //| - com.goyeau::mill-scalafix::0.6.2
+//| - com.lihaoyi::mill-contrib-docker:1.1.8
 
 package build
 
@@ -9,6 +10,7 @@ import mill.scalalib.scalafmt.ScalafmtModule
 import mill.scalajslib.*
 import mill.scalajslib.api.{JsEnvConfig, ModuleKind, ModuleSplitStyle}
 import com.goyeau.mill.scalafix.ScalafixModule
+import mill.contrib.docker.DockerModule
 
 // Compiled into the meta-build by `mill-build/build.mill`, and into `build-tests` for its unit tests.
 import kui.build.{ArchitectureRules, BuildFacts, BundleShape, CssPipeline, CssSource, ModuleFacts}
@@ -1339,6 +1341,328 @@ object apps extends Module {
       )
     }
   }
+}
+
+/** The container images KUI ships, and the conventions every future one inherits.
+  *
+  * Three images in M0 — `kui-gateway`, `kui-cluster` and `kui-allinone` — and each is a thin wrapper
+  * around a deployable `app` module rather than something that module grows itself. Keeping them here
+  * means "how KUI is packaged" is one file to read and one place to change, and it means adding the
+  * eighth service's image is four lines rather than four lines copied into a service's own build
+  * definition where nobody will find them.
+  *
+  * The conventions below are decided once, in [[deployment.docker.KuiImage]], and they are the ones
+  * INFRA-001 fixes for every image KUI will ever publish.
+  */
+object deployment extends Module {
+
+  object docker extends Module {
+
+    /** Where a mounted configuration file is expected, and what the images say to run without one. */
+    val ConfigPath: String = "/etc/kui/kui.yaml"
+
+    /** One deployable process, packaged.
+      *
+      * Every image is `eclipse-temurin:21-jre` (ADR-001) with one assembled jar in it and nothing
+      * else. The conventions, and why each one is what it is:
+      *
+      *   - **Non-root, uid 1001.** A container process that is root is root on the host kernel if
+      *     anything ever escapes the namespace, and nothing KUI does needs privilege.
+      *
+      *     The uid is written numerically and no user is created for it, which is a deliberate
+      *     trade. `useradd` would give `whoami` an answer, and it would also write the current day
+      *     number into `/etc/shadow` — so the same commit would produce a different image tomorrow,
+      *     and the reproducibility this task also asks for would be gone. A numeric `USER` costs a
+      *     confusing `whoami` and buys an image that is a function of its source. `HOME` is set to
+      *     `/tmp` so that anything looking for a home directory finds a writable one.
+      *
+      *   - **`-XX:MaxRAMPercentage=75`.** The JVM's default heap sizing reads the *host's* memory on
+      *     older runtimes and a container's limit on newer ones; saying it explicitly means the heap
+      *     is a stated fraction of whatever limit the orchestrator applied, on every runtime.
+      *
+      *   - **`-XX:+ExitOnOutOfMemoryError`.** An out-of-memory JVM does not recover; it thrashes,
+      *     answers slowly, and passes its own liveness probe while doing it. Exiting turns a silent
+      *     degradation into a restart the orchestrator can see and an operator can alert on.
+      *
+      *   - **`-Djava.io.tmpdir=/tmp`.** Explicit because the images are meant to run with a read-only
+      *     root filesystem and a tmpfs at `/tmp`; see `deployment/docker/README.md` for the flags.
+      *
+      *   - **`HEALTHCHECK` on the liveness endpoint.** `curl` is already in the base image, so this
+      *     costs no extra layer and no package installation — which also means no `apt-get`, which is
+      *     the other thing that would have made the image a function of the day it was built.
+      *
+      *   - **The configuration is mounted, never baked in.** The default command names
+      *     [[ConfigPath]] and the file is not in the image, so a container started without the mount
+      *     stops with the configuration problem printed rather than starting on defaults and
+      *     pretending to work.
+      *
+      *   - **OCI labels from the build.** `revision` in particular: it is the answer to "which commit
+      *     is that container running", asked during every incident, and `docker inspect` answers it
+      *     without anyone having to exec into anything.
+      */
+    trait KuiImage extends ScalaModule with DockerModule {
+      def scalaVersion = Versions.scala
+
+      /** The deployable this image wraps. */
+      def deployable: JavaModule
+
+      /** The repository name, without a tag. */
+      def imageName: String
+
+      /** The `main` this image starts. */
+      def entryClass: String
+
+      /** The port the process listens on, and the only one the image exposes. */
+      def containerPort: Int = 8080
+
+      /** The path the liveness probe is served at.
+        *
+        * It differs between the gateway and a service and that is not an inconsistency: the gateway
+        * serves its own probes under the public `/api/v1` prefix, because everything a browser can
+        * reach lives there, while a service serves them at the root of its private world.
+        */
+      def livenessPath: String
+
+      /** A one-line description of the process, for the OCI `description` label. */
+      def imageDescription: String
+
+      def moduleDeps = Seq(deployable)
+      def mainClass  = Some(entryClass)
+
+      // The wrapper contributes no code of its own; it exists to name a main class and to be
+      // assembled. Saying so explicitly stops Mill looking for directories that will never exist.
+      def sources   = Task.Sources()
+      def resources = Task.Sources()
+
+      /** The assembled jar, rewritten so that two builds of one commit produce the same bytes.
+        *
+        * It overrides `assembly` rather than sitting beside it so that everything downstream — the
+        * `COPY` in the generated Dockerfile and the copy the contributed docker module makes into
+        * its build context — uses the normalised jar without having to know it exists.
+        *
+        * INFRA-001 asks for an image whose digest is a function of the commit it was built from,
+        * and the reason it matters is not tidiness: a digest that changes on every build cannot be
+        * used to answer "is the thing running in production the thing we reviewed". Every other
+        * piece of the image is already deterministic — the base image is pinned by tag and never
+        * re-pulled, the Dockerfile is generated from source, and `SOURCE_DATE_EPOCH` fixes the
+        * layer and configuration timestamps. The jar was the one part that was not: Mill stamps
+        * each zip entry with the moment it was written, so the last layer's content hash changed
+        * every time and carried the whole digest with it.
+        *
+        * Two things are normalised, and they are the two things `reproducible-builds.org` names:
+        *
+        *   - **every entry's timestamp becomes a fixed local 1980-01-01**, the earliest instant the
+        *     zip format can represent. `setTimeLocal` rather than `setTime` because the latter
+        *     converts through the *machine's* time zone, so two developers in different zones would
+        *     write different bytes for the same instant and the fix would only work on one of them;
+        *   - **entries are written in sorted order**, so a directory listing that came back in a
+        *     different order from the filesystem cannot reorder the archive.
+        *
+        * The shell prefix Mill puts in front of its assembly is dropped, because this jar is only
+        * ever started with `java -jar` and a self-executing prefix is one more thing that would have
+        * to be byte-stable for no benefit.
+        */
+      override def assembly: T[PathRef] = Task {
+        import java.util.zip.{ZipEntry, ZipFile, ZipOutputStream}
+        import scala.jdk.CollectionConverters.*
+
+        val target = Task.dest / "app.jar"
+        val fixedTime = java.time.LocalDateTime.of(1980, 1, 1, 0, 0, 0)
+        val source = new ZipFile(super.assembly().path.toIO)
+
+        try {
+          val output = new ZipOutputStream(os.write.outputStream(target))
+          try {
+            source
+              .entries()
+              .asScala
+              .toVector
+              .sortBy(_.getName)
+              .foreach { entry =>
+                val copied = new ZipEntry(entry.getName)
+                copied.setTimeLocal(fixedTime)
+                output.putNextEntry(copied)
+                if (!entry.isDirectory) {
+                  val content = source.getInputStream(entry)
+                  try content.transferTo(output)
+                  finally content.close()
+                }
+                output.closeEntry()
+              }
+          } finally output.close()
+        } finally source.close()
+
+        PathRef(target)
+      }
+
+      object docker extends ClassicDockerConfig {
+        def tags       = Task { Seq(s"$imageName:${kuiVersion()}") }
+        def baseImage  = "eclipse-temurin:21-jre"
+
+        // Never re-pull: a `:latest` base would make the image a function of when it was built,
+        // which is exactly what the reproducibility requirement rules out. The tag here is fixed.
+        def pullBaseImage = Task { false }
+
+        def exposedPorts = Task { Seq(containerPort) }
+        def user         = "1001"
+        def envVars      = Task { Map("HOME" -> "/tmp", "TMPDIR" -> "/tmp") }
+
+        def jvmOptions = Seq(
+          "-XX:MaxRAMPercentage=75",
+          "-XX:+ExitOnOutOfMemoryError",
+          "-Djava.io.tmpdir=/tmp"
+        )
+
+        def labels = Task {
+          Map(
+            "org.opencontainers.image.title"       -> imageName,
+            "org.opencontainers.image.description" -> imageDescription,
+            "org.opencontainers.image.version"     -> kuiVersion(),
+            "org.opencontainers.image.revision"    -> gitRevision(),
+            "org.opencontainers.image.source"      -> "https://github.com/kui/kui",
+            "org.opencontainers.image.licenses"    -> "Apache-2.0"
+          )
+        }
+
+        /** The generated Dockerfile, plus the three things the contributed module cannot express:
+          * the health check, the default command, and the jar's fixed name.
+          *
+          * The base `dockerfile` task copies the assembly under its own file name, which contains
+          * the module path and would change if a module were renamed. Writing the whole file here
+          * instead keeps the layout of the image stable and readable — one jar at `/app.jar` — and
+          * puts every instruction in one place a reader can check against the conventions above.
+          */
+        override def dockerfile: T[String] = Task {
+          val jar = assembly().path.last
+          val renderedLabels = labels()
+            .toSeq
+            .sortBy(_._1)
+            .map((key, value) => s"""LABEL "$key"="$value"""")
+            .mkString("\n")
+          val renderedEnv = envVars()
+            .toSeq
+            .sortBy(_._1)
+            .map((key, value) => s"ENV $key=$value")
+            .mkString("\n")
+          val entrypoint =
+            (Seq("java") ++ jvmOptions() ++ Seq("-jar", "/app.jar"))
+              .map(argument => s""""$argument"""")
+              .mkString(", ")
+
+          s"""FROM ${baseImage()}
+             |$renderedLabels
+             |$renderedEnv
+             |EXPOSE $containerPort/tcp
+             |COPY $jar /app.jar
+             |USER ${user()}
+             |HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \\
+             |  CMD curl -fsS http://127.0.0.1:$containerPort$livenessPath || exit 1
+             |ENTRYPOINT [$entrypoint]
+             |CMD ["--config", "$ConfigPath"]
+             |""".stripMargin
+        }
+
+        /** `SOURCE_DATE_EPOCH` is what BuildKit reads instead of "now" when it has to write a
+          * timestamp. See [[build]] for the other two halves of making that actually take effect.
+          */
+        override def dockerEnv = Task { super.dockerEnv() ++ Map("SOURCE_DATE_EPOCH" -> "0") }
+
+        /** Builds the image so that the same commit produces the same digest.
+          *
+          * The contributed module's own `build` runs a plain `docker build`, which produces a
+          * different digest every time even when nothing has changed. That is not a defect in it —
+          * it is BuildKit's default behaviour — but it does defeat the one property INFRA-001 asks
+          * for, and the reason that property matters is practical rather than tidy: a digest that
+          * changes on every build cannot answer "is the image running in production built from the
+          * commit we reviewed".
+          *
+          * Three flags are what make it hold, and each addresses a different source of drift:
+          *
+          *   - `rewrite-timestamp=true` on the exporter, which is what actually applies
+          *     `SOURCE_DATE_EPOCH` to the files *inside* each layer. Setting the variable alone
+          *     fixes the image's `created` field and leaves every copied file stamped with the
+          *     moment it was copied, so the layer's content hash still changes on every build.
+          *   - `--provenance=false`, because the provenance attestation records when and where the
+          *     build ran, which is by definition different every time.
+          *   - `--sbom=false`, for the same reason: the attestation is generated per build and
+          *     becomes part of the manifest list.
+          *
+          * `unpack=false` comes along with the first of those because BuildKit refuses to rewrite
+          * timestamps while also unpacking the image into the local snapshotter. The image is still
+          * registered and still appears in `docker images`; it is unpacked the first time something
+          * runs it, which costs a second once and nothing afterwards.
+          *
+          * The jar being copied in is normalised separately — see `assembly` above — because none of
+          * these flags can help with an input whose own bytes differ.
+          */
+        override def build: T[Seq[String]] = Task {
+          val context = Task.dest
+          val jar = assembly().path
+
+          os.copy.over(jar, context / jar.last)
+          os.write.over(context / "Dockerfile", dockerfile())
+
+          val built = tags().head
+
+          os.proc(
+            executable(),
+            "buildx",
+            "build",
+            "--provenance=false",
+            "--sbom=false",
+            "--output",
+            s"type=docker,name=$built,rewrite-timestamp=true,unpack=false",
+            context
+          ).call(stdout = os.Inherit, stderr = os.Inherit, env = dockerEnv())
+
+          tags().tail.foreach(extra =>
+            os.proc(executable(), "tag", built, extra)
+              .call(stdout = os.Inherit, stderr = os.Inherit, env = dockerEnv())
+          )
+
+          Task.log.info(s"built ${tags().mkString(", ")}")
+          tags()
+        }
+      }
+    }
+
+    /** The one process a browser talks to. */
+    object gateway extends KuiImage {
+      def deployable       = services.gateway.app
+      def imageName        = "kui-gateway"
+      def entryClass       = "kui.gateway.app.Main"
+      def livenessPath     = "/api/v1/health/live"
+      def imageDescription = "KUI gateway: the single origin a browser talks to"
+    }
+
+    /** The Cluster Registry and Topology service. */
+    object cluster extends KuiImage {
+      def deployable       = services.cluster.app
+      def imageName        = "kui-cluster"
+      def entryClass       = "kui.cluster.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI cluster registry and topology service"
+    }
+
+    /** The whole product in one process (ADR-005). */
+    object allinone extends KuiImage {
+      def deployable       = apps.allinone
+      def imageName        = "kui-allinone"
+      def entryClass       = "kui.allinone.AllInOne"
+      def livenessPath     = "/api/v1/health/live"
+      def imageDescription = "KUI all-in-one: the gateway and every service in one process"
+    }
+  }
+}
+
+/** The commit this build is being run from, or `unknown` when there is no git checkout.
+  *
+  * `unknown` rather than a failed build, because a release tarball and many build containers have no
+  * `.git` directory and an image built from one is still a perfectly good image — it just cannot say
+  * which commit it came from, which the label then states plainly instead of guessing.
+  */
+def gitRevision: T[String] = Task {
+  git("rev-parse", "HEAD").map(_.trim).filter(_.nonEmpty).getOrElse(BuildFacts.Unknown)
 }
 
 /** Small programs the build runs. They are ordinary modules so that their logic is unit-tested like
