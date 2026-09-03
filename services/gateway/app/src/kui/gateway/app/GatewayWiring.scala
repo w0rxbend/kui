@@ -3,20 +3,34 @@ package kui.gateway.app
 import java.time.Instant
 
 import cats.Parallel
+import cats.data.NonEmptyList
 import cats.effect.kernel.{Async, Resource}
+import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 import sttp.capabilities.fs2.Fs2Streams
+import sttp.client4.StreamBackend
+import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
+import kui.config.PrincipalKeyConfig
 import kui.gateway.api.auth.SessionMiddleware
+import kui.gateway.api.client.SttpServiceClient
+import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
 import kui.gateway.api.{CapabilityRoutes, EdgeHeaders, GatewayApi, InfoRoutes}
-import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, RegistryConfig, Trigger}
+import kui.gateway.application.capability.{
+  CapabilityRegistry,
+  CapabilitySignals,
+  CircuitFeed,
+  ReadinessPoller,
+  RegistryConfig
+}
+import kui.gateway.application.client.ServiceClients
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
 import kui.http.health.ReadinessCheck
 import kui.http.{BasePath, Cors, ErrorInterceptor}
-import kui.kernel.ServiceId
 import kui.observability.{KuiInterceptors, Telemetry}
+import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
 
 /** Everything a gateway needs in order to be served, with no listener started.
   *
@@ -92,8 +106,21 @@ object GatewayWiring {
       _ <- Resource.eval(warnIfInsecureCookies[F](logger, config))
       sessions <- InMemorySessionStore.resource[F](SessionConfig.Default)
       registry <- CapabilityRegistry.resource[F](RegistryConfig.Default, telemetry, logger)
-      _ <- Resource.eval(
+      signals <- Resource.eval(
         CapabilitySignals.make[F](RegistryConfig.Default, registry, config.gateway.services.keys.toList)
+      )
+      backend <- HttpClientFs2Backend.resource[F]()
+      clients <- upstreams[F](config, telemetry, logger, backend)
+      trigger <- ReadinessPoller.resource[F](
+        clients,
+        signals,
+        config.gateway.readinessInterval,
+        logger
+      )
+      _ <- Resource.eval(registry.attachProbe(trigger.probe))
+      _ <- CircuitFeed.resource[F](clients, signals)
+      proxied <- Resource.eval(
+        Async[F].fromEither(proxyRoutes[F](clients, signals).leftMap(BadContract.apply))
       )
       instrumentation <- Resource.eval(
         KuiInterceptors.serverInterceptors[F](telemetry, GatewayApi.ServiceName)
@@ -103,7 +130,7 @@ object GatewayWiring {
         config.view,
         readiness,
         sessions,
-        CapabilityRoutes[F](registry, probeThrough(registry), telemetry, logger)
+        CapabilityRoutes[F](registry, trigger, telemetry, logger) ++ proxied
       ),
       interceptors = Cors.interceptor[F](config.gateway.cors).toList ++
         EdgeHeaders.interceptors[F] ++
@@ -146,17 +173,72 @@ object GatewayWiring {
   def readinessChecks[F[_]: cats.Applicative]: List[ReadinessCheck[F]] =
     List(ReadinessCheck.always[F]("process"))
 
-  /** The probe the capability routes call, routed back through the registry.
-    *
-    * The registry forwards it to whatever poller was attached to it (GW-004). Going through the registry
-    * rather than holding the poller's trigger directly means that a deployment with no poller yet -- which is
-    * what this is until GW-006 wires the service clients -- answers the retry button successfully and does
-    * nothing, instead of failing in the browser.
+  /** A contract that cannot be routed. Raised at startup, never at request time: a gateway that would serve a
+    * broken route must refuse to start instead, where an operator sees it once rather than in every user's
+    * browser.
     */
-  def probeThrough[F[_]](registry: CapabilityRegistry[F]): Trigger[F] =
-    new Trigger[F] {
-      def probe(service: ServiceId): F[Unit] = registry.probeNow(service)
+  /** A configuration the gateway will not start with. Refusing at startup is the point: a signing key too
+    * short for HS256 weakens every principal the gateway mints, and a deployment must find that out from its
+    * own logs rather than from an audit.
+    */
+  final case class Misconfigured(problem: String) extends Exception(problem)
+
+  final case class BadContract(problem: String)
+      extends Exception(s"the gateway cannot derive routes from a service contract: $problem")
+
+  /** One client per configured service, each with its own bulkhead and circuit breaker (PLAN §16.4). */
+  def upstreams[F[_]: Async](
+      config: GatewayServiceConfig,
+      telemetry: Telemetry[F],
+      logger: StructuredLogger[F],
+      backend: StreamBackend[F, Fs2Streams[F]]
+  ): Resource[F, ServiceClients[F]] =
+    Resource
+      .eval(Async[F].fromEither(principals[F](config).leftMap(Misconfigured.apply)))
+      .flatMap(codec =>
+        config.gateway.services.toList
+          .sortBy(_._1.value)
+          .traverse((service, upstream) =>
+            SttpServiceClient.resource[F](service, upstream, codec, telemetry, logger, backend)
+          )
+          .map(ServiceClients.of[F])
+      )
+
+  /** How the gateway signs the principal it hands to a service (ADR-020).
+    *
+    * With no keys configured it falls back to the in-process codec, which does not sign at all and says so
+    * loudly on stderr. That is right for the all-in-one deployment, where the "network" between the gateway
+    * and a service is a function call, and wrong for anything else -- which is why it announces itself rather
+    * than being quietly convenient.
+    */
+  def principals[F[_]: Async](config: GatewayServiceConfig): Either[String, PrincipalCodec[F]] =
+    NonEmptyList.fromList(config.gateway.principalKeys.map(signingKey)) match {
+      case None => Right(PrincipalCodec.inProcess[F])
+      case Some(keys) =>
+        JwsPrincipalCodec
+          .make[F](keys, GatewayApi.ServiceName)
+          .leftMap(weak => s"kui.gateway.principalKeys: ${weak.message}")
     }
+
+  private def signingKey(key: PrincipalKeyConfig): SigningKey =
+    SigningKey(key.kid, key.key.map(_.getBytes(java.nio.charset.StandardCharsets.UTF_8)), key.notBefore)
+
+  /** The proxied routes: every configured service the gateway holds a contract for. */
+  def proxyRoutes[F[_]: Async](
+      clients: ServiceClients[F],
+      signals: CapabilitySignals[F]
+  ): Either[String, List[ServerEndpoint[Fs2Streams[F], F]]] =
+    clients.all
+      .traverse(client =>
+        ContractRouting.derive[F](
+          client.service,
+          ServiceContracts.of(client.service),
+          client,
+          signals,
+          RbacPreCheck.allowAll[F]
+        )
+      )
+      .map(_.flatten)
 
   /** The one INFO line every KUI process writes as it starts.
     *
