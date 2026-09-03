@@ -102,6 +102,87 @@ final class CapabilityRegistrySuite extends CatsEffectSuite {
     TestControl.executeEmbed(program).assertEquals(CapabilityState.Available)
   }
 
+  test("anOutageReportedRepeatedlyDuringTheWindowIsStillPublished") {
+    // The failure this exists for: a service that is down answers every proxied request with a
+    // transport error, so the outage is reported many times a second, and each report carries a freshly
+    // stamped `since` because the committed state is still `Available`. The debounce used to compare the
+    // pending entry against the exact value its timer was scheduled with, so every one of those reports
+    // both failed the comparison and deleted the pending entry -- and the sidebar stayed green forever
+    // for a service returning nothing but errors.
+    val program = registry().flatMap { (resource, _) =>
+      resource.use { registry =>
+        for {
+          seen <- Ref.of[IO, Vector[CapabilityChange]](Vector.empty)
+          reader <- registry.changes.evalMap(change => seen.update(_ :+ change)).compile.drain.start
+          _ <- IO.sleep(1.second)
+          _ <- registry.report(cluster, CapabilityState.Available)
+          // One report every 250ms for the whole ten-second debounce window, each carrying its own
+          // freshly stamped `since`, exactly as `CapabilitySignals` produces them while the committed
+          // state is still `Available`.
+          _ <- (1 to 40).toList.traverse_ { n =>
+            registry.report(
+              cluster,
+              CapabilityState.Unavailable(
+                ReasonCode.UpstreamUnavailable,
+                "refused",
+                Instant.EPOCH.plusMillis(n.toLong * 250L)
+              )
+            ) *> IO.sleep(250.milliseconds)
+          }
+          changes <- seen.get
+          _ <- reader.cancel
+        } yield changes.toList
+      }
+    }
+
+    TestControl.executeEmbed(program).map { changes =>
+      val outages = changes.collect { case CapabilityChange(entry, _) =>
+        entry.state
+      }.collect { case unavailable @ CapabilityState.Unavailable(_, _, _) => unavailable }
+
+      outages.headOption match {
+        case None => fail(s"the outage was never published: $changes")
+        case Some(CapabilityState.Unavailable(reason, _, since)) =>
+          assertEquals(reason, ReasonCode.UpstreamUnavailable)
+          // `since` is stamped once, on entry to the pending outage, and not restamped by the reports
+          // that followed it inside the window.
+          assertEquals(since, Instant.EPOCH.plusMillis(250L))
+      }
+    }
+  }
+
+  test("aRepeatedlyReportedOutageSchedulesOneDebounceTimerNotOnePerReport") {
+    // Each report used to supervise its own ten-second fiber, so a service failing on every request
+    // accumulated fibres for as long as it stayed down. One pending outage is one timer.
+    val program = registry().flatMap { (resource, _) =>
+      resource.use { registry =>
+        for {
+          seen <- Ref.of[IO, Vector[CapabilityChange]](Vector.empty)
+          reader <- registry.changes.evalMap(change => seen.update(_ :+ change)).compile.drain.start
+          _ <- IO.sleep(1.second)
+          _ <- registry.report(cluster, CapabilityState.Available)
+          _ <- (1 to 5).toList.traverse_ { n =>
+            registry.report(
+              cluster,
+              CapabilityState.Unavailable(ReasonCode.UpstreamUnavailable, s"refused $n", Instant.EPOCH)
+            ) *> IO.sleep(100.milliseconds)
+          }
+          _ <- IO.sleep(30.seconds)
+          changes <- seen.get
+          _ <- reader.cancel
+        } yield changes.toList
+      }
+    }
+
+    TestControl.executeEmbed(program).map { changes =>
+      val outages = changes.count(_.entry.state match {
+        case CapabilityState.Unavailable(_, _, _) => true
+        case _ => false
+      })
+      assertEquals(outages, 1, s"one pending outage must publish exactly once: $changes")
+    }
+  }
+
   test("aSlowSubscriberDoesNotBlockTheRegistry") {
     val config = RegistryConfig.Default.copy(subscriberQueueSize = 2)
 
@@ -220,10 +301,14 @@ final class CapabilityRegistrySuite extends CatsEffectSuite {
     val services = (1 to 8).map(n => CapabilityKey(ServiceId.unsafe(s"service-$n"), None)).toList
     val statuses = List(CapabilityState.Available, CapabilityState.NotConfigured, outage)
 
+    // Indexed by the service's position, not by `key.service.value.length` -- every id is nine
+    // characters long, so that indexed every service identically and the eight of them moved through
+    // the states in lockstep. A registry that published a delta under the wrong key was invisible,
+    // because at every instant all eight keys held the same value.
     val reports = for {
       round <- (1 to 4).toList
       key <- services
-    } yield (key, statuses((round + key.service.value.length) % statuses.size))
+    } yield (key, statuses((round + services.indexOf(key)) % statuses.size))
 
     val program = registry(RegistryConfig.Default.copy(debounce = 1.millisecond)).flatMap {
       (resource, _) =>

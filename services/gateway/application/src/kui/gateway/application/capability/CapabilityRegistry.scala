@@ -3,7 +3,7 @@ package kui.gateway.application.capability
 import java.time.Instant
 
 import cats.effect.kernel.{Async, Clock, Ref, Resource}
-import cats.effect.std.{Queue, Supervisor}
+import cats.effect.std.{Queue, Semaphore, Supervisor}
 import cats.syntax.all.*
 import fs2.Stream
 import org.typelevel.log4cats.StructuredLogger
@@ -90,12 +90,17 @@ object CapabilityRegistry {
     for {
       supervisor <- Supervisor[F](await = false)
       gauge <- Resource.eval(stateGauge[F](telemetry))
+      // One permit, held across the whole decide-then-commit sequence. Reading the state and writing
+      // it back are several effects apart, so two reports about the same key that overlap would each
+      // decide against the same `previous`: the gauge would be decremented twice for one increment and
+      // one of the two published changes would name a `previous` that was never a committed state.
+      lock <- Resource.eval(Semaphore[F](1))
       states <- Resource.eval(Ref.of[F, Map[CapabilityKey, CapabilityEntry]](Map.empty))
       pending <- Resource.eval(Ref.of[F, Map[CapabilityKey, CapabilityState]](Map.empty))
       subscribers <- Resource.eval(Ref.of[F, Map[Long, Subscriber[F]]](Map.empty))
       nextId <- Resource.eval(Ref.of[F, Long](0L))
       probe <- Resource.eval(Ref.of[F, ServiceId => F[Unit]](_ => Async[F].unit))
-    } yield new Impl[F](config, logger, supervisor, gauge, states, pending, subscribers, nextId, probe)
+    } yield new Impl[F](config, logger, supervisor, lock, gauge, states, pending, subscribers, nextId, probe)
 
   /** One subscriber's bounded mailbox. `None` ends the stream. */
   final private case class Subscriber[F[_]](queue: Queue[F, Option[CapabilityChange]])
@@ -113,6 +118,7 @@ object CapabilityRegistry {
       config: RegistryConfig,
       logger: StructuredLogger[F],
       supervisor: Supervisor[F],
+      lock: Semaphore[F],
       gauge: UpDownCounter[F, Long],
       states: Ref[F, Map[CapabilityKey, CapabilityEntry]],
       pending: Ref[F, Map[CapabilityKey, CapabilityState]],
@@ -136,15 +142,17 @@ object CapabilityRegistry {
     def probeNow(service: ServiceId): F[Unit] = probe.get.flatMap(_.apply(service))
 
     def report(key: CapabilityKey, next: CapabilityState): F[Unit] =
-      Clock[F].realTimeInstant.flatMap { now =>
-        decide(key, next).flatMap {
-          // Any report other than the outage itself cancels a pending outage. Without this, a service
-          // that failed once and recovered inside the debounce window would still be published as down
-          // when the window closed -- the sidebar would go red for a service that was already fine
-          // again, which is precisely the flicker the debounce exists to remove.
-          case Decision.Ignore => pending.update(_ - key)
-          case Decision.Publish(previous) => commit(key, next, previous, now)
-          case Decision.Hold => hold(key, next)
+      lock.permit.surround {
+        Clock[F].realTimeInstant.flatMap { now =>
+          decide(key, next).flatMap {
+            // Any report other than the outage itself cancels a pending outage. Without this, a service
+            // that failed once and recovered inside the debounce window would still be published as down
+            // when the window closed -- the sidebar would go red for a service that was already fine
+            // again, which is precisely the flicker the debounce exists to remove.
+            case Decision.Ignore => pending.update(_ - key)
+            case Decision.Publish(previous) => commit(key, next, previous, now)
+            case Decision.Hold => hold(key, next)
+          }
         }
       }
 
@@ -175,24 +183,57 @@ object CapabilityRegistry {
       * registry would publish into a closed topic.
       */
     private def hold(key: CapabilityKey, next: CapabilityState): F[Unit] =
-      pending.update(_.updated(key, next)) *>
-        supervisor
-          .supervise(
-            Async[F].sleep(config.debounce) *> confirm(key, next)
-          )
-          .void
-
-    private def confirm(key: CapabilityKey, next: CapabilityState): F[Unit] =
-      pending.modify(held => (held - key, held.get(key))).flatMap {
-        // Still the same pending outage, so it has persisted for a whole debounce window and is real.
-        case Some(held) if held == next =>
-          Clock[F].realTimeInstant
-            .flatMap(now =>
-              states.get.flatMap(current => commit(key, next, current.get(key).map(_.state), now))
+      pending
+        .modify { held =>
+          // A service that is failing on every proxied request reports the same outage many times a
+          // second, and each report carries a freshly stamped `since` because the committed state is
+          // still `Available`, so `CapabilityFold.stickySince` has nothing to be sticky about. The
+          // pending entry is where the outage first became known, so `since` is taken from it and the
+          // later report only refreshes the reason and message. Without this the pending value changed
+          // on every report and no timer ever recognised the outage it was scheduled for.
+          val entering = !held.contains(key)
+          val effective = held.get(key).fold(next)(carrySince(_, next))
+          (held.updated(key, effective), entering)
+        }
+        .flatMap { entering =>
+          // One timer per pending outage, not one per report. Supervised so that releasing the registry
+          // cancels it; a pending outage that outlived its registry would publish into a closed topic.
+          Async[F]
+            .whenA(entering)(
+              supervisor.supervise(Async[F].sleep(config.debounce) *> confirm(key)).void
             )
-        // Something else happened in the meantime — a recovery, or a different failure — and that
-        // something else has already been decided on its own terms.
-        case _ => Async[F].unit
+        }
+
+    /** Keeps the instant an outage began while its reason is allowed to change underneath it.
+      *
+      * A refused connection that becomes an open circuit is the same outage; restarting the clock would
+      * answer "when did we last notice?" rather than "how long has this been broken?".
+      */
+    private def carrySince(held: CapabilityState, next: CapabilityState): CapabilityState =
+      (held, next) match {
+        case (CapabilityState.Unavailable(_, _, since), CapabilityState.Unavailable(reason, message, _)) =>
+          CapabilityState.Unavailable(reason, message, since)
+        case _ => next
+      }
+
+    /** Publishes whatever outage is still pending for this key once the debounce window has closed.
+      *
+      * It deliberately does not compare against the value the timer was scheduled with. Anything that is
+      * not an outage -- a recovery, a `NotConfigured` -- already removed the pending entry when it was
+      * reported, so an entry that is still here has been an outage for the whole window. Requiring exact
+      * equality instead meant a second report of the same outage, differing only in its message, both
+      * failed the check and was deleted by it, and the outage was never published at all.
+      */
+    private def confirm(key: CapabilityKey): F[Unit] =
+      lock.permit.surround {
+        pending.modify(held => (held - key, held.get(key))).flatMap {
+          case Some(held) =>
+            Clock[F].realTimeInstant
+              .flatMap(now =>
+                states.get.flatMap(current => commit(key, held, current.get(key).map(_.state), now))
+              )
+          case None => Async[F].unit
+        }
       }
 
     private def commit(
@@ -203,14 +244,28 @@ object CapabilityRegistry {
     ): F[Unit] =
       states.update(_.updated(key, CapabilityEntry(key, next, now))) *>
         pending.update(_ - key) *>
-        record(previous, next) *>
+        record(key, previous, next) *>
         log(key, previous, next) *>
         publish(CapabilityChange(CapabilityEntry(key, next, now), previous))
 
     /** One gauge that moves between buckets, so `sum by (state)` is the number of keys in each. */
-    private def record(previous: Option[CapabilityState], next: CapabilityState): F[Unit] =
-      previous.traverse_(state => gauge.dec(Attribute(MetricNames.Attr.State, state.status))) *>
-        gauge.inc(Attribute(MetricNames.Attr.State, next.status))
+    private def record(
+        key: CapabilityKey,
+        previous: Option[CapabilityState],
+        next: CapabilityState
+    ): F[Unit] = {
+      // `kui.capability.state {service, cluster, state}` is what PLAN section 30 and ARCHITECTURE.md
+      // section 13 document. Without the first two labels the metric can say how many keys are
+      // unavailable but never which, which is the only question an operator actually has.
+      def at(state: CapabilityState): List[Attribute[String]] =
+        List(
+          Attribute(MetricNames.Attr.Service, key.service.value),
+          Attribute(MetricNames.Attr.Cluster, key.cluster.fold("-")(_.value)),
+          Attribute(MetricNames.Attr.State, state.status)
+        )
+
+      previous.traverse_(state => gauge.dec(at(state)*)) *> gauge.inc(at(next)*)
+    }
 
     /** One line per transition and none while a state is steady. A log that repeats itself every ten seconds
       * for every healthy service is a log nobody reads.
