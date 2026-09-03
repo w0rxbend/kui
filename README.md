@@ -81,6 +81,49 @@ Linting is [scalafix](https://scalacenter.github.io/scalafix/), configured in `.
 which forbids `null`, `throw`, `return` and `asInstanceOf` everywhere. `libs/` and every service's
 `domain` module get a stricter set from `.scalafix-pure.conf`, which additionally forbids `var`.
 
+### Adding a module
+
+The build file decides once how modules are compiled, cross-compiled and tested, so declaring a new
+one is short. A JVM-only module:
+
+```scala
+object config extends KuiJvmModule {
+  object test extends ScalaTests with KuiTests
+}
+```
+
+A browser-only module (compiled to JavaScript by Scala.js):
+
+```scala
+object uiShell extends KuiFrontendModule
+```
+
+A module compiled for *both*, sharing one set of sources:
+
+```scala
+object contractsCore extends Module {
+  trait Shared extends KuiModule with PlatformScalaModule
+  object jvm extends Shared with KuiJvmModule {
+    object test extends ScalaTests with KuiTests with KuiCrossTests
+  }
+  object js extends Shared with KuiJsModule {
+    object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+  }
+}
+```
+
+The cross layout puts shared code in `libs/<name>/src` and anything platform-specific in
+`src-jvm` or `src-js`; tests are written once in `test/src`, with `test/src-jvm` and `test/src-js`
+for the rare assertion that only holds on one platform. Swap `KuiModule` for `KuiPureModule` when
+the module must also be free of `var`.
+
+### A note on frontend tests
+
+Running Scala.js tests needs a JavaScript engine. Install **Node.js** (22 LTS) for the plain
+suites, and additionally `npm install -g jsdom` for the suites that need a `document`. Without Node
+the frontend still compiles and links — only `./mill <module>.js.test` fails, with
+`failed to start command List(node)`.
+
 `resolveAll` is worth knowing about: it exists purely to fail fast. It asks the build to download
 every library version listed in [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md), even ones no module
 uses yet, so that a wrong version number is caught in seconds instead of surfacing weeks later when

@@ -94,3 +94,45 @@ Not applicable.
 ## Docs to update
 
 `README.md`: how to add a module (JVM, JS, cross) in three lines.
+
+## Deviations
+
+Recorded during implementation, 2026-09-03.
+
+1. **`./mill libs.kernel.js.test` could not be run: Node.js is not installed.** Scala.js tests
+   execute by handing the linked JavaScript to a JavaScript engine, and Mill's default engine is
+   `node`. The command fails with
+   `org.scalajs.jsenv.ExternalJSRun$FailedToStartException: failed to start command List(node)`.
+   Everything up to the point of starting the engine works: `libs.kernel.js.compile`,
+   `libs.kernel.js.test.compile` and `libs.kernel.js.test.fastLinkJS` all succeed, so the module
+   really does cross-compile and link. Node was deliberately not installed here; the requirement is
+   recorded as **B-002** in `BLOCKERS.md` and belongs to the frontend lane and to BUILD-004's CI
+   image. The other four acceptance commands pass.
+
+2. **There is no single `KuiCrossModule` trait.** A Mill trait cannot conjure two submodules, so
+   cross-compilation uses Mill's own idiom: a `Shared` trait mixing `PlatformScalaModule`, and two
+   nested objects `jvm` and `js` that extend it. `PlatformScalaModule` is what supplies the
+   `src` / `src-jvm` / `src-js` split the spec asks for. The three-lines-per-module goal is met —
+   a new cross module is a `Shared` trait plus two one-line objects.
+
+3. **Test sources come from `KuiCrossTests`, and the platform is read from the module id.** The
+   spec puts the cross module's tests in `libs/kernel/test/src`, shared by both platforms. Mill's
+   default would have used `libs/kernel/jvm/test/src` and `libs/kernel/js/test/src` — two
+   near-identical directories. `KuiCrossTests` overrides `sources` to `<module>/test/src` plus
+   `<module>/test/src-<platform>`. The platform name is taken from the module id
+   (`libs.kernel.jvm.test` gives `jvm`) rather than from the directory, because a
+   `PlatformScalaModule`'s nested test module already shares one `moduleDir` across both platforms.
+
+4. **`KuiJsTests` does not extend `ScalaJSTests`.** `ScalaJSTests` is an inner trait of
+   `ScalaJSModule`, so no top-level trait can extend it. `KuiJsTests`, `KuiJsDomTests` and
+   `KuiBrowserTests` are therefore mixins that carry the MUnit dependencies and the JavaScript
+   environment, combined at the use site as `object test extends ScalaJSTests with KuiJsTests`.
+
+5. **`ModuleSplitStyle.SmallModulesFor` takes varargs, not a `List`.** The spec's
+   `SmallModulesFor(List("kui.ui.clusters"))` does not compile under Mill 1.1.8; it is
+   `SmallModulesFor("kui.ui.clusters")`.
+
+6. **`domtestutils` and `munit-cats-effect` are not yet on any test module's classpath.** They are
+   still resolved by `resolveAll`, so the versions are proven. They are added when a module actually
+   needs them — `domtestutils` by the first Laminar suite, `munit-cats-effect` by the first suite
+   that tests an `IO` — rather than being put on every test classpath now.

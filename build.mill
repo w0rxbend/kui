@@ -6,6 +6,8 @@ package build
 import mill.*
 import mill.scalalib.*
 import mill.scalalib.scalafmt.ScalafmtModule
+import mill.scalajslib.*
+import mill.scalajslib.api.{JsEnvConfig, ModuleKind, ModuleSplitStyle}
 import com.goyeau.mill.scalafix.ScalafixModule
 
 /** Every third-party version KUI pins, in one place.
@@ -83,12 +85,106 @@ trait KuiPureModule extends KuiModule {
   def scalafixConfig = Task { Some(mill.api.BuildCtx.workspaceRoot / ".scalafix-pure.conf") }
 }
 
+/** A module that runs on the JVM. Its own trait so that JVM-only defaults have somewhere to live. */
+trait KuiJvmModule extends KuiModule
+
+/** A module that is compiled to JavaScript by Scala.js and runs in a browser.
+  *
+  * `ESModule` output is what a modern browser loads natively with `<script type="module">`, and
+  * what ADR-012's lazy microfrontend loading needs: `js.dynamicImport` becomes a real `import()`
+  * the browser can defer, rather than everything being flattened into one file.
+  */
+trait KuiJsModule extends KuiModule with ScalaJSModule {
+  def scalaJSVersion = Versions.scalaJs
+  def moduleKind     = ModuleKind.ESModule
+
+  // WebAssembly output is off: it is still experimental in Scala.js and browser support for it is
+  // narrower than for ES modules. ADR-001 pins the JS backend.
+  def scalaJSUseWebAssembly = false
+
+  // Source maps make a stack trace from a browser point back at Scala source rather than at
+  // generated JavaScript. Worth the extra artefacts.
+  def scalaJSSourceMap = true
+}
+
+/** The JS half of the shipped frontend.
+  *
+  * `SmallModulesFor` tells the Scala.js linker to emit one small JavaScript module per class in the
+  * listed packages, instead of one module for the whole program. That is what lets the shell load a
+  * feature only when the user navigates to it (ADR-012). Every later milestone adds its feature
+  * package to this list; a package that is missing from it still works, it just is not splittable.
+  */
+trait KuiFrontendModule extends KuiJsModule {
+  def moduleSplitStyle = ModuleSplitStyle.SmallModulesFor("kui.ui.clusters")
+}
+
+/** JVM tests. MUnit is the only test framework (ADR-018). */
+trait KuiTests extends TestModule.Munit {
+  def mvnDeps = Seq(
+    mvn"org.scalameta::munit::${Versions.munit}",
+    mvn"org.scalameta::munit-scalacheck::${Versions.munitScalacheck}",
+    mvn"org.scalacheck::scalacheck::${Versions.scalacheck}"
+  )
+}
+
+/** Scala.js tests. Mixed into a module's own `ScalaJSTests`, which is where the linking lives.
+  *
+  * The default JavaScript environment is plain Node: no `document`, so only logic can be tested.
+  * The two traits below swap that environment for one that has a DOM.
+  */
+trait KuiJsTests extends KuiTests
+
+/** Test sources for one platform of a cross-compiled module.
+  *
+  * Mill's default would put a nested `jvm.test` module's sources under `libs/kernel/jvm/test/src`,
+  * which splits a cross module's tests across two directories that are 99% identical. This instead
+  * reads `libs/kernel/test/src` — written once, run on both platforms — plus
+  * `libs/kernel/test/src-jvm` or `-js` for the rare assertion that only makes sense on one of them.
+  */
+trait KuiCrossTests extends JavaModule {
+  def sources = {
+    // A `PlatformScalaModule`'s nested test module already has `libs/kernel/test` as its
+    // `moduleDir`, shared by both platforms, so the platform name has to come from the module id
+    // (`libs.kernel.jvm.test`) rather than from the path.
+    val platform = moduleSegments.parts.dropRight(1).last
+    Task.Sources(moduleDir / "src", moduleDir / s"src-$platform")
+  }
+}
+
+/** Runs the tests against a `document` supplied by the `jsdom` npm package rather than by a real
+  * browser. Fast, but jsdom is not a browser: layout, real event ordering and CSS are approximated.
+  * Requires `jsdom` to be installed (see README).
+  */
+trait KuiJsDomTests extends ScalaJSModule with KuiJsTests {
+  override def jsEnvConfig = Task { JsEnvConfig.JsDom() }
+}
+
+/** Runs the tests in a real browser engine, driven by Playwright.
+  *
+  * Reserved for the two SSE wrapper suites, where what is under test is the browser's own
+  * `EventSource` behaviour and jsdom's approximation of it would prove nothing.
+  */
+trait KuiBrowserTests extends ScalaJSModule with KuiJsTests {
+  override def jsEnvConfig = Task { JsEnvConfig.Playwright.chrome(headless = true, showLogs = false) }
+}
+
 object libs extends Module {
 
-  /** Shared, platform-neutral vocabulary. KERN-001 fills it in; today it only has to compile. */
+  /** Shared, platform-neutral vocabulary. KERN-001 fills it in; today it only has to compile.
+    *
+    * Sources live in `libs/kernel/src` and are compiled twice, once for each platform.
+    * `libs/kernel/src-jvm` and `libs/kernel/src-js` hold anything that cannot be shared;
+    * `PlatformScalaModule` wires those directories up from the submodule's name.
+    */
   object kernel extends Module {
-    object jvm extends KuiPureModule {
-      def sources = Task.Sources(moduleDir / os.up / "src")
+    trait Shared extends KuiPureModule with PlatformScalaModule
+
+    object jvm extends Shared with KuiJvmModule {
+      object test extends ScalaTests with KuiTests with KuiCrossTests
+    }
+
+    object js extends Shared with KuiJsModule {
+      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
     }
   }
 }
