@@ -2,7 +2,7 @@ package kui.gateway.application.client
 
 import fs2.Stream
 import sttp.capabilities.fs2.Fs2Streams
-import sttp.tapir.Endpoint
+import sttp.tapir.{Endpoint, PublicEndpoint}
 
 import kui.contracts.ErrorEnvelope
 import kui.http.sse.SseEvent
@@ -58,6 +58,17 @@ trait ServiceClient[F[_]] {
 
   /** Calls a request/response endpoint and returns its output, or the error it failed with. */
   def call[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any], input: I)(
+      ctx: CallContext
+  ): F[Either[KuiError, O]]
+
+  /** Calls an endpoint that carries no principal, such as a service's `/health/ready`.
+    *
+    * The health and capability endpoints of `libs/http` are deliberately unauthenticated: a readiness probe
+    * has to work when authentication is exactly what is broken, and a load balancer calling one cannot hold a
+    * KUI principal. There is therefore nothing for `call` to sign, and a separate method says so in the types
+    * rather than by convention.
+    */
+  def callPublic[I, O](endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any], input: I)(
       ctx: CallContext
   ): F[Either[KuiError, O]]
 

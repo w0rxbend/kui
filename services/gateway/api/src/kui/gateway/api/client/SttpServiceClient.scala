@@ -10,7 +10,7 @@ import sttp.client4.*
 import sttp.model.Header
 import sttp.tapir.client.sttp4.SttpClientInterpreter
 import sttp.tapir.client.sttp4.stream.StreamSttpClientInterpreter
-import sttp.tapir.{DecodeResult, Endpoint}
+import sttp.tapir.{DecodeResult, Endpoint, PublicEndpoint}
 
 import kui.config.UpstreamServiceConfig
 import kui.contracts.ErrorEnvelope
@@ -133,22 +133,23 @@ object SttpServiceClient {
       signed(build(Placeholder), ctx).flatMap { token =>
         send(decorate(build(token), ctx)).map {
           case Left(error) => Left(error)
-          case Right(response) =>
-            response.body match {
-              case DecodeResult.Value(Right(output)) => Right(output)
-              case DecodeResult.Value(Left(envelope)) =>
-                Left(errorOf(service, response.code.code, envelope))
-              case failure: DecodeResult.Failure =>
-                Left(
-                  InfrastructureError.Unreachable(
-                    service.value,
-                    s"the response could not be decoded: $failure"
-                  )
-                )
-            }
+          case Right(response) => decoded(response.code.code, response.body)
         }
       }
     }
+
+    private def decoded[O](
+        status: Int,
+        body: DecodeResult[Either[ErrorEnvelope, O]]
+    ): Either[KuiError, O] =
+      body match {
+        case DecodeResult.Value(Right(output)) => Right(output)
+        case DecodeResult.Value(Left(envelope)) => Left(errorOf(service, status, envelope))
+        case failure: DecodeResult.Failure =>
+          Left(
+            InfrastructureError.Unreachable(service.value, s"the response could not be decoded: $failure")
+          )
+      }
 
     /** Streaming deliberately bypasses the resilience wrapper that `call` goes through.
       *
@@ -162,6 +163,14 @@ object SttpServiceClient {
       * that `kui.http.sse.Sse.stream` applies on the way out, and the client's own reconnect — so the stream
       * goes out on the plain transport and is protected there instead.
       */
+    def callPublic[I, O](endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any], input: I)(
+        ctx: CallContext
+    ): F[Either[KuiError, O]] =
+      send(decorate(interpreter.toRequest(endpoint, baseUri).apply(input), ctx)).map {
+        case Left(error) => Left(error)
+        case Right(response) => decoded(response.code.code, response.body)
+      }
+
     def stream[I](
         endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, Stream[F, Byte], Fs2Streams[F]],
         input: I

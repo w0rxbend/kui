@@ -57,20 +57,52 @@ object HealthEndpoints {
       checks: List[ReadinessCheck[F]],
       capabilities: F[ServiceCapabilities]
   ): List[ServerEndpoint[Any, F]] =
-    List(live[F], ready[F](checks), capabilitiesEndpoint[F](capabilities))
+    List(liveRoute[F], readyRoute[F](checks), capabilitiesRoute[F](capabilities))
 
   // ---------------------------------------------------------------------------------------------
 
-  private def live[F[_]: Temporal]: ServerEndpoint[Any, F] =
+  /** The endpoint descriptions, without server logic.
+    *
+    * They are public so that a *caller* can be derived from the same value the server is derived from. The
+    * gateway polls every service's readiness and capabilities (GW-004), and if it built those requests from
+    * its own copy of the paths, the two copies could drift and nothing would notice until a deployment
+    * reported every service as down. ADR-003's rule -- routes are derived from endpoint metadata,
+    * hand-written path lists are forbidden -- applies to the client side just as much.
+    */
+  val live: PublicEndpoint[Unit, ErrorEnvelope, LivenessReport, Any] =
     endpoint.get
       .in("health" / "live")
       .out(jsonBody[LivenessReport])
       .errorOut(jsonBody[ErrorEnvelope])
       .name("health.live")
       .description("Whether the process should be restarted. Never depends on an upstream.")
-      .serverLogicSuccess[F](_ => Clock[F].realTimeInstant.map(LivenessReport.at))
 
-  private def ready[F[_]: {Temporal, Parallel}](checks: List[ReadinessCheck[F]]): ServerEndpoint[Any, F] =
+  val ready: PublicEndpoint[Unit, ErrorEnvelope, ReadinessReport, Any] =
+    endpoint.get
+      .in("health" / "ready")
+      .out(jsonBody[ReadinessReport])
+      .errorOut(jsonBody[ErrorEnvelope])
+      .name("health.ready")
+      .description("Whether the service can serve requests now, and which checks say otherwise.")
+
+  val capabilities: PublicEndpoint[Unit, ErrorEnvelope, ServiceCapabilities, Any] =
+    endpoint.get
+      .in("capabilities")
+      .out(jsonBody[ServiceCapabilities])
+      .errorOut(jsonBody[ErrorEnvelope])
+      .name("capabilities")
+      .description("What this service can currently do, per cluster.")
+
+  private def liveRoute[F[_]: Temporal]: ServerEndpoint[Any, F] =
+    live.serverLogicSuccess[F](_ => Clock[F].realTimeInstant.map(LivenessReport.at))
+
+  /** The served readiness route adds the status code to the body, so that a load balancer can read the
+    * verdict without parsing JSON. The description above stays body-only, because a client decodes the body
+    * and reads the status from the response it already has.
+    */
+  private def readyRoute[F[_]: {Temporal, Parallel}](
+      checks: List[ReadinessCheck[F]]
+  ): ServerEndpoint[Any, F] =
     endpoint.get
       .in("health" / "ready")
       .out(statusCode.and(jsonBody[ReadinessReport]))
@@ -79,16 +111,8 @@ object HealthEndpoints {
       .description("Whether the service can serve requests now, and which checks say otherwise.")
       .serverLogicSuccess[F](_ => report(checks).map(r => (statusOf(r), r)))
 
-  private def capabilitiesEndpoint[F[_]](
-      capabilities: F[ServiceCapabilities]
-  ): ServerEndpoint[Any, F] =
-    endpoint.get
-      .in("capabilities")
-      .out(jsonBody[ServiceCapabilities])
-      .errorOut(jsonBody[ErrorEnvelope])
-      .name("capabilities")
-      .description("What this service can currently do, per cluster.")
-      .serverLogicSuccess[F](_ => capabilities)
+  private def capabilitiesRoute[F[_]](reported: F[ServiceCapabilities]): ServerEndpoint[Any, F] =
+    capabilities.serverLogicSuccess[F](_ => reported)
 
   // ---------------------------------------------------------------------------------------------
 
