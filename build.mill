@@ -553,6 +553,39 @@ object frontend extends Module {
   }
 }
 
+/** Small programs the build runs. They are ordinary modules so that their logic is unit-tested like
+  * any other code, rather than living as untested script inside a Mill task.
+  */
+object tools extends Module {
+
+  /** Renders `docs/api/error-codes.md` from the `ErrorCode` enum (KERN-008, ADR-034 amendment 2). */
+  object errorCodes extends KuiJvmModule {
+    override def moduleDir = mill.api.BuildCtx.workspaceRoot / "tools" / "error-codes"
+
+    def moduleDeps = Seq(libs.kernel.jvm)
+
+    object test extends ScalaTests with KuiTests
+  }
+}
+
+/** Documents generated from code.
+  *
+  * A generated document is only trustworthy if something fails when it goes stale, so every task
+  * here has a `--check` mode that CI runs: `./mill docs.errorCodes` writes the file, and
+  * `./mill docs.errorCodes --check` fails when the committed file no longer matches the source it
+  * was generated from.
+  */
+object docs extends Module {
+
+  /** Where the generated table is committed. */
+  private def errorCodesTarget: String =
+    (mill.api.BuildCtx.workspaceRoot / "docs" / "api" / "error-codes.md").toString
+
+  def errorCodes(args: String*): Command[Unit] = Task.Command {
+    tools.errorCodes.run(Task.Anon(mill.api.Args(errorCodesTarget +: args)))()
+  }
+}
+
 /** A module that exists only to be resolved, never compiled.
   *
   * It declares every Maven coordinate M0 will eventually use. `resolveAll` downloads the lot, so a

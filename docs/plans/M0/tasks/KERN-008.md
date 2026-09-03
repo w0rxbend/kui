@@ -79,3 +79,32 @@ Not applicable.
 
 `docs/api/error-codes.md` is the output. Add a line to its header saying it is generated and
 must not be edited by hand.
+
+## Deviations
+
+- **The renderer is `tools/error-codes`, an ordinary Mill module, and the Mill task only runs
+  it.** `ErrorCodeDoc.render` is pure and unit-tested; `ErrorCodeDocMain` decides between
+  writing and checking; `docs.errorCodes` in `build.mill` passes the target path and the flags
+  through. Putting the rendering in the build file would have made it the one piece of logic in
+  the project with no tests.
+- **`--check` is demonstrated below rather than only asserted.** Adding a case to `ErrorCode`
+  without regenerating fails the task:
+
+  ```
+  $ ./mill docs.errorCodes --check
+  /home/worxbend/Projects/kui/docs/api/error-codes.md is out of date: the ErrorCode enum has
+  changed since it was generated.
+  Run ./mill docs.errorCodes and commit the result.
+  131/132, 1 FAILED] ./mill docs.errorCodes --check 1s
+  ```
+
+  With the enum restored, the same command passes:
+
+  ```
+  $ ./mill docs.errorCodes --check
+  /home/worxbend/Projects/kui/docs/api/error-codes.md is up to date (22 codes)
+  132/132, SUCCESS] ./mill docs.errorCodes --check
+  ```
+
+  BUILD-004's CI should add `./mill docs.errorCodes --check` to the architecture or style stage;
+  it is not wired in by this task because the workflow file belongs to that one.
