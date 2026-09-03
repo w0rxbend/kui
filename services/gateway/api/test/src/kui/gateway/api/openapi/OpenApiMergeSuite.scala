@@ -39,6 +39,12 @@ final class OpenApiMergeSuite extends FunSuite {
         "/api/v1/capabilities",
         "/api/v1/capabilities/stream",
         "/api/v1/capabilities/{service}/probe",
+        "/api/v1/clusters",
+        "/api/v1/clusters/{clusterId}",
+        "/api/v1/clusters/{clusterId}/brokers",
+        "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs",
+        "/api/v1/clusters/{clusterId}/log-dirs",
+        "/api/v1/clusters/{clusterId}/refresh",
         "/api/v1/info",
         "/api/v1/ping"
       )

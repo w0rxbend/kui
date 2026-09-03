@@ -1,0 +1,29 @@
+{
+  "configs" : {
+    "status" : "ok",
+    "data" : [
+      {
+        "name" : "log.retention.hours",
+        "value" : "168",
+        "source" : "STATIC_BROKER_CONFIG",
+        "isSensitive" : false,
+        "isReadOnly" : true,
+        "documentation" : null,
+        "synonyms" : [
+          "log.retention.hours"
+        ]
+      },
+      {
+        "name" : "listener.name.internal.ssl.key.password",
+        "value" : null,
+        "source" : "STATIC_BROKER_CONFIG",
+        "isSensitive" : true,
+        "isReadOnly" : true,
+        "documentation" : null,
+        "synonyms" : [
+        ]
+      }
+    ],
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

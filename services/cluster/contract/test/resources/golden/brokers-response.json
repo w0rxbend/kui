@@ -1,0 +1,23 @@
+{
+  "brokers" : {
+    "status" : "stale",
+    "data" : [
+      {
+        "id" : 1,
+        "host" : "broker-1.example.com",
+        "port" : 9093,
+        "rack" : "eu-west-1a",
+        "isController" : true,
+        "partitionCount" : null,
+        "leaderCount" : null,
+        "inSyncReplicaCount" : 42,
+        "replicaSkewPercent" : 3.5,
+        "leaderSkewPercent" : null,
+        "diskUsageBytes" : 183251937970,
+        "segmentCount" : 128
+      }
+    ],
+    "fetchedAt" : "2026-09-03T10:11:12.000Z",
+    "reason" : "UPSTREAM_TIMEOUT"
+  }
+}

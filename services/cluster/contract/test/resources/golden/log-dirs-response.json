@@ -1,0 +1,8 @@
+{
+  "logDirs" : {
+    "status" : "unavailable",
+    "reason" : "UPSTREAM_AUTH",
+    "message" : "the cluster refused describeLogDirs: ClusterAuthorizationException",
+    "since" : "2026-09-03T10:11:12.000Z"
+  }
+}
