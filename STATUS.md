@@ -10,10 +10,10 @@
 | --- | --- | --- | --- |
 | G1 Research | Research agents A–H | `research/**` | **Complete** (agent I blocked, see below) |
 | G2 Domain model | Domain Architects | `docs/domain/*.md` | In progress: `docs/domain/kafka-glossary.md` drafted; per-context models not started |
-| G3 Architecture | Chief Architect + CTO | `ARCHITECTURE.md`, `docs/adr/` | **Complete**: ADR-001 … ADR-041 Accepted and indexed in `DECISIONS.md` |
+| G3 Architecture | Chief Architect + CTO | `ARCHITECTURE.md`, `docs/adr/` | **Complete**: ADR-001 … ADR-043 Accepted and indexed in `DECISIONS.md` |
 | G4 Roadmap | CEO + Program Lead | `docs/ROADMAP.md`, `docs/FEATURE_MATRIX.md` | **Complete** (this pass) |
 | G5 Technical dev plan | Planner + Domain Architects + Principal Scala Engineer | `docs/plans/M0/DEVPLAN.md` + 57 task specs | **Complete** for M0 |
-| G6 Gate | CTO + CEO | `docs/plans/M0/GATE-REVIEW.md`, sign-off in this file | **Complete** for M0: APPROVED WITH CONDITIONS |
+| G6 Gate | CTO + CEO | `docs/plans/M0/GATE-REVIEW.md`, sign-off in this file | **Complete** for M0: approved, and **all conditions discharged** — see "G6 conditions" below |
 
 ## Research reports (G1)
 
@@ -59,16 +59,12 @@ smart-filter test execution and connector plugin validation gain RBAC checks.
   implied); M5: audit records carry an anonymous principal until M6.
 - §9A profile: neither Kafbat nor Provectus ships an AWS Glue serde; Kafbat still ships the ODD
   exporter (research B).
-- §16.6: "except through the gateway's contracts" is ambiguous. `ARCHITECTURE.md` §5 reads it
-  as "through the gateway-*visible* contracts" and permits direct service→service calls on
-  `/internal/v1` (every Kafka-facing service → cluster-service; metrics → topic and consumer
-  snapshots). PLAN §3's own wording is satisfied either way, but §16.6 should say plainly which
-  it means. Raised at the G6 gate (finding F-06); must be settled before the first M1 task that
-  makes such a call, and recorded in ADR-004.
-- §18: `domain` is listed as depending on "nothing but Scala stdlib and cats-core", which would
-  forbid `libs/kernel` — the shared kernel that `ARCHITECTURE.md` §3, `docs/domain/context-map.md`
-  and every M0 task spec give it. §18 should read "Scala stdlib, cats-core and `kui-kernel`
-  (which is itself pure, and depends only on cats-core and Iron)".
+- §16.6: "except through the gateway's contracts" → "except through the **published**
+  contract of the callee". Settled by **ADR-043**: direct service→service calls on `/internal/v1`
+  are permitted under four conditions (published contract, cached last-known fallback, capability
+  reporting, no chains). Relaying through the gateway was rejected because it would make the
+  gateway a mandatory dependency of every service pair — spreading the failure the rule exists
+  to contain.
 
 ## Gate review
 
@@ -121,3 +117,27 @@ questions that could invalidate later work.
 | Milestone | Accepted on | Evidence |
 | --- | --- | --- |
 | — | — | — |
+
+## G6 conditions
+
+The gate approved M0 with conditions. All are discharged; implementation may start.
+
+| Condition | Discharged by |
+| --- | --- |
+| F-01 layering contradiction (gateway `application` vs rule A3) | **ADR-041 Amendment 1** — A3 is scoped to services that own a `domain`; the gateway, which owns none by ADR-004 §3, may use `libs/contracts-core` and `libs/http`; new rule A8 forbids any Kafka client on the gateway. Addendum 2 in `GATE-REVIEW.md` records the reversal and its argument. |
+| F-05 shared relational store (OT-004 vs PLAN §3) | **ADR-042** — metadata lives in internal compacted Kafka topics; no database, ever. `TECH_DEBT.md` TD-014 closed. |
+| F-06 PLAN §16.6 ambiguity | **ADR-043** — direct service→service calls permitted on the callee's published contract under four conditions. Removed from `DECISIONS.md` "not yet taken"; the PLAN amendment is listed above. |
+| F-14 design tokens with no import | **Decided, not accepted as a risk** — KUI owns its token set (`docs/plans/M0/tasks/UI-002.md`), derived from competitor analysis and contrast-tested. `BLOCKERS.md` B-001 closed as decided-around; NX-007 closes `DONE`. |
+| F-17 naming key | Added to `ARCHITECTURE.md` §16. |
+
+Nothing in the M0 plan now waits on input from outside the execution loop.
+
+## M0 readiness
+
+- `docs/plans/M0/DEVPLAN.md` + 57 task specs, gate-reviewed and amended.
+- 8 parallel lanes; critical path 17 tasks (`DEVPLAN` §6.3).
+- Every M0 exit criterion maps to at least one task and to a command that proves it.
+- **Next action:** begin Phase E with BUILD-001. Lane A unblocks lanes B–H; BUILD-006,
+  CFG-001 and KERN-006 are the three off-critical-path tasks worth starting early, because
+  each answers a question that could invalidate later work.
+

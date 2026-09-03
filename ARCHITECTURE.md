@@ -105,7 +105,12 @@ Two Degradable/Optional services with different failure domains are never merged
 ## 3. Bounded contexts and module layout
 
 Each service is one Mill module tree (PLAN §18), hexagonal, with the dependency rule
-enforced by `moduleDeps` (a module cannot import what it does not depend on):
+enforced by `moduleDeps` (a module cannot import what it does not depend on) and machine-checked
+by `./mill checkArchitecture`, whose rule table is ADR-041 §2. Two consequences of that ADR are
+worth stating here: a domain-owning service's `application` never depends on `libs/contracts-core`
+or `libs/http` (it owns its types; `api` maps them), and the **gateway is outside that rule** —
+it owns no `domain`, the wire is its subject matter, and its real constraints are enforced
+instead as "only a service's `contract`" (A4) and "no Kafka client" (A8).
 
 ```
 services/<name>/
@@ -442,8 +447,11 @@ and `tracestate` are outside that family and are handled by otel4s.
 - Streaming: FS2 over HTTP chunked `text/event-stream` service → gateway, re-streamed to the
   browser; cancellation propagates browser → gateway → service → consumer close (fiber
   cancellation, `KafkaConsumer.resource`).
-- Services never call each other in request paths except through the gateway-visible
-  contracts and with a cached fallback (PLAN §16.6). The only such dependencies are:
+- Services may call each other directly on the callee's published `/internal/v1` contract,
+  under the four conditions of **ADR-043** (published contract, cached last-known fallback,
+  capability reporting, one hop and no chains). This is the reading of PLAN §16.6 that ADR-043
+  settles; the gateway does not relay internal traffic. The edge list below is closed — adding
+  an edge amends ADR-043:
   every Kafka-facing service → cluster-service (`ClusterProfile`, §10), and
   metrics-service → topic/consumer snapshot endpoints (30 s cadence, tolerant).
 - Asynchronous internal events (`kui.internal.events` topic) stay `RESEARCH` for M6+; nothing
@@ -814,3 +822,22 @@ kui/
 ```
 
 `services/config` from PLAN §48 does not exist (§2). Mill task names follow PLAN §48.
+
+### Naming key
+
+The same thing has a different form in different places; each form has one job.
+
+| Form | Where it is used | Example |
+| --- | --- | --- |
+| `kui-<name>-service` | prose about a deployable, and the Helm release name | `kui-topic-service` |
+| `kui-<name>` | Docker image and Compose service name | `kui-topic` |
+| `<name>` | `ServiceId` values, capability keys, metric and log labels, OpenAPI tags | `topic` |
+| `services/<name>/<layer>` | directory path | `services/topic/api` |
+| `services.<name>.<layer>` | Mill module id (`.` for directory nesting; a cross-compiled module adds `.jvm` / `.js`) | `services.topic.api` |
+| `libs/<name>` … `libs.<name>` | same rule for libraries; `kui-<name>` appears in prose only | `libs/kernel`, `libs.kernel.jvm`, "kui-kernel" |
+| `frontend/ui-<name>` … `frontend.ui<Name>` | frontend modules; PLAN §21's `kui-ui-<name>` is prose | `frontend/ui-topics`, `frontend.uiTopics` |
+| `kui.ui.<name>` | Scala package, and the `ModuleSplitStyle.SmallModulesFor` entry | `kui.ui.topics` |
+
+The `<name>` form is the identifier of record: a `ServiceId` in code, the `service` label in
+every metric and log line, and the key the capability registry and the frontend `FeatureId`
+share, so a capability maps to a feature without a lookup table.
