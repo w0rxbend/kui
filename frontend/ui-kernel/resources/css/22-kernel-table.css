@@ -76,6 +76,11 @@
   color: inherit;
   font: inherit;
   letter-spacing: inherit;
+  /* The browser's own stylesheet sets `text-transform: none` on `button`, and a rule in the
+   * browser's stylesheet beats inheritance — inheritance only fills in where nothing is declared.
+   * Without this line a sortable column's label stayed in its original case while an unsortable
+   * one next to it was upper-cased, so one table header had two typographic styles in it. */
+  text-transform: inherit;
   cursor: pointer;
 }
 
