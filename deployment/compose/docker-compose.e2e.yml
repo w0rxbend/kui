@@ -1,0 +1,28 @@
+# What the end-to-end fault-isolation suite changes about the distributed stack, and nothing else.
+#
+# It is a Compose *override* file: it is passed after `docker-compose.yml` and merged into it, so
+# the topology stays described in one place and this file holds only the differences the tests need.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --wait
+#
+# There is exactly one difference, and the reason for it is timing rather than behaviour.
+#
+# The gateway asks each service whether it is ready every ten seconds in the shipped configuration
+# (`kui.gateway.readinessIntervalMs` in `kui.yaml`). That is the right number for a deployment: it is
+# frequent enough to notice an outage quickly and infrequent enough that a hundred services do not
+# turn into a hundred requests a second. It is the wrong number for a test suite, which waits out
+# that interval at every transition — the entry going dim, the entry coming back — and would spend
+# most of its runtime asleep. Three seconds keeps the same behaviour and makes the suite fast enough
+# that people run it.
+#
+# THE SUITE MUST NOT COME TO DEPEND ON THIS BEING THE DEFAULT. That is why the override lives here
+# rather than in `kui.yaml`, and why the ten-second production default is asserted separately by
+# CFG-001's defaults test: if someone lowered the shipped default to make a test faster, that test
+# would fail and this file would be unnecessary — and the two facts stay independently checked.
+
+services:
+  kui-gateway:
+    environment:
+      # `kui.gateway.readinessIntervalMs` as an environment variable: the key in capitals with the
+      # dots replaced by underscores, which is the rule for every KUI setting (CFG-001).
+      KUI_GATEWAY_READINESSINTERVALMS: "3000"

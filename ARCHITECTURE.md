@@ -66,6 +66,15 @@ Two shapes are built from the same Mill modules (ADR-005):
 No service mesh, no registry service, no shared database (PLAN §3). Services own their
 state; most state is a rebuildable snapshot of the target cluster (§9).
 
+The distributed shape is not only described here, it is **verified in CI by a browser**. The `e2e`
+job runs `kui.e2e.ClusterServiceDownSuite` against `deployment/compose/docker-compose.yml`: it stops
+the `kui-cluster` container, and asserts that the entry for that feature dims while staying
+clickable, that the fallback panel names the reason and when it started, that the rest of the
+application keeps working, and that starting the container again heals the interface without the
+page ever being reloaded. That suite is the check that keeps the table above a statement of fact
+rather than of intent — the all-in-one shape cannot make it, because "stopping a service" there
+would mean calling a method that pretends to be down. See `docs/testing.md`.
+
 ## 2. Service catalog and tiers
 
 Validated against PLAN §15 with two amendments, both recorded in ADR-004:

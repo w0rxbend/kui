@@ -118,6 +118,39 @@ questions that could invalidate later work.
 | --- | --- | --- |
 | — | — | — |
 
+## M0 exit criterion: fault-isolation E2E (E2E-002)
+
+The milestone's central claim, checked by a real browser against two real containers. Run on
+2026-09-03 with `./mill e2e.test -v`, Playwright 1.62.0 / Chromium 151.0.7922.34 (build 1234),
+against `deployment/compose/docker-compose.yml` + `docker-compose.e2e.yml`:
+
+```
+kui.e2e.ClusterServiceDownSuite:
+  + entry is normal while the service is up 0.988s
+  + stopping the service dims the entry within the readiness interval 12.799s
+  + the capability API reports unavailable with a reason and a since 0.01s
+  + the fallback panel shows reason, since, retry and what-still-works 0.026s
+  + settings and the shell keep working while the service is down 0.052s
+  + retry while down probes and reports still-unavailable 0.074s
+  + starting the service restores the entry with no page reload 31.35s
+  + ping works again after recovery 0.181s
+kui.e2e.ClusterServiceDownSuite finished: 0 failed, 0 ignored, 8 total 73.634s
+
+kui.e2e.CircuitBreakerSuite:
+  + a hanging service dims the entry instead of hanging the UI 18.478s
+  + unpausing the service brings the entry back 1.932s
+kui.e2e.CircuitBreakerSuite finished: 0 failed, 0 ignored, 2 total 48.108s
+
+kui.e2e.ShellSmokeSuite:      0 failed, 0 ignored, 7 total 28.453s
+kui.e2e.ThemeSuite:           0 failed, 0 ignored, 1 total 22.363s
+```
+
+The suite was also run with its `docker compose stop` deliberately removed, to establish that the
+assertions are not vacuous: four of the eight steps then failed, each with the state it had been
+waiting for named in the message — for example `timed out after 9 seconds waiting for: the Clusters
+entry to be dimmed after kui-cluster stopped`. The other four passed, correctly, because they do not
+depend on the outage.
+
 ## G6 conditions
 
 The gate approved M0 with conditions. All are discharged; implementation may start.
