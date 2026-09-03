@@ -29,29 +29,32 @@ export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"
 
 Verify with `node --version` before running any task whose name contains `js`.
 
-## The DOM test suites need jsdom, and need to be able to find it
+## The DOM test suites need jsdom
 
 Some frontend suites render real elements and therefore need a `document`. Plain Node has none, so
 those suites run under [jsdom](https://github.com/jsdom/jsdom), a `document` implemented in
-JavaScript. It is an npm package, and it is not something Mill can download for you:
+JavaScript. It is an npm package, and it is not something Mill can download for you.
+
+Install it into a `node_modules` directory at the repository root:
 
 ```bash
-npm install -g jsdom
+cd <repository root>
+npm install --no-save jsdom
 ```
 
-A globally installed package is not on Node's default lookup path, so the build also has to be told
-where the global packages live — and it has to be told *before Mill's background daemon starts*,
-because the daemon passes its own environment on to the `node` process it forks. Exporting the
-variable and then running a task against an already-running daemon has no effect:
+The root is where it has to be. Mill runs the test binary from a sandbox directory underneath the
+repository, and Node finds a package by walking up from there looking for `node_modules`, so a
+package installed at the root is found and one installed anywhere else is not. `node_modules/` is
+git-ignored, so this is a per-checkout setup step and nothing to commit.
 
-```bash
-export NODE_PATH="$(npm root -g)"
-./mill shutdown            # only needed if a daemon is already running without NODE_PATH set
-./mill frontend.uiKernel.test
-```
+A global install (`npm install -g jsdom`) is not enough on its own, because a global package is not
+on Node's lookup path. Exporting `NODE_PATH="$(npm root -g)"` does make it work, but only if the
+variable is set *before Mill's background daemon starts* — the daemon passes its own environment to
+the `node` process it forks, so exporting it and then running a task against an already-running
+daemon has no effect. The local install avoids the whole question.
 
 The symptom of getting this wrong is `Error: Cannot find module 'jsdom'` from inside
-`codeWithJSDOMContext.js`, with the test run exiting before any test starts.
+`codeWithJSDOMContext.js`, with the run exiting before any test starts.
 
 Server-side work needs none of this. `./mill libs.kernel.jvm.test` and everything else on the
 JVM runs without Node present.

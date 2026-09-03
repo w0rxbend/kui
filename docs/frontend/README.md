@@ -101,12 +101,15 @@ browser, and it approximates layout, so nothing here may assert geometry.
 
 ```bash
 export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"
-export NODE_PATH="$(npm root -g)"
+npm install --no-save jsdom          # once per checkout, into the repository root
 ./mill frontend.uiKernel.test
 ```
 
-See [`../development/toolchain.md`](../development/toolchain.md) for why both variables are needed
-and why they must be set before Mill's daemon starts.
+See [`../development/toolchain.md`](../development/toolchain.md) for why jsdom has to live in a
+`node_modules` at the repository root.
+
+Run Scala.js test tasks on their own rather than folding them into `./mill __.test`: a Scala.js test
+module and a JVM test module in one Mill invocation currently fail together (blocker B-003).
 
 ## Further reading
 

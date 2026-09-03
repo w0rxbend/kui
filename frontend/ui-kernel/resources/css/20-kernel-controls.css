@@ -1,0 +1,287 @@
+/* Kernel primitives: button, field (input and select), tag, card, tabs, icon.
+ *
+ * Every value here comes from a token. There is not one colour, spacing step or font size written
+ * literally in this file, and there must never be: that rule is what makes the whole product
+ * re-themeable from `10-tokens.css` (ADR-024, docs/frontend/tokens.md).
+ *
+ * Nothing here is load-bearing. Each component is usable with this stylesheet missing — a button is
+ * a `<button>`, a disabled control carries the `disabled` attribute, an unselected tab panel is
+ * simply not in the document. See "degraded rendering" in docs/frontend/README.md.
+ */
+
+/* --- Icon ------------------------------------------------------------------------------------ */
+
+.kui-icon {
+  /* Sized in `em` by the markup, so an icon always matches the text beside it. `flex-shrink: 0`
+   * stops it being squashed when the label next to it is long. */
+  flex-shrink: 0;
+}
+
+.kui-spinner {
+  animation: kui-spin 800ms linear infinite;
+  transform-origin: center;
+}
+
+@keyframes kui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Button ---------------------------------------------------------------------------------- */
+
+.kui-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-md);
+  font-weight: var(--kui-font-weight-medium);
+  line-height: var(--kui-font-line-height-tight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--kui-duration-fast) ease,
+    border-color var(--kui-duration-fast) ease;
+}
+
+.kui-button:disabled {
+  /* Both cues, not just the dimming: opacity alone can still read as "enabled but subtle". */
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.kui-button--sm {
+  padding: var(--kui-space-1) var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-button--md {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  font-size: var(--kui-font-size-md);
+}
+
+.kui-button--lg {
+  padding: var(--kui-space-3) var(--kui-space-5);
+  font-size: var(--kui-font-size-lg);
+}
+
+.kui-button--primary {
+  background-color: var(--kui-color-primary);
+  color: var(--kui-color-primary-contrast);
+}
+
+.kui-button--secondary {
+  background-color: var(--kui-color-surface-raised);
+  border-color: var(--kui-color-border-strong);
+  color: var(--kui-color-text);
+}
+
+.kui-button--danger {
+  background-color: var(--kui-color-danger);
+  color: var(--kui-color-surface-raised);
+}
+
+.kui-button--ghost {
+  background-color: transparent;
+  color: var(--kui-color-text);
+}
+
+/* `color-mix` darkens a token without a second token existing for the hover state. That is the
+ * whole reason there are no component-scoped tokens: the hover shade is derived, not declared. */
+.kui-button--primary:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--kui-color-primary) 88%, black);
+}
+
+.kui-button--secondary:hover:not(:disabled),
+.kui-button--ghost:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--kui-color-text) 8%, transparent);
+}
+
+.kui-button--danger:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--kui-color-danger) 88%, black);
+}
+
+.kui-button__icon {
+  display: inline-flex;
+}
+
+/* --- Field: label, control, hint, error ------------------------------------------------------ */
+
+.kui-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-field__label {
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text);
+}
+
+.kui-field__control {
+  padding: var(--kui-space-2);
+  border: 1px solid var(--kui-color-border-strong);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-raised);
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-md);
+}
+
+.kui-field__control:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.kui-field__control::placeholder {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-field--invalid .kui-field__control {
+  border-color: var(--kui-color-danger);
+}
+
+.kui-field__hint {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-field__error {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-danger);
+}
+
+/* --- Tag ------------------------------------------------------------------------------------- */
+
+.kui-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  padding: 0 var(--kui-space-2);
+  border-radius: var(--kui-radius-pill);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  line-height: calc(var(--kui-space-5) - var(--kui-space-1));
+  /* The tone classes below set only `color`; the background is a faint wash of that same colour, so
+   * one declaration here covers all five tones and they can never drift apart. */
+  background-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.kui-tag--neutral {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-tag--info {
+  color: var(--kui-color-info);
+}
+
+.kui-tag--success {
+  color: var(--kui-color-success);
+}
+
+.kui-tag--warning {
+  color: var(--kui-color-warning);
+}
+
+.kui-tag--danger {
+  color: var(--kui-color-danger);
+}
+
+.kui-tag__dot {
+  width: var(--kui-space-2);
+  height: var(--kui-space-2);
+  border-radius: var(--kui-radius-pill);
+  background-color: currentColor;
+}
+
+.kui-tag__remove {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* --- Card ------------------------------------------------------------------------------------ */
+
+.kui-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-raised);
+}
+
+.kui-card--elevated {
+  border-color: transparent;
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-card__header {
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border-bottom: 1px solid var(--kui-color-border);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-card__body {
+  padding: var(--kui-space-4);
+}
+
+.kui-card__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+/* --- Tabs ------------------------------------------------------------------------------------ */
+
+.kui-tabs__list {
+  display: flex;
+  gap: var(--kui-space-1);
+  border-bottom: 1px solid var(--kui-color-border);
+  /* Many tabs on a narrow window scroll sideways inside the strip rather than wrapping onto a second
+   * row, which would move the panel down the page as the window is resized. */
+  overflow-x: auto;
+}
+
+.kui-tabs__tab {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border: 0;
+  /* A transparent underline of the same width as the selected one, so selecting a tab does not
+   * move it by two pixels. */
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-md);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.kui-tabs__tab:hover {
+  color: var(--kui-color-text);
+}
+
+.kui-tabs__tab--selected {
+  border-bottom-color: var(--kui-color-primary);
+  color: var(--kui-color-text);
+  font-weight: var(--kui-font-weight-medium);
+}
+
+.kui-tabs__panel {
+  padding-top: var(--kui-space-4);
+}
+
+/* The panel is focusable so keyboard users can reach content with no focusable child. It should not
+ * draw a ring when reached by mouse, which is exactly what `:focus-visible` decides. */
+.kui-tabs__panel:focus {
+  outline: none;
+}
+
+.kui-tabs__panel:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}

@@ -30,4 +30,48 @@ object KernelCss {
     * `display: none`, which would remove the element from the accessibility tree too.
     */
   val VisuallyHidden = "kui-visually-hidden"
+
+  val Button = "kui-button"
+  val ButtonPrimary = "kui-button--primary"
+  val ButtonSecondary = "kui-button--secondary"
+  val ButtonDanger = "kui-button--danger"
+  val ButtonGhost = "kui-button--ghost"
+  val ButtonSm = "kui-button--sm"
+  val ButtonMd = "kui-button--md"
+  val ButtonLg = "kui-button--lg"
+  val ButtonLoading = "kui-button--loading"
+  val ButtonIcon = "kui-button__icon"
+  val ButtonLabel = "kui-button__label"
+
+  val Field = "kui-field"
+  val FieldLabel = "kui-field__label"
+  val FieldControl = "kui-field__control"
+  val FieldHint = "kui-field__hint"
+  val FieldError = "kui-field__error"
+  val FieldInvalid = "kui-field--invalid"
+
+  val Tag = "kui-tag"
+  val TagNeutral = "kui-tag--neutral"
+  val TagInfo = "kui-tag--info"
+  val TagSuccess = "kui-tag--success"
+  val TagWarning = "kui-tag--warning"
+  val TagDanger = "kui-tag--danger"
+  val TagDot = "kui-tag__dot"
+  val TagRemove = "kui-tag__remove"
+
+  val Card = "kui-card"
+  val CardElevated = "kui-card--elevated"
+  val CardHeader = "kui-card__header"
+  val CardBody = "kui-card__body"
+  val CardFooter = "kui-card__footer"
+
+  val Tabs = "kui-tabs"
+  val TabsList = "kui-tabs__list"
+  val TabsTab = "kui-tabs__tab"
+  val TabsSelected = "kui-tabs__tab--selected"
+  val TabsPanel = "kui-tabs__panel"
+
+  val Icon = "kui-icon"
+
+  val Spinner = "kui-spinner"
 }
