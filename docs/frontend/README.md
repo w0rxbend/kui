@@ -235,6 +235,49 @@ Both return an `SseHandle`: the events, a `Signal[SseConnection]` for the connec
 - **`error` and `done` are terminal** (ADR-035). `error` carries the ordinary error envelope, so a
   failure after the headers were sent is handled by the same code as one before.
 
+## What the user sees for a feature: the derivation table
+
+Every dimmed sidebar entry and every fallback panel in KUI comes from one pure function,
+`FeatureState.derive`. It takes what the gateway says about a service's capability and what RBAC
+says about the user, and returns one of five states. `FeatureStateSuite` is this table, row for row;
+the table is reproduced here for readers who will not open the suite.
+
+| capability from the gateway | permitted | `FeatureState` | on screen |
+| --- | --- | --- | --- |
+| *nothing reported yet* | true | `Degraded(Starting)` | normal entry, amber dot |
+| `Available` | true | `Ready` | normal entry |
+| `Degraded(reason)` | true | `Degraded(reason)` | amber dot, page usable, inline banner |
+| `Unavailable(reason, message, since)` | true | `Unavailable(…)` | dimmed, **still clickable** → fallback panel |
+| `NotConfigured` | true | `NotConfigured` | hidden |
+| *anything* | **false** | `Forbidden` | disabled with a tooltip, or hidden |
+
+Three rows are easy to get wrong, so their reasons are written down:
+
+- **`Forbidden` outranks every health state** (ADR-032 amendment 1). A user who may not see the
+  schema registry must not be able to learn from the sidebar whether it is up, how long it has been
+  down, or what its upstream error message said. Deriving from two independent inputs means both can
+  apply at once, and this is which one wins.
+- **A capability nobody has reported yet is `Degraded(Starting)`, never `Unavailable`** (amendment
+  2). Between the gateway starting and its first readiness poll it has no information; reporting
+  `Unavailable` would be a claim it cannot support, and every operator who restarted the gateway
+  would watch the whole sidebar go red for one polling interval — which teaches people to ignore the
+  colour that matters.
+- **`Unavailable` stays clickable.** The page it leads to is the feature's own fallback panel, which
+  is the only place the reason, the `since` and a working retry exist. A disabled link has nowhere to
+  put any of that, which is why ADR-032 amended the original plan.
+
+`NotConfigured` is not a failure. A cluster with no schema registry attached does not have a *broken*
+schema registry, and rendering it as one sends an operator hunting for an outage that does not exist.
+
+### Where the wire meets the kernel
+
+`FeatureState` is also the one place the capability DTOs are named. `KuiFeature.unavailableView` takes
+the kernel's own `UnavailableReason(code, message, since)` and never the wire type, so a new field on
+the DTO changes nothing below this line. The translation is
+`FeatureState.unavailableReason`, and it belongs here rather than in `kui.ui.kernel.feature`
+deliberately: the kernel's primitives are the bottom of the frontend, and the bottom must not depend
+on the shape of one service's response.
+
 ## Tests
 
 Frontend suites are MUnit, run under jsdom (a `document` implemented in JavaScript) rather than a
