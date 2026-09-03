@@ -9,6 +9,7 @@ import ch.qos.logback.core.read.ListAppender
 import munit.CatsEffectSuite
 import org.slf4j.LoggerFactory
 import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.trace.Tracer
 
@@ -126,6 +127,58 @@ final class KuiLoggerSuite extends CatsEffectSuite {
           assertEquals(byMessage("inside")(ContextKeys.TraceId).length, 32)
           assertEquals(byMessage("inside")(ContextKeys.SpanId).length, 16)
         }
+      }
+    }
+  }
+
+  test("a logger built once outside a span still tags every line with the span it is used in") {
+    // The regression this pins: `withSpanContext` freezes the ids when the logger is built, so a
+    // process-wide logger built at startup — the only kind KUI has — carried no trace id on any line,
+    // and logs could not be joined to traces at all. `spanAware` looks the span up per call.
+    TracesTestkit.inMemory[IO]().use { testkit =>
+      testkit.tracerProvider.get("kui.test").flatMap { tracer =>
+        given Tracer[IO] = tracer
+
+        captured { startupLogger =>
+          val logger = KuiLogger.spanAware[IO](startupLogger)
+          for {
+            _ <- logger.info("outside")
+            _ <- tracer.span("request").use(_ => KuiLogger.withContext(logger, fullContext).info("inside"))
+            _ <- tracer.span("failing").use(_ => logger.error(new RuntimeException("nope"))("failed"))
+          } yield ()
+        }.map { events =>
+          val byMessage = events.map(event => event.getMessage -> context(event)).toMap
+
+          assert(!byMessage("outside").contains(ContextKeys.TraceId), byMessage("outside").toString)
+
+          assertEquals(byMessage("inside").get(ContextKeys.TraceId).map(_.length), Some(32))
+          assertEquals(byMessage("inside").get(ContextKeys.SpanId).map(_.length), Some(16))
+          // The caller's own context survives alongside the ids.
+          assertEquals(byMessage("inside").get(ContextKeys.ServiceName), Some(serviceName))
+          assertEquals(byMessage("inside").get(ContextKeys.Operation), fullContext.operation)
+
+          // The error overload matters most: it is the line an operator starts from.
+          assertEquals(byMessage("failed").get(ContextKeys.TraceId).map(_.length), Some(32))
+        }
+      }
+    }
+  }
+
+  test("KuiLogger.traced wires the tracer in, so a composition root cannot forget the ids") {
+    TracesTestkit.inMemory[IO]().use { testkit =>
+      val telemetry = Telemetry.fromProviders(testkit.tracerProvider, MeterProvider.noop[IO])
+
+      for {
+        tracer <- testkit.tracerProvider.get("kui.test")
+        logger <- KuiLogger.traced[IO](serviceName, telemetry, "kui.test")
+        events <- IO.blocking(attach()).bracket { appender =>
+          tracer.span("request").use(_ => logger.info("traced")) *>
+            IO.blocking(appender.list.asScala.toList)
+        }(appender => IO.blocking(detach(appender)))
+      } yield {
+        val ctx = context(events.find(_.getMessage == "traced").get)
+        assertEquals(ctx.get(ContextKeys.TraceId).map(_.length), Some(32))
+        assertEquals(ctx.get(ContextKeys.ServiceName), Some(serviceName))
       }
     }
   }
