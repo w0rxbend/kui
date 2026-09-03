@@ -1,0 +1,120 @@
+/* Two ways of reading a number without reading it.
+ *
+ * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ *
+ * Both patterns come from the design, and both exist because this product is mostly numbers. A
+ * screen of topic sizes, partition counts, message rates and consumer lag is a screen of digits,
+ * and digits are slow: the eye has to parse each one before it can compare it to the one above.
+ *
+ *   - The **magnitude bar** puts a proportional bar beside the figure, so "which of these is the
+ *     big one" is answered by shape before any digit is read. The figure stays, in full, next to
+ *     it; the bar is redundant on purpose, because a bar alone cannot say *how* big.
+ *
+ *   - The **threshold value** colours a figure only once it has crossed a limit. The design's rule,
+ *     and the reason it is worth a component: a column that is coloured all the time teaches the
+ *     operator to ignore the colour. Out-of-sync replicas and consumer lag are zero almost always,
+ *     and the one row that is not zero has to be the only coloured thing on the screen.
+ */
+
+/* --- Magnitude bar --------------------------------------------------------------------------- */
+
+.kui-magnitude {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-magnitude__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-magnitude__label {
+  flex: 1;
+  min-width: 0;
+  /* A topic name has no spaces to break at, so it is truncated rather than allowed to wrap the row
+   * and misalign the bars underneath. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-magnitude__value {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-muted);
+}
+
+/* The track is the highest surface — the design uses it for anything recessed into a panel — so the
+ * bar reads as a groove with something in it rather than as two coloured rectangles. */
+.kui-magnitude__track {
+  height: var(--kui-space-2);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-overlay);
+  overflow: hidden;
+}
+
+.kui-magnitude__fill {
+  height: 100%;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-primary);
+  transition: width var(--kui-duration-normal) ease;
+}
+
+/* A second colour, for the case where two bars are shown side by side and have to be told apart.
+ * The accent is the design's seed-independent second colour, chosen precisely so that a marker can
+ * be distinct without claiming to be the primary action. */
+.kui-magnitude--accent .kui-magnitude__fill {
+  background-color: var(--kui-color-accent);
+}
+
+/* Inside a table cell there is no room for a row above the bar, so the figure sits beside it. The
+ * figure comes first in the source and stays first on screen: it is the value, the bar is the
+ * gloss. */
+.kui-magnitude--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-magnitude--inline .kui-magnitude__track {
+  flex: 1;
+  min-width: var(--kui-space-7);
+}
+
+.kui-magnitude--inline .kui-magnitude__value {
+  order: -1;
+  color: inherit;
+}
+
+/* --- Threshold value ------------------------------------------------------------------------- */
+
+/* Under the limit: the quiet treatment every other numeric cell gets. */
+.kui-threshold {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-muted);
+}
+
+/* Over it. The colour changes *and* a warning mark appears, because colour on its own excludes the
+ * roughly one man in twelve who cannot separate these hues, and because a figure that has both is
+ * findable by scrolling past at speed. */
+.kui-threshold--over {
+  color: var(--kui-color-warning);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-threshold--critical {
+  color: var(--kui-color-danger);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-threshold__mark {
+  display: inline-flex;
+}

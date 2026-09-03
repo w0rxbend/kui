@@ -6,6 +6,24 @@ import com.raquo.laminar.codecs.StringAsIsCodec
 import kui.kernel.{Sort, SortOrder}
 import kui.ui.kernel.css.KernelCss
 
+/** How a column's cells line up.
+  *
+  * Only two, because only two are ever right. Text is read along a row and starts at the same left edge in
+  * every one of them; numbers are compared *down* a column and only line up if their units digits do.
+  * Centring is the third option and it is the wrong one for both: it puts nothing in a predictable place.
+  */
+enum ColumnAlign {
+
+  /** The default: text, chips, names, anything a reader scans left to right. */
+  case Start
+
+  /** Right-aligned with tabular figures, so "1,204" and "18,220" stack digit over digit. The whole column
+    * takes the alignment, header included, and so does a missing value's em dash — it lands where the number
+    * it replaced would have been rather than drifting left.
+    */
+  case Numeric
+}
+
 /** One column of a `DataTable`.
   *
   * @param id
@@ -16,13 +34,16 @@ import kui.ui.kernel.css.KernelCss
   *   several of those.
   * @param width
   *   any CSS length, or `None` to let the browser decide.
+  * @param align
+  *   how the column lines up. Set `Numeric` for offsets, counts, sizes and rates.
   */
 final case class Column[A](
     id: String,
     header: String,
     render: A => Modifier[HtmlElement],
     sortable: Boolean = false,
-    width: Option[String] = None
+    width: Option[String] = None,
+    align: ColumnAlign = ColumnAlign.Start
 )
 
 /** A plain, non-virtualized table.
@@ -96,6 +117,7 @@ object DataTable {
       th(
         columnScope := "col",
         cls := KernelCss.TableHeaderCell,
+        Option.when(column.align == ColumnAlign.Numeric)(cls := KernelCss.TableHeaderCellNumeric),
         column.width.map(value => styleAttr := s"width: $value"),
         aria.sort <-- sort.signal.map(current => ariaSort(current, column.id)),
         if column.sortable then
@@ -126,7 +148,11 @@ object DataTable {
           tr(
             cls := KernelCss.TableRow,
             columns.map(column =>
-              td(cls := KernelCss.TableCell, child <-- rowSignal.map(row => span(column.render(row))))
+              td(
+                cls := KernelCss.TableCell,
+                Option.when(column.align == ColumnAlign.Numeric)(cls := KernelCss.TableCellNumeric),
+                child <-- rowSignal.map(row => span(column.render(row)))
+              )
             )
           )
         ),

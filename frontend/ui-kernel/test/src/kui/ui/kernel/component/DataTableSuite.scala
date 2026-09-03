@@ -7,7 +7,7 @@ import org.scalajs.dom
 
 import kui.kernel.{Sort, SortOrder}
 
-private final case class Broker(id: String, host: String, bytesIn: Option[Long])
+final private case class Broker(id: String, host: String, bytesIn: Option[Long])
 
 final class DataTableSuite extends ScalaCheckSuite with Mounted {
 
@@ -76,6 +76,25 @@ final class DataTableSuite extends ScalaCheckSuite with Mounted {
     }
   }
 
+  test("a numeric column marks its header and every one of its cells") {
+    // The alignment belongs to the column and not to the value, so the header, the numbers and the
+    // em dash standing in for a missing number all line up on the same right edge.
+    val numeric = columns.map(column =>
+      if column.id == "bytesIn" then column.copy(align = ColumnAlign.Numeric) else column
+    )
+
+    mounted(DataTable(numeric, Val(brokers), _.id)) { root =>
+      assertEquals(root.querySelectorAll(".kui-table__header-cell--numeric").length, 1)
+      assertEquals(root.querySelectorAll(".kui-table__cell--numeric").length, brokers.size)
+    }
+  }
+
+  test("a column is left-aligned unless the caller asks otherwise") {
+    mounted(DataTable(columns, Val(brokers), _.id)) { root =>
+      assertEquals(root.querySelectorAll(".kui-table__cell--numeric").length, 0)
+    }
+  }
+
   test("emptyStateReplacesTheBodyButKeepsTheHeader") {
     mounted(DataTable(columns, Val(List.empty[Broker]), _.id)) { root =>
       assertEquals(bodyRows(root), Nil)
@@ -104,7 +123,7 @@ final class DataTableSuite extends ScalaCheckSuite with Mounted {
     // the identity of the DOM nodes is what is checked here.
     forAll { (seed: Int) =>
       val shuffled = scala.util.Random(seed).shuffle(brokers)
-      val rows     = Var(brokers)
+      val rows = Var(brokers)
 
       mounted(DataTable(columns, rows.signal, _.id)) { root =>
         val before = bodyRows(root).map(row => (row.textContent, row))

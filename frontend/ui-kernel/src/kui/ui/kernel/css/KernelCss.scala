@@ -139,4 +139,20 @@ object KernelCss {
   val TableSortButton = "kui-table__sort"
   val TableSortPlaceholder = "kui-table__sort-placeholder"
   val TableEmpty = "kui-table__empty"
+  val TableCellNumeric = "kui-table__cell--numeric"
+  val TableHeaderCellNumeric = "kui-table__header-cell--numeric"
+
+  val Magnitude = "kui-magnitude"
+  val MagnitudeAccent = "kui-magnitude--accent"
+  val MagnitudeInline = "kui-magnitude--inline"
+  val MagnitudeRow = "kui-magnitude__row"
+  val MagnitudeLabel = "kui-magnitude__label"
+  val MagnitudeValue = "kui-magnitude__value"
+  val MagnitudeTrack = "kui-magnitude__track"
+  val MagnitudeFill = "kui-magnitude__fill"
+
+  val Threshold = "kui-threshold"
+  val ThresholdOver = "kui-threshold--over"
+  val ThresholdCritical = "kui-threshold--critical"
+  val ThresholdMark = "kui-threshold__mark"
 }

@@ -6,29 +6,33 @@ import org.scalajs.dom
 
 /** One table with a row per primitive, naming the accessibility contract that primitive promises.
   *
-  * The shape is the point. Adding a component to the kernel without adding its row here leaves the
-  * table visibly incomplete, and the alternative — an accessibility assertion buried in each
-  * component's own suite — is the arrangement in which a new component quietly ships with none.
+  * The shape is the point. Adding a component to the kernel without adding its row here leaves the table
+  * visibly incomplete, and the alternative — an accessibility assertion buried in each component's own suite
+  * — is the arrangement in which a new component quietly ships with none.
   *
-  * What this can and cannot prove: it checks that the documented roles and attributes are present in
-  * the rendered DOM. It is not an audit. It cannot tell whether a label reads well, whether a colour
-  * pair is legible (`ContrastSuite` does that) or whether the reading order makes sense.
+  * What this can and cannot prove: it checks that the documented roles and attributes are present in the
+  * rendered DOM. It is not an audit. It cannot tell whether a label reads well, whether a colour pair is
+  * legible (`ContrastSuite` does that) or whether the reading order makes sense.
   */
 final class A11ySuite extends FunSuite with Mounted {
 
-  /** One expectation: on the element matching `selector`, the attribute `name` must be present, and
-    * must equal `value` when a value is given.
+  /** One expectation: on the element matching `selector`, the attribute `name` must be present, and must
+    * equal `value` when a value is given.
     */
-  private final case class Expected(selector: String, name: String, value: Option[String])
+  final private case class Expected(selector: String, name: String, value: Option[String])
 
-  private def present(selector: String, name: String): Expected     = Expected(selector, name, None)
+  private def present(selector: String, name: String): Expected = Expected(selector, name, None)
   private def equalTo(selector: String, name: String, value: String) = Expected(selector, name, Some(value))
 
   private val contract: List[(String, HtmlElement, List[Expected])] = List(
     (
       "Button",
       Button(Val("Save"), Observer.empty, loading = Val(true)),
-      List(equalTo("button", "type", "button"), equalTo("button", "aria-busy", "true"), present("button", "disabled"))
+      List(
+        equalTo("button", "type", "button"),
+        equalTo("button", "aria-busy", "true"),
+        present("button", "disabled")
+      )
     ),
     (
       "TextInput",
@@ -88,6 +92,19 @@ final class A11ySuite extends FunSuite with Mounted {
       List(equalTo("nav", "aria-label", "Breadcrumb"), equalTo("[aria-current]", "aria-current", "page"))
     ),
     (
+      "MagnitudeBar",
+      MagnitudeBar(Val("48.2 GB"), Val(0.42)),
+      // The bar restates the figure printed beside it, so it must not be announced as well.
+      List(equalTo(".kui-magnitude__track", "aria-hidden", "true"))
+    ),
+    (
+      "ThresholdValue",
+      ThresholdValue(Val("18"), Val(ThresholdLevel.Warning)),
+      // The colour and the warning mark are both invisible to a screen reader, so a crossed
+      // threshold has to say so in words.
+      List(present(".kui-visually-hidden", "class"))
+    ),
+    (
       "DataTable",
       DataTable[String](List(Column("id", "ID", value => value, sortable = true)), Val(List("a")), identity),
       List(equalTo("th", "scope", "col"), equalTo("th", "aria-sort", "none"))
@@ -102,7 +119,7 @@ final class A11ySuite extends FunSuite with Mounted {
             case None => Some(s"no element matching '${expected.selector}'")
             case Some(target) =>
               (attributeOf(target, expected.name), expected.value) match {
-                case (None, _)                                  => Some(s"'${expected.selector}' has no ${expected.name}")
+                case (None, _) => Some(s"'${expected.selector}' has no ${expected.name}")
                 case (Some(actual), Some(wanted)) if actual != wanted =>
                   Some(s"'${expected.selector}' ${expected.name} is '$actual', expected '$wanted'")
                 case _ => None

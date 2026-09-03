@@ -4,6 +4,19 @@
  * literally in this file, and there must never be: that rule is what makes the whole product
  * re-themeable from `10-tokens.css` (ADR-024, docs/frontend/tokens.md).
  *
+ * ## The design's rule, which this file now follows everywhere
+ *
+ * The "Kafka UI v2" design is a surface / on-surface palette: every filled thing declares both its
+ * fill and the text colour that belongs on that fill, and the two are always a pair the contrast
+ * table checks. So no rule below derives a text colour by mixing, and no rule below tints a
+ * background out of `currentColor`. A filled control names a container token and its `-contrast`
+ * partner; an unfilled one sits on whatever surface it was dropped onto and uses `--kui-color-text`
+ * or `--kui-color-text-muted`, both of which are checked against all five surfaces.
+ *
+ * Hover is the one exception, and it is a deliberate one: hovering paints
+ * `--kui-color-state-layer`, a translucent wash, over whatever is underneath. Because it is
+ * translucent it never replaces the pair beneath it, so no new legibility question is created.
+ *
  * Nothing here is load-bearing. Each component is usable with this stylesheet missing — a button is
  * a `<button>`, a disabled control carries the `disabled` attribute, an unselected tab panel is
  * simply not in the document. See "degraded rendering" in docs/frontend/README.md.
@@ -30,19 +43,25 @@
 
 /* --- Button ---------------------------------------------------------------------------------- */
 
+/* The design draws every button as a pill: a 40px-tall control with a 20px radius, a 44px one with
+ * 22. That is not decoration, it is how the design distinguishes "a thing you press" from "a thing
+ * that holds content", which is square-cornered-but-rounded at 24px. So the radius here is the pill
+ * step and not the control step. */
 .kui-button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--kui-space-2);
   border: 1px solid transparent;
-  border-radius: var(--kui-radius-md);
-  font-weight: var(--kui-font-weight-medium);
+  border-radius: var(--kui-radius-pill);
+  font-weight: var(--kui-font-weight-bold);
   line-height: var(--kui-font-line-height-tight);
   white-space: nowrap;
   cursor: pointer;
   transition:
     background-color var(--kui-duration-fast) ease,
-    border-color var(--kui-duration-fast) ease;
+    border-color var(--kui-duration-fast) ease,
+    color var(--kui-duration-fast) ease;
 }
 
 .kui-button:disabled {
@@ -52,54 +71,75 @@
 }
 
 .kui-button--sm {
-  padding: var(--kui-space-1) var(--kui-space-2);
+  padding: var(--kui-space-1) var(--kui-space-3);
   font-size: var(--kui-font-size-sm);
 }
 
 .kui-button--md {
-  padding: var(--kui-space-2) var(--kui-space-3);
+  padding: var(--kui-space-2) var(--kui-space-4);
   font-size: var(--kui-font-size-md);
 }
 
 .kui-button--lg {
   padding: var(--kui-space-3) var(--kui-space-5);
-  font-size: var(--kui-font-size-lg);
+  font-size: var(--kui-font-size-md);
 }
 
+/* The screen's one real action. The design fills it with the accent itself and prints its paired
+ * text on top, and lifts it off the page with the small shadow. */
 .kui-button--primary {
   background-color: var(--kui-color-primary);
   color: var(--kui-color-primary-contrast);
+  box-shadow: var(--kui-shadow-sm);
 }
 
+/* Everything else that is a real action. The design's second button is a *tonal* fill — the softer
+ * brand container — rather than an outline, so a screen with several actions on it does not read as
+ * a row of empty rectangles. */
 .kui-button--secondary {
-  background-color: var(--kui-color-surface-raised);
-  border-color: var(--kui-color-border-strong);
-  color: var(--kui-color-text);
+  background-color: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
 }
 
+/* Destructive. The design deliberately does *not* fill this one: a permanently red button on a
+ * console screen is alarm fatigue, and the operator stops seeing it. It is an outline that carries
+ * the danger colour as its text, and only fills — with the danger *container*, whose paired text is
+ * the danger colour it already has — once the pointer is on it and the press is imminent. */
 .kui-button--danger {
-  background-color: var(--kui-color-danger);
-  color: var(--kui-color-surface-raised);
+  background-color: transparent;
+  border-color: var(--kui-color-border-strong);
+  color: var(--kui-color-danger);
 }
 
+/* Reads as text until you hover it: toolbar and table-row actions. */
 .kui-button--ghost {
   background-color: transparent;
+  color: var(--kui-color-text-muted);
+}
+
+/* The hover treatment, one rule for all four variants.
+ *
+ * Hovering paints the design's state layer — a translucent wash — over whatever the button already
+ * is. As a `background-image` it composites *on top of* the `background-color` each variant set, so
+ * the pair a variant declared is still the pair underneath, and a filled button, an outlined one
+ * and a transparent one all respond identically without four separate colour decisions that could
+ * drift apart. Deriving a darker shade instead would have needed a different sum in each theme:
+ * in light the fill is the darker half of its pair, in dark it is the lighter one. */
+.kui-button:hover:not(:disabled) {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+/* An unfilled button also comes up to full text contrast on hover, which is the cue that it was a
+ * control at all. */
+.kui-button--ghost:hover:not(:disabled) {
   color: var(--kui-color-text);
 }
 
-/* `color-mix` darkens a token without a second token existing for the hover state. That is the
- * whole reason there are no component-scoped tokens: the hover shade is derived, not declared. */
-.kui-button--primary:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--kui-color-primary) 88%, black);
-}
-
-.kui-button--secondary:hover:not(:disabled),
-.kui-button--ghost:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--kui-color-text) 8%, transparent);
-}
-
+/* Destructive is the one variant that changes fill on hover: it fills with the danger container,
+ * whose paired text colour is the danger colour the button already carries. */
 .kui-button--danger:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--kui-color-danger) 88%, black);
+  background-color: var(--kui-color-danger-container);
+  border-color: transparent;
 }
 
 .kui-button__icon {
@@ -111,22 +151,28 @@
 .kui-field {
   display: flex;
   flex-direction: column;
-  gap: var(--kui-space-1);
+  gap: var(--kui-space-2);
 }
 
+/* Small, heavy and quiet: the design labels a field the way it labels a table column, so a form and
+ * a table read as the same product. */
 .kui-field__label {
   font-size: var(--kui-font-size-sm);
-  font-weight: var(--kui-font-weight-medium);
+  font-weight: var(--kui-font-weight-bold);
   color: var(--kui-color-text);
 }
 
+/* The design's fields are *filled*, not outlined: a tinted, borderless, fully rounded control. The
+ * 1px border is transparent rather than absent so that focus and the invalid state can colour it
+ * without the control changing size and nudging the rest of the form. */
 .kui-field__control {
-  padding: var(--kui-space-2);
-  border: 1px solid var(--kui-color-border-strong);
-  border-radius: var(--kui-radius-md);
-  background-color: var(--kui-color-surface-raised);
+  padding: var(--kui-space-2) var(--kui-space-4);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-hover);
   color: var(--kui-color-text);
   font-size: var(--kui-font-size-md);
+  transition: border-color var(--kui-duration-fast) ease;
 }
 
 .kui-field__control:disabled {
@@ -149,45 +195,70 @@
 
 .kui-field__error {
   font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
   color: var(--kui-color-danger);
 }
 
 /* --- Tag ------------------------------------------------------------------------------------- */
 
+/* The design's status marker is a small filled chip, never a bare coloured dot: a container colour
+ * with the text colour that is declared as its partner. That is what the five tone rules below do,
+ * and it is why none of them mixes a background out of `currentColor` — a mixed background has no
+ * checked partner, so nobody can say whether the text on it is legible.
+ *
+ * Squarer than a pill on purpose. The design reserves the pill for things you press; a chip is a
+ * label, and it takes the small radius so the two are never confused at a glance. */
 .kui-tag {
   display: inline-flex;
   align-items: center;
   gap: var(--kui-space-1);
-  padding: 0 var(--kui-space-2);
-  border-radius: var(--kui-radius-pill);
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
   font-size: var(--kui-font-size-xs);
-  font-weight: var(--kui-font-weight-medium);
-  line-height: calc(var(--kui-space-5) - var(--kui-space-1));
-  /* The tone classes below set only `color`; the background is a faint wash of that same colour, so
-   * one declaration here covers all five tones and they can never drift apart. */
-  background-color: color-mix(in srgb, currentColor 14%, transparent);
+  /* The design's chip label is the heaviest text on the screen. `display` is the heaviest weight
+   * the token set carries; see docs/frontend/tokens.md for why there are only three. */
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  white-space: nowrap;
 }
 
+/* Says nothing about health, which is different from saying everything is fine. The design's
+ * neutral chip is the hover surface, whose pair with muted text is checked. */
 .kui-tag--neutral {
+  background-color: var(--kui-color-surface-hover);
   color: var(--kui-color-text-muted);
 }
 
+/* The design has no informational colour and therefore no informational *container*. What it does
+ * have is a second accent, independent of the seed, that it uses exactly for a categorical marker
+ * that must not read as "primary" — the cleanup-policy chip. An info tag is that same thing: a fact
+ * about a row, not a judgement on it. Using the accent container gives this tone a fill whose
+ * paired text colour is declared and contrast-checked, which a mix of `--kui-color-info` would not
+ * have. `--kui-color-info` itself stays for text and borders on a plain surface, where it *is*
+ * checked. */
 .kui-tag--info {
-  color: var(--kui-color-info);
+  background-color: var(--kui-color-accent-container);
+  color: var(--kui-color-accent-container-contrast);
 }
 
 .kui-tag--success {
+  background-color: var(--kui-color-success-container);
   color: var(--kui-color-success);
 }
 
 .kui-tag--warning {
+  background-color: var(--kui-color-warning-container);
   color: var(--kui-color-warning);
 }
 
 .kui-tag--danger {
+  background-color: var(--kui-color-danger-container);
   color: var(--kui-color-danger);
 }
 
+/* A second, non-colour cue for the roughly one man in twelve who cannot separate red from green.
+ * The chip's fill already carries the tone; the dot repeats it in a shape, and the label says it in
+ * words. */
 .kui-tag__dot {
   width: var(--kui-space-2);
   height: var(--kui-space-2);
@@ -206,34 +277,45 @@
 
 /* --- Card ------------------------------------------------------------------------------------ */
 
+/* The design does not outline a card. It raises it: a card is the *elevated* surface, two steps
+ * above the page, and the step in colour is what says "this is a distinct region". A border as well
+ * would draw the same boundary twice. The radius is the largest step, which is what the design uses
+ * for every panel that holds content. */
 .kui-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--kui-color-border);
-  border-radius: var(--kui-radius-lg);
-  background-color: var(--kui-color-surface-raised);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-surface-elevated);
 }
 
 .kui-card--elevated {
-  border-color: transparent;
   box-shadow: var(--kui-shadow-md);
 }
 
+/* The internal rules use the faint outline, not the strong one: they separate parts of one card,
+ * they do not bound anything the user has to perceive to operate it. */
 .kui-card__header {
-  padding: var(--kui-space-3) var(--kui-space-4);
-  border-bottom: 1px solid var(--kui-color-border);
+  padding: var(--kui-space-5) var(--kui-space-5) 0;
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
   font-weight: var(--kui-font-weight-bold);
 }
 
 .kui-card__body {
-  padding: var(--kui-space-4);
+  padding: var(--kui-space-4) var(--kui-space-5) var(--kui-space-5);
+}
+
+/* A card with no header still starts its body a full step down from the card's own edge. */
+.kui-card > .kui-card__body:first-child {
+  padding-top: var(--kui-space-5);
 }
 
 .kui-card__footer {
   display: flex;
   justify-content: flex-end;
   gap: var(--kui-space-2);
-  padding: var(--kui-space-3) var(--kui-space-4);
+  padding: var(--kui-space-4) var(--kui-space-5);
   border-top: 1px solid var(--kui-color-border);
 }
 
@@ -248,27 +330,44 @@
   overflow-x: auto;
 }
 
+/* The design's tab is a rounded tab-shaped slab — square at the bottom where it meets the rule,
+ * rounded at the top — that takes the state layer on hover, and marks the selected one with a short
+ * bar that stops short of the tab's own edges. `position: relative` is here rather than on the
+ * selected modifier so that selecting a tab cannot change its layout. */
 .kui-tabs__tab {
-  padding: var(--kui-space-2) var(--kui-space-3);
+  position: relative;
+  padding: var(--kui-space-3) var(--kui-space-4);
   border: 0;
-  /* A transparent underline of the same width as the selected one, so selecting a tab does not
-   * move it by two pixels. */
-  border-bottom: 2px solid transparent;
+  border-radius: var(--kui-radius-md) var(--kui-radius-md) 0 0;
   background: none;
   color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
   white-space: nowrap;
   cursor: pointer;
+  transition: color var(--kui-duration-fast) ease;
 }
 
 .kui-tabs__tab:hover {
+  background-color: var(--kui-color-state-layer);
   color: var(--kui-color-text);
 }
 
+/* The selected tab takes the accent as its *text* colour, not merely an underline: the underline
+ * alone is a three-pixel difference, and on a strip of eight tabs it is easy to lose. */
 .kui-tabs__tab--selected {
-  border-bottom-color: var(--kui-color-primary);
-  color: var(--kui-color-text);
-  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-primary);
+}
+
+.kui-tabs__tab--selected::after {
+  content: "";
+  position: absolute;
+  left: var(--kui-space-4);
+  right: var(--kui-space-4);
+  bottom: 0;
+  height: 3px;
+  border-radius: var(--kui-radius-xs) var(--kui-radius-xs) 0 0;
+  background-color: var(--kui-color-primary);
 }
 
 .kui-tabs__panel {

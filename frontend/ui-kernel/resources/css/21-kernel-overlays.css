@@ -26,8 +26,10 @@
   width: 100%;
   /* Never taller than the window: a dialog whose buttons are below the fold cannot be dismissed. */
   max-height: calc(100vh - var(--kui-space-8));
-  border-radius: var(--kui-radius-lg);
-  background-color: var(--kui-color-surface-raised);
+  /* The largest radius and the elevated surface: in the design a dialog is the same object as a
+   * card, just floating. Giving it a smaller radius would make it read as a smaller thing. */
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-surface-elevated);
   box-shadow: var(--kui-shadow-md);
 }
 
@@ -48,30 +50,45 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--kui-space-3);
-  padding: var(--kui-space-4);
-  border-bottom: 1px solid var(--kui-color-border);
+  padding: var(--kui-space-5) var(--kui-space-5) 0;
 }
 
+/* The design sets a panel's own title in the display face, which is how a title is told from a
+ * heavy label inside the panel. */
 .kui-dialog__title {
   margin: 0;
+  font-family: var(--kui-font-family-display);
   font-size: var(--kui-font-size-lg);
-  font-weight: var(--kui-font-weight-bold);
+  font-weight: var(--kui-font-weight-display);
 }
 
+/* A round hit target, the way the design draws every icon-only control in its header bar: no fill
+ * until hovered, then the state layer, which is translucent and therefore correct on any surface
+ * this button might sit on. */
 .kui-dialog__close,
 .kui-drawer__close,
 .kui-toast__dismiss {
   display: inline-flex;
-  padding: var(--kui-space-1);
+  padding: var(--kui-space-2);
   border: 0;
-  border-radius: var(--kui-radius-sm);
+  border-radius: var(--kui-radius-pill);
   background: none;
-  color: inherit;
+  color: var(--kui-color-text-muted);
   cursor: pointer;
+  transition:
+    background-color var(--kui-duration-fast) ease,
+    color var(--kui-duration-fast) ease;
+}
+
+.kui-dialog__close:hover,
+.kui-drawer__close:hover,
+.kui-toast__dismiss:hover {
+  background-color: var(--kui-color-state-layer);
+  color: var(--kui-color-text);
 }
 
 .kui-dialog__body {
-  padding: var(--kui-space-4);
+  padding: var(--kui-space-4) var(--kui-space-5);
   /* The body scrolls, not the whole dialog, so the title and the actions stay put. */
   overflow-y: auto;
 }
@@ -80,8 +97,7 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--kui-space-2);
-  padding: var(--kui-space-4);
-  border-top: 1px solid var(--kui-color-border);
+  padding: var(--kui-space-4) var(--kui-space-5) var(--kui-space-5);
 }
 
 /* --- Drawer ---------------------------------------------------------------------------------- */
@@ -116,19 +132,20 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--kui-space-3);
-  padding: var(--kui-space-4);
+  padding: var(--kui-space-5) var(--kui-space-5) var(--kui-space-4);
   border-bottom: 1px solid var(--kui-color-border);
 }
 
 .kui-drawer__title {
   margin: 0;
+  font-family: var(--kui-font-family-display);
   font-size: var(--kui-font-size-lg);
-  font-weight: var(--kui-font-weight-bold);
+  font-weight: var(--kui-font-weight-display);
 }
 
 .kui-drawer__body {
   flex: 1;
-  padding: var(--kui-space-4);
+  padding: var(--kui-space-5);
   overflow-y: auto;
 }
 
@@ -152,10 +169,10 @@
   display: flex;
   align-items: flex-start;
   gap: var(--kui-space-2);
-  padding: var(--kui-space-3);
+  padding: var(--kui-space-3) var(--kui-space-4);
   border-left: 3px solid currentColor;
-  border-radius: var(--kui-radius-md);
-  background-color: var(--kui-color-surface-raised);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
   box-shadow: var(--kui-shadow-md);
   pointer-events: auto;
 }
@@ -187,7 +204,7 @@
 }
 
 .kui-toast__title {
-  font-weight: var(--kui-font-weight-medium);
+  font-weight: var(--kui-font-weight-bold);
 }
 
 .kui-toast__message {
@@ -213,11 +230,16 @@
   position: absolute;
   z-index: var(--kui-z-dropdown);
   max-width: 18rem;
-  padding: var(--kui-space-1) var(--kui-space-2);
-  border-radius: var(--kui-radius-sm);
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  /* Inverted, and therefore the one place in the product where the pair is read backwards: the
+   * body text colour is the fill and the page surface is the text. It is the same checked pair,
+   * so the ratio is unchanged by the swap. */
   background-color: var(--kui-color-text);
   color: var(--kui-color-surface);
+  box-shadow: var(--kui-shadow-md);
   font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
   /* A tooltip never contains anything interactive, so it must not intercept the pointer either. */
   pointer-events: none;
   white-space: normal;
@@ -257,6 +279,7 @@
   gap: var(--kui-space-1);
   list-style: none;
   font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
   color: var(--kui-color-text-muted);
 }
 
@@ -266,8 +289,14 @@
   gap: var(--kui-space-1);
 }
 
+/* The design draws the trail itself in muted text and lets only the hover mark a link, so the
+ * breadcrumb does not compete with the page title directly underneath it. */
 .kui-breadcrumbs__item a {
-  color: var(--kui-color-primary);
+  color: inherit;
+}
+
+.kui-breadcrumbs__item a:hover {
+  color: var(--kui-color-text);
 }
 
 .kui-breadcrumbs__separator {
@@ -276,27 +305,52 @@
 
 /* --- Empty state ----------------------------------------------------------------------------- */
 
+/* The design gives an empty region real presence rather than a line of grey text: a large rounded
+ * tile holding the icon, a display-face headline, one sentence of explanation at a readable measure,
+ * and the action that fixes it. The point is that "nothing here" should look deliberate, because an
+ * empty region that looks accidental is indistinguishable from a request that failed silently. */
 .kui-empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--kui-space-2);
+  gap: var(--kui-space-3);
   padding: var(--kui-space-7) var(--kui-space-4);
   text-align: center;
   color: var(--kui-color-text-muted);
 }
 
+/* The tile is the softer brand container with its paired text, and it is raised, so the eye lands
+ * on it first. `Icon` draws at 1em, so the font size here is what sizes the glyph. */
 .kui-empty-state__icon {
-  font-size: var(--kui-font-size-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kui-space-8);
+  height: var(--kui-space-8);
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+  box-shadow: var(--kui-shadow-md);
+  font-size: var(--kui-font-size-3xl);
 }
 
 .kui-empty-state__title {
   margin: 0;
-  font-weight: var(--kui-font-weight-medium);
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-2xl);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
   color: var(--kui-color-text);
 }
 
+/* Held to a measure. A single sentence set across the full width of a table is harder to read than
+ * the same sentence over three short lines. */
 .kui-empty-state__description {
   margin: 0;
-  font-size: var(--kui-font-size-sm);
+  max-width: 25rem;
+  font-size: var(--kui-font-size-md);
+}
+
+.kui-empty-state__action {
+  margin-top: var(--kui-space-2);
 }

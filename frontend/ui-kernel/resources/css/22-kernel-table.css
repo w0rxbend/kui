@@ -1,29 +1,69 @@
-/* The non-virtual table.
+/* The non-virtual table — the product's primary surface.
  *
  * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ *
+ * ## What the design decided about a table, and why each decision is here
+ *
+ * A KUI operator spends their day scanning rows, so the design treats the table as a *panel* rather
+ * than as a grid drawn on the page: the elevated surface, the largest radius, and no outer border,
+ * exactly like a card. The internal rules are the faint outline and not the strong one, because a
+ * heavy rule between every row turns a list of two hundred topics into a ladder and the eye follows
+ * the rungs instead of the rows.
+ *
+ * The row rhythm is the one thing an operator can change: `--kui-density-row-padding-y` is the
+ * design's density switch and this file is its only consumer. Compact takes a row from 15px of
+ * vertical padding to 9px and moves nothing else — not the type size, not the control heights, not
+ * the gaps between sections. Shrinking those makes an interface harder to hit, not denser.
+ *
+ * ## Why `border-collapse: separate`
+ *
+ * Collapsed borders are one pixel narrower between rows, but a collapsed table cannot be clipped by
+ * a border radius: the browser paints the cells' own edges outside the rounded corner and the panel
+ * comes out square. Separate borders with zero spacing give the same single-pixel rule — each rule
+ * belongs to one side of one cell — and let the four corner cells round with the panel.
  */
 
 .kui-table {
   width: 100%;
-  /* Collapsed borders let a single rule between rows come from one side only, so a row separator is
-   * one pixel rather than two. */
-  border-collapse: collapse;
-  font-size: var(--kui-font-size-sm);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-surface-elevated);
+  font-size: var(--kui-font-size-md);
 }
 
+/* --- Header ---------------------------------------------------------------------------------- */
+
+/* Small, heavy, letter-spaced and upper-case. The design shrinks the column labels rather than
+ * emboldening the rows, so the heaviest thing on screen is the header — which is read once — and
+ * the rows stay at reading weight, which is what is read two hundred times. */
 .kui-table__header-cell {
-  padding: var(--kui-space-2) var(--kui-space-3);
-  border-bottom: 1px solid var(--kui-color-border-strong);
+  padding: var(--kui-space-4) var(--kui-space-5);
+  border-bottom: 1px solid var(--kui-color-border);
   color: var(--kui-color-text-muted);
-  font-weight: var(--kui-font-weight-medium);
+  font-size: var(--kui-font-size-xs);
+  /* `display` is the heaviest weight the token set carries; the design sets these labels heavier
+   * still. See docs/frontend/tokens.md for why there are only three weights. */
+  font-weight: var(--kui-font-weight-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   text-align: left;
   white-space: nowrap;
-  /* The header stays visible while the body scrolls. `position: sticky` on a `<th>` works only with
-   * collapsed borders if the border is on the cell, which is why it is declared above and not on the
-   * row. */
+  /* The header stays visible while the body scrolls. It needs its own opaque background or the rows
+   * show through it, and that background has to be the panel's surface rather than the page's. */
   position: sticky;
   top: 0;
-  background-color: var(--kui-color-surface);
+  background-color: var(--kui-color-surface-elevated);
+}
+
+/* The panel's own corners. With separate borders the corner cells have to be rounded individually,
+ * because the radius on the table clips nothing by itself. */
+.kui-table__header-cell:first-child {
+  border-top-left-radius: var(--kui-radius-xl);
+}
+
+.kui-table__header-cell:last-child {
+  border-top-right-radius: var(--kui-radius-xl);
 }
 
 .kui-table__sort {
@@ -35,7 +75,12 @@
   background: none;
   color: inherit;
   font: inherit;
+  letter-spacing: inherit;
   cursor: pointer;
+}
+
+.kui-table__sort:hover {
+  color: var(--kui-color-text);
 }
 
 /* Reserves the space an arrow will take, so a column does not shift sideways the moment it is
@@ -45,14 +90,44 @@
   width: 1em;
 }
 
+/* --- Rows ------------------------------------------------------------------------------------ */
+
 .kui-table__cell {
-  padding: var(--kui-space-2) var(--kui-space-3);
+  /* The vertical half is the density switch; the horizontal half is fixed, because a narrower
+   * gutter would not fit more columns on screen, only crowd the ones already there. */
+  padding: var(--kui-density-row-padding-y) var(--kui-space-5);
   border-bottom: 1px solid var(--kui-color-border);
-  vertical-align: top;
+  /* Centred, not top-aligned: a row whose cells hold a chip, a bar and a number reads as one line
+   * only if all three sit on the same middle. */
+  vertical-align: middle;
 }
 
+/* The last row's rule would cut across the panel's rounded bottom edge. */
+.kui-table__body tr:last-child .kui-table__cell {
+  border-bottom: 0;
+  border-bottom-left-radius: var(--kui-radius-xl);
+  border-bottom-right-radius: var(--kui-radius-xl);
+}
+
+/* The design's hover is the state layer: a translucent wash over the row, so whatever colours the
+ * cells already carry — a status chip, a threshold-coloured figure — keep their own contrast. */
 .kui-table__row:hover .kui-table__cell {
-  background-color: color-mix(in srgb, var(--kui-color-text) 4%, transparent);
+  background-color: var(--kui-color-state-layer);
+}
+
+/* Numbers are compared down a column, not read along a row. Right-aligning them puts the units
+ * digits under each other, and `tabular-nums` makes every digit the same width so "1,204" and
+ * "18,220" line up even in a proportional face. A caller opts a column into this with
+ * `Column(align = ColumnAlign.Numeric)`; the alignment belongs to the column, not to the value, so
+ * a missing value's em dash lands in the same place as the number it replaced. */
+.kui-table__cell--numeric,
+.kui-table__header-cell--numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-table__cell--numeric {
+  white-space: nowrap;
 }
 
 /* Loading dims the rows that are already there rather than replacing them. Replacing them would
@@ -61,6 +136,9 @@
   opacity: 0.5;
 }
 
+/* The empty state fills the panel rather than sitting in a padded cell; the cell is only a
+ * container for it. */
 .kui-table__empty {
   padding: 0;
+  border-bottom: 0;
 }
