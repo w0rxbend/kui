@@ -119,6 +119,18 @@ final class ClusterApiSuite extends CatsEffectSuite {
     }
   }
 
+  test("theServiceOwnDocumentDescribesTheWriteEndpointTheGatewayDoesNotPublish") {
+    // The other half of the pair in the gateway's `MergedDocumentShapeSuite`. The public document
+    // deliberately omits the write endpoint - no browser can reach it - and an operator debugging this
+    // service directly still needs a complete description of what it serves.
+    val document = ClusterApi.openApi[cats.effect.IO]
+
+    assert(
+      document.paths.pathItems.get("/internal/v1/clusters/{clusterId}").flatMap(_.put).isDefined,
+      document.paths.pathItems.keySet.toString
+    )
+  }
+
   test("openApiContainsEveryEndpointInClusterEndpointsAll") {
     val document = ClusterApi.openApi[cats.effect.IO]
     val paths = document.paths.pathItems.keySet

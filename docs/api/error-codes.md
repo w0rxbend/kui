@@ -22,6 +22,12 @@ one is a breaking change. `Retryable` means the same request, unchanged, could s
 | `KUI-READ-ONLY` | 405 | no | READ | The cluster is configured read-only, so no operation that changes it is accepted. |
 | `KUI-ROUTE-NOT-FOUND` | 404 | no | ROUTE | No endpoint matches this method and path. |
 | `KUI-SCHEMA-NOT-FOUND` | 404 | no | SCHEMA | The subject or schema version does not exist in the schema registry. |
+| `KUI-STORE-CRYPTO` | 500 | no | STORE | An encrypted field in the metadata store could not be decrypted with any configured key. |
+| `KUI-STORE-ENVELOPE` | 500 | no | STORE | A record in the metadata store is not a readable envelope for this version of KUI. |
+| `KUI-STORE-NOT-CONFIGURED` | 501 | no | STORE | No metadata store is configured, so this change cannot be persisted; configure kui.store.kafka.* to enable it. |
+| `KUI-STORE-REPLAY-TIMEOUT` | 503 | yes | STORE | The metadata store's log could not be replayed to its end within the configured timeout. |
+| `KUI-STORE-TOPIC-INCOMPATIBLE` | 500 | no | STORE | An existing metadata-store topic has settings KUI cannot use, and KUI never rewrites an existing topic's configuration. |
+| `KUI-STORE-UNAVAILABLE` | 503 | yes | STORE | KUI's metadata store could not be reached; reads are served from the last replayed state and writes are rejected. |
 | `KUI-TIMEOUT` | 408 | yes | TIMEOUT | The operation did not finish inside its time budget. |
 | `KUI-TOPIC-NOT-FOUND` | 404 | no | TOPIC | The topic does not exist on this cluster. |
 | `KUI-UNAUTHENTICATED` | 401 | no | UNAUTHENTICATED | The request carried no valid identity; sign in, or check the signed principal header. |

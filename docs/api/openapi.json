@@ -10,48 +10,6 @@
     }
   ],
   "paths" : {
-    "/api/v1/clusters" : {
-      "get" : {
-        "tags" : [
-          "cluster"
-        ],
-        "summary" : "Every configured cluster and its last known state",
-        "description" : "The list of clusters comes from configuration overlaid by the metadata store and is always available; each row's summary is a section that can be stale or unavailable on its own.",
-        "operationId" : "cluster.list",
-        "parameters" : [
-          {
-            "name" : "X-Kui-Principal",
-            "in" : "header",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
-        "responses" : {
-          "200" : {
-            "description" : "",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ClustersResponse"
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/clusters/{clusterId}" : {
       "get" : {
         "tags" : [
@@ -535,6 +493,39 @@
           }
         }
       }
+    },
+    "/api/v1/clusters" : {
+      "get" : {
+        "tags" : [
+          "clusters",
+          "gateway"
+        ],
+        "summary" : "Every configured cluster, with a status for the list and one for each row",
+        "description" : "Always answers 200. The outer section says whether the cluster service could be reached at all - stale means these rows are the last ones that arrived, with the time they did. Each row's own summary says whether that Kafka cluster could be reached. A cluster that is down costs its own row's data and nothing else.",
+        "operationId" : "gateway.clusters.overview",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClusterOverviewDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components" : {
@@ -745,6 +736,24 @@
           }
         }
       },
+      "ClusterOverviewDto" : {
+        "title" : "ClusterOverviewDto",
+        "description" : "Every configured cluster, with a status for the list and a status for each row",
+        "type" : "object",
+        "required" : [
+          "clusters",
+          "generatedAt"
+        ],
+        "properties" : {
+          "clusters" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "generatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
       "ClusterRowDto" : {
         "title" : "ClusterRowDto",
         "description" : "One configured cluster: identity always, live data only when a scrape succeeded",
@@ -800,26 +809,6 @@
           },
           "keystoreConfigured" : {
             "type" : "boolean"
-          }
-        }
-      },
-      "ClustersResponse" : {
-        "title" : "ClustersResponse",
-        "description" : "Every configured cluster and its last known state",
-        "type" : "object",
-        "required" : [
-          "generatedAt"
-        ],
-        "properties" : {
-          "items" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/ClusterRowDto"
-            }
-          },
-          "generatedAt" : {
-            "description" : "RFC 3339 timestamp in UTC",
-            "type" : "string"
           }
         }
       },

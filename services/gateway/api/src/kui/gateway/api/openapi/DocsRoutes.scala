@@ -31,12 +31,19 @@ object DocsRoutes {
   def gatewayEndpoints[F[_]]: List[AnyEndpoint] =
     kui.gateway.contract.InfoEndpoints.all ++
       kui.gateway.contract.AuthEndpoints.all ++
-      kui.gateway.api.CapabilityRoutes.endpoints[F]
+      kui.gateway.api.CapabilityRoutes.endpoints[F] ++
+      // The dashboard: a public path the gateway answers itself rather than proxying, so it is documented
+      // from the gateway's own list. Taking it from the cluster service's list instead would publish that
+      // service's response shape for a path that answers with a different one.
+      kui.gateway.contract.ClusterOverviewEndpoints.all
 
   /** Everything the gateway documents: its own endpoints plus every configured service it can route. */
   def documentation[F[_]](services: List[ServiceId]): List[ServiceDoc] =
     ServiceDoc(kui.gateway.application.Gateway.Id, gatewayEndpoints[F]) ::
-      services.sortBy(_.value).map(service => ServiceDoc(service, ServiceContracts.of(service)))
+      // `proxied`, not `of`: an endpoint the gateway answers itself is documented once, above, and one
+      // that is not routed publicly at all - the cluster write - is not documented publicly at all. An
+      // internal-only endpoint in the public document is an invitation to call something that 404s.
+      services.sortBy(_.value).map(service => ServiceDoc(service, ServiceContracts.proxied(service)))
 
   /** The merged document, or the reasons it could not be built.
     *
