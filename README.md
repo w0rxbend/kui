@@ -197,6 +197,30 @@ cross-checked rather than compared and hoped about.
 A build made outside a git checkout — a release tarball, say — reports `"unknown"` for the git
 fields rather than failing or leaving them blank.
 
+## Running the gateway with a locally linked frontend
+
+The gateway serves the shell from its own classpath at `GET /ui/**`, and the browser and the API
+share one origin — no CORS, no second server, no separate deployment step (ADR-011, ADR-012).
+`services/gateway/api/resources/web/index.html` is the committed template; a linked frontend's
+compiled assets (`main.js`, its split chunks, `styles.css`, and so on) land beside it. In M0 that
+linking step does not exist yet (INFRA-003 adds it), so a gateway built today serves only the
+template and an empty import map — a real deep link like `/ui/clusters/prod` still returns
+`index.html`, but there is no Laminar shell behind it to render the page.
+
+Running the gateway without a linked frontend at all is not an error:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ui/
+503
+```
+
+is what a developer running the API alone should see, with a plain HTML page explaining that the UI
+was not bundled into this build — never a stack trace, and never an empty `200`.
+
+`server.basePath` moves every served URL, the injected `<base href>`, and the API prefix the shell
+reads together: set `KUI_SERVER_BASEPATH=/kui` and the same build answers under `/kui/ui/`, while
+the bare paths 404 — see `docs/operations/configuration.md`.
+
 ## Reading the design
 
 | Document | What it covers |

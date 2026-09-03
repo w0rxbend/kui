@@ -7,6 +7,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.config.{GatewayConfig, ServerConfig}
 import kui.contracts.capability.ServiceCapabilities
+import kui.gateway.api.static.{BootstrapConfig, StaticRoutes}
 import kui.gateway.application.Gateway
 import kui.gateway.contract.GatewayEndpoints
 import kui.http.BasePath
@@ -59,7 +60,10 @@ object GatewayApi {
     // capability stream (GW-005) and the re-streamed message browser. `ServerEndpoint` is contravariant in
     // that parameter, so an endpoint requiring nothing fits wherever one that may require streaming does.
     BasePath.prefixAll(GatewayEndpoints.ApiPrefix, HealthEndpoints.make[F](readiness, capabilities)) ++
-      InfoRoutes[F](config.server, config.gateway)
+      InfoRoutes[F](config.server, config.gateway) ++
+      // Matched last: the static routes' `/ui/**` fallback answers `index.html` for any path that reaches
+      // it, so any API route that had to come after it would never be seen at all.
+      StaticRoutes[F](BasePath.normalize(config.server.basePath), bootstrapOf(config))
 }
 
 /** The two configuration sections the route list needs, and no more.
@@ -71,3 +75,14 @@ object GatewayApi {
   * the signing keys.
   */
 final case class GatewayServiceConfigView(server: ServerConfig, gateway: GatewayConfig)
+
+/** The bootstrap block `StaticRoutes` embeds in `index.html`, derived from the same configuration and build
+  * the rest of the process reports (GW-010) — one source of truth for "which build, which base path, which
+  * API prefix" rather than three places that could drift apart.
+  */
+private def bootstrapOf(config: GatewayServiceConfigView): BootstrapConfig =
+  BootstrapConfig(
+    basePath = BasePath.normalize(config.server.basePath),
+    apiBase = s"${BasePath.normalize(config.server.basePath)}${GatewayEndpoints.ApiPrefix}",
+    buildVersion = InfoRoutes.buildInfo.version
+  )
