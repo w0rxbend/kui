@@ -241,3 +241,45 @@ No other finding is affected. F-05 and F-06 remain accepted risks with their rec
 conditions, both of which fall inside M1 grooming and neither of which requires input from
 outside the execution loop to settle.
 
+## Addendum 2 — 2026-09-03, F-01's resolution revised
+
+**F-01 identified a real contradiction; its resolution went the wrong way and has been
+reversed.** The finding was correct that `DEVPLAN.md` §5.3 and rule A3 disagreed about whether
+`services.gateway.application` may depend on `libs.http` and `libs.contractsCore`. It resolved
+the disagreement by tightening the module map to match the rule. The reverse was right: the
+rule was wrong for this module.
+
+**The argument.** A3 keeps business rules away from the transport, so that the transport can be
+replaced without touching the rules. It presupposes there are business rules to protect — a
+`domain` module behind the `application`. `services/gateway` has none and never will, by
+ADR-004 §3's explicit decision ("the gateway is application code only … no domain rules"). Its
+subject matter *is* the composition of other services' published contracts; `CapabilityState`,
+`Section[A]` and `ErrorEnvelope` are its vocabulary, and `ARCHITECTURE.md` §4.5 and §6 already
+define them that way. Applying A3 there required an implementation the architecture document
+does not describe, and bought nominal isolation — a duplicate type set plus a mapper, where
+the two types are identical by construction — at the cost of making `CapabilityFoldSuite`, the
+executable specification of KU-001, harder to read.
+
+The generalisation, now recorded in ADR-041 §1a: **a module may depend on the wire when the wire
+is its subject matter.** The gateway is the only such module in KUI, and it is one by explicit
+decision rather than convenience, so this is a scoped rule and not an exception others can claim.
+
+**What replaced the constraint.** Dropping A3 for the gateway would have left its real
+boundaries implied rather than checked, so they are now stated positively: rule **A4**
+(the gateway sees a service only through its `contract` module) is unchanged, and new rule
+**A8** forbids any Kafka client on the gateway's classpath — ADR-004's other central
+constraint, previously enforced only by prose. BUILD-005 additionally gains a negative test per
+relaxed rule, so the scoping cannot drift later without a test failing.
+
+| Artifact | Change |
+| --- | --- |
+| `docs/adr/ADR-041` | Retitled; §1 scoped to domain-owning services; new §1a admits the gateway with the full argument; A3 rescoped; A8 added; the rejected-alternatives section rewritten; Amendment 1 log appended |
+| `docs/plans/M0/tasks/BUILD-005.md` | Rule table updated; the "domain-owning" test made mechanical (a `domain` module is declared or it is not); permitted-edge assertions and per-rule negative tests added |
+| `docs/plans/M0/DEVPLAN.md` | §5.3 restores the gateway's `application` dependencies and explains why; §10 D6 rewritten as the split rule |
+| `docs/plans/M0/tasks/GW-003.md` | The registry uses the contracts-core types directly — no duplicate types, no mapper — with kernel ids in the keys per F-09 |
+| `docs/plans/M0/tasks/GW-002.md` | The `ServiceClient` port/implementation split is now recorded as a deliberate choice (two implementations, ADR-005), not a rule consequence |
+
+**Unaffected:** every other finding, and the answer for domain-owning services — SVC-001's
+`CapabilityReport` still belongs to `application` and is still mapped in `api`. F-01 remains a
+correctly identified blocker; only its direction of fix changed.
+

@@ -159,14 +159,23 @@ so M1 only adds content.
 | `services/cluster/contract` | `services.cluster.contract.{jvm,js}` | `libs.contractsCore.{jvm,js}` | Tapir endpoints `/internal/v1/ping`, `/capabilities`, `/health/*` and their DTOs |
 | `services/cluster/api` | `services.cluster.api` | `services.cluster.{application,contract.jvm}`, `libs.http`, `libs.securityCore.jvm` | server logic, `KuiError` → envelope, principal verification, OpenAPI document |
 | `services/cluster/app` | `services.cluster.app` | `services.cluster.api`, `libs.config`, `libs.observability`, macwire, logback | `ClusterWiring.make`, `main`, Netty listener |
-| `services/gateway/application` | `services.gateway.application` | `libs.kernel.jvm`, `libs.securityCore.jvm`, cats-effect, fs2 | capability registry (own types), `ServiceClient[F]` port, session store, aggregation helpers |
+| `services/gateway/application` | `services.gateway.application` | `libs.kernel.jvm`, `libs.contractsCore.jvm`, `libs.securityCore.jvm`, `libs.http`, cats-effect, fs2 | capability registry (uses the contract types directly), `ServiceClient[F]` port, session store, aggregation helpers |
 | `services/gateway/contract` | `services.gateway.contract.{jvm,js}` | `libs.contractsCore.{jvm,js}` | `/api/v1/capabilities`, `/api/v1/capabilities/stream`, `/api/v1/info`, `/api/v1/auth/me` |
 | `services/gateway/api` | `services.gateway.api` | `services.gateway.{application,contract.jvm}`, `services.cluster.contract.jvm`, `libs.contractsCore.jvm`, `libs.http`, tapir-files, tapir-swagger-ui-bundle | routing derived from contracts, static assets, OpenAPI merge, CSRF and session middleware |
 | `services/gateway/app` | `services.gateway.app` | `services.gateway.api`, `libs.config`, `libs.observability`, macwire, logback | `GatewayWiring.make`, `main`, Netty listener |
 
 The gateway depends on each service's **`contract`** module and on nothing else from a service
 (`ARCHITECTURE.md` §3). A `moduleDeps` edge from the gateway to `services.cluster.application`
-is an architecture violation and CI must fail on it (BUILD-005).
+is an architecture violation and CI must fail on it (BUILD-005 rule A4), as is any Kafka client
+on the gateway's classpath (rule A8).
+
+**The gateway's `application` may depend on `libs/contracts-core` and `libs/http`** — it is the
+one module in KUI for which the wire is the subject matter rather than an encoding of something
+else. It owns no `domain` by ADR-004's explicit decision, so the rule that keeps business rules
+away from transport (A3) has nothing to protect here, and forcing a duplicate type set plus a
+mapper would buy nominal isolation at the cost of making the capability fold — the executable
+specification of KU-001 — harder to read. ADR-041 §1a carries the full argument. Domain-owning
+services are unchanged: `services/cluster/application` owns its types and maps in `api`.
 
 No `application` module — the gateway's included — depends on `libs.contractsCore`, `libs.http`,
 tapir or circe (ADR-041). The gateway's capability registry therefore owns its own state types
@@ -406,7 +415,7 @@ reach `ARCHITECTURE.md` through INFRA-004.
 | D3 | ADR-034's code table has no code for an unmatched route | Add `KUI-ROUTE-NOT-FOUND` (404) rather than overloading `KUI-INTERNAL` | Kouncil returns raw 500s for unknown paths (`research/kouncil/architecture.md` D11); Kafbat's numeric `5000` catch-all hides routing mistakes | **ADR-034** amendments 1–2 (HTTP-001, KERN-008) |
 | D4 | Whether an inbound `X-Kui-Correlation-Id` from a browser is trusted | Never. The gateway generates it | A client-chosen id lets a caller poison log correlation; no reference does this either way, so the safe default is taken | **ADR-040** (GW-001) |
 | D5 | Which failures feed the capability registry | Only `InfrastructureError`. An `ApplicationError` (a 404 for a missing resource) must not dim a sidebar | Kafbat has no registry at all; getting this wrong would make every user typo look like an outage | **ADR-039** §6 (GW-006) |
-| D6 | `application` cannot depend on `contracts-core`, yet the capability report is a DTO | The use case returns an application-owned `CapabilityReport`; `api` maps it | PLAN §18's dependency rule, enforced by `checkArchitecture` A3 | **ADR-041** (SVC-001, SVC-003, BUILD-005) |
+| D6 | May an `application` layer touch the wire? | **Split by whether the module owns a `domain`.** A domain-owning service's `application` (e.g. `services/cluster`) returns its own `CapabilityReport` and `api` maps it. The **gateway's `application` may use `contracts-core` and `libs/http` directly**: it owns no domain, and the wire is its subject matter. Its real constraints — no service internals (A4), no Kafka client (A8) — are enforced positively instead | PLAN §18's rule protects business rules from transport; ADR-004 §3 gives the gateway none to protect. `ARCHITECTURE.md` §4.5 already places the registry's types in `contracts-core` | **ADR-041 §1a + Amendment 1** (SVC-001, GW-002, GW-003, BUILD-005) |
 | D7 | A deep link to a feature route arrives before that feature's module is downloaded | Route *patterns* are static metadata beside the import thunk; only rendering is lazy | Kafbat's `React.lazy` per page has the same problem and solves it with static route declarations (`App.tsx`); the Scala.js equivalent must be explicit | UI-009, UI-007 |
 | D8 | Interaction of RBAC and capability in the navigation | `Forbidden` wins over every health state, so the UI is never an oracle for what exists | Kouncil's route-level roles hide entries outright; ADR-032 wants them visible-but-disabled, which only works if health is not leaked through them | UI-008, UI-010 |
 | D9 | ADR-012 assumed a dev proxy for `/api` | None needed: the gateway serves the linked assets itself, same origin | Kafbat runs a separate Vite dev server and a proxy; with no npm bundling in M0 that whole layer is unnecessary | INFRA-003, GW-008 |
