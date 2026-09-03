@@ -4,12 +4,14 @@ import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
 import kui.cluster.contract.ClusterEndpoints
-import kui.cluster.contract.dto.PingResponse
+import kui.cluster.contract.dto.*
+import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
+import kui.kernel.{BrokerId, ClusterId}
 
 /** The cluster service's endpoints as the *browser* calls them.
   *
-  * ## Why this is not simply `ClusterEndpoints.ping`
+  * ## Why this is not simply `ClusterEndpoints`
   *
   * A browser never talks to a service. It talks to the gateway, which derives its public routes from each
   * service's published contract by rewriting the leading `/internal/v1` to `/api/v1` and replacing the signed
@@ -17,18 +19,85 @@ import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
   * holds (`ARCHITECTURE.md` §5, ADR-040). So the endpoint the browser calls has a different path and a
   * different security input from the one the service serves, and it cannot be the same value.
   *
-  * What it *can* be is built from the same pieces, which is what this does: the path segment, the query
-  * parameter name and the response type all come from `ClusterEndpoints` and its DTO. Renaming the parameter
-  * in the contract stops this file compiling, which is the whole point of cross-compiling contracts.
+  * What it *can* be is built from the same pieces, which is what this does: every path segment, every
+  * parameter name and every response type comes from `ClusterEndpoints` and its DTOs. Renaming a segment in
+  * the contract stops this file compiling, which is the whole point of cross-compiling contracts, and it is
+  * why a string literal like `"/api/v1/clusters"` anywhere in this module is a review failure.
+  *
+  * ## What comes back
+  *
+  * Never a bare payload. A cluster the service cannot reach is a *section* of a healthy 200 — the list of
+  * configured clusters comes from configuration overlaid by the metadata store and is available whenever the
+  * service is, while each cluster's own summary is the part that needs a live broker. A client that unwrapped
+  * that here would throw away the one distinction the dashboard is built on.
   */
 object ClustersApi {
 
-  /** `GET /api/v1/ping?message=…` — the gateway's public face of `ClusterEndpoints.ping`. */
-  val ping: PublicEndpoint[String, ErrorEnvelope, PingResponse, Any] =
+  private val clustersBase = PublicApi.prefix / ClusterEndpoints.ClustersSegment
+
+  private val clusterIdPath: EndpointInput[ClusterId] = path[ClusterId](ClusterEndpoints.ClusterIdParam)
+
+  private val brokerIdPath: EndpointInput[BrokerId] = path[BrokerId](ClusterEndpoints.BrokerIdParam)
+
+  /** `GET /api/v1/clusters` — every configured cluster, each with its own section status. */
+  val clusters: PublicEndpoint[Unit, ErrorEnvelope, ClustersResponse, Any] =
     KuiEndpoint.base.get
-      .in(PublicApi.prefix)
-      .in(ClusterEndpoints.PingPath)
-      .in(query[String](ClusterEndpoints.PingMessageParam))
-      .out(jsonBody[PingResponse])
-      .name("clusters.ping")
+      .in(clustersBase)
+      .out(jsonBody[ClustersResponse])
+      .name("clusters.list")
+
+  /** `GET /api/v1/clusters/{clusterId}` — one cluster, so a deep link does not fetch the other thirty-nine.
+    */
+  val cluster: PublicEndpoint[ClusterId, ErrorEnvelope, ClusterDetailResponse, Any] =
+    KuiEndpoint.base.get
+      .in(clustersBase / clusterIdPath)
+      .out(jsonBody[ClusterDetailResponse])
+      .name("clusters.get")
+
+  /** `GET /api/v1/clusters/{clusterId}/brokers` */
+  val brokers: PublicEndpoint[ClusterId, ErrorEnvelope, BrokersResponse, Any] =
+    KuiEndpoint.base.get
+      .in(clustersBase / clusterIdPath / ClusterEndpoints.BrokersSegment)
+      .out(jsonBody[BrokersResponse])
+      .name("clusters.brokers")
+
+  /** `GET /api/v1/clusters/{clusterId}/brokers/{brokerId}/configs?docs=`
+    *
+    * The `docs` flag asks the broker for each setting's own description. It is off by default because the
+    * option exists only from Kafka 2.6 and roughly doubles the size of the answer; the configs tab is the
+    * only screen that turns it on.
+    */
+  val brokerConfigs
+      : PublicEndpoint[(ClusterId, BrokerId, Boolean), ErrorEnvelope, BrokerConfigsResponse, Any] =
+    KuiEndpoint.base.get
+      .in(
+        clustersBase / clusterIdPath / ClusterEndpoints.BrokersSegment / brokerIdPath /
+          ClusterEndpoints.ConfigsSegment
+      )
+      .in(query[Boolean](ClusterEndpoints.DocsParam).default(false))
+      .out(jsonBody[BrokerConfigsResponse])
+      .name("clusters.broker.configs")
+
+  /** `GET /api/v1/clusters/{clusterId}/log-dirs?brokerId=`
+    *
+    * One endpoint for the whole cluster with an optional broker filter, matching the contract: the brokers
+    * *list* needs every broker's disk totals in one call, and two endpoints would make that page issue one
+    * request per broker to fill a column.
+    */
+  val logDirs: PublicEndpoint[(ClusterId, Option[BrokerId]), ErrorEnvelope, LogDirsResponse, Any] =
+    KuiEndpoint.base.get
+      .in(clustersBase / clusterIdPath / ClusterEndpoints.LogDirsSegment)
+      .in(query[Option[BrokerId]](ClusterEndpoints.BrokerIdParam))
+      .out(jsonBody[LogDirsResponse])
+      .name("clusters.logDirs")
+
+  /** `POST /api/v1/clusters/{clusterId}/refresh` — 202, and the answer is the time the request was taken. */
+  val refresh: PublicEndpoint[ClusterId, ErrorEnvelope, RefreshAcceptedDto, Any] =
+    KuiEndpoint.base.post
+      .in(clustersBase / clusterIdPath / ClusterEndpoints.RefreshSegment)
+      .out(jsonBody[RefreshAcceptedDto])
+      .name("clusters.refresh")
+
+  /** Every client this module has. The suite walks it, so a sixth endpoint cannot be added untested. */
+  val all: List[AnyEndpoint] = List(clusters, cluster, brokers, brokerConfigs, logDirs, refresh)
 }

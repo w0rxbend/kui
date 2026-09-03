@@ -27,23 +27,21 @@ import kui.ui.kernel.state.{AuthState, CapabilityStore}
   *
   * The constructor takes nothing, because a dynamic import cannot pass arguments. So the feature reaches for
   * the kernel's own singletons — the bootstrap block the gateway injected, the session, the capability store
-  * — exactly as the shell does, and creates its own per-instance `ClustersState` (PLAN §21: feature state is
-  * a class holding `Var`s, never a global).
+  * — exactly as the shell does, and creates its own per-instance `ClustersQueries` (PLAN §21: feature state
+  * is a class holding `Var`s, never a global).
   */
 final class ClustersFeature extends KuiFeature {
 
-  private given Owner = unsafeWindowOwner
-
   private val api: ApiClient = ClustersFeature.api
 
-  private val state = new ClustersState(api)
+  private val queries = new ClustersQueries(api)
 
   /** This feature's health, for gating the Ping button while the page is open. */
   private val capability = CapabilityStore.featureState(FeatureId.Clusters, None, Val(true))
 
   // One element for the life of the page, so navigating away and back keeps the results, the typed
   // message and the scroll position (ADR-011 §3.3).
-  private lazy val page: HtmlElement = ClustersPage(state, capability)
+  private lazy val page: HtmlElement = ClustersPage(queries, capability)
 
   def id: FeatureId = FeatureId.Clusters
 
