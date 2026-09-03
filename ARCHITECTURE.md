@@ -849,6 +849,17 @@ so that the same instant always serialises the same way; `details` is always pre
 when empty; and an unrecognised `code` still decodes, so an older browser keeps working against a
 newer gateway.
 
+**The single mapping point (M0, task HTTP-001).** `kui.http.ErrorInterceptor` in `libs/http` is
+where a failure becomes a response, and it is the only such place. It covers all four paths at
+once: a route that matched nothing (`KUI-ROUTE-NOT-FOUND`), an input that would not decode
+(`KUI-VALIDATION`, with `details[0].field` naming the input), an exception nobody expected
+(`KUI-INTERNAL`, with the stack trace in the log and never in the body), and — through the pure
+`ErrorInterceptor.render`, which each service's `api` layer calls — an error the endpoint's own
+logic returned. Every one of them takes its status from `ErrorCode.httpStatus`, the same table
+`ErrorEnvelope.statusOf` reads, so a second code-to-status mapping cannot appear. Every error
+response also carries the correlation id both as the `X-Kui-Correlation-Id` header and in the body,
+and the two always agree.
+
 Codes are stable strings, namespaced `KUI-<AREA>-<NAME>`; the frontend renders by code.
 Stack traces never leave a service. Kafka client exceptions are translated by
 `KafkaErrorMapper` in `libs/kafka` (total over the class list in

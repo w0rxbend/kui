@@ -152,3 +152,55 @@ exits non-zero — it never retries silently on another port.
 ## Docs to update
 
 `ARCHITECTURE.md` §15: note the interceptor is the single mapping point.
+
+## Deviations
+
+1. **`KuiEndpoint` is not in `libs/http`.** It was implemented in `libs/contracts-core`
+   (`kui.contracts.KuiEndpoint`) by the lane that needed it first, and that is the right home: a
+   `contract` module is cross-compiled to the browser, and `libs/http` is a Netty server that
+   exists only on the JVM, so a base endpoint here could never be the base of a browser-compiled
+   contract. This task therefore adds no `KuiEndpoint` of its own.
+
+2. **`ErrorInterceptor.interceptors` returns three interceptors, not one.** Tapir routes the three
+   kinds of failure to three different extension points — an exception is caught around the
+   endpoint's logic, a decode failure happens before the logic runs, and "nothing matched" happens
+   before an endpoint is chosen at all — and no single `Interceptor` sees all three. The spec's
+   `apply(logger): Interceptor[F]` is not expressible. The mapping itself is still in one place,
+   which is what `ARCHITECTURE.md` §15 actually asks for.
+
+3. **`KUI-ROUTE-NOT-FOUND` and `KUI-INTERNAL` are built by `ErrorInterceptor.envelope`, not by
+   `render`.** Neither is something a domain or an application layer can return, so neither has a
+   case in the sealed `KuiError` hierarchy in `libs/kernel`, and `ErrorEnvelope.of` needs a
+   `KuiError`. The status still comes from `ErrorCode.httpStatus`, which is exactly what
+   `ErrorEnvelope.statusOf` reads, so there is still one code-to-status table.
+
+4. **A method mismatch answers 404 `KUI-ROUTE-NOT-FOUND`, not 405.** The error-code table has no
+   "method not allowed"; `KUI-READ-ONLY` is also a 405 but means something entirely different, and
+   returning it here would be worse than a slightly imprecise 404. Adding a code is an ADR-034
+   change and is not in this task's scope.
+
+5. **`KuiServer.resource` takes `List[ServerEndpoint[Fs2Streams[F], F]]`**, not
+   `Fs2Streams[F] & WebSockets`. `tapir-netty-server-cats` accepts only the former, and KUI streams
+   with server-sent events rather than WebSockets (ADR-035), so nothing is lost. Narrowing the
+   capability with a cast would also have needed `asInstanceOf`, which `libs/**` forbids.
+
+6. **`KuiServer.resource` gained a `gracefulShutdown` parameter**, defaulting to 10 seconds. A
+   stopping server waits that long for in-flight requests, which is what a rolling deployment needs.
+   The suites pass 10 milliseconds: without it, a suite that starts and stops thirty servers spends
+   two and a half minutes waiting for connections that closed long ago, and the run went from 165
+   seconds to 49.
+
+7. **`Cors.interceptor` has no `Applicative` bound**, because Tapir's CORS interceptor needs none
+   and an unused implicit parameter is a compile error under `-Werror`.
+
+8. **`BasePath.prefix` is `[R, F[_]](String, ServerEndpoint[R, F]): ServerEndpoint[R, F]`.** The
+   spec's `[A](String, ServerEndpoint[A, ?])` does not match Tapir's two-parameter
+   `ServerEndpoint[R, F]`, where the first parameter is the *capability* and the second the effect.
+
+9. **The error bodies are asserted field by field rather than against new golden files.**
+   `libs/contracts-core` already commits `error-envelope-validation.json` and
+   `error-envelope-upstream.json` and asserts the encoder against them byte for byte on both
+   platforms (`ARCHITECTURE.md` §15). Copying those bytes into `libs/http` would create a second
+   copy of the same contract that could drift from the first; what this suite adds is the part
+   contracts-core cannot see — that a real server, on a real port, produces that shape for each of
+   the five failure situations.
