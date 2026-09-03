@@ -168,3 +168,54 @@ every upstream call as bounded.
 
 `docs/operations/observability.md`: what an open circuit looks like in metrics and logs, and
 how it reaches the UI through the capability registry.
+
+## Deviations
+
+1. **The backend returns non-2xx responses; it does not turn them into failures.**
+   `UpstreamClient.errorFor(config, outcome)` is the public mapping from an outcome to the
+   `KuiError` in the spec's table, and a caller applies it. Converting a `500` into a raised error
+   inside the backend would break every Tapir client interpreter, which decides for itself what a
+   status means for its own endpoint — a `404` from `GET /subjects/{name}` is an ordinary "no such
+   subject", not an infrastructure failure. What the backend *does* raise is everything that stops
+   a response existing at all: circuit open, bulkhead full, timeout, unreachable.
+
+2. **`CircuitBreaker.protect` takes a success predicate.** The spec's breaker only counts thrown
+   failures, which would mean an upstream answering `503` to everything never opens the circuit —
+   and something that answers `503` to everything is as down as something that refuses connections.
+   `protect(call)(succeeded)` lets the client count a `5xx` response as a failure; `protect(call)`
+   without the predicate is the convenience that treats any value as a success.
+
+3. **Every failure leaves the backend wrapped in `UpstreamFailure(error: KuiError)`.** An sttp
+   backend can only fail with a `Throwable`, so the typed error travels inside one and a caller
+   unwraps it rather than reconstructing it from a message.
+
+4. **The bulkhead rejection is `InfrastructureError.Timeout(s"$name (bulkhead full)", 0)`.** The
+   spec asks for `Timeout(name, 0)` "with detail `bulkhead full`", and `InfrastructureError.Timeout`
+   has no detail field — it is `(operation, afterMs)`. Putting the reason in the operation keeps it
+   visible in the rendered message without changing a kernel type from this task.
+
+5. **`UpstreamClient.resource` takes `Telemetry[F]`, a `ServiceId` and a `StructuredLogger[F]`
+   rather than an implicit `Tracer`.** `service` is one of the three labels PLAN §30 puts on
+   `kui.upstream.duration`, the tracer comes from the telemetry the process already has (OBS-002's
+   `UpstreamInstrumentation.wrap` does the wrapping), and the logger is needed for the
+   one-line-per-transition rule.
+
+6. **Failover rotates only on a connection-level failure.** An address that answered `500` is
+   reachable and is answering; trying the next machine would give the same answer and would hide
+   from the operator that the cluster is unwell rather than unreachable. A URL-policy refusal does
+   not fail over either, because the next address would be refused for the same reason.
+
+7. **The URL policy is enforced per call, on the rebased address.** Checking only at configuration
+   time would leave the case that matters open: a redirect is chosen by the upstream, so a
+   compromised or misconfigured one could otherwise send KUI to `http://169.254.169.254/` and have
+   it fetch the cloud instance's credentials from a network position no outsider has.
+
+8. **`UpstreamConfig` gained `retryableStatuses`, `retryBase` and `urlPolicy`.** The first is the
+   caller-supplied set the spec's retry rule refers to (Kafka Connect's 409, in M7); the second
+   makes the backoff testable without a global; the third is how a deployment chooses strict or
+   development address rules, consistent with `KuiConfigSource.load`.
+
+9. **The named extension points ADR-037 lists are not implemented, as the spec requires.** There is
+   no OAuth2 token cache, no TLS truststore or keystore configuration and no vendor media types.
+   `UpstreamConfig` is where each of them will be a field, and the M7 milestone that needs them
+   adds them.

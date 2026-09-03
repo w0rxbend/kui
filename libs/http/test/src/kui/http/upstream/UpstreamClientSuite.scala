@@ -1,0 +1,422 @@
+package kui.http.upstream
+
+import scala.concurrent.duration.DurationInt
+
+import cats.data.NonEmptyList
+import cats.effect.IO
+import cats.effect.testkit.TestControl
+import cats.syntax.all.*
+import munit.CatsEffectSuite
+import sttp.client4.*
+import sttp.model.{Method, StatusCode}
+
+import kui.kernel.error.{InfrastructureError, KuiError}
+import kui.kernel.PositiveInt
+
+/** That one slow or dead upstream cannot take a KUI process down, starve another upstream, or hide
+  * the fact that it is failing.
+  *
+  * This is the mechanical half of the product's central promise (PLAN §2.1), so the assertions are
+  * mostly about what did *not* happen: calls that never reached the network, concurrency that never
+  * exceeded its cap, latency that did not move. Every case uses `TestControl`, so there is no
+  * `sleep` in the suite and nothing here can be flaky under load.
+  */
+final class UpstreamClientSuite extends CatsEffectSuite {
+
+  private val target = uri"http://ignored/subjects"
+
+  private def request(method: Method) = basicRequest.method(method, target)
+
+  // ---------------------------------------------------------------------------------------------
+  // Retry
+  // ---------------------------------------------------------------------------------------------
+
+  test("retriesGetButNotPost") {
+    // A GET that failed may or may not have reached the upstream, and repeating it changes nothing
+    // either way. A POST may have created something, and repeating it may create a second one.
+    val table = List(
+      Method.GET -> 3,
+      Method.HEAD -> 3,
+      Method.OPTIONS -> 3,
+      Method.POST -> 1,
+      Method.PUT -> 1,
+      Method.PATCH -> 1,
+      Method.DELETE -> 1
+    )
+
+    table
+      .traverse { (method, expectedAttempts) =>
+        val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
+          UpstreamFixture.client(UpstreamFixture.single(), stub.backend).use { client =>
+            request(method).send(client.backend).attempt *> stub.calls.map(_ -> method)
+          }
+        }
+
+        TestControl.executeEmbed(program).map { (attempts, m) =>
+          assertEquals(attempts, expectedAttempts, clue = s"$m made $attempts attempts")
+        }
+      }
+      .void
+  }
+
+  test("doesNotRetryAFourHundredResponse") {
+    // The upstream answered. Asking again gets the same answer and wastes the caller's budget.
+    val program = UpstreamFixture.recording(ResponseKind.Status(400)).flatMap { stub =>
+      UpstreamFixture.client(UpstreamFixture.single(), stub.backend).use { client =>
+        request(Method.GET).send(client.backend) *> stub.calls
+      }
+    }
+
+    TestControl.executeEmbed(program).map(attempts => assertEquals(attempts, 1))
+  }
+
+  test("retriesAConfiguredRetryableStatus") {
+    // Kafka Connect answers 409 while it is rebalancing, and it means "ask me again shortly". Only
+    // a status the caller named is treated that way; nothing is guessed.
+    val config = UpstreamFixture.single().copy(retryableStatuses = Set(409))
+
+    val program = UpstreamFixture.recording(ResponseKind.Status(409)).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        request(Method.GET).send(client.backend) *> stub.calls
+      }
+    }
+
+    TestControl.executeEmbed(program).map(attempts => assertEquals(attempts, 3))
+  }
+
+  test("a retryable status on a non-idempotent method is still not retried") {
+    val config = UpstreamFixture.single().copy(retryableStatuses = Set(409))
+
+    val program = UpstreamFixture.recording(ResponseKind.Status(409)).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        request(Method.POST).send(client.backend) *> stub.calls
+      }
+    }
+
+    TestControl.executeEmbed(program).map(attempts => assertEquals(attempts, 1))
+  }
+
+  test("backoff is full jitter, so a recovering upstream is not hit by every client at once") {
+    val base = 100.milliseconds
+
+    // The wait is drawn from the whole interval rather than being a fixed backoff with a wobble.
+    assertEquals(RetryPolicy.backoff(0, base, random = 1.0), base)
+    assertEquals(RetryPolicy.backoff(0, base, random = 0.0), 0.milliseconds)
+    assertEquals(RetryPolicy.backoff(1, base, random = 1.0), 200.milliseconds)
+    assertEquals(RetryPolicy.backoff(3, base, random = 1.0), 800.milliseconds)
+    // And it stops growing, so a long-lived client cannot end up waiting for minutes.
+    assert(RetryPolicy.backoff(50, base, random = 1.0) <= 30.seconds)
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Bulkhead
+  // ---------------------------------------------------------------------------------------------
+
+  test("bulkheadCapsConcurrency") {
+    val config = UpstreamFixture.single().copy(maxConcurrent = PositiveInt.unsafe(4))
+
+    val program = UpstreamFixture.recording(ResponseKind.Slow(1.second, ResponseKind.Ok)).flatMap {
+      stub =>
+        UpstreamFixture.client(config, stub.backend).use { client =>
+          for {
+            _ <- List.fill(100)(request(Method.GET).send(client.backend).attempt).parSequence
+            peak <- stub.peakInFlight
+          } yield peak
+        }
+    }
+
+    TestControl.executeEmbed(program).map { peak =>
+      assert(peak <= 4, s"$peak calls were in flight at once, the cap is 4")
+      assert(peak > 0, "no call reached the backend at all")
+    }
+  }
+
+  test("a call turned away by a full bulkhead fails fast rather than queueing") {
+    // Queueing in front of a slow upstream does not reduce the load, it hides it, and the requests
+    // that eventually get through are answering questions the user stopped caring about.
+    val config = UpstreamFixture.single().copy(maxConcurrent = PositiveInt.unsafe(1))
+
+    val program = UpstreamFixture.recording(ResponseKind.Slow(5.seconds, ResponseKind.Ok)).flatMap {
+      stub =>
+        UpstreamFixture.client(config, stub.backend).use { client =>
+          for {
+            slow <- request(Method.POST).send(client.backend).attempt.start
+            _ <- IO.sleep(100.milliseconds)
+            turnedAway <- request(Method.POST).send(client.backend).attempt.timed
+            _ <- slow.joinWithNever
+          } yield turnedAway
+        }
+    }
+
+    TestControl.executeEmbed(program).map { (elapsed, outcome) =>
+      assertEquals(elapsed, 0.milliseconds, "the rejected call waited instead of failing fast")
+      assertEquals(
+        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.Timeout) => e.afterMs },
+        Some(0L)
+      )
+    }
+  }
+
+  test("slowUpstreamDoesNotStarveAnother") {
+    // The property PLAN §16.4 asks for, and the reason bulkheads exist at all: two upstreams, one
+    // hung, and the healthy one's latency must be untouched.
+    val program = for {
+      hung <- UpstreamFixture.recording(ResponseKind.Never)
+      healthy <- UpstreamFixture.recording(ResponseKind.Ok)
+      result <- UpstreamFixture.client(UpstreamFixture.single("slow"), hung.backend).use { slow =>
+        UpstreamFixture.client(UpstreamFixture.single("fast"), healthy.backend).use { fast =>
+          for {
+            saturate <- List.fill(50)(request(Method.GET).send(slow.backend).attempt).parSequence.start
+            _ <- IO.sleep(1.second)
+            timing <- request(Method.GET).send(fast.backend).timed
+            _ <- saturate.cancel
+          } yield timing
+        }
+      }
+    } yield result
+
+    TestControl.executeEmbed(program).map { (elapsed, response) =>
+      assertEquals(response.code, StatusCode.Ok)
+      assertEquals(elapsed, 0.milliseconds, "the healthy upstream was slowed by the hung one")
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Timeout
+  // ---------------------------------------------------------------------------------------------
+
+  test("timeoutCancelsTheUnderlyingCall") {
+    val config = UpstreamFixture.single().copy(callTimeout = 2.seconds)
+
+    val program = UpstreamFixture.recording(ResponseKind.Never).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        for {
+          outcome <- request(Method.POST).send(client.backend).attempt.timed
+          // The stub decrements its in-flight count in a `bracket` finaliser, so this reaching
+          // zero is the stub observing the cancellation rather than the call merely being
+          // abandoned by the caller.
+          stillRunning <- stub.peakInFlight
+          calls <- stub.calls
+        } yield (outcome, stillRunning, calls)
+      }
+    }
+
+    TestControl.executeEmbed(program).map { case ((elapsed, outcome), peak, calls) =>
+      assertEquals(elapsed, 2.seconds)
+      assertEquals(calls, 1)
+      assertEquals(peak, 1)
+      assertEquals(
+        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.Timeout) => e.afterMs },
+        Some(2000L)
+      )
+    }
+  }
+
+  test("the timeout bounds the whole call, not each attempt") {
+    // A caller told "at most ten seconds" gets ten seconds, not ten seconds times the retry count.
+    val config = UpstreamFixture.single().copy(callTimeout = 3.seconds, maxRetries = 5)
+
+    val program = UpstreamFixture.recording(ResponseKind.Slow(2.seconds, ResponseKind.Refused)).flatMap {
+      stub =>
+        UpstreamFixture.client(config, stub.backend).use { client =>
+          request(Method.GET).send(client.backend).attempt.timed
+        }
+    }
+
+    TestControl.executeEmbed(program).map { (elapsed, _) => assertEquals(elapsed, 3.seconds) }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Failover
+  // ---------------------------------------------------------------------------------------------
+
+  test("a refused address is stepped over and the next one answers") {
+    val config = UpstreamFixture.config(
+      "registry",
+      NonEmptyList.of(UpstreamFixture.url("http://registry-a:8081"), UpstreamFixture.url("http://registry-b:8081"))
+    )
+
+    val program = UpstreamFixture.recording(ResponseKind.Ok).flatMap { stub =>
+      stub.setFor("registry-a", ResponseKind.Refused) *>
+        UpstreamFixture.client(config, stub.backend).use { client =>
+          for {
+            response <- request(Method.POST).send(client.backend)
+            hosts <- stub.hosts
+          } yield (response.code, hosts)
+        }
+    }
+
+    TestControl.executeEmbed(program).map { (status, hosts) =>
+      assertEquals(status, StatusCode.Ok)
+      assertEquals(hosts, List("registry-a", "registry-b"))
+    }
+  }
+
+  test("when every address refuses, the error is Unreachable") {
+    val config = UpstreamFixture.config(
+      "registry",
+      NonEmptyList.of(UpstreamFixture.url("http://registry-a:8081"), UpstreamFixture.url("http://registry-b:8081"))
+    )
+
+    val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        request(Method.POST).send(client.backend).attempt
+      }
+    }
+
+    TestControl.executeEmbed(program).map { outcome =>
+      assertEquals(
+        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.Unreachable) => e.upstream },
+        Some("registry")
+      )
+    }
+  }
+
+  test("an address that answered 500 is not failed over to the next one") {
+    // It is reachable and it is answering. Asking the next machine the same question gives the
+    // same answer and hides from the operator that the cluster is unwell rather than unreachable.
+    val config = UpstreamFixture.config(
+      "registry",
+      NonEmptyList.of(UpstreamFixture.url("http://registry-a:8081"), UpstreamFixture.url("http://registry-b:8081"))
+    )
+
+    val program = UpstreamFixture.recording(ResponseKind.Status(500)).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        request(Method.POST).send(client.backend) *> stub.hosts
+      }
+    }
+
+    TestControl.executeEmbed(program).map(hosts => assertEquals(hosts, List("registry-a")))
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The error table, and what must never be in it
+  // ---------------------------------------------------------------------------------------------
+
+  private val config = UpstreamFixture.single("schema-registry")
+
+  private def errorFor(outcome: Either[Throwable, Int]): Option[KuiError] =
+    UpstreamClient.errorFor(config, outcome)
+
+  test("the error table of HTTP-003, case by case") {
+    assertEquals(errorFor(Right(200)), None)
+    assertEquals(errorFor(Right(204)), None)
+
+    assertEquals(errorFor(Right(401)), Some(InfrastructureError.AuthFailed("schema-registry")))
+    assertEquals(errorFor(Right(403)), Some(InfrastructureError.AuthFailed("schema-registry")))
+    assertEquals(errorFor(Right(500)), Some(InfrastructureError.Upstream("schema-registry", 500)))
+    assertEquals(errorFor(Right(418)), Some(InfrastructureError.Upstream("schema-registry", 418)))
+
+    assertEquals(
+      errorFor(Left(new java.util.concurrent.TimeoutException("slow"))),
+      Some(InfrastructureError.Timeout("schema-registry", config.callTimeout.toMillis))
+    )
+
+    assertEquals(
+      errorFor(Left(BulkheadFullException("schema-registry"))),
+      Some(InfrastructureError.Timeout("schema-registry (bulkhead full)", 0))
+    )
+
+    val since = java.time.Instant.parse("2026-09-03T10:11:12Z")
+    assertEquals(
+      errorFor(Left(CircuitOpenException("schema-registry", since))),
+      Some(InfrastructureError.CircuitOpen("schema-registry", since))
+    )
+
+    assertEquals(
+      errorFor(Left(new java.net.ConnectException("refused"))),
+      Some(InfrastructureError.Unreachable("schema-registry", "refused"))
+    )
+  }
+
+  test("upstreamBodyIsNotIncludedInTheError") {
+    // ADR-034: an upstream's body can carry its own internal detail, or its credentials. The type
+    // carries a status and a name and has nowhere to put a body, which is what makes the rule
+    // impossible to break rather than merely discouraged.
+    val program = UpstreamFixture.recording(ResponseKind.Status(500)).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        request(Method.POST).send(client.backend).map(response => response.code.code)
+      }
+    }
+
+    TestControl.executeEmbed(program).map { status =>
+      val error = errorFor(Right(status))
+      assertEquals(error.map(_.message), Some("schema-registry answered with status 500"))
+      assertEquals(error.map(_.details), Some(Nil))
+      assert(!error.map(_.message).exists(_.contains("detail")), error.toString)
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Logging and the circuit feed
+  // ---------------------------------------------------------------------------------------------
+
+  test("one log line per circuit transition, and none per failed call") {
+    // A dead upstream that logs on every attempt floods the log at exactly the moment an operator
+    // needs to read it. This is the flooding footgun the reference implementation has.
+    val config = UpstreamFixture.single().copy(failureThreshold = PositiveInt.unsafe(3), maxRetries = 0)
+
+    val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
+      UpstreamFixture.clientAndLog(config, stub.backend).use { (client, logger) =>
+        for {
+          _ <- request(Method.POST).send(client.backend).attempt.replicateA_(20)
+          _ <- IO.sleep(1.second)
+          entries <- logger.entries
+        } yield entries
+      }
+    }
+
+    TestControl.executeEmbed(program).map { entries =>
+      val transitions = entries.filter(_.context.contains("upstream"))
+      assertEquals(transitions.size, 1, s"expected one transition line, got ${transitions.map(_.message)}")
+      assertEquals(transitions.head.level, "info")
+      assertEquals(transitions.head.context.get("state"), Some("open"))
+      assert(transitions.head.context.contains("error.last"), transitions.head.context.toString)
+    }
+  }
+
+  test("circuitStates feeds the transitions the capability registry subscribes to") {
+    val config = UpstreamFixture.single().copy(failureThreshold = PositiveInt.unsafe(2), maxRetries = 0)
+
+    val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        for {
+          collected <- client.circuitStates.take(1).compile.toList.start
+          _ <- IO.sleep(1.second)
+          _ <- request(Method.POST).send(client.backend).attempt.replicateA_(2)
+          events <- collected.joinWithNever
+          state <- client.currentState
+        } yield (events, state)
+      }
+    }
+
+    TestControl.executeEmbed(program).map { (events, state) =>
+      assertEquals(events.map(_.state), List(CircuitState.Open))
+      assertEquals(events.map(_.upstream), List("registry"))
+      assertEquals(state, CircuitState.Open)
+    }
+  }
+
+  test("an open circuit refuses without touching the network") {
+    val config = UpstreamFixture.single().copy(failureThreshold = PositiveInt.unsafe(2), maxRetries = 0)
+
+    val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
+      UpstreamFixture.client(config, stub.backend).use { client =>
+        for {
+          _ <- request(Method.POST).send(client.backend).attempt.replicateA_(2)
+          before <- stub.calls
+          outcome <- request(Method.POST).send(client.backend).attempt
+          after <- stub.calls
+        } yield (before, after, outcome)
+      }
+    }
+
+    TestControl.executeEmbed(program).map { (before, after, outcome) =>
+      assertEquals(after, before, "a call reached the network while the circuit was open")
+      assertEquals(
+        outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.CircuitOpen) => e.upstream },
+        Some("registry")
+      )
+    }
+  }
+}
