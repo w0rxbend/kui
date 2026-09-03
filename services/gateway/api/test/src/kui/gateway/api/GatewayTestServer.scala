@@ -34,7 +34,9 @@ object GatewayTestServer {
   /** One bound gateway, plus everything a test needs to talk to it and to read what it logged. */
   final case class Running(
       binding: KuiServer.ServerBinding,
-      backend: Backend[IO],
+      // Typed as a *stream* backend so that the SSE suites can read a live response body rather than
+      // waiting for one that never ends. Every other suite uses it as a plain backend, which it also is.
+      backend: StreamBackend[IO, Fs2Streams[IO]],
       logger: FakeStructuredLogger[IO],
       sessions: SessionStore[IO]
   ) {
@@ -72,12 +74,7 @@ object GatewayTestServer {
       logger <- Resource.eval(FakeStructuredLogger[IO])
       sessions <- InMemorySessionStore.resource[IO](SessionConfig.Default)
       readiness = List(ReadinessCheck.always[IO]("process"))
-      routes = GatewayApi.routes[IO](
-        configView(basePath),
-        readiness,
-        gatewayCapabilities,
-        sessions
-      ) ++ extraRoutes
+      routes = GatewayApi.routes[IO](configView(basePath), readiness, sessions, extraRoutes)
       interceptors = EdgeHeaders.interceptors[IO] ++
         SessionMiddleware.interceptors[IO](sessions, logger, basePath, secureCookies = !devInsecureCookies) ++
         ErrorInterceptor.interceptors[IO](logger)
@@ -92,10 +89,6 @@ object GatewayTestServer {
       ServerConfig(Host.unsafe("localhost"), Port.unsafe(0), basePath),
       GatewayConfig.Default
     )
-
-  /** The same placeholder document `GatewayWiring` serves, so the suites exercise the shipped shape. */
-  private def gatewayCapabilities: IO[kui.contracts.capability.ServiceCapabilities] =
-    IO.pure(kui.contracts.capability.ServiceCapabilities(GatewayApi.Id, Map.empty))
 
   /** The telemetry a suite uses when it needs one at all: records nothing, costs nothing. */
   val noTelemetry: Telemetry[IO] = Telemetry.noop[IO]

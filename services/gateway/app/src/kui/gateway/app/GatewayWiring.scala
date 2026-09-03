@@ -4,18 +4,18 @@ import java.time.Instant
 
 import cats.Parallel
 import cats.effect.kernel.{Async, Resource}
-import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
-import kui.contracts.capability.ServiceCapabilities
 import kui.gateway.api.auth.SessionMiddleware
-import kui.gateway.api.{EdgeHeaders, GatewayApi, InfoRoutes}
+import kui.gateway.api.{CapabilityRoutes, EdgeHeaders, GatewayApi, InfoRoutes}
+import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, RegistryConfig, Trigger}
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
 import kui.http.health.ReadinessCheck
 import kui.http.{BasePath, Cors, ErrorInterceptor}
+import kui.kernel.ServiceId
 import kui.observability.{KuiInterceptors, Telemetry}
 
 /** Everything a gateway needs in order to be served, with no listener started.
@@ -91,11 +91,20 @@ object GatewayWiring {
     for {
       _ <- Resource.eval(warnIfInsecureCookies[F](logger, config))
       sessions <- InMemorySessionStore.resource[F](SessionConfig.Default)
+      registry <- CapabilityRegistry.resource[F](RegistryConfig.Default, telemetry, logger)
+      _ <- Resource.eval(
+        CapabilitySignals.make[F](RegistryConfig.Default, registry, config.gateway.services.keys.toList)
+      )
       instrumentation <- Resource.eval(
         KuiInterceptors.serverInterceptors[F](telemetry, GatewayApi.ServiceName)
       )
     } yield GatewayServer(
-      routes = GatewayApi.routes[F](config.view, readiness, capabilities[F], sessions),
+      routes = GatewayApi.routes[F](
+        config.view,
+        readiness,
+        sessions,
+        CapabilityRoutes[F](registry, probeThrough(registry), telemetry, logger)
+      ),
       interceptors = Cors.interceptor[F](config.gateway.cors).toList ++
         EdgeHeaders.interceptors[F] ++
         SessionMiddleware.interceptors[F](
@@ -137,14 +146,17 @@ object GatewayWiring {
   def readinessChecks[F[_]: cats.Applicative]: List[ReadinessCheck[F]] =
     List(ReadinessCheck.always[F]("process"))
 
-  /** The gateway's own capability document.
+  /** The probe the capability routes call, routed back through the registry.
     *
-    * A placeholder in M0: the gateway is either running, in which case it can do everything it offers, or it
-    * is not, in which case nobody is reading this. GW-003 replaces it with the fold over every upstream's
-    * readiness, which is the document the browser's sidebar is actually derived from (ADR-039).
+    * The registry forwards it to whatever poller was attached to it (GW-004). Going through the registry
+    * rather than holding the poller's trigger directly means that a deployment with no poller yet -- which is
+    * what this is until GW-006 wires the service clients -- answers the retry button successfully and does
+    * nothing, instead of failing in the browser.
     */
-  def capabilities[F[_]: cats.Applicative]: F[ServiceCapabilities] =
-    ServiceCapabilities(GatewayApi.Id, Map.empty).pure[F]
+  def probeThrough[F[_]](registry: CapabilityRegistry[F]): Trigger[F] =
+    new Trigger[F] {
+      def probe(service: ServiceId): F[Unit] = registry.probeNow(service)
+    }
 
   /** The one INFO line every KUI process writes as it starts.
     *

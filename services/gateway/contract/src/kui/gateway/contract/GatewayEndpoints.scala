@@ -50,5 +50,10 @@ object GatewayEndpoints {
     * Empty here and filled in by the endpoint objects beside it, so that adding an endpoint to the product
     * and adding it to the published documentation are the same edit.
     */
-  val all: List[AnyEndpoint] = InfoEndpoints.all ++ AuthEndpoints.all
+  /** A `def`, not a `val`, and that matters. Each of these objects builds its endpoints from
+    * `GatewayEndpoints.base`, so a `val` here would make this object's initialiser call theirs while `base`
+    * was still null -- a class-initialisation cycle that fails at runtime with a `NullPointerException`
+    * nowhere near the cause. Evaluating the list on demand breaks the cycle.
+    */
+  def all: List[AnyEndpoint] = InfoEndpoints.all ++ AuthEndpoints.all ++ CapabilityEndpoints.all
 }

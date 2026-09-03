@@ -57,7 +57,18 @@ object HealthEndpoints {
       checks: List[ReadinessCheck[F]],
       capabilities: F[ServiceCapabilities]
   ): List[ServerEndpoint[Any, F]] =
-    List(liveRoute[F], readyRoute[F](checks), capabilitiesRoute[F](capabilities))
+    probes[F](checks) :+ capabilitiesRoute[F](capabilities)
+
+  /** Liveness and readiness only, without the self-report.
+    *
+    * The gateway needs exactly this. Every other service publishes `/capabilities` to say what it can do per
+    * cluster, and the gateway aggregates all of those into one document it serves at `/api/v1/capabilities`
+    * (GW-005). Serving its own near-empty self-report at that same path as well would put two different
+    * documents behind one URL, with whichever route was registered first winning -- a collision that is
+    * invisible in a route list and obvious in a bug report.
+    */
+  def probes[F[_]: {Temporal, Parallel}](checks: List[ReadinessCheck[F]]): List[ServerEndpoint[Any, F]] =
+    List(liveRoute[F], readyRoute[F](checks))
 
   // ---------------------------------------------------------------------------------------------
 

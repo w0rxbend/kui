@@ -34,10 +34,16 @@ final class FakeCapabilityRegistry[F[_]: Async] private (
 
   def snapshot: F[Map[CapabilityKey, CapabilityState]] = states.get
 
+  def entries: F[List[CapabilityEntry]] =
+    states.get.map(_.toList.sortBy(_._1.service.value).map(CapabilityEntry(_, _, Instant.EPOCH)))
+
   def state(key: CapabilityKey): F[CapabilityState] =
     states.get.map(_.getOrElse(key, CapabilityState.NotConfigured))
 
   def changes: Stream[F, CapabilityChange] = Stream.evalSeq(published.get.map(_.toList))
+
+  def subscribe: cats.effect.kernel.Resource[F, Stream[F, CapabilityChange]] =
+    cats.effect.kernel.Resource.pure(changes)
 
   def report(key: CapabilityKey, next: CapabilityState): F[Unit] =
     states.modify(current => (current.updated(key, next), current.get(key))).flatMap { previous =>

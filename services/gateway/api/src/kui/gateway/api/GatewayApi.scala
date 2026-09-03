@@ -6,7 +6,6 @@ import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.server.ServerEndpoint
 
 import kui.config.{GatewayConfig, ServerConfig}
-import kui.contracts.capability.ServiceCapabilities
 import kui.gateway.api.auth.AuthRoutes
 import kui.gateway.api.static.{BootstrapConfig, StaticRoutes}
 import kui.gateway.application.Gateway
@@ -41,15 +40,20 @@ object GatewayApi {
     *   operator most needs a working UI to diagnose it.
     * @param config
     *   the sections the routes read: where this deployment is mounted, and which services it names
-    * @param capabilities
-    *   what the gateway can currently do, recomputed per request. GW-003 replaces the M0 placeholder with the
-    *   fold over every upstream's readiness.
+    * @param extra
+    *   the routes the composition root builds because they need components this module must not construct:
+    *   the capability endpoints over the registry (GW-005), the contract-derived proxy routes (GW-006) and
+    *   the merged documentation (GW-007).
+    *
+    * The gateway does **not** serve `/api/v1/capabilities` as its own self-report the way every other service
+    * does. On the gateway that path means something different and more useful -- what the whole product can
+    * do -- and two documents behind one URL is a collision nobody sees in a route list.
     */
   def routes[F[_]: {Async, Parallel}](
       config: GatewayServiceConfigView,
       readiness: List[ReadinessCheck[F]],
-      capabilities: F[ServiceCapabilities],
-      sessions: SessionStore[F]
+      sessions: SessionStore[F],
+      extra: List[ServerEndpoint[Fs2Streams[F], F]] = Nil
   ): List[ServerEndpoint[Fs2Streams[F], F]] =
     // Two kinds of route, prefixed differently, and the difference is worth stating rather than
     // discovering. The gateway's own endpoints are built from `GatewayEndpoints.base`, which already
@@ -62,9 +66,12 @@ object GatewayApi {
     // the gateway's list is typed on `Fs2Streams`, because some of its routes do need streaming: the
     // capability stream (GW-005) and the re-streamed message browser. `ServerEndpoint` is contravariant in
     // that parameter, so an endpoint requiring nothing fits wherever one that may require streaming does.
-    BasePath.prefixAll(GatewayEndpoints.ApiPrefix, HealthEndpoints.make[F](readiness, capabilities)) ++
+    BasePath.prefixAll(GatewayEndpoints.ApiPrefix, HealthEndpoints.probes[F](readiness)) ++
       InfoRoutes[F](config.server, config.gateway) ++
       AuthRoutes[F](sessions) ++
+      // The capability, proxy and documentation routes the composition root builds, which need
+      // components (the registry, the service clients) that this module must not construct itself.
+      extra ++
       // Matched last: the static routes' `/ui/**` fallback answers `index.html` for any path that reaches
       // it, so any API route that had to come after it would never be seen at all.
       StaticRoutes[F](BasePath.normalize(config.server.basePath), bootstrapOf(config))

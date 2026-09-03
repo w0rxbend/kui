@@ -34,6 +34,15 @@ trait CapabilityRegistry[F[_]] {
     */
   def snapshot: F[Map[CapabilityKey, CapabilityState]]
 
+  /** The same thing, with the instant each state was last decided.
+    *
+    * The wire shape carries `updatedAt` per entry, and stamping every entry with "now" when the document is
+    * rendered would answer a different question -- "when did you ask?" rather than "when did this last
+    * change?" -- while looking identical. A user comparing two entries to see which broke first would get a
+    * wrong answer.
+    */
+  def entries: F[List[CapabilityEntry]]
+
   def state(key: CapabilityKey): F[CapabilityState]
 
   /** Every transition, from the moment of subscription onwards.
@@ -43,6 +52,15 @@ trait CapabilityRegistry[F[_]] {
     * mid-stream must not be able to stall the sidebar of everyone else in the building.
     */
   def changes: Stream[F, CapabilityChange]
+
+  /** The same subscription, with its lifetime made explicit.
+    *
+    * A caller that needs to read the snapshot *and* receive every change from that instant on has to open the
+    * subscription first and read the snapshot inside it; otherwise a change landing between the two is lost,
+    * and the client's view drifts from the registry with nothing to correct it. `changes` cannot express that
+    * ordering, because it opens and closes the subscription around its own stream.
+    */
+  def subscribe: Resource[F, Stream[F, CapabilityChange]]
 
   /** Records what the pollers and feeds observed. Total: it never fails and never blocks. */
   def report(key: CapabilityKey, state: CapabilityState): F[Unit]
@@ -72,7 +90,7 @@ object CapabilityRegistry {
     for {
       supervisor <- Supervisor[F](await = false)
       gauge <- Resource.eval(stateGauge[F](telemetry))
-      states <- Resource.eval(Ref.of[F, Map[CapabilityKey, CapabilityState]](Map.empty))
+      states <- Resource.eval(Ref.of[F, Map[CapabilityKey, CapabilityEntry]](Map.empty))
       pending <- Resource.eval(Ref.of[F, Map[CapabilityKey, CapabilityState]](Map.empty))
       subscribers <- Resource.eval(Ref.of[F, Map[Long, Subscriber[F]]](Map.empty))
       nextId <- Resource.eval(Ref.of[F, Long](0L))
@@ -96,17 +114,22 @@ object CapabilityRegistry {
       logger: StructuredLogger[F],
       supervisor: Supervisor[F],
       gauge: UpDownCounter[F, Long],
-      states: Ref[F, Map[CapabilityKey, CapabilityState]],
+      states: Ref[F, Map[CapabilityKey, CapabilityEntry]],
       pending: Ref[F, Map[CapabilityKey, CapabilityState]],
       subscribers: Ref[F, Map[Long, Subscriber[F]]],
       nextId: Ref[F, Long],
       probe: Ref[F, ServiceId => F[Unit]]
   ) extends CapabilityRegistry[F] {
 
-    def snapshot: F[Map[CapabilityKey, CapabilityState]] = states.get
+    def snapshot: F[Map[CapabilityKey, CapabilityState]] = states.get.map(_.view.mapValues(_.state).toMap)
+
+    def entries: F[List[CapabilityEntry]] =
+      states.get.map(
+        _.values.toList.sortBy(entry => (entry.key.service.value, entry.key.cluster.map(_.value)))
+      )
 
     def state(key: CapabilityKey): F[CapabilityState] =
-      states.get.map(_.getOrElse(key, CapabilityState.NotConfigured))
+      states.get.map(_.get(key).fold(CapabilityState.NotConfigured)(_.state))
 
     def attachProbe(next: ServiceId => F[Unit]): F[Unit] = probe.set(next)
 
@@ -134,7 +157,7 @@ object CapabilityRegistry {
       */
     private def decide(key: CapabilityKey, next: CapabilityState): F[Decision] =
       states.get.map { current =>
-        val previous = current.get(key)
+        val previous = current.get(key).map(_.state)
         if previous.contains(next) then Decision.Ignore
         else if isOutage(next) && previous.contains(CapabilityState.Available) then Decision.Hold
         else Decision.Publish(previous)
@@ -164,7 +187,9 @@ object CapabilityRegistry {
         // Still the same pending outage, so it has persisted for a whole debounce window and is real.
         case Some(held) if held == next =>
           Clock[F].realTimeInstant
-            .flatMap(now => states.get.flatMap(current => commit(key, next, current.get(key), now)))
+            .flatMap(now =>
+              states.get.flatMap(current => commit(key, next, current.get(key).map(_.state), now))
+            )
         // Something else happened in the meantime — a recovery, or a different failure — and that
         // something else has already been decided on its own terms.
         case _ => Async[F].unit
@@ -176,7 +201,7 @@ object CapabilityRegistry {
         previous: Option[CapabilityState],
         now: Instant
     ): F[Unit] =
-      states.update(_.updated(key, next)) *>
+      states.update(_.updated(key, CapabilityEntry(key, next, now))) *>
         pending.update(_ - key) *>
         record(previous, next) *>
         log(key, previous, next) *>
@@ -214,12 +239,12 @@ object CapabilityRegistry {
         case _ => "-"
       }
 
-    def changes: Stream[F, CapabilityChange] =
-      Stream
-        .resource(subscribe)
-        .flatMap(subscriber => Stream.fromQueueNoneTerminated(subscriber.queue))
+    def changes: Stream[F, CapabilityChange] = Stream.resource(subscribe).flatten
 
-    private def subscribe: Resource[F, Subscriber[F]] =
+    def subscribe: Resource[F, Stream[F, CapabilityChange]] =
+      mailbox.map(subscriber => Stream.fromQueueNoneTerminated(subscriber.queue))
+
+    private def mailbox: Resource[F, Subscriber[F]] =
       Resource
         .make(
           for {
