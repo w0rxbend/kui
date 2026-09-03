@@ -178,3 +178,26 @@ Not applicable.
 ## Docs to update
 
 None yet — `docs/api/error-codes.md` is generated in KERN-008.
+
+## Deviations
+
+- **`ApplicationError.Conflict` carries `KUI-INVALID-STATE`.** ADR-034's table has no code of
+  its own for a conflict: `KUI-CONFIG-VERSION-CONFLICT` is specifically about the dynamic
+  configuration store, and inventing a general `KUI-CONFLICT` would have been a contract change
+  made in passing. Both `Conflict` and `InvalidState` therefore serve 409 with
+  `KUI-INVALID-STATE`; the two cases stay distinct in code because they read differently at a
+  call site, and a general conflict code can be added later without moving anything.
+- **`InfrastructureError.Upstream` has no `body`, and `Unreachable.cause` never reaches
+  `message`.** `ARCHITECTURE.md` §4.1's sketch showed `Upstream(status, body)`. A body is the
+  most reliable way for an upstream's error text — which routinely contains hosts, tokens and
+  JAAS strings — to end up in a user-visible response, and ADR-034 forbids exactly that. The
+  case carries the status only. `Unreachable` keeps `cause` for the log but builds its message
+  from the upstream name alone, and `KuiErrorSuite` asserts that a cause containing a password
+  does not appear in the message.
+- **`Secret.equals` is annotated `@nowarn("msg=pattern selector")`.** Overriding `equals`
+  forces the parameter type `Any`, and `-source:future` warns that `Any` is not a legal match
+  selector (only `Matchable` is). There is no way to satisfy both, and `-Werror` turns the
+  warning into a build failure, so it is silenced on that one method.
+- **`DomainError.InvariantViolation` takes an optional list of `FieldError`s**, so that
+  `DomainError.fromValidation` can carry the field a rejected value object was about into the
+  envelope's `details` array rather than losing it in prose.

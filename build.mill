@@ -202,6 +202,12 @@ object libs extends Module {
     }
 
     object js extends Shared with KuiJsModule {
+      // A browser has no `java.time`, and the kernel needs `Instant` (an error that records when a
+      // circuit opened, a capability that records when it went away). scala-java-time is a
+      // reimplementation of the java.time API in Scala, so the same source compiles for both
+      // platforms instead of the JS half growing a parallel date type.
+      def mvnDeps = super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
       object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
     }
   }
