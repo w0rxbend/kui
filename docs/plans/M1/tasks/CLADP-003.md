@@ -366,3 +366,42 @@ check:
 None. `docs/operations/metadata-store.md` is owned by STORE (sections 2–6) and CFGOP-008; record
 the key prefix, the payload shape and the error table in the implementation report so those tasks
 can quote them.
+
+---
+
+## Deviations
+
+Recorded by the implementing agent, 2026-09-04. Commit `d8e7267`.
+
+1. **`changes` is `onChange`, per the gate review's F-02**, and the adapter owns a `Supervisor`
+   and a single subscription to `ConfigStore.changes` that feeds every registered handler. One
+   subscription and not one per handler: the store's change stream is hot and drops slow
+   consumers, and N subscribers each re-listing the section on every change is N times the work
+   for one answer they all share. `ClusterConfigStoreAdapter.resource` is therefore a `Resource`,
+   not a bare constructor.
+2. **`keyFor` returns `Either[KuiError, StoreKey]`**, because `StoreKey.cluster` validates. The
+   `Left` is unreachable in practice — `ClusterId`'s slug rule and `StoreKey`'s id rule are the
+   same — and it is still a value rather than a `.get`, so an id that somehow passed both cannot
+   address the wrong record.
+3. **`StoreErrorMapping` is two functions, not a `match` over a store error ADT.** STORE-007
+   returns typed `KuiError` values already, so the spec's six-row table is honoured by *not*
+   reinterpreting them: the version conflict, the not-configured refusal, the unreachable store
+   and the read-back timeout are passed through with their codes intact, and the suite asserts
+   each. What is left for this file is the health projection and the one failure this module owns,
+   an undecodable payload.
+4. **A decode failure is a skip in `list` and a `Left` in `get`.** The spec says skip; that is
+   right for a listing, where one bad row must not cost the other nine clusters. For `get(id)` the
+   caller named that record, and answering `Right(None)` would send them to create a duplicate.
+5. **`ClusterRecordCodec` also encodes the `properties` override map's sensitive values under the
+   `$secret` marker.** An operator who pastes a password into the raw property escape hatch gets
+   the same encryption as one who uses the typed fields; anything else would make the escape hatch
+   the one place secrets are stored in the clear.
+6. **The golden file is asserted from the test classpath, not through `Golden.assertJson`.** Mill
+   runs the suite in a sandbox, so `Golden`'s working-directory-relative path writes into
+   `out/`. The assertion is `assertNoDiff` against `/golden/cluster-record.json` read as a
+   resource, which is the shape `services/cluster/contract`'s `GoldenFilesSuite` already uses. The
+   sample holds plaintext markers rather than ciphertext, because pinning an encrypted form would
+   pin a fresh random IV that changes on every write.
+7. **The `updatedBy` of every write is the constant `"kui-cluster"`.** M1 has no authentication;
+   a field that will later hold a principal must not be left holding something that looks like
+   one.

@@ -234,3 +234,31 @@ The probe *is* the degraded-behaviour mechanism, so its own contract is strict:
 
 None. The `Connectivity` cases and their sentences are copied into the operator troubleshooting
 page by CFGOP-008; put the final table in the implementation report.
+
+---
+
+## Deviations
+
+Recorded by the implementing agent, 2026-09-04. Commit `3b78c3f`.
+
+1. **The probe holds `libs/kafka`'s `ClusterAdmin` directly, not the domain port.** The domain
+   port's `describeCluster` also calls `describeQuorum`, because the domain's `ClusterDescription`
+   carries a controller mode (CLADP-002 deviation 5). Paying for a second admin call on the
+   dashboard's cheap-question path is exactly what this task's bound exists to prevent, so the
+   probe makes one call. It still goes through `ClusterAdminClients.connectionFor`, so it
+   participates in the same client and eviction policy and never opens a throwaway client.
+2. **`AdminTuning` has no `probeTimeout`, as this spec anticipated.** The bound is
+   `min(profile.admin.requestTimeout, 5.seconds)`, exposed as
+   `ConnectivityProbeAdapter.DefaultProbeTimeout` and `timeoutFor`. CFGOP-002 should add
+   `kui.clusters[].admin.probeTimeout` and this adapter should then read it; nothing in
+   `libs/config` was touched here.
+3. **A refused request is `AuthenticationFailed`, not `Unreachable`.** `Connectivity` has three
+   cases and none of them is "reached but refused". Reporting a cluster that answered as
+   unreachable would send an operator to the network when the answer is an access-control rule,
+   and would grey out a row that works; `AuthenticationFailed` with the sentence "the cluster
+   accepted KUI but refused the request" is the closest true statement the enum can make. A fourth
+   case is a CLDOM-003 change and is deliberately not made here.
+4. **Eight tests, not the spec's named set.** `theProbeGivesUpOnItsOwnBoundAndNotTheAdminClients`
+   asserts the bound with `TestControl`, which required `cats-effect-testkit` on the test module.
+   `noVerdictEverCarriesAHostAPasswordOrAnExceptionMessage` drives a deliberately leaky error
+   through and asserts no host, port or cluster identifier survives into `detail`.

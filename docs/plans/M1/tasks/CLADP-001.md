@@ -313,3 +313,51 @@ bootstrap string.
 
 None. `docs/domain/cluster.md` is CLDOM's (DEVPLAN §6.5); the module appears in
 `ARCHITECTURE.md` §3 already as the planned fourth layer.
+
+---
+
+## Deviations
+
+Recorded by the implementing agent, 2026-09-04. Commits `8f73b87` and `5b1aaf4`.
+
+1. **`ClusterProfileConnection.of` delegates to `ClusterProfile.connection`.** CLDOM-001 shipped
+   the projection as a method on the profile itself. The file named by this spec still exists, and
+   still is the one named seam, but it is a one-line delegation rather than a second assembly of
+   the same five fields. Two assemblies of one value is exactly the drift this file was created to
+   prevent.
+2. **The duration histogram is not recorded in the adapter.** The spec asks for a span, a
+   histogram and a failure log per method. `libs/kafka`'s `AdminClientPool.run` already records
+   `kui.kafka.admin.duration` with `{cluster, operation, outcome}` for every call
+   (`AdminMetrics`), so recording it again here would double every count and halve every rate on
+   the dashboard those attributes were chosen for. The adapter keeps the span and the WARN log,
+   and `ClusterAdminAdapter.create` resolves the tracer once rather than per call. Consequence:
+   the `downgraded` outcome CLADP-002 asks for is not distinguishable in the metric; the WARN log
+   `broker configs unavailable on this cluster` is the signal instead. Owed to whichever task adds
+   an outcome parameter to `AdminMetrics.timed`.
+3. **`ClusterAdminContract`'s six named cases became nine, and two changed meaning.** The contract
+   file has to run unchanged against a live broker (CLADP-002), and a container cannot be asked to
+   lose its controller on cue. `describeClusterWithNoControllerIsRepresentable` and
+   `describeClusterWithNoAuthorizedOperationsIsRepresentable` therefore assert what is true of any
+   cluster — the call answers `Right` whatever the field turns out to be, and the field is
+   faithfully optional. The stub-only versions of both, with a genuinely absent controller and
+   genuinely absent operations, are `ClusterAdminAdapterSuite`'s
+   `describeClusterWithNoControllerIsAnswered` and
+   `describeClusterWithNoAuthorizedOperationsIsAnswered`, and the conversion-level assertions are
+   in `KafkaToDomainSuite`.
+4. **`KafkaToDomain.scala` and its suite were added.** Not in the spec's file list. The
+   Kafka-to-domain projection is where every real decision lives — a controller that is not a
+   broker, a blank rack, a sensitive value the broker withholds, an offline disk, a `-1`
+   timestamp — and as a pure function those nineteen shapes are asserted without a broker. Its
+   absence would have made them all wait for CFGOP-004.
+5. **`describeCluster` makes a second admin call.** The domain's `ClusterDescription` carries a
+   `ControllerMode` that `describeCluster` alone cannot supply, and `libs/kafka` reports "this is
+   a ZooKeeper cluster" and "KUI may not ask" identically as `Right(None)`. The adapter therefore
+   calls `describeQuorum` as well and maps `Some` to `KRaft` and everything else to `Unknown`;
+   `ZooKeeper` is never reported, because it would be a guess printed as a fact. The probe
+   (CLADP-004) does *not* pay for this: it calls `libs/kafka`'s `describeCluster` directly.
+6. **`TestProfiles`, `KafkaFixtures` and `RecordingAdminPool` were added** to the test sources.
+   The spec names only `StubKafkaClusterAdmin`; the other three are the profile builder, the
+   `libs/kafka` fixture set and the pool double the suites are written against.
+7. **The negative classpath check was not run as stated.** `./mill show
+   services.cluster.api.compileClasspath` is CFGOP-003's build test to write; `./mill
+   checkArchitecture` reports 75 modules and no layering violations with the new module present.

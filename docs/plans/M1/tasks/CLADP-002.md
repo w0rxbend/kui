@@ -437,3 +437,78 @@ Implementation Report, and ship the tests below.
 - **Test:** cancel a `run` during client creation and assert (a) no `Admin` is left unclosed,
   (b) the semaphore is free, (c) the next `run` for the same cluster creates a client and
   succeeds.
+
+---
+
+## Deviations
+
+Recorded by the implementing agent, 2026-09-04. Commit `5b1aaf4`.
+
+1. **`ClusterAdminClients` is a version registry, not a client registry.** KAFKA-004 shipped
+   `kui.kafka.AdminClientPool`, which already is everything scope item 2 asks for: one client per
+   cluster, created behind a per-cluster `Semaphore`, `uncancelable` from `Admin.create` to the
+   entry being in the `Ref`, generation-guarded invalidation so two simultaneous failures cost one
+   reconnect, and `closeAll` on release. It also invalidates automatically on a reconnect-class
+   `Throwable` inside `run`. Building a second registry here would be two pools racing to open
+   clients against the same brokers — the finding this spec's own "do not invent a second
+   container fixture" note exists to prevent, one layer down.
+
+   What the pool cannot know is that a `ClusterProfile` has a `ProfileVersion`, and that an edited
+   profile is a different connection wearing the same cluster id. `ClusterAdminClients` owns
+   exactly that: `connectionFor(profile)` evicts the pooled client when the profile version has
+   moved, `invalidate(id)` delegates, and `openClients` counts registered clusters. Both effects
+   are `uncancelable` around the `Ref` update and the eviction, so the registry cannot come to
+   believe a client matches a profile it does not.
+
+   Consequently `ClusterAdminClients.resource` takes an `AdminClientPool[F]`, not a
+   `KafkaClientFactory[F]` (which does not exist — see the M1 gate review's F-04 for the same
+   phantom name in another lane), and `get(profile): F[ClusterAdmin[F]]` is
+   `connectionFor(profile): F[ClusterConnection]`, because `libs/kafka`'s `ClusterAdmin` is one
+   pool-backed instance rather than one per cluster.
+
+2. **Test names follow the design.** `ClusterAdminClientsSuite` has eight cases, not the spec's
+   six: `theFirstCallRegistersTheClusterAndEvictsNothing`,
+   `tenConcurrentCallsForOneClusterEvictNothing` (the spec's
+   `tenConcurrentCallsForOneClusterCreateOneClient`, which is `AdminClientPoolSuite`'s to assert),
+   `aNewerProfileVersionEvictsTheClient` (the spec's `aNewerProfileVersionReplacesTheClient`),
+   `anOlderOrEqualProfileVersionDoesNotEvict`, `everyClusterIsTrackedSeparately`,
+   `invalidateAsksThePoolToRebuildAndKeepsTheRegistration`,
+   `releasingTheResourceEvictsEveryRegisteredCluster`, and
+   `aCancelledConnectionForLeavesTheRegistryAndThePoolInStep` — the F-07 cancellation test.
+   `aFailedClientCreationLeavesNoEntryBehind` is `libs/kafka`'s, where creation happens.
+
+3. **`capabilities` returns the domain's three-set `ClusterFeatures`**, per this spec's own gate
+   amendment, and the port signature in the "Public Scala signatures" block above (which still
+   says `F[Set[ClusterFeature]]`) is superseded by it. `KafkaToDomain.features` maps through
+   `ClusterFeatures.of`, so the partition invariant holds by construction — including for
+   `ClusterFeature.BrokerConfigs`, which the domain models and `libs/kafka` never probes, and
+   which therefore lands in `unknown` rather than in `absent`.
+
+4. **`describeLogDirs` takes `NonEmptyList` at the port and `Set` at `libs/kafka`.** The
+   conversion is in the adapter and the requested set is what `PartialResult.from` is given, so a
+   broker in neither map is filled in as a failure rather than vanishing.
+
+5. **A log directory's per-directory error becomes `LogDirError.Offline`.** `libs/kafka`'s
+   `SkipReason` carries an `ErrorCode` and not the Java exception class, and the domain's
+   `LogDirError.Other` accepts only a class name — a wire code passed through it renders
+   "unknown", which says strictly less than `Offline` does. Per
+   `research/kafka/admin-capabilities.md` §1 the only error a broker reports for a directory is a
+   storage failure, so `Offline` is the honest rendering. If a future task wants the distinction,
+   `libs/kafka`'s `SkipReason.Failed` needs to carry the class name.
+
+6. **`ClusterAdminLiveSuite` is not written.** CFGOP-004 has not landed: `libs/testkit` has no
+   `KafkaFixture`/`KafkaTopology`, and this spec's own corrected-dependency note forbids inventing
+   a second container fixture here. The mitigation is deliberate and was designed for: every
+   assertion the live suite would make about *mapping* is already made by `KafkaToDomainSuite`
+   against the same values a broker produces, and every assertion it would make about the *port*
+   is in `ClusterAdminContract`, which is written so that the live subclass adds one file and
+   changes nothing else.
+
+   **Owed, exactly:** `ClusterAdminLiveSuite extends ClusterAdminContract` with
+   `port = ClusterAdminClients.resource(pool, logger).flatMap(adapter over KafkaClusterAdmin)` and
+   `profile` addressing `KafkaFixture(KafkaTopology.Plaintext)`, plus
+   `brokerConfigsReturnsTheBrokersConfigurationSortedByName`, `logDirsReportPerDirectorySizes`,
+   `quorumIsSomeOnAKRaftBrokerAndNoneIsNotAFailure` (asserted here as a contract case that a live
+   broker will strengthen), `capabilitiesContainsLogDirsAndDoesNotThrowOnAnUnprobeableFeature`,
+   `describeClusterRecordsTheKafkaClusterId`, and the two behavioural acceptance criteria — a
+   container stopped mid-suite, and the same container restarted.

@@ -333,3 +333,41 @@ Implementation Report, and ship the tests below.
   update of a fully-built snapshot.
 - **Test:** cancel mid-reconcile and assert the registry still returns the previous snapshot in
   full and that the handler is deregistered.
+
+---
+
+## Deviations
+
+Recorded by the implementing agent, 2026-09-04. Commit `0c59973`.
+
+1. **The listener takes the reconcile as a function, not the registry.** `ClusterRegistry`
+   (CLDOM-004) lives in `services/cluster/application`, which `infrastructure` may not depend on.
+   `ProfileChangeListener.resource` therefore takes `reconcile: List[ClusterProfile] => F[Unit]`,
+   which CLAPI-005 wires to `registry.reload.void`. The spec's conditional
+   `ClusterRegistryWriter.scala` was not created: a one-method port and a function of the same
+   shape are the same thing, and the function does not have to be kept in step with the registry's
+   evolving interface.
+2. **Version monotonicity, the reload and the version bump are the registry's *and* the
+   listener's.** `ClusterRegistry` already computes its own `RegistryVersion` and its own store
+   health on `reload`. The listener does not duplicate that; it decides *whether* a reload is
+   needed at all — which is the idempotence requirement of scope item 2 — and keeps its own
+   per-cluster `ProfileVersion` map for that decision, merged with `max` in two places.
+3. **The reload runs before the versions are recorded.** The spec does not say which order. It
+   matters: recording first would make a failed reload permanent, because the next identical
+   emission would look like a record already applied and this replica would serve stale profiles
+   for ever. The commit merges with `max` again rather than overwriting, since a retried reload
+   may have taken long enough for a later emission to move a version on.
+4. **Backoff wraps the reconcile, not a stream resubscribe.** The change feed itself is
+   subscribed once by `ClusterConfigStoreAdapter`, which supervises it and logs if it stops
+   (CLADP-003). What can fail repeatedly here is the reconcile, so that is what carries the 1 s →
+   30 s jittered backoff of scope item 1.
+5. **Health transitions are logged; nothing writes a shared health value.** Scope item 6 asks the
+   listener to write the current `StoreHealth` "into the value CLDOM-007's capability report
+   reads". `ClusterRegistry` already stores `storeHealth` in its snapshot on every reload, and a
+   second copy would be a second thing to keep in step. The listener logs the transition once in
+   each direction, which is the part nothing else does.
+6. **`ProfileChangeListener` exposes `changes: Stream[F, ProfileChanged]`** over an internal
+   `Topic`, as scope item 1 asks. `known` is exposed as well, for the suite and for diagnostics.
+7. **The diff is a pure function**, `ProfileChangeListener.diff`, so the five interesting cases —
+   an addition, a no-op echo, a replayed older record, a removal from a complete list, and all
+   three at once — are asserted without any effects at all.
