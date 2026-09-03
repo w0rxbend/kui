@@ -220,6 +220,17 @@ final class KuiInterceptorsSuite extends CatsEffectSuite {
     }
   }
 
+  test("aQueryParameterNeverReachesTheRouteLabel") {
+    // Tapir's path template renders query parameters by default, which would put `?message={message}`
+    // in the label. That is wrong twice over: the label stops being the path, and it stops matching
+    // UnmeasuredRoutes, so an excluded endpoint that grew a query parameter would silently start
+    // being measured again.
+    val withQuery = endpoint.get.in("internal" / "v1" / "ping").in(query[String]("message"))
+
+    assertEquals(KuiInterceptors.routeLabel(withQuery), "/internal/v1/ping")
+    assertEquals(KuiInterceptors.spanName("kui-cluster", withQuery), "GET /internal/v1/ping")
+  }
+
   test("health endpoints are excluded, so a probe every second cannot dominate the histogram") {
     assertEquals(KuiInterceptors.UnmeasuredRoutes, Set("/health/live", "/health/ready"))
   }

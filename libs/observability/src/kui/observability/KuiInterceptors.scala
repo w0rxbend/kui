@@ -128,7 +128,7 @@ object KuiInterceptors {
     endpoint.info.name match {
       case Some(name) if name.startsWith("kui.") => name
       case Some(name) => s"kui.${contextOf(serviceName)}.$name"
-      case None => s"${endpoint.method.map(_.method).getOrElse("*")} ${endpoint.showPathTemplate()}"
+      case None => routeOf(endpoint)
     }
 
   /** The endpoints that would use the fallback span name, so a service's own suite can fail on them.
@@ -186,7 +186,7 @@ object KuiInterceptors {
       status: Int,
       startedAt: scala.concurrent.duration.FiniteDuration
   ): F[Unit] = {
-    val route = endpoint.showPathTemplate()
+    val route = routeLabel(endpoint)
 
     if UnmeasuredRoutes.contains(route) then Async[F].unit
     else
@@ -200,8 +200,17 @@ object KuiInterceptors {
       }
   }
 
+  /** The path template, with query parameters left out.
+    *
+    * Tapir renders query parameters into the template by default. In a metric label that is wrong twice: the
+    * label stops being the path, and it stops matching [[UnmeasuredRoutes]], so an excluded endpoint that
+    * grew a query parameter would quietly start being measured again.
+    */
+  def routeLabel(endpoint: AnyEndpoint): String =
+    endpoint.showPathTemplate(showQueryParam = None)
+
   private def routeOf(endpoint: AnyEndpoint): String =
-    s"${endpoint.method.map(_.method).getOrElse("*")} ${endpoint.showPathTemplate()}"
+    s"${endpoint.method.map(_.method).getOrElse("*")} ${routeLabel(endpoint)}"
 
   /** The request's correlation id, after [[correlationInterceptor]] has run. */
   def correlationIdOf(request: ServerRequest): Option[String] =
