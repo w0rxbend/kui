@@ -16,6 +16,7 @@ import sttp.tapir.server.interceptor.Interceptor
 import kui.config.PrincipalKeyConfig
 import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.client.SttpServiceClient
+import kui.gateway.api.openapi.DocsRoutes
 import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
 import kui.gateway.api.{CapabilityRoutes, EdgeHeaders, GatewayApi, InfoRoutes}
 import kui.gateway.application.capability.{
@@ -119,6 +120,13 @@ object GatewayWiring {
       )
       _ <- Resource.eval(registry.attachProbe(trigger.probe))
       _ <- CircuitFeed.resource[F](clients, signals)
+      docs <- Resource.eval(
+        Async[F].fromEither(
+          DocsRoutes
+            .document[F](config.gateway.services.keys.toList, List(publicBaseUrl(config)))
+            .leftMap(BadContract.apply)
+        )
+      )
       proxied <- Resource.eval(
         Async[F].fromEither(proxyRoutes[F](clients, signals).leftMap(BadContract.apply))
       )
@@ -130,7 +138,9 @@ object GatewayWiring {
         config.view,
         readiness,
         sessions,
-        CapabilityRoutes[F](registry, trigger, telemetry, logger) ++ proxied
+        CapabilityRoutes[F](registry, trigger, telemetry, logger) ++
+          proxied ++
+          DocsRoutes[F](docs, BasePath.normalize(config.server.basePath))
       ),
       interceptors = Cors.interceptor[F](config.gateway.cors).toList ++
         EdgeHeaders.interceptors[F] ++
@@ -222,6 +232,18 @@ object GatewayWiring {
 
   private def signingKey(key: PrincipalKeyConfig): SigningKey =
     SigningKey(key.kid, key.key.map(_.getBytes(java.nio.charset.StandardCharsets.UTF_8)), key.notBefore)
+
+  /** The `servers` entry of the served document.
+    *
+    * The base path is included because a deployment behind a reverse proxy at `/kui` must produce URLs that
+    * work from the browser's point of view, not the server's. The host is deliberately left out: the gateway
+    * does not reliably know the name it is reached by, and a wrong absolute URL in the docs is worse than a
+    * relative one that always works.
+    */
+  def publicBaseUrl(config: GatewayServiceConfig): String = {
+    val base = BasePath.normalize(config.server.basePath)
+    if base.isEmpty then "/" else base
+  }
 
   /** The proxied routes: every configured service the gateway holds a contract for. */
   def proxyRoutes[F[_]: Async](

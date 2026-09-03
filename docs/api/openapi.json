@@ -1,0 +1,600 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI",
+    "version" : "1.0"
+  },
+  "servers" : [
+    {
+      "url" : "/"
+    }
+  ],
+  "paths" : {
+    "/api/v1/ping" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Echo endpoint used to prove the contract -> client -> gateway -> browser chain",
+        "operationId" : "cluster.ping",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "message",
+            "in" : "query",
+            "description" : "Echoed back, 1..128 characters",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PingResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/info" : {
+      "get" : {
+        "tags" : [
+          "gateway"
+        ],
+        "summary" : "Which build of KUI is running, and what this deployment enables",
+        "description" : "Unauthenticated. Contains no URL, hostname or key id: it lists configured service ids only.",
+        "operationId" : "gateway.info",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AppInfo"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me" : {
+      "get" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "The caller's identity and the CSRF token to use for mutations",
+        "operationId" : "gateway.auth.me",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AuthMeResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Clears the session cookie",
+        "operationId" : "gateway.auth.logout",
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities" : {
+      "get" : {
+        "tags" : [
+          "capabilities",
+          "gateway"
+        ],
+        "summary" : "Everything KUI can and cannot do right now",
+        "description" : "One entry per configured service. A service that is configured but has not been checked yet appears as degraded with reason STARTING; it is never missing, because 'not asked yet' and 'not deployed' mean different things to whoever is looking.",
+        "operationId" : "gateway.capabilities.snapshot",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CapabilitySnapshot"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/stream" : {
+      "get" : {
+        "tags" : [
+          "capabilities",
+          "gateway"
+        ],
+        "summary" : "A snapshot, then every capability change as it happens",
+        "description" : "The first event is always a full snapshot, so a client that has just connected -- or reconnected -- never has to guess what it missed. There is no cursor and no terminal event: the stream ends when the client disconnects. A heartbeat every fifteen seconds keeps proxies from closing an idle connection.",
+        "operationId" : "gateway.capabilities.stream",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/{service}/probe" : {
+      "post" : {
+        "tags" : [
+          "capabilities",
+          "gateway"
+        ],
+        "summary" : "Re-check one service now and return its recomputed state",
+        "description" : "What the UI's 'Retry now' button calls. It waits for the check to finish, so the entry it returns is the fresh one rather than the one that was on screen.",
+        "operationId" : "gateway.capabilities.probe",
+        "parameters" : [
+          {
+            "name" : "service",
+            "in" : "path",
+            "description" : "The service id to re-check",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "202" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CapabilityEntry"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AppInfo" : {
+        "title" : "AppInfo",
+        "description" : "Which build of KUI is running, and what this deployment enables",
+        "type" : "object",
+        "required" : [
+          "build",
+          "authType",
+          "basePath",
+          "features"
+        ],
+        "properties" : {
+          "build" : {
+            "$ref" : "#/components/schemas/BuildInfoDto"
+          },
+          "authType" : {
+            "type" : "string"
+          },
+          "basePath" : {
+            "type" : "string"
+          },
+          "services" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "features" : {
+            "$ref" : "#/components/schemas/Map_Boolean"
+          }
+        }
+      },
+      "AuthMeResponse" : {
+        "title" : "AuthMeResponse",
+        "type" : "object",
+        "required" : [
+          "principal",
+          "csrfToken",
+          "authType"
+        ],
+        "properties" : {
+          "principal" : {
+            "$ref" : "#/components/schemas/PrincipalDto"
+          },
+          "csrfToken" : {
+            "type" : "string"
+          },
+          "authType" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Available" : {
+        "title" : "Available",
+        "type" : "object"
+      },
+      "BuildInfoDto" : {
+        "title" : "BuildInfoDto",
+        "description" : "The build this process was compiled from",
+        "type" : "object",
+        "required" : [
+          "version",
+          "gitCommit",
+          "gitCommitShort",
+          "gitDirty",
+          "builtAt",
+          "scalaVersion",
+          "jdkVersion"
+        ],
+        "properties" : {
+          "version" : {
+            "type" : "string"
+          },
+          "gitCommit" : {
+            "type" : "string"
+          },
+          "gitCommitShort" : {
+            "type" : "string"
+          },
+          "gitDirty" : {
+            "type" : "boolean"
+          },
+          "builtAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "scalaVersion" : {
+            "type" : "string"
+          },
+          "jdkVersion" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilityEntry" : {
+        "title" : "CapabilityEntry",
+        "type" : "object",
+        "required" : [
+          "key",
+          "state",
+          "updatedAt"
+        ],
+        "properties" : {
+          "key" : {
+            "$ref" : "#/components/schemas/CapabilityKey"
+          },
+          "state" : {
+            "$ref" : "#/components/schemas/CapabilityState"
+          },
+          "updatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilityKey" : {
+        "title" : "CapabilityKey",
+        "type" : "object",
+        "required" : [
+          "service"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilitySnapshot" : {
+        "title" : "CapabilitySnapshot",
+        "type" : "object",
+        "required" : [
+          "generatedAt"
+        ],
+        "properties" : {
+          "entries" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CapabilityEntry"
+            }
+          },
+          "generatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilityState" : {
+        "title" : "CapabilityState",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Available"
+          },
+          {
+            "$ref" : "#/components/schemas/Degraded"
+          },
+          {
+            "$ref" : "#/components/schemas/NotConfigured"
+          },
+          {
+            "$ref" : "#/components/schemas/Unavailable"
+          }
+        ]
+      },
+      "Degraded" : {
+        "title" : "Degraded",
+        "type" : "object",
+        "required" : [
+          "reason"
+        ],
+        "properties" : {
+          "reason" : {
+            "$ref" : "#/components/schemas/DegradedReason"
+          }
+        }
+      },
+      "DegradedReason" : {
+        "title" : "DegradedReason",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message"
+        ],
+        "properties" : {
+          "code" : {
+            "description" : "Why a capability is not available",
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "suggestedPollIntervalMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "p95Ms" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "Map_Boolean" : {
+        "title" : "Map_Boolean",
+        "type" : "object",
+        "additionalProperties" : {
+          "type" : "boolean"
+        }
+      },
+      "NotConfigured" : {
+        "title" : "NotConfigured",
+        "type" : "object"
+      },
+      "PingResponse" : {
+        "title" : "PingResponse",
+        "description" : "The echoed message, the instant the service saw it, and which service answered",
+        "type" : "object",
+        "required" : [
+          "message",
+          "at",
+          "service"
+        ],
+        "properties" : {
+          "message" : {
+            "type" : "string"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "service" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PrincipalDto" : {
+        "title" : "PrincipalDto",
+        "type" : "object",
+        "required" : [
+          "name",
+          "kind"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "roles" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "kind" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Unavailable" : {
+        "title" : "Unavailable",
+        "type" : "object",
+        "required" : [
+          "reason",
+          "message",
+          "since"
+        ],
+        "properties" : {
+          "reason" : {
+            "description" : "Why a capability is not available",
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "since" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      }
+    }
+  }
+}
