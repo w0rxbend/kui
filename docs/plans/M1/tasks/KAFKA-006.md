@@ -269,4 +269,36 @@ steps pick this file up through the DEVPLAN's reference to it.
 
 ## Deviations
 
-*(filled in by the implementer, in the same commit)*
+Recorded by the implementer, in the same commit.
+
+1. **The context bound is `Concurrent` alone, not `Concurrent: Parallel`.** `parTraverseN` comes
+   from `cats.effect.syntax.all` and needs only `Concurrent`; adding `Parallel` made it an unused
+   implicit parameter, which `-Werror` refuses. The bounded behaviour the spec asks for is
+   unchanged.
+
+2. **`AdminBatch.rejectDuplicates` is a separate function rather than a check inside `chunked`.**
+   The spec says a duplicate key is a programming error "reported by `combineChecked`". Inside the
+   batcher, `combineChecked` cannot report it usefully — the batch has already run by then, and the
+   caller gets an error instead of the data it asked for. A caller that wants the check calls
+   `rejectDuplicates` before it batches, and `BatchResult.combineChecked` remains for the merge.
+
+3. **A key the broker did not mention is skipped with a reason, not silently absent.** The spec does
+   not say what to do when a chunk *succeeds* but its result map is missing keys, which is exactly
+   what `describeConfigs` does on a partly-authorized cluster. Dropping them would reintroduce the
+   silent absence `BatchResult` exists to prevent, so those keys become
+   `SkipReason.NotFound("<operation> returned no entry for it")`. A test pins it.
+
+4. **The two ScalaCheck properties live in `AdminBatchPropertySuite`.** `AdminBatchSuite`'s subject
+   is time — it runs under `TestControl` on a `CatsEffectSuite`, which has no `property`. The two
+   properties are about shape rather than timing, so they run on the real runtime in a
+   `ScalaCheckSuite` next door.
+
+5. **The DEBUG and INFO batch log lines are not emitted here.** `AdminBatch` is a pure combinator
+   with no logger and no cluster id; taking a `Logger[F]` would make every caller thread one
+   through for a line that belongs at the call site, which has both. KAFKA-007 and KAFKA-008 emit
+   it, and `BatchResult` carries everything the line needs (key count, skipped count, reasons).
+
+6. **`SkipReason.NoLeader` still has no producer**, which is intentional and is the subject of
+   `PORT-INVARIANTS.md` §1: the filter that produces it belongs to `TopicAdmin.listOffsets`, an M2
+   port. The case exists now because putting the vocabulary in place is what stops the invariant
+   from being rediscovered as a sixty-second timeout in production.
