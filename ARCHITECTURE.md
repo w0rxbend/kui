@@ -439,6 +439,23 @@ trait PrincipalCodec[F[_]]:
 Read-only clusters are enforced inside `decide` through `ClusterFlags.readOnly` and
 `Action.isAlter` (ADR-021), so no URL-pattern filter exists anywhere.
 
+**What exists today (M0, task KERN-006).** `Principal`, `PrincipalKind`, `RequestDigest`,
+`SessionRef`, `PrincipalClaims`, `SignedPrincipal`, `PrincipalError` and `PrincipalCodec[F]`
+are implemented in `libs/security-core/src/kui/security/`, with the HS256 JWS implementation in
+`libs/security-core/src-jvm/kui/security/JwsPrincipalCodec.scala`. The JOSE library lives in the
+JVM source set alone, so the module still cross-compiles to the browser; `./mill
+checkArchitecture` rule A6 fails the build if it ever moves. Everything above about `Rbac`,
+`Resource`, `Action`, `Permission`, `Role` and `RbacPolicy` is still a sketch: it is M6 and no
+part of it is implemented.
+
+Two details differ from the sketch above and are decided by KERN-006. `RequestDigest` travels in
+the claims as an object (`req: {m, p, b}`) rather than as one further hash, because hashing the
+triple would put a SHA-256 implementation in the cross-compiled source set for the benefit of a
+caller — the browser — that never signs anything; comparing the three fields binds a token to a
+call exactly as tightly. And building a digest from a body is `RequestDigests.of` in the JVM
+source set for the same reason, while `RequestDigest.ofRequestLine` (the streaming case, which
+hashes no body) stays shared.
+
 ## 5. Inter-service contracts, headers and principal propagation
 
 - Every service publishes exactly one `contract` module; the gateway derives routes from

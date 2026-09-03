@@ -280,6 +280,12 @@ object libs extends Module {
     * browser half.
     */
   object securityCore extends Module {
+
+    // Mill names a module's directory after the Scala identifier, which would be `libs/securityCore`.
+    // The repository layout in ARCHITECTURE.md §16 spells library directories with a dash, and the
+    // directory is what a person navigates, so the identifier bends rather than the layout.
+    override def moduleDir = mill.api.BuildCtx.workspaceRoot / "libs" / "security-core"
+
     trait Shared extends KuiPureModule with PlatformScalaModule {
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",

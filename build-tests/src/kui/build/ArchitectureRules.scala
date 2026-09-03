@@ -205,9 +205,15 @@ object ArchitectureRules {
   /** A6 — the kernel, the shared contracts and the security vocabulary are compiled for the browser as well
     * as for the JVM. A JVM-only library in their shared source set makes the browser half uncompilable, and
     * the failure surfaces far from the line that caused it.
+    *
+    * The `.jvm` half of such a module is exempt, and that is the whole point rather than a loophole: these
+    * modules are allowed a JVM-only adapter as long as it lives in the `src-jvm` source set, which only the
+    * `.jvm` module compiles. `libs.securityCore.jvm` signing tokens with nimbus is the intended shape; what
+    * the rule forbids is that dependency reaching the shared or the `.js` half, which is where it would
+    * actually break the browser build (ADR-020, ADR-041 A6).
     */
   private def a6(module: ModuleFacts): List[Violation] =
-    if SharedCoreModules.contains(coreModuleOf(module.id)) then {
+    if SharedCoreModules.contains(coreModuleOf(module.id)) && !module.id.endsWith(".jvm") then {
       val why =
         "this module is cross-compiled to the browser, so its shared source set must not depend " +
           "on a library that exists only on the JVM (ADR-041 A6)"

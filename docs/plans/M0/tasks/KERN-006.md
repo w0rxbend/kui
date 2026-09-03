@@ -165,3 +165,40 @@ startup, not fall back to accepting unsigned requests. Assert this in SVC-004.
 
 `ARCHITECTURE.md` §4.6: replace the sketch with a link to the implementing file and note that
 `Rbac` is still M6.
+
+## Deviations
+
+- **`RequestDigest.of(method, path, body)` is JVM-only, as `RequestDigests.of`.** Hashing a body
+  needs SHA-256. The JVM has a vetted implementation in its standard library; a browser's is
+  asynchronous and therefore unusable from a synchronous function, so the shared half would have
+  needed a hand-written SHA-256 for a caller that does not exist — the browser never signs a
+  principal. The shared source set keeps the `RequestDigest` type and `ofRequestLine`, whose body
+  hash is the SHA-256 of zero bytes and is therefore a written-down constant.
+- **The `req` claim is an object, not a hash.** ADR-020 writes `req = sha256(METHOD \n PATH \n
+  sha256(body))`. Producing that hash inside the shared claims codec would drag SHA-256 back into
+  the cross-compiled source set, which is the exact thing this task exists to avoid. The claim is
+  therefore `req: {m, p, b}`, and verification compares the three fields. The binding is the
+  same: a token still only matches the one call it was minted for. The token grows by the length
+  of the path, which is a header on an internal call.
+- **`JwsPrincipalCodec.make` returns `Either[WeakSigningKey, PrincipalCodec[F]]` with
+  `F[_]: MonadThrow`, not `F[PrincipalCodec[F]]` with `Sync`.** `Sync` would have added a
+  cats-effect dependency to a module whose declared coordinates are nimbus, circe and cats-core,
+  for no gain: construction performs no effect. Its one failure mode — a key shorter than the 256
+  bits HS256 requires, which weakens the signature rather than failing loudly — is reported as a
+  value, which is what the rest of these libraries do.
+- **The claim set carries no `iss`, `jti` or algorithm agility yet.** The issuer is stamped in the
+  JWS header and verified there; `jti` is explicitly not tracked by ADR-020; `EdDSA` remains the
+  configuration-only upgrade the ADR describes and is not implemented.
+- **JVM-only test sources live in `libs/security-core/test/src-jvm/`, not `test-jvm/src/`.** That
+  is the layout `KuiCrossTests` established in BUILD-003, where one shared `test/src` is compiled
+  for both platforms and `test/src-<platform>` holds the exceptions.
+- **`PrincipalError.metricLabel`, not `reason`.** The `Malformed` case already has a constructor
+  parameter called `reason`, and a method of that name on the enum does not compile.
+- **`libs.securityCore` overrides `moduleDir`.** Mill names a module's directory after its Scala
+  identifier, which would have been `libs/securityCore`; the layout in `ARCHITECTURE.md` §16
+  spells library directories with a dash, and the directory is what a person navigates.
+- **ADR-041 rule A6 now exempts the `.jvm` half of a cross-compiled core module.** As written, the
+  rule flagged `libs.securityCore.jvm` for depending on nimbus, which is precisely the shape this
+  task is specified to produce. The rule still fires on the shared and `.js` halves, which is
+  where a JVM-only dependency actually breaks the browser build, and `ArchitectureSuite` gains
+  two tests: one that the JVM half may hold nimbus, one that the browser half may not.

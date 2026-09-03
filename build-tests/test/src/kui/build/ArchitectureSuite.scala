@@ -150,6 +150,20 @@ final class ArchitectureSuite extends FunSuite {
     )
   }
 
+  test("A6: the JVM half of a cross-compiled core module may pull in a JVM-only library") {
+    // libs/security-core keeps its nimbus JWS adapter in src-jvm, which only the .jvm module compiles.
+    expectNoViolations(
+      moduleWithLibs("libs.securityCore.jvm", "io.circe:circe-core", "com.nimbusds:nimbus-jose-jwt"),
+      moduleWithLibs("libs.securityCore.js", "io.circe:circe-core")
+    )
+  }
+
+  test("A6: the browser half of that same module may not") {
+    expectOneViolation("A6", "libs.securityCore.js", "com.nimbusds:nimbus-jose-jwt")(
+      moduleWithLibs("libs.securityCore.js", "com.nimbusds:nimbus-jose-jwt")
+    )
+  }
+
   test("A6: a JVM-only module may pull in a JVM-only library") {
     expectNoViolations(moduleWithLibs("libs.observability", "ch.qos.logback:logback-classic"))
   }

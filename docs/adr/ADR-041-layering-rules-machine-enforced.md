@@ -1,6 +1,6 @@
 # ADR-041 — Layering rules are machine-enforced; a domain-owning `application` never depends on the wire
 
-- Status: Accepted (amended 2026-09-03, Amendment 1 — see below)
+- Status: Accepted (amended 2026-09-03, Amendments 1 and 2 — see below)
 - Date: 2026-09-03
 
 ## Context
@@ -100,7 +100,7 @@ the build on any of these edges:
 | A3 | `services/<name>/application` **where the service owns a `domain`** → `libs.http`, `libs.contractsCore`, tapir, circe, or any `infrastructure` module. `services.gateway.application` is outside this rule (§1a) |
 | A4 | `services.gateway.*` → any `services.<other>.{domain,application,infrastructure,api,app}` (only `contract` is allowed) |
 | A5 | `libs/*` → any `services/*` or `frontend/*` module |
-| A6 | `libs.kernel`, `libs.contractsCore`, `libs.securityCore` → any JVM-only dependency in their shared source set |
+| A6 | `libs.kernel`, `libs.contractsCore`, `libs.securityCore` → any JVM-only dependency, checked on the shared and `.js` halves; the `.jvm` half is exempt (Amendment 2) |
 | A7 | `frontend/ui-shell` → a *static* reference to a `kui.ui.<feature>` class (checked by the bundle-shape assertion, not by this task) |
 | A8 | `services.gateway.*` → `libs.kafka`, `libs.kafka-auth`, `fs2-kafka` or `kafka-clients` (ADR-004 §3: the gateway holds no Kafka client) |
 
@@ -188,3 +188,31 @@ and A8 rather than left implied by A3.
 
 **Tasks updated:** BUILD-005 (rule table), GW-002, GW-003, `DEVPLAN` §5.3 and §10.
 
+
+## Amendment 2 — 2026-09-03
+
+**What changed.** Rule A6 no longer fires on the `.jvm` half of a cross-compiled core module. It
+still fires on the shared and `.js` halves.
+
+**Why.** A6 exists so that a library which only exists on the JVM cannot make the browser build
+impossible. What it actually checked was every module whose id reduced to `libs.kernel`,
+`libs.contractsCore` or `libs.securityCore` — including the `.jvm` platform module, which is
+compiled for the JVM and for nothing else. That made a shape the architecture explicitly calls
+for illegal: ADR-020 puts the nimbus JOSE library "in the JVM adapter so the core stays
+cross-platform", and task KERN-006 requires exactly that (`libs/security-core/src-jvm/` holds
+`JwsPrincipalCodec`, and `libs.securityCore.js` must link without nimbus). Under the rule as
+written, implementing the ADR broke the check.
+
+The exemption is narrow and does not weaken what the rule protects. A dependency declared on the
+`.jvm` module is on the classpath of the `src-jvm` source set alone; the browser build never sees
+it. A dependency declared on the shared trait reaches both platforms and is still caught, because
+it appears on the `.js` module too, and `ArchitectureSuite` now has a test for each direction: the
+JVM half of `libs.securityCore` may hold nimbus, the browser half may not.
+
+The alternative — splitting a JVM-only adapter into its own top-level module — was rejected. It
+would mean a `libs/security-jws` whose only reason to exist is to satisfy a check, published and
+versioned separately from the vocabulary it implements, when Mill's platform source sets already
+express "this file is compiled for one platform" precisely.
+
+**Tasks updated:** BUILD-005 (rule table), KERN-006 (which records the same reasoning as a
+deviation).
