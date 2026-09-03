@@ -370,6 +370,50 @@ it has to line up with. Screenshots of both themes are in
 
 ![The component gallery in the dark theme](screenshots/gallery-dark.png)
 
+## Building a screen: where "how it looks" and "what it does" come from
+
+Two different documents govern a screen, and mixing them up is the most common mistake. Read this
+before you build one.
+
+**How it should look** — layout, spacing, typography, colour, and interaction affordances (what a
+button looks like, where it sits, what hover/focus/disabled/busy look like) — comes from the Claude
+Design project *Kafka UI v2*, current main artboard `Kafka UI v2.dc.html`. That design is revised
+over time and re-imported at the start of every milestone's grooming; whatever the import produced
+lands under `research/design/`, and the revision it came from is recorded in
+`research/design/REFERENCE.md`. No HTML, CSS or JavaScript from the design is ever copied into this
+repository — it is reimplemented in Laminar with KUI's own CSS and the kernel's tokens (ADR-024).
+
+**What it should do** — what the screen is for, which data it shows, where that data comes from,
+what each action performs, what a form validates, and what happens when a call fails, is forbidden,
+is slow, or returns nothing — comes from the researched behaviour of the two reference products,
+Kafbat Kafka UI and Provectus Kafka UI, written down in `research/` (start with
+`research/kafbat/ui-analysis.md`), plus `docs/FEATURE_MATRIX.md` for which behaviours KUI has
+committed to.
+
+A worked example. You are building the topic list.
+
+- From the design you take: that it is a full-width table, the column widths and alignment, the
+  type scale of the header row, the pill used for the "internal topic" marker, the placement and
+  shape of the search box, and what a row looks like while it is loading.
+- From the research you take: that the list is paged and searchable server-side, which columns
+  exist at all (partitions, replication factor, size, message count), that "internal" means the
+  topic name starts with an underscore, what the delete action asks for before it fires, and what
+  the screen shows when the cluster is unreachable rather than merely empty.
+- If the artboard shows a column the research never mentions and no feature-matrix row covers, you
+  do **not** invent its meaning. Either the row is missing from the matrix and gets added there
+  first, or the column is not built.
+
+**When they disagree, the research wins.** If the design implies a behaviour that contradicts the
+researched behaviour — an action that would delete without confirming, a screen that would show data
+KUI does not fetch — implement the researched behaviour and *record the difference* in
+`research/design/REFERENCE.md` and in the task file: which artboard implied what, what was done
+instead, and why. Do not resolve it silently; the next person will otherwise re-open the same
+argument with no record that it was already settled.
+
+One rule sits above both: **a colour pair from the design that fails WCAG AA contrast is adjusted,
+not adopted**, and the adjustment is written down. Accessibility outranks fidelity to a mockup. See
+PLAN §21 "Visual design reference" for the same rules in their canonical form.
+
 ## What the user sees for a feature: the derivation table
 
 Every dimmed sidebar entry and every fallback panel in KUI comes from one pure function,
