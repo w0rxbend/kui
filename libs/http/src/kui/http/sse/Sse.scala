@@ -228,6 +228,19 @@ object Sse {
       instruments: Instruments[F]
   ): Stream[F, SseEvent] =
     Stream.eval(Queue.bounded[F, Option[SseEvent]](math.max(1, config.bufferSize))).flatMap { queue =>
+      // The terminator has to go in without ever waiting for room. This runs as a stream
+      // finaliser, and fs2 runs finalisers uncancelably: when the client disconnects, `concurrently`
+      // interrupts the producer and then waits for exactly this. A blocking `offer` against a full
+      // queue that no longer has a reader never completes, so the request fiber, the queue and
+      // whatever the source held open — a registry subscription, a Kafka consumer — would leak,
+      // one per disconnect. Making room the same way the overflow path does keeps it non-blocking
+      // and still delivers the terminator when the reader is alive.
+      def terminate: F[Unit] =
+        queue.tryOffer(None).flatMap {
+          case true => Temporal[F].unit
+          case false => queue.tryTake *> instruments.dropped *> terminate
+        }
+
       val producer = source
         .evalMap { event =>
           queue.tryOffer(Some(event)).flatMap {
@@ -235,7 +248,7 @@ object Sse {
             case false => queue.tryTake *> instruments.dropped *> queue.offer(Some(event))
           }
         }
-        .onFinalize(queue.offer(None))
+        .onFinalize(terminate)
 
       Stream.fromQueueNoneTerminated(queue).concurrently(producer)
     }
