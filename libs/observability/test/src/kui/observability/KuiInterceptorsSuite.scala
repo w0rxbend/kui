@@ -49,7 +49,20 @@ final class KuiInterceptorsSuite extends CatsEffectSuite {
       .name("boom")
       .serverLogicSuccess[IO](_ => IO.raiseError(new RuntimeException("nope")))
 
-  private val endpoints = List(listTopics, echoCorrelation, boom)
+  /** A liveness probe as it is actually served: under a prefix.
+    *
+    * `BasePath.prefixAll` puts the configured base path in front of every endpoint, and the gateway mounts
+    * its probes under `/api/v1`, so the path template Tapir renders for a probe is almost never the bare
+    * `/health/live` the endpoint declares.
+    */
+  private val prefixedLiveness: ServerEndpoint[Any, IO] =
+    endpoint.get
+      .in("api" / "v1" / "health" / "live")
+      .out(stringBody)
+      .name("health.live")
+      .serverLogicSuccess[IO](_ => IO.pure("alive"))
+
+  private val endpoints = List(listTopics, echoCorrelation, boom, prefixedLiveness)
 
   private def withStub[A](
       body: (Backend[IO], OtelJavaTestkit[IO]) => IO[A]
@@ -232,6 +245,44 @@ final class KuiInterceptorsSuite extends CatsEffectSuite {
   }
 
   test("health endpoints are excluded, so a probe every second cannot dominate the histogram") {
-    assertEquals(KuiInterceptors.UnmeasuredRoutes, Set("/health/live", "/health/ready"))
+    withStub { (backend, testkit) =>
+      for {
+        _ <- basicRequest.get(uri"http://x/api/v1/health/live").response(asStringAlways).send(backend)
+        _ <- basicRequest.get(uri"http://x/boom").response(asStringAlways).send(backend).attempt
+        metrics <- testkit.collectMetrics
+      } yield {
+        val routes = metrics
+          .filter(_.getName == MetricNames.HttpServerDuration)
+          .flatMap(_.getData.getPoints.asScala.toList)
+          .flatMap(point =>
+            point.getAttributes.asMap.asScala.collect {
+              case (key, value) if key.getKey == MetricNames.Attr.Route => value.toString
+            }
+          )
+
+        // The failing request proves the histogram exists at all, so an empty result cannot pass
+        // this test by accident.
+        assert(routes.contains("/boom"), routes.toString)
+        assert(!routes.exists(_.contains("health")), routes.toString)
+      }
+    }
+  }
+
+  test("a probe is excluded however it is mounted, and by the name the real endpoint declares") {
+    // The exclusion is keyed on the operation id, which is why these are the ids `HealthEndpoints`
+    // declares (`libs/http` asserts the other half of that equality, since this module cannot see it).
+    assertEquals(KuiInterceptors.UnmeasuredOperations, Set("health.live", "health.ready"))
+
+    val bare = endpoint.get.in("health" / "live").name("health.live")
+    val underBasePath = endpoint.get.in("kui" / "health" / "ready").name("health.ready")
+    val unnamedProbe = endpoint.get.in("api" / "v1" / "health" / "ready")
+
+    assert(!KuiInterceptors.isMeasured(bare))
+    assert(!KuiInterceptors.isMeasured(underBasePath))
+    assert(!KuiInterceptors.isMeasured(unnamedProbe))
+
+    // Nothing else is swept up: neither a route that merely ends in a similar word nor a real endpoint.
+    assert(KuiInterceptors.isMeasured(endpoint.get.in("clusters" / "health" / "livez").name("cluster.health")))
+    assert(KuiInterceptors.isMeasured(listTopics.endpoint))
   }
 }

@@ -39,10 +39,30 @@ import sttp.tapir.server.tracing.otel4s.{Otel4sTracing, Otel4sTracingConfig}
   */
 object KuiInterceptors {
 
-  /** Routes that are measured by their absence: a liveness probe every second would dominate the duration
-    * histogram and tell nobody anything (HTTP-002).
+  /** Operation ids that are measured by their absence: a liveness probe every second would dominate the
+    * duration histogram and tell nobody anything (HTTP-002).
+    *
+    * The exclusion is keyed on the endpoint's *operation id* and not on its path, because the path a probe is
+    * finally served at is not the path its endpoint declares. `BasePath.prefixAll` prepends the configured
+    * base path to every endpoint of a process, and the gateway mounts its own probes under `/api/v1`, so the
+    * rendered template is `/kui/health/live` or `/api/v1/health/live` rather than `/health/live`. The
+    * operation id is chosen by whoever declared the endpoint and no prefix can change it.
+    */
+  val UnmeasuredOperations: Set[String] = Set("health.live", "health.ready")
+
+  /** The paths those operations are declared at, kept as a second net.
+    *
+    * An endpoint that somehow lost its operation id would otherwise fall back into the histogram. The match
+    * is on the *end* of the rendered template, for the prefixing reason above.
     */
   val UnmeasuredRoutes: Set[String] = Set("/health/live", "/health/ready")
+
+  /** Whether this endpoint's duration belongs in the histogram at all. */
+  def isMeasured(endpoint: AnyEndpoint): Boolean = {
+    val route = routeLabel(endpoint)
+    !endpoint.info.name.exists(UnmeasuredOperations.contains) &&
+    !UnmeasuredRoutes.exists(excluded => route == excluded || route.endsWith(excluded))
+  }
 
   /** The instrumentation interceptors, outermost first.
     *
@@ -188,7 +208,7 @@ object KuiInterceptors {
   ): F[Unit] = {
     val route = routeLabel(endpoint)
 
-    if UnmeasuredRoutes.contains(route) then Async[F].unit
+    if !isMeasured(endpoint) then Async[F].unit
     else
       Async[F].realTime.flatMap { endedAt =>
         histogram.record(
@@ -204,7 +224,7 @@ object KuiInterceptors {
     *
     * Tapir renders query parameters into the template by default. In a metric label that is wrong twice: the
     * label stops being the path, and it stops matching [[UnmeasuredRoutes]], so an excluded endpoint that
-    * grew a query parameter would quietly start being measured again.
+    * grew a query parameter would quietly start being measured again (see [[isMeasured]]).
     */
   def routeLabel(endpoint: AnyEndpoint): String =
     endpoint.showPathTemplate(showQueryParam = None)
