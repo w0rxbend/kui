@@ -1,0 +1,17 @@
+# Messages for inventory.stock-levels: compacted AND time-limited, keyed by stock keeping unit
+# (SKU), with headers that carry which warehouse the reading came from.
+#mode: headers-key-value
+
+source:wms-eu-1,event-type:StockLevelChanged\tKB-87-ISO\t{"sku":"KB-87-ISO","warehouse":"EU-1","onHand":142,"reserved":18,"available":124,"reorderPoint":40,"updatedAt":"%TS-7200%"}
+source:wms-eu-1,event-type:StockLevelChanged\tCBL-USBC-2M\t{"sku":"CBL-USBC-2M","warehouse":"EU-1","onHand":2891,"reserved":204,"available":2687,"reorderPoint":500,"updatedAt":"%TS-7100%"}
+source:wms-us-1,event-type:StockLevelChanged\tHDD-2TB\t{"sku":"HDD-2TB","warehouse":"US-1","onHand":57,"reserved":9,"available":48,"reorderPoint":25,"updatedAt":"%TS-6800%"}
+source:wms-eu-1,event-type:StockLevelChanged\tMON-27-4K\t{"sku":"MON-27-4K","warehouse":"EU-1","onHand":31,"reserved":6,"available":25,"reorderPoint":15,"updatedAt":"%TS-6400%"}
+source:wms-eu-2,event-type:StockLevelChanged\tCHR-ERG\t{"sku":"CHR-ERG","warehouse":"EU-2","onHand":12,"reserved":11,"available":1,"reorderPoint":10,"updatedAt":"%TS-5900%","alert":"below-reorder-point"}
+source:wms-eu-1,event-type:StockLevelChanged\tLMP-DESK\t{"sku":"LMP-DESK","warehouse":"EU-1","onHand":210,"reserved":3,"available":207,"reorderPoint":50,"updatedAt":"%TS-5200%"}
+source:wms-eu-1,event-type:StockLevelChanged\tKB-87-ISO\t{"sku":"KB-87-ISO","warehouse":"EU-1","onHand":141,"reserved":19,"available":122,"reorderPoint":40,"updatedAt":"%TS-4300%"}
+source:wms-us-1,event-type:StockLevelChanged\tCBL-USBC-1M\t{"sku":"CBL-USBC-1M","warehouse":"US-1","onHand":1740,"reserved":88,"available":1652,"reorderPoint":400,"updatedAt":"%TS-3800%"}
+source:wms-eu-2,event-type:StockCounted,count-type:cycle\tKEY-CAPS-PBT\t{"sku":"KEY-CAPS-PBT","warehouse":"EU-2","onHand":64,"reserved":2,"available":62,"reorderPoint":20,"updatedAt":"%TS-3000%","countedBy":"cycle-count-2026-09"}
+source:wms-us-1,event-type:StockLevelChanged\tLAP-14-PRO\t{"sku":"LAP-14-PRO","warehouse":"US-1","onHand":8,"reserved":8,"available":0,"reorderPoint":6,"updatedAt":"%TS-2400%","alert":"out-of-stock"}
+source:wms-eu-1,event-type:StockLevelChanged\tMUG-KUI\t{"sku":"MUG-KUI","warehouse":"EU-1","onHand":436,"reserved":12,"available":424,"reorderPoint":100,"updatedAt":"%TS-1800%"}
+source:wms-eu-1,event-type:StockLevelChanged\tKB-87-ISO\t{"sku":"KB-87-ISO","warehouse":"EU-1","onHand":139,"reserved":15,"available":124,"reorderPoint":40,"updatedAt":"%TS-600%"}
+source:wms-eu-2,event-type:StockLevelChanged\tBLB-E27\t{"sku":"BLB-E27","warehouse":"EU-2","onHand":903,"reserved":41,"available":862,"reorderPoint":200,"updatedAt":"%TS-180%"}

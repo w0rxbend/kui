@@ -1,0 +1,27 @@
+# Messages for audit.log.raw. THESE ARE NOT JSON.
+#
+# This topic exists so the message browser is forced to show a value it cannot parse. Half the
+# lines are logfmt (key=value pairs, the format used by a lot of Go services), the other half are
+# a plain application log line with no structure at all. Neither has a key or headers: this is
+# what a log shipper writes when it is simply forwarding text.
+#
+# If KUI ever renders one of these as "invalid JSON" or as an error, that is a bug, and this topic
+# is how you find it in ten seconds instead of in a support ticket.
+#mode: value-only
+
+ts=%TS-6300% level=info actor=user:marta.zielinska action=login result=success ip=10.4.9.31 mfa=totp
+ts=%TS-6100% level=info actor=user:marta.zielinska action=topic.read target=orders.v1 result=allowed
+%TS-5900% INFO  [audit-writer-3] AuditService - replayed 412 events for tenant acme in 88ms
+ts=%TS-5600% level=warn actor=service:billing-sync action=credential.rotate result=deferred reason="lock held by billing-sync-2"
+ts=%TS-5100% level=info actor=user:owen.pritchard action=login result=failure ip=88.12.240.7 attempts=3
+%TS-4800% ERROR [http-nio-8080-exec-7] SessionFilter - rejected session token: expired 00:04:12 ago (subject=owen.pritchard)
+ts=%TS-4400% level=info actor=user:owen.pritchard action=login result=success ip=88.12.240.7 mfa=webauthn
+ts=%TS-4000% level=info actor=system action=retention.enforce target=analytics.pageviews deleted_segments=6 freed_bytes=734003200
+%TS-3500% WARN  [cleaner-0] LogCleaner - compaction of customers.profiles-2 took 4213ms, dirty ratio was 0.62
+ts=%TS-3100% level=info actor=user:dana.whitfield action=acl.create target=payments.transactions principal=User:reporting operation=Read
+ts=%TS-2700% level=error actor=service:order-fulfilment action=consume target=orders.v1 result=failure error="deserialisation failed at offset 14"
+%TS-2300% INFO  [order-fulfilment-1] DeadLetterProducer - forwarded orders.v1-2@14 to orders.v1.DLQ
+ts=%TS-1900% level=info actor=user:aneta.kowal action=topic.create target=inventory.stock-levels partitions=4 result=allowed
+ts=%TS-1400% level=warn actor=system action=quota.throttle principal=User:analytics-indexer throttle_ms=340
+%TS-900% INFO  [controller-1] KafkaController - preferred leader election completed for 3 partitions
+ts=%TS-400% level=info actor=user:marta.zielinska action=group.offsets.describe target=order-fulfilment result=allowed

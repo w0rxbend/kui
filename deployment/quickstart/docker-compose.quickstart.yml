@@ -1,0 +1,148 @@
+# The quickstart: one Kafka broker, some data in it, and KUI pointed at it.
+#
+# THIS IS A DEMONSTRATION ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. The broker speaks plain text
+# with no authentication and no encryption, and KUI serves its session cookie without `Secure` so
+# that plain HTTP on localhost works. Both are wrong anywhere a network can reach them.
+#
+# Do not run this file by hand — run `deployment/quickstart/quickstart.sh`, which builds the KUI
+# image if it is missing and then calls this file. The script is the documented entry point; this
+# file is what it drives.
+
+name: kui-quickstart
+
+services:
+  # ---------------------------------------------------------------------------------------------
+  # Kafka 4.3.1, one node, KRaft mode: it is its own controller and there is no ZooKeeper.
+  #
+  # Why this exact version rather than a floating tag such as `apache/kafka:latest`: a quickstart
+  # that pulls whatever was published this morning is a quickstart that can break without anybody
+  # changing a line of KUI, and the failure lands on the one person least equipped to debug it — a
+  # newcomer running the project for the first time. 4.3.1 is a patch release of the current 4.x
+  # line, which is the first Kafka series that removed ZooKeeper entirely, so this is a modern
+  # broker rather than a KRaft-mode-enabled old one. It is `apache/kafka`, the image the Apache
+  # Kafka project publishes itself, and it carries the command-line tools the seed step uses.
+  # ---------------------------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: kui-quickstart-kafka
+    ports:
+      # Published so you can point your own console tools, kcat, or an IDE at the same broker.
+      # KUI does not use this route; it reaches the broker over the private network below.
+      - "${KUI_QUICKSTART_KAFKA_PORT:-9092}:29092"
+    environment:
+      # A fixed cluster id. Generating one per run would work, but a fixed value means the broker
+      # formats its storage identically on every machine, which makes a support question about it
+      # answerable.
+      CLUSTER_ID: kui-quickstart-0000000001
+
+      # One node that is both broker and controller. `KAFKA_CONTROLLER_QUORUM_VOTERS` names the
+      # quorum: node 1, reachable at kafka:9093. With a single node it is a quorum of one.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # Three listeners, because the address a client must be told to use depends on where the
+      # client is. A container on this network resolves `kafka`; a program on your laptop cannot,
+      # and resolves `localhost` instead. A Kafka client always reconnects to the address the
+      # broker advertises, not the one it was given, so advertising the wrong one produces the
+      # classic failure where the first connection succeeds and every later one times out.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:${KUI_QUICKSTART_KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+
+      # Single node, so every internal topic has to be happy with one replica. The defaults are 3
+      # and the broker refuses to create the consumer-offsets topic without them.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      # Do not wait three seconds for other consumers to join a group that will never have any.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # No log directory is mounted, on purpose: the broker keeps its data inside the container's
+      # own writable layer, so removing the container removes the data and there is no volume left
+      # behind for anyone to find months later. A quickstart's data is a demonstration, not
+      # something to preserve.
+    healthcheck:
+      # THE IMPORTANT LINE IN THIS FILE. A Kafka container reports itself started long before it
+      # can answer a metadata request: the process is up, the port accepts connections, and the
+      # controller has not yet finished electing itself and publishing the cluster's metadata. A
+      # TCP check, or Compose's plain `depends_on`, is satisfied at that moment, and anything that
+      # connects then gets its request refused or times out.
+      #
+      # `kafka-topics.sh --list` is a real metadata request over the real client protocol, so it
+      # cannot pass until the broker can actually serve a client. That is the difference between
+      # "started" and "ready", and it is why the seed step and KUI wait on this and not on a port.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 15s
+    networks:
+      - kui-quickstart
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------------------------
+  # A one-shot container that puts something worth looking at into the broker, then exits.
+  # ---------------------------------------------------------------------------------------------
+  seed:
+    image: apache/kafka:4.3.1
+    container_name: kui-quickstart-seed
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/opt/kui/seed.sh"]
+    volumes:
+      - ./seed.sh:/opt/kui/seed.sh:ro
+    networks:
+      - kui-quickstart
+    # A seed that failed and was restarted would seed twice. It is written to be safe to re-run,
+    # but a restart loop hiding a real error is worse than a visible failure.
+    restart: "no"
+
+  # ---------------------------------------------------------------------------------------------
+  # KUI itself, in its all-in-one shape: the gateway and every service in one process (ADR-005).
+  # The distributed shape lives in ../compose/docker-compose.yml and exists to demonstrate fault
+  # isolation between processes; a newcomer does not need three containers to see the product.
+  # ---------------------------------------------------------------------------------------------
+  kui:
+    image: kui-allinone:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-quickstart-kui
+    command: ["--config", "/etc/kui/kui-quickstart.yaml"]
+    ports:
+      - "${KUI_PORT:-8080}:8080"
+    environment:
+      # Human-readable log lines. The images default to one JSON object per line, which is right
+      # for a log collector and unreadable for the person who just ran the quickstart.
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-quickstart.yaml:/etc/kui/kui-quickstart.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      kafka:
+        condition: service_healthy
+      seed:
+        # Wait for the data to be there, so the first screen is never a half-seeded cluster.
+        condition: service_completed_successfully
+        # But do not refuse to start KUI when seeding failed. KUI's whole design position is that
+        # it stays up and reports what is broken rather than disappearing along with it; a
+        # quickstart that showed nothing at all because a topic could not be created would be
+        # contradicting the product it is demonstrating.
+        required: false
+    networks:
+      - kui-quickstart
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/v1/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+networks:
+  kui-quickstart:
+    driver: bridge

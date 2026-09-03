@@ -1,0 +1,15 @@
+# Messages for _schemas, the internal topic Confluent Schema Registry keeps its state in.
+#
+# The registry stores each registered schema as one compacted record whose key is a small JSON
+# document naming the subject and version. Copying that shape here means the topic looks the way
+# it would on a cluster that actually runs a registry, so the "show internal topics" switch has
+# something believable behind it.
+#
+# Nothing reads these records in the quickstart. No Schema Registry is running; this is the topic
+# it would have created, populated with the schemas the other topics here would have registered.
+#mode: key-value
+
+{"keytype":"SCHEMA","subject":"orders.v1-value","version":1,"magic":1}\t{"subject":"orders.v1-value","version":1,"id":1,"schemaType":"JSON","schema":"{\"type\":\"object\",\"required\":[\"orderId\",\"customerId\"],\"properties\":{\"orderId\":{\"type\":\"string\"},\"customerId\":{\"type\":\"string\"},\"total\":{\"type\":\"number\"}}}","deleted":false}
+{"keytype":"SCHEMA","subject":"payments.transactions-value","version":1,"magic":1}\t{"subject":"payments.transactions-value","version":1,"id":2,"schemaType":"JSON","schema":"{\"type\":\"object\",\"required\":[\"paymentId\",\"amount\",\"currency\",\"status\"],\"properties\":{\"paymentId\":{\"type\":\"string\"},\"amount\":{\"type\":\"number\"},\"currency\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"}}}","deleted":false}
+{"keytype":"SCHEMA","subject":"customers.profiles-value","version":2,"magic":1}\t{"subject":"customers.profiles-value","version":2,"id":3,"schemaType":"JSON","schema":"{\"type\":\"object\",\"required\":[\"customerId\",\"tier\"],\"properties\":{\"customerId\":{\"type\":\"string\"},\"tier\":{\"type\":\"string\",\"enum\":[\"bronze\",\"silver\",\"gold\",\"platinum\"]}}}","deleted":false}
+{"keytype":"NOOP","magic":1}\t<NULL>

@@ -1,0 +1,14 @@
+# Messages for payments.transactions. Keyed, but with no headers: plenty of real producers never
+# set any, and the interface must not look broken when the header list is empty.
+#mode: key-value
+
+PAY-77120\t{"paymentId":"PAY-77120","orderId":"ORD-10242","amount":24.00,"currency":"GBP","status":"SETTLED","method":{"type":"card","network":"visa","last4":"4242"},"processedAt":"%TS-5180%","fees":{"processing":0.44,"currency":"GBP"}}
+PAY-77121\t{"paymentId":"PAY-77121","orderId":"ORD-10244","amount":82.40,"currency":"USD","status":"SETTLED","method":{"type":"wallet","provider":"applepay"},"processedAt":"%TS-4080%","fees":{"processing":1.21,"currency":"USD"}}
+PAY-77122\t{"paymentId":"PAY-77122","orderId":"ORD-10246","amount":336.75,"currency":"GBP","status":"SETTLED","method":{"type":"card","network":"mastercard","last4":"5100"},"processedAt":"%TS-2900%","fees":{"processing":4.72,"currency":"GBP"}}
+PAY-77123\t{"paymentId":"PAY-77123","orderId":"ORD-10248","amount":19.99,"currency":"USD","status":"SETTLED","method":{"type":"card","network":"visa","last4":"1881"},"processedAt":"%TS-880%","fees":{"processing":0.68,"currency":"USD"},"recurring":true}
+PAY-77124\t{"paymentId":"PAY-77124","orderId":"ORD-10243","amount":1899.00,"currency":"EUR","status":"REFUND_PENDING","method":{"type":"card","network":"visa","last4":"4242"},"processedAt":"%TS-3290%","refundOf":"PAY-77119"}
+PAY-77125\t{"paymentId":"PAY-77125","orderId":"ORD-10251","amount":74.00,"currency":"EUR","status":"DECLINED","method":{"type":"card","network":"maestro","last4":"6703"},"processedAt":"%TS-2400%","declineReason":"insufficient_funds","retryable":true}
+PAY-77126\t{"paymentId":"PAY-77126","orderId":"ORD-10251","amount":74.00,"currency":"EUR","status":"SETTLED","method":{"type":"card","network":"visa","last4":"4242"},"processedAt":"%TS-2280%","retryOf":"PAY-77125"}
+PAY-77127\t{"paymentId":"PAY-77127","orderId":"ORD-10252","amount":12.00,"currency":"PLN","status":"PENDING","method":{"type":"transfer","bank":"mBank"},"processedAt":"%TS-600%"}
+PAY-77128\t{"paymentId":"PAY-77128","orderId":"ORD-10247","amount":459.00,"currency":"PLN","status":"AUTHORISED","method":{"type":"blik"},"processedAt":"%TS-1490%","capturedAt":null}
+PAY-77129\t{"paymentId":"PAY-77129","orderId":"ORD-10253","amount":5400.00,"currency":"USD","status":"HELD_FOR_REVIEW","method":{"type":"card","network":"amex","last4":"0005"},"processedAt":"%TS-300%","risk":{"score":88,"rules":["velocity","new-device","high-value"]}}

@@ -1,0 +1,20 @@
+# What `docker build` must not copy into the build context for deployment/quickstart/Dockerfile.
+#
+# BuildKit reads `<dockerfile>.dockerignore` next to the Dockerfile in preference to a `.dockerignore`
+# at the root of the context, which is why this file is here rather than at the top of the
+# repository: the quickstart owns its own exclusions and does not need to add a file to the root.
+#
+# The point is not tidiness. The build context is sent to the Docker daemon before anything runs;
+# including `out/` (a full Mill build tree, often gigabytes) or `node_modules/` would make the
+# newcomer wait through a large upload for files the build then ignores.
+
+out/
+node_modules/
+.git/
+.idea/
+.vscode/
+.bsp/
+.metals/
+.bloop/
+e2e/node_modules/
+**/*.log

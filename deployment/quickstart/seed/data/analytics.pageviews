@@ -1,0 +1,45 @@
+# Messages for analytics.pageviews: a firehose. No keys and no headers, which is why every
+# record lands on a partition round-robin and the topic spreads evenly across all twelve.
+#
+# The payloads are the same shape as each other but not identical: roughly one in five
+# carries an A/B experiment block, one in four a viewport, and a few an explicit null. That
+# is what a real event stream looks like once a product team has been shipping for a year,
+# and it is what makes a JSON viewer worth having.
+#mode: value-only
+
+{"sessionId":"s_100000","path":"/","ts":"%TS-5800%","device":"desktop","browser":"chrome","country":"PL","referrer":"google","durationMs":120,"experiment":{"name":"checkout-b","variant":"control"}}
+{"sessionId":"s_10c34f","path":"/products/kb-87-iso","ts":"%TS-5640%","device":"mobile","browser":"firefox","country":"GB","referrer":"direct","durationMs":157,"viewport":{"w":377,"h":663}}
+{"sessionId":"s_11869e","path":"/products/mon-27-4k","ts":"%TS-5480%","device":"tablet","browser":"safari","country":"US","referrer":"newsletter","durationMs":194}
+{"sessionId":"s_1249ed","path":"/checkout","ts":"%TS-5320%","device":"desktop","browser":"edge","country":"DE","referrer":"twitter","durationMs":231,"userId":null}
+{"sessionId":"s_130d3c","path":"/checkout/payment","ts":"%TS-5160%","device":"mobile","browser":"chrome","country":"IT","referrer":"direct","durationMs":268}
+{"sessionId":"s_13d08b","path":"/account/orders","ts":"%TS-5000%","device":"desktop","browser":"chrome","country":"IN","referrer":"google","durationMs":305,"experiment":{"name":"checkout-b","variant":"treatment"},"viewport":{"w":445,"h":755}}
+{"sessionId":"s_1493da","path":"/search?q=keyboard","ts":"%TS-4840%","device":"desktop","browser":"chrome","country":"US","referrer":"google","durationMs":342}
+{"sessionId":"s_155729","path":"/blog/mechanical-switches-explained","ts":"%TS-4680%","device":"mobile","browser":"firefox","country":"GB","referrer":"direct","durationMs":379}
+{"sessionId":"s_161a78","path":"/products/lap-14-pro","ts":"%TS-4520%","device":"tablet","browser":"safari","country":"PL","referrer":"newsletter","durationMs":416}
+{"sessionId":"s_16ddc7","path":"/support/returns","ts":"%TS-4360%","device":"desktop","browser":"edge","country":"GB","referrer":"twitter","durationMs":453,"viewport":{"w":513,"h":847}}
+{"sessionId":"s_17a116","path":"/","ts":"%TS-4200%","device":"mobile","browser":"chrome","country":"US","referrer":"direct","durationMs":490,"experiment":{"name":"checkout-b","variant":"control"},"userId":null}
+{"sessionId":"s_186465","path":"/products/kb-87-iso","ts":"%TS-4040%","device":"desktop","browser":"chrome","country":"DE","referrer":"google","durationMs":527}
+{"sessionId":"s_1927b4","path":"/products/mon-27-4k","ts":"%TS-3880%","device":"desktop","browser":"chrome","country":"IT","referrer":"google","durationMs":564}
+{"sessionId":"s_19eb03","path":"/checkout","ts":"%TS-3720%","device":"mobile","browser":"firefox","country":"IN","referrer":"direct","durationMs":601,"viewport":{"w":581,"h":939}}
+{"sessionId":"s_1aae52","path":"/checkout/payment","ts":"%TS-3560%","device":"tablet","browser":"safari","country":"US","referrer":"newsletter","durationMs":638}
+{"sessionId":"s_1b71a1","path":"/account/orders","ts":"%TS-3400%","device":"desktop","browser":"edge","country":"GB","referrer":"twitter","durationMs":675,"experiment":{"name":"checkout-b","variant":"treatment"}}
+{"sessionId":"s_1c34f0","path":"/search?q=keyboard","ts":"%TS-3240%","device":"mobile","browser":"chrome","country":"PL","referrer":"direct","durationMs":712}
+{"sessionId":"s_1cf83f","path":"/blog/mechanical-switches-explained","ts":"%TS-3080%","device":"desktop","browser":"chrome","country":"GB","referrer":"google","durationMs":749,"userId":null,"viewport":{"w":649,"h":1031}}
+{"sessionId":"s_1dbb8e","path":"/products/lap-14-pro","ts":"%TS-2920%","device":"desktop","browser":"chrome","country":"US","referrer":"google","durationMs":786}
+{"sessionId":"s_1e7edd","path":"/support/returns","ts":"%TS-2760%","device":"mobile","browser":"firefox","country":"DE","referrer":"direct","durationMs":823}
+{"sessionId":"s_1f422c","path":"/","ts":"%TS-2600%","device":"tablet","browser":"safari","country":"IT","referrer":"newsletter","durationMs":860,"experiment":{"name":"checkout-b","variant":"control"}}
+{"sessionId":"s_20057b","path":"/products/kb-87-iso","ts":"%TS-2440%","device":"desktop","browser":"edge","country":"IN","referrer":"twitter","durationMs":897,"viewport":{"w":717,"h":1123}}
+{"sessionId":"s_20c8ca","path":"/products/mon-27-4k","ts":"%TS-2280%","device":"mobile","browser":"chrome","country":"US","referrer":"direct","durationMs":934}
+{"sessionId":"s_218c19","path":"/checkout","ts":"%TS-2120%","device":"desktop","browser":"chrome","country":"GB","referrer":"google","durationMs":971}
+{"sessionId":"s_224f68","path":"/checkout/payment","ts":"%TS-1960%","device":"desktop","browser":"chrome","country":"PL","referrer":"google","durationMs":1008,"userId":null}
+{"sessionId":"s_2312b7","path":"/account/orders","ts":"%TS-1800%","device":"mobile","browser":"firefox","country":"GB","referrer":"direct","durationMs":1045,"experiment":{"name":"checkout-b","variant":"treatment"},"viewport":{"w":785,"h":1215}}
+{"sessionId":"s_23d606","path":"/search?q=keyboard","ts":"%TS-1640%","device":"tablet","browser":"safari","country":"US","referrer":"newsletter","durationMs":1082}
+{"sessionId":"s_249955","path":"/blog/mechanical-switches-explained","ts":"%TS-1480%","device":"desktop","browser":"edge","country":"DE","referrer":"twitter","durationMs":1119}
+{"sessionId":"s_255ca4","path":"/products/lap-14-pro","ts":"%TS-1320%","device":"mobile","browser":"chrome","country":"IT","referrer":"direct","durationMs":1156}
+{"sessionId":"s_261ff3","path":"/support/returns","ts":"%TS-1160%","device":"desktop","browser":"chrome","country":"IN","referrer":"google","durationMs":1193,"viewport":{"w":853,"h":1307}}
+{"sessionId":"s_26e342","path":"/","ts":"%TS-1000%","device":"desktop","browser":"chrome","country":"US","referrer":"google","durationMs":1230,"experiment":{"name":"checkout-b","variant":"control"}}
+{"sessionId":"s_27a691","path":"/products/kb-87-iso","ts":"%TS-840%","device":"mobile","browser":"firefox","country":"GB","referrer":"direct","durationMs":1267,"userId":null}
+{"sessionId":"s_2869e0","path":"/products/mon-27-4k","ts":"%TS-680%","device":"tablet","browser":"safari","country":"PL","referrer":"newsletter","durationMs":1304}
+{"sessionId":"s_292d2f","path":"/checkout","ts":"%TS-520%","device":"desktop","browser":"edge","country":"GB","referrer":"twitter","durationMs":1341,"viewport":{"w":921,"h":1399}}
+{"sessionId":"s_29f07e","path":"/checkout/payment","ts":"%TS-360%","device":"mobile","browser":"chrome","country":"US","referrer":"direct","durationMs":1378}
+{"sessionId":"s_2ab3cd","path":"/account/orders","ts":"%TS-200%","device":"desktop","browser":"chrome","country":"DE","referrer":"google","durationMs":1415,"experiment":{"name":"checkout-b","variant":"treatment"}}

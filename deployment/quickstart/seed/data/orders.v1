@@ -1,0 +1,29 @@
+# Messages for orders.v1. See README.md for the file format.
+#
+# Every line is: headers \t key \t value. The literal two characters \t are the field separator,
+# not a real tab, so that this file survives being opened in any editor. seed.sh turns them into
+# real tabs before handing the line to Kafka's console producer.
+#
+# %TS-n% is replaced with an ISO-8601 UTC timestamp n seconds before the seed runs, so the data
+# looks like it was produced by a system that is running now rather than one frozen in 2026.
+#
+# The payloads deliberately do not all have the same fields: `orders` in a real system grows new
+# ones over time and old messages never gain them. A message browser has to cope with that.
+#mode: headers-key-value
+
+trace-id:0f9c1a4b7e2d,event-type:OrderPlaced,schema-version:3\tORD-10241\t{"orderId":"ORD-10241","customerId":"CUST-8812","placedAt":"%TS-5400%","currency":"EUR","total":149.90,"items":[{"sku":"KB-87-ISO","name":"Mechanical keyboard, ISO","qty":1,"unitPrice":129.00},{"sku":"CBL-USBC-2M","name":"USB-C cable 2m","qty":2,"unitPrice":10.45}],"shipping":{"country":"PL","city":"Wroclaw","method":"courier"}}
+trace-id:3b8e0d6f1c74,event-type:OrderPlaced,schema-version:3\tORD-10242\t{"orderId":"ORD-10242","customerId":"CUST-2049","placedAt":"%TS-5210%","currency":"GBP","total":24.00,"items":[{"sku":"MUG-KUI","name":"Enamel mug","qty":2,"unitPrice":12.00}],"shipping":{"country":"GB","city":"Bristol","method":"post"}}
+trace-id:3b8e0d6f1c74,event-type:OrderPaid,schema-version:3\tORD-10242\t{"orderId":"ORD-10242","paidAt":"%TS-5180%","amount":24.00,"currency":"GBP","paymentId":"PAY-77120","method":"card"}
+trace-id:c41d90ab5e18,event-type:OrderPlaced,schema-version:2\tORD-10243\t{"orderId":"ORD-10243","customerId":"CUST-8812","placedAt":"%TS-4720%","currency":"EUR","total":1899.00,"items":[{"sku":"LAP-14-PRO","name":"14\" laptop","qty":1,"unitPrice":1899.00}]}
+trace-id:c41d90ab5e18,event-type:OrderCancelled,schema-version:2,reason:customer-request\tORD-10243\t{"orderId":"ORD-10243","cancelledAt":"%TS-3300%","reason":"customer-request","refund":{"amount":1899.00,"currency":"EUR","status":"pending"}}
+trace-id:7de2f0c93a6b,event-type:OrderPlaced,schema-version:3\tORD-10244\t{"orderId":"ORD-10244","customerId":"CUST-5501","placedAt":"%TS-4100%","currency":"USD","total":82.40,"items":[{"sku":"HDD-2TB","name":"Portable drive 2TB","qty":1,"unitPrice":74.00},{"sku":"CBL-USBC-1M","name":"USB-C cable 1m","qty":1,"unitPrice":8.40}],"shipping":{"country":"US","city":"Austin","method":"courier"},"giftMessage":null}
+trace-id:7de2f0c93a6b,event-type:OrderPaid,schema-version:3\tORD-10244\t{"orderId":"ORD-10244","paidAt":"%TS-4080%","amount":82.40,"currency":"USD","paymentId":"PAY-77121","method":"wallet"}
+trace-id:a90b12cd45ef,event-type:OrderPlaced,schema-version:3\tORD-10245\t{"orderId":"ORD-10245","customerId":"CUST-3310","placedAt":"%TS-3600%","currency":"EUR","total":0.00,"items":[],"note":"replacement shipment, no charge"}
+trace-id:55c7ea1908bd,event-type:OrderPlaced,schema-version:3\tORD-10246\t{"orderId":"ORD-10246","customerId":"CUST-2049","placedAt":"%TS-2950%","currency":"GBP","total":336.75,"items":[{"sku":"MON-27-4K","name":"27\" 4K monitor","qty":1,"unitPrice":329.00},{"sku":"CBL-DP-2M","name":"DisplayPort cable 2m","qty":1,"unitPrice":7.75}],"shipping":{"country":"GB","city":"Bristol","method":"courier"}}
+trace-id:55c7ea1908bd,event-type:OrderPaid,schema-version:3\tORD-10246\t{"orderId":"ORD-10246","paidAt":"%TS-2900%","amount":336.75,"currency":"GBP","paymentId":"PAY-77122","method":"card"}
+trace-id:55c7ea1908bd,event-type:OrderShipped,schema-version:3\tORD-10246\t{"orderId":"ORD-10246","shippedAt":"%TS-1750%","carrier":"DPD","tracking":"DPD-4471203881","estimatedDelivery":"%TS+86400%"}
+trace-id:e2411f7a0c99,event-type:OrderPlaced,schema-version:3\tORD-10247\t{"orderId":"ORD-10247","customerId":"CUST-9007","placedAt":"%TS-1500%","currency":"PLN","total":459.00,"items":[{"sku":"CHR-ERG","name":"Ergonomic chair","qty":1,"unitPrice":459.00}],"shipping":{"country":"PL","city":"Gdansk","method":"pallet"},"metadata":{"channel":"mobile-app","appVersion":"5.2.1","experiment":"checkout-b"}}
+trace-id:1c6d83be2f40,event-type:OrderPlaced,schema-version:3\tORD-10248\t{"orderId":"ORD-10248","customerId":"CUST-5501","placedAt":"%TS-900%","currency":"USD","total":19.99,"items":[{"sku":"SUB-PRO-1M","name":"Pro subscription, 1 month","qty":1,"unitPrice":19.99}],"digital":true}
+trace-id:1c6d83be2f40,event-type:OrderPaid,schema-version:3\tORD-10248\t{"orderId":"ORD-10248","paidAt":"%TS-880%","amount":19.99,"currency":"USD","paymentId":"PAY-77123","method":"card"}
+trace-id:6ab4c2e70d15,event-type:OrderPlaced,schema-version:3\tORD-10249\t{"orderId":"ORD-10249","customerId":"CUST-3310","placedAt":"%TS-420%","currency":"EUR","total":63.50,"items":[{"sku":"LMP-DESK","name":"Desk lamp","qty":1,"unitPrice":45.00},{"sku":"BLB-E27","name":"Bulb E27","qty":2,"unitPrice":9.25}],"shipping":{"country":"DE","city":"Leipzig","method":"courier"}}
+trace-id:8f03d5a1b7c2,event-type:OrderPlaced,schema-version:3\tORD-10250\t{"orderId":"ORD-10250","customerId":"CUST-8812","placedAt":"%TS-120%","currency":"EUR","total":58.00,"items":[{"sku":"KEY-CAPS-PBT","name":"PBT keycap set","qty":1,"unitPrice":58.00}],"shipping":{"country":"PL","city":"Wroclaw","method":"courier"}}

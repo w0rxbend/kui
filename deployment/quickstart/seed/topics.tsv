@@ -1,0 +1,62 @@
+# The topics the quickstart creates. One row per topic, tab-separated, in this order:
+#
+#   name <TAB> partitions <TAB> replication <TAB> configs
+#
+# "replication" is what we would LIKE. A Kafka broker refuses to create a topic whose replication
+# factor is higher than the number of brokers it has, and the quickstart runs a single broker, so
+# seed.sh counts the brokers first and lowers any number above that count. Written this way, the
+# same file also does the right thing on a three-broker cluster: the numbers below are then used
+# as they are, and the topic list stops being uniform.
+#
+# "configs" is a SEMICOLON-separated list of Kafka topic-level configuration keys, passed straight
+# through to `kafka-topics.sh --config`. Use `-` for "no configuration, take the broker defaults".
+# Semicolons rather than commas because a Kafka config VALUE can itself contain a comma:
+# `cleanup.policy=compact,delete` below is one setting, not two.
+# Every key here is a real Kafka topic config; a typo makes topic creation fail loudly rather than
+# quietly producing a topic that behaves differently from what this file claims.
+#
+# Retention is written in milliseconds because that is the unit `retention.ms` takes. The comment
+# beside each row says what it is in human units.
+#
+# Lines starting with # and blank lines are ignored.
+
+# --- The main event streams -------------------------------------------------------------------
+# A busy, keyed, partitioned stream: the shape most people's most important topic has.
+orders.v1	6	3	retention.ms=604800000;min.insync.replicas=2;compression.type=producer
+# 7 days. min.insync.replicas=2 is the usual durability setting for a topic you cannot lose.
+
+# Fewer partitions, longer retention: money is kept for longer and moves less.
+payments.transactions	3	3	retention.ms=2592000000;min.insync.replicas=2
+# 30 days.
+
+# High volume, short retention, no keys: the classic firehose.
+analytics.pageviews	12	1	retention.ms=86400000;retention.bytes=1073741824;compression.type=lz4
+# 1 day, or 1 GiB per partition, whichever comes first.
+
+# --- Compacted topics -------------------------------------------------------------------------
+# A compacted topic is a keyed table, not a log: Kafka keeps the newest value for each key for
+# ever and throws older ones away. KUI draws these differently, which is why one is here.
+customers.profiles	3	3	cleanup.policy=compact;min.cleanable.dirty.ratio=0.1;segment.ms=60000;delete.retention.ms=86400000
+
+# compact AND delete together: keep the latest value per key, but also drop anything older than
+# the retention window. Stock levels for a product nobody sells any more should eventually go.
+inventory.stock-levels	4	2	cleanup.policy=compact,delete;retention.ms=1209600000;segment.ms=60000
+# 14 days.
+
+# --- Not JSON ---------------------------------------------------------------------------------
+# Plain-text log lines. The message browser has to show a value it cannot parse as JSON without
+# pretending it failed, so the quickstart must contain one.
+audit.log.raw	1	1	retention.ms=7776000000;cleanup.policy=delete;max.message.bytes=2097152
+# 90 days.
+
+# --- The failure path -------------------------------------------------------------------------
+# A dead-letter queue: where orders.v1 messages go when a consumer cannot process them. Small,
+# and interesting precisely because it is not empty.
+orders.v1.DLQ	3	3	retention.ms=1209600000
+# 14 days.
+
+# --- An internal topic ------------------------------------------------------------------------
+# A leading underscore is the convention for "this belongs to a piece of infrastructure, not to
+# you", and user interfaces hide these behind a "show internal topics" switch. This is the topic
+# Confluent Schema Registry keeps its schemas in, with the configuration it insists on.
+_schemas	1	3	cleanup.policy=compact

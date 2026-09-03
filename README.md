@@ -40,7 +40,27 @@ into separate containers for production. No code changes between the two.
 
 ## Quick start
 
-Two ways in. Both need only a JDK 21 and this repository; the second also needs Docker.
+Three ways in. The first needs only Docker; the other two need a JDK 21 and this repository, and the
+third also needs Docker.
+
+### Just show me it running, with a Kafka behind it
+
+```
+deployment/quickstart/quickstart.sh
+```
+
+One command, and Docker is the only thing that has to be installed — no JDK, no Mill, no Scala. It
+starts a single-node Kafka 4.3.1 in KRaft mode, waits until the broker can genuinely serve metadata
+rather than merely until it has started, seeds it with topics, JSON messages and a consumer group
+that is behind, starts KUI pointed at it, and prints the URL. `quickstart.sh down` removes all of it,
+volumes included.
+
+Be clear about what you see today: KUI does not connect to Kafka yet — that is Milestone 1, and this
+release is Milestone 0 — so you get the working KUI shell and a home page saying cluster overviews
+appear once the clusters feature is installed, with a real, seeded broker sitting behind it waiting
+for that work to land. [`deployment/quickstart/README.md`](deployment/quickstart/README.md) explains
+what runs, why the broker's readiness check is what it is, and how to run it when 8080 or 9092 are
+already taken.
 
 ### See the interface, and change it
 

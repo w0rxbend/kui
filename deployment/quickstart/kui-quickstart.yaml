@@ -1,0 +1,66 @@
+# The quickstart's KUI configuration.
+#
+# It is a copy of the all-in-one configuration with one addition — the broker this quickstart
+# starts, written under `kui.clusters`. It is a copy rather than a reference to
+# ../compose/kui-allinone.yaml because that file belongs to the Compose topology and must stay a
+# faithful example of it; the quickstart is allowed to add a cluster to its own copy without
+# changing what the Compose example demonstrates.
+#
+# THIS IS A DEMONSTRATION CONFIGURATION. There is no TLS and no authentication, in KUI or in the
+# broker it points at.
+#
+# Every key here can also be given as an environment variable — `kui.server.port` becomes
+# `KUI_SERVER_PORT` — or as a command-line flag `--kui.server.port=9090`. Flags beat the
+# environment, the environment beats this file, and this file beats the built-in defaults.
+
+kui:
+  server:
+    # Every interface. Binding 127.0.0.1 inside a container makes the process unreachable from
+    # outside it, which looks exactly like a crash and is not one.
+    host: "0.0.0.0"
+    port: 8080
+    basePath: "/"
+
+    # Plain HTTP on localhost, so the session cookie cannot carry `Secure` or the browser will
+    # refuse to send it back. KUI warns about this on every start and the warning is correct:
+    # never set it anywhere a network can reach.
+    devInsecureCookies: true
+
+  auth:
+    # The only value the current release accepts. Real authentication arrives with the identity
+    # service in M6; anything else here fails the load with a message saying so.
+    type: disabled
+
+  telemetry:
+    # Overridden to `text` by the Compose file, because `docker compose logs` is read by a person.
+    logFormat: json
+    hashUserIds: true
+
+  # ---------------------------------------------------------------------------------------------
+  # The broker this quickstart starts.
+  #
+  # BE CLEAR ABOUT WHAT HAPPENS TODAY: nothing reads this yet. Kafka connectivity is Milestone 1,
+  # which is being planned as this is written, and the current release has no Kafka client in it at
+  # all. The configuration loader accepts everything under `kui.clusters` and ignores it — that is
+  # a deliberate rule in libs/config (`kui.clusters.**` is on its known-keys list), so that a file
+  # written for the version you will upgrade to still loads on the version you are running. Without
+  # that rule the loader would reject this file at start-up, because it rejects any key it does not
+  # recognise rather than silently ignoring your typo.
+  #
+  # So this entry exists for one reason: when M1 lands, the same `quickstart.sh` must show a real
+  # cluster with nothing new to type. Today it changes nothing you can see.
+  #
+  # `kafka:9092` and not `localhost:9092`: KUI reaches the broker across the Compose network by
+  # container name. The port published on your machine is for your own tools.
+  #
+  # The field names follow the cluster record M1's design documents describe
+  # (docs/plans/M1/tasks/STORE-001.md). They are not frozen yet — M1's own configuration task owns
+  # the final shape — so if a name changes there, it changes in this file too, and the command a
+  # newcomer types stays the same.
+  clusters:
+    - id: "quickstart"
+      displayName: "Quickstart (local)"
+      bootstrapServers:
+        - "kafka:9092"
+
+  rbac: {}
