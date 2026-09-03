@@ -90,7 +90,7 @@ object OpenApiMerge {
     *
     * Operation ids are what a generated client turns into method names, so two services claiming `getStatus`
     * would produce a client with one of them missing, silently, in whichever language the integrator used.
-    * Every KUI operation id is already prefixed with its service (`cluster.ping`), so a collision means two
+    * Every KUI operation id is already prefixed with its service (`cluster.list`), so a collision means two
     * services think they are the same service -- worth stopping a release for.
     */
   private def duplicateOperationIds(docs: List[ServiceDoc]): Either[NonEmptyList[String], Unit] = {
