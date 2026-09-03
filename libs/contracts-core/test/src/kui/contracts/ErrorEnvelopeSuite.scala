@@ -43,8 +43,11 @@ final class ErrorEnvelopeSuite extends FunSuite {
     )
   }
 
-  test("both golden documents decode") {
-    GoldenDocuments.all.foreach { document =>
+  test("both envelope documents decode") {
+    List(
+      "error-envelope-validation.json" -> GoldenDocuments.errorEnvelopeValidation,
+      "error-envelope-upstream.json"   -> GoldenDocuments.errorEnvelopeUpstream
+    ).foreach { document =>
       assert(decode[ErrorEnvelope](document._2).isRight, s"${document._1} did not decode")
     }
   }

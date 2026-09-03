@@ -41,9 +41,98 @@ object GoldenDocuments {
       |  "retryable" : true
       |}""".stripMargin
 
+  val capabilitiesSnapshot: String =
+    """{
+      |  "entries" : [
+      |    {
+      |      "key" : {
+      |        "service" : "cluster",
+      |        "cluster" : null
+      |      },
+      |      "state" : {
+      |        "status" : "available"
+      |      },
+      |      "updatedAt" : "2026-09-03T10:11:12.000Z"
+      |    },
+      |    {
+      |      "key" : {
+      |        "service" : "schema",
+      |        "cluster" : "prod-eu"
+      |      },
+      |      "state" : {
+      |        "status" : "not_configured"
+      |      },
+      |      "updatedAt" : "2026-09-03T10:11:12.000Z"
+      |    }
+      |  ],
+      |  "generatedAt" : "2026-09-03T10:11:13.000Z"
+      |}""".stripMargin
+
+  val capabilityChangeUnavailable: String =
+    """{
+      |  "entry" : {
+      |    "key" : {
+      |      "service" : "cluster",
+      |      "cluster" : null
+      |    },
+      |    "state" : {
+      |      "status" : "unavailable",
+      |      "reason" : "UPSTREAM_UNAVAILABLE",
+      |      "message" : "readiness probe failed",
+      |      "since" : "2026-09-03T10:11:12.000Z"
+      |    },
+      |    "updatedAt" : "2026-09-03T10:11:13.000Z"
+      |  },
+      |  "previous" : {
+      |    "status" : "available"
+      |  }
+      |}""".stripMargin
+
+  val serviceCapabilities: String =
+    """{
+      |  "service" : "schema",
+      |  "clusters" : {
+      |    "prod-eu" : {
+      |      "configured" : true,
+      |      "features" : [
+      |        "SCHEMA_REGISTRY"
+      |      ],
+      |      "status" : "available"
+      |    },
+      |    "staging" : {
+      |      "configured" : false,
+      |      "features" : [
+      |      ],
+      |      "status" : "not_configured"
+      |    }
+      |  }
+      |}""".stripMargin
+
+  val sseDone: String =
+    """{
+      |  "reason" : "limit",
+      |  "cursor" : "eyJ2IjoxfQ.c2ln"
+      |}""".stripMargin
+
+  val sseError: String =
+    """{
+      |  "code" : "KUI-UPSTREAM-UNAVAILABLE",
+      |  "message" : "schema-registry could not be reached",
+      |  "details" : [
+      |  ],
+      |  "correlationId" : "3b1fa9c2e4d54f0b",
+      |  "timestamp" : "2026-09-03T10:11:12.000Z",
+      |  "retryable" : true
+      |}""".stripMargin
+
   /** Every constant above, by the file name it is committed under. */
   val all: List[(String, String)] = List(
-    "error-envelope-validation.json" -> errorEnvelopeValidation,
-    "error-envelope-upstream.json"   -> errorEnvelopeUpstream
+    "error-envelope-validation.json"        -> errorEnvelopeValidation,
+    "error-envelope-upstream.json"          -> errorEnvelopeUpstream,
+    "capabilities-snapshot.json"            -> capabilitiesSnapshot,
+    "capability-change-unavailable.json"    -> capabilityChangeUnavailable,
+    "service-capabilities.json"             -> serviceCapabilities,
+    "sse-done.json"                         -> sseDone,
+    "sse-error.json"                        -> sseError
   )
 }

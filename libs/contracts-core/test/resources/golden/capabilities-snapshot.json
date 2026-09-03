@@ -1,0 +1,25 @@
+{
+  "entries" : [
+    {
+      "key" : {
+        "service" : "cluster",
+        "cluster" : null
+      },
+      "state" : {
+        "status" : "available"
+      },
+      "updatedAt" : "2026-09-03T10:11:12.000Z"
+    },
+    {
+      "key" : {
+        "service" : "schema",
+        "cluster" : "prod-eu"
+      },
+      "state" : {
+        "status" : "not_configured"
+      },
+      "updatedAt" : "2026-09-03T10:11:12.000Z"
+    }
+  ],
+  "generatedAt" : "2026-09-03T10:11:13.000Z"
+}

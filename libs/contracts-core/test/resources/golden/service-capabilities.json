@@ -1,0 +1,18 @@
+{
+  "service" : "schema",
+  "clusters" : {
+    "prod-eu" : {
+      "configured" : true,
+      "features" : [
+        "SCHEMA_REGISTRY"
+      ],
+      "status" : "available"
+    },
+    "staging" : {
+      "configured" : false,
+      "features" : [
+      ],
+      "status" : "not_configured"
+    }
+  }
+}

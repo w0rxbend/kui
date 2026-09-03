@@ -1,0 +1,9 @@
+{
+  "code" : "KUI-UPSTREAM-UNAVAILABLE",
+  "message" : "schema-registry could not be reached",
+  "details" : [
+  ],
+  "correlationId" : "3b1fa9c2e4d54f0b",
+  "timestamp" : "2026-09-03T10:11:12.000Z",
+  "retryable" : true
+}

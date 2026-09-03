@@ -497,6 +497,10 @@ and `tracestate` are outside that family and are handled by otel4s.
 
 Each service exposes `GET /health/live`, `GET /health/ready` and `GET /capabilities`:
 
+The response shape is the committed sample
+`libs/contracts-core/test/resources/golden/service-capabilities.json`, which
+`CapabilityDtosSuite` decodes on both platforms:
+
 ```
 GET /capabilities ->
 { "service": "schema",
