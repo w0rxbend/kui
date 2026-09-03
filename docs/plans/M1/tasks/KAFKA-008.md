@@ -335,4 +335,48 @@ in `docs/operations/configuration.md`; the downgrade rules above are its source.
 
 ## Deviations
 
-*(filled in by the implementer, in the same commit)*
+Recorded by the implementer, in the same commit. KAFKA-007, KAFKA-008 and KAFKA-009 landed in one
+commit; the deviations they share are recorded in KAFKA-007 and not repeated here.
+
+### The Testcontainers integration suite is not in this commit
+
+`ClusterAdminIntegrationSuite` and `CapabilityProbeIntegrationSuite` are **not written yet**, and
+neither is the `build.mill` Testcontainers block. The M1 gate review's finding F-11 made
+`libs/testkit`'s `KafkaFixture` / `KafkaTopology` (CFGOP-004) the single home of the container
+topology and made KAFKA-007 depend on it, precisely so that a second PLAINTEXT container is not
+typed in a second file. CFGOP-004 has not landed — the STORE lane recorded the same block for
+STORE-009 in commit `712476d`.
+
+Declaring the containers here anyway would be the M0 review's "same string typed twice in two
+files" finding with a Docker image attached, which is the thing F-11 exists to prevent. So the
+live-broker cases are deferred, and everything that can be asserted without a broker is asserted
+here instead — see the deviation about `AdminConversions` below, which is what made that possible.
+
+**What is still owed, once CFGOP-004 lands:** `ClusterAdminIntegrationSuite`
+(`describeClusterAgainstALiveBroker`, `versionAgainstALiveBroker`,
+`aDeadAddressTimesOutWithinTheConfiguredBound`,
+`theClientIsInvalidatedAfterATimeoutAndTheNextCallSucceeds`, plus KAFKA-008's four live cases) and
+`CapabilityProbeIntegrationSuite` (`theFullTableAgainstALiveBroker`,
+`aclManagementIsAbsentWithNoAuthorizerConfigured`, `everyProbeCompletesWithinTheBudget`).
+
+1. **The conversions are pure functions in `AdminConversions`** (see KAFKA-007's deviation 1), which
+   is where `sensitiveValuesAreNoneAndFlagged`, `sourcesAreMappedTable`, `synonymsArePreservedInOrder`,
+   `entriesAreSortedByName`, `aPerDirectoryErrorIsPreservedAndTheDirectoryIsStillListed`,
+   `emptyOptionalTotalsAreNoneAndSoAreMinusOneTotals` and `usedByReplicasBytesSumsTheReplicas` are
+   asserted. `BrokerConfigsSuite`, `LogDirsSuite` and `QuorumSuite` as separate files do not exist;
+   their content is split between `AdminConversionsSuite` (the semantics) and the deferred
+   integration suite (the plumbing).
+
+2. **A test helper lives in Kafka's own package.**
+   `libs/kafka/test/src/org/apache/kafka/clients/admin/KuiTestSynonyms.scala` exists for one reason:
+   `ConfigEntry.ConfigSynonym`'s constructor is package-private, and synonyms are what tell an
+   operator *where* a broker setting came from. Without the helper, `synonymsArePreservedInOrder`
+   could only be asserted against a live broker, where which synonyms exist depends on how the
+   container happens to be configured. Test sources only; nothing shipped is in that package.
+
+3. **The per-broker WARN rate limit for an offline log directory is not implemented.** The spec asks
+   for "at most once per broker per hour, via a last-logged timestamp in the adapter". A timestamp
+   map in the adapter is mutable state in a `KuiPureModule`, and the adapter is constructed per
+   call site rather than held, so the map would not survive to do its job. The directory's error is
+   carried in the returned `LogDir` and the caller — which does hold state, and does know how often
+   it refreshes — is the right place for the rate limit. Recorded as owed to CLDOM-006.

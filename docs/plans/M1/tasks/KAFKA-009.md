@@ -306,4 +306,43 @@ needs to answer "present" rather than "unknown".
   topic lane, which will have both a topic port and a caller, replaces these two rows with real
   probes; the table above and this note are what tells it to.
 
-*(further deviations filled in by the implementer, in the same commit)*
+### Further deviations, recorded by the implementer
+
+### The Testcontainers integration suite is not in this commit
+
+`ClusterAdminIntegrationSuite` and `CapabilityProbeIntegrationSuite` are **not written yet**, and
+neither is the `build.mill` Testcontainers block. The M1 gate review's finding F-11 made
+`libs/testkit`'s `KafkaFixture` / `KafkaTopology` (CFGOP-004) the single home of the container
+topology and made KAFKA-007 depend on it, precisely so that a second PLAINTEXT container is not
+typed in a second file. CFGOP-004 has not landed — the STORE lane recorded the same block for
+STORE-009 in commit `712476d`.
+
+Declaring the containers here anyway would be the M0 review's "same string typed twice in two
+files" finding with a Docker image attached, which is the thing F-11 exists to prevent. So the
+live-broker cases are deferred, and everything that can be asserted without a broker is asserted
+here instead — see the deviation about `AdminConversions` below, which is what made that possible.
+
+**What is still owed, once CFGOP-004 lands:** `ClusterAdminIntegrationSuite`
+(`describeClusterAgainstALiveBroker`, `versionAgainstALiveBroker`,
+`aDeadAddressTimesOutWithinTheConfiguredBound`,
+`theClientIsInvalidatedAfterATimeoutAndTheNextCallSucceeds`, plus KAFKA-008's four live cases) and
+`CapabilityProbeIntegrationSuite` (`theFullTableAgainstALiveBroker`,
+`aclManagementIsAbsentWithNoAuthorizerConfigured`, `everyProbeCompletesWithinTheBudget`).
+
+1. **`CapabilityProbe.probe` takes the cluster description and the `delete.topic.enable` setting as
+   parameters** rather than fetching them itself. The spec's signature takes `version` and
+   `description`; `TopicDeletion` is "derived from KAFKA-008's broker configs", which the probe would
+   otherwise have to read a second time — one extra `describeConfigs` per hour per cluster for a
+   value the adapter has already fetched. `KafkaClusterAdmin.capabilities` gathers all three and
+   passes them in, which also makes every one of the seventeen probe tests a pure input rather than
+   a fixture.
+
+2. **`ClusterFeatures.isTotal` also asserts pairwise disjointness**, not only that the union is
+   every feature. A feature in two sets is as wrong as a feature in none, and the union alone does
+   not catch it.
+
+3. **The `unknown` case for `LogDirs` when the cluster could not be described at all** is produced
+   by raising inside the probe rather than by a special case: with no node to ask about, there is
+   nothing to ask, and "could not ask" is exactly `unknown`. The acceptance criterion for a dead
+   address — total, nothing present, **nothing absent** — is asserted by
+   `aClusterThatCannotBeDescribedProbesNothingAndKnowsNothing`.

@@ -357,4 +357,59 @@ replaced with links to the implementing files by CFGOP-008, from the definition 
 
 ## Deviations
 
-*(filled in by the implementer, in the same commit)*
+Recorded by the implementer, in the same commit.
+
+### The Testcontainers integration suite is not in this commit
+
+`ClusterAdminIntegrationSuite` and `CapabilityProbeIntegrationSuite` are **not written yet**, and
+neither is the `build.mill` Testcontainers block. The M1 gate review's finding F-11 made
+`libs/testkit`'s `KafkaFixture` / `KafkaTopology` (CFGOP-004) the single home of the container
+topology and made KAFKA-007 depend on it, precisely so that a second PLAINTEXT container is not
+typed in a second file. CFGOP-004 has not landed — the STORE lane recorded the same block for
+STORE-009 in commit `712476d`.
+
+Declaring the containers here anyway would be the M0 review's "same string typed twice in two
+files" finding with a Docker image attached, which is the thing F-11 exists to prevent. So the
+live-broker cases are deferred, and everything that can be asserted without a broker is asserted
+here instead — see the deviation about `AdminConversions` below, which is what made that possible.
+
+**What is still owed, once CFGOP-004 lands:** `ClusterAdminIntegrationSuite`
+(`describeClusterAgainstALiveBroker`, `versionAgainstALiveBroker`,
+`aDeadAddressTimesOutWithinTheConfiguredBound`,
+`theClientIsInvalidatedAfterATimeoutAndTheNextCallSucceeds`, plus KAFKA-008's four live cases) and
+`CapabilityProbeIntegrationSuite` (`theFullTableAgainstALiveBroker`,
+`aclManagementIsAbsentWithNoAuthorizerConfigured`, `everyProbeCompletesWithinTheBudget`).
+
+1. **The Kafka-to-KUI conversions live in their own object, `AdminConversions`, as pure functions.**
+   The specs put them inside the adapter. Almost every rule these three tasks care about at the
+   Kafka boundary *is* a conversion rule — a `null` that means "electing", a `null` that means "ACLs
+   are off", a `-1` that means "not reported", a sensitive value that must stay absent, an unknown
+   ACL operation that must not throw. Testing those through the adapter needs a live cluster in each
+   of those states; testing them as functions needs a constructor call. `AdminConversionsSuite` is
+   nineteen assertions that would otherwise have been impossible to make at all, and it is what lets
+   the deferred integration suite be about plumbing rather than about semantics.
+
+2. **`version` falls through to the config when the metadata level does not resolve.** The spec says
+   a level above `MetadataVersions.highestKnownLevel` returns `version = None` with the raw level
+   and a WARN. Implemented literally, that would report "no version" for every cluster newer than
+   KUI's table — including, quite possibly, the pinned 4.3 test container. The WARN is still
+   emitted, and then the `inter.broker.protocol.version` fallback runs, which a broker newer than
+   the table still answers correctly. Strictly better, and it keeps the promise the spec's own
+   acceptance criterion makes.
+
+3. **The `MetadataVersions` table starts at Kafka 3.0, not at 2.8.** `metadata.version` arrived with
+   KRaft's feature mechanism in 3.0; a 2.8 cluster has no such feature at all and is always detected
+   through the config fallback. Writing a level-to-2.8 row would have been inventing one. A test
+   asserts the table's lowest release is 3.0 so that the omission is deliberate rather than
+   forgotten.
+
+4. **`KafkaClusterAdmin.apply` takes an optional `log: Option[Logger[F]] = None`**, for the reason
+   KAFKA-003, KAFKA-004 and KAFKA-010 all record: the module has a `Logger` type but no
+   `LoggerFactory` and no SLF4J binding, and a required parameter would change the signature
+   CLADP-002 — written in parallel — has to call. All three log lines this task owns (the detected
+   version, the below-minimum warning, the newer-than-our-table warning) are emitted through it.
+
+5. **The three methods KAFKA-008 owns and the one KAFKA-009 owns are implemented in this commit,
+   not stubbed.** The spec permits stubs "only if each is implemented within the same milestone by
+   its own task"; implementing all three tasks together removes the window in which a caller could
+   find a stub.
