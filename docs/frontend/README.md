@@ -25,6 +25,8 @@ frontend/
       component/        the primitives: button, input, dialog, table, …
       css/              KernelCss — the class names, as Scala constants
       feature/          KuiFeature, FeatureRegistry, LazyFeature, FeaturePanel
+      query/            QueryCache — server state, fetched once and shared
+      sse/              Sse, SseParser — the two server-sent-events wrappers
       state/            the kernel-owned Vars: AuthState, NotificationBus
       theme/            Theme (light / dark / follow the system) and Tokens
     resources/css/      this module's stylesheets
@@ -172,6 +174,66 @@ every URL to gain that prefix, and neither the build nor a constant can know it.
 
 A missing or malformed block is not an error: it falls back to the root deployment
 (`apiBase = "/api/v1"`), which is what a development build opened without a gateway needs.
+
+### Server state: `QueryCache`
+
+A screen is made of independent components, and several usually want the same thing — the header,
+the breadcrumb and the table on a cluster page all begin by asking for the cluster. Written naively
+that is three identical requests and three different answers on screen while they are in flight.
+
+`QueryCache` is the answer: components ask it, it asks the server at most once, and everybody
+watches the same value. It is what react-query does in the reference implementation.
+
+```scala
+val clusters = QueryCache.make[ClusterId, Cluster](id => client.call(ClusterApi.get, id))
+
+// Nothing is fetched here. The request happens when this signal is subscribed to — which in
+// Laminar means when the element holding it is mounted — and only if what is cached is missing
+// or stale.
+div(child <-- clusters.get(id).map {
+  case Pending(_)                  => spinner
+  case Resolved(_, Right(value), _) => renderCluster(value)
+  case Resolved(_, Left(failure), _) => renderFailure(failure)
+})
+```
+
+Four behaviours are worth knowing before you use it:
+
+- **Demand-driven.** When the last subscriber goes away the entry stops being refreshed and becomes
+  a candidate for eviction, so a page the user left behind does not keep talking to the server.
+- **Failures are cached too**, but for five seconds instead of thirty. Not caching them at all means
+  every component that wanted the data retries independently, and a struggling endpoint is hit by
+  the whole page at once.
+- **`invalidateWhere` is prefix invalidation.** After creating a topic on cluster A, every cached
+  list belonging to cluster A is wrong and everything belonging to cluster B is still good;
+  invalidating everything would be correct and would also refetch the entire application.
+- **`fetchedAt(key)`** is the timestamp ADR-032 puts next to stale data that stays on screen.
+
+### Streaming: which of the two wrappers to use
+
+| | `Sse.eventSource` | `Sse.fetchStream` |
+| --- | --- | --- |
+| Underlying mechanism | the browser's `EventSource` | `fetch` plus KUI's own parser |
+| Reconnects by itself | yes | no |
+| Can `POST` / send headers | no | yes |
+| Can be aborted | no | yes |
+| Use it for | `GET` streams — the capability stream | streams with a request body, or that the user must be able to stop |
+
+The rule of thumb: **`eventSource` unless you need a body or cancellation.** The browser's own
+object handles reconnection, cookies and a backgrounded tab better than anything written by hand.
+Reach for `fetchStream` when the stream cannot be a `GET` (M3's message browsing sends a filter) or
+when stopping it matters — aborting propagates all the way down, cancelling the gateway's stream,
+the service's fiber and its Kafka consumer (ADR-035).
+
+Both return an `SseHandle`: the events, a `Signal[SseConnection]` for the connection indicator, and
+`close()`. Three rules they share:
+
+- a **decode failure for one event does not end the stream** — it is reported as
+  `Left(SseError.Decode)` and reading continues, the same rule ADR-035 gives the server;
+- **`heartbeat` is swallowed.** Its only job is to stop a proxy from reaping an idle connection, and
+  forwarding it would make every caller filter it out;
+- **`error` and `done` are terminal** (ADR-035). `error` carries the ordinary error envelope, so a
+  failure after the headers were sent is handled by the same code as one before.
 
 ## Tests
 
