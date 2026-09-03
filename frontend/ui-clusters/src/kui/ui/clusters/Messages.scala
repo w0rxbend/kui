@@ -107,6 +107,73 @@ object Messages {
   val BrokerEmptyDescription: String =
     "This broker's log directories and its settings appear here."
 
+  // --- Broker detail: the two tabs -----------------------------------------------------------------
+
+  val Segments: String = "segments"
+
+  val ColumnSetting: String = "Setting"
+
+  val ColumnValue: String = "Value"
+
+  val ColumnSource: String = "Source"
+
+  val ColumnReadOnly: String = ""
+
+  val ConfigsSearchLabel: String = "Search settings"
+
+  val ConfigsSearchPlaceholder: String = "e.g. log.retention"
+
+  val ConfigsNoMatchTitle: String = "No setting matches"
+
+  val ConfigsNoMatchDescription: String = "Clear the search box to see every setting again."
+
+  val ConfigsEmptyTitle: String = "This broker reported no settings"
+
+  val ConfigsEmptyDescription: String =
+    "That is unusual: a running broker always has settings. It is worth checking what KUI is allowed to " +
+      "read on this cluster."
+
+  def configsUnavailable(detail: String): String = s"This broker's settings could not be read: $detail"
+
+  val ConfigsForbidden: String = "You do not have permission to see this broker's settings."
+
+  val RedactedMask: String = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+
+  /** Why the value is not there, said on the screen.
+    *
+    * The distinction is worth spelling out: the value was withheld by the server and never sent, rather than
+    * being held by the browser and hidden. Anyone who has used an interface that merely masks a value it has
+    * in memory has reason to want to know which of the two this is.
+    */
+  val RedactedExplanation: String = "Redacted by the server. KUI never receives this value."
+
+  val EmptyValueExplanation: String = "Set to the empty string"
+
+  val LogDirOffline: String = "offline"
+
+  val LogDirUsed: String = "Used"
+
+  val LogDirTopics: String = "topics"
+
+  val LogDirPartitions: String = "partitions"
+
+  val LogDirFree: String = "free"
+
+  def ofDisk(total: String): String = s"of $total"
+
+  def logDirFailed(detail: String): String = s"This directory could not be read: $detail"
+
+  def logDirsUnavailable(detail: String): String =
+    s"This broker's log directories could not be read: $detail"
+
+  val LogDirsForbidden: String = "You do not have permission to see this broker's log directories."
+
+  val LogDirsEmptyTitle: String = "This broker reported no log directories"
+
+  val LogDirsEmptyDescription: String =
+    "A running broker always has at least one. It is worth checking what KUI is allowed to read on this " +
+      "cluster."
+
   val UnknownFailure: String = "the reason was not reported"
 
   def listFailed(detail: String): String = s"The cluster list could not be read: $detail"

@@ -1,5 +1,7 @@
 package kui.ui.clusters
 
+import scala.annotation.nowarn
+
 import com.raquo.waypoint.*
 import io.circe.{HCursor, Json}
 
@@ -32,8 +34,14 @@ object ClustersPageId {
     */
   final case class Brokers(clusterId: String) extends ClustersPageId
 
-  /** One broker of one cluster. */
-  final case class BrokerDetail(clusterId: String, brokerId: Int) extends ClustersPageId
+  /** One broker of one cluster, on one of its tabs.
+    *
+    * The tab is part of the page, and therefore part of the URL: a configuration listing is the thing an
+    * operator pastes into a ticket, and a link that always opened on log directories would make the recipient
+    * hunt for what they were sent.
+    */
+  final case class BrokerDetail(clusterId: String, brokerId: Int, tab: Option[String] = None)
+      extends ClustersPageId
 
   given CanEqual[ClustersPageId, ClustersPageId] = CanEqual.derived
 }
@@ -94,25 +102,67 @@ object ClustersRoutes extends FeatureRoutes {
         pattern = root / ClustersSegment / segment[String] / BrokersSegment / endOfSegments,
         basePath = uiPrefix
       ),
-      Route[ClustersPageId.BrokerDetail, (String, Int)](
-        encode = page => (page.clusterId, page.brokerId),
-        decode = ClustersPageId.BrokerDetail.apply,
+      // The default tab has no segment of its own, so a broker's canonical URL is its short form and a
+      // link to a broker needs to know nothing about tabs. Two patterns rather than an optional segment,
+      // because Waypoint matches a pattern by shape and an optional trailing segment is two shapes.
+      // `applyPF`, and the partial function is the point: this pattern must *refuse* a page that names a
+      // tab, or it would happily encode `BrokerDetail(c, b, Some("configs"))` to the tabless URL and a
+      // link to a broker's configuration would open on its log directories.
+      Route.applyPF[ClustersPageId, (String, Int)](
+        matchEncode = brokerDetailEncode(_.tab.isEmpty)(page => (page.clusterId, page.brokerId)),
+        decode = { case (clusterId, brokerId) => ClustersPageId.BrokerDetail(clusterId, brokerId, None) },
         pattern = root / ClustersSegment / segment[String] / BrokersSegment / segment[Int] / endOfSegments,
+        basePath = uiPrefix
+      ),
+      Route.applyPF[ClustersPageId, (String, Int, String)](
+        matchEncode = brokerDetailEncode(_.tab.isDefined)(page =>
+          (page.clusterId, page.brokerId, page.tab.getOrElse(""))
+        ),
+        decode = { case (clusterId, brokerId, tab) =>
+          ClustersPageId.BrokerDetail(clusterId, brokerId, Some(tab))
+        },
+        pattern = root / ClustersSegment / segment[String] / BrokersSegment / segment[Int] / segment[String] /
+          endOfSegments,
         basePath = uiPrefix
       )
     )
+
+  /** A `matchEncode` for one of the two broker-detail patterns.
+    *
+    * Waypoint types `matchEncode` as `PartialFunction[Any, Args]`, and Scala 3 refuses to destructure an
+    * `Any` — a value that is not `Matchable` may be an opaque type whose runtime shape is not its static one.
+    * Narrowing to `Matchable` once, here, is what lets both patterns be written as ordinary cases.
+    *
+    * @param wanted
+    *   which of the two shapes this pattern claims. Written as a predicate rather than as a pattern guard so
+    *   that neither route can silently claim the other's URLs — the tabless pattern refusing a page that
+    *   names a tab is the whole reason these are partial.
+    */
+  @nowarn("msg=unmatchable type Any")
+  private def brokerDetailEncode[A](
+      wanted: ClustersPageId.BrokerDetail => Boolean
+  )(encode: ClustersPageId.BrokerDetail => A): PartialFunction[Any, A] = {
+    // Guarded rather than nested-and-hoped: a partial function has to answer `isDefinedAt` honestly, and an
+    // inner match that throws would make Waypoint's "can this route encode this page" question crash
+    // instead of answering "no".
+    val claim: PartialFunction[Matchable, A] = {
+      case page: ClustersPageId.BrokerDetail if wanted(page) => encode(page)
+    }
+    { case value: Matchable if claim.isDefinedAt(value) => claim(value) }
+  }
 
   def encodePage(page: Page): Option[Json] =
     page match {
       case ClustersPageId.Overview => Some(Json.obj("page" -> Json.fromString(OverviewTag)))
       case ClustersPageId.Brokers(clusterId) =>
         Some(Json.obj("page" -> Json.fromString(BrokersTag), "clusterId" -> Json.fromString(clusterId)))
-      case ClustersPageId.BrokerDetail(clusterId, brokerId) =>
+      case ClustersPageId.BrokerDetail(clusterId, brokerId, tab) =>
         Some(
           Json.obj(
             "page" -> Json.fromString(BrokerTag),
             "clusterId" -> Json.fromString(clusterId),
-            "brokerId" -> Json.fromInt(brokerId)
+            "brokerId" -> Json.fromInt(brokerId),
+            "tab" -> tab.fold(Json.Null)(Json.fromString)
           )
         )
       case _ => None
@@ -127,6 +177,10 @@ object ClustersRoutes extends FeatureRoutes {
       for {
         clusterId <- cursor.get[String]("clusterId").toOption
         brokerId <- cursor.get[Int]("brokerId").toOption
-      } yield ClustersPageId.BrokerDetail(clusterId, brokerId)
+        // The tab is read leniently and defaults to absent, so a state written before tabs existed still
+        // decodes — a Back button pressed across a deployment upgrade lands on the default tab rather than
+        // on "not found".
+        tab = cursor.get[Option[String]]("tab").toOption.flatten
+      } yield ClustersPageId.BrokerDetail(clusterId, brokerId, tab)
     else None
 }

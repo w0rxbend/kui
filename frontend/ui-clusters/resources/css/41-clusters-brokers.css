@@ -29,3 +29,66 @@
 .kui-clusters .kui-table__cell {
   overflow-wrap: anywhere;
 }
+
+/* --- Broker detail ---------------------------------------------------------------------------- */
+
+.kui-clusters__tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-clusters__log-dirs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-clusters__log-dir-header {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+}
+
+/* Monospaced and selectable: this path is about to be pasted into an ssh command, and a proportional
+ * face makes a long path harder to read and harder to check character by character. */
+.kui-clusters__log-dir-path {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.kui-clusters__log-dir-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--kui-space-5);
+}
+
+.kui-clusters__log-dir-figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-clusters__config-name {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Wrapped, never truncated. A `listeners` value is long and the part that differs between two brokers
+ * is usually the end of it, which is exactly the part an ellipsis would eat. */
+.kui-clusters__config-value {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Muted rather than alarming: a redacted value is the system working as designed. */
+.kui-clusters__config-redacted {
+  font-family: var(--kui-font-family-mono);
+  letter-spacing: 0.15em;
+  color: var(--kui-color-text-muted);
+}

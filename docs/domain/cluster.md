@@ -161,6 +161,33 @@ The figure is computed server-side so that this table, a future export and any o
 it the same way; the browser carries the same definition as a fallback for a deployment whose
 service predates the field.
 
+### Broker settings: where a value came from, and what is never sent
+
+A broker setting carries the source it came from, and the vocabulary is a closed list with an
+escape hatch, because Kafka has added sources between versions and will again:
+
+| Source | Shown as | Order |
+| --- | --- | --- |
+| `DYNAMIC_BROKER_CONFIG` | Dynamic broker config | 1 |
+| `DYNAMIC_DEFAULT_BROKER_CONFIG` | Dynamic default broker config | 2 |
+| `DYNAMIC_BROKER_LOGGER_CONFIG` | Dynamic broker logger config | 3 |
+| `STATIC_BROKER_CONFIG` | Static broker config | 4 |
+| `DEFAULT_CONFIG` | Default config | 5 |
+| anything else | Unknown, with the raw string kept | 6 |
+
+The order is the feature. Somebody opening a broker's settings is nearly always asking "what did
+someone change", so what someone changed at runtime is at the top and the defaults are at the
+bottom. An unrecognised source renders as "Unknown" with its raw name available, never as a blank
+cell and never as a failure to decode the response.
+
+**Sensitive values are redacted by the service and never leave it.** A setting Kafka marks
+sensitive arrives at the browser with no value at all — the DTO's `value` is absent and
+`isSensitive` is true — so the mask on screen is not the browser hiding something it holds. That
+distinction is stated on the screen itself, in the tooltip on the mask, because anyone who has used
+an interface that merely hid a value it had in memory has reason to want to know which of the two
+this is. It is asserted twice: once in the contract's own tests, and once in the browser, where a
+suite feeds the screen a plaintext token and asserts it appears nowhere in the rendered DOM.
+
 ## Ports
 
 Three traits, stated over an abstract `F[_]` with no bound at all, in domain types only.

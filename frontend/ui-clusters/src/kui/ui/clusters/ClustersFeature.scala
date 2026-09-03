@@ -5,7 +5,7 @@ import com.raquo.waypoint.Route
 import org.scalajs.dom
 
 import kui.kernel.{BrokerId, ClusterId}
-import kui.ui.clusters.brokers.{BrokerDetailPage, BrokersPage}
+import kui.ui.clusters.brokers.{BrokerDetailPage, BrokerTab, BrokersPage}
 import kui.ui.clusters.dashboard.DashboardPage
 import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
@@ -54,15 +54,26 @@ final class ClustersFeature extends KuiFeature {
   private val current: Var[Page] = Var(ClustersRoutes.landing)
 
   private lazy val root: HtmlElement =
-    div(
-      child <-- current.signal.map {
-        case ClustersPageId.Brokers(clusterId) =>
-          brokers(ClusterId.from(clusterId).toOption)
-        case ClustersPageId.BrokerDetail(clusterId, brokerId) =>
-          brokerDetail(ClusterId.from(clusterId).toOption, BrokerId.from(brokerId).toOption)
-        case _ => dashboard
-      }
-    )
+    // Keyed on *which screen*, not on the whole page: switching a broker's tab changes the page but not the
+    // screen, and rebuilding the element for it would throw away the scroll position and the search box the
+    // user is typing in. `distinct` is what keeps that from happening.
+    div(child <-- current.signal.map(screenOf).distinct.map(build))
+
+  /** Which screen a page belongs to, ignoring anything that only changes what is inside it. */
+  private def screenOf(page: Page): Screen =
+    page match {
+      case ClustersPageId.Brokers(clusterId) => Screen.Brokers(clusterId)
+      case ClustersPageId.BrokerDetail(clusterId, brokerId, _) => Screen.Broker(clusterId, brokerId)
+      case _ => Screen.Dashboard
+    }
+
+  private def build(screen: Screen): HtmlElement =
+    screen match {
+      case Screen.Dashboard => dashboard
+      case Screen.Brokers(clusterId) => brokers(ClusterId.from(clusterId).toOption)
+      case Screen.Broker(clusterId, brokerId) =>
+        brokerDetail(ClusterId.from(clusterId).toOption, BrokerId.from(brokerId).toOption)
+    }
 
   private lazy val dashboard: HtmlElement =
     DashboardPage(
@@ -96,9 +107,17 @@ final class ClustersFeature extends KuiFeature {
         BrokerDetailPage(
           cluster = clusterId,
           broker = brokerId,
+          // Read from the route, so the URL is the one source of truth for which tab is open.
+          tab = current.signal.map {
+            case ClustersPageId.BrokerDetail(_, _, segment) => BrokerTab.fromSegment(segment)
+            case _ => BrokerTab.LogDirs
+          },
+          selectTab =
+            wanted => goTo(ClustersPageId.BrokerDetail(clusterId.value, brokerId.value, wanted.segment)),
           queries = queries,
           clustersHref = hrefOf(ClustersPageId.Overview),
-          brokersHref = hrefOf(ClustersPageId.Brokers(clusterId.value))
+          brokersHref = hrefOf(ClustersPageId.Brokers(clusterId.value)),
+          zone = Timezone.choice.signal
         )
       case (Some(clusterId), None) => brokers(Some(clusterId))
       case _ => dashboard
@@ -157,6 +176,17 @@ final class ClustersFeature extends KuiFeature {
     * arrives in M4, when there is a second feature to contribute one to.
     */
   override def panels: List[PanelContribution] = Nil
+}
+
+/** Which screen is on show, with everything that only changes what is *inside* it stripped out. */
+private enum Screen {
+  case Dashboard
+  case Brokers(clusterId: String)
+  case Broker(clusterId: String, brokerId: Int)
+}
+
+private object Screen {
+  given CanEqual[Screen, Screen] = CanEqual.derived
 }
 
 object ClustersFeature {

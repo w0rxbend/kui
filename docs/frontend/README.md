@@ -629,6 +629,32 @@ in by the function that builds all the rows together. The alternative — each r
 skew — would need every row to know the others, and two rows computed against different denominators
 would fail to add up on the page they are shown on together.
 
+### Putting state in the URL, and keeping it decodable across upgrades
+
+Some state belongs in the URL and some does not, and the test is not technical: **would somebody
+send this to a colleague?** A broker's configuration listing is pasted into tickets and chat
+messages, so which tab is open is part of the address; a table's sort order and a search box's
+contents are not, so they stay in the page.
+
+The pattern the broker detail page sets, and later features copy:
+
+- **The default state has no segment.** A broker's canonical URL is `/clusters/x/brokers/1`, not
+  `/clusters/x/brokers/1/logdirs`, so a link to a broker needs to know nothing about tabs.
+- **Two route patterns, not one optional segment.** A router matches a pattern by shape, and "with
+  a trailing segment" and "without one" are two shapes. Each pattern's encoder is *partial* and
+  refuses the other's pages — without that, the tabless pattern happily encodes a page that names a
+  tab, and a link to a configuration listing opens on log directories. That is a real bug this
+  project shipped for about ten minutes; `theTabIsInTheUrlSoAConfigsLinkOpensOnConfigs` is what
+  found it.
+- **Anything unrecognised decodes to the default**, never to "not found". A hand-edited URL, a
+  truncated one, and — the case that matters — a `history.state` written by an *older build that
+  had no tabs* all land on the page. Back across a deployment upgrade must not produce a 404, and
+  that compatibility is a test case rather than a comment.
+- **The URL is the single source of truth while the page is open.** The route drives the tab
+  control, and the control asks to *navigate* rather than writing its own state. Two independent
+  truths here means the Back button and the visible tab disagree, which is the kind of bug nobody
+  reports precisely because it looks like their own mistake.
+
 ### User preferences: what is stored, and the rule about reading it
 
 Four preferences, all of them browser-local. There is no per-user store on the server until M6, and

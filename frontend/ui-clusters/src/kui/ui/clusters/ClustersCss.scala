@@ -22,4 +22,16 @@ object ClustersCss {
   val ScrapedAt = "kui-clusters__scraped-at"
 
   val BrokersHeader = "kui-clusters__brokers-header"
+
+  val TabBody = "kui-clusters__tab-body"
+
+  val LogDirs = "kui-clusters__log-dirs"
+  val LogDirHeader = "kui-clusters__log-dir-header"
+  val LogDirPath = "kui-clusters__log-dir-path"
+  val LogDirFigures = "kui-clusters__log-dir-figures"
+  val LogDirFigure = "kui-clusters__log-dir-figure"
+
+  val ConfigName = "kui-clusters__config-name"
+  val ConfigValue = "kui-clusters__config-value"
+  val ConfigRedacted = "kui-clusters__config-redacted"
 }
