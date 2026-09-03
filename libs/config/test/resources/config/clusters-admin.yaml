@@ -1,0 +1,20 @@
+# One cluster tuning every knob, one tuning a single knob, and one with no admin section at all,
+# so that the per-key defaulting rule is visible in a file rather than only in a test.
+kui:
+  clusters:
+    - name: Fully Tuned
+      bootstrapServers: far-away:9092
+      admin:
+        requestTimeout: 90s
+        apiTimeout: 5m
+        chunkSize: 50
+        groupChunkSize: 25
+        parallelism: 8
+
+    - name: One Knob
+      bootstrapServers: nearby:9092
+      admin:
+        parallelism: 1
+
+    - name: Untuned
+      bootstrapServers: default:9092

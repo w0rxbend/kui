@@ -255,7 +255,39 @@ refused, naming the gap, because it nearly always means a deleted entry or a mis
 | `kui.clusters.<n>.security.ssl.keyPassword` | `…_SECURITY_SSL_KEYPASSWORD` | *(unset)* | A secret. Must be a literal here. |
 | `kui.clusters.<n>.security.ssl.verifyHostname` | `…_SECURITY_SSL_VERIFYHOSTNAME` | `true` | Leave it on. `false` also removes the check that the broker is who it claims to be. |
 | `kui.clusters.<n>.security.ssl.enabledProtocols` / `.cipherSuites` | `…` | *(unset)* | Comma-separated lists. |
+| `kui.clusters.<n>.admin.requestTimeout` | `…_ADMIN_REQUESTTIMEOUT` | `30s` | How long one request to a broker may take. Becomes `request.timeout.ms`. |
+| `kui.clusters.<n>.admin.apiTimeout` | `…_ADMIN_APITIMEOUT` | `60s` | The whole-call budget, the client's own retries included. Becomes `default.api.timeout.ms`. |
+| `kui.clusters.<n>.admin.chunkSize` | `…_ADMIN_CHUNKSIZE` | `200` | How many topics, partitions or config resources go into one admin request. |
+| `kui.clusters.<n>.admin.groupChunkSize` | `…_ADMIN_GROUPCHUNKSIZE` | `50` | The same, for consumer groups. Read and validated today; the first code that uses it ships in M4. |
+| `kui.clusters.<n>.admin.parallelism` | `…_ADMIN_PARALLELISM` | `4` | How many chunks are in flight at once against this one cluster. |
 | `kui.clusters.<n>.properties.<kafka.property>` | *(not settable from the environment)* | *(empty)* | Raw Kafka client properties, applied last. |
+
+**Tuning one cluster without touching the others.** The five keys under `admin` are per cluster, so
+a cluster with ten thousand topics, or a broker on the other side of an ocean, can be tuned on its
+own. The section is optional, and so is every key in it: `admin: { parallelism: 8 }` leaves the
+other four at their defaults rather than resetting them.
+
+| Key | Accepted range |
+| --- | --- |
+| `requestTimeout` | 1s … 5m |
+| `apiTimeout` | 1s … 15m, and at least as long as `requestTimeout` |
+| `chunkSize` | 1 … 1000 |
+| `groupChunkSize` | 1 … 1000 |
+| `parallelism` | 1 … 32 |
+
+The defaults are not round numbers somebody liked. 30s and 60s are the Kafka client's own; 200, 50
+and 4 are the values Kafbat arrived at after hitting the failures
+`research/kafka/admin-capabilities.md` §0 records. Start from them.
+
+If a cluster is timing out, reach for `chunkSize` **down** before `requestTimeout` **up**. A smaller
+request that succeeds is better than a larger one that eventually does not, and the admin client has
+a single network thread, so a longer timeout on a big request also holds up everything queued behind
+it.
+
+`apiTimeout` shorter than `requestTimeout` is refused rather than clamped. It describes a client
+that gives up before its own single request can finish, which on a dashboard looks exactly like a
+broken cluster. The error names the other key and its value — including when that value is the
+default, which is the half an operator cannot see for themselves.
 
 **Mechanism spellings, and how far each one is tested.** The values are upper-case and are exactly
 the ones Kafka's own documentation uses, so they can be copied across without translation. The last

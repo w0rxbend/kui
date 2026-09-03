@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.time.Instant
 
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.util.Try
 
 import cats.data.{NonEmptyList, ValidatedNel}
@@ -1098,24 +1098,145 @@ object KuiConfigSource {
         .decode(s"$prefix.security", layers.first)
         .traverse(draft => ClusterSecurityConfig.resolve[F](draft, layers.env))
         .map(_.andThen(identity))
+      admin <- decodeAdminTuning[F](layers, index)
       properties = ClientProperties.fromRaw(propertiesUnder(layers, s"$prefix.properties"))
-    } yield (name, servers, readOnly, security).tupled.andThen { (clusterName, bootstrap, readonly, sec) =>
-      // The id is derived last, and only from a name that decoded: deriving it from a name that did not
-      // would report the same bad name twice, once under `.name` and once under `.id`.
-      clusterId(layers, prefix, clusterName).map { id =>
-        ClusterConfig(
-          id = id,
-          name = clusterName,
-          bootstrapServers = bootstrap,
-          security = sec,
-          properties = properties,
-          readOnly = readonly,
-          // CFGOP-002 decodes `kui.clusters.<n>.admin` and replaces this default.
-          admin = AdminTuning.default
-        )
-      }
+    } yield (name, servers, readOnly, security, admin).tupled.andThen {
+      (clusterName, bootstrap, readonly, sec, tuning) =>
+        // The id is derived last, and only from a name that decoded: deriving it from a name that did not
+        // would report the same bad name twice, once under `.name` and once under `.id`.
+        clusterId(layers, prefix, clusterName).map { id =>
+          ClusterConfig(
+            id = id,
+            name = clusterName,
+            bootstrapServers = bootstrap,
+            security = sec,
+            properties = properties,
+            readOnly = readonly,
+            admin = tuning
+          )
+        }
     }
   }
+
+  // -------------------------------------------------------------------------------------------
+  // `kui.clusters.<n>.admin`: how KUI talks to one cluster's brokers
+  // -------------------------------------------------------------------------------------------
+
+  /** The five per-cluster admin knobs (CFGOP-002).
+    *
+    * The section is optional in full and every key inside it is optional on its own, so a cluster with
+    * `admin: { parallelism: 8 }` keeps the defaults for the other four. Per-key defaults, not per-section:
+    * configuring one knob must never silently reset another.
+    *
+    * Every value is bounded. An unbounded knob is a way for an operator to make KUI worse without being told
+    * — a 200-topic request that a broker times out on, or 200 concurrent requests queued behind the admin
+    * client's single network thread.
+    */
+  private def decodeAdminTuning[F[_]: Async](layers: Layers, index: Int): F[Problems[AdminTuning]] = {
+    val prefix = s"$ClustersPrefix.$index.admin"
+    val defaults = AdminTuning.default
+    for {
+      requestTimeout <- read[F, FiniteDuration](
+        field(
+          s"$prefix.requestTimeout",
+          s"a duration between $MinAdminTimeout and $MaxRequestTimeout",
+          readBoundedDuration(MinAdminTimeout, MaxRequestTimeout),
+          defaults.requestTimeout
+        ),
+        layers
+      )
+      apiTimeout <- read[F, FiniteDuration](
+        field(
+          s"$prefix.apiTimeout",
+          s"a duration between $MinAdminTimeout and $MaxApiTimeout",
+          readBoundedDuration(MinAdminTimeout, MaxApiTimeout),
+          defaults.apiTimeout
+        ),
+        layers
+      )
+      chunkSize <- read[F, Int](
+        field(
+          s"$prefix.chunkSize",
+          s"a whole number between 1 and $MaxChunkSize",
+          readBoundedInt(1, MaxChunkSize),
+          defaults.topicChunkSize
+        ),
+        layers
+      )
+      groupChunkSize <- read[F, Int](
+        field(
+          s"$prefix.groupChunkSize",
+          s"a whole number between 1 and $MaxChunkSize",
+          readBoundedInt(1, MaxChunkSize),
+          defaults.groupChunkSize
+        ),
+        layers
+      )
+      parallelism <- read[F, Int](
+        field(
+          s"$prefix.parallelism",
+          s"a whole number between 1 and $MaxParallelism",
+          readBoundedInt(1, MaxParallelism),
+          defaults.parallelism
+        ),
+        layers
+      )
+    } yield (requestTimeout, apiTimeout, chunkSize, groupChunkSize, parallelism).tupled.andThen {
+      (request, api, chunk, groupChunk, concurrency) =>
+        checkApiTimeout(layers, prefix, request, api).map { _ =>
+          AdminTuning(
+            requestTimeout = request,
+            apiTimeout = api,
+            // One operator-facing key sets both, because "how many things go in one admin request" is one
+            // question. Splitting it would be two knobs nobody could tell apart from the outside.
+            topicChunkSize = chunk,
+            partitionChunkSize = chunk,
+            groupChunkSize = groupChunk,
+            parallelism = concurrency,
+            // Not operator-facing in M1: the snapshot cadence is ADR-016's, and a per-cluster override with
+            // no screen to observe its effect would be a knob nobody could evaluate.
+            metadataRefresh = defaults.metadataRefresh,
+            capabilityRefresh = defaults.capabilityRefresh
+          )
+        }
+    }
+  }
+
+  /** D-2: a whole-call budget shorter than one request's budget is refused, naming both keys.
+    *
+    * A client whose `apiTimeout` is 10s and whose `requestTimeout` is the default 30s gives up before its own
+    * single request can finish, and that looks exactly like a broken cluster. The message names the other key
+    * and its effective value — including when that value came from the default, which is the case the
+    * operator cannot see for themselves.
+    */
+  private def checkApiTimeout(
+      layers: Layers,
+      prefix: String,
+      requestTimeout: FiniteDuration,
+      apiTimeout: FiniteDuration
+  ): Problems[Unit] =
+    if apiTimeout >= requestTimeout then ().validNel
+    else {
+      val source = layers.first(s"$prefix.apiTimeout").map(_._1).getOrElse(ConfigSourceName.Default)
+      val origin = if layers.first(s"$prefix.requestTimeout").isDefined then "" else ", which is the default"
+      ConfigProblem(
+        s"$prefix.apiTimeout",
+        s"expected a duration at least as long as $prefix.requestTimeout " +
+          s"($requestTimeout$origin); got $apiTimeout",
+        source
+      ).invalidNel
+    }
+
+  private val MinAdminTimeout: FiniteDuration = 1.second
+  private val MaxRequestTimeout: FiniteDuration = 5.minutes
+  private val MaxApiTimeout: FiniteDuration = 15.minutes
+  private val MaxChunkSize: Int = 1000
+  private val MaxParallelism: Int = 32
+
+  private def readBoundedInt(min: Int, max: Int)(raw: String): Either[String, Int] =
+    raw.toIntOption.toRight(s"'$raw' is not a whole number").flatMap { value =>
+      if value >= min && value <= max then Right(value) else Left(s"$value is outside $min..$max")
+    }
 
   /** D-1: an explicit `id` wins, and the default is the slug of the name.
     *
@@ -1275,6 +1396,11 @@ object KuiConfigSource {
       List("kui", "clusters", "*", "bootstrapServers"),
       List("kui", "clusters", "*", "bootstrapServers", "*"),
       List("kui", "clusters", "*", "readOnly"),
+      List("kui", "clusters", "*", "admin", "requestTimeout"),
+      List("kui", "clusters", "*", "admin", "apiTimeout"),
+      List("kui", "clusters", "*", "admin", "chunkSize"),
+      List("kui", "clusters", "*", "admin", "groupChunkSize"),
+      List("kui", "clusters", "*", "admin", "parallelism"),
       // Open for the same reason as the store's: this map's whole purpose is to carry Kafka client
       // properties KUI does not model, so it cannot have a list of legal names.
       List("kui", "clusters", "*", "properties", "**"),
