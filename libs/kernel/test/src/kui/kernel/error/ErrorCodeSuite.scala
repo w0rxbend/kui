@@ -86,6 +86,12 @@ final class ErrorCodeSuite extends ScalaCheckSuite {
       (ErrorCode.CursorInvalid, "KUI-CURSOR-INVALID", 400, false),
       (ErrorCode.CursorTooLarge, "KUI-CURSOR-TOO-LARGE", 400, false),
       (ErrorCode.ConfigVersionConflict, "KUI-CONFIG-VERSION-CONFLICT", 409, false),
+      (ErrorCode.StoreUnavailable, "KUI-STORE-UNAVAILABLE", 503, true),
+      (ErrorCode.StoreReplayTimeout, "KUI-STORE-REPLAY-TIMEOUT", 503, true),
+      (ErrorCode.StoreTopicIncompatible, "KUI-STORE-TOPIC-INCOMPATIBLE", 500, false),
+      (ErrorCode.StoreEnvelope, "KUI-STORE-ENVELOPE", 500, false),
+      (ErrorCode.StoreCrypto, "KUI-STORE-CRYPTO", 500, false),
+      (ErrorCode.StoreNotConfigured, "KUI-STORE-NOT-CONFIGURED", 501, false),
       (ErrorCode.RouteNotFound, "KUI-ROUTE-NOT-FOUND", 404, false),
       (ErrorCode.Internal, "KUI-INTERNAL", 500, false)
     )

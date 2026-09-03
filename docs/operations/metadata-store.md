@@ -114,6 +114,32 @@ expected compact. KUI will not change an existing topic's configuration.
 Fix the topic or point kui.store.topicPrefix at a different prefix.
 ```
 
+### 2.1 The record format
+
+Every value in `__kui_config` is one line of JSON in a versioned envelope. The Kafka record key is
+the same text as the envelope's `key` field, so a dump that loses the key column is still
+self-describing:
+
+```json
+{"envelopeVersion":1,"key":"cluster/prod-eu","version":3,"updatedAt":"2026-09-03T10:15:30Z","updatedBy":"kui-cluster/7f3a","deleted":false,"payload":{"displayName":"Production EU","bootstrapServers":["kafka-1:9092"],"security":{"protocol":"SASL_SSL","mechanism":"SCRAM-SHA-512","username":"kui","password":{"$enc":{"keyId":"k1","iv":"...","ct":"..."}}}}}
+```
+
+`version` starts at 1 and goes up by one per accepted write; `deleted` marks a logical tombstone,
+which KUI writes in preference to a `null` value because a `null` carries no timestamp and no
+author and so cannot answer "who removed this cluster". A `password` field is never plaintext on
+the topic: `{"$enc":{...}}` is an encrypted field, and the key that opens it lives in
+`kui.store.encryptionKey`, outside the topic (see §4.2).
+
+Two compatibility rules, which differ on purpose:
+
+- **An unknown envelope field is ignored.** Adding a field is compatible by construction — a
+  reader that does not know about it behaves exactly as it did before — so an older KUI keeps
+  reading records a newer one writes.
+- **An unknown `envelopeVersion` is refused**, with `KUI-STORE-ENVELOPE`. A bumped version number
+  is the writer saying "you cannot understand this". Skipping such a record silently would leave
+  the older KUI serving a stale view of the world while reporting itself healthy, which is a worse
+  failure than refusing to start.
+
 ## 3. Sizing
 
 Small. A registered cluster is a few kilobytes of JSON; a hundred clusters, a hundred roles and

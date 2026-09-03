@@ -183,6 +183,54 @@ enum ErrorCode(
         "The configuration changed since it was read; re-read it and apply the change again."
       )
 
+  case StoreUnavailable
+      extends ErrorCode(
+        "KUI-STORE-UNAVAILABLE",
+        503,
+        true,
+        "KUI's metadata store could not be reached; reads are served from the last replayed state and writes are rejected."
+      )
+
+  case StoreReplayTimeout
+      extends ErrorCode(
+        "KUI-STORE-REPLAY-TIMEOUT",
+        503,
+        true,
+        "The metadata store's log could not be replayed to its end within the configured timeout."
+      )
+
+  case StoreTopicIncompatible
+      extends ErrorCode(
+        "KUI-STORE-TOPIC-INCOMPATIBLE",
+        500,
+        false,
+        "An existing metadata-store topic has settings KUI cannot use, and KUI never rewrites an existing topic's configuration."
+      )
+
+  case StoreEnvelope
+      extends ErrorCode(
+        "KUI-STORE-ENVELOPE",
+        500,
+        false,
+        "A record in the metadata store is not a readable envelope for this version of KUI."
+      )
+
+  case StoreCrypto
+      extends ErrorCode(
+        "KUI-STORE-CRYPTO",
+        500,
+        false,
+        "An encrypted field in the metadata store could not be decrypted with any configured key."
+      )
+
+  case StoreNotConfigured
+      extends ErrorCode(
+        "KUI-STORE-NOT-CONFIGURED",
+        501,
+        false,
+        "No metadata store is configured, so this change cannot be persisted; configure kui.store.kafka.* to enable it."
+      )
+
   case RouteNotFound
       extends ErrorCode(
         "KUI-ROUTE-NOT-FOUND",
