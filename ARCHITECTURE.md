@@ -558,6 +558,15 @@ KUI /api/v1 mapping"): `GET /clusters`, `GET /clusters/{id}/dashboard`,
 `GET /consumer-groups/{groupId}` page aggregation, `GET /connects?withStats`,
 `GET /capabilities`. A section failure never fails the response.
 
+`GET /clusters` is **implemented as of M1** by
+`services/gateway/application/.../cluster/ClusterOverviewUseCase.scala`, served by
+`ClusterOverviewRoutes`. It carries two independent section levels: the outer one says whether
+the cluster service could be reached at all — `stale` means the rows are the last that arrived,
+with the time they did — and each row's own `summary` says whether that Kafka cluster could be
+reached. `GET /clusters/{id}/dashboard` is deliberately **not** built in M1: with metrics and
+topic counts out of scope, what remains of it is exactly `GET /clusters/{id}`, which the cluster
+service already serves.
+
 ## 7. Streaming (SSE) envelope
 
 Applies to message browsing, event tracking, KSQL responses, capability changes, live

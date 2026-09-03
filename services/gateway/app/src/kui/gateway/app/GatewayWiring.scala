@@ -17,6 +17,9 @@ import kui.config.PrincipalKeyConfig
 import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.api.openapi.DocsRoutes
+import kui.kernel.ServiceId
+import kui.gateway.api.ClusterOverviewRoutes
+import kui.gateway.application.cluster.ClusterOverviewUseCase
 import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
 import kui.gateway.api.{CapabilityRoutes, EdgeHeaders, GatewayApi, InfoRoutes}
 import kui.gateway.application.capability.{
@@ -155,6 +158,12 @@ object GatewayWiring {
       proxied <- Resource.eval(
         Async[F].fromEither(proxyRoutes[F](clients, signals).leftMap(BadContract.apply))
       )
+      // The dashboard, which the gateway answers itself over the cluster service's client. A deployment
+      // with no cluster service configured has no such client and therefore no route: the path 404s,
+      // rather than answering an empty list that would read as "no clusters are configured".
+      overview <- clients.all
+        .find(_.service == ClusterServiceId)
+        .traverse(ClusterOverviewUseCase.resource[F](_, registry, signals, logger))
       instrumentation <- Resource.eval(
         KuiInterceptors.serverInterceptors[F](telemetry, GatewayApi.ServiceName)
       )
@@ -164,6 +173,7 @@ object GatewayWiring {
         readiness,
         sessions,
         CapabilityRoutes[F](registry, trigger, telemetry, logger) ++
+          overview.toList.flatMap(ClusterOverviewRoutes[F](_)) ++
           proxied ++
           DocsRoutes[F](docs, BasePath.normalize(config.server.basePath))
       ),
@@ -284,7 +294,12 @@ object GatewayWiring {
     if base.isEmpty then "/" else base
   }
 
-  /** The proxied routes: every configured service the gateway holds a contract for. */
+  /** The service whose list endpoint the gateway aggregates rather than proxies. */
+  val ClusterServiceId: ServiceId = ServiceId.unsafe("cluster")
+
+  /** The proxied routes: every configured service the gateway holds a contract for, minus the endpoints the
+    * gateway answers itself.
+    */
   def proxyRoutes[F[_]: Async](
       clients: ServiceClients[F],
       signals: CapabilitySignals[F]
@@ -293,7 +308,9 @@ object GatewayWiring {
       .traverse(client =>
         ContractRouting.derive[F](
           client.service,
-          ServiceContracts.of(client.service),
+          // `proxied`, not `of`: the cluster list is served by the aggregation above, and two routes
+          // claiming one path is a collision nobody sees in a route list.
+          ServiceContracts.proxied(client.service),
           client,
           signals,
           RbacPreCheck.allowAll[F]

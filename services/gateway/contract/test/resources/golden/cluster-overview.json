@@ -1,0 +1,74 @@
+{
+  "clusters" : {
+    "status" : "stale",
+    "data" : [
+      {
+        "cluster" : {
+          "id" : "prod-eu",
+          "name" : "Production EU",
+          "readOnly" : false,
+          "bootstrapServers" : "broker-1.example.com:9093",
+          "security" : {
+            "protocol" : "SASL_SSL",
+            "mechanism" : "SCRAM-SHA-512",
+            "truststoreConfigured" : true,
+            "keystoreConfigured" : false
+          },
+          "summary" : {
+            "status" : "ok",
+            "data" : {
+              "kafkaClusterId" : "MkU3OEVBNTcwNTJENDM2Qk",
+              "version" : "4.0.0",
+              "controllerId" : 1,
+              "controllerKind" : "kraft",
+              "brokerCount" : 3,
+              "onlinePartitionCount" : null,
+              "offlinePartitionCount" : null,
+              "underReplicatedPartitionCount" : null,
+              "totalDiskUsageBytes" : 549755813888,
+              "features" : [
+              ],
+              "scrapedAt" : "2026-09-03T10:11:12.000Z"
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        "capability" : {
+          "status" : "available"
+        }
+      },
+      {
+        "cluster" : {
+          "id" : "dead",
+          "name" : "Decommissioned",
+          "readOnly" : true,
+          "bootstrapServers" : "gone.example.com:9092",
+          "security" : {
+            "protocol" : "PLAINTEXT",
+            "mechanism" : null,
+            "truststoreConfigured" : false,
+            "keystoreConfigured" : false
+          },
+          "summary" : {
+            "status" : "unavailable",
+            "reason" : "UPSTREAM_UNAVAILABLE",
+            "message" : "connection refused",
+            "since" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        "capability" : {
+          "status" : "degraded",
+          "reason" : {
+            "code" : "STARTING",
+            "message" : "this cluster has not been scraped yet",
+            "suggestedPollIntervalMs" : null,
+            "p95Ms" : null
+          }
+        }
+      }
+    ],
+    "fetchedAt" : "2026-09-03T10:11:12.000Z",
+    "reason" : "UPSTREAM_UNAVAILABLE"
+  },
+  "generatedAt" : "2026-09-03T10:11:13.000Z"
+}

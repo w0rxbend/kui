@@ -1295,8 +1295,21 @@ object services extends Module {
       // `libs.http` is here for the resilience vocabulary (`CircuitEvent`, `CircuitState`) and the SSE
       // event type the `ServiceClient` port speaks in. ADR-041 §1a admits both for the gateway
       // specifically, because the gateway owns no domain and the wire *is* its subject matter.
+      // The two contract modules are here for the dashboard aggregation (CLAPI-007): it calls the cluster
+      // service's published `listClusters` endpoint and answers with the gateway's own overview document.
+      // Both are wire types, which is the exception ADR-041 §1a already grants this module - the gateway
+      // owns no domain, so the wire *is* its subject matter, and a mapper between two DTOs it can already
+      // see would be ceremony with no boundary behind it.
       def moduleDeps =
-        Seq(libs.kernel.jvm, libs.contractsCore.jvm, libs.securityCore.jvm, libs.config, libs.http)
+        Seq(
+          libs.kernel.jvm,
+          libs.contractsCore.jvm,
+          libs.securityCore.jvm,
+          libs.config,
+          libs.http,
+          contract.jvm,
+          services.cluster.contract.jvm
+        )
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
