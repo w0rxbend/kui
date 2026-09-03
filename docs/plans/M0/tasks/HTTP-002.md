@@ -125,3 +125,41 @@ gateway's registry (GW-004) applies the debounce, not the service.
 
 `docs/operations/observability.md`: a health-endpoint section for operators (what to probe,
 what a 503 means, why liveness never depends on upstreams).
+
+## Deviations
+
+1. **`ReadinessCheck` is a case class with `timeout` as a field, not a `withTimeout` that adds one.**
+   The spec's shape implies a check can exist without a timeout and acquire one later; making it a
+   constructor parameter with a two-second default means a check without a bound is not
+   representable. `withTimeout` still exists, as the copy method.
+
+2. **`HealthEndpoints.make` needs `Parallel[F]` as well as `Temporal[F]`.** The checks run at once,
+   which is the whole reason three one-second checks answer in one second, and `parTraverse` needs
+   it.
+
+3. **`HealthEndpoints.report` and `statusOf` are public.** `report` is the part with the timing
+   behaviour, and testing it through a bound port would mean sleeping for real; exposed, it is
+   asserted under `TestControl` with deterministic virtual time and no sleeping at all.
+
+4. **`ReadinessCheck.bounded` handles a raised error as well as a timeout.** A check that throws
+   would otherwise fail the whole endpoint, turning "one upstream is down" into "the probe is
+   broken" — which is worse, because a broken probe is indistinguishable from a broken service.
+
+5. **`HealthEndpoints.paths` was added**, so a server can exclude the three from request metrics and
+   logging without spelling the paths again. `KuiInterceptors.UnmeasuredRoutes` in
+   `libs/observability` holds the two health paths for the same reason; they are separate because
+   `libs/observability` cannot see `libs/http`.
+
+6. **The capability fake is `FakeCapabilities` in `libs/testkit`** (the fake this task was expected
+   to add). It also counts how many times it was asked, which is what lets a suite assert that the
+   endpoint recomputes rather than caches — the property the gateway's polling depends on.
+
+7. **The golden document is asserted in two places for two different things.**
+   `libs/contracts-core` owns `readiness-report-degraded.json` and asserts the *encoder* against it
+   on both platforms; `HealthEndpointsSuite` asserts that a real endpoint on a real port serves
+   exactly the committed capabilities document. The second needed the JSON inline, because a test
+   constant in another module's test sources is not on this module's classpath.
+
+8. **A test asserts none of the three declares a security input**, which is the mechanical form of
+   "health endpoints are unauthenticated and allow-listed" (`ARCHITECTURE.md` §13): no later
+   authentication wiring can start demanding a principal on an endpoint that has nowhere to put one.

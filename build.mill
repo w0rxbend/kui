@@ -485,6 +485,10 @@ object libs extends Module {
 
       def mvnDeps = super.mvnDeps() ++ Seq(
         mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        // Deterministic virtual time. The readiness and upstream suites assert timing — that three
+        // one-second checks finish in one second, that a breaker reopens after its reset — and
+        // sleeping through those would make the suite slow and flaky at once.
+        mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
         mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
         mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
         mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}",

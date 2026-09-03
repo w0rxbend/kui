@@ -125,6 +125,29 @@ object GoldenDocuments {
       |  "retryable" : true
       |}""".stripMargin
 
+  val readinessReportDegraded: String =
+    """{
+      |  "ready" : false,
+      |  "checks" : [
+      |    {
+      |      "name" : "config",
+      |      "healthy" : true,
+      |      "detail" : null
+      |    },
+      |    {
+      |      "name" : "schema-registry",
+      |      "healthy" : false,
+      |      "detail" : "connection refused"
+      |    },
+      |    {
+      |      "name" : "connect",
+      |      "healthy" : false,
+      |      "detail" : "timeout"
+      |    }
+      |  ],
+      |  "at" : "2026-09-03T10:11:12.000Z"
+      |}""".stripMargin
+
   /** Every constant above, by the file name it is committed under. */
   val all: List[(String, String)] = List(
     "error-envelope-validation.json"        -> errorEnvelopeValidation,
@@ -133,6 +156,7 @@ object GoldenDocuments {
     "capability-change-unavailable.json"    -> capabilityChangeUnavailable,
     "service-capabilities.json"             -> serviceCapabilities,
     "sse-done.json"                         -> sseDone,
-    "sse-error.json"                        -> sseError
+    "sse-error.json"                        -> sseError,
+    "readiness-report-degraded.json"        -> readinessReportDegraded
   )
 }

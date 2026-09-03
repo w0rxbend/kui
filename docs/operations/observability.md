@@ -149,6 +149,54 @@ Outbound calls get a client span of their own inside the request's span, with `t
 injected, so when a page is slow the trace shows whether the time went in KUI or in the
 system it called.
 
+## Health endpoints: what to probe, and what a 503 means
+
+Every KUI service serves three endpoints, and the first thing to get right is that the first
+two answer **different questions**:
+
+| Endpoint | The question | Configure it as |
+| --- | --- | --- |
+| `GET /health/live` | should this process be **restarted**? | the liveness probe |
+| `GET /health/ready` | can this serve requests **now**? | the readiness probe |
+| `GET /capabilities` | what can it currently do, per cluster? | not a probe; the gateway polls it |
+
+**`/health/live` never depends on an upstream.** A service whose schema registry is down is
+not broken — it has a broken dependency, and restarting it will not fix the registry.
+Wiring liveness to an upstream turns one outage into two, because every replica
+restart-loops for as long as the upstream is down. It returns 200 unless the process should
+be restarted, and its body carries a flag and a timestamp and nothing else, deliberately, so
+that nobody can make a restart decision depend on anything more.
+
+**`/health/ready` returning 503 means "take me out of rotation", not "restart me".** The
+body is a `ReadinessReport` listing **every** check, not only the failing ones: knowing that
+one upstream out of four is down is a different situation from knowing the only check there
+is has failed.
+
+```json
+{"ready":false,
+ "checks":[{"name":"config","healthy":true,"detail":null},
+           {"name":"schema-registry","healthy":false,"detail":"connection refused"},
+           {"name":"connect","healthy":false,"detail":"timeout"}],
+ "at":"2026-09-03T10:11:12.000Z"}
+```
+
+`"detail":"timeout"` is reserved and means the check did not answer inside its own budget,
+which is a different cause from a check that answered no. Every check has a timeout — two
+seconds unless the service says otherwise — and the endpoint has a total budget of three
+seconds on top. Checks run in parallel, so three one-second checks answer in about one
+second rather than three. A check that hangs, or one that throws, is reported as a failed
+check; it never makes the endpoint itself fail, because a broken probe is indistinguishable
+from a broken service.
+
+All three endpoints are unauthenticated and allow-listed (`ARCHITECTURE.md` §13): a probe
+has no credentials and cannot be given any. They are also excluded from
+`kui.http.server.duration` and from request logging — a probe every second would dominate
+the histogram and drown the log, and neither would have told anyone anything.
+
+A service whose readiness flips reports it immediately. It is the gateway's registry that
+applies a debounce, not the service, so that "is it up" and "should the UI grey this out"
+stay two separate decisions.
+
 ## Two Prometheus endpoints, and why they are different
 
 This confuses people, so it is worth being explicit (ADR-009):

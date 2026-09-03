@@ -1,0 +1,21 @@
+{
+  "ready" : false,
+  "checks" : [
+    {
+      "name" : "config",
+      "healthy" : true,
+      "detail" : null
+    },
+    {
+      "name" : "schema-registry",
+      "healthy" : false,
+      "detail" : "connection refused"
+    },
+    {
+      "name" : "connect",
+      "healthy" : false,
+      "detail" : "timeout"
+    }
+  ],
+  "at" : "2026-09-03T10:11:12.000Z"
+}
