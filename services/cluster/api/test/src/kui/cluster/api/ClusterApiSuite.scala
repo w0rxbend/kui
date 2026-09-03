@@ -19,49 +19,42 @@ import kui.observability.KuiInterceptors
   */
 final class ClusterApiSuite extends CatsEffectSuite {
 
-  test("pingReturnsTheEchoedMessage") {
+  test("theClusterListIsServedToAVerifiedCaller") {
+    // An empty registry answers with an empty list rather than a failure: a KUI nobody has configured a
+    // cluster in genuinely has none, and that is not an error state.
     ClusterTestServer.resource().use { server =>
       for {
         token <- ClusterTestServer.token()
         response <- basicRequest
-          .get(uri"${ClusterTestServer.PingUri}?message=hello")
-          .header(KuiEndpoint.PrincipalHeader, token.value)
-          .response(asStringAlways)
-          .send(server.backend)
-      } yield {
-        assertEquals(response.code.code, 200, response.body)
-        // The instant comes from the fixed clock and the service name from `ClusterService.Id`,
-        // which is the whole of what `PingMapping` adds to the domain value.
-        assertEquals(
-          parse(response.body),
-          parse("""{"message":"hello","at":"2026-09-03T10:11:12.000Z","service":"cluster"}""")
-        )
-      }
-    }
-  }
-
-  test("pingWithAnOverLongMessageReturnsValidation") {
-    ClusterTestServer.resource().use { server =>
-      val tooLong = "x" * 129
-
-      for {
-        token <- ClusterTestServer.token()
-        response <- basicRequest
-          .get(uri"${ClusterTestServer.PingUri}?message=$tooLong")
+          .get(uri"${ClusterTestServer.ClustersUri}")
           .header(KuiEndpoint.PrincipalHeader, token.value)
           .response(asStringAlways)
           .send(server.backend)
         body = parse(response.body).getOrElse(fail(s"not JSON: ${response.body}")).hcursor
       } yield {
-        // 400 and not 500: the domain refused the request, and `ErrorEnvelope.statusOf` is what
-        // turned that refusal into a status. Naming the field is the whole value of the answer to
-        // whoever has to fix the call.
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(body.get[List[io.circe.Json]]("items"), Right(Nil))
+      }
+    }
+  }
+
+  test("aMalformedClusterIdIsFourHundredWithTheFieldNamed") {
+    // 400 and not 404, and not 500: "that is not an id" and "no such cluster" are different answers, and
+    // only one of them is worth retrying with a different id. `ErrorEnvelope.statusOf` decides the status.
+    ClusterTestServer.resource().use { server =>
+      for {
+        token <- ClusterTestServer.token(
+          digest = kui.security.RequestDigest.ofRequestLine("GET", "/internal/v1/clusters/Not%20A%20Slug")
+        )
+        response <- basicRequest
+          .get(uri"http://cluster/internal/v1/clusters/Not%20A%20Slug")
+          .header(KuiEndpoint.PrincipalHeader, token.value)
+          .response(asStringAlways)
+          .send(server.backend)
+        body = parse(response.body).getOrElse(fail(s"not JSON: ${response.body}")).hcursor
+      } yield {
         assertEquals(response.code.code, 400, response.body)
         assertEquals(body.get[String]("code"), Right("KUI-VALIDATION"))
-        assertEquals(
-          body.downField("details").downN(0).get[String]("field"),
-          Right("message")
-        )
         assertEquals(body.get[Boolean]("retryable"), Right(false))
       }
     }
@@ -99,9 +92,13 @@ final class ClusterApiSuite extends CatsEffectSuite {
     }
   }
 
-  test("capabilitiesReportAnUnreachableClusterRatherThanFailing") {
+  test("capabilitiesReportADegradedClusterRatherThanFailing") {
     // The degraded case the endpoint exists for: the gateway's registry needs this document most
-    // exactly when things are wrong, so "cannot reach it" is an answer and never a 503.
+    // exactly when things are wrong, so "cannot serve it fully" is an answer and never a 503.
+    //
+    // `degraded` and not `unavailable`: a service answering this request is reachable by definition, so
+    // reporting itself unavailable would be a service claiming it is not there. `unavailable` is the
+    // gateway's verdict when it gets no answer at all.
     ClusterTestServer.resource(available = false).use { server =>
       basicRequest
         .get(uri"http://cluster/capabilities")
@@ -116,14 +113,14 @@ final class ClusterApiSuite extends CatsEffectSuite {
               .downField("clusters")
               .downField("prod-eu")
               .get[String]("status"),
-            Right("unavailable")
+            Right("degraded")
           )
         }
     }
   }
 
   test("openApiContainsEveryEndpointInClusterEndpointsAll") {
-    val document = ClusterApi.openApi
+    val document = ClusterApi.openApi[cats.effect.IO]
     val paths = document.paths.pathItems.keySet
 
     // The drift guard. An endpoint added to the contract and not to the served list would still

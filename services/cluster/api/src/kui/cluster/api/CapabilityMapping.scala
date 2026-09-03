@@ -1,12 +1,21 @@
 package kui.cluster.api
 
-import java.time.Instant
-
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*
 
-import kui.cluster.application.{CapabilityReport, ClusterCapabilityReport, ClusterService}
-import kui.contracts.capability.{CapabilityState, ClusterCapability, ReasonCode, ServiceCapabilities}
+import kui.cluster.application.{
+  CapabilityReport,
+  ClusterCapabilityReport,
+  ClusterService,
+  CapabilityState as ApplicationCapabilityState
+}
+import kui.contracts.capability.{
+  CapabilityState,
+  ClusterCapability,
+  DegradedReason,
+  ReasonCode,
+  ServiceCapabilities
+}
 
 /** Turning what the use case said into what the gateway reads.
   *
@@ -37,24 +46,40 @@ object CapabilityMapping {
   /** How one cluster's report is spelled on the wire.
     *
     * A cluster this deployment was never told about is `not_configured`, which ADR-032 is explicit is **not**
-    * a failure and must not be rendered as one. A configured cluster is `available` or `unavailable`
-    * depending on whether the service can reach it right now. `degraded` cannot be produced here in M0: it
-    * carries a reason and a suggested poll interval, and the M0 report has neither to give.
+    * a failure and must not be rendered as one. A configured cluster is `available` or `degraded`, and never
+    * `unavailable`: a service that is answering this request at all is reachable by definition, and
+    * `unavailable` is the gateway's verdict when it gets no answer. A service reporting itself unavailable
+    * would be claiming it is not there.
+    *
+    * `degraded` is what M0 could not produce, because its report had no reason to give. The reason now comes
+    * from the use case — an unreachable metadata store, or a first scrape that has not finished — and it
+    * reaches the browser, which is the difference between a dimmed menu item and a dimmed menu item that says
+    * why.
     */
   def statusOf(report: ClusterCapabilityReport): String =
     if !report.configured then CapabilityState.NotConfigured.status
-    else if report.available then CapabilityState.Available.status
-    else UnavailableStatus
+    else
+      report.state match {
+        case ApplicationCapabilityState.Available => CapabilityState.Available.status
+        case ApplicationCapabilityState.Degraded(_) => DegradedStatus
+      }
 
-  /** The `unavailable` discriminator, read off the enum rather than typed out.
+  /** The reason a cluster is degraded, for the entry that carries one. `None` when it is not degraded. */
+  def reasonOf(report: ClusterCapabilityReport): Option[String] =
+    report.state match {
+      case ApplicationCapabilityState.Available => None
+      case ApplicationCapabilityState.Degraded(reason) => Some(reason)
+    }
+
+  /** The `degraded` discriminator, read off the enum rather than typed out.
     *
-    * `CapabilityState.Unavailable` needs a reason, a message and an instant before it will tell anyone what
-    * its `status` string is, and none of those three reach the wire from here — only the discriminator does.
-    * Building one throwaway value to ask it its own name is still better than writing `"unavailable"` in a
-    * second place, because the enum is where that word is contract.
+    * `CapabilityState.Degraded` needs a whole `DegradedReason` before it will tell anyone what its `status`
+    * string is, and that reason does not reach this wire shape — only the discriminator does. Building one
+    * throwaway value to ask it its own name is still better than writing `"degraded"` in a second place,
+    * because the enum is where that word is contract.
     */
-  private val UnavailableStatus: String =
-    CapabilityState.Unavailable(ReasonCode.UpstreamUnavailable, "", Instant.EPOCH).status
+  private val DegradedStatus: String =
+    CapabilityState.Degraded(DegradedReason(ReasonCode.Starting, "", None, None)).status
 
   /** The per-cluster transformer, as a `given` so the map-valued transformation below can find it. */
   private given Transformer[ClusterCapabilityReport, ClusterCapability] =

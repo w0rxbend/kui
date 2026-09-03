@@ -10,26 +10,18 @@
     }
   ],
   "paths" : {
-    "/api/v1/ping" : {
+    "/api/v1/clusters" : {
       "get" : {
         "tags" : [
           "cluster"
         ],
-        "summary" : "Echo endpoint used to prove the contract -> client -> gateway -> browser chain",
-        "operationId" : "cluster.ping",
+        "summary" : "Every configured cluster and its last known state",
+        "description" : "The list of clusters comes from configuration overlaid by the metadata store and is always available; each row's summary is a section that can be stale or unavailable on its own.",
+        "operationId" : "cluster.list",
         "parameters" : [
           {
             "name" : "X-Kui-Principal",
             "in" : "header",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "name" : "message",
-            "in" : "query",
-            "description" : "Echoed back, 1..128 characters",
             "required" : true,
             "schema" : {
               "type" : "string"
@@ -42,7 +34,292 @@
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/PingResponse"
+                  "$ref" : "#/components/schemas/ClustersResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "One configured cluster and its last known state",
+        "description" : "Answers 404 when no cluster with that id is configured; 400 when the id is malformed.",
+        "operationId" : "cluster.get",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClusterDetailResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/brokers" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "The cluster's brokers, with rack, controller flag and replica counts",
+        "description" : "Read from the cluster snapshot, not from a fresh admin call: the response carries the time it was scraped, and a section status saying whether that time is current.",
+        "operationId" : "cluster.brokers",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BrokersResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "One broker's settings, read-only",
+        "description" : "Read-only in M1: BR-002 ships without edits, which arrive in M5 with read-only mode and audit. A setting the broker marks sensitive has no value and says so.",
+        "operationId" : "cluster.broker.configs",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "brokerId",
+            "in" : "path",
+            "description" : "The broker's node id, as the cluster reports it",
+            "required" : true,
+            "schema" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "docs",
+            "in" : "query",
+            "description" : "Ask the broker for each setting's documentation (Kafka 2.6+)",
+            "required" : false,
+            "schema" : {
+              "default" : false,
+              "type" : "boolean"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BrokerConfigsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/log-dirs" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Log directories and their sizes, for one broker or for all of them",
+        "description" : "A directory that is offline carries its own error while the rest of the answer is good, which is how Kafka reports a failed disk.",
+        "operationId" : "cluster.logDirs",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "brokerId",
+            "in" : "query",
+            "description" : "Only this broker's directories; omit for every broker in the cluster",
+            "required" : false,
+            "schema" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LogDirsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/refresh" : {
+      "post" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Ask for this cluster to be scraped now",
+        "description" : "Answers 202 with the time the request was taken. The snapshot is not new when this returns; the response exists so a button has something truthful to say.",
+        "operationId" : "cluster.refresh",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "202" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RefreshAcceptedDto"
                 }
               }
             }
@@ -317,6 +594,32 @@
         "title" : "Available",
         "type" : "object"
       },
+      "BrokerConfigsResponse" : {
+        "title" : "BrokerConfigsResponse",
+        "description" : "One broker's settings, or why they could not be read",
+        "type" : "object",
+        "required" : [
+          "configs"
+        ],
+        "properties" : {
+          "configs" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "BrokersResponse" : {
+        "title" : "BrokersResponse",
+        "description" : "The cluster's brokers, or why they could not be read",
+        "type" : "object",
+        "required" : [
+          "brokers"
+        ],
+        "properties" : {
+          "brokers" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "BuildInfoDto" : {
         "title" : "BuildInfoDto",
         "description" : "The build this process was compiled from",
@@ -429,6 +732,97 @@
           }
         ]
       },
+      "ClusterDetailResponse" : {
+        "title" : "ClusterDetailResponse",
+        "description" : "One configured cluster and its last known state",
+        "type" : "object",
+        "required" : [
+          "cluster"
+        ],
+        "properties" : {
+          "cluster" : {
+            "$ref" : "#/components/schemas/ClusterRowDto"
+          }
+        }
+      },
+      "ClusterRowDto" : {
+        "title" : "ClusterRowDto",
+        "description" : "One configured cluster: identity always, live data only when a scrape succeeded",
+        "type" : "object",
+        "required" : [
+          "id",
+          "name",
+          "readOnly",
+          "bootstrapServers",
+          "security",
+          "summary"
+        ],
+        "properties" : {
+          "id" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "bootstrapServers" : {
+            "type" : "string"
+          },
+          "security" : {
+            "$ref" : "#/components/schemas/ClusterSecurityDto"
+          },
+          "summary" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "ClusterSecurityDto" : {
+        "title" : "ClusterSecurityDto",
+        "description" : "The shape of a cluster's security settings, with no credential in it",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "truststoreConfigured",
+          "keystoreConfigured"
+        ],
+        "properties" : {
+          "protocol" : {
+            "type" : "string"
+          },
+          "mechanism" : {
+            "type" : "string"
+          },
+          "truststoreConfigured" : {
+            "type" : "boolean"
+          },
+          "keystoreConfigured" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ClustersResponse" : {
+        "title" : "ClustersResponse",
+        "description" : "Every configured cluster and its last known state",
+        "type" : "object",
+        "required" : [
+          "generatedAt"
+        ],
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ClusterRowDto"
+            }
+          },
+          "generatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
       "Degraded" : {
         "title" : "Degraded",
         "type" : "object",
@@ -518,6 +912,19 @@
           }
         }
       },
+      "LogDirsResponse" : {
+        "title" : "LogDirsResponse",
+        "description" : "Log directories, with a per-directory error where there is one",
+        "type" : "object",
+        "required" : [
+          "logDirs"
+        ],
+        "properties" : {
+          "logDirs" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "Map_Boolean" : {
         "title" : "Map_Boolean",
         "type" : "object",
@@ -528,28 +935,6 @@
       "NotConfigured" : {
         "title" : "NotConfigured",
         "type" : "object"
-      },
-      "PingResponse" : {
-        "title" : "PingResponse",
-        "description" : "The echoed message, the instant the service saw it, and which service answered",
-        "type" : "object",
-        "required" : [
-          "message",
-          "at",
-          "service"
-        ],
-        "properties" : {
-          "message" : {
-            "type" : "string"
-          },
-          "at" : {
-            "description" : "RFC 3339 timestamp in UTC",
-            "type" : "string"
-          },
-          "service" : {
-            "type" : "string"
-          }
-        }
       },
       "PrincipalDto" : {
         "title" : "PrincipalDto",
@@ -569,6 +954,25 @@
             }
           },
           "kind" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RefreshAcceptedDto" : {
+        "title" : "RefreshAcceptedDto",
+        "description" : "A refresh was accepted; the snapshot is not new yet",
+        "type" : "object",
+        "required" : [
+          "clusterId",
+          "requestedAt"
+        ],
+        "properties" : {
+          "clusterId" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "requestedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
             "type" : "string"
           }
         }

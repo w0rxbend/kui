@@ -10,13 +10,6 @@ package kui.cluster.contract
   */
 object GoldenDocuments {
 
-  val pingResponse: String =
-    """{
-      |  "message" : "hello",
-      |  "at" : "2026-09-03T10:11:12.000Z",
-      |  "service" : "cluster"
-      |}""".stripMargin
-
   val clustersResponse: String =
     """{
       |  "items" : [
@@ -179,7 +172,6 @@ object GoldenDocuments {
 
   /** Every sample, by file name, for the JVM suite to walk. */
   val all: Map[String, String] = Map(
-    "ping-response.json" -> pingResponse,
     "clusters-response.json" -> clustersResponse,
     "brokers-response.json" -> brokersResponse,
     "broker-configs-response.json" -> brokerConfigsResponse,

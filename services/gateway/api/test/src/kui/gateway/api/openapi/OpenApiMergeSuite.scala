@@ -45,8 +45,7 @@ final class OpenApiMergeSuite extends FunSuite {
         "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs",
         "/api/v1/clusters/{clusterId}/log-dirs",
         "/api/v1/clusters/{clusterId}/refresh",
-        "/api/v1/info",
-        "/api/v1/ping"
+        "/api/v1/info"
       )
     )
   }
@@ -70,10 +69,10 @@ final class OpenApiMergeSuite extends FunSuite {
     // Operation ids become method names in a generated client, so a collision silently loses one of them
     // in whichever language the integrator used. It has to stop the build.
     val clash: AnyEndpoint =
-      KuiEndpoint.internal.get.in("internal" / "v1" / "clash").name("cluster.ping").summary("s")
+      KuiEndpoint.internal.get.in("internal" / "v1" / "clash").name("cluster.list").summary("s")
 
     OpenApiMerge.merge("KUI", "1.0", List("/"), List(clusterDoc, ServiceDoc(topic, List(clash)))) match {
-      case Left(problems) => assert(problems.toList.exists(_.contains("cluster.ping")), problems.toString)
+      case Left(problems) => assert(problems.toList.exists(_.contains("cluster.list")), problems.toString)
       case Right(_) => fail("two endpoints claiming one operation id must not merge")
     }
   }
@@ -81,8 +80,9 @@ final class OpenApiMergeSuite extends FunSuite {
   test("everyServicesEndpointsAreTaggedWithThatService") {
     // The tag is what groups the UI by service, which is the grouping an integrator finds useful.
     val document = merged(List(gatewayDoc, clusterDoc))
-    val ping = document.paths.pathItems("/api/v1/ping").get.getOrElse(fail("no ping operation"))
-    assertEquals(ping.tags, List("cluster"))
+    val clusters =
+      document.paths.pathItems("/api/v1/clusters").get.getOrElse(fail("no cluster list operation"))
+    assertEquals(clusters.tags, List("cluster"))
   }
 
   test("serversEntryIncludesTheBasePath") {

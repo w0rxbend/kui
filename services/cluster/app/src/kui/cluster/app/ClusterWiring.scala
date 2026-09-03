@@ -2,6 +2,8 @@ package kui.cluster.app
 
 import java.time.Instant
 
+import scala.concurrent.duration.*
+
 import cats.Parallel
 import cats.effect.kernel.{Async, Clock, Resource}
 import org.typelevel.log4cats.StructuredLogger
@@ -10,11 +12,19 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
 import kui.cluster.api.{ClusterApi, PrincipalVerification}
-import kui.cluster.application.{CapabilityReportUseCase, PingUseCase}
-import kui.cluster.domain.ClockPort
+import kui.cache.CacheMetrics
+import kui.cluster.application.{
+  BrokerDetailUseCase,
+  CapabilityReportUseCase,
+  ClusterRegistry,
+  ClusterSnapshots,
+  ClusterTopologyUseCase
+}
+import kui.cluster.domain.*
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
-import kui.kernel.ClusterId
+import kui.kernel.error.*
+import kui.kernel.{BrokerId, ClusterId}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 
@@ -88,13 +98,27 @@ object ClusterWiring {
       meter <- Resource.eval(telemetry.meter(Instrumentation))
       rejections <- Resource.eval(PrincipalVerification.rejectionCounter[F](meter))
       interceptors <- Resource.eval(ClusterApi.interceptors[F](telemetry, rejections, logger))
+      registry <- ClusterRegistry.make[F](StaticClusters, unconfiguredStore[F], clock[F], logger)
+      snapshots <- ClusterSnapshots.resource[F](
+        registry,
+        unreachableAdmin[F],
+        CacheMetrics.noop[F],
+        RefreshInterval,
+        CapabilityProbeInterval,
+        logger
+      )
+      topology = ClusterTopologyUseCase.make[F](registry, snapshots, logger)
+      brokers = BrokerDetailUseCase.make[F](registry, snapshots, unreachableAdmin[F], logger)
     } yield ClusterServer(
       routes = ClusterApi.routes[F](
-        PingUseCase.make[F](clock[F], logger),
+        registry,
+        topology,
+        brokers,
         capabilities,
         readiness,
         principals,
         rejections,
+        telemetry,
         logger
       ),
       interceptors = interceptors,
@@ -102,6 +126,76 @@ object ClusterWiring {
       capabilities = ClusterApi.capabilityDocument[F](capabilities, logger)
     )
   }
+
+  /** How often a configured cluster is scraped, and how often its feature probe is repeated
+    * (`ARCHITECTURE.md` §9). Both become per-cluster settings in CLAPI-005, read from `kui.clusters[]`.
+    */
+  val RefreshInterval: FiniteDuration = 30.seconds
+
+  val CapabilityProbeInterval: FiniteDuration = 1.hour
+
+  /** The clusters this deployment knows about.
+    *
+    * **Empty, and temporary.** CLAPI-005 wires `kui.clusters[]`, the Kafka-backed metadata store and the real
+    * admin adapter into this file. Until then the service serves its endpoints correctly over an empty
+    * registry: every cluster-shaped question answers "no such cluster", which is the truth about a deployment
+    * that has been told about none.
+    */
+  val StaticClusters: List[ClusterProfile] = Nil
+
+  /** A store this deployment does not have. Reports `NotConfigured`, which the capability report renders as
+    * exactly that rather than as an outage. Replaced by the Kafka adapter in CLAPI-005.
+    */
+  private def unconfiguredStore[F[_]: cats.Applicative]: ClusterConfigStore[F] =
+    new ClusterConfigStore[F] {
+      private val unsupported: KuiError =
+        ApplicationError.Unsupported("this deployment has no metadata store configured")
+
+      def list: F[Either[KuiError, List[ClusterProfile]]] =
+        cats.Applicative[F].pure(Right(Nil))
+
+      def get(id: ClusterId): F[Either[KuiError, Option[ClusterProfile]]] =
+        cats.Applicative[F].pure(Right(None))
+
+      def put(profile: ClusterProfile, expected: ProfileVersion): F[Either[KuiError, ClusterProfile]] =
+        cats.Applicative[F].pure(Left(unsupported))
+
+      def onChange(handler: List[ClusterProfile] => F[Unit]): F[F[Unit]] =
+        cats.Applicative[F].pure(cats.Applicative[F].unit)
+
+      def health: F[StoreHealth] = cats.Applicative[F].pure(StoreHealth.NotConfigured)
+    }
+
+  /** An admin port with no cluster to talk to.
+    *
+    * Every method answers "unreachable". It is never called while [[StaticClusters]] is empty — snapshot
+    * cells are created per configured cluster — and it exists so that the wiring is total rather than
+    * partial. CLAPI-005 replaces it with `services/cluster/infrastructure`'s adapter.
+    */
+  private def unreachableAdmin[F[_]: cats.Applicative]: ClusterAdmin[F] =
+    new ClusterAdmin[F] {
+      private def unreachable[A]: F[Either[KuiError, A]] =
+        cats
+          .Applicative[F]
+          .pure(
+            Left(InfrastructureError.Unreachable("kafka", "no cluster is configured in this deployment"))
+          )
+
+      def describeCluster(profile: ClusterProfile): F[Either[KuiError, ClusterDescription]] = unreachable
+      def detectVersion(profile: ClusterProfile): F[Either[KuiError, Option[KafkaVersion]]] = unreachable
+      def describeQuorum(profile: ClusterProfile): F[Either[KuiError, Option[QuorumInfo]]] = unreachable
+      def brokerConfigs(
+          profile: ClusterProfile,
+          broker: BrokerId,
+          includeDocs: Boolean
+      ): F[Either[KuiError, List[ConfigEntry]]] = unreachable
+      def describeLogDirs(
+          profile: ClusterProfile,
+          brokers: cats.data.NonEmptyList[BrokerId]
+      ): F[Either[KuiError, PartialResult[BrokerId, List[LogDir]]]] = unreachable
+      def capabilities(profile: ClusterProfile): F[ClusterFeatures] =
+        cats.Applicative[F].pure(ClusterFeatures.unprobed(Instant.EPOCH))
+    }
 
   /** What this service checks before it says it can serve.
     *

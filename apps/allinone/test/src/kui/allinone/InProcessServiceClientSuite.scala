@@ -44,8 +44,8 @@ final class InProcessServiceClientSuite extends KuiIOSuite {
   test("producesTheSameResultAsTheHttpClientForEverySampleEndpoint") {
     both { transports =>
       for {
-        ping <- ask(transports)(
-          _.call(ClusterEndpoints.ping, "hello")(AllInOneFixture.context)
+        clusters <- ask(transports)(
+          _.call(ClusterEndpoints.listClusters, ())(AllInOneFixture.context)
         )
         capabilities <- ask(transports)(
           _.callPublic(HealthEndpoints.capabilities, ())(AllInOneFixture.context)
@@ -54,14 +54,13 @@ final class InProcessServiceClientSuite extends KuiIOSuite {
           _.callPublic(HealthEndpoints.ready, ())(AllInOneFixture.context)
         )
       } yield {
-        // The echoed message and the reporting service are the whole of the ping response that is not a
-        // timestamp. The timestamp is read from the real clock and is genuinely different between two
-        // calls a millisecond apart, in either transport, so comparing it would be asserting that time
-        // does not pass.
+        // The rows are the whole of the cluster list that is not a timestamp. `generatedAt` is read from
+        // the real clock and is genuinely different between two calls a millisecond apart, in either
+        // transport, so comparing it would be asserting that time does not pass.
         assertEquals(
-          ping._1.map(response => (response.message, response.service)),
-          ping._2.map(response => (response.message, response.service)),
-          "the ping response must not depend on how the service was called"
+          clusters._1.map(_.items),
+          clusters._2.map(_.items),
+          "the cluster list must not depend on how the service was called"
         )
         assertEquals(capabilities._1, capabilities._2, "the capability document must be transport-agnostic")
         assertEquals(
@@ -74,11 +73,13 @@ final class InProcessServiceClientSuite extends KuiIOSuite {
   }
 
   test("producesTheSameFailureAsTheHttpClientWhenTheUseCaseRefuses") {
-    // An empty message breaks `Ping`'s domain rule, so this is a real `KuiError` raised by a use case and
-    // carried back as an error envelope — not a transport failure. If the in-process path skipped the
-    // envelope and reported "the upstream answered 400", the two codes would differ here and nowhere else.
+    // A cluster nothing is configured under is a real `KuiError` raised by a use case and carried back as
+    // an error envelope — not a transport failure. If the in-process path skipped the envelope and
+    // reported "the upstream answered 404", the two codes would differ here and nowhere else.
     both { transports =>
-      ask(transports)(_.call(ClusterEndpoints.ping, "")(AllInOneFixture.context)).map {
+      ask(transports)(
+        _.call(ClusterEndpoints.getCluster, EmptyClusterUseCases.UnknownCluster)(AllInOneFixture.context)
+      ).map {
         (inProcess, overHttp) =>
           assertEquals(
             inProcess.leftMap(_.code),
@@ -87,8 +88,8 @@ final class InProcessServiceClientSuite extends KuiIOSuite {
           )
           assertEquals(
             inProcess.leftMap(_.code),
-            Left(ErrorCode.Validation),
-            "a message the domain refuses is a validation failure, not an upstream failure"
+            Left(ErrorCode.ClusterNotFound),
+            "a cluster that is not configured is a not-found failure, not an upstream failure"
           )
       }
     }
@@ -100,7 +101,7 @@ final class InProcessServiceClientSuite extends KuiIOSuite {
     // means the claims arrived, the audience matched and the request digest matched.
     val accepted = both { transports =>
       transports.inProcess
-        .call(ClusterEndpoints.ping, "hello")(AllInOneFixture.context)
+        .call(ClusterEndpoints.listClusters, ())(AllInOneFixture.context)
         .map(result => assert(result.isRight, s"the in-process principal must be accepted, got $result"))
     }
 
@@ -114,7 +115,7 @@ final class InProcessServiceClientSuite extends KuiIOSuite {
           .use { service =>
             AllInOneFixture
               .inProcessClient(service, codec = PrincipalCodec.inProcess[IO])
-              .call(ClusterEndpoints.ping, "hello")(AllInOneFixture.context)
+              .call(ClusterEndpoints.listClusters, ())(AllInOneFixture.context)
               .map(result =>
                 assertEquals(
                   result.leftMap(_.code),

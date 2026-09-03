@@ -22,7 +22,7 @@ object OpenApiDocument {
   /** The document, as the exact text that belongs on disk: two-space indented JSON with a trailing newline,
     * which is what every other JSON file in this repository looks like.
     */
-  def render: String = ClusterApi.openApi.asJson.deepDropNullValues.spaces2 + "\n"
+  def render: String = ClusterApi.openApi[cats.Id].asJson.deepDropNullValues.spaces2 + "\n"
 
   /** `OpenApiDocument <path> [--check]`.
     *

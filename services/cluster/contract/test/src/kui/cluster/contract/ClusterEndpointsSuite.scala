@@ -67,13 +67,12 @@ final class ClusterEndpointsSuite extends FunSuite {
     }
   }
 
-  test("theEndpointListIsExactlyTheSevenDeclared") {
-    // A seventh read endpoint, or an eighth, must be a deliberate edit to this list rather than something
-    // that appears because a value was declared. `cluster.ping` is the M0 sample and CLAPI-004 removes it.
+  test("theEndpointListIsExactlyTheSixDeclared") {
+    // A seventh read endpoint must be a deliberate edit to this list rather than something that appears
+    // because a value was declared.
     assertEquals(
       ClusterEndpoints.all.flatMap(_.info.name),
       List(
-        "cluster.ping",
         "cluster.list",
         "cluster.get",
         "cluster.brokers",
@@ -85,7 +84,7 @@ final class ClusterEndpointsSuite extends FunSuite {
   }
 
   test("the six read endpoints are at exactly the documented addresses") {
-    val addresses = ClusterEndpoints.all.tail.map(endpoint =>
+    val addresses = ClusterEndpoints.all.map(endpoint =>
       s"${endpoint.method.getOrElse(Method.GET).method} ${pathTemplate(endpoint)}"
     )
 
@@ -123,6 +122,12 @@ final class ClusterEndpointsSuite extends FunSuite {
 
   test("refresh answers 202, because the snapshot is not new when it returns") {
     assert(ClusterEndpoints.refresh.showDetail.contains("202"), ClusterEndpoints.refresh.showDetail)
+  }
+
+  test("nothing named ping survives") {
+    // It reads as a joke and it is not: the M0 sample endpoint spanned five modules across three areas, and
+    // a milestone that left half of it behind is exactly the failure DEVPLAN §1 names.
+    assert(!ClusterEndpoints.all.exists(_.info.name.exists(_.contains("ping"))))
   }
 
   test("no broker-config edit endpoint is declared") {

@@ -4,7 +4,7 @@ import cats.effect.IO
 import munit.CatsEffectSuite
 
 import kui.cluster.api.ClusterApi
-import kui.cluster.contract.ClusterEndpoints
+import kui.cluster.contract.{ClusterEndpoints, ProfileEndpoints}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 import kui.testkit.fakes.FakeStructuredLogger
@@ -41,9 +41,22 @@ final class ClusterWiringSuite extends CatsEffectSuite {
         // that a route added without a contract entry is caught here rather than in production.
         assertEquals(
           served,
-          Set("/health/live", "/health/ready", "/capabilities", "/internal/v1/ping")
+          Set(
+            "/health/live",
+            "/health/ready",
+            "/capabilities",
+            "/internal/v1/clusters",
+            "/internal/v1/clusters/{clusterId}",
+            "/internal/v1/clusters/{clusterId}/brokers",
+            "/internal/v1/clusters/{clusterId}/brokers/{brokerId}/configs",
+            "/internal/v1/clusters/{clusterId}/log-dirs",
+            "/internal/v1/clusters/{clusterId}/refresh",
+            "/internal/v1/clusters/{clusterId}/profile",
+            "/internal/v1/clusters/stream"
+          )
         )
-        assertEquals(server.routes.size, ClusterEndpoints.all.size + 3)
+        // The six read endpoints, the profile, the change stream and the three every KUI service serves.
+        assertEquals(server.routes.size, ClusterEndpoints.all.size + ProfileEndpoints.all.size + 4)
       }
     }
   }

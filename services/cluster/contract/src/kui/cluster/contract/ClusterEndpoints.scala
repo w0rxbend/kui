@@ -44,32 +44,6 @@ object ClusterEndpoints {
     */
   val DocsParam: String = "docs"
 
-  /** The last path segment of [[ping]], and the name of its query parameter.
-    *
-    * Named constants rather than literals typed twice, because the gateway serves this endpoint at a
-    * *rewritten* path (`/api/v1/ping`) and the browser's client is built from a separate endpoint value
-    * describing that address. Two literals in two files is exactly the drift ADR-003 exists to prevent, and
-    * it is the kind that compiles cleanly and 404s in production.
-    */
-  val PingPath: String = "ping"
-
-  val PingMessageParam: String = "message"
-
-  /** Echoes a message back with the time the service saw it.
-    *
-    * The M0 sample endpoint. CLAPI-004 deletes it, together with the rest of the `Ping` family, in one commit
-    * — the whole family at once, because it spans five modules and half a deletion leaves `main` red for
-    * every lane working behind this one (M1 gate review, F-01).
-    */
-  val ping: Endpoint[SignedPrincipal, String, ErrorEnvelope, PingResponse, Any] =
-    KuiEndpoint.internal.get
-      .in("internal" / "v1" / PingPath)
-      .in(query[String](PingMessageParam).description("Echoed back, 1..128 characters"))
-      .out(jsonBody[PingResponse])
-      .name("cluster.ping")
-      .summary("Echo endpoint used to prove the contract -> client -> gateway -> browser chain")
-      .tag("cluster")
-
   private val clustersBase = "internal" / "v1" / ClustersSegment
 
   private val clusterIdPath: EndpointInput[ClusterId] =
@@ -181,5 +155,5 @@ object ClusterEndpoints {
     * copies of the same path end up disagreeing.
     */
   val all: List[AnyEndpoint] =
-    List(ping, listClusters, getCluster, listBrokers, brokerConfigs, logDirs, refresh)
+    List(listClusters, getCluster, listBrokers, brokerConfigs, logDirs, refresh)
 }

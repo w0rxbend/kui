@@ -1200,6 +1200,10 @@ object services extends Module {
 
         def mvnDeps = super.mvnDeps() ++ Seq(
           mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // `TestControl` runs a route against a virtual clock, which is how "the refresh endpoint
+          // answers without waiting for the scrape" is asserted as a fact rather than as a stopwatch
+          // reading that would be flaky on a loaded machine.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
           // The stub interpreter runs the real interceptor chain and the real routes without a socket.
           // A bound port would add seconds per case and prove nothing this module is responsible for.
           mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",

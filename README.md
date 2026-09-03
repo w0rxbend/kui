@@ -339,7 +339,7 @@ short-lived principal for each call, so a request without one is refused — and
 however it is wrong, so that nobody can use the response to work out what to forge next:
 
 ```
-$ curl -s localhost:8081/internal/v1/ping?message=hi
+$ curl -s localhost:8081/internal/v1/clusters
 {"code":"KUI-UNAUTHENTICATED","message":"Unauthenticated","details":[],"correlationId":"cde7...","timestamp":"...","retryable":false}
 ```
 

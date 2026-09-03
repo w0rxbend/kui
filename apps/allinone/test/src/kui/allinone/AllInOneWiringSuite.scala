@@ -66,7 +66,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         assert(paths.contains("/api/v1/info"), s"the gateway's own routes are missing from $paths")
         assert(paths.contains("/api/v1/capabilities"), s"the capability routes are missing from $paths")
         assert(
-          paths.contains("/api/v1/ping"),
+          paths.contains("/api/v1/clusters"),
           s"the in-process cluster service's route was not proxied; served $paths"
         )
         assert(paths.contains("/api/v1/health/live"), s"the process's own probes are missing from $paths")

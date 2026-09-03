@@ -12,7 +12,7 @@ import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
 import kui.cluster.contract.ClusterEndpoints
 import kui.gateway.api.client.ServiceClientFixture as Fixture
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
-import kui.kernel.ClusterId
+import kui.kernel.{BrokerId, ClusterId}
 import kui.observability.{Correlation, Telemetry}
 import kui.security.{PrincipalClaims, PrincipalCodec, RequestDigests}
 
@@ -26,12 +26,54 @@ import kui.security.{PrincipalClaims, PrincipalCodec, RequestDigests}
   */
 final class SttpServiceClientSuite extends CatsEffectSuite {
 
-  private val ping = ClusterEndpoints.ping
+  /** One real published endpoint of the cluster service, driven end to end through the client.
+    *
+    * `getCluster` rather than the list, because it has a path parameter: a client that dropped or mangled
+    * one would still pass every assertion made against a parameterless route.
+    */
+  private val getCluster = ClusterEndpoints.getCluster
 
-  private val pingBody: Json = Json.obj(
-    "message" -> Json.fromString("hello"),
-    "at" -> Json.fromString("2026-09-03T10:11:12.000Z"),
-    "service" -> Json.fromString("cluster")
+  private val cluster = ClusterId.unsafe("prod-eu")
+
+  private val clusterBody: Json = Json.obj(
+    "cluster" -> Json.obj(
+      "id" -> Json.fromString("prod-eu"),
+      "name" -> Json.fromString("Production EU"),
+      "readOnly" -> Json.fromBoolean(false),
+      "bootstrapServers" -> Json.fromString("broker-1.example.com:9093"),
+      "security" -> Json.obj(
+        "protocol" -> Json.fromString("PLAINTEXT"),
+        "mechanism" -> Json.Null,
+        "truststoreConfigured" -> Json.fromBoolean(false),
+        "keystoreConfigured" -> Json.fromBoolean(false)
+      ),
+      "summary" -> Json.obj(
+        "status" -> Json.fromString("ok"),
+        "data" -> Json.obj(
+          "kafkaClusterId" -> Json.Null,
+          "version" -> Json.Null,
+          "controllerId" -> Json.Null,
+          "controllerKind" -> Json.fromString("kraft"),
+          "brokerCount" -> Json.fromInt(1),
+          "onlinePartitionCount" -> Json.Null,
+          "offlinePartitionCount" -> Json.Null,
+          "underReplicatedPartitionCount" -> Json.Null,
+          "totalDiskUsageBytes" -> Json.Null,
+          "features" -> Json.arr(),
+          "scrapedAt" -> Json.fromString("2026-09-03T10:11:12.000Z")
+        ),
+        "fetchedAt" -> Json.fromString("2026-09-03T10:11:12.000Z")
+      )
+    )
+  )
+
+  /** An empty but well-formed log-directories answer, for the case that only cares about the query. */
+  private val logDirsBody: Json = Json.obj(
+    "logDirs" -> Json.obj(
+      "status" -> Json.fromString("ok"),
+      "data" -> Json.arr(),
+      "fetchedAt" -> Json.fromString("2026-09-03T10:11:12.000Z")
+    )
   )
 
   private def envelope(code: ErrorCode, message: String): Json = Json.obj(
@@ -53,7 +95,7 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
     // be testing nothing.
     TracesTestkit.inMemory[IO]().use { traces =>
       for {
-        stub <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
+        stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
         tracer <- traces.tracerProvider.get("kui.test")
         telemetry = Telemetry.fromProviders[IO](traces.tracerProvider, org.typelevel.otel4s.metrics.MeterProvider.noop[IO])
         _ <- kui.testkit.fakes.FakeStructuredLogger[IO].flatMap { logger =>
@@ -68,7 +110,7 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
             )
             .use(client =>
               tracer.span("inbound").surround(
-                client.call(ping, "hello")(Fixture.context(Some(ClusterId.unsafe("local"))))
+                client.call(getCluster, cluster)(Fixture.context(Some(ClusterId.unsafe("local"))))
               )
             )
         }
@@ -87,18 +129,18 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
 
   test("omitsTheClusterHeaderWhenTheCallIsNotAboutOneCluster") {
     for {
-      stub <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
-      _ <- Fixture.client(Fixture.Cluster, stub).use(_.call(ping, "hello")(Fixture.context()))
+      stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
+      _ <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
       sent <- stub.sent.map(_.head)
     } yield assertEquals(sent.header(SttpServiceClient.ClusterHeader), None)
   }
 
   test("signsWithTheTargetServiceAsAudience") {
     for {
-      stub <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
+      stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
       _ <- Fixture
         .client(Fixture.Topic, stub, Fixture.config("http://topic:8082"))
-        .use(_.call(ping, "hello")(Fixture.context()))
+        .use(_.call(getCluster, cluster)(Fixture.context()))
       sent <- stub.sent.map(_.head)
       claims = claimsOf(sent.header("X-Kui-Principal").getOrElse(fail("no principal header")))
     } yield {
@@ -109,20 +151,20 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
 
   test("requestDigestCoversMethodPathAndBody") {
     for {
-      stub <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
-      _ <- Fixture.client(Fixture.Cluster, stub).use(_.call(ping, "hello")(Fixture.context()))
+      stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
+      _ <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
       sent <- stub.sent.map(_.head)
       claims = claimsOf(sent.header("X-Kui-Principal").getOrElse(fail("no principal header")))
     } yield {
       // The three fields KERN-006's `RequestDigest` is made of, taken from the request that actually
       // went out rather than from anything the gateway happened to have lying around. The receiving
       // service recomputes them from the request line it read, so a token minted for `GET
-      // /internal/v1/ping` cannot be replayed against `DELETE /internal/v1/topics/orders`.
+      // /internal/v1/clusters/prod-eu` cannot be replayed against `DELETE /internal/v1/topics/orders`.
       assertEquals(claims.requestDigest.method, "GET")
-      assertEquals(claims.requestDigest.path, "/internal/v1/ping")
+      assertEquals(claims.requestDigest.path, "/internal/v1/clusters/prod-eu")
       assertEquals(claims.requestDigest.bodySha256, RequestDigests.sha256Hex(Array.emptyByteArray))
       // A different body is a different digest — asserted on the digest function itself, because no
-      // endpoint the cluster service publishes in M0 has a request body to vary.
+      // endpoint the cluster service publishes has a request body to vary.
       assertNotEquals(
         RequestDigests.of("POST", "/internal/v1/topics", "a".getBytes("UTF-8")),
         RequestDigests.of("POST", "/internal/v1/topics", "b".getBytes("UTF-8"))
@@ -138,18 +180,20 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
     // cover the query would have to be a change on both sides at once, which is why it is written down
     // here rather than fixed locally.
     for {
-      stub <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
+      stub <- Fixture.stub(ServiceBehaviour.Ok(logDirsBody))
       _ <- Fixture.client(Fixture.Cluster, stub).use { client =>
-        client.call(ping, "hello")(Fixture.context()) >>
-          client.call(ping, "goodbye")(Fixture.context())
+        // The same path twice, with and without the broker filter: two calls that differ only in the
+        // query string.
+        client.call(ClusterEndpoints.logDirs, (cluster, Some(BrokerId.unsafe(1))))(Fixture.context()) >>
+          client.call(ClusterEndpoints.logDirs, (cluster, None))(Fixture.context())
       }
       sent <- stub.sent
       first = claimsOf(sent.head.header("X-Kui-Principal").getOrElse(fail("no principal header")))
       second = claimsOf(sent(1).header("X-Kui-Principal").getOrElse(fail("no principal header")))
     } yield {
       assertEquals(first.requestDigest, second.requestDigest)
-      assert(sent.head.uri.contains("message=hello"))
-      assert(sent(1).uri.contains("message=goodbye"))
+      assert(sent.head.uri.contains("brokerId=1"), sent.head.uri)
+      assert(!sent(1).uri.contains("brokerId"), sent(1).uri)
     }
   }
 
@@ -158,7 +202,7 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
       stub <- Fixture.stub(
         ServiceBehaviour.Failure(404, envelope(ErrorCode.TopicNotFound, "topic 'orders' does not exist"))
       )
-      result <- Fixture.client(Fixture.Cluster, stub).use(_.call(ping, "hello")(Fixture.context()))
+      result <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
     } yield result match {
       case Left(error: ApplicationError.Remote) =>
         assertEquals(error.code, ErrorCode.TopicNotFound)
@@ -175,7 +219,7 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
       stub <- Fixture.stub(
         ServiceBehaviour.Failure(403, envelope(ErrorCode.Forbidden, "not your cluster"))
       )
-      result <- Fixture.client(Fixture.Cluster, stub).use(_.call(ping, "hello")(Fixture.context()))
+      result <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
     } yield assert(
       result.left.exists(_.isInstanceOf[ApplicationError]),
       s"a 403 must stay an application error, got $result"
@@ -186,7 +230,7 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
     val cases = List(
       "connection refused" -> ServiceBehaviour.Refused,
       "a 500 with no envelope" -> ServiceBehaviour.Failure(500, Json.obj("oops" -> Json.True)),
-      "a timeout" -> ServiceBehaviour.Slow(30.seconds, ServiceBehaviour.Ok(pingBody))
+      "a timeout" -> ServiceBehaviour.Slow(30.seconds, ServiceBehaviour.Ok(clusterBody))
     )
 
     cases.traverse_ { (name, behaviour) =>
@@ -194,7 +238,7 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
         stub <- Fixture.stub(behaviour)
         result <- Fixture
           .client(Fixture.Cluster, stub, Fixture.config(timeout = 200.millis))
-          .use(_.call(ping, "hello")(Fixture.context()))
+          .use(_.call(getCluster, cluster)(Fixture.context()))
       } yield assert(
         result.left.exists(_.isInstanceOf[InfrastructureError]),
         s"$name should be an infrastructure error, got $result"
@@ -207,8 +251,8 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
     // endpoint value and a `CallContext`, and neither can carry a cookie — so this asserts the
     // construction held: no `Cookie`, no `Authorization`, and no second principal header.
     for {
-      stub <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
-      _ <- Fixture.client(Fixture.Cluster, stub).use(_.call(ping, "hello")(Fixture.context()))
+      stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
+      _ <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
       sent <- stub.sent.map(_.head)
     } yield {
       assertEquals(sent.header("Cookie"), None)
@@ -221,15 +265,15 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
     // Independent bulkheads, per PLAN §16.4: the topic service saturating its own concurrency limit
     // must not queue a call to the cluster service behind it.
     for {
-      slow <- Fixture.stub(ServiceBehaviour.Slow(2.seconds, ServiceBehaviour.Ok(pingBody)))
-      quick <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
+      slow <- Fixture.stub(ServiceBehaviour.Slow(2.seconds, ServiceBehaviour.Ok(clusterBody)))
+      quick <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
       outcome <- (
         Fixture.client(Fixture.Topic, slow, Fixture.config("http://topic:8082", maxConcurrent = 1)),
         Fixture.client(Fixture.Cluster, quick)
       ).tupled.use { (slowClient, quickClient) =>
         for {
-          blocked <- slowClient.call(ping, "hello")(Fixture.context()).start
-          fast <- quickClient.call(ping, "hello")(Fixture.context()).timeout(500.millis)
+          blocked <- slowClient.call(getCluster, cluster)(Fixture.context()).start
+          fast <- quickClient.call(getCluster, cluster)(Fixture.context()).timeout(500.millis)
           _ <- blocked.cancel
         } yield fast
       }
@@ -238,8 +282,8 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
 
   test("returnsTheDecodedOutputOnSuccess") {
     for {
-      stub <- Fixture.stub(ServiceBehaviour.Ok(pingBody))
-      result <- Fixture.client(Fixture.Cluster, stub).use(_.call(ping, "hello")(Fixture.context()))
-    } yield assertEquals(result.map(_.message), Right("hello"))
+      stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
+      result <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
+    } yield assertEquals(result.map(_.cluster.name), Right("Production EU"))
   }
 }

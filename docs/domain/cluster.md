@@ -12,9 +12,8 @@ configuration wizard and store. It is upstream of every other Kafka-facing conte
 profile, a topology is a finding about that profile, and the two are deliberately different types
 that cannot reach each other.
 
-The one piece of M0 scaffolding still standing is `Ping`, which is removed together with its
-endpoint by the task that replaces `/internal/v1/ping`. It is the only thing left in this context
-that is not real.
+No M0 scaffolding remains: the sample `Ping` type, its use case, its wire shape and its endpoint
+were deleted in one commit together with the routes that replaced them.
 
 ## The profile — what KUI knows about one configured cluster
 

@@ -6,8 +6,7 @@ import cats.effect.IO
 import cats.effect.kernel.Resource
 
 import kui.cluster.api.{ClusterApi, PrincipalVerification}
-import kui.cluster.application.{CapabilityReport, CapabilityReportUseCase, PingUseCase}
-import kui.cluster.domain.ClockPort
+import kui.cluster.application.{CapabilityReport, CapabilityReportUseCase}
 import kui.contracts.capability.CapabilityKey
 import kui.gateway.application.capability.{
   CapabilityRegistry,
@@ -86,11 +85,14 @@ final class FaultIsolationSuite extends KuiIOSuite {
     } yield InProcessServiceClient.make[IO](
       ClusterApi.Id,
       ClusterApi.routes[IO](
-        PingUseCase.make[IO](realClock, logger),
+        EmptyClusterUseCases.registry,
+        EmptyClusterUseCases.topology,
+        EmptyClusterUseCases.brokers,
         if healthy then workingCapabilities else brokenCapabilities,
         List(if healthy then ReadinessCheck.always[IO]("process") else brokenReadiness),
         principals,
         rejections,
+        telemetry,
         logger
       ),
       interceptors,
@@ -174,10 +176,6 @@ final class FaultIsolationSuite extends KuiIOSuite {
   }
 
   private val ClusterWiringInstrumentation: String = "kui.cluster"
-
-  private def realClock: ClockPort[IO] = new ClockPort[IO] {
-    def now: IO[java.time.Instant] = IO.realTimeInstant
-  }
 
   private def workingCapabilities: CapabilityReportUseCase[IO] =
     CapabilityReportUseCase.constant[IO](Set.empty)

@@ -20,8 +20,8 @@ import kui.security.{PrincipalKind, RequestDigest}
   */
 final class PrincipalVerificationSuite extends CatsEffectSuite {
 
-  private def ping(server: ClusterTestServer, header: Option[String]) = {
-    val base = basicRequest.get(uri"${ClusterTestServer.PingUri}?message=hello").response(asStringAlways)
+  private def listClusters(server: ClusterTestServer, header: Option[String]) = {
+    val base = basicRequest.get(uri"${ClusterTestServer.ClustersUri}").response(asStringAlways)
     header.fold(base)(value => base.header(KuiEndpoint.PrincipalHeader, value)).send(server.backend)
   }
 
@@ -35,33 +35,33 @@ final class PrincipalVerificationSuite extends CatsEffectSuite {
         // No header at all. This one does not even reach the security logic: the header codec
         // refuses a blank value, so it arrives as a decode failure and `PrincipalInterceptor` is
         // what stops the shared handler calling it a 400.
-        missing <- ping(server, None)
+        missing <- listClusters(server, None)
 
         // A token minted for another service. A stolen `cluster` header must not work against
         // `topic`, and the check that makes that true is the one being exercised here.
         wrongAudience <- ClusterTestServer
           .token(audience = ServiceId.unsafe("topic"))
-          .flatMap(t => ping(server, Some(t.value)))
+          .flatMap(t => listClusters(server, Some(t.value)))
 
         // A token that was good a minute ago. Sixty-second lifetimes are what limit the damage of
         // an intercepted header, and they only limit it if expiry is actually enforced.
         expired <- ClusterTestServer
           .token(validFor = (-120).seconds)
-          .flatMap(t => ping(server, Some(t.value)))
+          .flatMap(t => listClusters(server, Some(t.value)))
 
         // A signature that no longer matches its payload.
         tampered <- ClusterTestServer
           .token()
-          .flatMap(t => ping(server, Some(tamper(t.value))))
+          .flatMap(t => listClusters(server, Some(tamper(t.value))))
 
         // A perfectly valid token for a *different* call. This is ADR-020's request binding: the
         // same principal, inside the same minute, on an operation the gateway never authorised.
         otherCall <- ClusterTestServer
           .token(digest = RequestDigest.ofRequestLine("DELETE", "/internal/v1/topics/orders"))
-          .flatMap(t => ping(server, Some(t.value)))
+          .flatMap(t => listClusters(server, Some(t.value)))
 
         // An unsigned string that is not a token at all.
-        malformed <- ping(server, Some("not-a-token"))
+        malformed <- listClusters(server, Some("not-a-token"))
       } yield {
         val responses = List(missing, wrongAudience, expired, tampered, otherCall, malformed)
 
@@ -90,7 +90,7 @@ final class PrincipalVerificationSuite extends CatsEffectSuite {
       for {
         _ <- ClusterTestServer
           .token(audience = ServiceId.unsafe("topic"))
-          .flatMap(t => ping(server, Some(t.value)))
+          .flatMap(t => listClusters(server, Some(t.value)))
         entries <- server.logger.entries
         metrics <- server.telemetry.collectMetrics
       } yield {
@@ -123,7 +123,7 @@ final class PrincipalVerificationSuite extends CatsEffectSuite {
   test("aMissingHeaderIsCountedAsMissingRatherThanAsAValidationFailure") {
     ClusterTestServer.resource().use { server =>
       for {
-        _ <- ping(server, None)
+        _ <- listClusters(server, None)
         metrics <- server.telemetry.collectMetrics
       } yield {
         val labels = metrics
@@ -141,7 +141,7 @@ final class PrincipalVerificationSuite extends CatsEffectSuite {
     ClusterTestServer.resource().use { server =>
       for {
         token <- ClusterTestServer.token(subject = "alice")
-        response <- ping(server, Some(token.value))
+        response <- listClusters(server, Some(token.value))
         entries <- server.logger.entries
       } yield {
         assertEquals(response.code.code, 200, response.body)

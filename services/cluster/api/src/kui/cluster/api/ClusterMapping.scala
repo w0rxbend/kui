@@ -1,0 +1,190 @@
+package kui.cluster.api
+
+import java.time.Instant
+
+import kui.cluster.application.{BrokerListRow, SnapshotFreshness}
+import kui.cluster.contract.dto.ClusterProfileDto
+import kui.cluster.domain.*
+import kui.contracts.Section
+import kui.contracts.cluster.*
+import kui.kernel.ClusterId
+import kui.kernel.cluster.*
+
+/** Turning what this service knows into what a browser reads.
+  *
+  * ADR-041 makes this the only layer that may see both an application type and a wire type, and ADR-033 puts
+  * the mapping here rather than on either side of it. The point is not ceremony: a domain type that is also a
+  * DTO grows a field the first time the wire needs one, and from then on the model is shaped by JSON.
+  *
+  * The mapping is also the seam that absorbs a difference in *shape*. `ClusterTopology` holds a
+  * `Map[BrokerId, BrokerLoad]` because that is how the domain reasons about a cluster; a browser wants a flat
+  * row per broker. Neither has to move to accommodate the other.
+  *
+  * **Nothing here can leak a credential, and that is a property of the types rather than of this code.** The
+  * only value in the domain that holds a secret is `ClusterProfile`, whose secrets are `Secret[String]`; the
+  * two functions that take one ([[row]] and [[profile]]) read its shape and never its contents, and
+  * everything else in this file starts from a `ClusterTopology`, which holds a `ClusterRef` and has no field
+  * a secret could be in.
+  */
+object ClusterMapping {
+
+  /** One dashboard row: identity from configuration, live data from the snapshot.
+    *
+    * The identity half is outside the section on purpose. The milestone promises that a cluster KUI cannot
+    * reach still renders a row a user can click, and a row whose name lived inside the failed section would
+    * have nothing to draw.
+    */
+  def row(
+      profile: ClusterProfile,
+      topology: Option[ClusterTopology],
+      freshness: SnapshotFreshness,
+      at: Instant
+  ): ClusterRowDto =
+    ClusterRowDto(
+      id = profile.id,
+      name = profile.label,
+      readOnly = profile.readOnly,
+      bootstrapServers = profile.bootstrap.value,
+      security = security(profile.security),
+      summary =
+        SectionMapping.of(topology, freshness, at)(summary(_, freshness.scrapedAtOption.getOrElse(at)))
+    )
+
+  /** What one scrape found. The three partition counts have no source in M1 and are `None` by construction:
+    * the domain models them as `Option` for exactly this reason (DEVPLAN D5).
+    */
+  def summary(topology: ClusterTopology, scrapedAt: Instant): ClusterSummaryDto =
+    ClusterSummaryDto(
+      kafkaClusterId = topology.description.kafkaClusterId,
+      version = topology.version.map(_.raw),
+      controllerId = topology.description.controller.map(_.id),
+      controllerKind = controllerKind(topology.description.controllerMode),
+      brokerCount = topology.brokerCount,
+      onlinePartitionCount = topology.partitions.map(_.online),
+      offlinePartitionCount = topology.partitions.map(_.offline),
+      underReplicatedPartitionCount = topology.partitions.map(_.underReplicated),
+      totalDiskUsageBytes = topology.totalDiskBytes,
+      features = topology.features.tokens.toList.sorted,
+      scrapedAt = scrapedAt
+    )
+
+  /** The wire spelling of how a cluster is controlled. Lowercase words rather than the enum's own names,
+    * because they are a contract a browser matches on and the enum's names are Scala's.
+    */
+  def controllerKind(mode: ControllerMode): String = mode match {
+    case ControllerMode.KRaft => ClusterSummaryDto.KRaft
+    case ControllerMode.ZooKeeper => ClusterSummaryDto.ZooKeeper
+    case ControllerMode.Unknown => ClusterSummaryDto.UnknownController
+  }
+
+  /** One broker row.
+    *
+    * `replicaSkewPercent` is computed in the domain across the whole broker set rather than here, because a
+    * skew computed one broker at a time divides by a different denominator than its neighbour and the two
+    * numbers do not add up on the page they are shown on together.
+    */
+  def broker(row: BrokerListRow): BrokerDto =
+    BrokerDto(
+      id = row.broker.id,
+      host = row.broker.host.value,
+      port = row.broker.port.value,
+      rack = row.broker.rack.map(_.value),
+      isController = row.isController,
+      partitionCount = None,
+      leaderCount = row.leaders,
+      inSyncReplicaCount = row.replicas,
+      replicaSkewPercent = row.skewPercent,
+      leaderSkewPercent = None,
+      // What the filesystem reports as used, which is total minus usable. It is not "bytes Kafka wrote":
+      // a shared disk holds other things too, and the honest label for a number a broker reports about a
+      // whole filesystem is the filesystem's. `None` whenever either half is missing - a broker older than
+      // Kafka 3.3 reports no sizes at all, which is different from a disk that is empty.
+      diskUsageBytes = row.totalBytes.flatMap(total => row.usableBytes.map(total - _)),
+      segmentCount = None
+    )
+
+  def configEntry(entry: ConfigEntry): BrokerConfigEntryDto =
+    BrokerConfigEntryDto(
+      name = entry.name,
+      value = entry.value,
+      source = entry.source.token,
+      isSensitive = entry.isSensitive,
+      isReadOnly = entry.isReadOnly,
+      documentation = entry.documentation,
+      synonyms = entry.synonyms.map(_.name)
+    )
+
+  /** One log directory. The per-directory error is carried across as its own description rather than folded
+    * into the section: a broker with one offline disk and three healthy ones is a good answer with a warning
+    * in it, not a failure.
+    */
+  def logDir(brokerId: kui.kernel.BrokerId, dir: LogDir): LogDirDto =
+    LogDirDto(
+      brokerId = brokerId,
+      path = dir.path.value,
+      error = dir.error.map(_.describe),
+      totalBytes = dir.totalBytes,
+      usableBytes = dir.usableBytes,
+      topicCount = dir.replicas.map(_.partition.topic).distinct.size,
+      partitionCount = dir.replicas.size
+    )
+
+  /** A connection's *shape*: which protocol, which mechanism, whether stores were configured.
+    *
+    * Every branch reads a boolean or a documented wire name off the ADT. There is no branch that reads a
+    * username or unwraps a `Secret`, which is what makes "no credential reaches the wire" checkable by
+    * reading twenty lines rather than by auditing a call graph.
+    */
+  def security(security: ClusterSecurity): ClusterSecurityDto = {
+    val tls = security.tlsConfig
+
+    ClusterSecurityDto(
+      protocol = security.securityProtocol,
+      mechanism = security.saslMechanism.map(_.wireName),
+      truststoreConfigured = tls.exists(_.truststore.isDefined),
+      keystoreConfigured = tls.exists(_.keystore.isDefined)
+    )
+  }
+
+  /** The profile another KUI service fetches, with every credential removed and the override map reduced to
+    * its keys (CLAPI-003 explains why the values do not travel in M1).
+    */
+  def profile(profile: ClusterProfile, updatedAt: Instant): ClusterProfileDto =
+    ClusterProfileDto(
+      id = profile.id,
+      name = profile.label,
+      version = profile.version.value,
+      readOnly = profile.readOnly,
+      bootstrapServers = profile.bootstrap.value,
+      security = security(profile.security),
+      adminTimeoutMs = profile.admin.apiTimeout.toMillis,
+      adminBatchSize = profile.admin.topicChunkSize,
+      adminParallelism = profile.admin.parallelism,
+      propertyKeys = profile.properties.keys.toList.sorted,
+      updatedAt = updatedAt
+    )
+
+  /** Divergence from the mean, as a percentage rounded to two decimals, or `None` when there is no mean to
+    * diverge from.
+    *
+    * Kafbat computes this in the browser. Computing it server-side means one implementation and one rounding
+    * rule for the table, a CSV export and any later alert — and `None` renders as an em dash rather than as
+    * `0.00%`, which would claim a perfectly balanced cluster where there is simply nothing to measure.
+    */
+  def skewPercent(value: Int, mean: Double): Option[Double] =
+    if mean <= 0.0d then None
+    else Some(math.round((value.toDouble - mean) / mean * 100.0d * 100.0d).toDouble / 100.0d)
+
+  /** Wraps a list that came from a live call rather than from a snapshot.
+    *
+    * A live call's answer is current by definition, so it is `Ok` at the instant it returned. A failure has a
+    * `KuiError` in hand and goes through `Section.fromEither`, which classifies by failure case.
+    */
+  def liveSection[A, B](result: Either[kui.kernel.error.KuiError, A], at: Instant)(
+      render: A => B
+  ): Section[B] =
+    Section.fromEither(result.map(render), at)
+
+  /** The cluster ids of a registry listing, for a log line that must not carry a bootstrap string. */
+  def idsOf(profiles: List[ClusterProfile]): List[ClusterId] = profiles.map(_.id)
+}

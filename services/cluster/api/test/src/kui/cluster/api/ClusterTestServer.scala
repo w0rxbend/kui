@@ -17,8 +17,7 @@ import sttp.client4.testing.StreamBackendStub
 import sttp.client4.StreamBackend
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
-import kui.cluster.application.{CapabilityReportUseCase, ClusterService, PingUseCase}
-import kui.cluster.domain.ClockPort
+import kui.cluster.application.{CapabilityReportUseCase, ClusterService}
 import kui.kernel.{ClusterId, Secret, ServiceId, UserName}
 import kui.observability.Telemetry
 import kui.security.*
@@ -49,9 +48,14 @@ object ClusterTestServer {
 
   val Cluster: ClusterId = ClusterId.unsafe("prod-eu")
 
-  val PingPath: String = "/internal/v1/ping"
+  /** The endpoint the principal-verification cases drive.
+    *
+    * Any secured route would do; the cluster list is the cheapest, because it needs no cluster to exist and
+    * answers from an empty registry without touching anything.
+    */
+  val ClustersPath: String = "/internal/v1/clusters"
 
-  val PingUri: String = s"http://cluster$PingPath"
+  val ClustersUri: String = s"http://cluster$ClustersPath"
 
   /** Thirty-two bytes, which is the shortest key HS256 will accept. */
   private val KeyMaterial: Array[Byte] = Array.fill[Byte](32)(7)
@@ -69,7 +73,7 @@ object ClusterTestServer {
       .make[IO](NonEmptyList.of(Key), Issuer)
       .getOrElse(throw new IllegalStateException("the test signing key is too short for HS256"))
 
-  /** A token for `GET /internal/v1/ping`, good for a minute from now unless the caller says otherwise.
+  /** A token for `GET /internal/v1/clusters`, good for a minute from now unless the caller says otherwise.
     *
     * The lifetime is relative to the real clock and not to [[Now]] on purpose: expiry is checked against the
     * *service's* clock, and a token minted against a fixed instant would start failing the day the suite is
@@ -79,7 +83,7 @@ object ClusterTestServer {
   def token(
       audience: ServiceId = ClusterService.Id,
       validFor: FiniteDuration = 60.seconds,
-      digest: RequestDigest = RequestDigest.ofRequestLine("GET", PingPath),
+      digest: RequestDigest = RequestDigest.ofRequestLine("GET", ClustersPath),
       subject: String = "alice"
   ): IO[SignedPrincipal] =
     IO.realTimeInstant.flatMap(now =>
@@ -118,11 +122,14 @@ object ClusterTestServer {
         )
       } yield {
         val routes = ClusterApi.routes[IO](
-          PingUseCase.make[IO](fixedClock, logger),
+          new ClusterFixtures.StubRegistry(Nil),
+          new ClusterFixtures.StubTopology(Nil),
+          new ClusterFixtures.StubBrokers(),
           capabilities(configured, available),
           Nil,
           codec,
           rejections,
+          Telemetry.fromProviders(testkit.tracerProvider, testkit.meterProvider),
           logger
         )
 
@@ -140,10 +147,6 @@ object ClusterTestServer {
   /** A counter a suite can read back, without a whole server around it. */
   def rejectionCounter(testkit: OtelJavaTestkit[IO]): IO[Counter[IO, Long]] =
     testkit.meterProvider.get("kui.cluster").flatMap(PrincipalVerification.rejectionCounter[IO])
-
-  private def fixedClock: ClockPort[IO] = new ClockPort[IO] {
-    def now: IO[Instant] = IO.pure(Now)
-  }
 
   private def capabilities(configured: Boolean, available: Boolean): CapabilityReportUseCase[IO] =
     new CapabilityReportUseCase[IO] {

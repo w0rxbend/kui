@@ -12,8 +12,10 @@ import munit.CatsEffectSuite
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.*
 
-import kui.cluster.contract.dto.PingResponse
+import kui.cluster.contract.dto.ClustersResponse
 import kui.cluster.contract.ClusterEndpoints
+import kui.contracts.Section
+import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
 import kui.contracts.capability.{CapabilityKey, CapabilityState}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.gateway.api.GatewayTestServer
@@ -43,7 +45,29 @@ final class ContractRoutingSuite extends CatsEffectSuite {
   private val cluster = ServiceId.unsafe("cluster")
   private val clusterKey = CapabilityKey(cluster, None)
 
-  private val pong = PingResponse("hello", Instant.parse("2026-09-03T10:11:12Z"), "cluster")
+  private val at = Instant.parse("2026-09-03T10:11:12Z")
+
+  /** What the stubbed cluster service answers `GET /internal/v1/clusters` with.
+    *
+    * A real response type from the real contract, so that a change to the wire shape breaks this suite the
+    * same way it would break the browser.
+    */
+  private val listed = ClustersResponse(
+    List(
+      ClusterRowDto(
+        id = kui.kernel.ClusterId.unsafe("prod-eu"),
+        name = "Production EU",
+        readOnly = false,
+        bootstrapServers = "broker-1.example.com:9093",
+        security = ClusterSecurityDto("PLAINTEXT", None, false, false),
+        summary = Section.Ok(
+          ClusterSummaryDto(None, None, None, ClusterSummaryDto.KRaft, 1, None, None, None, None, Nil, at),
+          at
+        )
+      )
+    ),
+    at
+  )
 
   /** A streaming endpoint under `/internal/v1`, which M0 has no real example of.
     *
@@ -60,7 +84,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
 
   /** A `ServiceClient` that answers from a script and records what it was asked. */
   private def stubClient(
-      answer: Either[KuiError, PingResponse] = Right(pong),
+      answer: Either[KuiError, ClustersResponse] = Right(listed),
       streamed: Stream[IO, SseEvent] = Stream.empty
   ): IO[(ServiceClient[IO], Ref[IO, List[Any]])] =
     Ref.of[IO, List[Any]](Nil).map { calls =>
@@ -114,7 +138,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
   }
 
   test("rewritesInternalV1ToApiV1") {
-    assertEquals(ContractRouting.publicPathOf(ClusterEndpoints.ping), Right("/api/v1/ping"))
+    assertEquals(ContractRouting.publicPathOf(ClusterEndpoints.listClusters), Right("/api/v1/clusters"))
   }
 
   test("rewritesOnlyThePrefixAndNothingElse") {
@@ -153,14 +177,14 @@ final class ContractRoutingSuite extends CatsEffectSuite {
     (signals, Resource.eval(stubClient())).tupled.use { case ((signal, _), (client, calls)) =>
       GatewayTestServer.resource(extraRoutes = derived(client, signal)).use { server =>
         for {
-          response <- server.get("/api/v1/ping?message=hello")
+          response <- server.get("/api/v1/clusters")
           seen <- calls.get
         } yield {
           assertEquals(response.code.code, 200)
-          assertEquals(decode[PingResponse](response.body), Right(pong))
-          // The query parameter reached the upstream as the endpoint's declared input, decoded by the
-          // service's own codec, not as a string the gateway copied.
-          assertEquals(seen, List("hello"))
+          assertEquals(decode[ClustersResponse](response.body), Right(listed))
+          // The endpoint's declared input reached the upstream as itself, decoded by the service's own
+          // codec, rather than as a string the gateway copied.
+          assertEquals(seen, List(()))
         }
       }
     }
@@ -173,7 +197,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
       case ((signal, registry), (client, _)) =>
         GatewayTestServer.resource(extraRoutes = derived(client, signal)).use { server =>
           for {
-            response <- server.get("/api/v1/ping?message=hello")
+            response <- server.get("/api/v1/clusters")
             envelope = decode[ErrorEnvelope](response.body).fold(e => fail(e.getMessage), identity)
             state <- registry.state(clusterKey)
           } yield {
@@ -204,7 +228,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
       case ((signal, registry), (client, _)) =>
         GatewayTestServer.resource(extraRoutes = derived(client, signal)).use { server =>
           for {
-            response <- server.get("/api/v1/ping?message=hello")
+            response <- server.get("/api/v1/clusters")
             envelope = decode[ErrorEnvelope](response.body).fold(e => fail(e.getMessage), identity)
             state <- registry.state(clusterKey)
           } yield {
@@ -230,7 +254,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
       val routes = derived(client, signal, RbacPreCheck.denyAll[IO]("not for you"))
       GatewayTestServer.resource(extraRoutes = routes).use { server =>
         for {
-          response <- server.get("/api/v1/ping?message=hello")
+          response <- server.get("/api/v1/clusters")
           seen <- calls.get
           envelope = decode[ErrorEnvelope](response.body).fold(e => fail(e.getMessage), identity)
         } yield {
@@ -254,7 +278,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
       case ((signal, _), (client, _)) =>
         GatewayTestServer.resource(extraRoutes = derived(client, signal)).use { server =>
           for {
-            response <- server.get("/api/v1/ping?message=hello")
+            response <- server.get("/api/v1/clusters")
             envelope = decode[ErrorEnvelope](response.body).fold(e => fail(e.getMessage), identity)
             header = response.header(Correlation.HeaderName)
           } yield {
@@ -287,7 +311,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
     (signals, Resource.eval(stubClient())).tupled.use { case ((signal, _), (client, _)) =>
       GatewayTestServer.resource(extraRoutes = derived(client, signal)).use { server =>
         server
-          .get("/api/v1/ping?message=hello")
+          .get("/api/v1/clusters")
           .map(response => assertEquals(response.code.code, 200))
       }
     }
