@@ -400,19 +400,98 @@ A worked example. You are building the topic list.
   topic name starts with an underscore, what the delete action asks for before it fires, and what
   the screen shows when the cluster is unreachable rather than merely empty.
 - If the artboard shows a column the research never mentions and no feature-matrix row covers, you
-  do **not** invent its meaning. Either the row is missing from the matrix and gets added there
-  first, or the column is not built.
+  do **not** invent its meaning. Either a matrix row is proposed, researched and accepted first, and
+  the column is built by whatever task then owns it — or the column is not built. See case 1 below.
 
 **When they disagree, the research wins.** If the design implies a behaviour that contradicts the
 researched behaviour — an action that would delete without confirming, a screen that would show data
 KUI does not fetch — implement the researched behaviour and *record the difference* in
-`research/design/REFERENCE.md` and in the task file: which artboard implied what, what was done
-instead, and why. Do not resolve it silently; the next person will otherwise re-open the same
-argument with no record that it was already settled.
+`research/design/gaps.md` and in the task file: which artboard implied what, what was done instead,
+and why. Do not resolve it silently; the next person will otherwise re-open the same argument with no
+record that it was already settled.
+
+Note which file: `research/design/REFERENCE.md` is a faithful reading of *what the design is* —
+identity, revision, values under the design's own names — and nothing about a disagreement belongs in
+it. `research/design/gaps.md` is the register of disagreements.
 
 One rule sits above both: **a colour pair from the design that fails WCAG AA contrast is adjusted,
 not adopted**, and the adjustment is written down. Accessibility outranks fidelity to a mockup. See
 PLAN §21 "Visual design reference" for the same rules in their canonical form.
+
+### Three cases, worked through
+
+The rule above is easy to agree with and hard to apply, because the interesting cases are the ones
+where the design is *not* simply wrong. Here are the three that come up, with the answer written out
+so nobody has to re-derive it. Note that the first two end in "do not build it" and the third ends
+in "build it anyway, altered" — that asymmetry is the whole point, and it is not arbitrary.
+
+**1. The design shows a topic list with a column the reference products do not have.**
+
+The column is not built.
+
+Which columns a table has is *what the screen shows*, not *how it looks*, so it is outside the
+design's authority however finished the artboard looks. Nobody knows what the column means: an
+artboard can show a header and a plausible-looking number without anything in the product being able
+to produce that number, and the sample data in an artboard is invented (`research/design/REFERENCE.md`
+says so explicitly). Implementing it means inventing a definition, a data source and a failure mode,
+and the next person will read all three as specified behaviour.
+
+So: take the design's *treatment* of the table — its widths, alignment, header type scale, row
+density — and render only the columns the research and `docs/FEATURE_MATRIX.md` establish. Record the
+extra column in `research/design/gaps.md` as a bucket C item (UI-013 step 5). If it looks like a
+feature KUI should have, a feature-matrix row is **proposed** there; it is not added, because matrix
+rows come from research and product scope. Once such a row exists and is researched, the column gets
+built by the task that owns that row — not by the styling pass.
+
+**2. The design shows a button in a place where the researched behaviour has no such action.**
+
+The button is not built, and this is a stronger "no" than case 1.
+
+Same reason — an action is behaviour — but with more at stake: a column that shows the wrong thing
+is a display bug, whereas a button that does the wrong thing changes a cluster. There is no safe
+placeholder. A button wired to nothing is worse than an absent button, because a disabled or inert
+control tells an operator the capability exists and is merely unavailable to them right now, which is
+the vocabulary ADR-032 reserves for capability and permission states that are actually true.
+
+Two follow-on points that catch people out:
+
+- **Take the layout without the action.** If the design's toolbar is balanced around three buttons and
+  research supports two, lay the toolbar out for two. Do not reserve the third slot, and do not
+  invent a handler to fill it. (`__cluster-slot` in the shell header is not a counter-example: that
+  space is reserved for a *specified* M1 feature, and the reservation is documented.)
+- **A button that KUI already has, drawn differently, is not this case at all.** That is styling, and
+  the design wins outright.
+
+Record it in `research/design/gaps.md` the same way, with the researched position written beside the
+design's so the disagreement stays visible.
+
+**3. The design's palette fails contrast in dark mode.**
+
+The palette is adopted and *adjusted*. It is never rejected, and the test is never relaxed.
+
+This one sits inside the design's own authority — colour is exactly what the design decides — so
+"research wins" does not apply and there is nothing to send back. What applies instead is the
+accessibility rule, which is a decision already taken (PLAN §21, UI-013 step 4): the failing value is
+moved along its own hue, by the smallest amount that clears the threshold, until `ContrastSuite`
+passes in **both** themes.
+
+The three things that are never the fix:
+
+- lowering a minimum in the pair table in [`tokens.md`](tokens.md), or deleting a row from it —
+  `ContrastSuite` reads that table, so either one disables the check rather than satisfying it;
+- shipping the design value in light and a different one in dark *without recording it*;
+- fixing only the explicit `[data-theme="dark"]` block. The dark palette is declared twice (see
+  [`style-surface.md`](style-surface.md) §2.1) and a test asserts the two copies are identical.
+
+The adjusted value keeps a `/* kui */` provenance marker, and the **original design value is recorded
+beside the shipped one** in `tokens.md`. That record is load-bearing: without it the next importer
+sees the stylesheet disagreeing with the design, reads it as a transcription error, and quietly
+reverts the accessibility fix.
+
+Note the limit of the check while you are here: `ContrastSuite` verifies documented *token pairs*
+only. A dark palette can pass all thirty checks and still be unreadable where a colour is composed at
+run time — a `color-mix()` hover shade, a backdrop, a disabled control's opacity. Those are checked
+by eye against `/ui/gallery` in both themes ([`style-surface.md`](style-surface.md) §5.4).
 
 ## What the user sees for a feature: the derivation table
 
@@ -579,6 +658,9 @@ module and a JVM test module in one Mill invocation currently fail together (blo
 ## Further reading
 
 - [`tokens.md`](tokens.md) — the design tokens, the theme model and the contrast rules.
+- [`style-surface.md`](style-surface.md) — the full inventory of what a restyle touches: every token
+  and value, every stylesheet and the cascade order, every hard-coded visual literal, and the line
+  between what a design import may replace and what it may not.
 - [`components.md`](components.md) — the primitive catalogue, with each component's API and its
   accessibility contract.
 - [`features.md`](features.md) — how to add a microfrontend.

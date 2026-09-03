@@ -7,10 +7,14 @@ depends on, and every place where a visual value is written literally instead of
 token.
 
 **Why it exists.** The project owner keeps a Claude Design project, "Kafka UI v2", which defines the
-intended look. It has not been imported (the design tool needs an authorization step only the owner
-can perform), so nothing about its contents is known or guessed at here. What *is* knowable today is
-the shape of the surface it would land on. Writing that down in advance is what turns the eventual
-import into a small, reviewable diff instead of a rewrite.
+intended look. It *has* been read: the reading is recorded in
+[`research/design/REFERENCE.md`](../../research/design/REFERENCE.md), which is the only place in this
+repository that holds the design's own values. This document deliberately holds none of them, and
+neither states nor guesses what the design contains. It describes the surface an import lands *on*,
+which is knowable independently of what is landing, and which is what turns the reconciliation into a
+small, reviewable diff instead of a rewrite. Reconciling the two is task
+[UI-013](../plans/M0/tasks/UI-013.md); until that task runs, every value below is the shipped value
+and none of it has been superseded in the product.
 
 **The rule this document encodes.** The design project decides **how KUI looks**. The original plan
 and the researched behaviour of the two reference products — Kafbat Kafka UI and Provectus Kafka UI,
@@ -56,7 +60,9 @@ UI-002 exists to protect (§1.8).
 ### 1.1 Provenance markers
 
 Every colour declaration in the stylesheet ends with a trailing comment recording where its value
-came from. There are exactly two markers:
+came from, as do the two light-theme shadow values (§1.6) — 41 marked declarations in all, from 39
+colours and 2 shadows. There are exactly two markers today; UI-013 adds a third, `/* design */`, for
+a value taken from the import:
 
 - `/* seeded: kafbat */` — the exact value from Kafbat's palette (`frontend/src/theme/theme.ts` in
   the reference checkout, analysed in
@@ -319,8 +325,8 @@ file order above rather than by whoever nested their selectors most deeply.
 No Scala file writes a class-name string literal. Names live in one `Css` object per module and are
 referenced by constant, so a typo becomes a compile error rather than a silently unstyled element:
 
-- [`ui-kernel/.../css/KernelCss.scala`](../../frontend/ui-kernel/src/kui/ui/kernel/css/KernelCss.scala) — 84 constants
-- [`ui-shell/.../ShellCss.scala`](../../frontend/ui-shell/src/kui/ui/shell/ShellCss.scala) — 51 constants
+- [`ui-kernel/.../css/KernelCss.scala`](../../frontend/ui-kernel/src/kui/ui/kernel/css/KernelCss.scala) — 96 constants
+- [`ui-shell/.../ShellCss.scala`](../../frontend/ui-shell/src/kui/ui/shell/ShellCss.scala) — 52 constants
 - [`ui-clusters/.../ClustersPage.scala`](../../frontend/ui-clusters/src/kui/ui/clusters/ClustersPage.scala) — 7 constants in a private object at the foot of the file
 
 ---
@@ -518,7 +524,10 @@ graphical objects (WCAG 1.4.11), which is what a control outline and a focus rin
 
 ### 5.4 The limits of the check
 
-It verifies documented *token pairs*. It cannot see a colour composed at run time — the
+It verifies documented *token pairs*, and only those whose two names both resolve in the palette: a
+row naming a token that does not exist is skipped in silence rather than failing, so a renamed token
+can quietly take a pair out of the check. (Test 1 catches a *missing* token, not a *mistyped pair*.)
+It also cannot see a colour composed at run time — the
 `color-mix()` hover shades, the `rgba(0, 0, 0, 0.45)` backdrops, the `opacity: 0.55` on disabled
 controls, or text laid over a `currentColor 14%` tag wash. A palette whose primary is much lighter
 could make the 88 %-toward-black hover shade indistinguishable from the base without failing a single
@@ -567,7 +576,7 @@ width as a design decision, this should become a real token.
 
 ### R4 — hard-coded opacity values
 
-Nine literals, all in the 0.5–0.6 band, all meaning some flavour of "de-emphasised", none tokenised:
+Six literals, all in the 0.5–0.6 band, all meaning some flavour of "de-emphasised", none tokenised:
 
 | File:line | Selector | Value | Means |
 | --- | --- | --- | --- |
@@ -579,7 +588,8 @@ Nine literals, all in the 0.5–0.6 band, all meaning some flavour of "de-emphas
 | `40-clusters.css:46` | `.kui-clusters__table--stale` | `0.6` | stale data |
 
 Three distinct meanings share two near-identical values by coincidence rather than by decision.
-A redesign that wants disabled controls at a different strength has six edits to find. Candidate
+The value `0.55` alone appears four times, so a redesign that wants disabled controls at a
+different strength has four edits to find. Candidate
 remediation: `--kui-opacity-disabled` and `--kui-opacity-stale`. Note the accessibility floor in §7:
 whatever the values become, none of these may be the *only* signal.
 
@@ -796,8 +806,10 @@ arrives with per-component tokens must be *flattened into* this set, not adopted
 
 ### 7.3 Where a design would contradict the research
 
-Nothing to record yet — the design has not been imported, and this document deliberately does not
-speculate about its contents. The procedure when it lands:
+Nothing to record yet. The design has been read into
+[`research/design/REFERENCE.md`](../../research/design/REFERENCE.md), but no reconciliation has been
+attempted, so no contradiction has been *established* — and this document does not speculate about
+the design's contents either way. The procedure UI-013 follows:
 
 1. Anything in §7.1 → adopt.
 2. Anything in §7.2 → the existing behaviour wins. Restyle it; keep it.
@@ -831,20 +843,20 @@ sentence and asks for it to be fixed during the import; it is recorded here too 
 ADR-024 alone would come away believing the token *vocabulary* is still negotiable, when only the
 *values* are.
 
-**2. PLAN §21 calls the design project the "UI source of truth" without qualification.**
-PLAN §21 "Visual design reference" says the design project *is* the source of truth for tokens,
-components **and screens**, and assigns "Research Agent I" to import it. Read literally that would
-make the design authoritative over what a screen does, which is precisely the reading the owner's
-instruction rules out and which UI-013's step 6 ("never take behaviour from the design") also rules
-out. The consistent reading — design decides how it looks, research decides what it does — narrows
-PLAN §21's claim to *styling*, which is what this document assumes throughout. PLAN §21 also names
-the project **"Kafka UI"** where the current brief and UI-013 name it **"Kafka UI v2"**; UI-013 step
-1 resolves that by recording whatever identity the tool actually reports and correcting PLAN §21 in
-the same commit.
+**2. Resolved — PLAN §21 now states the division of authority explicitly.** This entry previously
+recorded that PLAN §21 called the design project the "UI source of truth" without qualification,
+which read as making the design authoritative over what a screen *does*. PLAN §21 "Visual design
+reference" now carries a "Division of authority" subsection saying the opposite in as many words —
+the design is the authority on appearance and explicitly *not* on behaviour — plus a conflict rule, an
+accessibility rule and a reimplementation rule. It also names the project **"Kafka UI v2"**,
+matching UI-013 and `research/design/REFERENCE.md`, so the old naming discrepancy is gone too. The
+reading this document assumes throughout is now PLAN's own. Kept as a row rather than deleted so a
+reader of an older revision can see it was settled deliberately.
 
-**3. `tokens.md` says "~45 semantic tokens"; there are 46.** Trivial, but `TokensSuite`'s ceiling is
-60 and the prose says "~45" in two places. Not worth a commit on its own; fix it when `tokens.md`
-is next edited.
+**3. `tokens.md` says "~45 semantic tokens"; there are 46, and `BLOCKERS.md` B-001 says "~40".**
+Trivial, and `TokensSuite`'s ceiling is 60 either way, so nothing is broken. The approximations are
+in prose only — one row of the comparison table in `tokens.md`, and one sentence in the B-001 row.
+Not worth a commit on their own; correct them when those files are next edited.
 
 **4. Two `var()` calls reference tokens that do not exist** — `--kui-z-modal` and
 `--kui-sidebar-width` (R1, R2). No document mentions either. `TokensSuite` guarantees declarations
