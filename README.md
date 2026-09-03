@@ -119,10 +119,12 @@ the module must also be free of `var`.
 
 ### A note on frontend tests
 
-Running Scala.js tests needs a JavaScript engine. Install **Node.js** (22 LTS) for the plain
+Running Scala.js tests needs a JavaScript engine. Install **Node.js** (20 or newer) for the plain
 suites, and additionally `npm install -g jsdom` for the suites that need a `document`. Without Node
 the frontend still compiles and links — only `./mill <module>.js.test` fails, with
-`failed to start command List(node)`.
+`failed to start command List(node)`. See
+[docs/development/toolchain.md](docs/development/toolchain.md) for the full setup, including the
+version-manager trap that makes Node invisible to the build.
 
 `resolveAll` is worth knowing about: it exists purely to fail fast. It asks the build to download
 every library version listed in [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md), even ones no module
