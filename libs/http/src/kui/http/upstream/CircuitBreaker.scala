@@ -232,11 +232,11 @@ object CircuitBreaker {
 
     /** Releases a probe claim whose call was cancelled before it could answer.
       *
-      * A cancelled probe told us nothing about the upstream, so the circuit goes back to open with
-      * a fresh timer rather than closing: the upstream still has to earn its way back with a probe
-      * that actually completes. The consecutive-failure run is left alone, because a cancellation
-      * is our decision, not the upstream's, and counting it as a failure would open circuits on
-      * upstreams that were merely called by a client that hung up.
+      * A cancelled probe told us nothing about the upstream, so the circuit goes back to open with a fresh
+      * timer rather than closing: the upstream still has to earn its way back with a probe that actually
+      * completes. The consecutive-failure run is left alone, because a cancellation is our decision, not the
+      * upstream's, and counting it as a failure would open circuits on upstreams that were merely called by a
+      * client that hung up.
       *
       * A cancelled non-probe call changes nothing: it never claimed anything.
       */
@@ -256,13 +256,12 @@ object CircuitBreaker {
 
     /** Hands a transition to the subscribers without ever making the caller wait for them.
       *
-      * `publish` runs on the request fiber that was calling the upstream, inside the bulkhead
-      * permit. `subscribe(n)` gives each subscriber a bounded, *backpressuring* queue, so a
-      * subscriber that stopped draining — the capability fold behind a stalled log appender, say —
-      * would not miss transitions, it would stop every in-flight upstream call. Subscribers are
-      * therefore unbounded: the only things published here are transitions, which are rare by
-      * construction, and every subscriber is a stream whose lifetime is a resource that
-      * unsubscribes when it ends.
+      * `publish` runs on the request fiber that was calling the upstream, inside the bulkhead permit.
+      * `subscribe(n)` gives each subscriber a bounded, *backpressuring* queue, so a subscriber that stopped
+      * draining — the capability fold behind a stalled log appender, say — would not miss transitions, it
+      * would stop every in-flight upstream call. Subscribers are therefore unbounded: the only things
+      * published here are transitions, which are rare by construction, and every subscriber is a stream whose
+      * lifetime is a resource that unsubscribes when it ends.
       */
     private def publish(state: CircuitState, at: Instant, lastError: Option[String]): F[Unit] =
       topic.publish1(CircuitEvent(upstream, state, at, lastError)).void
