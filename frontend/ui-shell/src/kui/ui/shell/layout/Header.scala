@@ -7,14 +7,13 @@ import kui.ui.kernel.css.KernelCss
 import kui.ui.kernel.theme.ThemeChoice
 import kui.ui.shell.ShellCss
 
-/** The bar across the top: the product name, a place for the cluster switcher, the theme switch and the build
+/** The bar across the top of the content: a place for the cluster switcher, the theme switch and the build
   * version.
   *
-  * @param uiPrefix
-  *   where the frontend is mounted, deployment prefix included (`/ui` normally, `/kafka/ui` behind a proxy
-  *   that mounts KUI under `/kafka`). The brand link is root-relative, so it cannot be left to the injected
-  *   `<base href>`: a `<base>` only rewrites *relative* URLs, and a hard-coded `/ui/` would send a user
-  *   behind a prefix to a path no gateway route matches.
+  * The product name is not here. In the design the wordmark belongs to the navigation drawer, which runs the
+  * full height of the window, and the top bar belongs to the content beside it — so `Sidebar` carries the
+  * brand and this bar carries only the controls that act on what is on screen.
+  *
   * @param buildVersion
   *   which build the browser is running. A `Signal` because it is filled in from `GET /api/v1/info` once that
   *   endpoint exists; until then it is what the gateway injected into the bootstrap block, and if that failed
@@ -23,10 +22,9 @@ import kui.ui.shell.ShellCss
   */
 object Header {
 
-  def apply(uiPrefix: String, buildVersion: Signal[String], theme: Var[ThemeChoice]): HtmlElement =
+  def apply(buildVersion: Signal[String], theme: Var[ThemeChoice]): HtmlElement =
     headerTag(
       cls := ShellCss.Header,
-      div(cls := ShellCss.HeaderBrand, a(href := s"$uiPrefix/", dataAttr("testid") := "brand-link", "KUI")),
       // The cluster switcher lands here in M1. The empty element is deliberate: it holds the space,
       // so adding the switcher does not move the theme button to a different place on screen.
       div(cls := ShellCss.ClusterSlot, dataAttr("testid") := "cluster-slot"),

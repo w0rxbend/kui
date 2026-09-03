@@ -70,7 +70,7 @@ class NavigationSuite extends FunSuite {
   private def sidebarFor(states: (FeatureRoutes, Signal[FeatureState])*)(
       hideForbidden: Boolean = false
   ): HtmlElement =
-    Sidebar(routerFor(states.toList), Navigation.items(states.toList, hideForbidden))
+    Sidebar(routerFor(states.toList), Navigation.items(states.toList, hideForbidden), "/ui")
 
   private def entryOf(root: dom.Element, testId: String): Option[dom.Element] =
     Option(root.querySelector(s"[data-testid='$testId']"))

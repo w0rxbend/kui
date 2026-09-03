@@ -124,6 +124,21 @@ class ShellLayoutSuite extends FunSuite {
     }
   }
 
+  test("theWordmarkIsInsideTheNavigationDrawer") {
+    // The design puts the wordmark at the top of the drawer, not in a bar across the top: the drawer
+    // runs the full height of the window and the top bar belongs to the content beside it. This is a
+    // structural assertion rather than a styling one, because the CSS grid can only place the drawer
+    // against the whole left edge if the brand really is inside it.
+    mounted(app("http://localhost:8080/ui/")) { root =>
+      val drawer = root.querySelector("nav[aria-label='Main']")
+      assert(drawer.querySelector("[data-testid='brand-link']") != null, "the wordmark is not in the drawer")
+      assert(
+        root.querySelector("header [data-testid='brand-link']") == null,
+        "the wordmark is still in the top bar"
+      )
+    }
+  }
+
   test("anUnknownAddressRendersTheNotFoundPageWithTheNavigationIntact") {
     mounted(app("http://localhost:8080/ui/nope")) { root =>
       assert(root.querySelector("[data-testid='page-not-found']") != null)

@@ -1,6 +1,7 @@
 package kui.ui.shell.layout
 
-import com.raquo.laminar.api.L.*
+import com.raquo.laminar.api.L.{svg as s, *}
+import com.raquo.laminar.codecs.StringAsIsCodec
 import com.raquo.waypoint.Router
 
 import kui.ui.kernel.component.Icon
@@ -10,7 +11,8 @@ import kui.ui.kernel.state.FeatureState
 import kui.ui.shell.nav.NavItem
 import kui.ui.shell.{Messages, ShellCss}
 
-/** The navigation down the left-hand side, and the five rendering rules of ADR-032.
+/** The navigation drawer down the left-hand side: the wordmark, the destinations, and the five rendering
+  * rules of ADR-032.
   *
   * ## The rules, and why each one is what it is
   *
@@ -38,17 +40,64 @@ import kui.ui.shell.{Messages, ShellCss}
   */
 object Sidebar {
 
-  def apply(router: Router[Page], items: Signal[List[NavItem]]): HtmlElement =
+  /** @param uiPrefix
+    *   where the frontend is mounted, deployment prefix included (`/ui` normally, `/kafka/ui` behind a proxy
+    *   that mounts KUI under `/kafka`). The wordmark links to it, and that link is root-relative, so it
+    *   cannot be left to the injected `<base href>`: a `<base>` only rewrites *relative* URLs, and a
+    *   hard-coded `/ui/` would send a user behind a prefix to a path no gateway route matches.
+    */
+  def apply(router: Router[Page], items: Signal[List[NavItem]], uiPrefix: String): HtmlElement =
     navTag(
       cls := ShellCss.Sidebar,
       // Named, because a page can hold more than one navigation region — this one and the
       // breadcrumbs — and a screen reader listing two unnamed "navigation" landmarks tells the user
       // nothing about which is which.
       aria.label := "Main",
+      wordmark(uiPrefix),
       ul(
         cls := ShellCss.SidebarList,
         children <-- items.split(_.testId)((_, initial, item) => entry(router, initial, item))
       )
+    )
+
+  /** The product name, and the mark beside it.
+    *
+    * The mark is drawn inline rather than loaded, for the reason `Icon` gives: an image is a second request
+    * that has to arrive before the interface looks finished, and a failed one leaves a broken box in the
+    * first thing the user looks at. Its tile takes its gradient from the accent tokens, so the mark follows
+    * the chosen accent instead of being a fixed brand colour painted onto a themed interface.
+    */
+  private def wordmark(uiPrefix: String): HtmlElement =
+    div(
+      cls := ShellCss.Brand,
+      a(
+        href := s"$uiPrefix/",
+        dataAttr("testid") := "brand-link",
+        span(cls := ShellCss.BrandMark, aria.hidden := true, mark),
+        span(cls := ShellCss.BrandName, "KUI")
+      )
+    )
+
+  private val ariaHidden = s.svgAttr("aria-hidden", StringAsIsCodec, None)
+
+  /** Three nodes and the links between them: a broker and its partitions, which is the one picture that says
+    * "Kafka" without saying anything the product would have to keep true.
+    */
+  private def mark: SvgElement =
+    s.svg(
+      s.viewBox := "0 0 24 24",
+      s.width := "1.75em",
+      s.height := "1.75em",
+      s.fill := "none",
+      s.stroke := "currentColor",
+      s.strokeWidth := "3",
+      s.strokeLineCap := "round",
+      s.strokeLineJoin := "round",
+      ariaHidden := "true",
+      s.path(s.d := "M6.5 12l10-6.2M6.5 12l10 6.2"),
+      s.circle(s.cx := "6.5", s.cy := "12", s.r := "3.3", s.fill := "currentColor", s.stroke := "none"),
+      s.circle(s.cx := "17.3", s.cy := "5.4", s.r := "3", s.fill := "currentColor", s.stroke := "none"),
+      s.circle(s.cx := "17.3", s.cy := "18.6", s.r := "3", s.fill := "currentColor", s.stroke := "none")
     )
 
   /** One entry. `initial` decides the element's shape; `item` keeps its appearance up to date.

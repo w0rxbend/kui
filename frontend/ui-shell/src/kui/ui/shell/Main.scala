@@ -12,7 +12,7 @@ import kui.ui.kernel.api.{ApiClient, ApiError, Bootstrap}
 import kui.ui.kernel.feature.{FeatureRegistry, FeatureRoutes, Page}
 import kui.ui.kernel.state.FeatureState.*
 import kui.ui.kernel.state.{Auth, AuthInfo, AuthState, CapabilityStore, FeatureState}
-import kui.ui.kernel.theme.Theme
+import kui.ui.kernel.theme.{Accent, Density, Theme}
 import kui.ui.shell.feature.{CapabilityBanner, FeatureGate}
 import kui.ui.shell.layout.{Header, Layout, Sidebar}
 import kui.ui.shell.nav.Navigation
@@ -56,6 +56,12 @@ object Shell {
 
     FeatureRegistry.install(FeatureRegistryImpl.thunks, FeatureRegistryImpl.staticRoutes)
     Theme.install()
+    // The accent seed and the density switch are stored preferences like the theme, and like the theme
+    // they are written onto `<html>` before the first paint: an interface that renders in the default
+    // accent and then corrects itself is a flash the user did not ask for. Without these two calls the
+    // tokens for the other accents and for compact rows are declared but never selected.
+    Accent.install()
+    Density.install()
     ErrorReporting.install()
 
     ShellHealth.install()
@@ -210,8 +216,8 @@ object Shell {
       )
 
     Layout(
-      sidebar = Sidebar(router, Navigation.items(states, hideForbidden = false)),
-      header = Header(uiPrefix, buildVersion.signal, Theme.choice),
+      sidebar = Sidebar(router, Navigation.items(states, hideForbidden = false), uiPrefix),
+      header = Header(buildVersion.signal, Theme.choice),
       content = content(router, buildVersion.signal, states, api, uiPrefix),
       fullScreen = ShellHealth.connectivity.map {
         case ShellConnectivity.Lost(_, _, _) => Some(unreachable)

@@ -4,16 +4,26 @@
  * what the frame says when something is broken. Every colour is a token, so both themes are
  * correct by construction rather than by somebody remembering to check the dark one.
  *
- * The one rule worth stating out loud: nothing here communicates by colour alone. A dimmed entry is
- * also marked with `aria-disabled` or a tooltip, and the degraded dot is accompanied by a tooltip
+ * ## Styling states the design does not draw
+ *
+ * The artboard shows a product in which everything works: it has a normal destination, an active
+ * one, and one that is not built yet. KUI has four more — degraded, unavailable, forbidden and not
+ * configured — plus a staleness banner and a fallback panel. Rather than leave those looking like
+ * they came from a different product, they are built out of the design's own vocabulary, which has
+ * exactly three moves for saying "this is not ordinary":
+ *
+ *   1. **A filled chip** — a container colour with its paired text colour on it. That is how the
+ *      design says "status", everywhere it says it. So the degraded marker is a filled amber chip,
+ *      and the staleness banner is the same chip grown to the width of the content.
+ *   2. **A dimmer text colour** — the design's own "KSQL DB, soon" row is the whole row in the
+ *      outline colour with no hover. That is precisely a forbidden entry: present, legible,
+ *      obviously not something you can press.
+ *   3. **A card** — the elevated surface at the largest radius. The fallback panel is a card.
+ *
+ * The one rule that overrides all three: nothing communicates by colour alone. A dimmed entry is
+ * also marked with `aria-disabled` or a tooltip, and the degraded chip is accompanied by a tooltip
  * sentence — because roughly one man in twelve cannot reliably tell amber from grey, and "the entry
  * that looks slightly different" is not a message. */
-
-.kui-shell__sidebar-link {
-  display: flex;
-  align-items: center;
-  gap: var(--kui-space-2);
-}
 
 .kui-shell__sidebar-link-label {
   flex: 1 1 auto;
@@ -24,78 +34,107 @@
 }
 
 /* `Unavailable`: dimmed, and still a real link. Reduced opacity rather than a grey colour, so the
- * "current page" highlight underneath it stays visible when the user is actually on the fallback. */
+ * "current page" highlight underneath it stays visible when the user is actually on the fallback —
+ * which matters more here than it did before, now that the highlight is a filled capsule and the
+ * text on it is a colour paired with that fill rather than with the drawer. */
 .kui-shell__sidebar-link--dimmed .kui-shell__sidebar-link-label {
-  opacity: 0.55;
+  opacity: 0.6;
 }
 
-/* `Forbidden`: shown, inert. The cursor is what tells a mouse user before they click; the
+/* `Forbidden`: shown, inert, in the outline colour — the design's treatment for the destination
+ * that is there but cannot be gone to. The cursor is what tells a mouse user before they click; the
  * `aria-disabled` attribute is what tells everybody else. */
 .kui-shell__sidebar-link--disabled {
   cursor: not-allowed;
-  color: var(--kui-color-text-muted);
+  color: var(--kui-color-border-strong);
 }
 
 .kui-shell__sidebar-link--disabled:hover {
   background: none;
+  color: var(--kui-color-border-strong);
 }
 
-/* `Degraded`: the amber dot. Small, at the end of the row, and never the only signal. */
+/* `Degraded`: a filled chip at the end of the row, in the design's status colours. Small, and never
+ * the only signal — the row also carries a tooltip saying what is wrong. */
 .kui-shell__sidebar-link-dot {
   flex: 0 0 auto;
   display: inline-flex;
-  font-size: 0.6em;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--kui-radius-pill);
+  background: var(--kui-color-warning-container);
   color: var(--kui-color-warning);
+  font-size: 0.5rem;
 }
 
-/* The banner above the content when the capability picture is stale or something is degraded. */
+/* The banner above the content when the capability picture is stale or something is limping. The
+ * same filled chip as the degraded marker, at the width of the content: one visual idea, used at
+ * two sizes, so a user who has learned what amber means in the drawer already knows what it means
+ * here. Filled rather than outlined, because the design outlines nothing that carries status. */
 .kui-shell__capability-banner {
   grid-area: content;
 }
 
 .kui-shell__capability-banner-body {
   display: flex;
-  align-items: flex-start;
-  gap: var(--kui-space-2);
+  align-items: center;
+  gap: var(--kui-space-3);
   margin-bottom: var(--kui-space-4);
   padding: var(--kui-space-3) var(--kui-space-4);
-  border: 1px solid var(--kui-color-warning);
-  border-radius: var(--kui-radius-md);
-  color: var(--kui-color-text);
+  border-radius: var(--kui-radius-lg);
+  background: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+  font-weight: var(--kui-font-weight-medium);
 }
 
 .kui-shell__capability-banner-icon {
   flex: 0 0 auto;
-  color: var(--kui-color-warning);
+  display: flex;
 }
 
-/* The fallback panel a dimmed entry leads to. Constrained width: it is prose, and prose set across
- * a wide screen is measurably harder to read than the same prose in a column. */
+/* The fallback panel a dimmed entry leads to: a card, at the design's largest radius, on the
+ * elevated surface. Constrained width, because it is prose, and prose set across a wide screen is
+ * measurably harder to read than the same prose in a column. */
 .kui-shell__fallback {
+  display: block;
   max-width: 44rem;
   padding: var(--kui-space-6) var(--kui-space-5);
+  border-radius: var(--kui-radius-xl);
+  background: var(--kui-color-surface-elevated);
 }
 
 .kui-shell__fallback-title {
   margin: 0 0 var(--kui-space-3) 0;
-  font-size: var(--kui-font-size-xl, 1.25rem);
+  font-family: var(--kui-font-family-display);
+  font-weight: var(--kui-font-weight-display);
+  font-size: var(--kui-font-size-2xl);
+  letter-spacing: -0.02em;
 }
 
+/* The reason is the sentence the user came for, so it gets the status chip rather than a bare line
+ * of amber text: the same fill, radius and pairing as the banner above it. */
 .kui-shell__fallback-reason {
   display: flex;
-  align-items: flex-start;
-  gap: var(--kui-space-2);
-  margin: 0 0 var(--kui-space-2) 0;
+  align-items: center;
+  gap: var(--kui-space-3);
+  margin: 0 0 var(--kui-space-3) 0;
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border-radius: var(--kui-radius-lg);
+  background: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
 }
 
 .kui-shell__fallback-reason-icon {
   flex: 0 0 auto;
-  color: var(--kui-color-warning);
+  display: flex;
 }
 
 .kui-shell__fallback-since {
   margin: 0 0 var(--kui-space-4) 0;
   color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
 }
 
 .kui-shell__fallback-feature {
@@ -117,7 +156,7 @@
 
 .kui-shell__fallback-still-works-title {
   margin: 0 0 var(--kui-space-2) 0;
-  font-size: var(--kui-font-size-md, 1rem);
+  font-size: var(--kui-font-size-lg);
 }
 
 .kui-shell__fallback-still-works-empty {

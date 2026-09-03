@@ -1,18 +1,29 @@
-/* The application frame: header across the top, navigation down the left, content in the middle.
+/* The application frame: a navigation drawer down the left for its whole height, a top bar and the
+ * content beside it.
  *
  * Everything here is layout and nothing is colour that is not a token. A rule that hard-codes a
  * colour works in one theme and is wrong in the other, and nobody notices until somebody switches.
  *
  * The frame is a grid rather than a flex column with a nested flex row, because a grid lets the
- * header span both columns and the sidebar reach the bottom of the viewport without either of them
- * knowing the other's size. */
+ * drawer reach the bottom of the viewport and the top bar sit beside it without either of them
+ * knowing the other's size.
+ *
+ * The drawer spans both rows. In the design the wordmark is *in* the drawer and the top bar belongs
+ * to the content region, so the drawer is one continuous raised panel from the top of the window to
+ * the bottom rather than something that starts below a full-width header. */
 
 .kui-shell {
+  /* 272px, the design's drawer width. Declared here rather than in the token file because it is a
+   * measurement of this one layout and nothing outside the shell has any business reading it — but
+   * declared as a variable all the same, because the responsive rule below and any future
+   * collapsible rail both need to refer to the same number. */
+  --kui-sidebar-width: 17rem;
+
   display: grid;
-  grid-template-columns: var(--kui-sidebar-width, 15rem) 1fr;
+  grid-template-columns: var(--kui-sidebar-width) 1fr;
   grid-template-rows: auto 1fr;
   grid-template-areas:
-    "header header"
+    "sidebar header"
     "sidebar content";
   min-height: 100vh;
   background: var(--kui-color-surface);
@@ -26,12 +37,13 @@
   position: absolute;
   left: var(--kui-space-2);
   top: -3rem;
-  z-index: 100;
-  padding: var(--kui-space-2) var(--kui-space-3);
-  background: var(--kui-color-surface);
+  z-index: var(--kui-z-dropdown);
+  padding: var(--kui-space-2) var(--kui-space-4);
+  background: var(--kui-color-surface-elevated);
   color: var(--kui-color-text);
   border: 1px solid var(--kui-color-primary);
-  border-radius: var(--kui-radius-md);
+  border-radius: var(--kui-radius-pill);
+  box-shadow: var(--kui-shadow-md);
   transition: top var(--kui-duration-fast) ease;
 }
 
@@ -39,21 +51,16 @@
   top: var(--kui-space-2);
 }
 
+/* The top bar. It sits over the page surface with no rule beneath it: in the design the drawer's
+ * own colour is what separates navigation from content, so a border here would be a second
+ * separator saying the same thing less well. */
 .kui-shell__header {
   grid-area: header;
   display: flex;
   align-items: center;
   gap: var(--kui-space-3);
-  padding: var(--kui-space-2) var(--kui-space-4);
-  border-bottom: 1px solid var(--kui-color-border);
+  padding: var(--kui-space-4) var(--kui-space-5) var(--kui-space-3);
   background: var(--kui-color-surface);
-}
-
-.kui-shell__brand a {
-  font-weight: 700;
-  font-size: var(--kui-font-size-lg);
-  color: var(--kui-color-text);
-  text-decoration: none;
 }
 
 /* Holds the space the cluster switcher takes in M1, so that adding it does not move the theme
@@ -69,7 +76,7 @@
 .kui-shell__header-actions {
   display: flex;
   align-items: center;
-  gap: var(--kui-space-2);
+  gap: var(--kui-space-1);
 }
 
 .kui-shell__version {
@@ -78,11 +85,58 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* --- The drawer --------------------------------------------------------------------------- */
+
 .kui-shell__sidebar {
   grid-area: sidebar;
-  padding: var(--kui-space-3) var(--kui-space-2);
-  border-right: 1px solid var(--kui-color-border);
-  background: var(--kui-color-surface);
+  display: flex;
+  flex-direction: column;
+  padding: var(--kui-space-5) var(--kui-space-3) var(--kui-space-4);
+  background: var(--kui-color-surface-raised);
+}
+
+/* The wordmark: a rounded tile carrying the mark, and the product name beside it. The tile's
+ * gradient runs from the accent to its container colour, which is what makes the mark change with
+ * the accent seed instead of being a fixed brand blue painted on top of a themed interface. */
+.kui-shell__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-1) var(--kui-space-3) var(--kui-space-5);
+}
+
+.kui-shell__brand a {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  color: var(--kui-color-text);
+  text-decoration: none;
+  border-radius: var(--kui-radius-lg);
+}
+
+.kui-shell__brand-mark {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.875rem; /* 46px */
+  height: 2.875rem;
+  border-radius: var(--kui-radius-lg);
+  background: linear-gradient(
+    145deg,
+    var(--kui-color-primary) 0%,
+    var(--kui-color-primary-container) 70%
+  );
+  box-shadow: var(--kui-shadow-md);
+  color: var(--kui-color-primary-contrast);
+}
+
+.kui-shell__brand-name {
+  font-family: var(--kui-font-family-display);
+  font-weight: var(--kui-font-weight-display);
+  font-size: var(--kui-font-size-xl);
+  line-height: var(--kui-font-line-height-tight);
+  letter-spacing: -0.02em;
 }
 
 .kui-shell__sidebar-list {
@@ -94,31 +148,42 @@
   gap: var(--kui-space-1);
 }
 
+/* A destination. Full-height pill rows with a generous radius: this is the design's single loudest
+ * shape decision, and it is what makes the active row read as a filled capsule rather than as a
+ * highlighted line of text. */
 .kui-shell__sidebar-link {
-  display: block;
-  padding: var(--kui-space-2) var(--kui-space-3);
-  border-radius: var(--kui-radius-md);
-  color: var(--kui-color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  min-height: 3.25rem; /* 52px */
+  padding: var(--kui-space-2) var(--kui-space-4);
+  border-radius: var(--kui-radius-pill);
+  font-weight: var(--kui-font-weight-display);
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text);
   text-decoration: none;
 }
 
 .kui-shell__sidebar-link:hover {
-  background: var(--kui-color-surface-raised);
+  background: var(--kui-color-surface-hover);
   color: var(--kui-color-text);
 }
 
-/* The current entry is marked by weight and a bar as well as by colour, so that it is still
- * identifiable to somebody who cannot distinguish the two colours. */
-.kui-shell__sidebar-link--current {
-  background: var(--kui-color-surface-raised);
-  color: var(--kui-color-text);
-  font-weight: 600;
-  box-shadow: inset 3px 0 0 0 var(--kui-color-primary);
+/* The current entry: the design marks it with the secondary container colour and its paired text
+ * colour, not with a border or a bar. Colour is not the only signal — the entry also carries
+ * `aria-current="page"`, which is what a screen reader announces and what a user who cannot
+ * distinguish the two backgrounds relies on. */
+.kui-shell__sidebar-link--current,
+.kui-shell__sidebar-link--current:hover {
+  background: var(--kui-color-selected);
+  color: var(--kui-color-selected-contrast);
 }
+
+/* --- The content region ------------------------------------------------------------------- */
 
 .kui-shell__content {
   grid-area: content;
-  padding: var(--kui-space-4);
+  padding: var(--kui-space-3) var(--kui-space-5) var(--kui-space-6);
   min-width: 0;
 }
 
@@ -177,25 +242,34 @@
   color: var(--kui-color-text-muted);
 }
 
-/* Below this width the sidebar stops being a column and becomes a strip above the content. Nothing
+/* Below this width the drawer stops being a column and becomes a strip above the content. Nothing
  * is hidden: a navigation that disappears on a narrow window is a navigation somebody cannot use. */
 @media (max-width: 48rem) {
   .kui-shell {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "header"
       "sidebar"
+      "header"
       "content";
   }
 
   .kui-shell__sidebar {
-    border-right: none;
-    border-bottom: 1px solid var(--kui-color-border);
+    padding-bottom: var(--kui-space-3);
+  }
+
+  .kui-shell__brand {
+    padding-bottom: var(--kui-space-3);
   }
 
   .kui-shell__sidebar-list {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  /* A pill row that is 52 px tall makes sense in a column; six of them wrapping across a phone does
+   * not. The shape stays, the height goes. */
+  .kui-shell__sidebar-link {
+    min-height: 0;
   }
 }
 
@@ -219,11 +293,15 @@
  * nothing behind it works.
  *
  * `position: fixed` and not `absolute`: the shell scrolls, and a state that scrolls away is a state
- * the user can scroll past into an application that does not respond. */
+ * the user can scroll past into an application that does not respond.
+ *
+ * The stacking value is `--kui-z-dialog`. It used to name `--kui-z-modal`, which no stylesheet has
+ * ever declared: the fallback in the `var()` was doing all the work, and a token file that grew a
+ * real `--kui-z-modal` at some other value would have silently moved this overlay. */
 .kui-shell__unreachable {
   position: fixed;
   inset: 0;
-  z-index: var(--kui-z-modal, 1000);
+  z-index: var(--kui-z-dialog);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -231,6 +309,8 @@
   background: var(--kui-color-surface);
 }
 
+/* A card, in the design's sense: the elevated surface, the largest radius, and a shadow rather than
+ * an outline. The design draws no dialog, but it draws plenty of cards, and this is one. */
 .kui-shell__unreachable-card {
   display: flex;
   flex-direction: column;
@@ -238,13 +318,19 @@
   gap: var(--kui-space-3);
   max-width: 34rem;
   padding: var(--kui-space-6);
-  border: 1px solid var(--kui-color-border);
-  border-radius: var(--kui-radius-lg);
-  background: var(--kui-color-surface-raised);
+  border-radius: var(--kui-radius-xl);
+  background: var(--kui-color-surface-elevated);
+  box-shadow: var(--kui-shadow-md);
 }
 
 .kui-shell__unreachable-icon {
-  font-size: var(--kui-font-size-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--kui-radius-lg);
+  background: var(--kui-color-warning-container);
   color: var(--kui-color-warning);
 }
 
