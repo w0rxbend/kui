@@ -98,6 +98,51 @@ final class ValidationSuite extends KuiSuite {
     assertEquals(loaded.gateway.cors, CorsConfig(enabled = false, Nil))
   }
 
+  /** Empty sections, one per shape the model has: a map of services, a list of signing keys, and a
+    * whole block whose only key the operator commented out. None of them supplies a value, so none
+    * of them can be a wrong value -- and the shipped `deployment/compose/kui.yaml` tells the
+    * operator in a comment that `services` is empty in the all-in-one deployment, so this is not a
+    * hypothetical shape.
+    */
+  private val emptySections = Map(
+    "an empty map of services" -> """kui:
+      |  gateway:
+      |    services: {}
+      |""".stripMargin,
+    "an empty list of signing keys" -> """kui:
+      |  gateway:
+      |    principalKeys: []
+      |""".stripMargin,
+    "an empty telemetry block" -> """kui:
+      |  telemetry: {}
+      |""".stripMargin,
+    "an empty server block" -> """kui:
+      |  server: {}
+      |""".stripMargin,
+    "an empty cors block" -> """kui:
+      |  gateway:
+      |    cors: {}
+      |""".stripMargin
+  )
+
+  emptySections.foreach { case (description, contents) =>
+    test(s"$description is accepted rather than reported as an unknown key") {
+      val loaded =
+        load(List(ConfigFixtures.yaml(contents))).fold(errors => fail(errors.render), identity)
+
+      assertEquals(loaded.gateway.services, Map.empty)
+      assertEquals(loaded.gateway.principalKeys, Nil)
+    }
+  }
+
+  test("a section that holds a value rather than keys is still an unknown key") {
+    // The relaxation above is for containers that supply nothing. A scalar where a section belongs
+    // is a real mistake and must still be named.
+    val found = problems(load(List(ConfigFixtures.yaml("kui:\n  telemetry: 7\n"))))
+
+    assertEquals(found.map(_.key), List("kui.telemetry"))
+  }
+
   test("the placeholder sections for M1 and M6 are accepted but read no keys") {
     val file = ConfigFixtures.yaml(
       """kui:

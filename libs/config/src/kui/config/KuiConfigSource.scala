@@ -707,21 +707,31 @@ object KuiConfigSource {
 
     private def unknownIn(document: Document): List[ConfigProblem] =
       leaves(document.json, Nil)
-        .filterNot(path => Known.exists(matches(_, path)))
-        .map(path =>
+        .filterNot(leaf => isKnown(leaf))
+        .map(leaf =>
           ConfigProblem(
-            path.mkString("."),
+            leaf.path.mkString("."),
             "is not a KUI configuration key",
             ConfigSourceName.File(document.path)
           )
         )
 
-    /** Every path from the document root down to a scalar, an empty object or an empty list.
+    /** A leaf of the document: the path it sits at, and whether what sits there is an empty container.
       *
-      * Empty containers stop the walk so that `clusters: []` and `rbac: {}` — the two placeholder sections —
-      * are checked as themselves rather than producing no path at all.
+      * The distinction is the whole point. A scalar has to name a key that exists. An empty container
+      * (`services: {}`, `principalKeys: []`, `telemetry:` with everything under it commented out) names no
+      * key at all — it supplies nothing — so it is legal wherever a known key could appear below it, and
+      * refusing it would refuse a configuration that says exactly what it means.
       */
-    private def leaves(json: Json, path: List[String]): List[List[String]] =
+    final private case class Leaf(path: List[String], isEmptyContainer: Boolean)
+
+    private def isKnown(leaf: Leaf): Boolean =
+      if leaf.isEmptyContainer then
+        Known.exists(pattern => matches(pattern, leaf.path) || isPrefixOf(pattern, leaf.path))
+      else Known.exists(matches(_, leaf.path))
+
+    /** Every path from the document root down to a scalar or to an empty container. */
+    private def leaves(json: Json, path: List[String]): List[Leaf] =
       json.asObject match {
         case Some(obj) if obj.nonEmpty =>
           obj.toList.flatMap { case (name, child) => leaves(child, path :+ name) }
@@ -731,8 +741,22 @@ object KuiConfigSource {
               items.toList.zipWithIndex.flatMap { case (child, index) =>
                 leaves(child, path :+ index.toString)
               }
-            case _ => List(path)
+            case _ =>
+              val isContainer = json.isObject || json.isArray
+              List(Leaf(path, isContainer))
           }
+      }
+
+    /** Whether `path` names a section that `pattern` has keys underneath, e.g. `kui.gateway.services` against
+      * `kui.gateway.services.*.url`.
+      */
+    private def isPrefixOf(pattern: List[String], path: List[String]): Boolean =
+      (pattern, path) match {
+        case ("**" :: _, _) => true
+        case (Nil, _) => false
+        case (_, Nil) => true
+        case (patternHead :: patternTail, pathHead :: pathTail) =>
+          (patternHead == "*" || patternHead == pathHead) && isPrefixOf(patternTail, pathTail)
       }
 
     private def matches(pattern: List[String], path: List[String]): Boolean =
