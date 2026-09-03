@@ -13,6 +13,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.{CapabilityChange, CapabilityEntry, CapabilityKey, CapabilitySnapshot}
+import kui.contracts.sse.SseEventName
 import kui.gateway.application.capability.{CapabilityRegistry, Trigger}
 import kui.gateway.contract.{CapabilityEndpoints, GatewayEndpoints}
 import kui.http.sse.{Sse, SseConfig, SseEvent}
@@ -30,7 +31,7 @@ object CapabilityRoutes {
   /** The event name every capability frame carries. One name for both the opening snapshot and each later
     * change, so a client registers one listener rather than two and cannot forget the second.
     */
-  val EventName: String = "capabilities"
+  val EventName: String = SseEventName.Capabilities
 
   /** The streaming endpoint. It lives here rather than in the contract module because describing it needs
     * `fs2` and a server-side event-stream body, and the contract has to link for the browser.
@@ -96,17 +97,24 @@ object CapabilityRoutes {
       config: SseConfig
   ): ServerEndpoint[Fs2Streams[F], F] =
     streamEndpoint[F].serverLogicSuccess[F] { _ =>
-      Async[F].pure(
+      // The correlation id is minted per connection rather than read from the request, because the
+      // failure this guards against happens long after the request headers were handled and the id has
+      // to be the one that identifies *this* stream in the logs.
+      Correlation.newRandom[F].map { correlationId =>
         Sse.encode(
           Sse.stream(
-            snapshotThenChanges(registry),
+            // Without this, a failure raised after the response headers are already on the wire reaches
+            // the browser as a truncated body: `EventSource` reconnects, re-runs the same failing
+            // subscription and loops, with nothing on screen or in the client's hands to say why. ADR-035
+            // requires exactly one terminal `done` or `error` event, and this is the `error` half.
+            Sse.withErrorEvent(snapshotThenChanges(registry), correlationId),
             config,
             EventName,
             telemetry,
             logger
           )
         )
-      )
+      }
     }
 
   private def probeRoute[F[_]: Async](

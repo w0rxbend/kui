@@ -285,6 +285,55 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
     }
   }
 
+  test("aMidStreamFailureArrivesAsAnErrorEventRatherThanATruncatedConnection") {
+    // ADR-035 exists because Kafbat closes the connection when something fails after the response
+    // headers are already on the wire. A browser cannot tell that apart from a proxy timeout: it
+    // reconnects, re-runs the same failing subscription, and loops with nothing on screen to say why.
+    // Exactly one terminal event, and here it is the `error` half.
+    val failing = new CapabilityRegistry[IO] {
+      def snapshot: IO[Map[CapabilityKey, CapabilityState]] = IO.pure(Map.empty)
+      def entries: IO[List[CapabilityEntry]] = IO.pure(Nil)
+      def state(key: CapabilityKey): IO[CapabilityState] = IO.pure(CapabilityState.NotConfigured)
+      def changes: fs2.Stream[IO, kui.contracts.capability.CapabilityChange] = subscribeStream
+      def subscribe: Resource[IO, fs2.Stream[IO, kui.contracts.capability.CapabilityChange]] =
+        Resource.pure(subscribeStream)
+      def report(key: CapabilityKey, state: CapabilityState): IO[Unit] = IO.unit
+      def probeNow(service: ServiceId): IO[Unit] = IO.unit
+      def attachProbe(probe: ServiceId => IO[Unit]): IO[Unit] = IO.unit
+
+      // The subscription survives long enough for the snapshot frame to be written, then fails --
+      // the shape of a registry subscription or a telemetry meter raising mid-stream.
+      private def subscribeStream: fs2.Stream[IO, kui.contracts.capability.CapabilityChange] =
+        fs2.Stream.sleep[IO](300.millis) >> fs2.Stream.raiseError[IO](new RuntimeException("boom"))
+    }
+
+    val resource = for {
+      logger <- Resource.eval(FakeStructuredLogger[IO])
+      trigger = new Trigger[IO] {
+        def probe(service: ServiceId): IO[Unit] = IO.unit
+      }
+      routes = CapabilityRoutes[IO](
+        failing,
+        trigger,
+        GatewayTestServer.noTelemetry,
+        logger,
+        kui.http.sse.SseConfig(heartbeatInterval = 30.seconds)
+      )
+      server <- GatewayTestServer.resource(extraRoutes = routes)
+    } yield server
+
+    resource.use { server =>
+      frames(server, 2).map { received =>
+        assertEquals(eventNameOf(received.head), CapabilityRoutes.EventName)
+        assertEquals(eventNameOf(received(1)), "error")
+        val envelope = decode[ErrorEnvelope](dataOf(received(1)))
+          .fold(error => fail(s"${dataOf(received(1))} ($error)"), identity)
+        assertEquals(envelope.code, "KUI-INTERNAL")
+        assert(envelope.correlationId.nonEmpty, envelope.toString)
+      }
+    }
+  }
+
   test("theStreamCarriesTheGatewaysCorrelationIdLikeEveryOtherResponse") {
     fixture().use { (server, _, _) =>
       basicRequest
