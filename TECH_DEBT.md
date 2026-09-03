@@ -1,0 +1,21 @@
+# KUI technical debt register
+
+Debt is recorded when it is taken, not when it hurts. Every row names the ADR or task that
+accepted it, the reason, the exit condition and an owner. Rows are closed by a commit that
+references the row id.
+
+| ID | Area | Debt | Accepted by | Why accepted | Exit condition | Owner | Opened | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TD-001 | build | Chimney 2.0.0-RC1 (release candidate) in production modules | ADR-033 | Chimney 1.x breaks under `-Werror` on Scala 3.9; 2.0.0 final not yet published | bump to 2.0.0 final, or replace affected mappers by hand-written ones if RC1 fails under `-Werror` | Principal Scala Engineer | 2026-09-03 | open |
+| TD-002 | telemetry | `opentelemetry-exporter-prometheus` is an `-alpha` artifact | ADR-009 | only Java-SDK Prometheus scrape exporter | exporter reaches a stable version, or switch to `otel4s-sdk-exporter-prometheus` | Infrastructure Lead | 2026-09-03 | open |
+| TD-003 | gateway | Sessions are in-memory: one gateway replica only | ADR-019 | single replica acceptable through M5 | Kafka compacted-topic `SessionStore` adapter shipped (M6) | Security Engineer | 2026-09-03 | open |
+| TD-004 | cluster state | 3–4 partially overlapping admin scrapes per cluster in distributed mode | ADR-027 | context isolation outweighs duplicated calls | internal events topic (`kui.internal.events`) research at M6 decides whether to share scrapes | Chief Architect | 2026-09-03 | open |
+| TD-005 | messages | Signed cursors grow ~20 B per partition; topics with more than ~1 000 partitions may exceed practical query-string size | ADR-026 | rare; explicit `KUI-CURSOR-TOO-LARGE` error with partition-subset hint | cursor compaction (range-run encoding) or header-carried cursor if a real cluster hits it | Domain Architect (messages) | 2026-09-03 | open |
+| TD-006 | serdes | Kafbat Java serde jars are not loadable until the bridge module ships (M6+) | ADR-028 | Scala SPI first; bridge is additive | `libs/serde-kafbat-bridge` merged with a sample-jar test | Kafka Specialist | 2026-09-03 | open |
+| TD-007 | frontend | Design tokens are Kafbat-derived placeholders until the Claude Design import (Research Agent I) lands; widget-library question (Shoelace) open | ADR-024 | design research not delivered at G3 | `research/design/tokens.md` merged and kernel tokens regenerated; Shoelace decision recorded | Frontend Architect | 2026-09-03 | open |
+| TD-008 | search | In-memory trigram search only; Lucene deferred without a benchmark yet | ADR-038 | data sets small; avoid JDK coupling | benchmark on ≥ 50 k names recorded in `docs/benchmarks/`; adopt Lucene only if p95 > 50 ms | Performance Engineer | 2026-09-03 | open |
+| TD-009 | ksql | Two code paths (`/query-stream` and legacy `/query` fallback) | ADR-037 | old ksqlDB versions still deployed | drop `/query` once the minimum supported ksqlDB version is raised | Domain Architect (ksql) | 2026-09-03 | open |
+| TD-010 | config | Keystore bytes are carried inline in `ClusterProfile` over the inter-service channel | ADR-036 | avoids shared filesystems in Kubernetes | revisit if a secret-manager integration (Vault/K8s CSI) is adopted; then carry references | Security Engineer | 2026-09-03 | open |
+| TD-011 | metrics | Prometheus Pushgateway / remote-write sinks not implemented (Kafbat parity gap) | ADR-009 | OTLP push covers the need; feature deferred post-M8 | implement as a metrics-service sink if users ask | Domain Architect (metrics) | 2026-09-03 | open |
+| TD-012 | identity | Authentication adapter changes (OIDC providers, LDAP) require an identity-service restart | ADR-036 | only `rbac` hot-reloads, as in Kafbat | make auth adapters rebuildable on config version change | Security Engineer | 2026-09-03 | open |
+| TD-013 | frontend | Hand-maintained CodeMirror 6 / uPlot facades (~300 lines) | ADR-025 | no maintained Scala.js facades exist | adopt a community facade if one becomes maintained | Frontend Architect | 2026-09-03 | open |
