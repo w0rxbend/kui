@@ -1,0 +1,31 @@
+/* The brokers list and the broker detail page. The 40s are this feature's band; 40 is the
+ * dashboard's, this is the brokers'.
+ *
+ * Every value is a token, for the reason the kernel's stylesheets give: a hard-coded colour is one
+ * the theme switch cannot reach, and it stays invisible until somebody uses dark mode.
+ */
+
+/* The alarm state of the summary strip. Not a colour on every figure — the design's rule is that a
+ * value changes colour when it crosses a threshold, not that a whole region is painted — so this
+ * marks the strip with a rule down its leading edge and leaves the figures alone. `ThresholdValue`
+ * colours the one figure that is actually wrong. */
+.kui-clusters__summary--alarm {
+  padding-left: var(--kui-space-3);
+  border-left: 3px solid var(--kui-color-danger);
+}
+
+/* The time the data was read. Small, muted and always present, fresh or stale: it is the visible
+ * half of the staleness contract and it is what makes not polling acceptable — the answer to "how
+ * old is this" is never more than a glance away. */
+.kui-clusters__scraped-at {
+  padding-top: var(--kui-space-3);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* A broker's DNS name is long. It wraps rather than widening the table, because a table that
+ * scrolls sideways hides the columns on the right, and the columns on the right are the ones this
+ * page exists to show. */
+.kui-clusters .kui-table__cell {
+  overflow-wrap: anywhere;
+}

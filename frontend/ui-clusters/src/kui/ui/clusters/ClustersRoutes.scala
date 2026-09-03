@@ -32,6 +32,9 @@ object ClustersPageId {
     */
   final case class Brokers(clusterId: String) extends ClustersPageId
 
+  /** One broker of one cluster. */
+  final case class BrokerDetail(clusterId: String, brokerId: Int) extends ClustersPageId
+
   given CanEqual[ClustersPageId, ClustersPageId] = CanEqual.derived
 }
 
@@ -58,6 +61,8 @@ object ClustersRoutes extends FeatureRoutes {
   private val BrokersTag = "clusters.brokers"
 
   private val BrokersSegment = "brokers"
+
+  private val BrokerTag = "clusters.broker"
 
   private val ClustersSegment = "clusters"
 
@@ -88,6 +93,12 @@ object ClustersRoutes extends FeatureRoutes {
         decode = ClustersPageId.Brokers(_),
         pattern = root / ClustersSegment / segment[String] / BrokersSegment / endOfSegments,
         basePath = uiPrefix
+      ),
+      Route[ClustersPageId.BrokerDetail, (String, Int)](
+        encode = page => (page.clusterId, page.brokerId),
+        decode = ClustersPageId.BrokerDetail.apply,
+        pattern = root / ClustersSegment / segment[String] / BrokersSegment / segment[Int] / endOfSegments,
+        basePath = uiPrefix
       )
     )
 
@@ -96,11 +107,26 @@ object ClustersRoutes extends FeatureRoutes {
       case ClustersPageId.Overview => Some(Json.obj("page" -> Json.fromString(OverviewTag)))
       case ClustersPageId.Brokers(clusterId) =>
         Some(Json.obj("page" -> Json.fromString(BrokersTag), "clusterId" -> Json.fromString(clusterId)))
+      case ClustersPageId.BrokerDetail(clusterId, brokerId) =>
+        Some(
+          Json.obj(
+            "page" -> Json.fromString(BrokerTag),
+            "clusterId" -> Json.fromString(clusterId),
+            "brokerId" -> Json.fromInt(brokerId)
+          )
+        )
       case _ => None
     }
 
   def decodePage(tag: String, cursor: HCursor): Option[Page] =
     if tag == OverviewTag then Some(ClustersPageId.Overview)
     else if tag == BrokersTag then cursor.get[String]("clusterId").toOption.map(ClustersPageId.Brokers(_))
+    else if tag == BrokerTag then
+      // Both fields, or nothing: a stored state that names a cluster but no broker cannot be turned into a
+      // broker page, and guessing a broker id would land the user on somebody else's machine.
+      for {
+        clusterId <- cursor.get[String]("clusterId").toOption
+        brokerId <- cursor.get[Int]("brokerId").toOption
+      } yield ClustersPageId.BrokerDetail(clusterId, brokerId)
     else None
 }

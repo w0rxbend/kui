@@ -4,8 +4,8 @@ import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.Route
 import org.scalajs.dom
 
-import kui.kernel.ClusterId
-import kui.ui.clusters.brokers.BrokersPage
+import kui.kernel.{BrokerId, ClusterId}
+import kui.ui.clusters.brokers.{BrokerDetailPage, BrokersPage}
 import kui.ui.clusters.dashboard.DashboardPage
 import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
@@ -58,6 +58,8 @@ final class ClustersFeature extends KuiFeature {
       child <-- current.signal.map {
         case ClustersPageId.Brokers(clusterId) =>
           brokers(ClusterId.from(clusterId).toOption)
+        case ClustersPageId.BrokerDetail(clusterId, brokerId) =>
+          brokerDetail(ClusterId.from(clusterId).toOption, BrokerId.from(brokerId).toOption)
         case _ => dashboard
       }
     )
@@ -76,7 +78,34 @@ final class ClustersFeature extends KuiFeature {
     * dashboard is where they can see which ids exist, which is what they needed.
     */
   private def brokers(cluster: Option[ClusterId]): HtmlElement =
-    cluster.fold(dashboard)(id => BrokersPage(Val(id), queries, backHref = hrefOf(ClustersPageId.Overview)))
+    cluster.fold(dashboard)(id =>
+      BrokersPage(
+        cluster = id,
+        queries = queries,
+        openBroker = goToBroker,
+        brokerHref = (c, b) => hrefOf(ClustersPageId.BrokerDetail(c.value, b.value)),
+        backHref = hrefOf(ClustersPageId.Overview),
+        zone = Timezone.choice.signal
+      )
+    )
+
+  /** One broker, or the list it belongs to when the URL held something that is not a broker id. */
+  private def brokerDetail(cluster: Option[ClusterId], broker: Option[BrokerId]): HtmlElement =
+    (cluster, broker) match {
+      case (Some(clusterId), Some(brokerId)) =>
+        BrokerDetailPage(
+          cluster = clusterId,
+          broker = brokerId,
+          queries = queries,
+          clustersHref = hrefOf(ClustersPageId.Overview),
+          brokersHref = hrefOf(ClustersPageId.Brokers(clusterId.value))
+        )
+      case (Some(clusterId), None) => brokers(Some(clusterId))
+      case _ => dashboard
+    }
+
+  private def goToBroker(cluster: ClusterId, broker: BrokerId): Unit =
+    goTo(ClustersPageId.BrokerDetail(cluster.value, broker.value))
 
   /** Moves to a cluster's brokers without reloading the application.
     *
@@ -85,8 +114,9 @@ final class ClustersFeature extends KuiFeature {
     * router owns the browser's history for its own pages and this feature has no reference to it — see this
     * task's recorded deviation, which owes a proper navigation port to the shell.
     */
-  private def goToBrokers(cluster: ClusterId): Unit = {
-    val page = ClustersPageId.Brokers(cluster.value)
+  private def goToBrokers(cluster: ClusterId): Unit = goTo(ClustersPageId.Brokers(cluster.value))
+
+  private def goTo(page: ClustersPageId): Unit = {
     dom.window.history.pushState((), "", hrefOf(page))
     current.set(page)
   }

@@ -622,6 +622,13 @@ a data change rather than a layout change. A figure whose *zero is meaningful* g
 all: an empty "Production" column reads as "this cluster has no traffic", which is a claim, so
 throughput waits for the metrics service instead of being drawn blank.
 
+**A derived figure lives where the whole set lives.** Broker skew is a property of the *set* of
+brokers, not of any one broker: it cannot be computed from a row, only from every row at once. So
+`Skew` takes the whole list and returns one answer per broker, and a row's `skewPercent` is filled
+in by the function that builds all the rows together. The alternative — each row working out its own
+skew — would need every row to know the others, and two rows computed against different denominators
+would fail to add up on the page they are shown on together.
+
 ### User preferences: what is stored, and the rule about reading it
 
 Four preferences, all of them browser-local. There is no per-user store on the server until M6, and

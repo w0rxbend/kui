@@ -52,6 +52,61 @@ object Messages {
   val BrokersEmptyDescription: String =
     "This cluster's brokers, their racks and their disk usage appear here."
 
+  val SummaryBrokers: String = "brokers"
+
+  val SummaryController: String = "controller"
+
+  val SummaryControllerType: String = "controller type"
+
+  val SummaryVersion: String = "version"
+
+  val SummaryPartitions: String = "online / total partitions"
+
+  val SummaryInSync: String = "in-sync / total replicas"
+
+  val NoActiveController: String = "No active controller"
+
+  val ControllerTag: String = "controller"
+
+  val ColumnBroker: String = "Broker"
+
+  val ColumnHost: String = "Host"
+
+  val ColumnPort: String = "Port"
+
+  val ColumnRack: String = "Rack"
+
+  val ColumnLeaders: String = "Leaders"
+
+  val ColumnLeaderSkew: String = "Leader skew"
+
+  val ColumnReplicas: String = "Replicas"
+
+  val ColumnInSync: String = "In sync"
+
+  val ColumnReplicaSkew: String = "Replica skew"
+
+  /** What the skew columns measure.
+    *
+    * Shown on the figure itself rather than only in documentation: a bare "12.4 %" in a column called "Leader
+    * skew" is a number nobody can act on until they are told what it is a percentage of.
+    */
+  val SkewExplanation: String = "How far this broker's count is above the average across brokers."
+
+  def segments(count: Int): String = if count == 1 then "1 segment" else s"$count segments"
+
+  def brokersUnavailable(detail: String): String =
+    s"This cluster's brokers could not be read: $detail"
+
+  val BrokersForbidden: String = "You do not have permission to see this cluster's brokers."
+
+  def brokerHeading(cluster: String, broker: Int): String = s"Broker $broker - $cluster"
+
+  val BrokerEmptyTitle: String = "Nothing to show for this broker yet"
+
+  val BrokerEmptyDescription: String =
+    "This broker's log directories and its settings appear here."
+
   val UnknownFailure: String = "the reason was not reported"
 
   def listFailed(detail: String): String = s"The cluster list could not be read: $detail"

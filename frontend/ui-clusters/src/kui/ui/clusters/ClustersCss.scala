@@ -15,7 +15,11 @@ object ClustersCss {
   val SummaryLabel = "kui-clusters__summary-label"
   val SummaryFetched = "kui-clusters__summary-fetched"
 
+  val SummaryAlarm = "kui-clusters__summary--alarm"
+
   val Toggle = "kui-clusters__toggle"
+
+  val ScrapedAt = "kui-clusters__scraped-at"
 
   val BrokersHeader = "kui-clusters__brokers-header"
 }

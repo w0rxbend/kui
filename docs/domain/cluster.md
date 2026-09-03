@@ -131,6 +131,37 @@ decisions:
   read as "this cluster has no traffic" — a claim, not an absence — which is worse than the column
   not being there.
 
+### Skew, and its four edge cases
+
+Skew is how far one broker's count sits above the average across brokers, as a percentage of that
+average:
+
+```
+skew(broker) = 100 * (count(broker) - mean) / mean
+```
+
+It is not a metric and does not wait for the metrics service: it is arithmetic over the assignment
+counts `describeLogDirs` already returns. A cluster where one machine holds forty percent more
+replicas than its share is a cluster where one disk fills up first, and that is not visible in any
+single command-line invocation.
+
+Four rules, because a user who sees `—` where they expected a number needs to be able to find out
+why:
+
+1. **Only reported above the mean.** A broker carrying less than its share is not a problem, so it
+   shows nothing rather than a negative number the reader has to work out is good news.
+2. **A mean of zero reports nothing.** A cluster with no partitions is an ordinary state on a fresh
+   install, and it must produce a dash rather than a division by zero, an `Infinity` or a `NaN`.
+3. **A single broker is `0 %`, not nothing.** With one broker the mean *is* that broker, so zero is
+   a real answer rather than an unknown one.
+4. **A broker whose count is unknown is left out of the mean** and reports nothing itself. Counting
+   it as zero would drag the mean down and inflate every other broker's figure — a wrong number that
+   looks like a right one, which is worse than a dash.
+
+The figure is computed server-side so that this table, a future export and any other client round
+it the same way; the browser carries the same definition as a fallback for a deployment whose
+service predates the field.
+
 ## Ports
 
 Three traits, stated over an abstract `F[_]` with no bound at all, in domain types only.
