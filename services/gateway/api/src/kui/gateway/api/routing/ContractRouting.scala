@@ -3,18 +3,19 @@ package kui.gateway.api.routing
 import cats.effect.kernel.{Async, Clock}
 import cats.syntax.all.*
 import sttp.capabilities.fs2.Fs2Streams
+import sttp.model.StatusCode
 import sttp.tapir.*
 import sttp.tapir.model.ServerRequest
 import sttp.tapir.server.ServerEndpoint
 
-import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.ReasonCode
+import kui.contracts.{ErrorEnvelope, PublicApi}
 import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.application.capability.{CapabilitySignals, ReadinessSignal}
 import kui.gateway.application.client.{CallContext, ServiceClient}
+import kui.http.ErrorInterceptor
 import kui.kernel.error.{InfrastructureError, KuiError}
-import kui.kernel.{ClusterId, ServiceId}
-import kui.observability.Correlation
+import kui.kernel.{ClusterId, CorrelationId, ServiceId}
 import kui.security.Principal
 
 /** Turns another service's published endpoints into gateway routes, with no path written by hand.
@@ -32,7 +33,14 @@ import kui.security.Principal
 object ContractRouting {
 
   val InternalPrefix: List[String] = List("internal", "v1")
-  val PublicPrefix: List[String] = List("api", "v1")
+
+  /** The public prefix, read off `PublicApi.prefix` rather than spelled out again.
+    *
+    * `kui.contracts.PublicApi` exists to hold `/api/v1` once, for both the gateway and the browser. A second
+    * literal here is a second thing to change on the day the public API becomes `v2`, and the browser and the
+    * gateway disagreeing about the prefix is a 404 on every route.
+    */
+  val PublicPrefix: List[String] = pathSegments(PublicApi.prefix)
 
   /** Every endpoint of one service, as gateway routes.
     *
@@ -99,9 +107,10 @@ object ContractRouting {
         )
 
       public
-        .serverSecurityLogic[Principal, F](request => principalOf[F](request).map(Right(_)))
-        .serverLogic { principal => input =>
-          proxy(service, endpoint, typed, client, signals, rbac, principal, input)
+        .errorOut(statusCode)
+        .serverSecurityLogic[(Principal, CorrelationId), F](request => callerOf[F](request).map(Right(_)))
+        .serverLogic { case (principal, correlationId) =>
+          input => proxy(service, endpoint, typed, client, signals, rbac, principal, correlationId, input)
         }
     }
 
@@ -148,10 +157,10 @@ object ContractRouting {
       signals: CapabilitySignals[F],
       rbac: RbacPreCheck[F],
       principal: Principal,
+      correlationId: CorrelationId,
       input: Any
-  ): F[Either[ErrorEnvelope, Any]] =
+  ): F[Either[(ErrorEnvelope, StatusCode), Any]] =
     for {
-      correlationId <- Correlation.newRandom[F]
       cluster <- Async[F].pure(none[ClusterId])
       permitted <- rbac.check(principal, original, cluster)
       result <- permitted match {
@@ -166,7 +175,9 @@ object ContractRouting {
       envelope <- answer match {
         case Right(output) => Async[F].pure(Right(output))
         case Left(error) =>
-          Clock[F].realTimeInstant.map(now => Left(ErrorEnvelope.of(error, correlationId, now)))
+          Clock[F].realTimeInstant.map(now =>
+            Left((ErrorEnvelope.of(error, correlationId, now), StatusCode(ErrorEnvelope.statusOf(error))))
+          )
       }
     } yield envelope
 
@@ -203,13 +214,29 @@ object ContractRouting {
       case _ => ReasonCode.UpstreamUnavailable
     }
 
-  /** The caller, from the session the edge attached. Anonymous when there is none, which in M0 is always:
-    * authentication is disabled, and the session exists to carry the CSRF secret (ADR-019).
+  /** Who is calling, and under which correlation id.
+    *
+    * The principal comes from the session the edge attached: anonymous when there is none, which in M0 is
+    * always, because authentication is disabled and the session exists to carry the CSRF secret (ADR-019).
+    *
+    * The correlation id is *read off the request*, never minted here. `EdgeHeaders.stripInterceptor` has
+    * already put the authoritative id into the request, and `EdgeHeaders.echoInterceptor` puts that same id
+    * on the response header while the access log and the span use it too. Generating a second id would mean
+    * the `correlationId` a user quotes from an error body matches no log line anywhere, and that the id the
+    * downstream service logs is not the id the gateway logged for the same request.
     */
-  private def principalOf[F[_]: Async](request: ServerRequest): F[Principal] =
-    Async[F].pure(
-      request.attribute(SessionMiddleware.Attribute).map(_.principal).getOrElse(Principal.Anonymous)
-    )
+  private def callerOf[F[_]: Async](request: ServerRequest): F[(Principal, CorrelationId)] =
+    ErrorInterceptor
+      .correlationIdOf[F](request)
+      .map(correlationId =>
+        (
+          request
+            .attribute(SessionMiddleware.Attribute)
+            .map(_.principal)
+            .getOrElse(Principal.Anonymous),
+          correlationId
+        )
+      )
 
 }
 

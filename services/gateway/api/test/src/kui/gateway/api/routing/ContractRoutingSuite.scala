@@ -27,6 +27,7 @@ import kui.http.sse.SseEvent
 import kui.http.upstream.CircuitEvent
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.ServiceId
+import kui.observability.Correlation
 import kui.security.SignedPrincipal
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -177,6 +178,10 @@ final class ContractRoutingSuite extends CatsEffectSuite {
             state <- registry.state(clusterKey)
           } yield {
             assertEquals(envelope.code, "KUI-TOPIC-NOT-FOUND")
+            // The status, not just the body. Without a status output on the public endpoint Tapir falls
+            // back to 400 for every proxied failure, so a missing topic, an expired session and a dead
+            // upstream all arrive at the browser looking identical.
+            assertEquals(response.code.code, 404)
             // A user asking for a topic that does not exist says nothing about the topic service, which
             // answered correctly and promptly. If this reported, anyone could dim a feature for everyone
             // else by typing a bad URL.
@@ -204,6 +209,7 @@ final class ContractRoutingSuite extends CatsEffectSuite {
             state <- registry.state(clusterKey)
           } yield {
             assertEquals(envelope.code, "KUI-UPSTREAM-UNAVAILABLE")
+            assertEquals(response.code.code, 503)
             assert(envelope.retryable)
             // Both halves, in one test, because "the page shows an error but the sidebar still looks
             // green" is exactly the inconsistency this is here to prevent.
@@ -229,11 +235,33 @@ final class ContractRoutingSuite extends CatsEffectSuite {
           envelope = decode[ErrorEnvelope](response.body).fold(e => fail(e.getMessage), identity)
         } yield {
           assertEquals(envelope.code, "KUI-FORBIDDEN")
+          assertEquals(response.code.code, 403)
           // The M6 seam, proven now by an upstream request that did not happen. A denied call that still
           // reaches the service means the service does the work and the gateway throws it away.
           assertEquals(seen, Nil)
         }
       }
+    }
+  }
+
+  test("proxiedErrorsCarryTheCorrelationIdTheRequestWasLoggedUnder") {
+    // The edge mints one id per request, stamps it on the response header, and logs and traces under it.
+    // A proxied error that minted a second id would put a string in the user's error body that appears in
+    // no log line anywhere -- and the id the downstream service saw would be a third one again.
+    val missing = ApplicationError.NotFound("topic", "orders", ErrorCode.TopicNotFound)
+
+    (signals, Resource.eval(stubClient(answer = Left(missing)))).tupled.use {
+      case ((signal, _), (client, _)) =>
+        GatewayTestServer.resource(extraRoutes = derived(client, signal)).use { server =>
+          for {
+            response <- server.get("/api/v1/ping?message=hello")
+            envelope = decode[ErrorEnvelope](response.body).fold(e => fail(e.getMessage), identity)
+            header = response.header(Correlation.HeaderName)
+          } yield {
+            assert(header.isDefined, "the edge must stamp a correlation id on every response")
+            assertEquals(Some(envelope.correlationId), header)
+          }
+        }
     }
   }
 
