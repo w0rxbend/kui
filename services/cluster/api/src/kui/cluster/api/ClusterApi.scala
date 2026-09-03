@@ -20,9 +20,10 @@ import kui.cluster.application.{
   CapabilityReportUseCase,
   ClusterRegistry,
   ClusterService,
-  ClusterTopologyUseCase
+  ClusterTopologyUseCase,
+  ClusterWriteUseCase
 }
-import kui.cluster.contract.{ClusterEndpoints, ProfileEndpoints}
+import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEndpoints}
 import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ErrorInterceptor
@@ -66,6 +67,9 @@ object ClusterApi {
     * @param brokers
     *   the broker detail use cases. The list comes from the snapshot; configuration and log directories are
     *   read live, because a disk that failed three seconds ago is why the page was opened.
+    * @param write
+    *   the one write M1 ships: registering or replacing a cluster. It has no user interface and is not
+    *   proxied by the gateway; the permission it requires is what keeps it out of a browser's reach.
     * @param capabilities
     *   what this service can currently do, recomputed per request rather than cached — the gateway polls it
     *   precisely to learn when the answer changes.
@@ -81,6 +85,7 @@ object ClusterApi {
       registry: ClusterRegistry[F],
       topology: ClusterTopologyUseCase[F],
       brokers: BrokerDetailUseCase[F],
+      write: ClusterWriteUseCase[F],
       capabilities: CapabilityReportUseCase[F],
       readiness: List[ReadinessCheck[F]],
       principals: PrincipalCodec[F],
@@ -94,6 +99,7 @@ object ClusterApi {
     // fit into a list typed on `Fs2Streams` that the streaming endpoints need.
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
       ClusterRoutes[F](registry, topology, brokers, principals, rejections, logger) ++
+      ClusterWriteRoutes[F](write, principals, rejections, logger) ++
       ProfileRoutes[F](registry, principals, rejections, telemetry, logger)
 
   /** The cross-cutting chain, outermost first, exactly as `libs/http`'s server wants it.
@@ -250,7 +256,8 @@ object ClusterApi {
     * gateway merges this document rather than the contract file (ADR-003, GW-007).
     */
   def documented[F[_]]: List[AnyEndpoint] =
-    ClusterEndpoints.all ++ ProfileEndpoints.all ++ ClusterStreamEndpoint.endpoints[F] ++
+    ClusterEndpoints.all ++ ClusterWriteEndpoints.all ++ ProfileEndpoints.all ++
+      ClusterStreamEndpoint.endpoints[F] ++
       List(HealthEndpoints.live, HealthEndpoints.ready, HealthEndpoints.capabilities)
 
   /** The service's OpenAPI document. */

@@ -72,6 +72,7 @@ object ClusterBootstrap {
       admin: ClusterAdminPort[F],
       topology: ClusterTopologyUseCase[F],
       brokers: BrokerDetailUseCase[F],
+      write: ClusterWriteUseCase[F],
       capabilities: CapabilityReportUseCase[F],
       health: F[StoreHealth],
       storeMode: String
@@ -135,12 +136,14 @@ object ClusterBootstrap {
       topology = ClusterTopologyUseCase.make[F](registry, snapshots, logger)
       brokers = BrokerDetailUseCase.make[F](registry, snapshots, admin, logger)
       capabilities = CapabilityReportUseCase.make[F](registry, snapshots)
+      write = ClusterWriteUseCase.make[F](registry, clusterStore, logger)
     } yield Bootstrapped(
       store = configStore,
       registry = registry,
       admin = admin,
       topology = topology,
       brokers = brokers,
+      write = write,
       capabilities = capabilities,
       health = clusterStore.health,
       storeMode = if store.kafka.isDefined then "kafka" else if store.dir.isDefined then "file" else "none"

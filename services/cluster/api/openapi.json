@@ -116,6 +116,84 @@
             }
           }
         }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Register or replace one cluster",
+        "description" : "Answers only after the write has been read back from the store, so a 200 means every replica that has caught up can already see it. A version that does not match answers 409 KUI-CONFIG-VERSION-CONFLICT; a deployment with no metadata store answers 501. The response is the redacted profile and never an echo of the request.",
+        "operationId" : "cluster.put",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "If-Match",
+            "in" : "header",
+            "description" : "The version being replaced, quoted; \"0\" to create",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ClusterWriteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClusterProfileDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header If-Match, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/internal/v1/clusters/{clusterId}/brokers" : {
@@ -620,6 +698,30 @@
   },
   "components" : {
     "schemas" : {
+      "AdminTuningWrite" : {
+        "title" : "AdminTuningWrite",
+        "description" : "Admin client timeouts, batching and concurrency",
+        "type" : "object",
+        "required" : [
+          "timeoutMs",
+          "batchSize",
+          "parallelism"
+        ],
+        "properties" : {
+          "timeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "batchSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "parallelism" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "BrokerConfigsResponse" : {
         "title" : "BrokerConfigsResponse",
         "description" : "One broker's settings, or why they could not be read",
@@ -820,6 +922,72 @@
           }
         }
       },
+      "ClusterSecurityWrite" : {
+        "title" : "ClusterSecurityWrite",
+        "description" : "How KUI should authenticate to this cluster",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "verifyHostname"
+        ],
+        "properties" : {
+          "protocol" : {
+            "type" : "string"
+          },
+          "mechanism" : {
+            "type" : "string"
+          },
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          },
+          "truststore" : {
+            "$ref" : "#/components/schemas/StoreMaterialWrite"
+          },
+          "keystore" : {
+            "$ref" : "#/components/schemas/StoreMaterialWrite"
+          },
+          "verifyHostname" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ClusterWriteRequest" : {
+        "title" : "ClusterWriteRequest",
+        "description" : "A cluster to register or replace. Carries credentials; the response does not",
+        "type" : "object",
+        "required" : [
+          "name",
+          "readOnly",
+          "bootstrapServers",
+          "security",
+          "properties",
+          "admin"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "bootstrapServers" : {
+            "type" : "string"
+          },
+          "security" : {
+            "$ref" : "#/components/schemas/ClusterSecurityWrite"
+          },
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_String"
+          },
+          "admin" : {
+            "$ref" : "#/components/schemas/AdminTuningWrite"
+          }
+        }
+      },
       "ClustersResponse" : {
         "title" : "ClustersResponse",
         "description" : "Every configured cluster and its last known state",
@@ -930,6 +1098,13 @@
           "$ref" : "#/components/schemas/ClusterCapability"
         }
       },
+      "Map_String" : {
+        "title" : "Map_String",
+        "type" : "object",
+        "additionalProperties" : {
+          "type" : "string"
+        }
+      },
       "ReadinessReport" : {
         "title" : "ReadinessReport",
         "description" : "Whether the service can serve requests now",
@@ -987,6 +1162,24 @@
           },
           "clusters" : {
             "$ref" : "#/components/schemas/Map_ClusterId_ClusterCapability"
+          }
+        }
+      },
+      "StoreMaterialWrite" : {
+        "title" : "StoreMaterialWrite",
+        "description" : "A keystore or truststore, base64 encoded, with its password",
+        "type" : "object",
+        "required" : [
+          "base64"
+        ],
+        "properties" : {
+          "base64" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
           }
         }
       }

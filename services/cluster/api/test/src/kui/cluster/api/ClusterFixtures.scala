@@ -215,6 +215,20 @@ object ClusterFixtures {
     ): IO[Either[KuiError, BrokerConfigView]] = IO.pure(configView)
   }
 
+  /** A write use case that answers from a script and records what it was asked. */
+  final class StubWrites(
+      answer: ClusterProfile => Either[KuiError, ClusterProfile] = _.asRight[KuiError],
+      takes: FiniteDuration = Duration.Zero,
+      seen: Option[Ref[IO, List[(ClusterProfile, ProfileVersion)]]] = None
+  ) extends ClusterWriteUseCase[IO] {
+
+    def put(profile: ClusterProfile, expected: ProfileVersion): IO[Either[KuiError, ClusterProfile]] =
+      seen.traverse_(_.update(_ :+ ((profile, expected)))) *>
+        // The store's contract is that a write is readable back before it returns, so the wait belongs
+        // inside this call: a route that answered first would be answering before the fact.
+        IO.sleep(takes).as(answer(profile))
+  }
+
   def notFound(id: ClusterId): KuiError =
     ApplicationError.NotFound("cluster", id.value, ErrorCode.ClusterNotFound)
 

@@ -98,6 +98,7 @@ object ClusterWiring {
         bootstrapped.registry,
         bootstrapped.topology,
         bootstrapped.brokers,
+        bootstrapped.write,
         bootstrapped.capabilities,
         readiness,
         principals,

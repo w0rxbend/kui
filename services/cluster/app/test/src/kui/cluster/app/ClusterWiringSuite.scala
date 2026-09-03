@@ -4,7 +4,7 @@ import cats.effect.IO
 import munit.CatsEffectSuite
 
 import kui.cluster.api.ClusterApi
-import kui.cluster.contract.{ClusterEndpoints, ProfileEndpoints}
+import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEndpoints}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 import kui.testkit.fakes.FakeStructuredLogger
@@ -55,8 +55,12 @@ final class ClusterWiringSuite extends CatsEffectSuite {
             "/internal/v1/clusters/stream"
           )
         )
-        // The six read endpoints, the profile, the change stream and the three every KUI service serves.
-        assertEquals(server.routes.size, ClusterEndpoints.all.size + ProfileEndpoints.all.size + 4)
+        // The six read endpoints, the write, the profile, the change stream and the three every KUI
+        // service serves.
+        assertEquals(
+          server.routes.size,
+          ClusterEndpoints.all.size + ClusterWriteEndpoints.all.size + ProfileEndpoints.all.size + 4
+        )
       }
     }
   }

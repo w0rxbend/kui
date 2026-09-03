@@ -125,6 +125,7 @@ object ClusterTestServer {
           new ClusterFixtures.StubRegistry(Nil),
           new ClusterFixtures.StubTopology(Nil),
           new ClusterFixtures.StubBrokers(),
+          new ClusterFixtures.StubWrites(),
           capabilities(configured, available),
           Nil,
           codec,

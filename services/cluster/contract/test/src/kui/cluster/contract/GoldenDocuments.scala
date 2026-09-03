@@ -170,6 +170,38 @@ object GoldenDocuments {
       |  "at" : "2026-09-03T10:11:12.000Z"
       |}""".stripMargin
 
+  /** The one request shape in KUI that carries credentials.
+    *
+    * The golden file holds them in the clear because that is what a caller sends; the point the suite makes
+    * is that nothing ever encodes them back out, and that a `Secret` on a log line prints as `****`.
+    */
+  val clusterWriteRequest: String =
+    """{
+      |  "name" : "Production EU",
+      |  "readOnly" : false,
+      |  "bootstrapServers" : "broker-1.example.com:9093,broker-2.example.com:9093",
+      |  "security" : {
+      |    "protocol" : "SASL_SSL",
+      |    "mechanism" : "SCRAM-SHA-512",
+      |    "username" : "kui",
+      |    "password" : "hunter2",
+      |    "truststore" : {
+      |      "base64" : "MIIB...",
+      |      "password" : "truststore-secret"
+      |    },
+      |    "keystore" : null,
+      |    "verifyHostname" : true
+      |  },
+      |  "properties" : {
+      |    "ssl.endpoint.identification.algorithm" : "https"
+      |  },
+      |  "admin" : {
+      |    "timeoutMs" : 15000,
+      |    "batchSize" : 200,
+      |    "parallelism" : 4
+      |  }
+      |}""".stripMargin
+
   /** Every sample, by file name, for the JVM suite to walk. */
   val all: Map[String, String] = Map(
     "clusters-response.json" -> clustersResponse,
@@ -178,6 +210,7 @@ object GoldenDocuments {
     "log-dirs-response.json" -> logDirsResponse,
     "refresh-accepted.json" -> refreshAccepted,
     "cluster-profile.json" -> clusterProfile,
-    "cluster-change.json" -> clusterChange
+    "cluster-change.json" -> clusterChange,
+    "cluster-write-request.json" -> clusterWriteRequest
   )
 }

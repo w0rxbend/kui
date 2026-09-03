@@ -6,7 +6,7 @@ import cats.effect.IO
 import fs2.Stream
 
 import kui.cluster.application.*
-import kui.cluster.domain.{ClusterProfile, ClusterRef, StoreHealth}
+import kui.cluster.domain.{ClusterProfile, ClusterRef, ProfileVersion, StoreHealth}
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{BrokerId, ClusterId}
 
@@ -63,6 +63,14 @@ object EmptyClusterUseCases {
         broker: BrokerId,
         includeDocs: Boolean
     ): IO[Either[KuiError, BrokerConfigView]] = IO.pure(Left(notFound(cluster)))
+  }
+
+  /** Writing is refused: this deployment has no metadata store, which is what a caller is told. */
+  val writes: ClusterWriteUseCase[IO] = new ClusterWriteUseCase[IO] {
+    def put(profile: ClusterProfile, expected: ProfileVersion): IO[Either[KuiError, ClusterProfile]] =
+      IO.pure(
+        Left(ApplicationError.Unsupported("the metadata store is not configured in this deployment"))
+      )
   }
 
   /** A cluster id nothing is configured under, for the cases that need a failure both transports agree on. */

@@ -1,0 +1,25 @@
+{
+  "name" : "Production EU",
+  "readOnly" : false,
+  "bootstrapServers" : "broker-1.example.com:9093,broker-2.example.com:9093",
+  "security" : {
+    "protocol" : "SASL_SSL",
+    "mechanism" : "SCRAM-SHA-512",
+    "username" : "kui",
+    "password" : "hunter2",
+    "truststore" : {
+      "base64" : "MIIB...",
+      "password" : "truststore-secret"
+    },
+    "keystore" : null,
+    "verifyHostname" : true
+  },
+  "properties" : {
+    "ssl.endpoint.identification.algorithm" : "https"
+  },
+  "admin" : {
+    "timeoutMs" : 15000,
+    "batchSize" : 200,
+    "parallelism" : 4
+  }
+}
