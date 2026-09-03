@@ -584,6 +584,63 @@ claimed to be working.
 recycling a connection, a laptop's wifi blinking — and a banner that flickers every few minutes is
 one people learn to ignore.
 
+### Data that has gone stale, and the one component that draws it
+
+A capability going down and a *screen's data* going stale are two different events, and the
+frontend answers them with two different components. The table above is about the first. This
+section is about the second.
+
+**The rule (ADR-032, DC-H3).** Numbers that were fetched successfully in this session stay on
+screen when the service behind them stops answering. They are dimmed, they carry the time they were
+fetched and the reason they are not being refreshed, and every control that would change something
+is disabled. They are not replaced by a spinner, an empty table or an error page.
+
+The reason is not politeness. The operator staring at the screen at the moment a cluster died is
+the person who most needs the last numbers that cluster produced — how many brokers there were, how
+full the disks were, which one was the controller. An error page throws exactly that away, at
+exactly the moment it became valuable.
+
+**Which component to use.**
+
+| what you have | draw | why |
+| --- | --- | --- |
+| data fetched earlier in this session, and the newest request failed | `StaleDataOverlay` around the region | there is something worth keeping on screen |
+| nothing fetched yet, and the request failed | `FeatureFallbackPanel` | dimming an empty table says nothing; the panel carries the reason, the `since` and a retry |
+| the *capability* is `Unavailable` | `FeatureFallbackPanel` (the route already renders it) | the feature is off the air, not merely behind |
+
+`QueryState.isStale` answers the first two rows directly, which is what it exists for:
+`lastGood.isDefined && outcome.exists(_.isLeft)`. A key that has only ever failed is deliberately
+**not** stale.
+
+**How a screen wires it up.** `QueryCache.state(key)` gives all three facts at once — what is
+happening now, the last value that was good, and when that value arrived — so a screen renders
+`lastGood` and hands `outcome` to the overlay as a reason. Before this existed every screen kept a
+private shadow copy of its own last good answer; `ClustersState` in M0 is the specimen. Reach for
+`state` rather than rebuilding that.
+
+**Two things the overlay does that a screen must therefore not do.**
+
+- It **disables the controls beneath it** — `disabled`, `aria-disabled="true"` and out of the tab
+  order — and restores exactly the ones it disabled. A screen that also disables its own buttons on
+  staleness will find them still disabled after the data recovers. CSS alone cannot do this:
+  `pointer-events: none` leaves every control operable from a keyboard.
+- It **never unmounts the content**. The same DOM nodes are there before and after the transition,
+  which is what keeps the scroll position and the selection. `StaleDataOverlaySuite` asserts node
+  identity precisely so that nobody later "optimises" it into a conditional render.
+
+**Timestamps.** `Timestamps` formats the badge: the relative form on screen (`Last updated 8
+minutes ago`) with the absolute form as the `title` (`2026-09-03 14:05:11 UTC+02:00`), because the
+first is what a person reads and the second is what they paste into a ticket. It takes the IANA
+zone as a parameter and reads no preference of its own; the settings page owns the preference and
+passes it in. A zone the browser does not know falls back to UTC rather than throwing — a corrupted
+stored preference must not blank a page — and a `fetchedAt` in the future reads as `in 5 seconds`,
+never as a negative, because a browser clock and a server clock disagree by a second or two as a
+matter of course.
+
+**Testing hooks.** The wrapper carries `data-testid="<testId>"` and the badge
+`data-testid="<testId>-stale-badge"`; the E2E suite asserts "greyed and timestamped" through those
+two and through `KernelCss.StaleActive`.
+
 ### Where the wire meets the kernel
 
 `FeatureState` is also the one place the capability DTOs are named. `KuiFeature.unavailableView` takes

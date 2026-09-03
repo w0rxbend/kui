@@ -151,6 +151,16 @@ object KernelCss {
   val MagnitudeTrack = "kui-magnitude__track"
   val MagnitudeFill = "kui-magnitude__fill"
 
+  /** The stale-data overlay (ADR-032 DC-H3). `StaleActive` is what dims the content; nothing in Scala
+    * computes an opacity.
+    */
+  val Stale = "kui-stale"
+  val StaleActive = "kui-stale--stale"
+  val StaleContent = "kui-stale__content"
+  val StaleBadge = "kui-stale__badge"
+  val StaleBadgeTime = "kui-stale__time"
+  val StaleBadgeReason = "kui-stale__reason"
+
   val Threshold = "kui-threshold"
   val ThresholdOver = "kui-threshold--over"
   val ThresholdCritical = "kui-threshold--critical"

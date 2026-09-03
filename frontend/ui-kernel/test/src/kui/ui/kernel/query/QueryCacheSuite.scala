@@ -212,4 +212,100 @@ class QueryCacheSuite extends FunSuite {
     assertEquals(seen.head: Status[String, Either[ApiError, Int]], Pending("a"))
     owner.killSubscriptions()
   }
+
+  // --- ADR-032's stale rule: a failing refetch never throws away the last good answer -----------
+
+  test("aFailingRefetchKeepsTheLastGoodValue") {
+    val clock = new TestClock
+    val source = new FakeFetch[String, Int]
+    val cache = QueryCache.make(source.fetch, now = clock.now)
+    given owner: ManualOwner = new ManualOwner
+
+    val states = watch(cache.state("a"), owner)
+    source.respond("a", Right(7))
+    val goodAt = states.last.lastGoodAt.map(_.getTime())
+
+    clock.advance(1.minute)
+    cache.invalidate("a")
+    source.respond("a", Left(ApiError.Unreachable("gone")))
+
+    val state = states.last
+    assertEquals(state.outcome, Some(Left(ApiError.Unreachable("gone"))))
+    assertEquals(state.lastGood, Some(7))
+    assertEquals(state.lastGoodAt.map(_.getTime()), goodAt)
+    assert(state.isStale)
+    owner.killSubscriptions()
+  }
+
+  test("aSucceedingRefetchReplacesTheLastGoodValueAndItsTimestamp") {
+    val clock = new TestClock
+    val source = new FakeFetch[String, Int]
+    val cache = QueryCache.make(source.fetch, now = clock.now)
+    given owner: ManualOwner = new ManualOwner
+
+    val states = watch(cache.state("a"), owner)
+    source.respond("a", Right(7))
+    val first = states.last.lastGoodAt.map(_.getTime())
+
+    clock.advance(1.minute)
+    cache.invalidate("a")
+    source.respond("a", Right(9))
+
+    assertEquals(states.last.lastGood, Some(9))
+    assertNotEquals(states.last.lastGoodAt.map(_.getTime()), first)
+    assert(!states.last.isStale)
+    owner.killSubscriptions()
+  }
+
+  test("aKeyThatHasOnlyEverFailedHasNoLastGoodAndIsNotStale") {
+    val clock = new TestClock
+    val source = new FakeFetch[String, Int]
+    val cache = QueryCache.make(source.fetch, now = clock.now)
+    given owner: ManualOwner = new ManualOwner
+
+    val states = watch(cache.state("a"), owner)
+    source.respond("a", Left(ApiError.Unreachable("gone")))
+
+    // Nothing to keep on screen, so this is a fallback panel's job and not the overlay's. The two
+    // cases have to be distinguishable or every screen draws the wrong one half the time.
+    assertEquals(states.last.lastGood, None)
+    assert(!states.last.isStale)
+    owner.killSubscriptions()
+  }
+
+  test("stateAndGetShareOneFetch") {
+    val clock = new TestClock
+    val source = new FakeFetch[String, Int]
+    val cache = QueryCache.make(source.fetch, now = clock.now)
+    given owner: ManualOwner = new ManualOwner
+
+    subscribe(cache.get("a"))
+    subscribe(cache.state("a"))
+
+    assertEquals(source.callsFor("a"), 1)
+    owner.killSubscriptions()
+  }
+
+  test("lastGoodSurvivesTheNegativeTtlRefetch") {
+    val clock = new TestClock
+    val source = new FakeFetch[String, Int]
+    val cache = QueryCache.make(source.fetch, now = clock.now)
+    given owner: ManualOwner = new ManualOwner
+
+    val values = watch(cache.lastGood("a"), owner)
+    source.respond("a", Right(7))
+
+    clock.advance(1.minute)
+    cache.invalidate("a")
+    source.respond("a", Left(ApiError.Unreachable("first failure")))
+
+    // The 5-second negative TTL makes the next subscription refetch; a second failure must still
+    // not clear the value the screen is showing.
+    clock.advance(QueryCache.NegativeStaleAfter + 1.second)
+    subscribe(cache.get("a"))
+    source.respond("a", Left(ApiError.Unreachable("second failure")))
+
+    assertEquals(values.last, Some(7))
+    owner.killSubscriptions()
+  }
 }

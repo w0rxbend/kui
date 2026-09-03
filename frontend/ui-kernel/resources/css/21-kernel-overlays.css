@@ -354,3 +354,46 @@
 .kui-empty-state__action {
   margin-top: var(--kui-space-2);
 }
+
+/* --- Stale data overlay ---------------------------------------------------------------------- */
+
+/* The design has no stale state of its own, so this is the design's status-chip treatment applied
+ * to a state the design does not draw: the warning container as the fill, its paired text colour on
+ * top, the pill radius every chip in the product uses.
+ *
+ * The dimming lives here and only here. ADR-024 forbids a colour or an opacity being computed in
+ * Scala, and the component obeys it by writing a class and letting this file decide what stale
+ * looks like. */
+.kui-stale {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-stale__badge {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-1) var(--kui-space-3);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+}
+
+/* The reason is the registry's own words and is often long; it is set apart from the timestamp by
+ * weight rather than by another chip, so the badge stays one object. */
+.kui-stale__reason {
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* Dimmed enough to read as inactive, not so far that the numbers stop being legible — the numbers
+ * are the reason the region is still on screen at all. `pointer-events` stops the mouse; the
+ * component removes the controls from the tab order itself, because CSS cannot. */
+.kui-stale--stale .kui-stale__content {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity var(--kui-duration-fast) ease;
+}

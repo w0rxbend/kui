@@ -16,6 +16,30 @@ import kui.ui.kernel.api.ApiError
   */
 final case class CacheEntry[A](value: Either[ApiError, A], fetchedAt: js.Date)
 
+/** Everything a screen needs in order to draw itself: what is happening now, the last value that was ever
+  * good, and when that value arrived.
+  *
+  * All three together, in one type, because ADR-032's stale rule needs all three at once — the old numbers to
+  * keep showing, the timestamp to put on the badge, and the current failure to explain why the numbers are
+  * not moving. Deriving them separately is what leads every screen to keep a private shadow copy of its own
+  * last good answer, which is precisely the duplication this type removes.
+  */
+final case class QueryState[A](
+    pending: Boolean,
+    outcome: Option[Either[ApiError, A]],
+    lastGood: Option[A],
+    lastGoodAt: Option[js.Date]
+) {
+
+  /** True when there is something worth showing and the newest thing we know is a failure.
+    *
+    * False when a key has only ever failed: that is an empty screen with an error on it, which is a fallback
+    * panel's job, and telling the two apart is the whole reason this is a method rather than
+    * `outcome.exists(_.isLeft)` written out at each call site.
+    */
+  def isStale: Boolean = lastGood.isDefined && outcome.exists(_.isLeft)
+}
+
 /** Server state, fetched once and shared.
   *
   * ## The problem
@@ -68,6 +92,20 @@ trait QueryCache[K, A] {
 
   /** When this key's value arrived, for ADR-032's rule that stale data stays on screen with its timestamp. */
   def fetchedAt(key: K): Signal[Option[js.Date]]
+
+  /** The full state of one key.
+    *
+    * Subscribing to this has exactly the same fetch-on-demand and reference-counting behaviour as [[get]],
+    * and it is derived from the same entry, so a screen that watches both still causes one request.
+    */
+  def state(key: K): Signal[QueryState[A]]
+
+  /** The last successfully fetched value for a key.
+    *
+    * A failing refetch never clears it. That is the guarantee the stale rule rests on, and it is stated here
+    * rather than left as an implementation detail because a screen is allowed to depend on it.
+    */
+  def lastGood(key: K): Signal[Option[A]]
 }
 
 object QueryCache {
@@ -118,6 +156,13 @@ final private class AirstreamQueryCache[K, A](
   final private class Entry {
     val cached: Var[Option[CacheEntry[A]]] = Var(None)
     val pending: Var[Boolean] = Var(false)
+
+    /** The last answer that was a `Right`, and when it arrived.
+      *
+      * Held separately from `cached` rather than derived from it, because `cached` is overwritten by a
+      * failure and the whole point is that the failure must not take the previous good answer with it.
+      */
+    val good: Var[Option[CacheEntry[A]]] = Var(None)
 
     /** How many live subscriptions are watching. Zero means nothing on screen wants it. */
     var watchers: Int = 0
@@ -183,6 +228,27 @@ final private class AirstreamQueryCache[K, A](
   def fetchedAt(key: K): Signal[Option[js.Date]] =
     entryFor(key).cached.signal.map(_.map(_.fetchedAt))
 
+  def state(key: K): Signal[QueryState[A]] =
+    // Built on `get` rather than beside it, so the acquire/release bookkeeping that makes the cache
+    // demand-driven happens exactly once and cannot drift between the two reads.
+    get(key).combineWith(goodOf(key)).map { (status, good) =>
+      val outcome = status match {
+        case Resolved(_, value, _) => Some(value)
+        case _ => None
+      }
+      QueryState(
+        pending = outcome.isEmpty,
+        outcome = outcome,
+        lastGood = good.flatMap(_.value.toOption),
+        lastGoodAt = good.map(_.fetchedAt)
+      )
+    }
+
+  def lastGood(key: K): Signal[Option[A]] =
+    state(key).map(_.lastGood)
+
+  private def goodOf(key: K): Signal[Option[CacheEntry[A]]] = entryFor(key).good.signal
+
   /** Somebody started watching this key. Fetches only if what is held is missing or too old. */
   private def acquire(key: K): Unit = {
     val entry = entryFor(key)
@@ -225,7 +291,9 @@ final private class AirstreamQueryCache[K, A](
   }
 
   private def store(key: K, entry: Entry, value: Either[ApiError, A]): Unit = {
-    entry.cached.set(Some(CacheEntry(value, now())))
+    val arrived = CacheEntry(value, now())
+    entry.cached.set(Some(arrived))
+    if value.isRight then entry.good.set(Some(arrived))
     entry.pending.set(false)
     entry.resolutions += 1
     publish(key, Resolved(key, value, entry.resolutions))
