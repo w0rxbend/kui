@@ -184,6 +184,22 @@ final class ArchitectureSuite extends FunSuite {
     expectNoViolations(moduleWithLibs("services.topic.infrastructure", "org.typelevel:fs2-kafka"))
   }
 
+  test("the layer rules do not apply to a test module, which needs its own subject and MUnit") {
+    expectNoViolations(
+      ModuleFacts(
+        "services.cluster.domain.test",
+        Set("services.cluster.domain", "libs.testkit.jvm"),
+        Set("org.scalameta:munit")
+      )
+    )
+  }
+
+  test("a test module is still held to the rules that are not about layers") {
+    expectOneViolation("A4", "services.gateway.api.test", "services.cluster.domain")(
+      module("services.gateway.api.test", "services.cluster.domain")
+    )
+  }
+
   test("a violation message names the rule, both modules and the reason") {
     val violation = ArchitectureRules
       .check(List(module("services.gateway.application", "services.cluster.application")))

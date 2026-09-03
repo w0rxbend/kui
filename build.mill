@@ -553,6 +553,54 @@ object frontend extends Module {
   }
 }
 
+/** The eleven services. Each is one module tree with the layers of `ARCHITECTURE.md` §3, and the
+  * edges between those layers are checked by `checkArchitecture` rather than by review (ADR-041).
+  */
+object services extends Module {
+
+  /** The Cluster Registry and Topology context (`docs/domain/context-map.md`), and — because it is
+    * the first one written — the shape every other service copies.
+    *
+    * M0 builds only the layers that have something to hold: `domain`, `application` and `contract`.
+    * There is deliberately no `infrastructure` module, because there is no adapter to write yet and
+    * an empty module is an invitation to put something in it.
+    */
+  object cluster extends Module {
+
+    /** Business rules and the ports they are stated in terms of. Rule A1 allows it `libs/kernel`
+      * and cats-core and nothing else; `KuiPureModule` additionally forbids `var` here.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** Use cases. It may see the domain and the effect libraries, and it may not see the wire:
+      * rule A3 fails the build on tapir, circe, `libs/contracts-core` or `libs/http` reaching it.
+      * The types a use case returns are its own, and `api` maps them (ADR-033).
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+  }
+}
+
 /** Small programs the build runs. They are ordinary modules so that their logic is unit-tested like
   * any other code, rather than living as untested script inside a Mill task.
   */

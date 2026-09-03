@@ -100,6 +100,18 @@ object ArchitectureRules {
 
   private def isUnder(id: String, root: String): Boolean = id == root || id.startsWith(s"$root.")
 
+  /** A module that holds a suite rather than production code: `services.cluster.domain.test`,
+    * `libs.kernel.jvm.test`.
+    *
+    * The layer-shape rules (A1, A2, A3) are about what a *layer* is allowed to know, and a suite is not the
+    * layer it tests: `services.cluster.domain.test` necessarily depends on `services.cluster.domain`, on
+    * `libs.testkit` and on MUnit, none of which A1 allows a domain module. Applying the rules to test modules
+    * would make every domain module untestable, so they are exempt. A4, A5 and A8 still apply: those are
+    * about a component reaching somewhere it must never reach, and a suite that reaches there is telling you
+    * about the production code it is testing.
+    */
+  private def isTestModule(id: String): Boolean = id.split('.').lastOption.contains("test")
+
   private def group(coordinate: String): String = coordinate.takeWhile(_ != ':')
 
   /** Every violation in the graph, in rule order. An empty result means the graph is legal. */
@@ -108,9 +120,11 @@ object ArchitectureRules {
       modules.flatMap(m => serviceLayer(m.id).collect { case (service, "domain") => service }).toSet
 
     modules.flatMap { module =>
-      a1(module) ++
-        a2(module) ++
-        a3(module, domainOwningServices) ++
+      val layerRules =
+        if isTestModule(module.id) then Nil
+        else a1(module) ++ a2(module) ++ a3(module, domainOwningServices)
+
+      layerRules ++
         a4(module) ++
         a5(module) ++
         a6(module) ++
