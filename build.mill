@@ -1,0 +1,143 @@
+package build
+
+import mill.*
+import mill.scalalib.*
+
+/** Every third-party version KUI pins, in one place.
+  *
+  * The numbers are the ones `DEPENDENCY_MATRIX.md` records; that file is the decision, this object
+  * is the mechanical restatement the build reads. Changing a number here without changing the
+  * matrix row (and the ADR the row cites) is how a build drifts away from its own documentation, so
+  * always change both.
+  */
+object Versions {
+  val scala           = "3.9.0"
+  val scalaJs         = "1.22.0"
+  val jdk             = "21"
+  val cats            = "2.13.0"
+  val catsEffect      = "3.7.1"
+  val fs2             = "3.13.0"
+  val tapir           = "1.13.31"
+  val sttp            = "4.0.26"
+  val circe           = "0.14.16"
+  val circeYaml       = "0.16.1"
+  val ciris           = "3.15.0"
+  val iron            = "3.3.2"
+  val macwire         = "2.6.7"
+  val log4cats        = "2.8.0"
+  val slf4j           = "2.0.18"
+  val logback         = "1.6.3"
+  val logstash        = "9.0"
+  val otel4s          = "1.1.0"
+  val otelSdk         = "1.65.0"
+  val laminar         = "17.2.1"
+  val waypoint        = "9.0.0"
+  val scalajsDom      = "2.8.1"
+  val scalaJavaTime   = "2.7.0"
+  val munit           = "1.3.6"
+  val munitScalacheck = "1.3.1"
+  val scalacheck      = "1.20.0"
+  val munitCatsEffect = "2.2.0"
+  val disciplineMunit = "2.0.0"
+  val testcontainers  = "0.44.1"
+  val domtestutils    = "19.0.0"
+}
+
+/** Settings every KUI Scala module shares. Modules inherit strictness rather than opting into it. */
+trait KuiModule extends ScalaModule {
+  def scalaVersion = Versions.scala
+}
+
+object libs extends Module {
+
+  /** Shared, platform-neutral vocabulary. KERN-001 fills it in; today it only has to compile. */
+  object kernel extends Module {
+    object jvm extends KuiModule {
+      def sources = Task.Sources(moduleDir / os.up / "src")
+    }
+  }
+}
+
+/** A module that exists only to be resolved, never compiled.
+  *
+  * It declares every Maven coordinate M0 will eventually use. `resolveAll` downloads the lot, so a
+  * typo in a version string fails on the first day rather than on the day the module that needs the
+  * library is finally written. It is deliberately not part of any real module's classpath.
+  */
+object depsSmoke extends KuiModule {
+  def sources = Task.Sources()
+
+  def mvnDeps = Seq(
+    // Runtime core
+    mvn"org.typelevel::cats-core::${Versions.cats}",
+    mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+    mvn"co.fs2::fs2-core::${Versions.fs2}",
+    mvn"co.fs2::fs2-io::${Versions.fs2}",
+    // HTTP and contracts
+    mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-iron::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-netty-server-cats::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-files::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-sttp-client4::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-swagger-ui-bundle::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-otel4s-tracing::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-opentelemetry-metrics::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+    mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+    mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+    mvn"com.softwaremill.sttp.client4::circe::${Versions.sttp}",
+    // JSON, config, validation, wiring
+    mvn"io.circe::circe-core::${Versions.circe}",
+    mvn"io.circe::circe-parser::${Versions.circe}",
+    mvn"io.circe::circe-generic::${Versions.circe}",
+    mvn"io.circe::circe-yaml::${Versions.circeYaml}",
+    mvn"is.cir::ciris::${Versions.ciris}",
+    mvn"is.cir::ciris-circe-yaml::${Versions.ciris}",
+    mvn"io.github.iltotore::iron::${Versions.iron}",
+    mvn"io.github.iltotore::iron-circe::${Versions.iron}",
+    mvn"io.github.iltotore::iron-cats::${Versions.iron}",
+    mvn"io.github.iltotore::iron-ciris::${Versions.iron}",
+    mvn"com.softwaremill.macwire::macros::${Versions.macwire}",
+    mvn"com.softwaremill.macwire::util::${Versions.macwire}",
+    // Logging and telemetry
+    mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+    mvn"org.typelevel::log4cats-slf4j::${Versions.log4cats}",
+    mvn"org.slf4j:slf4j-api:${Versions.slf4j}",
+    mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+    mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+    mvn"org.typelevel::otel4s-core::${Versions.otel4s}",
+    mvn"org.typelevel::otel4s-oteljava::${Versions.otel4s}",
+    mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}",
+    mvn"io.opentelemetry:opentelemetry-sdk:${Versions.otelSdk}",
+    mvn"io.opentelemetry:opentelemetry-sdk-extension-autoconfigure:${Versions.otelSdk}",
+    mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+    // Tests
+    mvn"org.scalameta::munit::${Versions.munit}",
+    mvn"org.scalameta::munit-scalacheck::${Versions.munitScalacheck}",
+    mvn"org.scalacheck::scalacheck::${Versions.scalacheck}",
+    mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+    mvn"org.typelevel::discipline-munit::${Versions.disciplineMunit}",
+    mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}",
+    // Frontend. These are Scala.js artifacts, named in full so a plain JVM resolution can still
+    // prove the coordinates exist without a Scala.js module being declared yet (BUILD-003).
+    mvn"com.raquo:laminar_sjs1_3:${Versions.laminar}",
+    mvn"com.raquo:airstream_sjs1_3:${Versions.laminar}",
+    mvn"com.raquo:waypoint_sjs1_3:${Versions.waypoint}",
+    mvn"org.scala-js:scalajs-dom_sjs1_3:${Versions.scalajsDom}",
+    mvn"org.scala-js:scalajs-library_2.13:${Versions.scalaJs}",
+    mvn"io.github.cquiroz:scala-java-time_sjs1_3:${Versions.scalaJavaTime}",
+    mvn"com.raquo:domtestutils_sjs1_3:${Versions.domtestutils}"
+  )
+}
+
+/** Downloads every coordinate M0 pins and prints how many were fetched. Exits non-zero on the first
+  * version that does not exist, which is the whole point of the task.
+  */
+def resolveAll(): Task.Command[Int] = Task.Command {
+  val jars = depsSmoke.resolvedMvnDeps()
+  println(s"resolved ${jars.toSeq.size} artifacts for ${depsSmoke.mvnDeps().size} pinned coordinates")
+  jars.toSeq.size
+}

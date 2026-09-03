@@ -120,3 +120,31 @@ Not applicable.
 ## Docs to update
 
 `README.md`: prerequisites (JDK 21, Docker) and the three commands above.
+
+## Deviations
+
+Recorded during implementation, 2026-09-03.
+
+1. **The placeholder source file is `KernelPlaceholder.scala`, not `package.scala`, and it defines
+   an object.** The spec asked for a source file containing only `package kui.kernel` and a doc
+   comment. That does compile, but it emits a compiler warning — *"No class, trait or object is
+   defined in the compilation unit"* — and BUILD-002 turns every warning into an error with
+   `-Werror`. A file that is legal in BUILD-001 and illegal one task later is not a useful starting
+   point, so the file declares one empty `object KernelPlaceholder`, and is named after what it
+   contains. KERN-001 replaces it either way.
+
+2. **`resolveAll` is a Mill *command*, so it is declared `def resolveAll() = Task.Command { ... }`
+   with an empty parameter list.** Mill 1.1.8 rejects a `Task.Command` whose definition has no
+   parameter list (`"Task.Command definition ... must have 1 parameter list"`). It is still invoked
+   as `./mill resolveAll`. The spec's `resolvedIvyDeps` is also spelled `resolvedMvnDeps` in
+   Mill 1.x, matching the `mvnDeps` / `mvn"..."` naming the rest of the file uses.
+
+3. **`libs/kernel` is `libs.kernel.jvm` from the start**, a plain nested module whose `sources`
+   point back at `libs/kernel/src`. The acceptance command in this spec is
+   `./mill libs.kernel.jvm.compile`, so the `.jvm` segment has to exist before BUILD-003 turns the
+   module into a real cross-platform one.
+
+4. **No version fallback was needed.** Every coordinate in the `Versions` object was checked against
+   `repo1.maven.org` before the first commit, including `org.scala-lang:scala3-library_3:3.9.0` and
+   `com.lihaoyi:mill-dist:1.1.8`. All 55 pinned coordinates resolved (208 jars). `DEPENDENCY_MATRIX.md`
+   is unchanged and the ADR-001 fallback to Scala 3.3.8 was not triggered.

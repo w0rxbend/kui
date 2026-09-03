@@ -36,6 +36,32 @@ of it flows from Kafka to the browser without buffering whole topics in memory.
 **It can be one process or eleven.** The same modules compose into a single JVM for local use, or
 into separate containers for production. No code changes between the two.
 
+## Building it
+
+### Prerequisites
+
+- **JDK 21.** Any distribution works; Temurin 21 is what the project is developed against. Check
+  yours with `java -version` — the first number must be 21.
+- **Docker.** Not needed to compile, but the integration tests start real Kafka brokers in
+  containers, so they need a working Docker daemon.
+
+You do **not** need to install Mill (the build tool). The `./mill` script in the repository root
+downloads the exact version pinned in `.mill-version` the first time you run it, so everyone —
+including the CI machine — builds with the same tool.
+
+### The commands
+
+```
+./mill --version                  # prints the pinned Mill version; also does the one-time download
+./mill resolveAll                 # downloads every third-party library the project pins
+./mill libs.kernel.jvm.compile    # compiles one module
+```
+
+`resolveAll` is worth knowing about: it exists purely to fail fast. It asks the build to download
+every library version listed in [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md), even ones no module
+uses yet, so that a wrong version number is caught in seconds instead of surfacing weeks later when
+somebody finally writes the code that needs it.
+
 ## Reading the design
 
 | Document | What it covers |

@@ -1,0 +1,12 @@
+# Mill build output
+out/
+
+# IDE and build-server metadata
+.bsp/
+.metals/
+.bloop/
+.idea/
+
+# Frontend build artifacts
+node_modules/
+frontend/dist/
