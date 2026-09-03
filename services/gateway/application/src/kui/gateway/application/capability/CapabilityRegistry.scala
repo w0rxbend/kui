@@ -218,11 +218,11 @@ object CapabilityRegistry {
 
     /** Publishes whatever outage is still pending for this key once the debounce window has closed.
       *
-      * It deliberately does not compare against the value the timer was scheduled with. Anything that is
-      * not an outage -- a recovery, a `NotConfigured` -- already removed the pending entry when it was
-      * reported, so an entry that is still here has been an outage for the whole window. Requiring exact
-      * equality instead meant a second report of the same outage, differing only in its message, both
-      * failed the check and was deleted by it, and the outage was never published at all.
+      * It deliberately does not compare against the value the timer was scheduled with. Anything that is not
+      * an outage -- a recovery, a `NotConfigured` -- already removed the pending entry when it was reported,
+      * so an entry that is still here has been an outage for the whole window. Requiring exact equality
+      * instead meant a second report of the same outage, differing only in its message, both failed the check
+      * and was deleted by it, and the outage was never published at all.
       */
     private def confirm(key: CapabilityKey): F[Unit] =
       lock.permit.surround {
