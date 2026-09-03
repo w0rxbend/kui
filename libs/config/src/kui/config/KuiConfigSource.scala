@@ -676,6 +676,7 @@ object KuiConfigSource {
       List("kui", "server", "host"),
       List("kui", "server", "port"),
       List("kui", "server", "basePath"),
+      List("kui", "server", "devInsecureCookies"),
       List("kui", "gateway", "services", "*", "url"),
       List("kui", "gateway", "services", "*", "timeout"),
       List("kui", "gateway", "services", "*", "maxConcurrent"),

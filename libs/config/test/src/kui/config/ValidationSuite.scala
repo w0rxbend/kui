@@ -62,6 +62,23 @@ final class ValidationSuite extends KuiSuite {
     assert(!found.head.problem.contains("did you mean"), found.head.problem)
   }
 
+  test("devInsecureCookiesCanBeSetInAFileAndNotOnlyInTheEnvironment") {
+    // It was decoded but missing from the list of recognised keys, so `--kui.server....` and
+    // `KUI_SERVER_DEVINSECURECOOKIES` worked while the same setting in a YAML file was refused as a
+    // typo. That asymmetry is invisible until someone writes it in the file that documents it --
+    // which is exactly what the Compose development environment does (INFRA-002).
+    val file = ConfigFixtures.yaml(
+      """kui:
+        |  server:
+        |    devInsecureCookies: true
+        |""".stripMargin
+    )
+
+    val loaded = load(List(file)).fold(errors => fail(errors.render), identity)
+
+    assertEquals(loaded.gateway.devInsecureCookies, true)
+  }
+
   test("anEmptyListIsAcceptedWhereItsElementsAreKnown") {
     // The walk that finds unknown keys stops at an empty container, so `origins: []` arrives as
     // the path `kui.gateway.cors.origins` rather than as any element under it. Declaring only
