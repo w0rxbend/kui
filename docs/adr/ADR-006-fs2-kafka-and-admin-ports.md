@@ -1,6 +1,6 @@
 # ADR-006 — fs2-kafka 4 and per-context Kafka admin ports
 
-- Status: Accepted
+- Status: Accepted (amended 2026-09-03, Amendment 1 — see below)
 - Date: 2026-09-03
 
 ## Context
@@ -54,3 +54,39 @@ managed-service quirks the research found.
 
 Medium. Ports are traits; the adapter is one module; the streaming protocol of the message
 service depends on `MessageBrowsePort` semantics.
+
+## Amendment 1 — 2026-09-03 (M1 gate review)
+
+**What changed.** The split between the two clients is now explicit, and it is the opposite of
+what the Decision above implies for admin work:
+
+- **Admin calls use the raw `org.apache.kafka.clients.admin.Admin`**, wrapped by
+  `libs/kafka`'s own `KafkaFutures` bridge and `AdminClientPool`. `KafkaAdminClient[F]` is not
+  used.
+- **Consumers and producers use fs2-kafka** (`KafkaConsumer.resource`,
+  `KafkaProducer.resource`), which is what the streaming, cancellation and chunking argument in
+  the Context paragraph was actually about.
+
+**Why.** Four things M1 needs are not expressible through fs2-kafka's admin wrappers, and each
+was found by reading the pinned 4.0.0 surface rather than by preference:
+
+1. The option objects. `DescribeClusterOptions.includeAuthorizedOperations`,
+   `DescribeConfigsOptions.includeSynonyms` / `includeDocumentation`, and a per-call
+   `timeoutMs` are not surfaced. Capability probing (ADR-030, ADR-039) is built on exactly
+   those flags.
+2. `DescribeCluster.controller` cannot represent the `null` controller a KRaft cluster reports
+   during failover. KUI must render that as `None`, not crash — it is a named test in the M1
+   plan (§7, "Admin adapter").
+3. The convenient wrappers return `all()`-shaped futures, which fail an entire batch when one
+   key fails. `BatchResult`/`PartialResult` — the whole partial-authorization story of
+   `research/kafka/admin-capabilities.md` §1 — needs the per-key futures.
+4. One bridge (`KafkaFutures`) is one layer to reason about instead of two.
+
+**What did not change.** The pinned coordinates, the compression codecs, the port family in
+`ARCHITECTURE.md` §4.2–§4.3, and the rule that `org.apache.kafka.*` is importable only inside
+`libs/kafka*`, `libs/config`, `libs/testkit`, a service's `infrastructure` and an `app`
+(ADR-041 A10). The "escape hatch where fs2-kafka lags" is no longer an exception for admin
+work; it is the admin path.
+
+**Tasks updated:** KAFKA-004 (which records the evidence in `libs/kafka/CLIENT-CHOICE.md`),
+KAFKA-005 … KAFKA-009, STORE-005.

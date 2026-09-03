@@ -280,3 +280,29 @@ This task *is* the documentation. The list is in "Files to change" above.
 ## Deviations
 
 Recorded during implementation.
+
+## M1 gate review additions
+
+Three documentation corrections were found at the gate and are this task's to make. They are not
+optional; each of them currently describes something that does not exist.
+
+1. **`docs/operations/metadata-store.md` §4.2 step 3 documents `POST /internal/v1/store/rekey`.**
+   No M1 task builds it — DEVPLAN decision D6 ships exactly one write endpoint,
+   `PUT /internal/v1/clusters/{id}`. Rewrite step 3 as the manual rotation procedure STORE-002
+   specifies (add the new key to the keyring as the write key, keep the old one for reads,
+   rewrite each record through the ordinary write path), and record the endpoint in
+   `TECH_DEBT.md` as deferred to the milestone that needs bulk rekeying.
+2. **Section ownership of `docs/operations/metadata-store.md`.** DEVPLAN §6.5 gives the STORE
+   area sections 2–6 and names no owner for §1 or §7 onward. STORE-004 corrects §1's key table
+   in its own commit; **everything from §7 onward is this task's**, including the OT-010
+   operator guidance, backup/restore and file-to-Kafka migration.
+3. **The ADR amendments named in DEVPLAN §9 item 10 were written at the gate, not here.**
+   [ADR-006 Amendment 1](../../../adr/ADR-006-fs2-kafka-and-admin-ports.md) (raw `Admin` for
+   admin work, fs2-kafka for consumers and producers),
+   [ADR-022 Amendment 1](../../../adr/ADR-022-typed-kafka-cluster-auth.md) (the ADT lives in
+   `libs/kernel`), [ADR-041 Amendment 3](../../../adr/ADR-041-layering-rules-machine-enforced.md)
+   (A9, A10, and A1 not widened) and the new
+   [ADR-044](../../../adr/ADR-044-store-record-envelope-and-field-encryption.md) are already
+   Accepted. This task's remaining ADR work is ADR-042's consequences section — what the
+   implementation learned about replay timing — and ADR-030's consequences, which must record
+   that a feature probe has three outcomes and not two (F-05).

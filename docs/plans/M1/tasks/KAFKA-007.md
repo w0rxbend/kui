@@ -6,7 +6,8 @@
 - **Owner role:** Principal Scala Engineer
 - **Context / service:** `libs/kafka`
 - **Size:** L
-- **Dependencies / blocked by:** KAFKA-006
+- **Dependencies / blocked by:** KAFKA-006, **CFGOP-004** (the shared Testcontainers fixture —
+  added at the M1 gate review, F-11: do not write a second PLAINTEXT container here)
 
 ## Goal (user value)
 
@@ -82,8 +83,12 @@ build.mill    # add the Testcontainers test dependencies to `libs.kafka.test`
 ```
 
 with `val testcontainersJava = "2.0.5"` added to `Versions` (`DEPENDENCY_MATRIX.md`,
-`org.testcontainers:testcontainers-kafka` 2.0.5). Only the PLAINTEXT container is used here;
-the three-mode secured topology is CFGOP-004's and lives in `libs/testkit`.
+`org.testcontainers:testcontainers-kafka` 2.0.5). Only the PLAINTEXT container is used here, and it is **not** declared here: use
+`KafkaFixture(KafkaTopology.Plaintext)` from `libs/testkit` (CFGOP-004). One container topology
+exists in this repository, in one file. The M0 review's second process finding was the same
+string typed twice in two files; a broker fixture typed twice is that finding with a Docker
+image attached. If CFGOP-004 has not landed, wait for it — it depends only on KAFKA-002 and can
+be worked in parallel from day one.
 
 ## Public Scala signatures to implement
 

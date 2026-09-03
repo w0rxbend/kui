@@ -7,6 +7,49 @@
 - **Size:** M
 - **Dependencies / blocked by:** CLDOM-001
 
+## M1 gate review amendment — `ClusterFeatures` keeps its third set
+
+**F-05, major, fixed.** KAFKA-009 produces a three-valued `ClusterFeatures` — `present`,
+`absent`, **`unknown`**, plus `probedAt` — precisely so that a probe which timed out is not
+recorded as "this cluster cannot do that". The domain then collapsed it back to a
+`Set[ClusterFeature]` at the port, which throws the third set away and reintroduces the exact
+bug KAFKA-009's decision exists to prevent: a one-hour cache of a lie.
+
+**The domain gains its own `ClusterFeatures`**, in
+`services/cluster/domain/src/kui/cluster/domain/ClusterFeatures.scala`, with the same three sets:
+
+```scala
+final case class ClusterFeatures(
+    present: Set[ClusterFeature],
+    absent:  Set[ClusterFeature],
+    unknown: Set[ClusterFeature],
+    probedAt: Instant
+) {
+  def has(f: ClusterFeature): Boolean = present.contains(f)
+  def isUnknown(f: ClusterFeature): Boolean = unknown.contains(f)
+}
+object ClusterFeatures {
+  def unprobed(at: Instant): ClusterFeatures   // everything unknown
+}
+```
+
+with the same invariant KAFKA-009 asserts as a property: `present ++ absent ++ unknown ==
+ClusterFeature.All`, always, and the three sets are pairwise disjoint. Assert it here too — the
+two enums are defined in two modules (CLDOM-002 decision 2), and a shared invariant checked on
+one side only is half a check.
+
+**Signature changes that follow, everywhere in this spec:**
+
+- `ClusterAdmin.capabilities(profile): F[ClusterFeatures]` (not `F[Set[ClusterFeature]]`).
+- `ClusterSnapshots.capabilitiesOf(id): F[Option[SnapshotCell[F, ClusterFeatures]]]`.
+- `ClusterDescription.features: ClusterFeatures`; `ClusterDescription.has(f)` is
+  `features.has(f)`, unchanged in meaning.
+- `CapabilityReportUseCase.stateOf` distinguishes the third case: a feature in `unknown` is
+  **not** reported as unsupported. It renders as `Degraded` with the probe's reason where the
+  screen depends on it, and as "not determined" otherwise — never as `absent`.
+- `CLADP-002`'s adapter maps `libs/kafka`'s `ClusterFeatures` onto the domain's field for field,
+  by exhaustive match on `ClusterFeature`, preserving all three sets and `probedAt`.
+
 ## Goal (user value)
 
 What a cluster *is made of*, as types that cannot hold a contradiction: the brokers, the

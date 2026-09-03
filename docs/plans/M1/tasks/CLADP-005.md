@@ -16,6 +16,16 @@
 > `ClusterConfigStoreAdapter.changes` returning an empty stream knows which task to wait for
 > rather than inventing a poll loop.
 
+## M1 gate review amendment — `ClusterConfigStore.changes` is now `onChange`
+
+**F-02, blocker, fixed.** Rule A1 was **not** widened to allow `co.fs2::fs2-core` in
+`services/cluster/domain` (see [ADR-041 Amendment 3](../../../adr/ADR-041-layering-rules-machine-enforced.md)),
+so `ClusterConfigStore` has no `changes: Stream[F, List[ClusterProfile]]`. It has
+`onChange(handler: List[ClusterProfile] => F[Unit]): F[F[Unit]]`, returning the deregistration
+action. Wherever this spec subscribes to `changes`, register a handler instead; wherever it
+consumes a stream, the stream now lives on `ClusterRegistry` in `application`, which may hold
+fs2. Nothing else about the behaviour, the backoff or the reconcile logic changes.
+
 ## Goal (user value)
 
 A cluster registered or edited on one replica becomes visible on every replica, without a
@@ -308,3 +318,18 @@ contract is the acceptance contract:
 None in this task. The backoff numbers, the transition log lines and the "last known state"
 guarantee are quoted by CFGOP-008 into `docs/operations/metadata-store.md`; put the final values
 in the implementation report.
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns a long-lived listener fiber, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- The listener runs under a `Supervisor` owned by its `Resource`; releasing the resource cancels
+  the fiber, deregisters the `onChange` handler, and completes without waiting for the next
+  change.
+- Cancellation in the middle of a reconcile leaves the registry at its previous consistent
+  value, never half-applied: the swap into the registry's `Ref` is a single `uncancelable`
+  update of a fully-built snapshot.
+- **Test:** cancel mid-reconcile and assert the registry still returns the previous snapshot in
+  full and that the handler is deregistered.

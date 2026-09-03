@@ -18,6 +18,49 @@
 > invent a second container fixture in this module — a duplicated Kafka container is how a
 > project ends up with two broker images and one of them unpinned.
 
+## M1 gate review amendment — `ClusterFeatures` keeps its third set
+
+**F-05, major, fixed.** KAFKA-009 produces a three-valued `ClusterFeatures` — `present`,
+`absent`, **`unknown`**, plus `probedAt` — precisely so that a probe which timed out is not
+recorded as "this cluster cannot do that". The domain then collapsed it back to a
+`Set[ClusterFeature]` at the port, which throws the third set away and reintroduces the exact
+bug KAFKA-009's decision exists to prevent: a one-hour cache of a lie.
+
+**The domain gains its own `ClusterFeatures`**, in
+`services/cluster/domain/src/kui/cluster/domain/ClusterFeatures.scala`, with the same three sets:
+
+```scala
+final case class ClusterFeatures(
+    present: Set[ClusterFeature],
+    absent:  Set[ClusterFeature],
+    unknown: Set[ClusterFeature],
+    probedAt: Instant
+) {
+  def has(f: ClusterFeature): Boolean = present.contains(f)
+  def isUnknown(f: ClusterFeature): Boolean = unknown.contains(f)
+}
+object ClusterFeatures {
+  def unprobed(at: Instant): ClusterFeatures   // everything unknown
+}
+```
+
+with the same invariant KAFKA-009 asserts as a property: `present ++ absent ++ unknown ==
+ClusterFeature.All`, always, and the three sets are pairwise disjoint. Assert it here too — the
+two enums are defined in two modules (CLDOM-002 decision 2), and a shared invariant checked on
+one side only is half a check.
+
+**Signature changes that follow, everywhere in this spec:**
+
+- `ClusterAdmin.capabilities(profile): F[ClusterFeatures]` (not `F[Set[ClusterFeature]]`).
+- `ClusterSnapshots.capabilitiesOf(id): F[Option[SnapshotCell[F, ClusterFeatures]]]`.
+- `ClusterDescription.features: ClusterFeatures`; `ClusterDescription.has(f)` is
+  `features.has(f)`, unchanged in meaning.
+- `CapabilityReportUseCase.stateOf` distinguishes the third case: a feature in `unknown` is
+  **not** reported as unsupported. It renders as `Degraded` with the probe's reason where the
+  screen depends on it, and as "not determined" otherwise — never as `absent`.
+- `CLADP-002`'s adapter maps `libs/kafka`'s `ClusterFeatures` onto the domain's field for field,
+  by exhaustive match on `ClusterFeature`, preserving all three sets and `probedAt`.
+
 ## Goal (user value)
 
 This is the task after which KUI can actually read a Kafka cluster. It completes
@@ -377,3 +420,20 @@ on every request":
 None in this task. The managed-service downgrade table and the invalidation policy are described
 for operators by CFGOP-008 in `docs/operations/`; record the exact behaviour in the implementation
 report so that task has the evidence.
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns the per-cluster admin client pool, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- Client creation is `uncancelable` between `Admin.create` succeeding and the entry being
+  recorded in the `Ref`. A cancellation in that window would leak a live `Admin` with its
+  network thread and nobody holding its finalizer.
+- The per-cluster creation `Semaphore` is released on cancellation (`permit` as a `Resource`,
+  not `acquire`/`release` around a body), or one cancelled first caller deadlocks every later
+  one for that cluster.
+- `invalidate` and `evict` run each entry's finalizer even when the caller is cancelled.
+- **Test:** cancel a `run` during client creation and assert (a) no `Admin` is left unclosed,
+  (b) the semaphore is free, (c) the next `run` for the same cluster creates a client and
+  succeeds.

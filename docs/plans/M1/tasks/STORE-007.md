@@ -223,3 +223,18 @@ provably exists in this process, and it is exactly the moment somebody is tempte
 `docs/operations/metadata-store.md` §6: add a row for the write-timeout case — "a write that
 times out may still have been applied; re-read the record" — because it is the one outcome an
 operator can otherwise misread as a lost edit.
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns the write path and its read-back waiter, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- A cancelled write deregisters its `WriteWaiter`. A waiter left in the map after its fiber is
+  gone is a slow leak that only shows up under load, which is the worst time to find it.
+- Cancellation between "produced" and "read back" is reported honestly: the record may have
+  landed. The caller sees cancellation, not success and not a fabricated failure, and the
+  Implementation Report says so.
+- The produce itself is `uncancelable` around the send/ack pair; the wait for read-back is not.
+- **Test:** issue a write, cancel it while the waiter is outstanding, assert the waiter map is
+  empty afterwards and that a subsequent write on the same key still completes.

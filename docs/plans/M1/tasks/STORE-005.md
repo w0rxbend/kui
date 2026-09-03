@@ -6,7 +6,8 @@
 - **Owner role:** Principal Scala Engineer
 - **Context / service:** `libs/config`, package `kui.config.store`
 - **Size:** M
-- **Dependencies / blocked by:** STORE-004, KAFKA-004
+- **Dependencies / blocked by:** STORE-004, KAFKA-003 (`ConnectionProperties`), KAFKA-004 (the
+  `Versions` entries and `ClientPurpose`)
 
 ## Goal (user value)
 
@@ -77,31 +78,39 @@ to `Versions` if KAFKA-004 has not already, and add the Testcontainers test coor
 `com.dimafeng::testcontainers-scala-kafka`). Do not touch the architecture rule table — CFGOP-003
 owns it, and its rule A10 already names `libs/config` as an allowed holder of a Kafka client.
 
-## Cross-area contract with KAFKA-004
+## Cross-area contract with KAFKA-003 and KAFKA-004
 
 This task needs client properties rendered from the KAFKA-001 `ClusterSecurity` ADT, and must not
 duplicate that rendering (that duplication is precisely what `libs/kafka-auth` exists to prevent).
-KAFKA-004 provides, and this task consumes, exactly:
+**Corrected at the M1 gate review (F-04).** This spec previously pinned a
+`kui.kafka.KafkaClientFactory.baseProperties(...)` that no KAFKA task creates. The function that
+does exist is KAFKA-003's, in `libs/kafka-auth`, and it is the one every client factory in the
+system calls:
 
 ```scala
-package kui.kafka
+package kui.kafka.auth
 
-object KafkaClientFactory:
-  /** Bootstrap servers, security, timeouts and `client.id`, as a property map ready to hand to
-    * any Kafka client. The `properties` override layer is applied last. */
-  def baseProperties(
-      bootstrapServers: BootstrapServers,
-      security: ClusterSecurity,
-      tuning: AdminTuning,
-      clientId: String,
-      overrides: Map[String, String]
-  ): Map[String, String]
+object ConnectionProperties {
+  /** Renders `security.*` / `sasl.*` / `ssl.*` plus `client.id` from the typed ADT, materializes
+    * any inline keystore for the lifetime of the `Resource`, and applies the `properties`
+    * override layer last. A misconfiguration is a `Left`, not an exception. */
+  def resource[F[_]: Async: Files](
+      connection: ClusterConnection,
+      purpose: ClientPurpose,
+      clientId: String
+  ): Resource[F, Either[KuiError, ClientProperties]]
+}
 ```
 
-If KAFKA-004 has not landed when this task starts, **do not** write a local renderer: the task is
-blocked on it and the DEVPLAN's dependency edge (STORE-005 depends on KAFKA-004) says so. If
-KAFKA-004 landed with a different name or shape, use what it shipped and record the difference in
-the Implementation Report; do not add an adapter layer to preserve this sketch.
+The store builds its `ClusterConnection` from the `kui.store.kafka.*` slice (STORE-004) exactly
+as a managed cluster's is built from `kui.clusters[]`, and passes `ClientPurpose.Admin`,
+`ClientPurpose.Consumer` or `ClientPurpose.Producer`. `libs/config` therefore needs a
+`libs.kafkaAuth` module edge as well as the `libs.kafka` one; both are on ADR-041 A10's
+allow-list.
+
+If KAFKA-003 has not landed when this task starts, **do not** write a local renderer: the task is
+blocked on it. If it landed with a different shape, use what it shipped and record the difference
+in the Implementation Report; do not add an adapter layer to preserve this sketch.
 
 `libs/config` builds its consumer, producer and admin client with **fs2-kafka directly**, from
 those properties. It does not go through `libs/kafka`'s `ClusterAdmin` port: that port is

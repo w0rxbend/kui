@@ -9,6 +9,21 @@
   `Timestamps`), CLAPI-007 (the gateway aggregation this reads). No restyle constraint: everything
   here is in `frontend/ui-clusters`.
 
+## M1 gate review amendment — three dashboard numbers do not exist in M1
+
+**F-20, major.** DEVPLAN §10 decision D5 said the dashboard shows "online/offline partition
+counts" from `describeCluster` + the broker set + `describeLogDirs`. It cannot:
+`research/kafka/admin-capabilities.md` §1 "Cluster stats" records that no single API produces
+them and that the reference product aggregates `describeTopics` + `describeLogDirs` +
+`listOffsets` — a topic sweep, which DEVPLAN §3 puts in M2. D5 has been corrected in the plan.
+
+For this screen: **topic count, partition counts (total, online, offline) and per-broker leader
+counts have no field on the wire** (CLAPI-001 decision 3 — no permanently-null fields) and their
+columns render `—`, with no tooltip promising a date, exactly like the metric columns. What does
+ship on the dashboard is broker count, controller, Kafka version and total disk usage; what
+ships on the broker list is rack, replica count and skew (BR-001), all of which are derivable
+from `describeLogDirs`.
+
 ## Goal (user value)
 
 The screen the milestone is judged on. Three configured clusters, one of them unreachable: two rows

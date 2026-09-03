@@ -7,6 +7,80 @@
 - **Size:** S
 - **Dependencies / blocked by:** CLDOM-002
 
+## M1 gate review amendment — `ClusterFeatures` keeps its third set
+
+**F-05, major, fixed.** KAFKA-009 produces a three-valued `ClusterFeatures` — `present`,
+`absent`, **`unknown`**, plus `probedAt` — precisely so that a probe which timed out is not
+recorded as "this cluster cannot do that". The domain then collapsed it back to a
+`Set[ClusterFeature]` at the port, which throws the third set away and reintroduces the exact
+bug KAFKA-009's decision exists to prevent: a one-hour cache of a lie.
+
+**The domain gains its own `ClusterFeatures`**, in
+`services/cluster/domain/src/kui/cluster/domain/ClusterFeatures.scala`, with the same three sets:
+
+```scala
+final case class ClusterFeatures(
+    present: Set[ClusterFeature],
+    absent:  Set[ClusterFeature],
+    unknown: Set[ClusterFeature],
+    probedAt: Instant
+) {
+  def has(f: ClusterFeature): Boolean = present.contains(f)
+  def isUnknown(f: ClusterFeature): Boolean = unknown.contains(f)
+}
+object ClusterFeatures {
+  def unprobed(at: Instant): ClusterFeatures   // everything unknown
+}
+```
+
+with the same invariant KAFKA-009 asserts as a property: `present ++ absent ++ unknown ==
+ClusterFeature.All`, always, and the three sets are pairwise disjoint. Assert it here too — the
+two enums are defined in two modules (CLDOM-002 decision 2), and a shared invariant checked on
+one side only is half a check.
+
+**Signature changes that follow, everywhere in this spec:**
+
+- `ClusterAdmin.capabilities(profile): F[ClusterFeatures]` (not `F[Set[ClusterFeature]]`).
+- `ClusterSnapshots.capabilitiesOf(id): F[Option[SnapshotCell[F, ClusterFeatures]]]`.
+- `ClusterDescription.features: ClusterFeatures`; `ClusterDescription.has(f)` is
+  `features.has(f)`, unchanged in meaning.
+- `CapabilityReportUseCase.stateOf` distinguishes the third case: a feature in `unknown` is
+  **not** reported as unsupported. It renders as `Degraded` with the probe's reason where the
+  screen depends on it, and as "not determined" otherwise — never as `absent`.
+- `CLADP-002`'s adapter maps `libs/kafka`'s `ClusterFeatures` onto the domain's field for field,
+  by exhaustive match on `ClusterFeature`, preserving all three sets and `probedAt`.
+
+## M1 gate review amendment — no `fs2.Stream` in the domain
+
+**F-02, blocker, fixed.** This spec asked CFGOP-003 to add `co.fs2::fs2-core` to rule A1's
+allow-list so that `ClusterConfigStore.changes` could be an `fs2.Stream`. **Refused**, and
+recorded as [ADR-041 Amendment 3](../../../adr/ADR-041-layering-rules-machine-enforced.md).
+Two reasons, one of them fatal on its own:
+
+1. **Ordering.** CFGOP-003 depends on CLADP-001, which depends on this task. The rule change
+   would land *after* the code that needs it, so this task would leave `./mill
+   checkArchitecture` — and therefore `main` — red for several tasks. The DEVPLAN's own rule is
+   that every task ends on a green `main`.
+2. **A1 is worth keeping short.** A port stated over an abstract `F[_]` needs no runtime
+   dependency at all. `fs2.Stream` is a concrete type from a concrete runtime, and a domain that
+   imports it can no longer be read, tested or moved without it.
+
+**Take the fallback this spec already specifies.** Replace the `changes` member with callback
+registration, and let `ClusterRegistry` (in `application`, where fs2 is already allowed) own the
+stream:
+
+```scala
+trait ClusterConfigStore[F[_]] {
+  /** Registers a handler invoked with the full resolved profile list on every change.
+    * Returns the deregistration action. No fs2, no cats-effect — just `F`. */
+  def onChange(handler: List[ClusterProfile] => F[Unit]): F[F[Unit]]
+  // ... the rest of the port unchanged
+}
+```
+
+`services.cluster.domain` keeps `moduleDeps = Seq(libs.kernel.jvm)` and
+`mvnDeps = Seq(cats-core)`. Do not add an mvnDep to that module in this task or any other.
+
 ## Goal (user value)
 
 The three sentences the cluster context says to the outside world: *tell me what this cluster

@@ -48,6 +48,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR (PLAN §39
 | [ADR-041](docs/adr/ADR-041-layering-rules-machine-enforced.md) | Layering rules are machine-enforced; a domain-owning `application` never depends on the wire (amended: the gateway is outside the rule) | Accepted | 2026-09-03 |
 | [ADR-042](docs/adr/ADR-042-kafka-backed-metadata-store.md) | KUI metadata lives in Kafka, in internal compacted topics | Accepted | 2026-09-03 |
 | [ADR-043](docs/adr/ADR-043-internal-service-to-service-calls.md) | Direct service→service calls are permitted on the callee's published `/internal/v1` contract, under four conditions (settles PLAN §16.6) | Accepted | 2026-09-03 |
+| [ADR-044](docs/adr/ADR-044-store-record-envelope-and-field-encryption.md) | The metadata-store record envelope is versioned; secrets are marked by JSON convention and each ciphertext is bound to its record and field | Accepted | 2026-09-03 |
 
 ADR-039 … ADR-043 were written at and after the G6 grooming gate (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded

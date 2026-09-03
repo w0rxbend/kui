@@ -8,6 +8,16 @@
 - **Dependencies / blocked by:** CLADP-001, STORE-007 (`ConfigStore[F]` with optimistic
   versioning, read-your-writes and conflict detection)
 
+## M1 gate review amendment — `ClusterConfigStore.changes` is now `onChange`
+
+**F-02, blocker, fixed.** Rule A1 was **not** widened to allow `co.fs2::fs2-core` in
+`services/cluster/domain` (see [ADR-041 Amendment 3](../../../adr/ADR-041-layering-rules-machine-enforced.md)),
+so `ClusterConfigStore` has no `changes: Stream[F, List[ClusterProfile]]`. It has
+`onChange(handler: List[ClusterProfile] => F[Unit]): F[F[Unit]]`, returning the deregistration
+action. Wherever this spec subscribes to `changes`, register a handler instead; wherever it
+consumes a stream, the stream now lives on `ClusterRegistry` in `application`, which may hold
+fs2. Nothing else about the behaviour, the backoff or the reconcile logic changes.
+
 ## Goal (user value)
 
 A cluster registered at runtime survives a restart, and two replicas of the cluster service

@@ -239,3 +239,13 @@ needs `./mill libs.config.test` to be usable.
 must record, for `docs/spikes/`, the measured replay time for 200 and for 20 000 records — ADR-042's
 Consequences section is required by DEVPLAN §9.10 to record "what the implementation learned about
 replay timing", and this suite is the only place that number exists.
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns the integration evidence for all of the above, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- Add one named test to the suite: with the store running and a write in flight, cancel the
+  application `Resource`; the process exits within its shutdown budget, the consumer and
+  producer are closed, and restarting replays cleanly with no duplicate or missing record.

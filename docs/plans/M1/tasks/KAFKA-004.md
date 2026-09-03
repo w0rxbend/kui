@@ -6,8 +6,10 @@
 - **Owner role:** Principal Scala Engineer, reviewed by the Chief Architect
 - **Context / service:** `libs/kafka` (new module)
 - **Size:** M
-- **Dependencies / blocked by:** KAFKA-002. On the milestone's critical path — STORE-005 cannot
-  start until this task lands.
+- **Dependencies / blocked by:** **KAFKA-003** (this task calls `ConnectionProperties.resource`,
+  which KAFKA-003 creates; KAFKA-003 in turn depends on KAFKA-002). Corrected at the M1 gate
+  review — DEVPLAN §6.2 said KAFKA-002, which would have left this task with no property
+  renderer. On the milestone's critical path — STORE-005 cannot start until this task lands.
 
 ## Goal (user value)
 

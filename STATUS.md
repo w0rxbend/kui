@@ -174,3 +174,46 @@ Nothing in the M0 plan now waits on input from outside the execution loop.
   CFG-001 and KERN-006 are the three off-critical-path tasks worth starting early, because
   each answers a question that could invalidate later work.
 
+
+## M1 gate (G6 for Milestone 1) — 2026-09-03
+
+**Verdict: APPROVED WITH CONDITIONS.** Full review: `docs/plans/M1/GATE-REVIEW.md`.
+
+Reviewed: `docs/plans/M1/DEVPLAN.md` and all 57 task specs, written by seven area agents in
+parallel, against the M1 roadmap entry, the feature matrix, `ARCHITECTURE.md`, ADR-001 … ADR-043,
+`DEPENDENCY_MATRIX.md`, `build.mill` and the executable rule table in `ArchitectureRules.scala`.
+
+**3 blockers, 10 majors, 9 minors.** All blockers and majors are fixed in the review commit; 5
+minors are fixed and 4 are assigned to a named task.
+
+The three blockers were each the same shape — two lanes believing the other owned a shared edge:
+`Ping` deleted by nobody because two specs deferred to each other (F-01); a domain port needing
+`fs2.Stream` whose enabling architecture rule was scheduled to land *after* the code (F-02); and
+`libs/kafka`'s client factory declaring the wrong upstream task, leaving the critical path's
+first library task with no property renderer (F-03).
+
+**ADRs written at this gate**, all Accepted and indexed in `DECISIONS.md`:
+
+| ADR | What it settles |
+| --- | --- |
+| ADR-006 Amendment 1 | Admin work uses the raw `Admin` client; fs2-kafka is for consumers and producers. Reverses what the original Decision implies, with the four pieces of evidence. |
+| ADR-022 Amendment 1 | The typed connection and security ADT lives in `libs/kernel`, not `libs/config`. Executes DEVPLAN D1 before the four modules are written against it. |
+| ADR-041 Amendment 3 | Rules A9 and A10 added; rule A1 explicitly **not** widened to allow fs2 in a `domain` module. |
+| **ADR-044** (new) | The metadata-store record envelope is versioned; secrets are marked by JSON convention (`$secret`/`$enc`) rather than a per-section field registry; each ciphertext is AES-GCM-bound to `key\|fieldPath`. A persisted format on a compacted topic is not a task-level detail. |
+
+**Against the four M0 process findings:** the seam-testing gap is *not* repeated (CLADP-001's
+shared port contract, CFGOP-005's parity suite, the all-in-one boot and the E2E are four seam
+suites); rule enforcement is stronger than M0's; "the same string typed twice" recurred twice,
+once fixed and once accepted with a stated reason and a `TECH_DEBT.md` entry; **cancellation was
+again systematically unconsidered** — 52 of 57 specs never mentioned it — and is fixed by adding
+a "Cancellation and shutdown" requirement with a named test to the eight specs that own a
+long-running fiber, plus a new condition of done in `DEVPLAN` §9.
+
+**Conditions:** (1) CFGOP-004 runs in the first week — three lanes now depend on it and it
+settles the Testcontainers artifact-id question; (2) all eight cancellation requirements ship
+with their tests; (3) CFGOP-008 completes the four assigned documentation items; (4) the
+`libs/kafka`-versus-domain dual type definitions are re-examined at M2 grooming, before
+`TopicAdmin` and `GroupAdmin` turn three pairs into ten.
+
+**Next action:** begin M1 with KAFKA-001, and start CFGOP-004, STORE-001 and CLUI-001 in
+parallel.

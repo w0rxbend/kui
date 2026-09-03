@@ -170,6 +170,7 @@ WireMock, Mockito, Groovy, the official Java MCP SDK, datasketches 9.0.0, Chimne
 | Chimney 2.0.0 | Final release date; verify `hearth` macros compile under `-Werror -Wunused:all` in an M0 spike (ADR-033). | Principal Scala Engineer | M0 |
 | fs2-kafka 4.0.0 | Which of `describeMetadataQuorum`, `listGroups`, `describeProducers`, `describeShareGroups` need the raw `Admin` escape hatch on the pinned tag (ADR-006 lists the first three; `describeShareGroups` was added here and the ADR has not caught up). | Kafka Specialist | M1 |
 | kafka-clients 4.3.1 | KIP-848 `GroupState`/`targetAssignment` exposure; defensive mapping for classic vs consumer groups (ADR-006, ADR-030). | Kafka Specialist | M1 |
+| testcontainers 2.0.5 | Whether the Kafka module's artifact id is `org.testcontainers:kafka` (three M1 specs) or `org.testcontainers:testcontainers-kafka` (line 153 above). CFGOP-004 resolves it and corrects this file in the same commit. | QA Engineer | M1 |
 | lz4-java | Whether upstream `org.lz4:lz4-java 1.8.1` already fixes CVE-2025-12183; the `at.yawk.lz4` fork stays until confirmed. | Security Engineer | M1 |
 | Confluent 8.3.1 | Community License review documented in `docs/operations`; confirm optional-classpath packaging (ADR-014). | CTO | M3 |
 | io.kafbat.ui:serde-api | Exact published version and Maven coordinates for the bridge module (ADR-028). | Kafka Specialist | M6 |

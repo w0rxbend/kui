@@ -166,8 +166,8 @@ children (`KuiModule` traits in `build.mill`).
 | Path | Mill id | Platforms | Depends on | Purpose |
 | --- | --- | --- | --- | --- |
 | `libs/kafka-auth` | `libs.kafkaAuth` | JVM | `libs.kernel.jvm`, cats-core, fs2-io | renders `security.*` / `sasl.*` / `ssl.*` client properties and JAAS strings from the typed ADT, with correct quoting and escaping; materializes keystore bytes to a private tmpfs path; declares the cloud SASL handlers as **optional runtime** coordinates that are not on the default classpath |
-| `libs/kafka` | `libs.kafka` | JVM | `libs.kafkaAuth`, `libs.kernel.jvm`, fs2-kafka 4, kafka-clients 4.3.1, snappy/lz4 (runtime) | `ClusterAdmin[F]` and its adapter over `KafkaAdminClient[F]`, `KafkaErrorMapper`, `BatchResult`, batching and parallelism helpers, client factory and invalidation, capability probing |
-| `libs/cache` | `libs.cache` | JVM | `libs.kernel.jvm`, cats-effect, fs2 | `SnapshotCell[F, A]`: a `Ref`-backed single value with `status`, `scrapedAt`, atomic replacement, `refresh` under a `Supervisor` and `Stale` reads while the upstream fails (ADR-016) |
+| `libs/kafka` | `libs.kafka` | JVM | `libs.kafkaAuth`, `libs.kernel.jvm`, `libs.observability`, fs2-kafka 4, kafka-clients 4.3.1, snappy/lz4 (runtime) | `ClusterAdmin[F]` and its adapter over `KafkaAdminClient[F]`, `KafkaErrorMapper`, `BatchResult`, batching and parallelism helpers, client factory and invalidation, capability probing |
+| `libs/cache` | `libs.cache` | JVM | `libs.kernel.jvm`, `libs.observability`, cats-effect, fs2 | `SnapshotCell[F, A]`: a `Ref`-backed single value with `status`, `scrapedAt`, atomic replacement, `refresh` under a `Supervisor` and `Stale` reads while the upstream fails (ADR-016) |
 | `services/cluster/infrastructure` | `services.cluster.infrastructure` | JVM | `services.cluster.domain`, `libs.kafka`, `libs.config`, `libs.cache`, `libs.observability` | the adapters implementing the cluster domain's ports. The **only** module in the cluster tree with a Kafka client on its classpath |
 
 `libs/kafka-auth` is a separate module from `libs/kafka` for one reason that is worth stating so
@@ -194,7 +194,7 @@ in M8's wizard without dragging a Kafka client into the validating process.
 | `apps.allinone`, `deployment.{docker,compose}` | the cluster service's new modules in the composition root; a broker and store settings in the development environment | CFGOP |
 
 **New dependency edges, and why each is legal.** `libs.kafkaAuth → libs.kernel.jvm`;
-`libs.kafka → libs.kafkaAuth`; `libs.config → libs.kafka` (the Kafka `ConfigStore` adapter — the
+`libs.kafka → libs.kafkaAuth`; `libs.kafka → libs.observability` and `libs.cache → libs.observability` (both publish the metric names `docs/operations/observability.md` and ADR-016 already promise; `libs.http → libs.observability` is the precedent, and A10 governs Kafka on a classpath, not metrics); `libs.config → libs.kafkaAuth` and `libs.config → libs.kafka` (the Kafka `ConfigStore` adapter — the
 store *is* a Kafka client, so this edge is the point of ADR-042, not a leak); `libs.cache →
 libs.kernel.jvm`; `services.cluster.infrastructure → {domain, libs.kafka, libs.config,
 libs.cache}`; `services.cluster.application → libs.cache`; `services.cluster.app →
@@ -252,10 +252,10 @@ task specs say so.
 | KAFKA-001 | `libs/kernel`: the typed cluster connection and security ADT | M | — | A |
 | KAFKA-002 | `libs/kafka-auth`: client property and JAAS rendering with quoting | L | KAFKA-001 | A |
 | KAFKA-003 | `libs/kafka-auth`: keystore materialization and optional cloud handlers | M | KAFKA-002 | A |
-| KAFKA-004 | `libs/kafka`: module, client factory, `client.id`, timeouts, invalidation | M | KAFKA-002 | A |
+| KAFKA-004 | `libs/kafka`: module, client factory, `client.id`, timeouts, invalidation | M | KAFKA-003 | A |
 | KAFKA-005 | `libs/kafka`: `KafkaErrorMapper` and `BatchResult`, total over the documented exceptions | M | KAFKA-004 | A |
 | KAFKA-006 | `libs/kafka`: batching and bounded parallelism from `AdminTuning` | M | KAFKA-005 | A |
-| KAFKA-007 | `ClusterAdmin` A: `describeCluster`, nodes, version detection | L | KAFKA-006 | A |
+| KAFKA-007 | `ClusterAdmin` A: `describeCluster`, nodes, version detection | L | KAFKA-006, CFGOP-004 | A |
 | KAFKA-008 | `ClusterAdmin` B: broker configs, log dirs, KRaft quorum | L | KAFKA-007 | A |
 | KAFKA-009 | `ClusterAdmin` C: the `ClusterFeature` capability probe | M | KAFKA-007 | A |
 | KAFKA-010 | `libs/cache`: `SnapshotCell` with status, `scrapedAt` and supervised refresh | M | — | A |
@@ -268,7 +268,7 @@ task specs say so.
 | STORE-007 | Store writes: optimistic `version`, read-your-writes, conflict detection | L | STORE-006 | B |
 | STORE-008 | `StoreHealth`, the `changes` stream and the unreachable-store contract | M | STORE-007 | B |
 | STORE-009 | Store integration suite against a Testcontainers broker | L | STORE-008, CFGOP-004 | B |
-| CLDOM-001 | Cluster domain: `ClusterProfile` and `ClusterRef`; `Ping` deleted | M | KAFKA-001 | C |
+| CLDOM-001 | Cluster domain: `ClusterProfile` and `ClusterRef`; `Ping` scheduled for deletion | M | KAFKA-001 | C |
 | CLDOM-002 | Cluster domain: the topology model and its invariants | M | CLDOM-001 | C |
 | CLDOM-003 | Cluster domain ports: `ClusterAdmin`, `ClusterConfigStore`, `ConnectivityProbe` | S | CLDOM-002 | C |
 | CLDOM-004 | `ClusterRegistry`: static configuration overlaid by the store | M | CLDOM-003 | C |
@@ -276,14 +276,14 @@ task specs say so.
 | CLDOM-006 | Broker detail use cases: configs, log dirs, per-partition sizes | M | CLDOM-005 | C |
 | CLDOM-007 | The real `CapabilityReportUseCase`: per cluster, including store health | M | CLDOM-005 | C |
 | CLADP-001 | `services/cluster/infrastructure`: the module and its first adapter test | S | CLDOM-003, KAFKA-007 | D |
-| CLADP-002 | `ClusterAdmin` adapter and the per-cluster client lifecycle | M | CLADP-001, KAFKA-008, KAFKA-009 | D |
+| CLADP-002 | `ClusterAdmin` adapter and the per-cluster client lifecycle | M | CLADP-001, KAFKA-008, KAFKA-009, CFGOP-004 | D |
 | CLADP-003 | `ClusterConfigStore` adapter over `ConfigStore[F]` | M | CLADP-001, STORE-007 | D |
 | CLADP-004 | `ConnectivityProbe` adapter | S | CLADP-002 | D |
-| CLADP-005 | Profile change propagation: store tail → registry reload → version bump | M | CLADP-003, CLDOM-004 | D |
+| CLADP-005 | Profile change propagation: store tail → registry reload → version bump | M | CLADP-003, CLDOM-004, STORE-008 | D |
 | CLAPI-001 | Cluster contract DTOs, redaction and golden files | M | CLDOM-002 | E |
 | CLAPI-002 | Cluster read endpoints: clusters, brokers, configs, log dirs, refresh | M | CLAPI-001 | E |
 | CLAPI-003 | Internal profile contract: `{id}/profile` with ETag and `clusters/stream` | M | CLAPI-001 | E |
-| CLAPI-004 | Cluster `api`: server logic, error envelope, `Section` staleness | L | CLAPI-002, CLDOM-006 | E |
+| CLAPI-004 | Cluster `api`: server logic, error envelope, `Section` staleness; the whole `Ping` family deleted | L | CLAPI-002, CLAPI-003, CLDOM-006 | E |
 | CLAPI-005 | Cluster `app`: wiring and the ADR-042 bootstrap ordering | L | CLAPI-004, CLADP-005, STORE-006 | E |
 | CLAPI-006 | Gateway: cluster routes and `X-Kui-Cluster-Id` validation | M | CLAPI-002 | E |
 | CLAPI-007 | Gateway: the dashboard aggregation with per-row section status | M | CLAPI-006 | E |
@@ -291,13 +291,13 @@ task specs say so.
 | CLAPI-009 | The one store-backed write endpoint, and `NotConfigured` without a store | M | CLAPI-004, CLADP-003 | E |
 | CLAPI-010 | OpenAPI regeneration, error-code table, contract snapshot | S | CLAPI-007, CLAPI-009 | E |
 | CLUI-001 | `ui-kernel`: `StaleDataOverlay` and stale retention in `QueryCache` | M | — | F |
-| CLUI-002 | `ui-clusters`: typed clients derived from the cluster contract | S | CLAPI-001 | F |
+| CLUI-002 | `ui-clusters`: typed clients derived from the cluster contract | S | CLAPI-001, CLAPI-002 | F |
 | CLUI-003 | Dashboard: cluster rows, per-row status, unavailable rows stay clickable | L | CLUI-002, CLUI-001, CLAPI-007 | F |
 | CLUI-004 | Brokers list: rack, leaders, replicas, skew; metric columns as `—` | L | CLUI-003 | F |
 | CLUI-005 | Broker detail: log dirs and configs tabs | L | CLUI-004 | F |
 | CLUI-006 | Shell: cluster switcher, status dot, per-cluster colour tag | M | CLUI-003 | F |
 | CLUI-007 | Settings page: theme, timezone, refresh rate, table density | M | CLUI-001 | F |
-| CLUI-008 | Force refresh action and its 202 handling | S | CLUI-004 | F |
+| CLUI-008 | Force refresh action and its 202 handling | S | CLUI-004, CLUI-002 | F |
 | CFGOP-001 | `kui.clusters[]`: typed security, the `properties` override layer, slug ids | L | KAFKA-001 | G |
 | CFGOP-002 | `kui.clusters[].admin`: timeout, batching and concurrency knobs | S | CFGOP-001 | G |
 | CFGOP-003 | `checkArchitecture` rules A9 and A10, with their build tests | S | CLADP-001 | G |
@@ -306,6 +306,10 @@ task specs say so.
 | CFGOP-006 | All-in-one and Compose: a broker, store settings, the encryption key | M | CLAPI-005 | G |
 | CFGOP-007 | Fault-isolation E2E: the cluster service stopped, and a dead cluster row | L | CFGOP-006, CLUI-005 | G |
 | CFGOP-008 | Milestone documentation, operator pages, feature matrix, ADR amendments | M | everything | G |
+
+**The table is grouped by lane, not topologically sorted.** Four edges point backwards in the
+listing — CFGOP-004 precedes KAFKA-007, CLADP-002 and STORE-009; CLAPI-004 precedes CFGOP-005.
+Read the `Depends on` column, never the row order. (M1 gate review, F-14.)
 
 ### 6.3 Critical path
 
@@ -385,6 +389,14 @@ Seven agents write the task specs. These are the boundaries; a file appears in e
 | `CLAPI-` | `services/cluster/{contract,api,app}/**`, `services/gateway/**`, `libs/contracts-core/src/kui/contracts/cluster/**`, `docs/api/*` | `services/cluster/{domain,application,infrastructure}`, `frontend/` |
 | `CLUI-` | `frontend/ui-clusters/**`, and the named additions in `frontend/ui-kernel` (CLUI-001) and `frontend/ui-shell` (CLUI-006, CLUI-007) | any backend module; the restyle work in progress in `ui-kernel` and `ui-shell` |
 | `CFGOP-` | the `kui.clusters[]` slice in `libs/config`, `libs/testkit/**`, `build.mill` rules, `apps/allinone/**`, `deployment/**`, `e2e/**`, `docs/operations/configuration.md`, `docs/ROADMAP.md`, `docs/FEATURE_MATRIX.md`, `STATUS.md`, `TECH_DEBT.md` | `libs/config/src/kui/config/store/**`, every service's own modules |
+
+**One boundary exception, granted at the M1 gate review.** `Ping` spans six files in
+`domain`/`application` and four in `contract`/`api`/`app`, and no area owns both halves; two
+specs each deferred the deletion to the other, so as written `Ping` is never deleted (F-01).
+**CLAPI-004 deletes the whole `Ping` family in one commit**, including the six
+`services/cluster/{domain,application}` files, and may touch those two modules **for deletion
+only**. It is the right task: it depends on CLDOM-006 and CLAPI-002, so every replacement exists,
+and it is the task that removes the route. CLDOM-001 and CLAPI-002 leave `Ping` compiling.
 
 Two shared files need a rule rather than an owner. **`build.mill`** is edited by five areas (each
 new module declares itself); the rule is that a task edits only the `object` it creates plus the
@@ -485,6 +497,12 @@ M1 is complete when all of the following are true and the evidence is committed:
     consequences section records what the implementation learned about replay timing.
 11. `ARCHITECTURE.md` §3, §4.2, §9 and §10.1 are updated where an M1 task found a delta —
     §4.2's sketch signatures are replaced by links to the implementing files.
+12a. **Every long-running or cancellable path introduced in M1 has a named cancellation test.**
+    The M0 review found cancellation systematically unconsidered; M1 repeats it in nine specs
+    (F-07). The store's replay and tail follower, the write waiter, the health reconnect loop,
+    the admin client pool, the profile change listener and the `app` bootstrap `Resource` chain
+    each carry a "Cancellation and shutdown" requirement and at least one test that cancels the
+    fiber and asserts the resource was released and nothing was left running.
 12. `TECH_DEBT.md` records every debt taken during M1, and `STATUS.md` records CEO acceptance with
     the CI run id that produced the evidence.
 13. A developer who has never seen the repository can follow `README.md`, bring up the Compose
@@ -502,7 +520,7 @@ Grooming produces decisions, not questions (PLAN §39). Where the roadmap, an AD
 | D2 | The roadmap's "Introduces" list for M1 does not mention `libs/cache`, but `ARCHITECTURE.md` §9 requires the cluster snapshot to be a `SnapshotCell` with `status`, `scrapedAt` and `Stale` reads | `libs/cache` is created in M1 with **`SnapshotCell` only**. `BoundedCache` (the Caffeine wrapper) waits for its first consumer in M2/M3 | ADR-016 defines both primitives but ties each to a named consumer; building the Caffeine wrapper with no caller would be a cache with no TTL policy to test against | KAFKA-010; §5.1 |
 | D3 | `services/cluster/infrastructure` did not exist when the `checkArchitecture` rules A1–A8 were written, so nothing constrains it or the modules that may see a Kafka client | Two new rules: **A9** (nothing in a service points at that service's `infrastructure` except `app`) and **A10** (`libs/kafka*`, fs2-kafka and kafka-clients are allowed only on `infrastructure`, `libs/kafka*`, `libs/config`, `libs/testkit` and `app` classpaths) | A8 already does exactly this for the gateway and is the precedent; ADR-041's argument — that nobody sets out to break layering, they add one edge for one type — applies identically to a Kafka client | CFGOP-003; §5.2 |
 | D4 | The dashboard's `Unavailable` row must show a reason, but the roadmap does not say whether an unreachable *managed* cluster is the cluster service being unavailable or a section of a healthy response | **A cluster the service cannot reach is a `Section` in a healthy response, not an unavailable capability.** The `cluster` capability is `Unavailable` only when the cluster *service* is down. An unreachable managed cluster is a `Section.Unavailable(reason)` inside a 200 | ADR-039 §6: only transport failures *of the upstream service* feed the registry. A user typing a bad broker address into configuration must not dim the sidebar for everyone else, which is precisely the failure mode that rule exists to prevent | CLAPI-007, CLAPI-008, CLUI-003 |
-| D5 | Where is the boundary between a "cluster stat" the dashboard shows (CL-003) and the topic sweep that belongs to M2? | The dashboard shows **only** what `describeCluster`, the broker set and `describeLogDirs` already produce: broker count, controller, version, online/offline partition counts and total disk usage. Topic count and partition totals that need a `describeTopics` sweep render `—` until M2 fills them | Kafbat's dashboard reads these from a periodic full scrape (`research/kafka/admin-capabilities.md` §1, "Cluster stats"), which is a topic-service concern; putting that sweep in the cluster service would make the one Core service the slowest one | CLDOM-005, CLUI-003; §3 non-goals |
+| D5 | Where is the boundary between a "cluster stat" the dashboard shows (CL-003) and the topic sweep that belongs to M2? | The dashboard shows **only** what `describeCluster`, the broker set and `describeLogDirs` already produce: broker count, controller, version and total disk usage. **Corrected at the M1 gate review:** online/offline *partition* counts are **not** derivable from those three calls either — `research/kafka/admin-capabilities.md` §1 "Cluster stats" records that the reference product aggregates `describeTopics` + `describeLogDirs` + `listOffsets` to get them. Partition counts, topic counts and per-broker *leader* counts are therefore `Option`, always `None` in M1, and render `—`. Per-broker *replica* counts and the skew percentage **are** derivable from `describeLogDirs` replica entries and do ship (BR-001) | Kafbat's dashboard reads these from a periodic full scrape (`research/kafka/admin-capabilities.md` §1, "Cluster stats"), which is a topic-service concern; putting that sweep in the cluster service would make the one Core service the slowest one | CLDOM-005, CLUI-003; §3 non-goals |
 | D6 | The exit criteria require concurrent writers, read-your-writes and version conflicts, but the cluster CRUD **screen** is explicitly M8. Something must write | One write endpoint ships with no UI: `PUT /internal/v1/clusters/{id}`, requiring `ApplicationConfig.Edit` (which nothing grants while auth is disabled, so it is reachable only by an internal caller and by tests). It reports `NotConfigured` when the file adapter is in use. It is the surface the M8 wizard will call, built once | The exit criteria cannot be demonstrated without a writer, and inventing a test-only write path would test something the product does not ship | CLAPI-009 |
 | D7 | ADR-042 names three topics; M1 has no audit feature | M1 creates and validates `__kui_config` and `__kui_files` only. `__kui_audit` is created by the milestone that first writes a record (M5). `docs/operations/metadata-store.md` documents all three, and says which of them KUI creates today | Creating a retention-based topic that nothing produces to would leave an operator wondering why it is empty, and would fix its retention settings before the feature that needs them exists | STORE-005, CFGOP-008 |
 | D8 | The roadmap lists ADR-014 (Schema Registry client strategy) among M1's ADRs, but nothing in M1's scope speaks to a registry | ADR-014 stays Accepted and unimplemented. Its first code arrives in M3 with the serdes | The ADR's own content is about the serde wire format; it appears in M1's list because M1 settles the *typed auth* model (ADR-022) that the registry client will reuse. Reading the list as an implementation obligation would build a client with no caller | §3 non-goals |

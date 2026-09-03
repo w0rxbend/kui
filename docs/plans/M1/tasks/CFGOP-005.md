@@ -185,8 +185,10 @@ criterion green.
 **D-6 — the negative case is part of parity.** A fourth assertion per mode: with the credentials
 deliberately wrong (a bad SCRAM password; a client keystore signed by a different CA), the same
 endpoint returns the same `ErrorEnvelope` shape with the same error code across the two secured
-modes — `KUI-CLUSTER-AUTHENTICATION-FAILED`, mapped by `KafkaErrorMapper` (KAFKA-005) and
-statused by `ErrorEnvelope.statusOf`. Parity of the failure path matters at least as much as
+modes — **`KUI-UPSTREAM-AUTH`** (502), which is what `KafkaErrorMapper` (KAFKA-005) maps
+`SaslAuthenticationException` and `SslAuthenticationException` to, statused by
+`ErrorEnvelope.statusOf`. Corrected at the M1 gate review: this spec previously named
+`KUI-CLUSTER-AUTHENTICATION-FAILED`, a code no task creates and which is not in `ErrorCode`. Parity of the failure path matters at least as much as
 parity of the success path: it is what tells an operator their password is wrong rather than
 their cluster being down.
 

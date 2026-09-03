@@ -371,3 +371,14 @@ requires "recorded in `ARCHITECTURE.md` §9" and is the source CFGOP-008 works f
 ## Deviations
 
 *(filled in by the implementer, in the same commit)*
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns `SnapshotCell`'s supervised refresh, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- Already covered by this spec's "refresh cancelled with the supervisor" test. Additionally
+  assert that cancelling a refresh leaves the previous value and its `scrapedAt` intact and the
+  status **not** stuck in a transient refreshing state — a cell that cancels into a permanent
+  "refreshing" is a screen that never loads again.

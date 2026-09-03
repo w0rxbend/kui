@@ -231,3 +231,15 @@ This task *is* the degraded behavior. The contract, restated so it can be checke
 `docs/operations/metadata-store.md` §6: add the `kui.store.health` gauge and the
 `kui.store.write.errors{reason}` label set to the "watch these" paragraph, and add the
 unreadable-record row to the table.
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns the health lifecycle and the reconnect loop, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- The bounded-backoff reconnect loop is cancellable at every step, including inside the sleep.
+  A shutdown must not have to wait out a 60-second backoff.
+- Cancelling the health resource leaves no supervised fiber and no scheduled retry.
+- **Test (`TestControl`):** cancel during a backoff sleep and assert the fiber count returns to
+  its starting value and no further reconnect attempt is made after cancellation.

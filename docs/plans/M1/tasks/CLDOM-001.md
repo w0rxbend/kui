@@ -7,6 +7,19 @@
 - **Size:** M
 - **Dependencies / blocked by:** KAFKA-001
 
+## M1 gate review amendment — `Ping`
+
+**F-01, blocker, fixed.** This spec said CLAPI-002 deletes the whole `Ping` family; CLAPI-002
+said CLDOM-001 deletes the domain and application halves and CLAPI-004 deletes the rest. Each
+deferred to the other, so as written `Ping` is never deleted, which DEVPLAN §1 makes a milestone
+failure.
+
+**Decided: `Ping` is deleted, entirely, in one commit, by CLAPI-004**, which by then depends on
+CLDOM-006 and CLAPI-002 and so has every replacement in place. CLAPI-004 is granted an explicit
+area-boundary exception (DEVPLAN §6.5) to delete the six `services/cluster/{domain,application}`
+`Ping` files — deletion only, no other change to those modules. This task changes nothing about
+`Ping`: it leaves it compiling alongside the real model, exactly as the section below describes.
+
 ## Goal (user value)
 
 The first real value object of the first real domain: *what KUI knows about one configured

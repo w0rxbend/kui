@@ -1,6 +1,6 @@
 # ADR-022 — Kafka cluster authentication as typed configuration
 
-- Status: Accepted
+- Status: Accepted (amended 2026-09-03, Amendment 1 — see below)
 - Date: 2026-09-03
 
 ## Context
@@ -58,3 +58,31 @@ properties: Map[String, String]   # override layer, applied last, secret-redacte
 ## Reversibility
 
 High.
+
+## Amendment 1 — 2026-09-03 (M1 gate review)
+
+**What changed.** The typed ADT does **not** live in `libs/config` / `ClusterProfile`. It lives
+in `libs/kernel`, in a new pure `kui.kernel.cluster` package: `BootstrapServers`,
+`ClusterSecurity`, `ClientProperties`, `AdminTuning`, `ClusterConnection`.
+
+**Why.** As originally written the decision is unimplementable under ADR-041. Rule A5 forbids
+`libs/kafka` depending on a service, and rule A1 forbids a `domain` module depending on
+`libs/config` or `libs/kafka-auth`; but `ARCHITECTURE.md` §4.2 writes every admin port as taking
+a `ClusterProfile`, and the cluster domain owns `ClusterProfile`. Something had to move. The
+alternative — one ADT in `libs`, a second in the domain and a mapper in `infrastructure` — is
+the duplication ADR-041 exists to prevent, and it would mean the redaction rule of this ADR was
+implemented twice, in two files, exactly the defect the M0 review recorded.
+
+`libs/kernel` is already the shared-kernel home of `Secret[A]` and every id type
+(`ARCHITECTURE.md` §4.1). The ADT is pure data with no dependencies, so it cross-compiles to
+Scala.js unchanged and `libs/contracts-core` can derive the redacted DTO from the same
+definition the renderer consumes.
+
+**Consequences for the rest of this ADR.** `libs/config` decodes the ADT with Ciris rather than
+declaring it; `libs/kafka-auth` renders it to `security.*` / `sasl.*` / `ssl.*` properties and
+is the only place a JAAS string is assembled; the domain's `ClusterProfile` composes a
+`ClusterConnection` field. Nothing about the mechanism table, the quoting rules, the
+`properties` override layer or the optional cloud-handler coordinates changes.
+
+**Tasks updated:** KAFKA-001 … KAFKA-004, CFGOP-001, STORE-004, CLDOM-001, CLAPI-001;
+`DEVPLAN` §5.2 and §10 D1.

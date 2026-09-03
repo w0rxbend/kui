@@ -8,6 +8,19 @@
 - **Size:** L
 - **Dependencies / blocked by:** KAFKA-002
 
+## M1 gate review amendment — verify the Testcontainers coordinate first
+
+**F-15, minor.** `DEPENDENCY_MATRIX.md` line 153 pins `org.testcontainers:testcontainers-kafka`
+2.0.5; three M1 specs write `org.testcontainers:kafka:2.0.5`. Both cannot be the artifact that
+resolves. This task is the first one that resolves it, so it settles it: resolve the coordinate,
+use whichever one exists at 2.0.5, and **correct `DEPENDENCY_MATRIX.md` in this task's commit**
+so the other specs and the matrix agree. Record the answer in the Implementation Report;
+KAFKA-007 and CFGOP-005 read it from the matrix afterwards.
+
+This task is also the single home of every Kafka container in the repository, PLAINTEXT
+included. KAFKA-007's spec was corrected to depend on this one rather than declaring its own
+(F-11).
+
 ## Goal (user value)
 
 Every claim M1 makes about secured Kafka is checked against a real broker that really refuses

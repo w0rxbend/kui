@@ -7,6 +7,35 @@
 - **Size:** L
 - **Dependencies / blocked by:** CLAPI-002, CLAPI-003, CLDOM-006
 
+## M1 gate review amendment — `Ping` is deleted here, and only here
+
+**F-01, blocker, fixed.** CLDOM-001 and CLAPI-002 each deferred the `Ping` deletion to the other,
+so nothing deleted it. This task now owns the whole deletion, in one commit, and DEVPLAN §6.5
+grants it a stated exception to the CLAPI area boundary for that purpose: it may delete files
+under `services/cluster/domain` and `services/cluster/application`, **for deletion only**.
+
+Delete, in this task's commit:
+
+```
+services/cluster/domain/src/kui/cluster/domain/Ping.scala
+services/cluster/domain/test/src/kui/cluster/domain/PingSuite.scala
+services/cluster/application/src/kui/cluster/application/PingUseCase.scala
+services/cluster/application/test/src/kui/cluster/application/PingUseCaseSuite.scala
+services/cluster/contract/src/kui/cluster/contract/dto/PingDtos.scala
+services/cluster/contract/test/src/kui/cluster/contract/PingDtosSuite.scala
+services/cluster/contract/test/resources/golden/ping-response.json
+services/cluster/api/src/kui/cluster/api/PingMapping.scala
+services/cluster/api/test/src/kui/cluster/api/PingMappingSuite.scala
+```
+
+plus the `ping` entry in `ClusterEndpoints.all`, the `PingUseCase` line in `ClusterWiring`, and
+the `Ping` paragraph in `docs/domain/cluster.md`. Regenerate the committed OpenAPI document in the
+same commit. `grep -ri ping services/ frontend/ docs/` must come back empty except for this
+sentence's neighbours in the M1 plan; that grep is an acceptance criterion of this task.
+
+(The exact file list is the one CLDOM-001 verified against the tree; if a path has moved, follow
+the tree, not this list.)
+
 ## Goal (user value)
 
 The cluster service answers for real. Every endpoint declared in the contract is bound to a use

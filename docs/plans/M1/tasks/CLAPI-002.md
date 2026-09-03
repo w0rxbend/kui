@@ -7,6 +7,17 @@
 - **Size:** M
 - **Dependencies / blocked by:** CLAPI-001
 
+## M1 gate review amendment — `Ping`
+
+**F-01, blocker, fixed.** This spec and CLDOM-001 each deferred the `Ping` deletion to the other.
+Decided: **CLAPI-004 deletes the entire `Ping` family in one commit** — the two contract files
+this spec lists, `PingMapping` and the route, *and* the six `services/cluster/{domain,application}`
+files, under the area-boundary exception recorded in DEVPLAN §6.5. This task deletes **nothing**:
+leave `ping` in `ClusterEndpoints.all`, leave `PingDtos` and `PingDtosSuite` and the
+`ping-response.json` golden file in place, and add the real endpoints alongside them. Removing
+half of a type that three other modules reference is how a lane leaves `main` red for the five
+lanes working behind it.
+
 ## Goal (user value)
 
 The addresses of everything M1 shows, declared once. After this task the gateway can derive its

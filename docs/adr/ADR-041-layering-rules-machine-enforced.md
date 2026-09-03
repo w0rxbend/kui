@@ -1,6 +1,6 @@
 # ADR-041 — Layering rules are machine-enforced; a domain-owning `application` never depends on the wire
 
-- Status: Accepted (amended 2026-09-03, Amendments 1 and 2 — see below)
+- Status: Accepted (amended 2026-09-03, Amendments 1, 2 and 3 — see below)
 - Date: 2026-09-03
 
 ## Context
@@ -216,3 +216,36 @@ express "this file is compiled for one platform" precisely.
 
 **Tasks updated:** BUILD-005 (rule table), KERN-006 (which records the same reasoning as a
 deviation).
+
+
+## Amendment 3 — 2026-09-03 (M1 gate review)
+
+**What changed.** Two rules are added, and one existing rule is confirmed rather than widened.
+
+- **A9** — a service's `application`, `contract` or `api` module may not depend on that
+  service's `infrastructure` module. Only `app` may. The dependency rule points inward; an
+  `api` that can see an adapter will eventually call one, and the port becomes decoration.
+- **A10** — `libs.kafka`, `libs.kafkaAuth`, `org.typelevel:fs2-kafka` and
+  `org.apache.kafka:kafka-clients` may appear only on the classpath of a service's
+  `infrastructure` module, `libs/kafka*` itself, `libs/config`, `libs/testkit`, or an `app`.
+  This is A8 generalised from the gateway to everyone. `libs/config` is on the list because the
+  Kafka `ConfigStore` adapter lives there (ADR-042 §5); the rule names the exception so that a
+  sixth one has to be argued in the commit that changes the rule.
+- **A1 is not widened.** M1 grooming asked for `co.fs2:fs2-core` to be added to A1's allow-list,
+  so that a domain port could expose `changes: fs2.Stream[F, List[ClusterProfile]]`. Refused.
+  A1's allow-list is `libs.kernel` and cats-core, and its value comes from being short enough
+  that adding to it is an event. A port stated in terms of an abstract `F[_]` needs no runtime
+  dependency at all; `fs2.Stream` is a concrete type from a concrete runtime, and a domain that
+  imports it can no longer be read, tested or moved without that runtime. Change notification
+  belongs one layer out: `ClusterRegistry`, in `application`, owns the stream — `application`
+  is already allowed fs2 — and the `ClusterConfigStore` port offers callback registration
+  (`onChange(handler: List[ClusterProfile] => F[Unit]): F[F[Unit]]`, returning the
+  deregistration) instead of a stream.
+
+**Why this is worth a rule rather than a review note.** Both A9 and A10 constrain a module shape
+that did not exist when A1–A8 were written: `services/cluster/infrastructure` is KUI's first
+adapter module. The argument of this ADR — that nobody sets out to break layering, they add one
+edge for one type — applies identically to a Kafka client and to an adapter edge.
+
+**Tasks updated:** CFGOP-003 (rule table and its build tests), CLDOM-003, CLDOM-004, CLADP-003,
+CLADP-005; `DEVPLAN` §5.1 and §5.2.

@@ -245,3 +245,21 @@ looks like. (Sections 2–6 of that file belong to the STORE area; this task wri
 section and says so in the Implementation Report so the two do not collide. If the file does not
 exist yet when this task lands, leave the content in the Implementation Report and let CFGOP-008
 place it.)
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns the whole bootstrap `Resource` chain, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- Shutdown releases in exact reverse order: HTTP server, then the refresh loops and the profile
+  listener, then the store, then the admin client pool. A refresh loop that outlives the pool it
+  calls into produces an error on every shutdown and teaches operators to ignore shutdown logs.
+- `SIGTERM` during replay cancels the replay and exits non-zero with the replay's own reason —
+  it does not hang waiting for `replayTimeout`, which is R-2's failure shape wearing a different
+  hat.
+- No `IO` in the composition root is `unsafeRunSync`'d, and nothing is started outside the
+  `Resource` chain; a fiber started with `.start` and never joined is not shut down by anything.
+- **Test (`munit-cats-effect`):** allocate the full application `Resource` against fakes, cancel
+  the allocation mid-way and after completion, and assert every fake's `released` flag is set,
+  in reverse order of acquisition.

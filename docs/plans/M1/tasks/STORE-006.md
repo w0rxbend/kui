@@ -266,3 +266,21 @@ Metrics (registered by STORE-008; named here so both tasks agree):
   that fail. STORE-008 turns this into `StoreHealth.Degraded` and a reconnect.
 - **One record is unreadable** → that key is missing and everything else works. Recorded in
   `health.unreadableKeys` so the capability report can say which.
+
+## Cancellation and shutdown (added at the M1 gate review, F-07)
+
+The M0 review found cancellation systematically unconsidered across the milestone. This task
+owns a replay and a tail-following fiber, so it owns the answer here. State it in the spec's own words in the
+Implementation Report, and ship the tests below.
+
+- The replay is interruptible. Cancelling the bootstrap `Resource` while replay is in flight
+  closes the consumer, releases the partition assignment and completes promptly — it does not
+  wait out `replayTimeout`.
+- The tail follower runs under a `Supervisor` owned by the store's `Resource`. Releasing the
+  resource cancels the follower **and then** closes the consumer, in that order; a consumer
+  closed underneath a running poll is how a shutdown turns into a stack trace.
+- `uncancelable` is used only around the two places that need it: recording a replayed record
+  into `StoreState`, and the commit-free offset bookkeeping. Everything else is cancellable.
+- **Test (`munit-cats-effect` + `TestControl`):** start the store's `Resource`, cancel it mid
+  replay, assert the consumer's `close` ran exactly once and no fiber survives; start it again,
+  cancel after replay while the follower is running, assert the same.
