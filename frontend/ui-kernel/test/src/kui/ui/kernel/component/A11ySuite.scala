@@ -61,6 +61,36 @@ final class A11ySuite extends FunSuite with Mounted {
         present("[role='tab']", "aria-controls"),
         present("[role='tabpanel']", "aria-labelledby")
       )
+    ),
+    (
+      "Dialog",
+      Dialog(Var(true), Val("Delete topic"), () => div("body"), () => Nil),
+      List(
+        equalTo("[role='dialog']", "aria-modal", "true"),
+        present("[role='dialog']", "aria-labelledby"),
+        equalTo("[role='dialog']", "tabindex", "-1"),
+        present(".kui-dialog__close", "aria-label")
+      )
+    ),
+    (
+      "Drawer",
+      Drawer(Var(true), Val("Message"), () => div("payload")),
+      List(equalTo("[role='dialog']", "aria-modal", "true"), present("[role='dialog']", "aria-labelledby"))
+    ),
+    (
+      "Tooltip",
+      Tooltip(button(tpe := "button", "Retry"), Val("Ask the gateway to probe again")),
+      List(present("button", "aria-describedby"), equalTo("[role='tooltip']", "role", "tooltip"))
+    ),
+    (
+      "Breadcrumbs",
+      Breadcrumbs(Val(List(Crumb("Cluster", Some("/ui")), Crumb("orders", None)))),
+      List(equalTo("nav", "aria-label", "Breadcrumb"), equalTo("[aria-current]", "aria-current", "page"))
+    ),
+    (
+      "DataTable",
+      DataTable[String](List(Column("id", "ID", value => value, sortable = true)), Val(List("a")), identity),
+      List(equalTo("th", "scope", "col"), equalTo("th", "aria-sort", "none"))
     )
   )
 

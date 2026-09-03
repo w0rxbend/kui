@@ -1,0 +1,66 @@
+/* The non-virtual table.
+ *
+ * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ */
+
+.kui-table {
+  width: 100%;
+  /* Collapsed borders let a single rule between rows come from one side only, so a row separator is
+   * one pixel rather than two. */
+  border-collapse: collapse;
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-table__header-cell {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-bottom: 1px solid var(--kui-color-border-strong);
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-medium);
+  text-align: left;
+  white-space: nowrap;
+  /* The header stays visible while the body scrolls. `position: sticky` on a `<th>` works only with
+   * collapsed borders if the border is on the cell, which is why it is declared above and not on the
+   * row. */
+  position: sticky;
+  top: 0;
+  background-color: var(--kui-color-surface);
+}
+
+.kui-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Reserves the space an arrow will take, so a column does not shift sideways the moment it is
+ * sorted. */
+.kui-table__sort-placeholder {
+  display: inline-block;
+  width: 1em;
+}
+
+.kui-table__cell {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-bottom: 1px solid var(--kui-color-border);
+  vertical-align: top;
+}
+
+.kui-table__row:hover .kui-table__cell {
+  background-color: color-mix(in srgb, var(--kui-color-text) 4%, transparent);
+}
+
+/* Loading dims the rows that are already there rather than replacing them. Replacing them would
+ * collapse the table to nothing, jump the page, and jump it back a moment later. */
+.kui-table--loading .kui-table__body {
+  opacity: 0.5;
+}
+
+.kui-table__empty {
+  padding: 0;
+}

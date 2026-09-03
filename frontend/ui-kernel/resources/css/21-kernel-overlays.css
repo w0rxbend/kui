@@ -1,0 +1,302 @@
+/* Overlays and feedback: dialog, drawer, toast, tooltip, breadcrumbs, empty state.
+ *
+ * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ *
+ * Every `z-index` here is a `--kui-z-*` token, and there are exactly four of them in the product.
+ * Hard-coded stacking numbers are how a dropdown ends up behind the dialog that opened it, and the
+ * bug stays invisible until the day it is not.
+ */
+
+/* --- Dialog ---------------------------------------------------------------------------------- */
+
+.kui-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--kui-z-dialog);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--kui-space-4);
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+.kui-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* Never taller than the window: a dialog whose buttons are below the fold cannot be dismissed. */
+  max-height: calc(100vh - var(--kui-space-8));
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-raised);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-dialog--sm {
+  max-width: 24rem;
+}
+
+.kui-dialog--md {
+  max-width: 36rem;
+}
+
+.kui-dialog--lg {
+  max-width: 56rem;
+}
+
+.kui-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-4);
+  border-bottom: 1px solid var(--kui-color-border);
+}
+
+.kui-dialog__title {
+  margin: 0;
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-dialog__close,
+.kui-drawer__close,
+.kui-toast__dismiss {
+  display: inline-flex;
+  padding: var(--kui-space-1);
+  border: 0;
+  border-radius: var(--kui-radius-sm);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.kui-dialog__body {
+  padding: var(--kui-space-4);
+  /* The body scrolls, not the whole dialog, so the title and the actions stay put. */
+  overflow-y: auto;
+}
+
+.kui-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-4);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+/* --- Drawer ---------------------------------------------------------------------------------- */
+
+.kui-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--kui-z-drawer);
+  display: flex;
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+.kui-drawer {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  height: 100%;
+  background-color: var(--kui-color-surface-raised);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-drawer--right {
+  margin-left: auto;
+}
+
+.kui-drawer--left {
+  margin-right: auto;
+}
+
+.kui-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-4);
+  border-bottom: 1px solid var(--kui-color-border);
+}
+
+.kui-drawer__title {
+  margin: 0;
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-drawer__body {
+  flex: 1;
+  padding: var(--kui-space-4);
+  overflow-y: auto;
+}
+
+/* --- Toast ----------------------------------------------------------------------------------- */
+
+.kui-toast-stack {
+  position: fixed;
+  right: var(--kui-space-4);
+  bottom: var(--kui-space-4);
+  z-index: var(--kui-z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  width: min(24rem, calc(100vw - var(--kui-space-6)));
+  /* The stack must never swallow a click meant for the page behind it; the toasts themselves take
+   * their clicks back below. */
+  pointer-events: none;
+}
+
+.kui-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-3);
+  border-left: 3px solid currentColor;
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-raised);
+  box-shadow: var(--kui-shadow-md);
+  pointer-events: auto;
+}
+
+.kui-toast--neutral {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-toast--info {
+  color: var(--kui-color-info);
+}
+
+.kui-toast--success {
+  color: var(--kui-color-success);
+}
+
+.kui-toast--warning {
+  color: var(--kui-color-warning);
+}
+
+.kui-toast--danger {
+  color: var(--kui-color-danger);
+}
+
+.kui-toast__content {
+  flex: 1;
+  /* The tone tints the border; the text itself stays at full contrast. */
+  color: var(--kui-color-text);
+}
+
+.kui-toast__title {
+  font-weight: var(--kui-font-weight-medium);
+}
+
+.kui-toast__message {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-toast-stack__queued {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  text-align: right;
+  pointer-events: auto;
+}
+
+/* --- Tooltip --------------------------------------------------------------------------------- */
+
+.kui-tooltip-host {
+  position: relative;
+  display: inline-flex;
+}
+
+.kui-tooltip {
+  position: absolute;
+  z-index: var(--kui-z-dropdown);
+  max-width: 18rem;
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-text);
+  color: var(--kui-color-surface);
+  font-size: var(--kui-font-size-xs);
+  /* A tooltip never contains anything interactive, so it must not intercept the pointer either. */
+  pointer-events: none;
+  white-space: normal;
+  width: max-content;
+}
+
+.kui-tooltip--top {
+  bottom: calc(100% + var(--kui-space-1));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.kui-tooltip--bottom {
+  top: calc(100% + var(--kui-space-1));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.kui-tooltip--left {
+  right: calc(100% + var(--kui-space-1));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.kui-tooltip--right {
+  left: calc(100% + var(--kui-space-1));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* --- Breadcrumbs ----------------------------------------------------------------------------- */
+
+.kui-breadcrumbs__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-1);
+  list-style: none;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-breadcrumbs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+}
+
+.kui-breadcrumbs__item a {
+  color: var(--kui-color-primary);
+}
+
+.kui-breadcrumbs__separator {
+  color: var(--kui-color-border-strong);
+}
+
+/* --- Empty state ----------------------------------------------------------------------------- */
+
+.kui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-7) var(--kui-space-4);
+  text-align: center;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-empty-state__icon {
+  font-size: var(--kui-font-size-xl);
+}
+
+.kui-empty-state__title {
+  margin: 0;
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text);
+}
+
+.kui-empty-state__description {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+}
