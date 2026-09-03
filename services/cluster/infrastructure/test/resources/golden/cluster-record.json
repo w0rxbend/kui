@@ -1,0 +1,69 @@
+{
+  "admin" : {
+    "apiTimeoutMs" : 60000,
+    "capabilityRefreshMs" : 3600000,
+    "groupChunkSize" : 50,
+    "metadataRefreshMs" : 30000,
+    "parallelism" : 4,
+    "partitionChunkSize" : 200,
+    "requestTimeoutMs" : 30000,
+    "topicChunkSize" : 200
+  },
+  "bootstrapServers" : "broker-1:9093,broker-2:9093",
+  "colour" : "amber",
+  "displayName" : "Production EU",
+  "properties" : {
+    "custom.token" : {
+      "secret" : {
+        "$secret" : "kUiS3cr3t-override"
+      }
+    },
+    "metadata.max.age.ms" : {
+      "value" : "120000"
+    }
+  },
+  "readOnly" : true,
+  "security" : {
+    "mechanism" : {
+      "password" : {
+        "$secret" : "kUiS3cr3t-sasl-password"
+      },
+      "type" : "scram-sha-512",
+      "username" : "kui"
+    },
+    "protocol" : "sasl_ssl",
+    "tls" : {
+      "cipherSuites" : null,
+      "enabledProtocols" : [
+        "TLSv1.3"
+      ],
+      "keystore" : {
+        "keyPassword" : {
+          "$secret" : "kUiS3cr3t-key-password"
+        },
+        "password" : {
+          "$secret" : "kUiS3cr3t-keystore-password"
+        },
+        "source" : {
+          "path" : "/etc/kui/keystore.p12",
+          "type" : "path"
+        },
+        "storeType" : "pkcs12"
+      },
+      "truststore" : {
+        "password" : {
+          "$secret" : "kUiS3cr3t-truststore-password"
+        },
+        "source" : {
+          "base64" : {
+            "$secret" : "kUiS3cr3t-truststore-bytes"
+          },
+          "type" : "inline"
+        },
+        "storeType" : "pkcs12"
+      },
+      "verifyHostname" : true
+    },
+    "type" : "sasl"
+  }
+}
