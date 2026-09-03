@@ -4,6 +4,20 @@ Imported from the Claude Design project `a6db560c-c2e2-41f6-b144-bbe0dd850aa4`, 
 `Kafka UI v2.dc.html`, on 2026-09-03. The project also contains the superseded `Kafka UI.dc.html`,
 a `support.js` runtime and two pasted images.
 
+## Which revision this is
+
+| | |
+| --- | --- |
+| Project | `a6db560c-c2e2-41f6-b144-bbe0dd850aa4` ("Make UI mockups for the Kafka UI project") |
+| Artboard | `Kafka UI v2.dc.html` |
+| Size | 70 140 bytes |
+| SHA-256 | `4734ed3e7fa4a244...` (first 16 hex characters) |
+| Read on | 2026-09-03 |
+
+The design tool exposes no revision number, so the content hash is the revision marker. It answers
+the question the date cannot: whether the artboard has changed since it was read. Re-run the hash
+before trusting this document, and if it differs, the design moved and this reading is stale.
+
 This document records what the design *is*. It is a reading of the source, not an interpretation:
 every value below was extracted from the artboard rather than judged by eye. Nothing from the design
 is copied into the product; it is reimplemented in Scala.js and Laminar with the project's own CSS.
