@@ -108,6 +108,32 @@ final class UrlPolicySuite extends KuiSuite {
     }
   }
 
+  /** The values that must not relax the policy, and the one that must.
+    *
+    * There was no switch at all before this: `UrlPolicy.Strict` was the default in the loader and no
+    * composition root passed anything else, so a developer running the gateway and a service as two
+    * local processes, or a deployment with an OTLP collector on `http://localhost:4317`, simply could
+    * not start -- while both the operations guide and the design note claimed a development relaxation
+    * existed.
+    */
+  test("only the exact value true relaxes the policy") {
+    assertEquals(UrlPolicy.fromEnv(Map(UrlPolicy.AllowPrivateUpstreams -> "true")), UrlPolicy.Dev)
+    assertEquals(UrlPolicy.fromEnv(Map(UrlPolicy.AllowPrivateUpstreams -> " TRUE ")), UrlPolicy.Dev)
+
+    List("", "1", "yes", "false", "ture", "on").foreach { value =>
+      assertEquals(
+        UrlPolicy.fromEnv(Map(UrlPolicy.AllowPrivateUpstreams -> value)),
+        UrlPolicy.Strict,
+        s"'$value' relaxed the policy"
+      )
+    }
+  }
+
+  test("an environment that does not mention the variable gets the strict policy") {
+    assertEquals(UrlPolicy.fromEnv(Map.empty), UrlPolicy.Strict)
+    assertEquals(UrlPolicy.fromEnv(Map("PATH" -> "/usr/bin")), UrlPolicy.Strict)
+  }
+
   private val hosts: Gen[String] =
     Gen.oneOf(
       "example.com",

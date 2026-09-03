@@ -3,7 +3,7 @@ package kui.gateway.app
 import cats.effect.kernel.{Clock, Resource}
 import cats.effect.{ExitCode, IO, IOApp}
 
-import kui.config.{ConfigErrors, KuiConfigSource}
+import kui.config.{ConfigErrors, KuiConfig, KuiConfigSource, UrlPolicy}
 import kui.gateway.api.GatewayApi
 import kui.http.KuiServer
 import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
@@ -32,10 +32,30 @@ import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
 object Main extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] =
-    KuiConfigSource.load[IO](args, files = Nil).flatMap {
+    IO.delay(sys.env).flatMap(loadConfig(args, _)).flatMap {
       case Left(errors) => reportConfigProblems(errors)
       case Right(loaded) => serve(GatewayServiceConfig.from(loaded))
     }
+
+  /** The configuration, with the URL policy chosen from the environment.
+    *
+    * Every URL an operator configures is a URL the gateway's own network position will fetch, so the default
+    * refuses addresses that are not routable on the public internet -- loopback, the private ranges, and the
+    * cloud metadata address inside the link-local range. That default used to be the only possibility, which
+    * made three legitimate deployments impossible to configure: a developer running the gateway and a service
+    * as two local processes, an OTLP collector running beside the gateway on `http://localhost:4317`, and a
+    * Kubernetes ClusterIP address. `KUI_ALLOW_PRIVATE_UPSTREAMS=true` is the one deliberate way to relax it,
+    * and `UrlPolicy.fromEnv` is where that decision lives so the gateway, the services and the all-in-one
+    * image cannot answer it differently.
+    *
+    * Taking the environment as an argument, rather than reading `sys.env` here, is what makes the choice
+    * testable without setting a variable for the whole test process.
+    */
+  private[app] def loadConfig(
+      args: List[String],
+      env: Map[String, String]
+  ): IO[Either[ConfigErrors, KuiConfig]] =
+    KuiConfigSource.loadFrom[IO](args, files = Nil, env, UrlPolicy.fromEnv(env))
 
   /** Runs until the process is asked to stop. `IO.never` is what holds it open: the server is a `Resource`,
     * so the shutdown hook that cancels this fiber is also what closes the listener gracefully.

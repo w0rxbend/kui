@@ -44,6 +44,29 @@ object UrlPolicy {
     */
   val Dev: UrlPolicy = UrlPolicy(allowLoopback = true, allowPrivate = true, HttpSchemes)
 
+  /** The environment variable that relaxes the address rule, and nothing else.
+    *
+    * It is an environment variable rather than a configuration key on purpose, in the same style as
+    * `KUI_ALLOW_UNSIGNED`: a security relaxation should be deliberate, visible in the process's environment
+    * where an operator or an auditor can see it in one place, and impossible to arrive by accident inside a
+    * large YAML file that somebody copied.
+    */
+  val AllowPrivateUpstreams: String = "KUI_ALLOW_PRIVATE_UPSTREAMS"
+
+  /** [[Dev]] when `KUI_ALLOW_PRIVATE_UPSTREAMS` is exactly `true`, [[Strict]] otherwise.
+    *
+    * Without this there was no switch at all: every composition root called the loader with the default, so a
+    * loopback or private-network upstream could not be configured anywhere -- not for two local processes
+    * talking to each other, not for an OTLP collector running as a sidecar on `http://localhost:4317`, and
+    * not for a Kubernetes ClusterIP such as `http://10.96.4.7:8080`. The documentation described a
+    * development relaxation that did not exist.
+    *
+    * Anything other than `true` -- unset, empty, `1`, `yes`, a typo -- leaves the strict policy in place,
+    * because a security control must not be switched off by a value nobody meant as an affirmative.
+    */
+  def fromEnv(env: Map[String, String]): UrlPolicy =
+    if env.get(AllowPrivateUpstreams).exists(_.trim.equalsIgnoreCase("true")) then Dev else Strict
+
   given CanEqual[UrlPolicy, UrlPolicy] = CanEqual.derived
 }
 
