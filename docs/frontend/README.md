@@ -154,8 +154,16 @@ the request, and a second subscriber joins that request rather than issuing anot
 
 | Header | On | Where it comes from |
 | --- | --- | --- |
-| `X-Kui-Csrf` | every request that is not a `GET` | `AuthState.csrfToken`, filled by `/auth/me` (ADR-019) |
+| `X-Csrf-Token` | every request that is not a `GET` | `AuthState.csrfToken`, filled by `/auth/me` (ADR-019) |
 | `X-Kui-Request-Id` | every request | generated per call, for support correlation |
+
+The CSRF header is deliberately **not** called `X-Kui-Csrf`, and the name is not written out in
+either half of the codebase: both read it from `kui.contracts.HttpHeaders.Csrf`. The gateway strips
+every inbound `X-Kui-*` header at the edge, because that family is how the gateway talks to itself
+and no browser ever legitimately sets one (ADR-040) — so a CSRF header inside the family would be
+deleted before the check that needs it ever ran. When the two halves each spelled the name out for
+themselves they drifted apart, and nothing failed to compile: the browser sent a header the gateway
+did not read and every mutation came back `403`. Sharing one constant is what makes that impossible.
 
 The gateway still mints the authoritative correlation id (GW-001). `X-Kui-Request-Id` is a second
 thread to pull on when a user says "it failed at about ten past three", and it is not yet built on:
@@ -395,6 +403,63 @@ Three rows are easy to get wrong, so their reasons are written down:
 
 `NotConfigured` is not a failure. A cluster with no schema registry attached does not have a *broken*
 schema registry, and rendering it as one sends an operator hunting for an outage that does not exist.
+
+### The rendering rules, and where each one lives
+
+The table above says what a state *is*; this one says what is drawn, and names the file that draws
+it, so a wrong pixel can be traced to a line without a search.
+
+| `FeatureState` | sidebar entry | route renders | drawn by |
+| --- | --- | --- | --- |
+| `Ready` | normal | the feature's page | `Sidebar`, `FeatureGate` |
+| `Degraded(reason)` | normal, amber dot, tooltip carrying the reason | the feature's page, with the banner | `Sidebar`, `CapabilityBanner` |
+| `Unavailable(…)` | dimmed, **still a link** | `FeatureFallbackPanel` | `Sidebar`, `FeatureGate` |
+| `Forbidden` | shown, `aria-disabled`, no `href`, permission tooltip | a short notice, no retry | `Sidebar`, `FeatureGate` |
+| `NotConfigured` | hidden | a short notice | `Navigation`, `FeatureGate` |
+
+Two rules about *loading* ride along with this table, and both are ADR-012's:
+
+- The feature's module is downloaded only in the `Ready` and `Degraded` rows. Clicking a dimmed
+  entry renders the fallback without fetching a byte, which is asserted by `FeatureGateSuite`.
+- There is never a blank frame. While the import is in flight the content area shows a spinner that
+  **names the feature**, because a bare spinner leaves a user on a slow connection unable to tell
+  whether the thing they clicked is the thing that is loading.
+
+`kui.ui.hideForbidden` turns the `Forbidden` row into a hidden entry, for deployments that consider
+the existence of a feature sensitive. It is off by default: most organisations find a
+visible-but-disabled entry more helpful than a menu that changes shape per user.
+
+### What each reason code says out loud
+
+One sentence per `ReasonCode`, written for an operator deciding what to do next rather than for a
+developer reading a log — which is why none of them names an HTTP status. They live in
+`kui.ui.shell.Messages` (ADR-024: strings centralised per module, no i18n runtime), and the shell
+prefers the gateway's own `message` when it sent one, because that is the more specific of the two
+and it mentions the actual upstream.
+
+| `ReasonCode` | what the user reads |
+| --- | --- |
+| `UpstreamUnavailable` | The service is not responding. |
+| `UpstreamTimeout` | The service is taking too long to answer. |
+| `CircuitOpen` | KUI has stopped calling this service for a moment after repeated failures, and will try again by itself. |
+| `UpstreamAuth` | The service refused KUI's credentials. |
+| `NotConfigured` | This is not configured in this deployment. |
+| `Forbidden` | You do not have permission to use this. |
+| `Starting` | KUI has not checked this service yet. |
+| `Unknown` | Something is wrong with this service, and KUI cannot say what. |
+
+### When the capability stream drops
+
+The picture goes **stale**, and nothing more. Every feature keeps its last known state, a banner at
+the top of the content says the connection was lost, and the store falls back to polling the
+snapshot every thirty seconds. Marking every feature unavailable because one connection failed would
+take a working product off the air on no evidence at all. The complementary rule is enforced
+upstream: an unknown state is `Degraded(Starting)`, never `Ready`, so nothing is ever silently
+claimed to be working.
+
+`Reconnecting` deliberately raises no banner. A stream between attempts is ordinary — a proxy
+recycling a connection, a laptop's wifi blinking — and a banner that flickers every few minutes is
+one people learn to ignore.
 
 ### Where the wire meets the kernel
 

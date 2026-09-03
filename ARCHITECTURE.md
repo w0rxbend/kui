@@ -819,6 +819,13 @@ fallback panel (reason, `since`, retry, "what still works"); `Degraded` shows an
 Stale data stays on screen greyed with its timestamp; actions are disabled. The frontend
 runs the same `Rbac.decide` on the pre-expanded permission list from `/api/v1/auth/me`.
 
+**Implemented** as of M0 (task UI-010): `kui.ui.shell.nav.Navigation` decides which entries
+exist, `kui.ui.shell.layout.Sidebar` applies the five rendering rules,
+`kui.ui.shell.feature.FeatureGate` decides between the feature and its fallback and is the one
+place that starts a dynamic import, and `kui.ui.kernel.component.ActionPermissionWrapper`
+merges the RBAC and capability reasons into one tooltip. The RBAC half is wired but always
+`true` until M6; see `docs/frontend/README.md` for the rendering-rule and reason-code tables.
+
 ## 13. Observability standard
 
 PLAN §30 applies unchanged: otel4s (`oteljava` backend, ADR-009) for traces and metrics,
@@ -842,7 +849,7 @@ service from the signed principal, ADR-020, ADR-021).
 Boundary rules:
 
 - Browser → gateway: opaque session cookie `kui_session` (`HttpOnly; Secure; SameSite=Lax`),
-  id rotated at login, idle 30 min / absolute 12 h; `X-Kui-Csrf` double-submit header plus
+  id rotated at login, idle 30 min / absolute 12 h; `X-Csrf-Token` double-submit header plus
   `Sec-Fetch-Site` check on every cookie-authenticated mutation; `POST /auth/logout`. Bearer
   tokens for API clients are stateless and exempt from CSRF.
 - Gateway → services: `X-Kui-Principal` JWS (HS256, `kid` rotation, 60 s expiry, `aud` per

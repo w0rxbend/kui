@@ -285,3 +285,15 @@
   outline: 2px solid var(--kui-color-focus);
   outline-offset: 2px;
 }
+
+/* A gated write action (ADR-032). The wrapper is inline so it does not change the layout of the
+ * control it wraps, and a blocked control keeps receiving pointer events so its tooltip can still
+ * explain itself — a disabled button that swallows the hover is a button that never says why. */
+.kui-action-gate {
+  display: inline-flex;
+}
+
+.kui-action-gate [aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

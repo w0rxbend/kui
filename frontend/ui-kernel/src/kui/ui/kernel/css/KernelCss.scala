@@ -110,6 +110,8 @@ object KernelCss {
   val ToastMessage = "kui-toast__message"
   val ToastDismiss = "kui-toast__dismiss"
 
+  val ActionGate = "kui-action-gate"
+
   val TooltipHost = "kui-tooltip-host"
   val Tooltip = "kui-tooltip"
   val TooltipTop = "kui-tooltip--top"

@@ -7,7 +7,8 @@ import org.scalajs.dom
 
 import kui.ui.kernel.api.Bootstrap
 import kui.ui.kernel.theme.ThemeChoice
-import kui.ui.shell.layout.{Layout, Sidebar}
+import kui.ui.shell.layout.Layout
+import kui.ui.shell.nav.Navigation
 import kui.ui.shell.page.GalleryPage
 
 /** The frame: what is on screen around the page, and in what order.
@@ -88,7 +89,7 @@ class ShellLayoutSuite extends FunSuite {
 
   test("everyNavigationEntryHasARealHrefSoItCanBeOpenedInANewTab") {
     mounted(app("http://localhost:8080/ui/")) { root =>
-      Sidebar.shellItems.foreach { item =>
+      Navigation.shellItems.foreach { item =>
         val link = root.querySelector(s"[data-testid='${item.testId}']")
         assert(link != null, s"${item.testId} is missing from the sidebar")
         // Waypoint's `navigateTo` binder writes the absolute URL over the relative one the

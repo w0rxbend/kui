@@ -69,23 +69,47 @@ final class Features(thunks: Map[FeatureId, () => js.Promise[KuiFeature]]) {
     }(using unsafeWindowOwner): Unit
 }
 
+/** The application's one registry.
+  *
+  * ## Why the map is installed rather than defined here
+  *
+  * The single place in the frontend where a feature class is named has to be a module that can *see* that
+  * class, and this is not it: the kernel is below every feature, and `frontend.uiKernel` depending on
+  * `frontend.uiClusters` would be a cycle. The shell is above both, so the shell owns the map
+  * (`kui.ui.shell.FeatureRegistryImpl`) and hands it here during start-up. Each entry's body must read
+  * exactly `js.dynamicImport(new kui.ui.clusters.ClustersFeature())` and nothing else; see `Features` above
+  * for why "exactly" is not a stylistic preference.
+  *
+  * Anything asked for before [[install]] gets a registry with no features in it, which renders as "this build
+  * has no such feature" rather than as a blank screen — the honest answer for a lookup that happened before
+  * start-up finished.
+  */
 object FeatureRegistry {
 
-  /** The single place in the whole frontend where a feature class is named.
+  private var installed: Features = new Features(Map.empty)
+
+  private var statics: List[FeatureRoutes] = Nil
+
+  /** Called once, by the shell, before anything is rendered.
     *
-    * Empty until UI-012 adds the clusters feature. The entry will read, exactly:
-    *
-    * {{{
-    * FeatureId.Clusters -> (() => js.dynamicImport(new kui.ui.clusters.ClustersFeature()))
-    * }}}
-    *
-    * and see `Features` above for why "exactly" is not a stylistic preference.
+    * @param thunks
+    *   the dynamic half: what to import, per feature.
+    * @param staticRoutes
+    *   the static half: nav entries, route patterns and `history.state` codecs, all available before a byte
+    *   of any feature has been downloaded (ADR-012 amendment 2).
     */
-  def default: Map[FeatureId, () => js.Promise[KuiFeature]] = Map.empty
+  def install(
+      thunks: Map[FeatureId, () => js.Promise[KuiFeature]],
+      staticRoutes: List[FeatureRoutes]
+  ): Unit = {
+    installed = new Features(thunks)
+    statics = staticRoutes
+  }
 
-  private lazy val features: Features = new Features(default)
+  /** The static registrations, in sidebar order. */
+  def staticRoutes: List[FeatureRoutes] = statics.sortBy(_.nav.order)
 
-  def lazyFeature(id: FeatureId): LazyFeature = features.lazyFeature(id)
+  def lazyFeature(id: FeatureId): LazyFeature = installed.lazyFeature(id)
 
-  def loaded: Signal[List[KuiFeature]] = features.loaded
+  def loaded: Signal[List[KuiFeature]] = installed.loaded
 }

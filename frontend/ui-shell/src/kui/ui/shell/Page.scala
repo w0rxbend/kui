@@ -3,7 +3,7 @@ package kui.ui.shell
 import io.circe.syntax.*
 import io.circe.{Decoder, Encoder, HCursor, Json}
 
-import kui.ui.kernel.feature.Page
+import kui.ui.kernel.feature.{FeatureRoutes, Page}
 
 /** The pages the shell itself owns.
   *
@@ -63,46 +63,70 @@ object ShellPage {
   * user typed into devtools — decodes to [[ShellPage.NotFound]]. The user gets a page saying the address does
   * not exist, with working navigation, instead of a blank screen.
   *
-  * ## The gap that UI-012 closes
+  * ## Feature pages contribute their own codec
   *
-  * Only shell pages have a codec today, because M0 has no feature pages. A feature page currently serializes
-  * as `unknown` and comes back as `NotFound`, which means Back onto a feature page would re-parse the URL
-  * rather than restore the state. When UI-012 adds the first feature, its registry entry contributes its
-  * codec next to its route patterns, exactly as ADR-012 amendment 2 has it contribute route patterns next to
-  * its import thunk.
+  * The shell cannot name a feature's page type — that would defeat the whole lazy-loading arrangement — so a
+  * feature registers a codec alongside its route patterns (`FeatureRoutes`, ADR-012 amendment 2) and this
+  * object tries each contributor in turn. Without that, Back onto a feature page would serialize as
+  * `unknown`, come back as `NotFound`, and the user would be shown a "page does not exist" screen for the
+  * page they had just been looking at.
+  *
+  * The contributors are a parameter rather than something read from a global, so a suite can exercise the
+  * whole mechanism with a stub feature and no registry to install or tear down.
   */
 object PageCodec {
 
   private val UnknownTag = "unknown"
 
-  def encode(page: Page): String = pageEncoder(page).noSpaces
+  def encode(page: Page): String = encode(page, Nil)
 
-  def decode(raw: String): Page =
-    io.circe.parser.decode[Page](raw)(using pageDecoder).getOrElse(fallback(raw))
+  def decode(raw: String): Page = decode(raw, Nil)
+
+  /** @param features
+    *   every registered feature's codec contribution, tried in order after the shell's own pages.
+    */
+  def encode(page: Page, features: List[FeatureRoutes]): String =
+    encoder(features)(page).noSpaces
+
+  def decode(raw: String, features: List[FeatureRoutes]): Page =
+    io.circe.parser.decode[Page](raw)(using decoder(features)).getOrElse(fallback(raw))
+
+  def encoder(features: List[FeatureRoutes]): Encoder[Page] = Encoder.instance { page =>
+    shellEncoder
+      .lift(page)
+      .orElse(features.iterator.map(_.encodePage(page)).collectFirst { case Some(json) => json })
+      // A page from a feature this build has no codec for. Written as a recognisable placeholder
+      // rather than as nothing, so that a debugger looking at `history.state` sees why.
+      .getOrElse(tagged(UnknownTag))
+  }
+
+  def decoder(features: List[FeatureRoutes]): Decoder[Page] = (cursor: HCursor) =>
+    cursor.get[String]("page").map { tag =>
+      shellDecoder(tag, cursor)
+        .orElse(features.iterator.map(_.decodePage(tag, cursor)).collectFirst { case Some(page) => page })
+        .getOrElse(ShellPage.NotFound(""))
+    }
 
   /** What an unreadable state becomes. Deliberately not an exception — see the class comment. */
   private def fallback(raw: String): Page =
     ShellPage.NotFound(if raw.isEmpty then "/" else "")
 
-  given pageEncoder: Encoder[Page] = Encoder.instance {
+  private val shellEncoder: PartialFunction[Page, Json] = {
     case ShellPage.Home => tagged("home")
     case ShellPage.Settings => tagged("settings")
     case ShellPage.Gallery => tagged("gallery")
     case ShellPage.NotFound(url) => tagged("not-found").deepMerge(Json.obj("url" -> url.asJson))
     case ShellPage.Forbidden(what) => tagged("forbidden").deepMerge(Json.obj("what" -> what.asJson))
-    // A feature's page, which this build has no codec for. It is written as a recognisable
-    // placeholder rather than as nothing, so that a debugger looking at `history.state` sees why.
-    case _ => tagged(UnknownTag)
   }
 
-  given pageDecoder: Decoder[Page] = (cursor: HCursor) =>
-    cursor.get[String]("page").map {
-      case "home" => ShellPage.Home
-      case "settings" => ShellPage.Settings
-      case "gallery" => ShellPage.Gallery
-      case "not-found" => ShellPage.NotFound(cursor.get[String]("url").getOrElse(""))
-      case "forbidden" => ShellPage.Forbidden(cursor.get[String]("what").getOrElse(""))
-      case _ => ShellPage.NotFound("")
+  private def shellDecoder(tag: String, cursor: HCursor): Option[Page] =
+    tag match {
+      case "home" => Some(ShellPage.Home)
+      case "settings" => Some(ShellPage.Settings)
+      case "gallery" => Some(ShellPage.Gallery)
+      case "not-found" => Some(ShellPage.NotFound(cursor.get[String]("url").getOrElse("")))
+      case "forbidden" => Some(ShellPage.Forbidden(cursor.get[String]("what").getOrElse("")))
+      case _ => None
     }
 
   private def tagged(name: String): Json = Json.obj("page" -> Json.fromString(name))

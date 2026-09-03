@@ -13,7 +13,7 @@ import sttp.model.{Method, Uri}
 import sttp.tapir.client.sttp4.SttpClientInterpreter
 import sttp.tapir.{DecodeResult, Endpoint, PublicEndpoint}
 
-import kui.contracts.ErrorEnvelope
+import kui.contracts.{ErrorEnvelope, HttpHeaders}
 import kui.ui.kernel.state.Auth
 
 /** The one way the browser talks to the gateway.
@@ -27,7 +27,7 @@ import kui.ui.kernel.state.Auth
   * Three things happen on every call that no feature should have to remember:
   *
   *   - the session cookie travels, because the backend is built with `credentials: include`;
-  *   - a mutation carries `X-Kui-Csrf` from the current session (ADR-019);
+  *   - a mutation carries the CSRF header from the current session (ADR-019);
   *   - the call carries an `X-Kui-Request-Id` the browser made up, so that a user who reports "it failed at
   *     about ten past three" can be found in the gateway's logs. The gateway still mints the authoritative
   *     correlation id (GW-001); this is a second, client-side thread to pull on.
@@ -155,8 +155,14 @@ object ApiClient {
   /** The client-generated id, echoed in the gateway's access log (ADR-040). */
   val RequestIdHeader = "X-Kui-Request-Id"
 
-  /** Where the CSRF token goes on a mutation (ADR-019). */
-  val CsrfHeader = "X-Kui-Csrf"
+  /** Where the CSRF token goes on a mutation (ADR-019).
+    *
+    * Taken from `kui.contracts.HttpHeaders` rather than written out here, because the gateway reads the name
+    * from the same constant. When the two were spelled out independently they drifted — the browser sent
+    * `X-Kui-Csrf`, which the gateway's edge policy strips before anything can read it, so every mutation was
+    * rejected as a forgery. Sharing the constant makes that failure impossible to reintroduce.
+    */
+  val CsrfHeader: String = HttpHeaders.Csrf
 
   private[api] val UnauthorizedStatus = 401
 

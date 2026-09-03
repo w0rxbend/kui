@@ -73,9 +73,11 @@ final class ImportedFeature(val id: FeatureId, importFeature: () => js.Promise[K
 
   def retry(): Unit =
     current.now() match {
-      case LoadState.Failed(_) =>
-        current.set(LoadState.NotLoaded)
-        start()
+      // Straight to `start`, which sets `Loading` as its first act. Passing through `NotLoaded` on the
+      // way would publish a frame saying "nothing has been requested" to every observer, and an
+      // observer whose job is to start the import when it sees `NotLoaded` — which is exactly what
+      // `FeatureGate` is — would then start a second one alongside this one.
+      case LoadState.Failed(_) => start()
       case _ => ()
     }
 

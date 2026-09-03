@@ -25,7 +25,7 @@ import sttp.tapir.server.interpreter.BodyListener
 import sttp.tapir.server.model.ValuedEndpointOutput
 import sttp.tapir.{statusCode, AttributeKey, EndpointOutput}
 
-import kui.contracts.ErrorEnvelope
+import kui.contracts.{ErrorEnvelope, HttpHeaders}
 import kui.contracts.ErrorEnvelope.given
 import kui.gateway.application.session.{Session, SessionId, SessionRef, SessionStore}
 import kui.kernel.error.ErrorCode
@@ -65,12 +65,11 @@ object SessionMiddleware {
 
   /** The header a non-`GET` cookie-authenticated request must echo the session's CSRF secret in.
     *
-    * Deliberately **not** `X-Kui-*`: every header in that family is stripped from every inbound request by
-    * `EdgeHeaders`, because none of them is ever legitimately set by a browser (ADR-040). This one is the
-    * opposite — a browser sending it correctly is the entire mechanism — so naming it inside the reserved
-    * family would have `EdgeHeaders` erase it from every genuine request before this code ever saw it.
+    * The name itself lives in `kui.contracts.HttpHeaders`, which the browser's `ApiClient` compiles against
+    * too, so that the two halves cannot drift apart the way they once did. `HttpHeaders.Csrf` explains why
+    * the name is deliberately outside the `X-Kui-*` family.
     */
-  val CsrfHeaderName: String = "X-Csrf-Token"
+  val CsrfHeaderName: String = HttpHeaders.Csrf
 
   /** Where the resolved session lives for the rest of the request pipeline to read. */
   val Attribute: AttributeKey[Session] = new AttributeKey[Session]("kui.gateway.session")

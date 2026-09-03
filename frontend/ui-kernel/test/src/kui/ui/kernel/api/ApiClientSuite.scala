@@ -14,7 +14,7 @@ import sttp.client4.testing.BackendStub
 import sttp.client4.{Backend, GenericRequest}
 import sttp.model.{StatusCode, Uri}
 
-import kui.contracts.ErrorEnvelope
+import kui.contracts.{ErrorEnvelope, HttpHeaders}
 import kui.contracts.ErrorEnvelope.given
 import kui.ui.kernel.state.{Auth, AuthInfo}
 
@@ -44,6 +44,32 @@ class ApiClientSuite extends FunSuite with ApiClientFixtures {
       // The request id is on both: it is a support aid, not a defence, so it is not tied to method.
       assert(getRequest.header(ApiClient.RequestIdHeader).isDefined)
       assert(postRequest.header(ApiClient.RequestIdHeader).isDefined)
+    }
+  }
+
+  test("theCsrfHeaderIsNamedExactlyWhatTheGatewayReads") {
+    // The one assertion that would have caught the bug this test was written for. The browser used to
+    // send `X-Kui-Csrf`; the gateway reads `X-Csrf-Token`, and it strips the whole `X-Kui-*` family at
+    // the edge before anything can look at it (ADR-040), so every mutation from the browser was
+    // rejected as a forgery. Both halves now read the name from `kui.contracts.HttpHeaders`, and this
+    // pins the literal so that a rename has to be a deliberate change to the shared contract rather
+    // than a silent one on either side.
+    assertEquals(ApiClient.CsrfHeader, "X-Csrf-Token")
+    assertEquals(ApiClient.CsrfHeader, HttpHeaders.Csrf)
+    assert(
+      !ApiClient.CsrfHeader.toLowerCase.startsWith("x-kui-"),
+      "the CSRF header must stay outside the X-Kui-* family, which the gateway strips from every " +
+        "inbound request"
+    )
+
+    val auth = new Auth
+    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("token-42"), authType = "session"))
+    val recorder = new RequestRecorder
+
+    // And the name is asserted on a real outgoing request too, not only on the constant: a client that
+    // held the right constant and sent a different header would still be broken.
+    one(clientFor(recorder.backend("pong"), auth).call(ApiEndpoints.poke, "body")).map { _ =>
+      assertEquals(recorder.last.header("X-Csrf-Token"), Some("token-42"))
     }
   }
 

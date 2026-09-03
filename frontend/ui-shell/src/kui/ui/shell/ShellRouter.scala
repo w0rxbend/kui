@@ -3,7 +3,7 @@ package kui.ui.shell
 import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.*
 
-import kui.ui.kernel.feature.Page
+import kui.ui.kernel.feature.{FeatureRoutes, Page}
 
 /** The one router, over every page in the application.
   *
@@ -55,7 +55,10 @@ object ShellRouter {
   /** Builds the router.
     *
     * @param featureRoutes
-    *   every loaded *and* not-yet-loaded feature's route patterns. Empty in M0; UI-012 supplies the first.
+    *   every loaded *and* not-yet-loaded feature's route patterns.
+    * @param featureCodecs
+    *   the same features' `history.state` contributions, so that pressing Back onto a feature page restores
+    *   it instead of decoding to "not found".
     * @param initialUrl
     *   the address the browser is on. A parameter so that a suite can start the router anywhere without a
     *   real `window.location`.
@@ -64,15 +67,16 @@ object ShellRouter {
       basePath: String,
       featureRoutes: List[Route[? <: Page, ?]],
       initialUrl: String,
-      origin: String
+      origin: String,
+      featureCodecs: List[FeatureRoutes] = Nil
   )(using owner: Owner): Router[Page] =
     new Router[Page](
       // Feature routes come last, so that a feature cannot accidentally shadow the shell's own
       // addresses by declaring a pattern that also matches `/ui/settings`.
       routes = shellRoutes(basePath) ++ featureRoutes,
       getPageTitle = titleOf,
-      serializePage = PageCodec.encode,
-      deserializePage = PageCodec.decode,
+      serializePage = page => PageCodec.encode(page, featureCodecs),
+      deserializePage = raw => PageCodec.decode(raw, featureCodecs),
       // Anything that matches no route is the 404 page, carrying the address that was attempted, so
       // the page can show the user what they actually asked for.
       routeFallback = url => ShellPage.NotFound(url),

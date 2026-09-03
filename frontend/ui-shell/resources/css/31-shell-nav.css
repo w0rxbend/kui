@@ -1,0 +1,136 @@
+/* Capability-driven navigation and the degraded states behind it (ADR-032, task UI-010).
+ *
+ * A separate file from `30-shell.css` because it is a separate subject: 30 is the frame, this is
+ * what the frame says when something is broken. Every colour is a token, so both themes are
+ * correct by construction rather than by somebody remembering to check the dark one.
+ *
+ * The one rule worth stating out loud: nothing here communicates by colour alone. A dimmed entry is
+ * also marked with `aria-disabled` or a tooltip, and the degraded dot is accompanied by a tooltip
+ * sentence — because roughly one man in twelve cannot reliably tell amber from grey, and "the entry
+ * that looks slightly different" is not a message. */
+
+.kui-shell__sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-shell__sidebar-link-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* `Unavailable`: dimmed, and still a real link. Reduced opacity rather than a grey colour, so the
+ * "current page" highlight underneath it stays visible when the user is actually on the fallback. */
+.kui-shell__sidebar-link--dimmed .kui-shell__sidebar-link-label {
+  opacity: 0.55;
+}
+
+/* `Forbidden`: shown, inert. The cursor is what tells a mouse user before they click; the
+ * `aria-disabled` attribute is what tells everybody else. */
+.kui-shell__sidebar-link--disabled {
+  cursor: not-allowed;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-shell__sidebar-link--disabled:hover {
+  background: none;
+}
+
+/* `Degraded`: the amber dot. Small, at the end of the row, and never the only signal. */
+.kui-shell__sidebar-link-dot {
+  flex: 0 0 auto;
+  display: inline-flex;
+  font-size: 0.6em;
+  color: var(--kui-color-warning);
+}
+
+/* The banner above the content when the capability picture is stale or something is degraded. */
+.kui-shell__capability-banner {
+  grid-area: content;
+}
+
+.kui-shell__capability-banner-body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  margin-bottom: var(--kui-space-4);
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border: 1px solid var(--kui-color-warning);
+  border-radius: var(--kui-radius-md);
+  color: var(--kui-color-text);
+}
+
+.kui-shell__capability-banner-icon {
+  flex: 0 0 auto;
+  color: var(--kui-color-warning);
+}
+
+/* The fallback panel a dimmed entry leads to. Constrained width: it is prose, and prose set across
+ * a wide screen is measurably harder to read than the same prose in a column. */
+.kui-shell__fallback {
+  max-width: 44rem;
+  padding: var(--kui-space-6) var(--kui-space-5);
+}
+
+.kui-shell__fallback-title {
+  margin: 0 0 var(--kui-space-3) 0;
+  font-size: var(--kui-font-size-xl, 1.25rem);
+}
+
+.kui-shell__fallback-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  margin: 0 0 var(--kui-space-2) 0;
+}
+
+.kui-shell__fallback-reason-icon {
+  flex: 0 0 auto;
+  color: var(--kui-color-warning);
+}
+
+.kui-shell__fallback-since {
+  margin: 0 0 var(--kui-space-4) 0;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-shell__fallback-feature {
+  margin-bottom: var(--kui-space-4);
+}
+
+.kui-shell__fallback-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  margin-bottom: var(--kui-space-5);
+}
+
+.kui-shell__fallback-error {
+  margin: 0;
+  color: var(--kui-color-danger);
+}
+
+.kui-shell__fallback-still-works-title {
+  margin: 0 0 var(--kui-space-2) 0;
+  font-size: var(--kui-font-size-md, 1rem);
+}
+
+.kui-shell__fallback-still-works-empty {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+}
+
+/* The named spinner shown while a feature's module downloads. It occupies the content area rather
+ * than sitting at the top, so the page does not jump when the feature replaces it. */
+.kui-shell__feature-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-6) var(--kui-space-5);
+  color: var(--kui-color-text-muted);
+}

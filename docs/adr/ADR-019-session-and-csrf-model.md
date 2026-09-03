@@ -28,6 +28,25 @@ browser-facing process and must be safe by default and scalable behind a load ba
 - `returnTo` after login must be a same-origin relative path.
 - CORS is off by default; the gateway serves the SPA from the same origin.
 
+## Amendments
+
+**Amendment 1 — the CSRF header is `X-Csrf-Token`, not `X-Kui-Csrf`.**
+
+Settled during M0 implementation (tasks GW-009 and UI-010). The original name is incompatible
+with ADR-040, which has the gateway strip every inbound header in the `X-Kui-*` family at the
+edge — that family is how the gateway talks to itself, and no browser ever legitimately sets
+one. A CSRF header inside it would be deleted before the check that needs it ever ran, so the
+mechanism could not work under its own name. The header is therefore `X-Csrf-Token`, and the
+name lives in one place, `kui.contracts.HttpHeaders.Csrf`, which both the gateway and the
+browser's `ApiClient` compile against. Nothing else about the decision changes: the token is
+still the session's secret, still obtained from `GET /api/v1/auth/me`, still required on every
+cookie-authenticated non-`GET`, and still paired with the `Sec-Fetch-Site` check.
+
+The shared constant is the point of the amendment rather than an implementation detail. The two
+halves originally spelled the name out independently, they drifted, and nothing failed to
+compile: the browser sent a header the gateway did not read, every mutation came back `403`, and
+the only evidence was in production.
+
 ## Evidence
 
 - `research/scala/security-research.md` §1.1 "Session model", "CSRF", §1.2 (Kouncil), §5

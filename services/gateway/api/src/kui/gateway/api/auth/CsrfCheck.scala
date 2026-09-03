@@ -1,5 +1,6 @@
 package kui.gateway.api.auth
 
+import kui.contracts.HttpHeaders
 import kui.security.PrincipalKind
 
 /** Whether one request is allowed to mutate state, as a pure function of the facts ADR-019 names (the
@@ -55,11 +56,11 @@ object CsrfCheck {
       Verdict.Denied("Sec-Fetch-Site is cross-site on a cookie-authenticated mutation")
     else
       (headerToken, sessionSecret) match {
-        case (None, _) => Verdict.Denied("X-Kui-Csrf is missing")
+        case (None, _) => Verdict.Denied(s"${HttpHeaders.Csrf} is missing")
         case (Some(_), None) => Verdict.Denied("no session is active")
         case (Some(token), Some(secret)) =>
           if constantTimeEquals(token, secret) then Verdict.Allowed
-          else Verdict.Denied("X-Kui-Csrf does not match the session's token")
+          else Verdict.Denied(s"${HttpHeaders.Csrf} does not match the session's token")
       }
   }
 

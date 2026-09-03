@@ -2,6 +2,7 @@ package kui.gateway.api.auth
 
 import munit.FunSuite
 
+import kui.contracts.HttpHeaders
 import kui.security.PrincipalKind
 
 /** The full matrix ADR-019 specifies, and the specification itself: {GET, POST} × {cookie, bearer,
@@ -68,7 +69,7 @@ final class CsrfCheckSuite extends FunSuite {
       PrincipalKind.Session,
       None,
       None,
-      CsrfCheck.Verdict.Denied("X-Kui-Csrf is missing")
+      CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} is missing")
     ),
 
     // ---- The token itself: missing, wrong, and matching. ----
@@ -77,14 +78,14 @@ final class CsrfCheckSuite extends FunSuite {
       PrincipalKind.Session,
       None,
       Some("same-origin"),
-      CsrfCheck.Verdict.Denied("X-Kui-Csrf is missing")
+      CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} is missing")
     ),
     Row(
       "DELETE",
       PrincipalKind.Session,
       Some("not-the-secret"),
       Some("same-origin"),
-      CsrfCheck.Verdict.Denied("X-Kui-Csrf does not match the session's token")
+      CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} does not match the session's token")
     ),
     Row("PATCH", PrincipalKind.Session, Some(secret), Some("same-origin"), allowed),
 
@@ -95,7 +96,7 @@ final class CsrfCheckSuite extends FunSuite {
       PrincipalKind.System,
       None,
       Some("same-origin"),
-      CsrfCheck.Verdict.Denied("X-Kui-Csrf is missing")
+      CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} is missing")
     )
   )
 
@@ -127,6 +128,6 @@ final class CsrfCheckSuite extends FunSuite {
     // shorter — case-insensitive comparison of a base64url string discards real entropy.
     val verdict =
       CsrfCheck.verdict("POST", PrincipalKind.Session, Some(secret.toUpperCase), Some(secret), Some("same-origin"))
-    assertEquals(verdict, CsrfCheck.Verdict.Denied("X-Kui-Csrf does not match the session's token"))
+    assertEquals(verdict, CsrfCheck.Verdict.Denied(s"${HttpHeaders.Csrf} does not match the session's token"))
   }
 }

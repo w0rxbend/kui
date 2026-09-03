@@ -1,13 +1,18 @@
 package kui.ui.shell
 
 import com.raquo.laminar.api.L.*
-import com.raquo.waypoint.{Route, Router, SplitRender}
+import com.raquo.waypoint.{Router, SplitRender}
 import org.scalajs.dom
 
-import kui.ui.kernel.api.Bootstrap
-import kui.ui.kernel.feature.Page
+import kui.gateway.contract.CapabilityEndpoints
+import kui.ui.kernel.api.{ApiClient, Bootstrap}
+import kui.ui.kernel.feature.{FeatureRegistry, FeatureRoutes, Page}
+import kui.ui.kernel.state.FeatureState.*
+import kui.ui.kernel.state.{AuthState, CapabilityStore, FeatureState}
 import kui.ui.kernel.theme.Theme
+import kui.ui.shell.feature.{CapabilityBanner, FeatureGate}
 import kui.ui.shell.layout.{Header, Layout, Sidebar}
+import kui.ui.shell.nav.Navigation
 import kui.ui.shell.page.{
   ForbiddenPage,
   GalleryPage,
@@ -27,6 +32,8 @@ import kui.ui.shell.page.{
   * The theme is installed before anything is rendered, so that the first paint is already in the user's
   * chosen colours rather than flashing light and then correcting itself. Error reporting is installed before
   * the router, so that a failure while building the first page is reported rather than silently swallowed.
+  * The feature registry is installed before either, because the router is built from the feature route
+  * patterns it holds and a deep link must resolve on the very first pass.
   */
 @main def main(): Unit = Shell.start()
 
@@ -44,31 +51,69 @@ object Shell {
   def start(): Unit = {
     val bootstrap = Bootstrap.read()
 
+    FeatureRegistry.install(FeatureRegistryImpl.thunks, FeatureRegistryImpl.staticRoutes)
     Theme.install()
     ErrorReporting.install()
+
+    val api = ApiClient.make(bootstrap, AuthState.current)
+
+    // The capability picture is what the whole navigation is drawn from, so it is started before the
+    // first paint. Nothing waits for it: an empty picture renders as `Degraded(Starting)`, which is
+    // the honest state — the features are usable and their health has not been established yet.
+    CapabilityStore.start(
+      streamUrl = streamUrlFor(bootstrap),
+      poll = () => api.call(CapabilityEndpoints.snapshot, ())
+    )
 
     // `getElementById` answers with `null` when there is no such element; `Option` is how that
     // becomes a value the rest of the code can reason about.
     val root = Option(dom.document.getElementById(RootId)).getOrElse(appendedRoot())
 
-    renderOnDomContentLoaded(root, app(bootstrap, dom.window.location.href, dom.window.location.origin))
+    renderOnDomContentLoaded(
+      root,
+      app(bootstrap, dom.window.location.href, dom.window.location.origin, Some(api))
+    )
   }
+
+  /** Where the capability stream lives.
+    *
+    * Built from the bootstrap's own `apiBase` rather than written out, so that a deployment under a prefix
+    * (`/kafka/api/v1`) streams from the right address without a second setting that has to be kept in step
+    * with the first.
+    */
+  def streamUrlFor(bootstrap: Bootstrap): String =
+    s"${bootstrap.apiBase.stripSuffix("/")}/capabilities/stream"
 
   /** The whole application, as one element.
     *
     * Taking the URL and the origin as parameters rather than reading `window.location` is what lets a suite
     * mount the shell on any address without touching the browser's real history.
+    *
+    * @param api
+    *   the client the retry button probes through. `None` for a suite that only wants the frame: the panels
+    *   then render with a retry that does nothing, which is better than a suite having to stand up a backend
+    *   to look at a layout.
     */
-  def app(bootstrap: Bootstrap, initialUrl: String, origin: String): HtmlElement = {
+  def app(
+      bootstrap: Bootstrap,
+      initialUrl: String,
+      origin: String,
+      api: Option[ApiClient] = None
+  ): HtmlElement = {
     given Owner = unsafeWindowOwner
+
+    // Route patterns come from the static half of the registry, so they are registered before any
+    // feature has been downloaded and a bookmarked deep link resolves on the first pass (ADR-012
+    // amendment 2). The same registrations carry the `history.state` codecs, so Back onto a feature
+    // page restores it rather than decoding to "not found".
+    val features: List[FeatureRoutes] = FeatureRegistry.staticRoutes
 
     val router = ShellRouter.make(
       basePath = bootstrap.basePath,
-      // Empty in M0. UI-012 supplies the clusters feature's patterns here, and they are registered
-      // before the feature is downloaded — see `ShellRouter`.
-      featureRoutes = List.empty[Route[? <: Page, ?]],
+      featureRoutes = features.flatMap(_.routes),
       initialUrl = initialUrl,
-      origin = origin
+      origin = origin,
+      featureCodecs = features
     )
 
     // What the *server* said its build was. `Bootstrap` already falls back to "dev" when the block is
@@ -84,15 +129,33 @@ object Shell {
       Observer[Unit](_ => ShellHealth.retryNow())
     )
 
+    val states: List[(FeatureRoutes, Signal[FeatureState])] =
+      features.map(registration =>
+        // `permitted` is always true in M0. Roles arrive in M6, and this is the one call site that
+        // changes when they do.
+        registration -> CapabilityStore.featureState(registration.id, None, Val(true))
+      )
+
     Layout(
-      sidebar = Sidebar(router, Val(Sidebar.shellItems)),
+      sidebar = Sidebar(router, Navigation.items(states, hideForbidden = false)),
       header = Header(buildVersion.signal, Theme.choice),
-      content = render(router, buildVersion.signal),
+      content = content(router, buildVersion.signal, states, api),
       fullScreen = ShellHealth.connectivity.map {
         case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
         case ShellConnectivity.Connected(_) => None
       }
     )
+  }
+
+  /** The content area: the capability banner, and under it whatever the current page is. */
+  private def content(
+      router: Router[Page],
+      buildVersion: Signal[String],
+      states: List[(FeatureRoutes, Signal[FeatureState])],
+      api: Option[ApiClient]
+  )(using Owner): Signal[HtmlElement] = {
+    val banner = CapabilityBanner(CapabilityStore.connection, degradedLabels(states))
+    render(router, buildVersion, states, api).map(page => div(banner, page))
   }
 
   /** Which element is in the content area, for the current page.
@@ -106,7 +169,12 @@ object Shell {
     * Every branch goes through `ErrorReporting.renderSafely`, so a page that throws while being built shows a
     * panel saying so and leaves the rest of the shell working (ADR-011 §3.6).
     */
-  private def render(router: Router[Page], buildVersion: Signal[String]): Signal[HtmlElement] = {
+  private def render(
+      router: Router[Page],
+      buildVersion: Signal[String],
+      states: List[(FeatureRoutes, Signal[FeatureState])],
+      api: Option[ApiClient]
+  )(using Owner): Signal[HtmlElement] = {
     // `collectStatic` takes its view *by name* and re-evaluates it every time the page signal emits
     // that page — including when it re-emits the page already on screen. A `lazy val` is what turns
     // that into "built on first visit, reused afterwards": the element for a singleton page exists
@@ -115,6 +183,8 @@ object Shell {
     lazy val home = ErrorReporting.renderSafely(() => HomePage())
     lazy val settings = ErrorReporting.renderSafely(() => SettingsPage(Theme.choice, buildVersion))
     lazy val gallery = ErrorReporting.renderSafely(() => GalleryPage())
+
+    val gates = featureGates(router, states, api)
 
     SplitRender[Page, HtmlElement](router.currentPageSignal)
       .collectStatic(ShellPage.Home)(home)
@@ -126,14 +196,83 @@ object Shell {
       .collectSignal[ShellPage.Forbidden](signal =>
         ErrorReporting.renderSafely(() => ForbiddenPage(signal.map(_.what), router))
       )
-      // A page from a feature this build cannot render. Not reachable in M0 — there are no feature
-      // routes — but the branch has to exist, because `SplitRender` with no match emits nothing at
-      // all and the content area would simply stay blank with no explanation.
-      .collect[Page](page =>
-        ErrorReporting.renderSafely(() => NotFoundPage(Val(pathOf(router, page)), router))
-      )
+      // Anything that is not one of the shell's own pages belongs to a feature. Which feature is
+      // decided by asking each one's routes whether they can produce this page's URL, because the
+      // shell may not name a feature's page type.
+      .collect[Page] { page =>
+        gates
+          .collectFirst { case (registration, gate) if owns(registration, page) => gate }
+          .fold(ErrorReporting.renderSafely(() => NotFoundPage(Val(pathOf(router, page)), router)))(gate =>
+            div(child <-- gate)
+          )
+      }
       .signal
   }
+
+  /** One `FeatureGate` per registered feature, built once so that a navigation back to a feature does not
+    * restart its download state machine.
+    */
+  private def featureGates(
+      router: Router[Page],
+      states: List[(FeatureRoutes, Signal[FeatureState])],
+      api: Option[ApiClient]
+  )(using Owner): List[(FeatureRoutes, Signal[HtmlElement])] = {
+    val probe = api.map(client => new CapabilityProbe(client))
+
+    states.map { (registration, state) =>
+      registration -> FeatureGate(
+        feature = FeatureRegistry.lazyFeature(registration.id),
+        featureLabel = registration.nav.label,
+        state = state,
+        page = router.currentPageSignal,
+        probe = probe.fold(Observer.empty[Unit])(_.observer(registration.id)),
+        whatStillWorks = readyLabels(states, except = registration),
+        retryInFlight = probe.fold(Val(false))(_.inFlight(registration.id)),
+        retryError = probe.fold(Val(None))(_.lastError(registration.id))
+      )
+    }
+  }
+
+  /** Whether a page came from this feature's routes.
+    *
+    * Asked by trying to build the page's URL from the feature's patterns: a route that can encode the page is
+    * a route that produced it. This is how the shell dispatches to the right feature without ever naming a
+    * feature's page type.
+    */
+  private def owns(registration: FeatureRoutes, page: Page): Boolean =
+    registration.routes.exists(route => route.relativeUrlForPage(page).isDefined)
+
+  /** The other features that are currently working, by label — the "what still works" list. */
+  private def readyLabels(
+      states: List[(FeatureRoutes, Signal[FeatureState])],
+      except: FeatureRoutes
+  ): Signal[List[String]] =
+    labelsWhere(states.filterNot((registration, _) => registration.id == except.id), isReady)
+
+  private def degradedLabels(states: List[(FeatureRoutes, Signal[FeatureState])]): Signal[List[String]] =
+    labelsWhere(states, isDegraded)
+
+  private def labelsWhere(
+      states: List[(FeatureRoutes, Signal[FeatureState])],
+      matches: FeatureState => Boolean
+  ): Signal[List[String]] =
+    if states.isEmpty then Val(Nil)
+    else
+      Signal
+        .combineSeq(states.map((registration, state) => state.map(registration -> _)))
+        .map(_.toList.collect { case (registration, current) if matches(current) => registration.nav.label })
+
+  private def isReady(state: FeatureState): Boolean =
+    state match {
+      case Ready => true
+      case Degraded(_) | Unavailable(_, _, _) | Forbidden | NotConfigured => false
+    }
+
+  private def isDegraded(state: FeatureState): Boolean =
+    state match {
+      case Degraded(_) => true
+      case Ready | Unavailable(_, _, _) | Forbidden | NotConfigured => false
+    }
 
   private def pathOf(router: Router[Page], page: Page): String =
     router.relativeUrlForPage(page)

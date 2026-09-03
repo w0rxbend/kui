@@ -20,6 +20,10 @@ object ShellCss {
   val SidebarList = "kui-shell__sidebar-list"
   val SidebarLink = "kui-shell__sidebar-link"
   val SidebarLinkCurrent = "kui-shell__sidebar-link--current"
+  val SidebarLinkDimmed = "kui-shell__sidebar-link--dimmed"
+  val SidebarLinkDisabled = "kui-shell__sidebar-link--disabled"
+  val SidebarLinkLabel = "kui-shell__sidebar-link-label"
+  val SidebarLinkDot = "kui-shell__sidebar-link-dot"
   val Content = "kui-shell__content"
   val Page = "kui-shell__page"
   val PageError = "kui-shell__page-error"
@@ -34,6 +38,27 @@ object ShellCss {
 
   val ErrorPage = "kui-shell__error-page"
   val ErrorPageDetail = "kui-shell__error-page-detail"
+
+  val CapabilityBanner = "kui-shell__capability-banner"
+  val CapabilityBannerBody = "kui-shell__capability-banner-body"
+  val CapabilityBannerIcon = "kui-shell__capability-banner-icon"
+  val CapabilityBannerText = "kui-shell__capability-banner-text"
+
+  val Fallback = "kui-shell__fallback"
+  val FallbackTitle = "kui-shell__fallback-title"
+  val FallbackReason = "kui-shell__fallback-reason"
+  val FallbackReasonIcon = "kui-shell__fallback-reason-icon"
+  val FallbackSince = "kui-shell__fallback-since"
+  val FallbackFeatureContent = "kui-shell__fallback-feature"
+  val FallbackActions = "kui-shell__fallback-actions"
+  val FallbackError = "kui-shell__fallback-error"
+  val FallbackStillWorks = "kui-shell__fallback-still-works"
+  val FallbackStillWorksTitle = "kui-shell__fallback-still-works-title"
+  val FallbackStillWorksEmpty = "kui-shell__fallback-still-works-empty"
+
+  val FeatureLoading = "kui-shell__feature-loading"
+  val FeatureLoadingIcon = "kui-shell__feature-loading-icon"
+  val FeatureLoadingLabel = "kui-shell__feature-loading-label"
 
   val Unreachable = "kui-shell__unreachable"
   val UnreachableCard = "kui-shell__unreachable-card"
