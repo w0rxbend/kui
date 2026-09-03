@@ -370,7 +370,51 @@ requires "recorded in `ARCHITECTURE.md` §9" and is the source CFGOP-008 works f
 
 ## Deviations
 
-*(filled in by the implementer, in the same commit)*
+Recorded by the implementer, in the same commit.
+
+1. **`SnapshotLoadFailure` was added**, because `KuiError` is not a `Throwable`. The spec says
+   `load` "raises `KuiError`", which is not possible: `KuiError` is deliberately a value type, not an
+   exception (`libs/kernel`'s own doc comment says why). A `load` that already knows which error it
+   hit wraps it in `SnapshotLoadFailure` and the cell unwraps it; anything else becomes
+   `InfrastructureError.Upstream("snapshot", 502)`. This mirrors what `AdminClientPool` does with
+   `KafkaClientConfigurationFailure` for the same reason.
+
+2. **`SnapshotCell.resource` takes an optional `log: Option[Logger[F]] = None`**, for the reason
+   KAFKA-003 and KAFKA-004 record: the module has `log4cats-core` and therefore a `Logger` type, but
+   no `LoggerFactory` and no SLF4J binding, and making the logger required would change the
+   signature that CLDOM-005 — being written in parallel — has to call.
+
+3. **`FakeCacheMetrics` is in `libs/cache`'s test sources, not in `libs/testkit`.** The spec puts it
+   in the testkit. It cannot go there without `libs/testkit → libs/cache`, which would put a cache
+   on the test classpath of every module in KUI for the benefit of one suite.
+
+4. **`refresh` is `uncancelable` with a `poll`, and the gate is a `Deferred` released in
+   `guaranteeCase`, not a `Semaphore`.** The spec describes "one `Ref` and one `Semaphore`" plus a
+   shared `Deferred`. A semaphore adds nothing the `Deferred` slot does not already do, and it adds
+   a second thing that has to be released on the cancellation path. The invariant that matters — one
+   load at a time, and every waiter gets the *new* value — is asserted by
+   `concurrentForcedRefreshesCollapseIntoOne` and `loadIsNeverCalledConcurrentlyWithItself`.
+
+   The cancellation detail is the part worth reading: the slot is released and the waiters are woken
+   in `guaranteeCase` on **every** outcome, cancellation included. Without that, a cancelled refresh
+   leaves every later caller blocked on a `Deferred` nobody will ever complete — a screen that never
+   loads again, which is exactly the failure the gate review's F-07 condition asks about.
+   `aCancelledRefreshLeavesTheValueAndDoesNotStickInARefreshingState` is the test.
+
+5. **The `refreshFailed` WARN line is emitted only on the transition into `Offline`,** not on every
+   failed refresh. The Observability section asks for WARN on `Online -> Offline`; without the
+   transition check, a cluster that stays down produces one WARN every thirty seconds for ever. The
+   metric still counts every failure.
+
+6. **`Snapshot.toEither` answers `Right` for `Initializing` with a value**, a combination the cell
+   itself never produces. It is there because `Snapshot` is a public case class that a caller can
+   construct, and a total function is better than a fifth case nobody reads.
+
+7. **No `libs/testkit` change was needed**, so the module's dependency list is unchanged from the
+   spec's `build.mill` block apart from two test-scope additions: `munit-cats-effect` and
+   `cats-effect-testkit`. The second is not optional — every assertion in the suite is about what
+   happens after thirty seconds of a failing upstream, and a suite that slept through that would be
+   slow and flaky at once.
 
 ## Cancellation and shutdown (added at the M1 gate review, F-07)
 
@@ -382,3 +426,18 @@ Implementation Report, and ship the tests below.
   assert that cancelling a refresh leaves the previous value and its `scrapedAt` intact and the
   status **not** stuck in a transient refreshing state — a cell that cancels into a permanent
   "refreshing" is a screen that never loads again.
+
+**Implemented.** Two named tests ship:
+
+- `releasingTheResourceCancelsAnInFlightRefresh` allocates the cell, lets the background loop start
+  a load that would take an hour, releases the `Resource`, and asserts the load's `onCancel`
+  finalizer ran exactly once. A leaked refresh fiber holding a Kafka admin client is the failure it
+  prevents.
+- `aCancelledRefreshLeavesTheValueAndDoesNotStickInARefreshingState` cancels a forced refresh
+  mid-load and asserts three things: the previous value survives, its `scrapedAt` did not move, and
+  a subsequent `refresh` still works — which is the assertion that the `Deferred` slot was released
+  on the cancellation path rather than left claimed for ever.
+
+The uncancellable window is the `inFlight.modify` that claims the slot; everything after it runs
+under `poll`, so a caller that gives up releases its fiber and the slot is freed by
+`guaranteeCase` regardless of how the load ended.

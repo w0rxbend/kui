@@ -555,6 +555,36 @@ object libs extends Module {
     }
   }
 
+  /** The one caching primitive M1 needs: a single value that is refreshed on a schedule and keeps
+    * answering while the refresh fails (ADR-016).
+    *
+    * `BoundedCache`, ADR-016's other primitive, is deliberately absent: it arrives with its first
+    * consumer in M2/M3. A cache with no caller has no TTL policy to test against.
+    */
+  object cache extends KuiPureModule with KuiJvmModule {
+    def moduleDeps = Seq(kernel.jvm, observability)
+
+    def mvnDeps = Seq(
+      mvn"org.typelevel::cats-core::${Versions.cats}",
+      mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+      mvn"co.fs2::fs2-core::${Versions.fs2}",
+      mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+      mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+    )
+
+    object test extends ScalaTests with KuiTests {
+      def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+
+      def mvnDeps = super.mvnDeps() ++ Seq(
+        mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        // Virtual time: the whole contract of this module is about what happens after thirty
+        // seconds of a failing upstream, and a suite that slept through that would be slow and
+        // flaky at once.
+        mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
+      )
+    }
+  }
+
   /** How every KUI process serves and consumes HTTP.
     *
     * The server, the one place `KuiError` becomes an HTTP response, the base-path and CORS
