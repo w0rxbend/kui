@@ -162,3 +162,32 @@ the frontend falls back to rendering `message` when it does not recognize the co
 ## Docs to update
 
 `ARCHITECTURE.md` §15: replace the hand-written JSON sample with a pointer to the golden file.
+
+## Deviations
+
+- **Golden files are asserted through string constants, and the file check is JVM-only.** A
+  Scala.js suite cannot read a file: a browser has no filesystem. The committed documents are
+  therefore duplicated as constants in `GoldenDocuments`, which both platforms assert against,
+  and a JVM-only `GoldenFilesSuite` asserts that each constant is exactly the committed file.
+  Neither copy can drift without a test failing. `libs/testkit`'s `Golden.assertJson`
+  (KERN-007) is JVM-only for the same reason.
+- **No Iron, and therefore no `tapir-iron` or `iron-circe`.** KERN-001 records the reasoning:
+  the kernel's smart constructors already return `Either[ValidationError, _]`, and a second
+  refinement vocabulary beside them would have to be translated at every boundary.
+- **A path or query decode failure is `DecodeResult.Error(raw, KernelDecodeFailure(error))`,
+  not `DecodeResult.InvalidValue`.** Tapir's `ValidationError` is built around its own
+  `Validator`, and forcing a kernel `ValidationError` through one loses the field name.
+  `KernelDecodeFailure` is a small exception type that carries the kernel error unchanged, so
+  HTTP-001's interceptor can render `KUI-VALIDATION` with the offending field named.
+
+## Findings for later lanes
+
+- **64-bit numbers lose precision in the browser above 2^53 - 1.** Discovered by running the
+  cross-compiled codec property under Node: an `Offset` of 1957712847277465469 round-trips on
+  the JVM and comes back altered in JavaScript, because `JSON.parse` produces a double. This is
+  a platform fact, not a circe one, and it contradicts the optimistic reading of ADR-007's note
+  that "numbers keep 64-bit precision on Scala.js". KUI keeps offsets and byte sizes as JSON
+  numbers, because no Kafka partition holds 2^53 records and stringifying every offset would
+  cost every reader of the API something real; the boundary is now asserted by a test on both
+  platforms. **M3 (message browsing) should not invent any 64-bit identifier that can exceed
+  2^53** — a hash, a fingerprint, a synthetic id — without encoding it as a string.

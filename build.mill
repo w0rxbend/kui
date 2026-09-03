@@ -272,6 +272,41 @@ object libs extends Module {
     }
   }
 
+  /** Wire shapes shared by every service: the error envelope, the capability and section DTOs, and
+    * the codecs that give kernel types a JSON and a Tapir form.
+    *
+    * It is the only module allowed to know how a kernel type is serialised (ADR-007). Cross-compiled,
+    * because the browser decodes exactly what the gateway encodes, from the same source.
+    */
+  object contractsCore extends Module {
+
+    override def moduleDir = mill.api.BuildCtx.workspaceRoot / "libs" / "contracts-core"
+
+    trait Shared extends KuiPureModule with PlatformScalaModule {
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+      )
+    }
+
+    object jvm extends Shared with KuiJvmModule {
+      def moduleDeps = Seq(kernel.jvm)
+
+      object test extends ScalaTests with KuiTests with KuiCrossTests
+    }
+
+    object js extends Shared with KuiJsModule {
+      def moduleDeps = Seq(kernel.js)
+      def mvnDeps =
+        super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+    }
+  }
+
   /** The security vocabulary: who a caller is, and how a service checks that claim.
     *
     * Cross-compiled like the kernel, because the browser renders what a principal may do. The JOSE

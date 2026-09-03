@@ -826,13 +826,16 @@ Boundary rules:
 
 ## 15. Errors
 
-`KuiError` (§4.1) is mapped in each `api` module to one envelope (ADR-034):
+`KuiError` (§4.1) is mapped in each `api` module to one envelope (ADR-034). The exact shape is
+the committed sample `libs/contracts-core/test/resources/golden/error-envelope-validation.json`,
+which the encoder is asserted against byte for byte on both platforms; the second sample,
+`error-envelope-upstream.json`, shows the no-details case. `ErrorEnvelope.of` builds one and
+`ErrorEnvelope.statusOf` gives the HTTP status, so the code-to-status mapping exists once.
 
-```json
-{ "code": "KUI-TOPIC-NOT-FOUND", "message": "Topic orders does not exist on prod-eu",
-  "details": [ { "field": "partitions", "restrictions": ["must be > 0"] } ],
-  "correlationId": "3b1f...", "timestamp": "2026-09-03T10:11:12Z", "retryable": false }
-```
+Timestamps are RFC 3339 in UTC with exactly three fractional digits (`2026-09-03T10:11:12.000Z`)
+so that the same instant always serialises the same way; `details` is always present and is `[]`
+when empty; and an unrecognised `code` still decodes, so an older browser keeps working against a
+newer gateway.
 
 Codes are stable strings, namespaced `KUI-<AREA>-<NAME>`; the frontend renders by code.
 Stack traces never leave a service. Kafka client exceptions are translated by
