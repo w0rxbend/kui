@@ -159,6 +159,37 @@ Read by every KUI process.
 | --- | --- | --- | --- | --- |
 | `kui.auth.type` | string | `disabled` | no | **`disabled` is the only accepted value today.** Anything else fails the load naming M6, rather than being ignored — so a file that asks for authentication can never quietly start a deployment that has none. |
 
+### `kui.store` — KUI's own metadata store
+
+Where KUI keeps the things it learns at runtime: registered clusters, settings, uploaded files.
+`kui.store.kafka.bootstrapServers` is the on/off switch — set it and KUI uses compacted Kafka
+topics, leave it unset and KUI reads a directory (or nothing) and reports every write as
+`NotConfigured`. There is no separate `enabled` flag on purpose: two settings that have to agree
+are two settings that will eventually disagree. See
+[the metadata-store page](metadata-store.md) for the topics, the encryption key and the backup
+procedure.
+
+| Key | Type | Default | Required | What happens when it is wrong or missing |
+| --- | --- | --- | --- | --- |
+| `kui.store.topicPrefix` | string | `__kui_` | no | Every store topic name is built from it, so `__kui_config` becomes `<prefix>config`. Must match `^[a-z0-9_.-]{1,64}$`. Change it when two KUI installations share one cluster. |
+| `kui.store.replicationFactor` | short | `3` | no | Used only when KUI *creates* a topic; an existing topic is never rewritten. `1` is accepted, because single-broker development is a supported mode. |
+| `kui.store.minInSyncReplicas` | int | `2` | no | Must be at least 1 and no greater than `replicationFactor`; breaking that fails the load with both values in one message. |
+| `kui.store.maxFileBytes` | long | `4194304` | no | The cap on one uploaded file. 1 KiB … 64 MiB. The broker's own `max.message.bytes` has to exceed it. |
+| `kui.store.replayTimeout` | duration | `30s` | no | How long startup waits for the store's log to be replayed to its end before failing with `KUI-STORE-REPLAY-TIMEOUT`. 1s … 10m. This bound is what turns a hung startup into a named error. |
+| `kui.store.writeTimeout` | duration | `10s` | no | How long a write waits to read its own record back from the log before giving up. 1s … 2m. |
+| `kui.store.dir` | path | *(unset)* | no | The read-only file adapter's root, laid out as `<root>/<section>/<id>.json`. A path that does not exist is **not** an error: it is an empty store, and a volume that mounts a moment after the process starts is a real thing. |
+| `kui.store.kafka.bootstrapServers` | list of string | *(unset)* | no | `host:port` entries; a YAML list, or comma-separated in the environment. **Setting it turns the Kafka store on.** |
+| `kui.store.kafka.security.*` | — | `PLAINTEXT` | no | The same typed security model as a managed cluster (ADR-022): `protocol`, `mechanism`, `username`, `password`, the `ssl.*` block. See the `kui.clusters` table below for the full key list; the two are decoded by the same code and accept the same spellings. |
+| `kui.store.kafka.properties.<name>` | map of string | *(empty)* | no | Raw Kafka client properties for the store's own clients, applied last. Not settable from the environment: a Kafka property name contains dots the `KUI_*` mapping cannot round-trip. Values whose key looks like a credential are redacted in every log line. |
+| `kui.store.encryptionKey` | secret | *(unset)* | with the Kafka store | 32 random bytes, base64. `openssl rand -base64 32`. Takes a literal, `env:NAME` or `file:/path`. **Required whenever `kui.store.kafka.*` is set** — starting without it would work until the first secret and then fail at write time, which is the worst place to find out. |
+| `kui.store.encryptionKeys` | secret | *(unset)* | no | The rotation form: `id:base64,id:base64`. Mutually exclusive with `encryptionKey`; setting both fails the load rather than merging them. |
+| `kui.store.encryptionKeyId` | string | `k1` | with `encryptionKeys` | Which key new writes are encrypted under. Every key listed stays usable for *reading*, which is what makes a rotation a rolling change rather than a flag day. An id that is not among the configured keys fails the load, listing the ids that are. |
+
+**Losing `kui.store.encryptionKey` makes every stored secret permanently unreadable.** There is no
+recovery path and there cannot be one — that is what encryption means. Back the key up separately
+from the topic, and read
+[the metadata-store page's key section](metadata-store.md#42-the-encryption-key) before you rotate.
+
 ### `kui.clusters` — the cluster registry (**M1**)
 
 **Accepted and ignored.** Any key under `kui.clusters` loads today and is read by nothing, so a

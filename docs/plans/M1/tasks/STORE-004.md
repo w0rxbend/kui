@@ -244,3 +244,40 @@ knowable at load time and is STORE-005's business.
 format. `docs/operations/metadata-store.md` §1: replace the YAML sketch with the exact key table
 above, including `replayTimeout`, `writeTimeout` and `dir`, which the page does not currently
 mention, and correct the `encryptionKeys` form to the one implemented here.
+
+## Deviations
+
+1. **No `StoreConfig.configValue: ConfigValue[Effect, StoreConfig]`.** The spec's signature block
+   assumes the loader composes raw Ciris `ConfigValue`s. It does not: CFG-001 built a `Field` /
+   `Layers` machinery on top of Ciris precisely so that every failure becomes a structured
+   `ConfigProblem` with a key and a source, and every problem is accumulated rather than
+   short-circuited. A `ConfigValue`-shaped store slice would have to be re-wrapped to produce
+   either. The slice is therefore decoded by `KuiConfigSource.decodeStore` in the same style as
+   `decodeServer`, `decodeGateway` and `decodeTelemetry`, and `StoreConfig` carries its defaults
+   and bounds as plain values.
+2. **Environment names follow the loader's mechanical mapping, not the spec's table.** The table
+   writes `KUI_STORE_TOPIC_PREFIX` and `KUI_STORE_REPLICATION_FACTOR`. CFG-001's rule is that the
+   environment name is the dotted key uppercased with `.` and `-` replaced by `_`, and it does not
+   split camel case — so the real names are `KUI_STORE_TOPICPREFIX` and
+   `KUI_STORE_REPLICATIONFACTOR`, exactly as `KUI_GATEWAY_READINESSINTERVALMS` already is.
+   Introducing a second naming rule for one section would mean an operator has to know which
+   sections split words. `docs/operations/metadata-store.md` §1 now states the rule instead of
+   listing examples that were wrong.
+3. **The shared decoder is `ClusterSecurityConfig.scala`, and CFGOP-001 must reuse it.** The
+   cross-area contract in this spec names `ClusterSecurityConfig.scala`; CFGOP-001's file list
+   names `ClusterSecurityDecoder.scala` for the same job. This task landed first and created
+   `ClusterSecurityConfig`, whose `decode(prefix, lookup)` works for any prefix — the store's and a
+   managed cluster's alike — and returns the keys it reads through `keysUnder(prefix)` so the
+   unknown-key check cannot fall behind it. **CFGOP-001 must not create a second decoder.**
+4. **The cross-field rules read the configuration layers, not the decoded value.** A decoded
+   `StoreDraft` only exists when every field parsed, so a cross-field rule expressed over it would
+   go silent whenever any unrelated field was also wrong — which is exactly the case the
+   "accumulate every problem" requirement is about. The rules therefore read the raw layers and
+   stay quiet only about a field that already reported its own problem.
+5. **`kui.store.kafka.properties` is not settable from the environment.** A Kafka property name
+   contains dots, and the `KUI_*` mapping turns dots into underscores, so the round trip is not
+   injective. CFGOP-001's D-4 reaches the same conclusion for `kui.clusters[].properties`.
+6. **`ClientPropertyOverrides.SecretKeyPattern` matches `jaas`, `passwd` and `auth` as well as the
+   five words the spec lists.** The redaction property test, run over real Kafka property names,
+   failed on `sasl.jaas.config` — the single most credential-bearing property name in Kafka, and
+   one that contains none of the obvious words.

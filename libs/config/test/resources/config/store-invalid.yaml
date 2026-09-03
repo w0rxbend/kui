@@ -1,0 +1,12 @@
+# Three problems, on purpose, so that one load reports all three.
+kui:
+  gateway:
+    services:
+      cluster:
+        url: "http://kui-cluster:8080"
+  store:
+    replicationFactor: 1
+    minInSyncReplicas: 2
+    replayTimeout: 0s
+    kafka:
+      bootstrapServers: ["kafka-1:9092"]

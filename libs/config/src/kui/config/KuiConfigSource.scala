@@ -13,6 +13,7 @@ import cats.syntax.all.*
 import ciris.{ConfigError, ConfigKey, ConfigValue}
 import io.circe.Json
 
+import kui.kernel.cluster.BootstrapServers
 import kui.kernel.{Host, Port, PositiveInt, Secret, ServiceId}
 
 /** Loads [[KuiConfig]] from the command line, the environment and YAML files.
@@ -249,6 +250,22 @@ object KuiConfigSource {
     def at(json: Json, key: String): Option[String] =
       descend(json, key.split('.').toList).flatMap(scalar)
 
+    /** Every scalar leaf under `prefix`, as `full.dotted.name -> text`.
+      *
+      * Used for the raw client-property map, whose key names KUI cannot know in advance and which therefore
+      * cannot be read one `Field` at a time.
+      */
+    def leavesUnder(json: Json, prefix: String): List[(String, String)] =
+      descend(json, prefix.split('.').toList).toList
+        .flatMap(node => flatten(node, Nil))
+        .map((path, value) => path.mkString(".") -> value)
+
+    private def flatten(json: Json, path: List[String]): List[(List[String], String)] =
+      json.asObject match {
+        case Some(obj) if obj.nonEmpty => obj.toList.flatMap((name, child) => flatten(child, path :+ name))
+        case _ => scalar(json).map(path -> _).toList
+      }
+
     def membersOf(json: Json, prefix: String): List[String] =
       descend(json, prefix.split('.').toList).toList.flatMap { node =>
         node.asObject
@@ -430,11 +447,12 @@ object KuiConfigSource {
       server <- decodeServer[F](layers)
       gateway <- decodeGateway[F](layers, policy)
       telemetry <- decodeTelemetry[F](layers, policy)
+      store <- decodeStore[F](layers)
       auth <- read[F, String](
         field("kui.auth.type", "disabled", readAuthType, "disabled"),
         layers
       )
-    } yield (unknown, server, gateway, telemetry, auth).mapN((_, s, g, t, _) => Draft(s, g, t))
+    } yield (unknown, server, gateway, telemetry, store, auth).mapN((_, s, g, t, st, _) => Draft(s, g, t, st))
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {
@@ -645,6 +663,288 @@ object KuiConfigSource {
     } yield (otlp, prometheus, format, hash).mapN(TelemetryConfig.apply)
 
   // ---------------------------------------------------------------------------------------------
+  // The metadata store
+  // ---------------------------------------------------------------------------------------------
+
+  /** The `kui.store.*` slice (ADR-042).
+    *
+    * `kui.store.kafka.bootstrapServers` being present is the on/off switch for the Kafka store; absent means
+    * the file adapter, and there is no third state. Everything else is a scalar with a default, plus four
+    * cross-field rules that no single field can check on its own and which are therefore checked here, each
+    * producing its own problem so that an operator sees all of them at once.
+    */
+  private def decodeStore[F[_]: Async](layers: Layers): F[Problems[StoreDraft]] =
+    for {
+      prefix <- read[F, String](
+        field(
+          "kui.store.topicPrefix",
+          s"a prefix matching ${StoreConfig.TopicPrefixPattern}",
+          readTopicPrefix,
+          StoreConfig.DefaultTopicPrefix
+        ),
+        layers
+      )
+      replication <- read[F, Short](
+        field(
+          "kui.store.replicationFactor",
+          "a whole number between 1 and 32767",
+          readReplicationFactor,
+          StoreConfig.DefaultReplicationFactor
+        ),
+        layers
+      )
+      minIsr <- read[F, PositiveInt](
+        field(
+          "kui.store.minInSyncReplicas",
+          "a positive whole number",
+          readPositiveInt,
+          StoreConfig.DefaultMinInSyncReplicas
+        ),
+        layers
+      )
+      maxFile <- read[F, Long](
+        field(
+          "kui.store.maxFileBytes",
+          s"a size between ${StoreConfig.MinFileBytes} and ${StoreConfig.MaxFileBytes} bytes",
+          readBounded(StoreConfig.MinFileBytes, StoreConfig.MaxFileBytes),
+          StoreConfig.DefaultMaxFileBytes
+        ),
+        layers
+      )
+      replay <- read[F, FiniteDuration](
+        field(
+          "kui.store.replayTimeout",
+          s"a duration between ${StoreConfig.MinReplayTimeout} and ${StoreConfig.MaxReplayTimeout}",
+          readBoundedDuration(StoreConfig.MinReplayTimeout, StoreConfig.MaxReplayTimeout),
+          StoreConfig.DefaultReplayTimeout
+        ),
+        layers
+      )
+      write <- read[F, FiniteDuration](
+        field(
+          "kui.store.writeTimeout",
+          s"a duration between ${StoreConfig.MinWriteTimeout} and ${StoreConfig.MaxWriteTimeout}",
+          readBoundedDuration(StoreConfig.MinWriteTimeout, StoreConfig.MaxWriteTimeout),
+          StoreConfig.DefaultWriteTimeout
+        ),
+        layers
+      )
+      dir <- readOptional[F, Path](
+        field("kui.store.dir", "a directory path", raw => readNonEmpty(raw).map(Path.of(_))),
+        layers
+      )
+      kafka <- decodeStoreKafka[F](layers)
+      encryption = decodeStoreEncryption(layers)
+      fields = (prefix, replication, minIsr, maxFile, replay, write, dir, kafka, encryption)
+        .mapN(StoreDraft.apply)
+    } yield (fields, checkStoreRules(layers)).mapN((draft, _) => draft)
+
+  private def readTopicPrefix(raw: String): Either[String, String] =
+    if raw.matches(StoreConfig.TopicPrefixPattern) then Right(raw)
+    else Left(s"'$raw' does not match ${StoreConfig.TopicPrefixPattern}")
+
+  private def readReplicationFactor(raw: String): Either[String, Short] =
+    raw.toIntOption.toRight(s"'$raw' is not a whole number").flatMap { value =>
+      if value >= 1 && value <= Short.MaxValue then Right(value.toShort)
+      else Left(s"$value is outside 1..${Short.MaxValue}")
+    }
+
+  private def readBounded(min: Long, max: Long)(raw: String): Either[String, Long] =
+    raw.toLongOption.toRight(s"'$raw' is not a whole number").flatMap { value =>
+      if value >= min && value <= max then Right(value) else Left(s"$value is outside $min..$max")
+    }
+
+  private def readBoundedDuration(min: FiniteDuration, max: FiniteDuration)(
+      raw: String
+  ): Either[String, FiniteDuration] =
+    Try(Duration(raw)).toEither.left
+      .map(_ => s"'$raw' is not a duration such as 30s or 2m")
+      .flatMap {
+        case finite: FiniteDuration if finite >= min && finite <= max => Right(finite)
+        case other => Left(s"$other is outside $min..$max")
+      }
+
+  /** The store cluster's connection, or `None` when no bootstrap servers are configured. */
+  private def decodeStoreKafka[F[_]: Async](layers: Layers): F[Problems[Option[StoreKafkaDraft]]] = {
+    val key = "kui.store.kafka.bootstrapServers"
+    if layers.first(key).isEmpty then Async[F].pure(none[StoreKafkaDraft].validNel)
+    else
+      read[F, BootstrapServers](
+        field(key, "a comma-separated list of host:port entries", readBootstrapServers),
+        layers
+      ).map { servers =>
+        val security = ClusterSecurityConfig.decode("kui.store.kafka.security", layers.first)
+        val properties = propertiesUnder(layers, "kui.store.kafka.properties")
+        (servers, security).mapN((s, sec) => Some(StoreKafkaDraft(s, sec, properties)))
+      }
+  }
+
+  private def readBootstrapServers(raw: String): Either[String, BootstrapServers] =
+    BootstrapServers.from(raw).leftMap(_.message)
+
+  /** Raw client properties, read out of the file layers by name. They are not settable from the environment:
+    * a Kafka property name contains dots that the `KUI_*` mapping cannot round-trip.
+    */
+  private def propertiesUnder(layers: Layers, prefix: String): Map[String, String] =
+    layers.documents.flatMap(document => Layers.leavesUnder(document.json, prefix)).toMap
+
+  /** `encryptionKey` is one key with the id `k1`; `encryptionKeys` is `id:base64,id:base64`. Setting both is
+    * an error rather than a merge: the shorthand exists for the common case, not as an alias.
+    */
+  private def decodeStoreEncryption(layers: Layers): Problems[Option[StoreEncryptionDraft]] = {
+    val single = layers.first("kui.store.encryptionKey")
+    val many = layers.first("kui.store.encryptionKeys")
+    val activeId = layers.first("kui.store.encryptionKeyId").map(_._2.trim).filter(_.nonEmpty)
+    (single, many) match {
+      case (Some(_), Some((source, _))) =>
+        ConfigProblem(
+          "kui.store.encryptionKeys",
+          "cannot be set together with kui.store.encryptionKey; use encryptionKey for one key and " +
+            "encryptionKeys for a rotation",
+          source
+        ).invalidNel
+
+      case (Some((_, raw)), None) =>
+        val id = activeId.getOrElse(StoreConfig.DefaultKeyId)
+        Some(StoreEncryptionDraft(Map(id -> SecretRef.parse(raw)), id)).validNel
+
+      case (None, Some((source, raw))) =>
+        parseKeyList(raw, source).andThen { keys =>
+          activeId match {
+            case None =>
+              ConfigProblem(
+                "kui.store.encryptionKeyId",
+                s"is required with kui.store.encryptionKeys; it names which of ${keys.keys.toList.sorted
+                    .mkString(", ")} new writes use",
+                ConfigSourceName.Default
+              ).invalidNel
+            case Some(id) if keys.contains(id) => Some(StoreEncryptionDraft(keys, id)).validNel
+            case Some(id) =>
+              ConfigProblem(
+                "kui.store.encryptionKeyId",
+                s"'$id' is not among the configured key ids (${keys.keys.toList.sorted.mkString(", ")})",
+                source
+              ).invalidNel
+          }
+        }
+
+      case (None, None) => none[StoreEncryptionDraft].validNel
+    }
+  }
+
+  /** `id:base64,id:base64`. The material is never echoed, whatever went wrong. */
+  private def parseKeyList(raw: String, source: ConfigSourceName): Problems[Map[String, SecretRef]] = {
+    val entries = raw.split(',').toList.map(_.trim).filter(_.nonEmpty)
+    val parsed = entries.map(entry => entry.span(_ != ':'))
+    val malformed = parsed.exists((id, rest) => id.isEmpty || rest.length <= 1)
+    if entries.isEmpty || malformed then
+      ConfigProblem(
+        "kui.store.encryptionKeys",
+        "expected 'id:base64,id:base64'; one entry is missing its id or its material",
+        source
+      ).invalidNel
+    else parsed.map((id, rest) => id -> SecretRef.parse(rest.drop(1))).toMap.validNel
+  }
+
+  /** The rules no single field can check.
+    *
+    * They read the layers directly rather than the decoded draft, and that is the point: a draft only exists
+    * when *every* field decoded, so a cross-field rule expressed over the draft would go unreported whenever
+    * some unrelated field was also wrong. An operator fixing one key per restart is precisely what the
+    * accumulate-everything discipline exists to prevent. A field that is itself invalid already has its own
+    * problem, so the rule that would have used it stays quiet rather than reporting the same mistake twice.
+    */
+  private def checkStoreRules(layers: Layers): Problems[Unit] = {
+    val replication = layers.first("kui.store.replicationFactor").flatMap(v => v._2.toIntOption)
+    val minIsr = layers.first("kui.store.minInSyncReplicas").flatMap(v => v._2.toIntOption)
+
+    val isrRule = (replication.orElse(Some(StoreConfig.DefaultReplicationFactor.toInt)), minIsr) match {
+      case (Some(factor), Some(isr)) if isr > factor =>
+        ConfigProblem(
+          "kui.store.minInSyncReplicas",
+          s"expected <= kui.store.replicationFactor ($factor), got $isr",
+          layers.first("kui.store.minInSyncReplicas").map(_._1).getOrElse(ConfigSourceName.Default)
+        ).invalidNel
+      case _ => ().validNel
+    }
+
+    val keyRule =
+      if layers.first("kui.store.kafka.bootstrapServers").isDefined &&
+        layers.first("kui.store.encryptionKey").isEmpty &&
+        layers.first("kui.store.encryptionKeys").isEmpty
+      then
+        ConfigProblem(
+          "kui.store.encryptionKey",
+          "a Kafka metadata store requires an encryption key; generate one with `openssl rand -base64 32` " +
+            "and set KUI_STORE_ENCRYPTION_KEY (see docs/operations/metadata-store.md §4.2)",
+          ConfigSourceName.Default
+        ).invalidNel
+      else ().validNel
+
+    (isrRule, keyRule).mapN((_, _) => ())
+  }
+
+  final private case class StoreDraft(
+      topicPrefix: String,
+      replicationFactor: Short,
+      minInSyncReplicas: PositiveInt,
+      maxFileBytes: Long,
+      replayTimeout: FiniteDuration,
+      writeTimeout: FiniteDuration,
+      dir: Option[Path],
+      kafka: Option[StoreKafkaDraft],
+      encryption: Option[StoreEncryptionDraft]
+  )
+
+  final private case class StoreKafkaDraft(
+      bootstrapServers: BootstrapServers,
+      security: ClusterSecurityConfig.ClusterSecurityDraft,
+      properties: Map[String, String]
+  )
+
+  final private case class StoreEncryptionDraft(keys: Map[String, SecretRef], activeKeyId: String)
+
+  private def resolveStore[F[_]: Async](
+      draft: StoreDraft,
+      env: Map[String, String]
+  ): F[Problems[StoreConfig]] =
+    for {
+      kafka <- draft.kafka.traverse(k =>
+        ClusterSecurityConfig
+          .resolve[F](k.security, env)
+          .map(_.map(security => StoreKafkaConfig(k.bootstrapServers, security, k.properties)))
+      )
+      encryption <- draft.encryption.traverse(resolveEncryption[F](_, env))
+    } yield (kafka.sequence, encryption.sequence).mapN((k, e) =>
+      StoreConfig(
+        draft.topicPrefix,
+        draft.replicationFactor,
+        draft.minInSyncReplicas,
+        draft.maxFileBytes,
+        draft.replayTimeout,
+        draft.writeTimeout,
+        draft.dir,
+        k,
+        e
+      )
+    )
+
+  private def resolveEncryption[F[_]: Async](
+      draft: StoreEncryptionDraft,
+      env: Map[String, String]
+  ): F[Problems[StoreEncryptionConfig]] =
+    draft.keys.toList
+      .sortBy(_._1)
+      .traverse { (id, ref) =>
+        SecretRef.resolve[F](ref, env).map {
+          case Right(secret) => (id -> secret).validNel
+          case Left(problem) =>
+            ConfigProblem("kui.store.encryptionKey", problem, ConfigSourceName.Default).invalidNel
+        }
+      }
+      .map(_.sequence.map(pairs => StoreEncryptionConfig(pairs.toMap, draft.activeKeyId)))
+
+  // ---------------------------------------------------------------------------------------------
   // Secrets
   // ---------------------------------------------------------------------------------------------
 
@@ -654,7 +954,8 @@ object KuiConfigSource {
   final private case class Draft(
       server: ServerConfig,
       gateway: GatewayDraft,
-      telemetry: TelemetryConfig
+      telemetry: TelemetryConfig,
+      store: StoreDraft
   )
 
   final private case class GatewayDraft(
@@ -674,24 +975,25 @@ object KuiConfigSource {
     draft match {
       case cats.data.Validated.Invalid(problems) => Async[F].pure(cats.data.Validated.Invalid(problems))
       case cats.data.Validated.Valid(value) =>
-        value.gateway.principalKeys.zipWithIndex
-          .traverse { case (key, index) => resolveKey[F](key, index, env) }
-          .map(_.sequence)
-          .map(
-            _.map(keys =>
-              KuiConfig(
-                value.server,
-                GatewayConfig(
-                  value.gateway.services,
-                  value.gateway.readinessInterval,
-                  keys,
-                  value.gateway.cors,
-                  value.gateway.devInsecureCookies
-                ),
-                value.telemetry
-              )
-            )
+        for {
+          keys <- value.gateway.principalKeys.zipWithIndex
+            .traverse { case (key, index) => resolveKey[F](key, index, env) }
+            .map(_.sequence)
+          store <- resolveStore[F](value.store, env)
+        } yield (keys, store).mapN((principalKeys, storeConfig) =>
+          KuiConfig(
+            value.server,
+            GatewayConfig(
+              value.gateway.services,
+              value.gateway.readinessInterval,
+              principalKeys,
+              value.gateway.cors,
+              value.gateway.devInsecureCookies
+            ),
+            value.telemetry,
+            storeConfig
           )
+        )
     }
 
   private def resolveKey[F[_]: Async](
@@ -749,9 +1051,26 @@ object KuiConfigSource {
       // Declared so the shape exists and a file that already carries them still loads. Nothing is
       // read out of either: `kui.clusters[]` arrives with the cluster registry in M1 and
       // `kui.rbac` with the authorization model in M6.
+      List("kui", "store", "topicPrefix"),
+      List("kui", "store", "replicationFactor"),
+      List("kui", "store", "minInSyncReplicas"),
+      List("kui", "store", "maxFileBytes"),
+      List("kui", "store", "replayTimeout"),
+      List("kui", "store", "writeTimeout"),
+      List("kui", "store", "dir"),
+      List("kui", "store", "encryptionKey"),
+      List("kui", "store", "encryptionKeys"),
+      List("kui", "store", "encryptionKeyId"),
+      List("kui", "store", "kafka", "bootstrapServers"),
+      List("kui", "store", "kafka", "bootstrapServers", "*"),
+      // `properties` is deliberately open: its whole purpose is to carry Kafka client properties KUI
+      // does not model, so it cannot have a list of legal names.
+      List("kui", "store", "kafka", "properties", "**"),
       List("kui", "clusters", "**"),
       List("kui", "rbac", "**")
-    )
+    ) ++ ClusterSecurityConfig
+      .keysUnder("kui.store.kafka.security")
+      .map(_.split('.').toList)
 
     def check(documents: List[Document]): ValidatedNel[ConfigProblem, Unit] =
       documents.flatMap(document => unknownIn(document)) match {

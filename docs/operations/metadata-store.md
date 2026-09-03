@@ -56,8 +56,34 @@ kui:
         password: "env:KUI_STORE_PASSWORD"
 ```
 
-Environment equivalents follow the usual mapping: `KUI_STORE_TOPIC_PREFIX`,
-`KUI_STORE_REPLICATION_FACTOR`, `KUI_STORE_KAFKA_BOOTSTRAP_SERVERS`, and so on.
+The environment name of a key is its dotted path uppercased with every `.` turned into `_`, so
+`kui.store.topicPrefix` is `KUI_STORE_TOPICPREFIX` and `kui.store.kafka.bootstrapServers` is
+`KUI_STORE_KAFKA_BOOTSTRAPSERVERS`. The camel-case segment is *not* split — the mapping is
+mechanical, so that a new key never needs a naming decision.
+
+The full key list, with defaults and rules, is in
+[the configuration page](configuration.md#kuistore--kuis-own-metadata-store). The three keys that
+page carries and the block above does not are worth knowing here:
+
+| Key | Default | What it is for |
+| --- | --- | --- |
+| `kui.store.replayTimeout` | `30s` | How long startup waits for the log to be replayed to its end before failing with `KUI-STORE-REPLAY-TIMEOUT`. This bound is what makes a store problem a startup error rather than a hang. |
+| `kui.store.writeTimeout` | `10s` | How long a write waits to read its own record back from the log. |
+| `kui.store.dir` | *(unset)* | The read-only file adapter's root; see §7. Ignored when `kui.store.kafka.*` is set. |
+
+For a key rotation, replace `encryptionKey` with the list form and name the active key:
+
+```yaml
+kui:
+  store:
+    encryptionKeys: "k1:env:KUI_STORE_KEY_K1,k2:env:KUI_STORE_KEY_K2"
+    encryptionKeyId: "k2"
+```
+
+Every listed key can still *decrypt*, and only `encryptionKeyId` is used to *encrypt*, which is
+what makes a rotation a rolling change instead of a flag day. Setting `encryptionKey` and
+`encryptionKeys` together fails the load: the single-key form is a shorthand for the common case,
+not an alias to merge.
 
 **Startup order.** KUI loads static configuration, opens the store client, replays the whole
 `__kui_config` topic into memory, and only then knows which clusters exist and reports itself

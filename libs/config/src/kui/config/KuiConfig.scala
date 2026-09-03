@@ -82,7 +82,8 @@ object ConfigErrors {
 final case class KuiConfig(
     server: ServerConfig,
     gateway: GatewayConfig,
-    telemetry: TelemetryConfig
+    telemetry: TelemetryConfig,
+    store: StoreConfig
 )
 
 object KuiConfig {
@@ -90,7 +91,8 @@ object KuiConfig {
   /** What a process gets when nothing at all is configured. Every field here is also the default used per
     * key, so configuring one key never changes another.
     */
-  val Default: KuiConfig = KuiConfig(ServerConfig.Default, GatewayConfig.Default, TelemetryConfig.Default)
+  val Default: KuiConfig =
+    KuiConfig(ServerConfig.Default, GatewayConfig.Default, TelemetryConfig.Default, StoreConfig.Default)
 
   given CanEqual[KuiConfig, KuiConfig] = CanEqual.derived
 }

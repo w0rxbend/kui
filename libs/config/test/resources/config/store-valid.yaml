@@ -1,0 +1,26 @@
+# The block from docs/operations/metadata-store.md §1, plus the keys that page did not show.
+kui:
+  server:
+    port: 9090
+  gateway:
+    services:
+      cluster:
+        url: "http://kui-cluster:8080"
+  store:
+    topicPrefix: "__kui_"
+    replicationFactor: 3
+    minInSyncReplicas: 2
+    maxFileBytes: 4194304
+    replayTimeout: 45s
+    writeTimeout: 15s
+    encryptionKey: "env:KUI_STORE_ENCRYPTION_KEY"
+    kafka:
+      bootstrapServers: ["kafka-1:9092", "kafka-2:9092"]
+      security:
+        protocol: SASL_SSL
+        mechanism: SCRAM-SHA-512
+        username: "kui"
+        password: "env:KUI_STORE_PASSWORD"
+      properties:
+        client.dns.lookup: "use_all_dns_ips"
+        sasl.login.refresh.window.factor: "0.8"
