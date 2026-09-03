@@ -15,10 +15,13 @@ offers `ALL | FIRST_5 | LAST_5`.
 - **Audit**: record shape kept from Kafbat (`timestamp, username, clusterName, resources[]
   {type, id, alter, accessType[]}, operation, operationParams, result{success, error}`) plus
   `correlationId`, `principalKind` and `sessionRef`. Levels `all | alterOnly` (default
-  `alterOnly`); sinks `console` and a Kafka topic (`__kui-audit-log` by default, created with
-  90-day retention, gzip producer, degrades to console when topic init fails unless
-  `requireAuditTopic`). Audit records are produced from the same `AccessRequest` and `Decision`
-  the authorization used, in the service that executed the operation; the gateway forwards
+  `alterOnly`); sinks `console` and a Kafka topic. The audit topic is the `__kui_audit`
+  topic of the metadata store (ADR-042): retention-based (not compacted), partitioned by
+  cluster id, 90-day retention by default, gzip producer, created and validated by the store,
+  degrading to console when topic init fails unless `requireAuditTopic`. Its name follows
+  `kui.store.topicPrefix`, so the default is `__kui_audit`.
+  Audit records are produced from the same `AccessRequest` and `Decision` the authorization
+  used, in the service that executed the operation; the gateway forwards
   edge-only events (login, logout, denied pre-checks) to the identity service's `AuditSink`.
   Browsing or deleting the audit topic of the same cluster is refused.
 - **Masking**: Kafbat's rule model (`type: remove | mask | replace`, `fields[]` xor
@@ -31,7 +34,8 @@ offers `ALL | FIRST_5 | LAST_5`.
   produce.
 - Group-scoped policies (Kouncil) are an M5+ extension: `subjects[]` on a rule, evaluated
   against the principal's roles from the signed header; policies editable in the UI live in
-  the `ConfigStore` with the file configuration as the canonical base.
+  the `ConfigStore` (ADR-042: key `masking/<clusterId>` in `__kui_config`) with the file
+  configuration as the canonical base.
 
 ## Evidence
 
@@ -49,7 +53,7 @@ offers `ALL | FIRST_5 | LAST_5`.
 ## Alternatives rejected
 
 - Database-backed policies (Kouncil): a relational store for a handful of rules; rejected
-  with ADR-036.
+  with ADR-036 and again with ADR-042.
 - Masking in the gateway: payloads would cross a process boundary unmasked.
 
 ## Reversibility

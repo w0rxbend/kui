@@ -46,7 +46,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | CL-003 | Cluster stats (dashboard numbers) served from a refreshed cache | Kafbat, Provectus | P0 | cluster | ui-clusters | M1 | M | RESEARCHING | Stats stay servable while the cluster is momentarily unreachable. |
 | CL-004 | Cluster-level aggregated metrics (JMX/Prometheus) | Kafbat, Provectus | P1 | metrics | ui-clusters | M8 | M | RESEARCHING | Dashboard cell shows `—` until M8. |
 | CL-005 | Force statistics cache refresh | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | S | RESEARCHING | `POST /clusters/{id}/refresh`, 202 Accepted. |
-| CL-006 | Dynamic cluster CRUD from the UI, persisted, with connection test | Kouncil | P1 | cluster | ui-admin | M8 | L | RESEARCHING | Merged with the config wizard (CW-002..005). Needs OT-004 persistence. Owner is `cluster`, not a config service: ADR-004 dissolved `kui-config-service`. |
+| CL-006 | Dynamic cluster CRUD from the UI, persisted, with connection test | Kouncil | P1 | cluster | ui-admin | M8 | L | RESEARCHING | Merged with the config wizard (CW-002..005). Persists to the `cluster/<clusterId>` keys of `__kui_config` through OT-004 (ADR-042), which lands in M1. Owner is `cluster`, not a config service: ADR-004 dissolved `kui-config-service`. |
 | CL-007 | Typed cluster security config (SASL/SSL/SCRAM/IAM/OAUTHBEARER) with `properties` escape hatch | Kafbat, Provectus, Kouncil | P0 | cluster (typed config in `kui-config`) | ui-admin (form in M8) | M1 | M | RESEARCHING | Decision D-7 / ADR-022. JAAS strings generated from typed fields, never accepted verbatim. |
 | CL-008 | Failover across multiple SR / Connect / ksql URLs | Kafbat, Provectus | P2 | schema, connect, ksql (shared lib) | — | M7 | M | RESEARCHING | |
 | CL-009 | Per-cluster colour tag and status dot in navigation | Kafbat | P2 | — | shell | M1 | S | RESEARCHING | Colour stored client-side (`LocalPrefs`). |
@@ -213,7 +213,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | CW-001 | App info: build info, enabled features | Kafbat, Provectus, Kouncil | P1 | gateway | shell | M0 | S | RESEARCHING | `GET /info`. Release check is OT-006 (opt-in). |
 | CW-002 | Read current config (redacted) and apply a new one with hot reload | Kafbat, Provectus | P1 | cluster + identity, aggregated by gateway | ui-admin | M8 | L | RESEARCHING | No process restart: config distribution to services. `/api/v1/config` is a gateway aggregation over the two owners (ADR-004, ADR-036). |
 | CW-003 | Validate a config with per-component connectivity probes | Kafbat, Provectus, Kouncil | P1 | cluster | ui-admin | M8 | M | RESEARCHING | Probe URLs pass the SSRF policy (KU-024). |
-| CW-004 | Upload related files (truststore, keystore, proto) | Kafbat, Provectus | P2 | cluster | ui-admin | M8 | S | RESEARCHING | |
+| CW-004 | Upload related files (truststore, keystore, proto) | Kafbat, Provectus | P2 | cluster | ui-admin | M8 | S | RESEARCHING | Bytes go to the `__kui_files` topic, encrypted, size-capped by `kui.store.maxFileBytes` (ADR-042). |
 | CW-005 | Cluster config wizard UI (bootstrap, auth, SR, Connect, ksql, metrics, serdes, masking) | Kafbat, Provectus, Kouncil | P1 | — | ui-admin | M8 | L | RESEARCHING | Screens 28–29 of the IA proposal. |
 | CW-006 | First-launch onboarding: temporary admin, removed on logout | Kouncil | P2 | identity | shell | M6 | M | RESEARCHING | DC-H12. |
 
@@ -234,7 +234,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | RB-001 | Role model: subjects × clusters × resource pattern × actions, with action dependencies | Kafbat, Provectus | P0 | identity (evaluation) + gateway (enforcement) | ui-admin (view) | M6 | XL | RESEARCHING | Kafbat resource × action matrix is the canonical vocabulary (DR-14). Pure evaluation in `kui-security-core`. |
 | RB-002 | Authority extractors: GitHub orgs/teams, Google hd, Cognito groups, OIDC claim, LDAP, AD | Kafbat, Provectus | P1 | identity | — | M6 | M | RESEARCHING | |
 | RB-003 | Current user info and flattened permissions for UI gating | Kafbat, Provectus | P0 | gateway | kernel | M6 | S | RESEARCHING | `GET /auth/me`; `ActionPermissionWrapper` merges RBAC and capability state (DC-H5). |
-| RB-004 | UI-managed user groups and function-permission matrix, persisted | Kouncil | P1 | identity | ui-admin | M6 | L | RESEARCHING | Persisted role store behind the same evaluation API; file wins, UI adds (D-5). Needs OT-004. |
+| RB-004 | UI-managed user groups and function-permission matrix, persisted | Kouncil | P1 | identity | ui-admin | M6 | L | RESEARCHING | Persisted role store behind the same evaluation API; file wins, UI adds (D-5). Stored under the `rbac/roles` key of `__kui_config` through OT-004 (ADR-042), which is already available from M1. |
 | RB-005 | Read-only cluster mode | Kafbat, Provectus | P0 | gateway (policy) | kernel | M5 | S | RESEARCHING | Enforced per operation via a `Mutation` marker in the domain, not by URL regex (security research §5). |
 
 ## Audit (AD)
@@ -250,7 +250,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | DM-001 | Config-driven masking (`REMOVE` / `MASK` / `REPLACE`, field paths, topic patterns) | Kafbat, Provectus | P1 | message | — | M3 | M | RESEARCHING | Applied after deserialization, before leaving the service. |
-| DM-002 | UI-managed masking policies bound to user groups (`ALL` / `FIRST_5` / `LAST_5`) | Kouncil | P1 | message (apply) + identity (policy store) | ui-admin | M6 | L | RESEARCHING | Same engine as DM-001 with caller-group scoping (D-6). Needs identity, so M6 not M5. |
+| DM-002 | UI-managed masking policies bound to user groups (`ALL` / `FIRST_5` / `LAST_5`) | Kouncil | P1 | message (apply) + identity (policy store) | ui-admin | M6 | L | RESEARCHING | Same engine as DM-001 with caller-group scoping (D-6). Needs identity, so M6 not M5. Stored under `masking/<clusterId>` in `__kui_config` (ADR-042, ADR-023). |
 
 ## Serdes (SD)
 
@@ -287,7 +287,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | NX-004 | Demo mode with an in-memory fake backend | Kouncil | P3 | — | shell | M9 | M | DEFERRED(marketing aid, not a product capability) | CEO decision DR-6. |
 | NX-005 | Custom context path / base path | Kafbat, Provectus, Kouncil | P1 | gateway | shell | M0 | S | RESEARCHING | Reverse-proxy deployments. Part of static asset serving. |
 | NX-006 | CORS configuration | Kafbat, Provectus | P1 | gateway | — | M0 | S | RESEARCHING | Off by default; explicit origin list when enabled. |
-| NX-007 | Shared UI primitives: confirmation modals, toasts, breadcrumbs, empty states, drawers, tabs, forms | Kafbat, Provectus, Kouncil | P0 | — | kernel | M0 | M | RESEARCHING | Kernel design system from the Claude Design tokens (BLOCKERS.md B-001). Inventory in `research/kafbat/ui-analysis.md` §IA.4. |
+| NX-007 | Shared UI primitives: confirmation modals, toasts, breadcrumbs, empty states, drawers, tabs, forms | Kafbat, Provectus, Kouncil | P0 | — | kernel | M0 | M | RESEARCHING | Kernel design system on KUI's own token set (UI-002; B-001 decided around, not waited on). Inventory in `research/kafbat/ui-analysis.md` §IA.4. |
 
 ## MCP (MC)
 
@@ -308,7 +308,11 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | OT-001 | Admin-client timeout, batching and concurrency knobs | Kafbat | P1 | cluster, topic, consumer | — | M1 | S | RESEARCHING | Shared `kui-kafka` settings. |
 | OT-002 | CSV formatting knobs | Kafbat | P2 | shared lib | — | M5 | S | RESEARCHING | With the first CSV export. |
 | OT-003 | Per-cluster consumer / producer / admin property overrides | Kafbat, Provectus | P0 | `libs/config` + cluster | — | M1 | S | RESEARCHING | The escape hatch of CL-007. |
-| OT-004 | Relational persistence (PostgreSQL, embedded for dev) with migrations | Kouncil | P1 | cluster, identity (**separate stores**) | — | M6 | M | RESEARCHING | D-10. File-only mode must keep working. PLAN §3 forbids a shared database and ADR-036 rejects a relational store outright, so this row cannot be built as one PostgreSQL behind two services: it needs an ADR that either supersedes ADR-036 with a store per owning context, or defers the row. Raised at the G6 gate; decide in M6 grooming. |
+| OT-004 | Kafka-backed metadata store: `ConfigStore[F]` over internal compacted topics (`__kui_config`, `__kui_files`), replay + tail, optimistic `version`, read-your-writes | KUI-new (replaces Kouncil's D-10) | P0 | cluster, identity | — | M1 | L | RESEARCHING | ADR-042. Replaces relational persistence: no database, ever. Core store is M1 because clusters become registrable at runtime there; UI-managed roles/groups (RB-004), masking policies (DM-002) and the wizard (CW-002 … CW-005) are consumers of it and keep their own milestones. File adapter stays for dev, bootstrap and read-only, and file-only mode must keep working (M0 ships the file adapter only). Closed `TECH_DEBT.md` TD-014. |
+| OT-007 | Store topic creation and validation: create `__kui_*` if missing, validate if present, fail fast with the setting, expected and found values | KUI-new | P0 | cluster, identity | — | M1 | S | RESEARCHING | ADR-042. Never rewrites operator topic settings silently. |
+| OT-008 | Envelope encryption of secret fields at rest (AES-GCM, `keyId` in the envelope) and key rotation | KUI-new | P0 | cluster, identity | — | M1 | M | RESEARCHING | ADR-042 §4; `research/scala/security-research.md` §5. Key from `kui.store.encryptionKey`, never stored. Rotation writes new records under a new `keyId` while old ones stay readable. |
+| OT-009 | Store health as a capability: store unreachable means last known state, `Degraded(reason)`, writes rejected | KUI-new | P0 | cluster, identity (+gateway registry) | kernel | M1 | S | RESEARCHING | ADR-042 §8 folded through ADR-039; rendered by ADR-032. |
+| OT-010 | Operator guidance for the store: sizing, ACLs, encryption key handling, backup/restore, file-to-Kafka migration | KUI-new | P1 | — | — | M1 | S | RESEARCHING | `docs/operations/metadata-store.md`. Ships with OT-004; revisited when RB-004 and DM-002 add sections. |
 | OT-005 | Uniform error envelope with stable `KUI-*` codes and correlation id | Kouncil, Kafbat | P0 | all | kernel | M0 | S | RESEARCHING | PLAN §26; code list in `research/kafbat/api-analysis.md`. |
 | OT-006 | Release check phone-home and installation id | Kafbat, Provectus, Kouncil | P3 | gateway | — | M8 | S | RESEARCHING | Opt-in only, default off (CEO decision DR-7). |
 
@@ -396,19 +400,20 @@ Totals by milestone and by state are recomputed when rows change. The initial se
 | Milestone | Rows | Of which P0 | Of which P1 |
 | --- | --- | --- | --- |
 | M0 | 15 | 12 | 3 |
-| M1 | 17 | 9 | 7 |
+| M1 | 22 | 13 | 8 |
 | M2 | 8 | 6 | 1 |
 | M3 | 28 | 16 | 9 |
 | M4 | 7 | 5 | 2 |
 | M5 | 22 | 6 | 10 |
-| M6 | 18 | 5 | 8 |
+| M6 | 17 | 5 | 7 |
 | M7 | 34 | 11 | 16 |
 | M8 | 20 | 0 | 14 |
 | M9 | 10 | 0 | 0 |
 | — (rejected) | 4 | 0 | 0 |
-| **Total** | **183** (150 from research + 33 KUI-new) | **70** | **70** |
+| **Total** | **187** (150 from research + 37 KUI-new) | **74** | **70** |
 
-States at seed time: 172 `RESEARCHING`, 7 `DEFERRED`, 4 `REJECTED`, 0 `DESIGNED`.
+States at seed time: 172 `RESEARCHING`, 7 `DEFERRED`, 4 `REJECTED`, 0 `DESIGNED`. ADR-042
+(2026-09-03) rewrote OT-004 and added OT-007 … OT-010, so the totals above count 187 rows.
 
 Every P0 and P1 row has a milestone. Recount after editing rows with:
 

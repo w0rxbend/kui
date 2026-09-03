@@ -91,8 +91,20 @@ stated order never places a task before its dependencies.
 
 Conditions, none of which gate the first commit:
 
-1. An ADR settles the OT-004 shared-database conflict with PLAN §3 before M6 grooming closes
-   (`TECH_DEBT.md` TD-014); no store shared by two services in the meantime.
+1. ~~An ADR settles the OT-004 shared-database conflict with PLAN §3 before M6 grooming closes
+   (`TECH_DEBT.md` TD-014); no store shared by two services in the meantime.~~
+   **Met, 2026-09-03: [ADR-042](docs/adr/ADR-042-kafka-backed-metadata-store.md).** KUI stores
+   its own metadata in Kafka, in internal compacted topics prefixed `__kui_` on a statically
+   configured store cluster. No relational database is introduced, ever. ADR-036 is amended
+   (the store is those topics, not a versioned YAML file; the Kubernetes Secret/ConfigMap
+   adapter is dropped because a mounted Secret is a path the file adapter already reads);
+   ADR-023's audit topic is renamed to `__kui_audit` for consistency. OT-004 is rewritten from
+   "relational persistence" to the Kafka-backed store and **moves from M6 to M1**, because
+   clusters become registrable at runtime in M1 and the store must exist by then; OT-007 …
+   OT-010 were added for topic creation and validation, envelope encryption and key rotation,
+   store health as a capability, and operator guidance. `TECH_DEBT.md` TD-014 is closed.
+   M0 is unaffected: it ships static configuration only, and CFG-001, SVC-001 and AIO-001 now
+   say so explicitly with a forward reference to M1.
 2. PLAN §16.6 is amended and ADR-004 updated before the first M1 service→service call.
 3. M0 closes with NX-007 `PARTIAL` and TD-007 open; no M0 task depends on the design import.
 4. `./mill checkArchitecture` is proven to fail on a deliberate violating edge, with the

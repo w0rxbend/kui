@@ -129,10 +129,16 @@ cross-compiled module has `.jvm` and `.js` children (BUILD-003 defines the trait
 | `libs/kernel` | `libs.kernel.{jvm,js}` | JVM + JS | cats-core, iron | shared-kernel ids, `KuiError`, `Secret[A]`, paging value types |
 | `libs/contracts-core` | `libs.contractsCore.{jvm,js}` | JVM + JS | `libs.kernel`, tapir-core, tapir-json-circe, tapir-iron, circe | error envelope DTO, `Section[A]`, capability DTOs, SSE event DTOs, Tapir codecs for kernel ids |
 | `libs/security-core` | `libs.securityCore.{jvm,js}` | JVM + JS | `libs.kernel`, circe | `Principal`, `PrincipalClaims`, `PrincipalCodec[F]`; nimbus JWS adapter on the JVM side only |
-| `libs/config` | `libs.config` | JVM | `libs.kernel`, ciris, ciris-circe-yaml, iron-ciris, circe-yaml, fs2-io | `KuiConfig` model slices, loaders, redaction |
+| `libs/config` | `libs.config` | JVM | `libs.kernel`, ciris, ciris-circe-yaml, iron-ciris, circe-yaml, fs2-io | `KuiConfig` model slices, loaders, redaction. **No `ConfigStore[F]` in M0**: the port and its file adapter arrive with the cluster registry in M1, and the Kafka adapter of ADR-042 with it. `libs/config` therefore has no Kafka dependency in M0. |
 | `libs/observability` | `libs.observability` | JVM | `libs.kernel`, otel4s, log4cats, tapir interceptors | telemetry bootstrap, structured logger, MDC bridge, metric names |
 | `libs/http` | `libs.http` | JVM | `libs.kernel`, `libs.contractsCore.jvm`, `libs.observability`, tapir-netty-server-cats, sttp4, fs2-io | Netty server builder, error interceptor, CORS, base path, health endpoints, `UpstreamClient`, SSE helpers |
 | `libs/testkit` | `libs.testkit` | JVM | `libs.kernel.jvm`, `libs.contractsCore.jvm`, munit, scalacheck, testcontainers, tapir-sttp-stub4-server | generators, fakes, golden files, fault-injection stubs |
+
+The metadata store of ADR-042 (`__kui_config`, `__kui_files`, `__kui_audit`) is **out of M0
+scope** in its entirety: M0 has no Kafka client code at all (`docs/ROADMAP.md` M0 goal). M1
+adds the `ConfigStore[F]` port with both adapters as feature-matrix row OT-004. Nothing in M0
+is invalidated by that: the static Ciris configuration M0 builds stays the canonical base that
+the store overlays (ADR-036, unchanged by ADR-042).
 
 Dependency edges added: `contracts-core → kernel`, `security-core → kernel`,
 `config → kernel`, `observability → kernel`, `http → {kernel, contracts-core, observability}`,
@@ -263,7 +269,7 @@ a hand-written JSON fixture and switches to the live stream in UI-010).
 | [UI-010](tasks/UI-010.md) | Capability-driven navigation, `FeatureGate`, fallback panel | L | UI-008, UI-009, GW-005 | F |
 | [UI-011](tasks/UI-011.md) | Error pages: 403, 404, gateway-unreachable | S | UI-009 | F |
 | [UI-012](tasks/UI-012.md) | `frontend/ui-clusters` sample feature and bundle-shape check | M | UI-010, SVC-002, BUILD-006 | F |
-| [UI-013](tasks/UI-013.md) | Follow-up: re-derive tokens from the design import | S | UI-002, BLOCKERS B-001 | F |
+| [UI-013](tasks/UI-013.md) | Optional: reconcile tokens with a design import, if one ever lands | S | UI-002 | F |
 | [AIO-001](tasks/AIO-001.md) | `apps/allinone` composition root and in-process client | L | SVC-004, GW-006, GW-009 | G |
 | [AIO-002](tasks/AIO-002.md) | Frontend assets packaged into the all-in-one image | M | AIO-001, UI-012, GW-008 | G |
 | [INFRA-001](tasks/INFRA-001.md) | Docker images for gateway, cluster and all-in-one | M | SVC-004, GW-010, AIO-001 | G |
@@ -307,7 +313,7 @@ fakes live in `libs/testkit`.
 | Kernel unit and property | `libs.kernel.{jvm,js}.test` | MUnit + ScalaCheck + discipline-munit | id validation round-trips, `Secret` redaction, paging arithmetic, `ErrorCode` totality |
 | Contract codec golden files | `libs.contractsCore.jvm.test` | MUnit | every DTO encodes to a committed golden JSON file under `libs/contracts-core/test/resources/golden/`; a shape change fails the build |
 | Cross-platform parity | `libs.contractsCore.js.test` | MUnit under Node | the same golden files decode identically on Scala.js |
-| Config | `libs.config.test` | MUnit + ScalaCheck | precedence CLI → env → YAML → default, accumulated errors, unknown-key rejection, `Secret` never printed |
+| Config | `libs.config.test` | MUnit + ScalaCheck | precedence CLI → env → YAML → default, accumulated errors, unknown-key rejection, `Secret` never printed. No store tests in M0; the Kafka store gets a Testcontainers suite in M1 (OT-004). |
 | Observability | `libs.observability.test` | MUnit + `otel4s-oteljava-testkit` | spans carry `correlation.id` / `service.name` / `operation`; MDC bridge populates log context; metric names match the constant list |
 | HTTP server | `libs.http.test` | MUnit + `munit-cats-effect` | error interceptor envelope shape and status per `ErrorCode`; CORS off by default; base path prefixing; health endpoints unauthenticated |
 | Upstream resilience | `libs.http.test` | MUnit + `tapir-sttp-stub4-server` | failover order, grace period, retry only on idempotent reads, bulkhead cap, breaker open → half-open → closed, circuit-state stream emission, URL policy rejections (link-local, metadata, non-http scheme, cross-host redirect) |
@@ -341,7 +347,7 @@ Registry, Connect, ksqlDB or LDAP containers — those arrive with the milestone
 
 | ID | Risk | Impact | Mitigation | Mitigating task(s) |
 | --- | --- | --- | --- | --- |
-| R-1 | **Claude Design import is blocked** (BLOCKERS.md B-001), so tokens have no source of truth | Kernel primitives may need restyling later; NX-007 cannot be marked DONE | Ship a token sheet whose every value carries a `PLACEHOLDER` marker, derived from Kafbat's palette; keep all component code reading CSS custom properties so only the token file changes later; **no M0 task may depend on the import** | UI-002 (placeholder), UI-013 (follow-up, blocked) |
+| R-1 | The Claude Design import never arrives (BLOCKERS.md B-001 is owned by someone outside this swarm) | Waiting would stall the whole frontend lane | **Do not wait.** KUI owns its token set: UI-002 derives it from the competitor evidence already gathered (Kafbat's `theme.ts` palette and three-state dark mode; Kouncil's single-palette SCSS with no dark mode) and locks it as the M0 design decision. Components read CSS custom properties only, so a later import is a one-file reconciliation, not a redesign. NX-007 closes as `DONE` on the KUI-owned token set | UI-002 (owns the tokens), UI-013 (optional reconciliation, never a blocker) |
 | R-2 | Long-lived SSE on `tapir-netty-server-cats` may buffer or drop (open question in DEPENDENCY_MATRIX) | The capability stream and every future message stream break | Time-boxed spike before HTTP-004; documented fallback is http4s-ember, swappable at `app` level only | BUILD-006, HTTP-004 |
 | R-3 | Scala 3.9.0 artifacts may not be published for every dependency | Nothing compiles | BUILD-001 verifies resolution of the whole DEPENDENCY_MATRIX before any code is written; documented fallback is 3.3.8 LTS with a one-line change in `Versions` | BUILD-001 |
 | R-4 | Accidental static reference pulls the feature module into `main.js`, silently defeating ADR-012 | The fault-isolation property "never downloaded" is lost | Automated bundle-shape assertion in CI, not a review convention | BUILD-006, UI-012 |
@@ -367,13 +373,49 @@ M0 is complete when all of the following are true and the evidence is committed:
 5. `GET /api/v1/openapi.json` is regenerated and its snapshot committed under
    `docs/api/openapi.json`; the OpenAPI diff check passes.
 6. `docs/api/error-codes.md` is generated from the `ErrorCode` enum and committed.
-7. `docs/FEATURE_MATRIX.md` rows KU-001 … KU-009, MT-007, CW-001, NX-005, NX-006, OT-005 are
-   `DONE`; NX-007 is `PARTIAL` with a pointer to UI-013 and TD-007.
-8. `TECH_DEBT.md` TD-007 is updated with the M0 reality (placeholder tokens shipped, exit
-   condition unchanged); any new debt taken during M0 has a row.
-9. `BLOCKERS.md` B-001 is still open but explicitly marked "does not block M0 completion".
+7. `docs/FEATURE_MATRIX.md` rows KU-001 … KU-009, MT-007, CW-001, NX-005, NX-006, NX-007 and
+   OT-005 are `DONE`. NX-007 closes on the KUI-owned token set of UI-002; it is not held open
+   for an external design import.
+8. `TECH_DEBT.md` TD-007 is rewritten to reflect the decision taken: the token set is KUI's
+   own, derived from competitor analysis, and the debt is the narrower "reconcile with the
+   design project if and when it is ever imported". Any new debt taken during M0 has a row.
+9. `BLOCKERS.md` B-001 is closed as **decided around**: the fallback became the decision, and
+   nothing in M0 or M1 waits on it.
 10. `ARCHITECTURE.md` is updated where an M0 task discovered a delta (§4 signatures are now
     real code, so the sketches are replaced by links to the implementing files).
 11. `STATUS.md` records CEO acceptance with the CI run id that produced the evidence.
 12. A developer who has never seen the repository can run `README.md`'s quick start and reach
     the shell in a browser in under ten minutes on a clean machine.
+
+## 10. Decisions taken in this plan rather than escalated
+
+Grooming produces decisions, not questions (PLAN §39: "if a worker must ask, the plan was
+incomplete"). Where an ADR left a gap, this plan closed it — from the behaviour of the three
+reference products already analysed in `research/`, not from opinion.
+
+**This section is an index, not a source of truth.** The G6 gate review promoted the decisions
+that constrain M1–M8 into ADRs (ADR-039 capability fold, ADR-040 edge header policy, ADR-041
+machine-enforced layering, plus amendments to ADR-032 and ADR-034); the ADR is authoritative
+and the "Where it lives" column says so. The rest live in the task that implements them and
+reach `ARCHITECTURE.md` through INFRA-004.
+
+| # | Gap | Decision | Evidence from the references | Where it lives |
+| --- | --- | --- | --- | --- |
+| D1 | ADR-032 lists the states but not what happens when several apply at once | Precedence `NotConfigured` > `Unavailable` > `Degraded` > `Available`; `since` is sticky across reason changes | Kafbat conflates "unconfigured" with "unhealthy" (both hide the entry), which is the exact confusion `research/kafbat/ui-analysis.md` DC-H2 flags; separating them requires a stated precedence | **ADR-039** §2–§3 (GW-003, UI-008) |
+| D2 | What a feature shows before its first readiness poll | `Degraded(Starting)`, never `Unavailable` | Kafbat renders an empty sidebar during startup; users read that as "broken". A "starting" state costs nothing and removes the false alarm | **ADR-032** amendment 2 (GW-003, UI-008) |
+| D3 | ADR-034's code table has no code for an unmatched route | Add `KUI-ROUTE-NOT-FOUND` (404) rather than overloading `KUI-INTERNAL` | Kouncil returns raw 500s for unknown paths (`research/kouncil/architecture.md` D11); Kafbat's numeric `5000` catch-all hides routing mistakes | **ADR-034** amendments 1–2 (HTTP-001, KERN-008) |
+| D4 | Whether an inbound `X-Kui-Correlation-Id` from a browser is trusted | Never. The gateway generates it | A client-chosen id lets a caller poison log correlation; no reference does this either way, so the safe default is taken | **ADR-040** (GW-001) |
+| D5 | Which failures feed the capability registry | Only `InfrastructureError`. An `ApplicationError` (a 404 for a missing resource) must not dim a sidebar | Kafbat has no registry at all; getting this wrong would make every user typo look like an outage | **ADR-039** §6 (GW-006) |
+| D6 | `application` cannot depend on `contracts-core`, yet the capability report is a DTO | The use case returns an application-owned `CapabilityReport`; `api` maps it | PLAN §18's dependency rule, enforced by `checkArchitecture` A3 | **ADR-041** (SVC-001, SVC-003, BUILD-005) |
+| D7 | A deep link to a feature route arrives before that feature's module is downloaded | Route *patterns* are static metadata beside the import thunk; only rendering is lazy | Kafbat's `React.lazy` per page has the same problem and solves it with static route declarations (`App.tsx`); the Scala.js equivalent must be explicit | UI-009, UI-007 |
+| D8 | Interaction of RBAC and capability in the navigation | `Forbidden` wins over every health state, so the UI is never an oracle for what exists | Kouncil's route-level roles hide entries outright; ADR-032 wants them visible-but-disabled, which only works if health is not leaked through them | UI-008, UI-010 |
+| D9 | ADR-012 assumed a dev proxy for `/api` | None needed: the gateway serves the linked assets itself, same origin | Kafbat runs a separate Vite dev server and a proxy; with no npm bundling in M0 that whole layer is unnecessary | INFRA-003, GW-008 |
+| D10 | Design tokens with no design import (B-001) | KUI owns the token set. Three-state theming (Kafbat has it, Kouncil has none), a ~40-token vocabulary instead of Kafbat's 1 600-line theme object, WCAG AA enforced by a test | `research/scala/frontend-research.md` §6 and §2: Kafbat's theme file is a maintenance smell; Kouncil has no dark mode at all. Neither is copied; both inform the size and shape of the set | UI-002; BLOCKERS B-001 closed as decided-around |
+| D11 | Spike outcomes (Netty SSE, ScalablyTyped, Playwright pin) | Each spike carries its own decision rule and fallback in the task spec, so a negative result changes the implementation without pausing the milestone | ADR-003 and ADR-025 already name the fallbacks; the plan binds them to a trigger | BUILD-006 |
+
+**Standing rule for the rest of the project.** A blocker owned outside the execution loop is
+not a reason to stop: propose the decision from the evidence available, take it, record it in
+the artifact that owns it, and leave a cheap reconciliation path if the external input ever
+arrives. B-001 (the design import) is the worked example — it is closed in `BLOCKERS.md` as
+*decided around*, and nothing in M0 or M1 waits on it. Nothing in M0 is gated on a person
+outside the execution loop.

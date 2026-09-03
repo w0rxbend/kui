@@ -30,15 +30,32 @@ kill the client and assert the server-side fiber is cancelled (observed by a `gu
 log line).
 
 Record: latency to first byte, whether events arrive individually or in a buffered burst,
-cancellation delay. If any of these fail, the finding is written up and ADR-003's documented
-fallback (http4s-ember) is scheduled as a new task before HTTP-004 starts.
+cancellation delay.
+
+**Decision rule, applied by the worker without escalation:**
+
+| Observation | Action |
+| --- | --- |
+| events flush individually, connection survives 10 min, cancellation within 1 s | keep Netty. No further work |
+| events flush but cancellation is slower than 5 s | keep Netty; HTTP-004 adds an explicit idle-timeout guard and the finding is noted in ADR-003's consequences |
+| buffering, dropped connections, or no cancellation at all | **switch to http4s-ember immediately**, in this task, by changing `KuiServer` only (ADR-003 pre-approved this and the swap is confined to one file); add `org.http4s::http4s-ember-server` and `tapir-http4s-server` to `DEPENDENCY_MATRIX.md`, and write the superseding note into ADR-003 |
+
+Both branches are already decided; the spike chooses between them, it does not open a
+discussion.
 
 ### Spike 2 — `mill-scalablytyped` on Mill 1.1.x (risk R-6)
 
 Question: does `lolgab/mill-scalablytyped` load and generate under Mill 1.1.8 and Scala 3.9?
 Method: generate a facade for `@codemirror/state` only, in a scratch module, and delete it.
-Record: yes/no, the plugin version tried, the error if it fails. A "no" costs nothing in M0
-(facades are M2+) but must be written down so ADR-025 can be revisited with evidence.
+Record: yes/no, the plugin version tried, the error if it fails.
+
+**Decision rule:** a "no" is not a blocker and does not go back to anyone. ADR-025 already
+specifies hand-written, vendored facades (~150 lines for CodeMirror, ~60 for uPlot);
+ScalablyTyped was only ever a labour-saving generator for the first draft. If it does not run
+on Mill 1.1.x, record that the facades will be written by hand in M2 from the upstream
+`.d.ts` files, remove the `mill-scalablytyped` row from `DEPENDENCY_MATRIX.md`, and note it in
+ADR-025's consequences. The competitors are no help here — Kafbat uses plain JS Ace and
+Kouncil loads Monaco as a prebuilt asset, so neither has a typed facade to borrow.
 
 ### Spike 3 — Playwright JVM version pin (risk R-10)
 
@@ -46,6 +63,11 @@ Question: which `com.microsoft.playwright:playwright` version is current, and wh
 revision does it download? Method: resolve the artifact, run `playwright install chromium`,
 record both versions. Deliverable: `Versions.playwright` and `Versions.playwrightBrowser` set
 in `build.mill`, plus the exact CI install command for BUILD-004's e2e job.
+
+**Decision rule:** take the newest stable release that resolves and runs the smoke navigation;
+pin it and its browser revision. Do not evaluate alternatives — ADR-018 already rejected
+TypeScript Playwright with reasons, and Kafbat's own e2e suite (`e2e-playwright/`) confirms
+Playwright is the right tool for this product; only the version number was open.
 
 ### Permanent deliverable — bundle-shape check task
 
@@ -92,7 +114,8 @@ $ ls docs/spikes/                              # three findings documents
 ```
 
 Each findings document follows PLAN Appendix D's short form: question, method, finding,
-consequence, confidence.
+**decision taken** (per the rules above), consequence, confidence. A findings document that
+ends in a question rather than a decision has not completed this task.
 
 ## Tests required
 
@@ -106,6 +129,6 @@ Not applicable.
 
 ## Docs to update
 
-`DEPENDENCY_MATRIX.md`: close the three "Open version questions" rows with the answers, or
-restate them with the new evidence. `TECH_DEBT.md`: a row only if a spike forces an accepted
-compromise.
+`DEPENDENCY_MATRIX.md`: close the three "Open version questions" rows with the decisions —
+closed, not restated. `TECH_DEBT.md`: a row only if a spike forced an accepted compromise.
+ADR-003 or ADR-025 gain a consequence note if their fallback was taken.

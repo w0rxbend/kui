@@ -131,7 +131,7 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 
 | Service | Key aggregates / value objects | Ports in `domain` | Adapters in `infrastructure` |
 | --- | --- | --- | --- |
-| cluster | `ClusterProfile` (config + resolved endpoints + security), `ClusterDescription`, `Broker`, `LogDir`, `ClusterFeature` set | `ClusterAdmin[F]`, `ClusterConfigStore[F]`, `ConnectivityProbe[F]` | kui-kafka admin adapter, YAML/K8s config store, probe clients |
+| cluster | `ClusterProfile` (config + resolved endpoints + security), `ClusterDescription`, `Broker`, `LogDir`, `ClusterFeature` set | `ClusterAdmin[F]`, `ClusterConfigStore[F]`, `ConnectivityProbe[F]` | kui-kafka admin adapter, Kafka `ConfigStore` adapter (file adapter for dev), probe clients |
 | topic | `Topic` (NonEmptyList[Partition], ISR ⊆ replicas), `TopicConfig`, `TopicAnalysis` | `TopicAdmin[F]`, `ClusterProfileSource[F]`, `TopicAnalysisPort[F]` | kui-kafka, cluster-service contract client, datasketches |
 | message | `BrowseRequest`, `SeekMode`, `PollingMode`, `OffsetRange`, `MaskingPolicy`, `TrackQuery` | `MessageBrowsePort[F]`, `SerdeRegistry[F]`, `MessageFilterPort[F]`, `ClusterProfileSource[F]` | fs2-kafka consumer/producer, kui-serde, kui-filter (CEL) |
 | consumer | `ConsumerGroup`, `Member`, `PartitionLag` (`Option[Lag]` + anomaly flags), `ResetSpec` | `GroupAdmin[F]`, `ClusterProfileSource[F]` | kui-kafka |
@@ -170,7 +170,7 @@ the *shape*; exact signatures are finalized in the M0 tasks. Scala 3, opaque typ
 | `libs/observability` | otel4s bootstrap, log4cats structured logger with MDC bridge, Tapir interceptors, metric names | ADR-008, ADR-009 |
 | `libs/security-core` | `Principal`, `Rbac.decide`, `PrincipalCodec`, masking rule model. Pure; JVM/JS. | ADR-020, ADR-021, ADR-023 |
 | `libs/http` | Netty server setup, error interceptor, health/ready/capabilities endpoints, sttp client factory with failover/retry/circuit breaker/bulkhead, SSE helpers | ADR-003, ADR-037 |
-| `libs/config` | Ciris loaders, YAML + env mapping, `Secret[A]`, `ConfigStore[F]` port and file/K8s adapters | ADR-013, ADR-036 |
+| `libs/config` | Ciris loaders, YAML + env mapping, `Secret[A]`, `ConfigStore[F]` port with Kafka (default) and file adapters, `StoreRecord` envelope, AES-GCM envelope encryption | ADR-013, ADR-036, ADR-042 |
 | `libs/testkit` | Testcontainers topology, fake ports, ScalaCheck generators, Tapir stubs, golden files | ADR-018 |
 
 ### 4.1 `kui-kernel` shared-kernel types
@@ -538,7 +538,7 @@ loops run under a `Supervisor`, are cancellable and emit `kui.cache.*` and
 
 | Service | Snapshot / cache | Refresh | Invalidation | Staleness contract |
 | --- | --- | --- | --- | --- |
-| cluster | `ClusterProfile` registry (from config store); `ClusterDescription`, quorum, brokers, log dirs, capability set per cluster | metadata every 30 s; capabilities every 1 h and on reconnect | config apply; `POST /clusters/{id}/refresh` | reads ≤ 30 s old; profile version bump propagates within one poll interval |
+| cluster | `ClusterProfile` registry (replayed from `__kui_config`, then tail-following); `ClusterDescription`, quorum, brokers, log dirs, capability set per cluster | metadata every 30 s; capabilities every 1 h and on reconnect | a new `__kui_config` record for `cluster/<id>`; `POST /clusters/{id}/refresh` | reads ≤ 30 s old; profile version bump propagates within one poll interval; store unreachable means last known state plus `Degraded` |
 | topic | per-cluster topic snapshot: descriptions, configs, begin/end offsets, name index | every 30 s (chunked admin calls) | partial update after create/update/delete of a topic; refresh endpoint | list/search ≤ 30 s old; detail pages re-describe the one topic live |
 | message | serde registry per cluster (`Resource`, rebuilt on profile change); compiled CEL filters (content-hash id, bounded, TTL 1 h); SR schema-by-id cache (size-bounded), subjects (TTL 60 s) | on demand | profile change | payloads are never cached |
 | consumer | per-cluster group snapshot: listings, descriptions, committed offsets; end offsets for committed partitions via its own `listOffsets` (no cross-service call) | every 30 s (50 groups × 4 parallel) | after reset/delete of a group | lag on the list page ≤ 30 s old; group detail page computes live |
@@ -547,7 +547,7 @@ loops run under a `Supervisor`, are cancellable and emit `kui.cache.*` and
 | connect | per-connect state: connectors + statuses via `?expand=status&expand=info` | every 30 s | after any action | list ≤ 30 s old; detail live |
 | ksql | query pipes (TTL 1 min, single use) | — | — | — |
 | metrics | scraped broker metrics, inferred metrics from topic/consumer snapshot endpoints | every 30 s | — | `/metrics` exposition is the last scrape |
-| identity | `RbacPolicy` (compiled once, hot-reloaded from file watcher/ConfigStore), sessions, OIDC state entries (5 min, single use) | on change | file change, session expiry | — |
+| identity | `RbacPolicy` (compiled once, hot-reloaded from the `rbac/roles` key of `__kui_config` or from a file watcher), sessions, OIDC state entries (5 min, single use) | on change | new store record, file change, session expiry | store unreachable means last known policy plus `Degraded`; writes rejected |
 | gateway | capability registry; `sessionId → Principal` (TTL 30 s); OpenAPI merge | readiness every 10 s | logout, role reload event | — |
 
 Cache discipline (PLAN §29): TTL, invalidation trigger, bound, hit/miss metrics and a named
@@ -565,8 +565,9 @@ files → defaults, with Kafbat-compatible env keys mapped explicitly. Ownership
 
 | Section | Owner (single writer) | Readers | Distribution |
 | --- | --- | --- | --- |
-| `kui.clusters[]` | cluster-service (`ClusterConfigStore`) | every Kafka-facing service via `GET /internal/v1/clusters/{id}/profile` (ETag = profile version) + `GET /internal/v1/clusters/stream` (SSE change notifications, cached fallback = last known profile) | no restart; services rebuild clients/serdes when the version changes |
-| `kui.auth`, `kui.rbac` | identity-service (`RolePolicySource`, file watcher or store) | gateway (`/auth/me`, role reload SSE) | no restart for roles; auth adapter changes need an identity-service restart (documented) |
+| `kui.clusters[]` | cluster-service (`ClusterConfigStore`, backed by the `cluster/<id>` keys of `__kui_config`) | every Kafka-facing service via `GET /internal/v1/clusters/{id}/profile` (ETag = profile version) + `GET /internal/v1/clusters/stream` (SSE change notifications, cached fallback = last known profile) | no restart; services rebuild clients/serdes when the version changes |
+| `kui.auth`, `kui.rbac` | identity-service (`RolePolicySource`, reading `rbac/roles` from `__kui_config`, or a file watcher) | gateway (`/auth/me`, role reload SSE) | no restart for roles; auth adapter changes need an identity-service restart (documented) |
+| `kui.store.*` | static only (file/env), never in the store | the two store-connected services | restart of that process (§10.1) |
 | `kui.gateway`, `kui.server`, `kui.telemetry` | each process | — | restart of that process |
 
 `ClusterProfile` is a value object of the Cluster Registry context and the *published
@@ -581,8 +582,115 @@ The config wizard (validate/apply/test-connection, cluster CRUD, related file up
 cluster-service use case with a throwaway client built from the candidate profile; remote
 validation of arbitrary URLs is gated by `kui.clusters.remoteValidation.enabled` and an
 allow-list (SSRF, §14). Concurrent writers are rejected with `KUI-CONFIG-VERSION-CONFLICT`
-(optimistic version in the stored YAML). The `ConfigStore` port has file and Kubernetes
-Secret/ConfigMap adapters; no relational database is introduced (ADR-036).
+(optimistic `version` in the record envelope, §10.1). The `ConfigStore` port has a Kafka
+adapter (default) and a file adapter (dev, bootstrap, read-only); no relational database is
+introduced (ADR-036, ADR-042).
+
+### 10.1 The metadata store: internal compacted Kafka topics
+
+KUI keeps its own metadata in Kafka (ADR-042). There is no relational database and no shared
+filesystem. The topics live on a **store cluster** configured statically under
+`kui.store.kafka.*`, because the connection strings of the managed clusters are themselves in
+the store and cannot bootstrap it. The store cluster may be one of the managed clusters or a
+separate one.
+
+**Bootstrap order** is one-directional and must not be reordered:
+
+```
+static config (Ciris: CLI -> env -> YAML -> defaults)
+  -> store Kafka client (kui.store.kafka.*)
+    -> replay __kui_config to the end of the log
+      -> managed clusters known -> admin clients built -> service reports Ready
+```
+
+**Topics** (prefix `kui.store.topicPrefix`, default `__kui_`):
+
+| Topic | Shape | Key | Value |
+| --- | --- | --- | --- |
+| `__kui_config` | compacted, **single partition**, RF `kui.store.replicationFactor` (default 3; 1 in dev) | section path: `cluster/<clusterId>`, `settings/global`, `rbac/roles`, `masking/<clusterId>` | `StoreRecord` JSON (Circe, ADR-007) |
+| `__kui_files` | compacted, single partition, same RF | file id | binary payload in the same envelope, capped by `kui.store.maxFileBytes` (default 4 MiB) |
+| `__kui_audit` | **not** compacted, retention-based, partitioned by cluster id | cluster id | `AuditRecord` JSON (ADR-023) |
+
+Exact topic configuration, and the `max.message.bytes` implication of `__kui_files`, are in
+`docs/operations/metadata-store.md`. KUI creates missing topics at startup and validates
+existing ones; an existing topic with an incompatible `cleanup.policy`, partition count or
+`max.message.bytes` fails the service at startup with a message naming the topic, the setting,
+the expected value and the found value. It never silently rewrites operator topic settings.
+
+**Consistency.** A single partition gives total order. Each owning service replays the log into
+memory and then follows the tail, so every replica converges on the same state in the same
+order. Writes are produced with `acks=all` and `enable.idempotence=true`, and the writer waits
+to read its own record back from the tail before acknowledging the HTTP call, which is what
+gives an operator read-your-writes: the `PUT` that returns 200 is already visible to every
+replica that has caught up. Each entry carries a `version`; a writer produces only when its base
+version matches the state it replayed, and after read-back it checks whether another record for
+the same key with the same base version landed first. If one did, the later writer lost the race
+and fails with `KUI-CONFIG-VERSION-CONFLICT` (ADR-034). Deletion is a tombstone (null value).
+This is correct with several replicas of the same service because the partition, not a lock, is
+the serialization point. ADR-036's single-writer-per-section ownership still holds: it keeps two
+*contexts* from writing one section, and the version check keeps two *processes* from clobbering
+each other.
+
+**Secrets at rest.** Records are readable by anyone with read access to the topic, so every
+secret field (SASL passwords, JAAS material, keystore and truststore bytes, OAuth client
+secrets) is encrypted with AES-GCM before it is produced, under a key from
+`kui.store.encryptionKey` (env or mounted secret, never in the store). The envelope carries the
+`keyId` so keys can be rotated by writing new records under a new id while old records stay
+readable (`research/scala/security-research.md` §5). Restrictive ACLs on `__kui_*` are an
+operator requirement, documented in `docs/operations/metadata-store.md`.
+
+**Who reads the topic.** The **cluster** and **identity** services connect to the store
+directly, because they own sections and must write them. Every other Kafka-facing service
+(topic, message, consumer, schema, connect, ksql, security, metrics) receives the resolved,
+redacted `ClusterProfile` over the internal contract instead: they need the profile, not the raw
+sections, they must work without store-cluster credentials, and one extra hop is cheaper than
+nine more Kafka connections and nine more holders of the encryption key. The **gateway never
+touches the store** (ADR-040).
+
+**Failure behavior.** When the store cluster is unreachable, the owning service keeps serving
+from its last replayed state, reports the affected capability as `Degraded(reason)` into the
+fold (ADR-039) so responses carry the degraded envelope (§6), and rejects writes. It never
+starts empty on a replay failure and it never falls back to the file adapter silently.
+
+```scala
+package kui.config.store
+
+/** One record in the metadata log. `version` is the optimistic-concurrency counter for `key`. */
+final case class StoreRecord(
+    envelopeVersion: Int,           // format version of this envelope itself, currently 1
+    key: StoreKey,                  // e.g. StoreKey("cluster/prod-eu")
+    version: Long,                  // 1 for the first record of a key, +1 per successful write
+    updatedAt: Instant,
+    updatedBy: Option[String],      // principal id, when the write came from the UI
+    payload: Json,                  // section body; secret fields replaced by EncryptedField
+    encryption: Option[EncryptionInfo]
+)
+
+final case class EncryptionInfo(keyId: String, algorithm: String) // algorithm = "AES-GCM-256"
+final case class EncryptedField(keyId: String, nonce: Base64, ciphertext: Base64)
+
+/** The port from ADR-036, unchanged in shape. Adapters: Kafka (default), file (dev/read-only). */
+trait ConfigStore[F[_]]:
+  def get(key: StoreKey): F[Option[StoreRecord]]
+  def list(prefix: String): F[List[StoreRecord]]
+  /** Fails with KuiError.VersionConflict when `expected` is not the current version. */
+  def put(key: StoreKey, expected: Option[Long], payload: Json): F[Either[KuiError, StoreRecord]]
+  def delete(key: StoreKey, expected: Long): F[Either[KuiError, Unit]]
+  /** Every change after the initial replay, in log order. Never completes. */
+  def changes: fs2.Stream[F, StoreRecord]
+  def health: F[StoreHealth]
+
+enum StoreHealth { case Ready(lastOffset: Long); case Degraded(reason: String, since: Instant) }
+
+object KafkaConfigStore:
+  /** Creates or validates the topics, replays the log, then follows the tail.
+    * The Resource does not complete until the initial replay reaches the end offset. */
+  def resource[F[_]: Async](
+      settings: StoreSettings,     // bootstrap, security, prefix, RF, size caps
+      crypto: FieldCrypto[F],      // AES-GCM over the fields a codec marks secret
+      clock: Clock[F]
+  ): Resource[F, ConfigStore[F]]
+```
 
 ## 11. All-in-one composition
 
@@ -596,8 +704,9 @@ Netty server, one otel4s provider:
 - `PrincipalCodec` is `PrincipalCodec.inProcess` (no signing); `Principal` is passed as a
   value. `kui.gateway.principalKey` is ignored with a warning.
 - Services do not open listeners of their own; only the gateway port is exposed.
-- Session store, `RbacPolicy`, audit sink, config store and capability registry are single
-  in-memory instances.
+- Session store, `RbacPolicy` and the capability registry are single in-memory instances. The
+  config store and audit sink are the real Kafka adapters pointed at the single dev broker when
+  `kui.store.kafka.*` is set, and the file adapter otherwise; all-in-one works either way (§10.1).
 - Fault isolation still holds at the code level: a failing use case returns a `KuiError`
   that the capability registry records exactly as it would from a remote 5xx.
 
@@ -657,6 +766,12 @@ Boundary rules:
 - Secrets: `Secret[A]` everywhere; `GET /api/v1/config` returns a redacted view derived
   from the same model; JAAS strings are rendered from typed fields with escaping; nothing
   secret appears in logs, traces, errors or the frontend.
+- Metadata store: every secret field is AES-GCM encrypted before it is produced to `__kui_*`
+  (§10.1, ADR-042), because a Kafka record is readable by anyone with topic read access. The
+  encryption key comes from `kui.store.encryptionKey` and is never written to the store.
+  Operators must restrict `__kui_*` to KUI's own principal; guidance is in
+  `docs/operations/metadata-store.md`, and the default RBAC policy keeps its deny rule on the
+  audit topic (ADR-023).
 - Outbound URLs (registry, connect, ksql, Prometheus, JMX, OIDC, LDAP) are config-time
   inputs: strict URL type, `http`/`https` only, deny link-local and metadata ranges by
   default, no cross-host redirects, upstream bodies never echoed into error messages.

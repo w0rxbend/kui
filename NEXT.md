@@ -30,6 +30,11 @@ None in execution. Current grooming focus: architecture (G3) and the M0 technica
   in every research report's "Decision candidates" section.
 - G3 merge decisions DR-20 (security service into cluster service?) and DR-21 (config service
   into gateway?) need an ADR each before M1 / M8 respectively.
+- G3 follow-up done out of order, 2026-09-03: **ADR-042** (KUI metadata lives in Kafka, in
+  internal compacted `__kui_*` topics) is Accepted. It amends ADR-036 and ADR-023, closes
+  TD-014, rewrites `docs/FEATURE_MATRIX.md` OT-004 and moves it from M6 to M1, and adds
+  `docs/operations/metadata-store.md`. M0 is unchanged and ships the static configuration
+  only; the `ConfigStore[F]` port and both its adapters are M1 work.
 - G5 `docs/plans/M0/DEVPLAN.md` and `docs/plans/M0/tasks/<ID>.md`: not started.
 - G6 gate sign-off in `STATUS.md`: not started.
 - PLAN.md amendments listed in `STATUS.md` (§16.5 wording, §45 M3/M5 notes, §9A corrections):

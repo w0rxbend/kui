@@ -15,12 +15,15 @@ than from re-reading diffs.
 ## Scope
 
 1. `docs/FEATURE_MATRIX.md`: set the M0 rows to their true state —
-   KU-001 … KU-009, MT-007, CW-001, NX-005, NX-006, OT-005 → `DONE`;
-   **NX-007 → `PARTIAL`** with a note naming UI-013 and TD-007.
-2. `TECH_DEBT.md`: update TD-007 (placeholder tokens shipped) and TD-002/TD-003 if M0 changed
-   their situation; add a row for any compromise an M0 task accepted (each Implementation
-   Report that says "deviation" must map to a row or to nothing at all).
-3. `BLOCKERS.md`: annotate B-001 as "does not block M0 completion; tracked by UI-013".
+   KU-001 … KU-009, MT-007, CW-001, NX-005, NX-006, **NX-007** and OT-005 → `DONE`.
+2. `TECH_DEBT.md`: rewrite TD-007 to the decision UI-002 took (KUI owns its token set; the
+   remaining debt is optional reconciliation), update TD-002/TD-003 if M0 changed their
+   situation, and add a row for any compromise an M0 task accepted (each Implementation Report
+   that says "deviation" must map to a row or to nothing at all).
+3. `BLOCKERS.md`: move B-001 to **Resolved**, with the note "decided around: KUI owns its
+   design token set (UI-002); reconciliation with an import is optional (UI-013)". A blocker
+   owned outside the execution loop is closed by deciding around it, not by waiting — if a
+   later blocker appears, the same rule applies: propose the decision, take it, record it.
 4. `ARCHITECTURE.md`: apply the deltas the tasks were told to record — §4.5 precedence table,
    §4.6 link, §5 correlation-id rule and prefix rewrite, §6 stream-has-no-cursor note, §7
    golden wire format, §11 in-process caveat, §12 navigation implemented, §15 interceptor.

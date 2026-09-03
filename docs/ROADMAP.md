@@ -19,7 +19,11 @@ later may be able to take that away.**
    eleven times.
 2. **M1 is connectivity only.** Typed cluster security config, the wrapped `AdminClient`, and
    the first Testcontainers suite are the foundation every later service reuses. Brokers and
-   the dashboard are the smallest real screens that exercise them.
+   the dashboard are the smallest real screens that exercise them. M1 also brings the
+   Kafka-backed metadata store (ADR-042, OT-004): the moment KUI talks to a real Kafka is the
+   moment a cluster can be registered at runtime, and there is no point building cluster
+   registration twice. The store's UI-managed consumers (roles in M6, the wizard in M8) then
+   land on a store that already exists and is already tested.
 3. **Read before write.** M2 (topics, read-only) and M3 (messages) deliver the two screens
    operators open most, before any mutating operation exists. Mutations arrive in M5 together
    with read-only mode and audit, so no destructive action ever ships without its safety net.
@@ -95,15 +99,19 @@ later may be able to take that away.**
 - **User value.** Multi-cluster dashboard, broker list, broker configs and log dirs against
   any SASL/SSL-secured cluster, with a cluster being down never taking the page down.
 - **Scope.** CL-001 CL-002 CL-003 CL-005 CL-007 CL-009, BR-001 BR-002 BR-005, PA-003,
-  AU-005 (theme, timezone; no logout yet), OT-001 OT-003, KU-010 KU-011 (dashboard) KU-012
-  KU-033 (first scenario).
-  Modules: `libs/{kafka,kafka-auth}`, `services/cluster` complete, `frontend/ui-clusters`
-  fleshed out from its M0 stub.
+  AU-005 (theme, timezone; no logout yet), OT-001 OT-003, OT-004 OT-007 OT-008 OT-009 OT-010
+  (the Kafka-backed metadata store and its operator documentation), KU-010 KU-011 (dashboard)
+  KU-012 KU-033 (first scenario).
+  Modules: `libs/{kafka,kafka-auth}`, the Kafka `ConfigStore` adapter in `libs/config`
+  (`services/cluster` and, from M6, `services/identity` are its only clients),
+  `services/cluster` complete, `frontend/ui-clusters` fleshed out from its M0 stub.
   ADRs: 014 (schema registry client strategy, needed by M3 serdes), 022 (typed cluster auth),
-  030 (minimum broker version), 031 (cluster id). The service-merge questions DR-20 and DR-21
-  were settled by ADR-004 before M1: security stays separate, config is dissolved.
+  030 (minimum broker version), 031 (cluster id), 042 (metadata store). The service-merge
+  questions DR-20 and DR-21 were settled by ADR-004 before M1: security stays separate, config
+  is dissolved.
 - **Non-goals.** No topics, messages, consumers. No broker config edits. No metrics columns
-  (bytes in/out render as `—`). No login.
+  (bytes in/out render as `—`). No login. No cluster CRUD *screen* (that is CW-005 in M8): M1
+  builds the store and the `ConfigStore`-backed registry underneath it, not the wizard UI.
 - **Exit criteria.**
   - Testcontainers suite: PLAINTEXT, SASL_PLAINTEXT/SCRAM and SSL clusters; each yields the
     same broker list, configs and log dirs through the contract client.
@@ -115,11 +123,31 @@ later may be able to take that away.**
     clusters' cached rows (greyed, timestamped) usable.
   - Configuration with an unknown key, a missing secret, or an invalid URL fails at startup
     with all errors accumulated in one message.
+  - Metadata store: with `kui.store.kafka.*` pointed at a Testcontainers broker, the service
+    creates `__kui_config` and `__kui_files`, replays them at startup and serves clusters from
+    the store; a pre-existing `__kui_config` with `cleanup.policy=delete` fails startup with a
+    message naming the topic, the setting, the expected value and the found value.
+  - Two cluster-service replicas writing the same cluster key concurrently: one succeeds, the
+    other gets `KUI-CONFIG-VERSION-CONFLICT`; both converge on the winner's record.
+  - A write returns 200 only after the writer has read its own record back from the log tail.
+  - Secret fields of a stored cluster are unreadable in the raw topic record: a console-consumer
+    dump of `__kui_config` contains no plaintext password and no JAAS string.
+  - With `kui.store.kafka.*` unset, the file adapter is used, the store-backed write endpoints
+    report `NotConfigured`, and everything else in M1 still passes.
+  - Store cluster stopped mid-run: clusters keep resolving from last known state, the affected
+    capability reports `Degraded` with a reason, and writes are rejected rather than lost.
 - **Risks.** JAAS generation for every mechanism (GSSAPI, OAUTHBEARER, AWS MSK IAM, Azure)
   cannot all be integration-tested locally; PLAIN, SCRAM and SSL are tested, the rest are
-  unit-tested against known-good property strings and flagged in docs.
+  unit-tested against known-good property strings and flagged in docs. The metadata store adds
+  a startup ordering the product did not have before (static config → store client → replay →
+  clusters known): a bug there makes the service hang rather than fail, so the replay has an
+  explicit timeout and a named error. Losing `kui.store.encryptionKey` makes stored secrets
+  unrecoverable; `docs/operations/metadata-store.md` says so in the first paragraph of the key
+  section and the file adapter remains a supported way to run without the risk.
 - **Introduces.** Service: `cluster` (complete). Microfrontend: `ui-clusters` (real screens;
-  the stub is M0). Libraries: `kafka`, `kafka-auth`.
+  the stub is M0). Libraries: `kafka`, `kafka-auth`, and the Kafka `ConfigStore` adapter in
+  `config`. Operational surface: the `__kui_*` topics and
+  `docs/operations/metadata-store.md`.
 
 ### M2 — Topic explorer (read-only)
 
@@ -231,12 +259,15 @@ later may be able to take that away.**
 - **Goal.** Who the user is and what they may do, enforced at the edge and re-checked in
   services.
 - **User value.** Login form, OIDC providers, LDAP/AD; roles from file and from a UI-managed
-  store; buttons and routes gated with a merged permission/capability tooltip; RBAC view,
+  store (the `__kui_config` topic from M1); buttons and routes gated with a merged
+  permission/capability tooltip; RBAC view,
   audit viewer with real principals, role-aware masking policies, first-launch onboarding.
-- **Scope.** AU-001 … AU-004, RB-001 … RB-004, AD-002, DM-002, CW-006, NX-001, OT-004,
+- **Scope.** AU-001 … AU-004, RB-001 … RB-004, AD-002, DM-002, CW-006, NX-001,
   KU-017 … KU-021.
-  Modules: `services/identity`, `frontend/ui-admin`, `libs/security-core` complete, the
-  persistence adapter of OT-004. ADRs: 015 (application auth), 019 (session and CSRF),
+  Modules: `services/identity`, `frontend/ui-admin`, `libs/security-core` complete. The
+  metadata store itself is not here: OT-004 shipped in M1 (ADR-042), so M6 only adds the
+  identity service as its second client, writing the `rbac/roles` and `masking/<clusterId>`
+  keys. ADRs: 015 (application auth), 019 (session and CSRF),
   020 (signed principal), 021 (RBAC), 023 (audit and masking).
   Threat model written; `kui.internal.events` research (PLAN §45) done here.
 - **Non-goals.** Bearer-token access is P2 and may slip. SAML/CAS out of scope.
@@ -253,8 +284,10 @@ later may be able to take that away.**
     the identity fallback panel (Core tier behavior per PLAN §15).
   - Permission change pushes a forced logout notification (NX-001).
 - **Risks.** Two role sources (file and UI store) need a documented merge policy (file wins,
-  UI adds). Persistence introduces the first stateful dependency: file-only mode must remain
-  the default and be tested.
+  UI adds). The identity service becomes the second writer to `__kui_config`; ADR-036's
+  single-writer-per-section ownership is what keeps it from colliding with the cluster service,
+  and a test must assert that identity never writes a `cluster/*` key. File-only mode must
+  remain a supported way to run and be tested.
 - **Introduces.** Service: `identity`. Microfrontend: `ui-admin`.
 
 ### M7 — Ecosystem plugins

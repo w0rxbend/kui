@@ -46,6 +46,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR (PLAN §39
 | [ADR-039](docs/adr/ADR-039-capability-fold.md) | Capability fold: inputs, precedence, debounce and what must not feed it | Accepted | 2026-09-03 |
 | [ADR-040](docs/adr/ADR-040-edge-header-policy.md) | Edge header policy: the gateway generates correlation ids and trusts no inbound `X-Kui-*` | Accepted | 2026-09-03 |
 | [ADR-041](docs/adr/ADR-041-layering-rules-machine-enforced.md) | Layering rules are machine-enforced, and `application` never depends on the wire | Accepted | 2026-09-03 |
+| [ADR-042](docs/adr/ADR-042-kafka-backed-metadata-store.md) | KUI metadata lives in Kafka, in internal compacted topics | Accepted | 2026-09-03 |
 
 ADR-039 … ADR-041 were written at the G6 grooming gate (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded
@@ -54,6 +55,12 @@ code and the `ErrorCode.description` field became **ADR-034 amendments 1 and 2**
 proxy-free dev loop and the static route patterns beside dynamic imports became **ADR-012
 amendments 1 and 2**; the `Forbidden` precedence rule and `Degraded(Starting)` became
 **ADR-032 amendments 1 and 2**.
+
+**ADR-042** (2026-09-03) settles the condition STATUS.md recorded at the G6 gate: KUI's own
+metadata lives in internal compacted Kafka topics, not in a relational database and not in a
+versioned YAML file. It amends **ADR-036** (store adapters and distribution) and clarifies
+**ADR-023** (the audit topic is the store's `__kui_audit`), closes `TECH_DEBT.md` TD-014, and
+replaces `docs/FEATURE_MATRIX.md` OT-004.
 
 ## Mapping from PLAN §43
 
@@ -69,8 +76,8 @@ were renumbered to ADR-019..025 above to avoid collisions.
 | MCP server library (andimiller/scala-mcp vs linkyard) | M9 scope; contracts must be stable first | M9 grooming |
 | Third-party frontend plugin SDK (Option C) | post-M8 | after M8 |
 | Web-component widget library (Shoelace) | design token import (Research Agent I) not delivered | after `research/design/` exists |
-| Shared session store adapter (Kafka compacted topic) | single gateway replica acceptable until M6 | M6 |
+| Shared session store adapter (Kafka compacted topic) | single gateway replica acceptable until M6; ADR-042 now fixes the shape it would take | M6 |
 | Internal events topic `kui.internal.events` | polling suffices for M0–M5 | M6 |
-| Persisting topic analysis results | memory only, as Kafbat | when a store need appears |
+| Persisting topic analysis results | memory only, as Kafbat; ADR-042 gives it a home if the need appears | when a store need appears |
 | `ui-clusters` page composition and feature-local state shape | one trivial page in M0; the pattern is worth deciding against a real screen | M2 grooming |
 | Whether `PLAN` §16.6 permits direct service→service `/internal/v1` calls (`ARCHITECTURE.md` §5 assumes it does; no ADR states it) | no service→service call exists before M1 | M1 grooming — see `STATUS.md` "Amendments to PLAN.md required" |

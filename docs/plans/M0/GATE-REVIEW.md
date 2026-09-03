@@ -55,7 +55,7 @@ build if not resolved; **minor** = wrong on paper, cheap to fix, no build conseq
 | F-02 | major | ADR refs | Seven ADRs cite a research-document *candidate* number in their Evidence section that was never renumbered, so each points at a real but unrelated ADR — e.g. the CSRF ADR cites "ADR-017 candidate", and ADR-017 is CEL smart filters. `DECISIONS.md` documents the renumbering that these bodies never applied. | `docs/adr/ADR-019:34`, `ADR-020:36`, `ADR-021:43`, `ADR-022:44`, `ADR-023:39`, `ADR-024:37`, `ADR-025:35`; `DECISIONS.md:49-52` | Fixed here — each now self-references, matching the convention ADR-011 and ADR-015 already used. |
 | F-03 | major | ADR refs | Five feature rows and three roadmap milestones cite ADR numbers from the same superseded scheme, mixing stale and correct numbers inside one table: CSS/facades cited as 019/020 instead of 024/025, typed cluster auth as 020 instead of 022, CSRF as 017 instead of 019, RBAC as 019 instead of 021, signed principal as 018 instead of 020. | `docs/ROADMAP.md:57-58, 95, 230`; `docs/FEATURE_MATRIX.md:50, 178, 204, 227, 339` | Fixed here. |
 | F-04 | major | services | `kui-config-service` exists in three incompatible states at once. ADR-004 and `ARCHITECTURE.md` §2.2 dissolve it into three ownerships; `docs/ROADMAP.md` M8 still introduces a service `config`; five feature rows still name `config` as an owner; and DR-21 still calls the question open, with a *fourth* answer (merge into the gateway). | `docs/adr/ADR-004:23`; `ARCHITECTURE.md:79`; `docs/ROADMAP.md:286, 304`; `docs/FEATURE_MATRIX.md:49, 214-216, 310, 390` | Fixed here — ADR-004 is authoritative; roadmap, owner columns and DR-21 now match it. |
-| F-05 | major | PLAN §3 | `docs/FEATURE_MATRIX.md` OT-004 schedules one PostgreSQL instance owned jointly by `config` and `identity`. PLAN §3 forbids a shared database outright, and ADR-036 rejects a relational store at all. Three documents disagree about something PLAN calls non-negotiable. | `docs/FEATURE_MATRIX.md:311`; `PLAN.md:75`; `ARCHITECTURE.md:561`; `docs/adr/ADR-036` | **Accepted risk for M0** (P1, M6). Row annotated with the conflict and the two ways out; `TECH_DEBT.md` **TD-014** opened with an exit condition before M6 grooming closes. |
+| F-05 | major | PLAN §3 | `docs/FEATURE_MATRIX.md` OT-004 schedules one PostgreSQL instance owned jointly by `config` and `identity`. PLAN §3 forbids a shared database outright, and ADR-036 rejects a relational store at all. Three documents disagree about something PLAN calls non-negotiable. | `docs/FEATURE_MATRIX.md:311`; `PLAN.md:75`; `ARCHITECTURE.md:561`; `docs/adr/ADR-036` | **Accepted risk for M0** (P1, M6). Row annotated with the conflict and the two ways out; `TECH_DEBT.md` **TD-014** opened with an exit condition before M6 grooming closes. **Resolved 2026-09-03 by [ADR-042](../../adr/ADR-042-kafka-backed-metadata-store.md)**: metadata lives in internal compacted Kafka topics, OT-004 rewritten and moved to M1, TD-014 closed. |
 | F-06 | major | PLAN §16.6 | `ARCHITECTURE.md` §5 permits direct service→service calls on `/internal/v1` (every Kafka-facing service → cluster-service; metrics → topic/consumer snapshots). PLAN §16.6 says services never call each other "except through the gateway's contracts". `ARCHITECTURE.md` reads that as "the gateway-*visible* contracts" and never records the reinterpretation. PLAN §3's own wording ("all inter-service traffic uses the published Tapir contract of the callee") is satisfied either way, so this is a §16.6 wording question, not a §3 violation. | `ARCHITECTURE.md:421-424, 544`; `PLAN.md:426-428`; `docs/domain/context-map.md:36` | **Accepted risk for M0** — no service→service call exists before M1. Added to `STATUS.md` "Amendments to PLAN.md required" and to `DECISIONS.md` "not yet taken"; must be settled in M1 grooming. |
 | F-07 | major | task order | `DEVPLAN.md` §6.2 listed CFG-002 before OBS-001, which CFG-002 depends on — the only forward reference in the table, and one that would leave a worker following the list unable to start. Two task specs also declared dependencies the DEVPLAN table dropped: HTTP-004 on BUILD-006, UI-013 on BLOCKERS B-001. | `docs/plans/M0/DEVPLAN.md` §6.2; `docs/plans/M0/tasks/HTTP-004.md:9`; `docs/plans/M0/tasks/UI-013.md:8-9` | Fixed here. The table is now a verified topological order: no task precedes a dependency. |
 | F-08 | major | error codes | `HTTP-001` left an unresolved deliberation in its acceptance table, containing the same error code spelled two ways — `KUI-NOT-FOUND-ROUTE` in the body and `KUI-ROUTE-NOT-FOUND` in the decision clause — with the reasoning that produced it still on the page. Only the second spelling matches the `KUI-<AREA>-<NAME>` convention. Separately, `KUI-CURSOR-TOO-LARGE` is used by ADR-026 and by TD-005 but appears in no code table and no enum. | `docs/plans/M0/tasks/HTTP-001.md:113, 120`; `docs/adr/ADR-026:42`; `docs/adr/ADR-034:21-28` | **ADR-034 amendment 1** + fixed here. Both codes are now in ADR-034's table and in the `KERN-002` enum. |
@@ -207,3 +207,37 @@ Conditions, none of which gate the first commit:
 
 Re-review is not required. Findings that surface during implementation follow the normal ADR
 route (`PLAN.md` §39): new evidence, a superseding ADR, a row in `TECH_DEBT.md`.
+
+---
+
+## Addendum — 2026-09-03, after the gate
+
+**F-14 is closed, not accepted.** The finding recorded the design-token exit criterion as only
+partially satisfiable because BLOCKERS B-001 (the Claude Design import) is owned outside the
+execution loop, and it accepted `NX-007 = PARTIAL` as the plan's own position.
+
+That acceptance has been replaced by a decision, on the principle that grooming must decide
+rather than wait: **KUI owns its design token set.** `docs/plans/M0/tasks/UI-002.md` now takes
+the decision explicitly, from the competitor evidence already gathered — Kafbat's three-state
+theming and ~1 600-line component-scoped `theme.ts` (adopted in spirit, rejected in shape) and
+Kouncil's single palette with no dark mode (rejected) — yielding ~40 semantic CSS custom
+properties, no component-scoped tokens, provenance comments per value, and WCAG AA enforced by
+`ContrastSuite`. Neither reference enforces contrast; KUI does.
+
+Consequences applied:
+
+| Artifact | Change |
+| --- | --- |
+| `docs/plans/M0/tasks/UI-002.md` | Retitled "KUI design tokens"; carries the decision table and its evidence; `PLACEHOLDER` markers replaced by provenance comments |
+| `docs/plans/M0/tasks/UI-013.md` | Demoted from blocked follow-up to optional, unscheduled reconciliation; a WCAG failure in an import is adjusted, not adopted |
+| `docs/plans/M0/DEVPLAN.md` | R-1 rewritten as "do not wait"; §9.7 sets NX-007 `DONE`; §9.9 closes B-001; new §10 indexes every decision taken without escalation |
+| `BLOCKERS.md` | B-001 moved to **Resolved** — "decided around, not waited on" |
+| `TECH_DEBT.md` | TD-007 rewritten: the debt is now the optional reconciliation, not "placeholders pending an import"; the Shoelace half is closed by ADR-024 |
+| `docs/FEATURE_MATRIX.md` | NX-007's note points at UI-002 instead of B-001 |
+| `docs/plans/M0/tasks/BUILD-006.md` | Each of the three spikes now carries its own decision rule and pre-approved fallback, so a negative result changes the implementation without pausing the milestone |
+| `docs/plans/M0/tasks/INFRA-004.md` | Records the standing rule: a blocker owned outside the loop is closed by deciding around it |
+
+No other finding is affected. F-05 and F-06 remain accepted risks with their recorded exit
+conditions, both of which fall inside M1 grooming and neither of which requires input from
+outside the execution loop to settle.
+
