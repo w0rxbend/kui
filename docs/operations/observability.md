@@ -70,6 +70,85 @@ resources. They include **every** MDC key rather than listing the ones they know
 list here would mean adding a key in Scala and forgetting it in the XML, and the field would
 then be silently missing in production.
 
+## The metrics
+
+Every metric KUI emits is in this table. The names are constants in
+`libs/observability`'s `MetricNames`, and `MetricNamesSuite` asserts the list against this
+document's source (PLAN §30 plus `ARCHITECTURE.md` §13), so the code and the plan cannot
+drift apart.
+
+"Live from" is when the metric starts being *emitted*. Every name is declared from M0, so a
+later milestone cannot accidentally reuse one for something else.
+
+| Metric | Labels | Live from | What it tells you |
+| --- | --- | --- | --- |
+| `kui.http.server.duration` | `service`, `route`, `status` | M0 | How long KUI took to answer, in seconds. The one metric that answers "is KUI slow". |
+| `kui.upstream.duration` | `service`, `upstream`, `outcome` | M0 | How long a call to another system took, and how it ended. |
+| `kui.upstream.circuit.state` | `upstream` | M0 | Whether an upstream's circuit breaker is closed, open or half-open. |
+| `kui.kafka.admin.duration` | `cluster`, `operation`, `outcome` | M1 | How long an admin call to a broker took. |
+| `kui.kafka.consume.records` | `cluster`, `topic` | M3 | Records read while browsing messages. |
+| `kui.kafka.consume.bytes` | `cluster`, `topic` | M3 | Bytes read while browsing messages. |
+| `kui.cache.hits` | `cache` | M1 | Cache hits, by cache. |
+| `kui.cache.misses` | `cache` | M1 | Cache misses, by cache. |
+| `kui.capability.state` | `service`, `cluster`, `state` | M0 | What the UI is allowed to show, per service and cluster. |
+| `kui.stream.events` | `service`, `stream`, `event` | M0 | Events pushed down an open stream, by event name. |
+| `kui.stream.active` | `service`, `stream` | M0 | Open streams. A gauge that never returns to zero is a leak. |
+| `kui.cursor.rejected` | `reason` | M3 | Paging cursors refused, by why. |
+| `kui.principal.rejected` | `reason` | M0 | Signed principal headers refused, by why. |
+| `kui.config.version` | `section` | M1 | The version of each configuration section in use. |
+
+### Reading `outcome`
+
+`kui.upstream.duration` groups by outcome rather than by HTTP status, because these six lead
+to six different actions:
+
+| `outcome` | What happened | Where to look |
+| --- | --- | --- |
+| `success` | 2xx or 3xx | — |
+| `client_error` | 4xx | KUI sent something the upstream did not accept — usually configuration |
+| `server_error` | 5xx | the upstream is unwell |
+| `timeout` | KUI gave up waiting | the upstream is slow, or the configured timeout is too tight |
+| `circuit_open` | KUI did not even try | the breaker is open; see below |
+| `unreachable` | no connection | DNS, network policy, or the upstream is down |
+
+A dashboard grouped by status cannot tell `timeout` from `unreachable`, and those have
+different causes and different fixes.
+
+### What an open circuit looks like
+
+When an upstream fails `failureThreshold` times in a row, KUI stops calling it for
+`resetTimeout` and then lets one probe through. While that is happening:
+
+- `kui.upstream.circuit.state{upstream}` is 1 (open) or 2 (half-open) rather than 0;
+- `kui.upstream.duration{outcome="circuit_open"}` keeps counting, so the calls that were
+  refused are visible as data rather than as an absence of data;
+- exactly **one** INFO log line is written per transition, naming the upstream and the last
+  error. There is deliberately no log line per failed call: a dead upstream that logs on
+  every attempt floods the log exactly when you most need to read it;
+- the capability that depends on that upstream is reported as degraded, which is what greys
+  the corresponding part of the UI out instead of letting a user click into an error.
+
+### Labels never carry user data
+
+A route label is the path *template* — `/clusters/{clusterId}/topics` — and never the actual
+path. A label whose values multiply (a cluster id, a topic name, a URL) turns one metric into
+thousands of time series, which is a well-known way to take a monitoring system down. A topic
+name is acceptable where it is deliberately chosen and bounded, such as
+`kui.kafka.consume.*`; a message payload never is.
+
+## Every endpoint is traced, and nobody instruments one
+
+Spans are named `kui.<context>.<operation>` — `kui.topic.list` — derived from the endpoint's
+own operation id, the same name the generated OpenAPI document uses. An endpoint that
+declares no operation id falls back to `GET /clusters/{clusterId}/topics`, which works but
+reads like a URL rather than like an operation. The fallback is a safety net, not a supported
+state: `KuiInterceptors.missingOperationIds` is the check each service runs over its own
+endpoints so the fallback stays unused.
+
+Outbound calls get a client span of their own inside the request's span, with `traceparent`
+injected, so when a page is slow the trace shows whether the time went in KUI or in the
+system it called.
+
 ## Two Prometheus endpoints, and why they are different
 
 This confuses people, so it is worth being explicit (ADR-009):
