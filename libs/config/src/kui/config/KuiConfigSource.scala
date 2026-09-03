@@ -684,6 +684,7 @@ object KuiConfigSource {
       List("kui", "gateway", "principalKeys", "*", "key"),
       List("kui", "gateway", "principalKeys", "*", "notBefore"),
       List("kui", "gateway", "cors", "enabled"),
+      List("kui", "gateway", "cors", "origins"),
       List("kui", "gateway", "cors", "origins", "*"),
       List("kui", "auth", "type"),
       List("kui", "telemetry", "otlpEndpoint"),

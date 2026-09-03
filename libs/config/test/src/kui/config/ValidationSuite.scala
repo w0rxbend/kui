@@ -62,6 +62,25 @@ final class ValidationSuite extends KuiSuite {
     assert(!found.head.problem.contains("did you mean"), found.head.problem)
   }
 
+  test("anEmptyListIsAcceptedWhereItsElementsAreKnown") {
+    // The walk that finds unknown keys stops at an empty container, so `origins: []` arrives as
+    // the path `kui.gateway.cors.origins` rather than as any element under it. Declaring only
+    // `origins.*` therefore rejected an empty allow-list -- which is a legitimate setting, and the
+    // one the shipped Compose file uses, so the gateway refused to start with its own defaults.
+    val file = ConfigFixtures.yaml(
+      """kui:
+        |  gateway:
+        |    cors:
+        |      enabled: false
+        |      origins: []
+        |""".stripMargin
+    )
+
+    val loaded = load(List(file)).fold(errors => fail(errors.render), identity)
+
+    assertEquals(loaded.gateway.cors, CorsConfig(enabled = false, Nil))
+  }
+
   test("the placeholder sections for M1 and M6 are accepted but read no keys") {
     val file = ConfigFixtures.yaml(
       """kui:
