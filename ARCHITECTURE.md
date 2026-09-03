@@ -175,6 +175,8 @@ a forbidden edge, naming the rule, both modules and the reason the rule exists:
 | A5 | anything under `libs/` depending on a service or on the frontend |
 | A6 | a cross-compiled core module (`kernel`, `contracts-core`, `security-core`) depending on a JVM-only library in its shared source set |
 | A8 | the gateway depending on `libs/kafka`, `libs/kafka-auth`, fs2-kafka or kafka-clients |
+| A9 | a service's `application`, `contract` or `api` depending on that service's own `infrastructure` module |
+| A10 | `libs/kafka`, `libs/kafka-auth`, fs2-kafka or kafka-clients on the classpath of any module that is not a service's `infrastructure` or `app`, `libs/kafka*` itself, `libs/config` or `libs/testkit` |
 
 A3 is scoped to services that own a `domain`, and the scoping is mechanical: a service is
 domain-owning when a `services/<name>/domain` module is declared in the build. The gateway
@@ -182,6 +184,15 @@ declares none, so `services.gateway.application → libs/contracts-core` and `�
 legal — the wire is the gateway's subject matter (ADR-041 §1a). Its real constraints are A4 and
 A8 instead. For every other service the original rule stands: `application` owns the types it
 returns and the `api` layer maps them to wire DTOs.
+
+A9 and A10 arrived with M1's first adapter module (ADR-041 Amendment 3). A9 is the dependency rule
+pointing inward: a layer that can see an adapter will eventually call one, and the port becomes
+decoration. A10 is A8 generalised from the gateway to everyone — `org.apache.kafka` must be
+importable in exactly the places that adapt it. Its allow-list has five named entries plus any
+service's `infrastructure` and `app` modules, and `KafkaAllowListSuite` asserts each entry on its
+own so that a sixth has to be argued in the commit that adds it. `libs/config` is on the list
+because the Kafka metadata-store adapter lives there (ADR-042 §5); that exception is deliberate and
+named, which is what makes a second one visible.
 
 A7 (the shell holding no static reference to a feature) is not checkable from module metadata and
 is enforced by the bundle-shape assertion in BUILD-006 instead.

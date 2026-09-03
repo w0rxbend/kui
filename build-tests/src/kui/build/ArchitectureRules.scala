@@ -63,6 +63,31 @@ object ArchitectureRules {
 
   private val KafkaModules: Set[String] = Set("libs.kafka", "libs.kafkaAuth")
 
+  /** Modules that may hold a Kafka client, as roots: a module id equal to one of these, or beneath it, so
+    * `libs.kafka.test` is covered without being listed.
+    *
+    * Five entries, and a sixth has to be argued in the commit that adds it. That is the whole mechanism: the
+    * rule is the list, the list is short, and `KafkaAllowListSuite` asserts each entry on its own, so
+    * replacing the list wholesale is not something a green build can hide either.
+    *
+    * A service's `infrastructure` and `app` modules are allowed too, and are matched structurally rather than
+    * listed: the rule has to keep holding for the nine services M2–M8 add, without anyone remembering to
+    * extend a list, and both of those layers are adaptation or composition by definition.
+    */
+  private val KafkaAllowedRoots: Set[String] = Set(
+    // it *is* the Kafka adapter layer
+    "libs.kafka",
+    // it renders Kafka client properties, and holds kafka-clients for the constant names, not a client
+    "libs.kafkaAuth",
+    // the Kafka ConfigStore adapter of ADR-042 §5: the metadata store *is* a Kafka client, so this edge is
+    // the point of that ADR rather than a leak
+    "libs.config",
+    // the Testcontainers Kafka topology; a fixture that starts a broker has to be able to talk to it
+    "libs.testkit",
+    // a composition root, which is where adapters are constructed
+    "apps.allinone"
+  )
+
   /** The wire: transport, serialisation and the modules built on them. A domain-owning service's
     * `application` may touch none of it (rule A3).
     */
@@ -108,7 +133,8 @@ object ArchitectureRules {
     * `libs.testkit` and on MUnit, none of which A1 allows a domain module. Applying the rules to test modules
     * would make every domain module untestable, so they are exempt. A4, A5 and A8 still apply: those are
     * about a component reaching somewhere it must never reach, and a suite that reaches there is telling you
-    * about the production code it is testing.
+    * about the production code it is testing. A9 and A10 are of that second kind, so they apply to suites
+    * too: a test that needs a Kafka client is a test of a module that is allowed one.
     */
   private def isTestModule(id: String): Boolean = id.split('.').lastOption.contains("test")
 
@@ -128,7 +154,9 @@ object ArchitectureRules {
         a4(module) ++
         a5(module) ++
         a6(module) ++
-        a8(module)
+        a8(module) ++
+        a9(module) ++
+        a10(module)
     }
   }
 
@@ -253,4 +281,49 @@ object ArchitectureRules {
     } else {
       Nil
     }
+
+  /** A9 — a service's `application`, `contract` and `api` layers are written in terms of ports, and only its
+    * `app` module wires an adapter in.
+    *
+    * `domain` is deliberately not in the layer list. A1 already forbids a domain module every dependency
+    * except `libs.kernel`, so including it here would report one edge twice under two rules, and whoever
+    * tripped it would fix it twice before discovering it was one problem.
+    */
+  private def a9(module: ModuleFacts): List[Violation] =
+    serviceLayer(module.id) match {
+      case Some((service, "application" | "contract" | "api")) =>
+        val why =
+          "a service's application, contract and api layers are stated in terms of ports, and only " +
+            "its app module wires an adapter in; a layer that can see an adapter will eventually call " +
+            "one and the port becomes decoration (ADR-041 A9)"
+        module.moduleDeps.toList.sorted
+          .filter(dep => isUnder(coreModuleOf(dep), s"services.$service.infrastructure"))
+          .map(dep => Violation("A9", module.id, dep, why))
+      case _ => Nil
+    }
+
+  /** A10 — `org.apache.kafka` is importable in exactly the places that adapt it, and nowhere else.
+    *
+    * This is A8 generalised from the gateway to everyone. A8 stays: its message says why the *gateway* in
+    * particular holds no client, which is ADR-004's central argument, and a gateway module that acquired a
+    * Kafka dependency should fail two rules rather than one — here the two say genuinely different things.
+    */
+  private def a10(module: ModuleFacts): List[Violation] =
+    if isKafkaAllowed(module.id) then Nil
+    else {
+      val why =
+        "org.apache.kafka must be importable in exactly the places that adapt it: a service's " +
+          "infrastructure module, libs/kafka and libs/kafka-auth themselves, libs/config for the " +
+          "metadata store adapter (ADR-042 §5), libs/testkit for the container fixtures, and a " +
+          "composition root (ADR-041 A10, generalising A8)"
+      val badModules = module.moduleDeps.filter(dep => KafkaModules.contains(coreModuleOf(dep)))
+      val badLibs = module.mvnDeps.filter(KafkaArtifacts.contains)
+      (badModules ++ badLibs).toList.sorted.map(dep => Violation("A10", module.id, dep, why))
+    }
+
+  private def isKafkaAllowed(id: String): Boolean = {
+    val core = coreModuleOf(id)
+    KafkaAllowedRoots.exists(root => isUnder(core, root)) ||
+    serviceLayer(core).exists((_, layer) => layer == "infrastructure" || layer == "app")
+  }
 }
