@@ -31,8 +31,8 @@ tested rather than asserted.
 | M2 Topic explorer | topic list, search, detail, partitions, configuration | roadmapped |
 | M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | roadmapped |
 | M4 Consumer groups | groups, members, assignments, lag, offset reset | roadmapped |
-| Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | not started |
-| Configuration examples | a plain example, a secured example, and the reference for every key | partial |
+| Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | built, blocked on packaging |
+| Configuration examples | a plain example, a secured example, and the reference for every key | built |
 
 Stages M5 to M9 — cluster administration, authentication, the ecosystem plugins, metrics — are
 beyond this bar. They are real work and they are planned, but nobody needs them to use the product.
@@ -65,3 +65,28 @@ Three, each one a file a person can copy:
 `STATUS.md` holds the current position and `docs/FEATURE_MATRIX.md` the per-capability state. This
 document holds only the delivery bar and the sequence above. When a stage completes, its row changes
 here and the detail lives in the milestone's own plan.
+
+## Where this stands, 2026-09-03
+
+The quickstart exists and runs. From a clean machine with only Docker, one command brings up a
+Kafka broker in KRaft mode, waits until it can actually serve metadata rather than merely until the
+container has started, seeds it with eight topics of deliberately varied shape, 111 messages, two
+tombstones, non-JSON values and three consumer groups in three different states, then starts KUI and
+prints one URL. A second run takes about 27 seconds. Teardown leaves no containers, volumes or
+networks behind.
+
+Two defects were found by running it rather than by reading it, which is the only way these are ever
+found:
+
+**The interface does not render from a clean clone.** The single-page fallback answers `/ui/main.js`
+with the page itself, so the browser is handed HTML where it expects a module and refuses to run it.
+The screen is blank while every health check passes and every container reports healthy — the worst
+shape a failure can take. The cause is that the frontend bundle is not packaged into the deployable.
+The fix is written and sits in the working tree; it lands with the end-to-end work that needs the
+interface to render.
+
+**Two seeds were built where one was needed.** Two agents each wrote one without knowing about the
+other, and the stack ran the weaker of them while the richer one sat unused and documented. Now
+resolved to the richer one.
+
+Neither was visible from the code. Both were visible within a minute of running it.
