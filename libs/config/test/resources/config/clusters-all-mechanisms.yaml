@@ -1,0 +1,90 @@
+# One cluster per SASL mechanism KUI models, plus PLAINTEXT and SSL, so that the decoder's whole
+# mechanism table is exercised by a file an operator could actually have written.
+kui:
+  clusters:
+    - name: Local Development
+      bootstrapServers:
+        - localhost:9092
+
+    - name: Production EU
+      bootstrapServers: broker-1.eu:9093,broker-2.eu:9093
+      readOnly: true
+      security:
+        protocol: SASL_SSL
+        mechanism: SCRAM-SHA-512
+        username: kui
+        password: env:KUI_PROD_PASSWORD
+        ssl:
+          truststore:
+            location: /etc/kui/truststore.p12
+            password: trust-me
+            type: PKCS12
+
+    - name: Staging Plain
+      bootstrapServers: staging:9092
+      security:
+        protocol: SASL_PLAINTEXT
+        mechanism: PLAIN
+        username: kui
+        password: literal-secret
+
+    - name: Scram 256
+      bootstrapServers: scram256:9092
+      security:
+        protocol: SASL_PLAINTEXT
+        mechanism: SCRAM-SHA-256
+        username: kui
+        password: literal-secret
+
+    - name: Kerberos
+      bootstrapServers: kerberos:9092
+      security:
+        protocol: SASL_PLAINTEXT
+        mechanism: GSSAPI
+        serviceName: kafka
+        principal: kui@EXAMPLE.COM
+        keytab: /etc/kui/kui.keytab
+
+    - name: OAuth
+      bootstrapServers: oauth:9093
+      security:
+        protocol: SASL_SSL
+        mechanism: OAUTHBEARER
+        tokenEndpoint: https://login.example.com/oauth2/token
+        clientId: kui
+        clientSecret: env:KUI_OAUTH_SECRET
+        scope: kafka.read
+
+    - name: MSK
+      bootstrapServers: msk:9098
+      security:
+        protocol: SASL_SSL
+        mechanism: AWS_MSK_IAM
+        profile: kui-readonly
+
+    - name: Event Hubs
+      bootstrapServers: eventhubs:9093
+      security:
+        protocol: SASL_SSL
+        mechanism: AZURE_ENTRA
+        namespace: kui-namespace
+
+    - name: Google Managed Kafka
+      bootstrapServers: gcp:9092
+      security:
+        protocol: SASL_SSL
+        mechanism: GCP
+
+    - name: Mutual TLS
+      bootstrapServers: mtls:9093
+      security:
+        protocol: SSL
+        ssl:
+          verifyHostname: false
+          keystore:
+            location: /etc/kui/keystore.p12
+            password: keystore-pass
+          keyPassword: key-pass
+      properties:
+        ssl.cipher.suites: TLS_AES_256_GCM_SHA384
+        ssl.truststore.password: overridden-secret

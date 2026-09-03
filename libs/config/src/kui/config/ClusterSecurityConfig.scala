@@ -89,14 +89,37 @@ object ClusterSecurityConfig {
   def decode(prefix: String, lookup: Lookup): Problems[ClusterSecurityDraft] = {
     val reader = Reader(prefix, lookup)
     reader.enumerated("protocol", Protocols, "PLAINTEXT").andThen {
-      case "PLAINTEXT" => draft(Map.empty, _ => ClusterSecurity.Plaintext).validNel
-      case "SSL" => reader.tls.map(tls => draft(Map.empty, _ => ClusterSecurity.Ssl(tls)))
+      case "PLAINTEXT" =>
+        (rejectMechanism(reader, "PLAINTEXT"), draft(Map.empty, _ => ClusterSecurity.Plaintext).validNel)
+          .mapN((_, plaintext) => plaintext)
+      case "SSL" =>
+        (rejectMechanism(reader, "SSL"), reader.tls)
+          .mapN((_, tls) => draft(Map.empty, _ => ClusterSecurity.Ssl(tls)))
       case "SASL_PLAINTEXT" => sasl(reader, SaslProtocol.SaslPlaintext, withTls = false)
       case "SASL_SSL" => sasl(reader, SaslProtocol.SaslSsl, withTls = true)
       case other =>
         reader.problem("protocol", s"'$other' is not one of ${Protocols.mkString(", ")}").invalidNel
     }
   }
+
+  /** A `mechanism` under a protocol that has no SASL is refused, not ignored.
+    *
+    * Silently dropping it is how an operator ends up with an unauthenticated connection they believe is
+    * authenticated: they wrote `mechanism: SCRAM-SHA-512`, KUI read `protocol: PLAINTEXT` (the default when
+    * `protocol` is misspelled or absent), and the credentials were never sent.
+    */
+  private def rejectMechanism(reader: Reader, protocol: String): Problems[Unit] =
+    reader.raw("mechanism").map(_.trim).filter(_.nonEmpty) match {
+      case None => ().validNel
+      case Some(mechanism) =>
+        reader
+          .problem(
+            "mechanism",
+            s"'$mechanism' is only meaningful for a SASL protocol, and protocol is $protocol; " +
+              "set protocol to SASL_PLAINTEXT or SASL_SSL, or remove the mechanism"
+          )
+          .invalidNel
+    }
 
   /** Follows the `env:` and `file:` references the draft collected.
     *

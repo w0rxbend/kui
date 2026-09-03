@@ -139,6 +139,56 @@ final class PrecedenceSuite extends KuiSuite {
     }
   }
 
+  // -------------------------------------------------------------------------------------------
+  // Lists: `kui.clusters.<n>.*` (CFGOP-001, D-2)
+  // -------------------------------------------------------------------------------------------
+
+  private def clusterFile(name: String): Path =
+    ConfigFixtures.yaml(s"kui:\n  clusters:\n    - name: $name\n      bootstrapServers: broker:9092\n")
+
+  private def clusterNames(result: Either[ConfigErrors, KuiConfig]): List[String] =
+    result.fold(errors => fail(errors.render), _.clusters.map(_.name))
+
+  test("a cluster name follows the same precedence as every other key") {
+    val file = clusterFile("From The File")
+
+    assertEquals(clusterNames(load(files = List(file))), List("From The File"))
+    assertEquals(
+      clusterNames(load(env = Map("KUI_CLUSTERS_0_NAME" -> "From The Environment"), files = List(file))),
+      List("From The Environment")
+    )
+    assertEquals(
+      clusterNames(
+        load(
+          args = List("--kui.clusters.0.name=From The Command Line"),
+          env = Map("KUI_CLUSTERS_0_NAME" -> "From The Environment"),
+          files = List(file)
+        )
+      ),
+      List("From The Command Line")
+    )
+  }
+
+  test("a cluster configured only through the environment is discovered") {
+    // The rule this exercises is `Layers.indicesOf`. `childrenOf`, which every other repeated section
+    // uses, splits an environment name at its *last* underscore, so it would read
+    // `KUI_CLUSTERS_0_SECURITY_PROTOCOL` as a member called `0-security` — a cluster nobody configured,
+    // while the one the operator meant never appears at all.
+    val loaded = load(
+      env = Map(
+        "KUI_CLUSTERS_0_NAME" -> "Environment Only",
+        "KUI_CLUSTERS_0_BOOTSTRAPSERVERS" -> "broker:9092",
+        "KUI_CLUSTERS_0_SECURITY_PROTOCOL" -> "SASL_PLAINTEXT",
+        "KUI_CLUSTERS_0_SECURITY_MECHANISM" -> "PLAIN",
+        "KUI_CLUSTERS_0_SECURITY_USERNAME" -> "kui",
+        "KUI_CLUSTERS_0_SECURITY_PASSWORD" -> "pw"
+      )
+    ).fold(errors => fail(errors.render), identity)
+
+    assertEquals(loaded.clusters.map(_.id.value), List("environment-only"))
+    assertEquals(loaded.clusters.head.security.securityProtocol, "SASL_PLAINTEXT")
+  }
+
   private given Arbitrary[Port] = Arbitrary(Gen.choose(1, 65535).map(Port.unsafe))
 
   property("whichever layers are present, the highest-precedence one supplies the value") {

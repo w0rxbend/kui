@@ -68,13 +68,17 @@ object ConfigErrors {
 
 /** The whole of KUI's static configuration, as one immutable value.
   *
-  * Only the three sections M0 needs are modelled. `kui.clusters` and `kui.rbac` are recognised — an operator
-  * may already have them in a file without the load failing — but nothing is read out of them yet:
+  * `kui.rbac` is recognised — an operator may already have it in a file without the load failing — but
+  * nothing is read out of it yet:
   *
-  *   - `kui.clusters[]` becomes a real section in **M1**, when the cluster registry arrives. It is also the
-  *     section that moves into the metadata store (ADR-036 as amended by ADR-042); the precedence chain built
-  *     here stays as it is and the store is inserted as one more layer above the file.
+  *   - `kui.clusters[]` is real as of **M1**: it is the static base of the cluster registry. The metadata
+  *     store's records overlay it at runtime (ADR-036 as amended by ADR-042); the precedence chain built here
+  *     stays as it is and the store is inserted as one more layer above the file.
   *   - `kui.rbac` becomes a real section in **M6**, with the authorization model.
+  *
+  * `clusters` is `Nil` when nothing is configured, and that is a supported deployment rather than a startup
+  * failure: it is what an operator sees before they have registered anything, and the dashboard shows its "no
+  * clusters configured" empty state.
   *
   * `kui.auth` is recognised too, and the only legal value in M0 is `type: disabled`; anything else is refused
   * with a message pointing at M6, rather than silently accepted and then ignored.
@@ -83,7 +87,8 @@ final case class KuiConfig(
     server: ServerConfig,
     gateway: GatewayConfig,
     telemetry: TelemetryConfig,
-    store: StoreConfig
+    store: StoreConfig,
+    clusters: List[ClusterConfig]
 )
 
 object KuiConfig {
@@ -92,7 +97,13 @@ object KuiConfig {
     * key, so configuring one key never changes another.
     */
   val Default: KuiConfig =
-    KuiConfig(ServerConfig.Default, GatewayConfig.Default, TelemetryConfig.Default, StoreConfig.Default)
+    KuiConfig(
+      ServerConfig.Default,
+      GatewayConfig.Default,
+      TelemetryConfig.Default,
+      StoreConfig.Default,
+      clusters = Nil
+    )
 
   given CanEqual[KuiConfig, KuiConfig] = CanEqual.derived
 }

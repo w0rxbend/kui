@@ -1,0 +1,18 @@
+# Four separate mistakes, in three clusters. The loader must report all four in one message:
+# an operator who fixes one key per restart has paid the restart cost four times for nothing.
+kui:
+  clusters:
+    - name: Broken Bootstrap
+      bootstrapServers: kafka-1
+      security:
+        protocol: SASL_PLAINTEXT
+        mechanism: scram512
+        username: kui
+        password: whatever
+    - name: Missing Secret
+      bootstrapServers: kafka-2:9092
+      security:
+        protocol: SASL_PLAINTEXT
+        mechanism: PLAIN
+        username: kui
+        password: env:KUI_PROD_PASSWORD

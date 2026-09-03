@@ -13,8 +13,8 @@ import cats.syntax.all.*
 import ciris.{ConfigError, ConfigKey, ConfigValue}
 import io.circe.Json
 
-import kui.kernel.cluster.BootstrapServers
-import kui.kernel.{Host, Port, PositiveInt, Secret, ServiceId}
+import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties}
+import kui.kernel.{ClusterId, Host, Port, PositiveInt, Secret, ServiceId}
 
 /** Loads [[KuiConfig]] from the command line, the environment and YAML files.
   *
@@ -229,6 +229,34 @@ object KuiConfigSource {
         .map(_.toLowerCase.replace('_', '-'))
       val fromFiles = files.flatMap(document => Layers.membersOf(document.json, prefix)).toSet
       fromCli ++ fromEnv ++ fromFiles
+    }
+
+    /** Numeric member names directly under `prefix`, in ascending order, across all three layers.
+      *
+      * [[childrenOf]] cannot be used for this. Its environment branch takes everything up to the *last*
+      * underscore, which turns `KUI_CLUSTERS_0_SECURITY_PROTOCOL` into the member `0-security` — right for
+      * the flat `services.<id>.<leaf>` map it was written for, and wrong for a nested list. So a list gets
+      * its own discovery: the first segment after the prefix, required to be a non-negative integer.
+      */
+    def indicesOf(prefix: String): List[Int] = {
+      val dotted = s"$prefix."
+      val fromCli = cli.keySet.filter(_.startsWith(dotted)).map(_.drop(dotted.length).takeWhile(_ != '.'))
+      val envPrefix = s"${Layers.envName(prefix)}_"
+      val fromEnv =
+        env.keySet.filter(_.startsWith(envPrefix)).map(_.drop(envPrefix.length).takeWhile(_ != '_'))
+      val fromFiles = files.flatMap(document => Layers.membersOf(document.json, prefix)).toSet
+      (fromCli ++ fromEnv ++ fromFiles).toList.flatMap(_.toIntOption).filter(_ >= 0).distinct.sorted
+    }
+
+    /** Environment variable names under `prefix`, as the dotted keys they would have been.
+      *
+      * Only [[decodeClusters]] needs this, and only to refuse them: a raw Kafka property name contains dots
+      * that the `KUI_*` mapping cannot round-trip, so the free `properties` map is file-only (D-4). Refusing
+      * is what turns "my cipher suites setting did nothing" into a startup error.
+      */
+    def envNamesUnder(prefix: String): List[String] = {
+      val envPrefix = s"${Layers.envName(prefix)}_"
+      env.keySet.filter(_.startsWith(envPrefix)).toList.sorted
     }
 
     def documents: List[Document] = files
@@ -448,11 +476,13 @@ object KuiConfigSource {
       gateway <- decodeGateway[F](layers, policy)
       telemetry <- decodeTelemetry[F](layers, policy)
       store <- decodeStore[F](layers)
+      clusters <- decodeClusters[F](layers)
       auth <- read[F, String](
         field("kui.auth.type", "disabled", readAuthType, "disabled"),
         layers
       )
-    } yield (unknown, server, gateway, telemetry, store, auth).mapN((_, s, g, t, st, _) => Draft(s, g, t, st))
+    } yield (unknown, server, gateway, telemetry, store, clusters, auth)
+      .mapN((_, s, g, t, st, cs, _) => Draft(s, g, t, st, cs))
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {
@@ -945,6 +975,178 @@ object KuiConfigSource {
       .map(_.sequence.map(pairs => StoreEncryptionConfig(pairs.toMap, draft.activeKeyId)))
 
   // ---------------------------------------------------------------------------------------------
+  // The managed clusters
+  // ---------------------------------------------------------------------------------------------
+
+  /** The `kui.clusters[]` slice: the static base of the cluster registry (ADR-022, ADR-031).
+    *
+    * Nothing here opens a socket. Validation is syntactic, because reachability is not knowable at load time
+    * and because one dead broker must never stop KUI from starting (M1 DEVPLAN §10, D4).
+    *
+    * Everything that is wrong is reported: every bad field of every cluster, plus the three cross-cluster
+    * rules — a gap in the index, two clusters that resolve to the same id, and a raw property set from the
+    * environment — so that an operator fixes their file once rather than once per restart.
+    */
+  private def decodeClusters[F[_]: Async](layers: Layers): F[Problems[List[ClusterConfig]]] = {
+    val indices = layers.indicesOf(ClustersPrefix)
+    indices
+      .traverse(index => decodeCluster[F](layers, index).map(_.map(index -> _)))
+      .map(_.sequence)
+      .map { drafts =>
+        (
+          drafts.andThen(rejectDuplicateIds),
+          denseIndex(indices),
+          rejectEnvironmentProperties(layers, indices)
+        ).mapN((list, _, _) => list)
+      }
+  }
+
+  private val ClustersPrefix: String = "kui.clusters"
+
+  /** D-3: the index must be dense and start at zero.
+    *
+    * `kui.clusters.0` and `kui.clusters.2` with no `1` almost always means a deleted entry or a typo in an
+    * environment variable name. Silently renumbering would hide both.
+    */
+  private def denseIndex(indices: List[Int]): Problems[Unit] =
+    indices.zipWithIndex.collectFirst {
+      case (configured, expected) if configured != expected =>
+        val previous =
+          if expected == 0 then "the list starts at 0" else s"$configured follows ${expected - 1}"
+        ConfigProblem(
+          s"$ClustersPrefix.$configured",
+          s"expected clusters to be numbered from 0 with no gaps; $previous",
+          ConfigSourceName.Default
+        )
+    } match {
+      case None => ().validNel
+      case Some(problem) => problem.invalidNel
+    }
+
+  /** D-4: `properties` is file-only, and an environment variable under it says so rather than being ignored.
+    */
+  private def rejectEnvironmentProperties(layers: Layers, indices: List[Int]): Problems[Unit] = {
+    val offenders = indices.flatMap(index => layers.envNamesUnder(s"$ClustersPrefix.$index.properties"))
+    offenders match {
+      case Nil => ().validNel
+      case names =>
+        ConfigProblem(
+          s"$ClustersPrefix.<n>.properties",
+          s"cannot be set from the environment (${names.mkString(", ")}); a Kafka property name contains " +
+            "dots that the KUI_* mapping cannot round-trip, so raw properties are read from a YAML file " +
+            "only. A secret inside properties still uses env:NAME, which travels through the environment " +
+            "as a value rather than as a key",
+          ConfigSourceName.Env
+        ).invalidNel
+    }
+  }
+
+  /** Two clusters that resolve to the same id, named by both of their configured names.
+    *
+    * The id is what every URL, cache key and RBAC rule is written against, so a collision would silently make
+    * one of the two clusters unreachable. Naming both is what tells the operator which one to give an
+    * explicit `id`.
+    */
+  private def rejectDuplicateIds(clusters: List[(Int, ClusterConfig)]): Problems[List[ClusterConfig]] =
+    clusters
+      .groupBy((_, cluster) => cluster.id)
+      .toList
+      .sortBy((id, _) => id.value)
+      .collect {
+        case (id, clashing) if clashing.sizeIs > 1 =>
+          ConfigProblem(
+            s"$ClustersPrefix.${clashing.map((index, _) => index).min}.id",
+            s"'${id.value}' is used by more than one cluster " +
+              s"(${clashing.map((_, cluster) => s"'${cluster.name}'").mkString(", ")}); " +
+              "set kui.clusters.<n>.id explicitly on all but one of them",
+            ConfigSourceName.Default
+          )
+      } match {
+      case Nil => clusters.map((_, cluster) => cluster).validNel
+      case first :: rest => cats.data.Validated.Invalid(NonEmptyList(first, rest))
+    }
+
+  /** One cluster, with its `env:` and `file:` secret references already followed.
+    *
+    * Resolving here rather than in [[resolveSecrets]] is deliberate. That second phase runs only when the
+    * *whole* decode succeeded, so a missing `KUI_PROD_PASSWORD` on cluster 1 would be hidden by an unrelated
+    * typo on cluster 0 and only appear on the next restart — which is exactly the one-problem-per-restart
+    * loop the accumulate-everything discipline exists to prevent. Reading a secret is already an effect here,
+    * so nothing is lost by doing it in place.
+    */
+  private def decodeCluster[F[_]: Async](layers: Layers, index: Int): F[Problems[ClusterConfig]] = {
+    val prefix = s"$ClustersPrefix.$index"
+    for {
+      name <- read[F, String](
+        field(
+          s"$prefix.name",
+          s"a display name of 1 to ${ClusterConfig.MaxNameLength} characters",
+          readClusterName
+        ),
+        layers
+      )
+      servers <- read[F, BootstrapServers](
+        field(
+          s"$prefix.bootstrapServers",
+          "a comma-separated list of host:port entries",
+          readBootstrapServers
+        ),
+        layers
+      )
+      readOnly <- read[F, Boolean](field(s"$prefix.readOnly", "true or false", readBoolean, false), layers)
+      security <- ClusterSecurityConfig
+        .decode(s"$prefix.security", layers.first)
+        .traverse(draft => ClusterSecurityConfig.resolve[F](draft, layers.env))
+        .map(_.andThen(identity))
+      properties = ClientProperties.fromRaw(propertiesUnder(layers, s"$prefix.properties"))
+    } yield (name, servers, readOnly, security).tupled.andThen { (clusterName, bootstrap, readonly, sec) =>
+      // The id is derived last, and only from a name that decoded: deriving it from a name that did not
+      // would report the same bad name twice, once under `.name` and once under `.id`.
+      clusterId(layers, prefix, clusterName).map { id =>
+        ClusterConfig(
+          id = id,
+          name = clusterName,
+          bootstrapServers = bootstrap,
+          security = sec,
+          properties = properties,
+          readOnly = readonly,
+          // CFGOP-002 decodes `kui.clusters.<n>.admin` and replaces this default.
+          admin = AdminTuning.default
+        )
+      }
+    }
+  }
+
+  /** D-1: an explicit `id` wins, and the default is the slug of the name.
+    *
+    * ADR-031 derives the id from the name, and that is right as a default and wrong as an absolute: an
+    * operator who fixes a typo in a display name would otherwise silently break every bookmark and every RBAC
+    * entry that named the old slug.
+    */
+  private def clusterId(layers: Layers, prefix: String, name: String): Problems[ClusterId] =
+    layers.first(s"$prefix.id") match {
+      case Some((source, raw)) =>
+        ClusterId.from(raw.trim) match {
+          case Right(id) => id.validNel
+          case Left(error) =>
+            ConfigProblem(s"$prefix.id", s"expected ${error.message} (found '$raw')", source).invalidNel
+        }
+      case None =>
+        ClusterConfig.slug(name) match {
+          case Right(id) => id.validNel
+          case Left(problem) => ConfigProblem(s"$prefix.id", problem, ConfigSourceName.Default).invalidNel
+        }
+    }
+
+  private def readClusterName(raw: String): Either[String, String] = {
+    val trimmed = raw.trim
+    if trimmed.isEmpty then Left("must not be empty")
+    else if trimmed.length > ClusterConfig.MaxNameLength then
+      Left(s"is ${trimmed.length} characters long, and the limit is ${ClusterConfig.MaxNameLength}")
+    else Right(trimmed)
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Secrets
   // ---------------------------------------------------------------------------------------------
 
@@ -955,7 +1157,8 @@ object KuiConfigSource {
       server: ServerConfig,
       gateway: GatewayDraft,
       telemetry: TelemetryConfig,
-      store: StoreDraft
+      store: StoreDraft,
+      clusters: List[ClusterConfig]
   )
 
   final private case class GatewayDraft(
@@ -991,7 +1194,8 @@ object KuiConfigSource {
               value.gateway.devInsecureCookies
             ),
             value.telemetry,
-            storeConfig
+            storeConfig,
+            value.clusters
           )
         )
     }
@@ -1066,11 +1270,26 @@ object KuiConfigSource {
       // `properties` is deliberately open: its whole purpose is to carry Kafka client properties KUI
       // does not model, so it cannot have a list of legal names.
       List("kui", "store", "kafka", "properties", "**"),
-      List("kui", "clusters", "**"),
+      List("kui", "clusters", "*", "name"),
+      List("kui", "clusters", "*", "id"),
+      List("kui", "clusters", "*", "bootstrapServers"),
+      List("kui", "clusters", "*", "bootstrapServers", "*"),
+      List("kui", "clusters", "*", "readOnly"),
+      // Open for the same reason as the store's: this map's whole purpose is to carry Kafka client
+      // properties KUI does not model, so it cannot have a list of legal names.
+      List("kui", "clusters", "*", "properties", "**"),
       List("kui", "rbac", "**")
     ) ++ ClusterSecurityConfig
       .keysUnder("kui.store.kafka.security")
       .map(_.split('.').toList)
+      ++ ClusterSecurityConfig
+        .keysUnder("kui.clusters.*.security")
+        .flatMap { key =>
+          val path = key.split('.').toList
+          // The list-valued security keys (`enabledProtocols`, `cipherSuites`) are legal as a YAML list,
+          // whose leaves are indexed, so each key is known both as a scalar and as a sequence.
+          List(path, path :+ "*")
+        }
 
     def check(documents: List[Document]): ValidatedNel[ConfigProblem, Unit] =
       documents.flatMap(document => unknownIn(document)) match {

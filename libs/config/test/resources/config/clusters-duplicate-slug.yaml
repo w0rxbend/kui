@@ -1,0 +1,8 @@
+# Two display names that slug to the same id. Without the collision check one of these two
+# clusters would be silently unreachable: every URL, cache key and RBAC rule names the id.
+kui:
+  clusters:
+    - name: Production EU
+      bootstrapServers: a:9092
+    - name: production-eu
+      bootstrapServers: b:9092

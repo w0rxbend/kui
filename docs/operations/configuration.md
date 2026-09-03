@@ -190,43 +190,132 @@ recovery path and there cannot be one — that is what encryption means. Back th
 from the topic, and read
 [the metadata-store page's key section](metadata-store.md#42-the-encryption-key) before you rotate.
 
-### `kui.clusters` — the cluster registry (**M1**)
+### `kui.clusters` — the clusters KUI manages
 
-**Accepted and ignored.** Any key under `kui.clusters` loads today and is read by nothing, so a
-file written for M1 still starts an M0 build instead of failing on a key that does not exist yet.
-KUI will not connect to a broker until M1 ships.
+This is the list of Kafka clusters KUI connects to. Nothing here is checked against a broker at
+startup: a cluster that is spelled correctly and unreachable is a valid configuration, and shows on
+the dashboard as `Unavailable: <reason>`. If a bad address stopped KUI from starting, one dead
+broker would take the whole console down.
 
-The shape M1 implements is ADR-022's typed security model, and
-[`deployment/examples/production.yaml`](../../deployment/examples/production.yaml) is written in it:
+Repeated sections use a dotted index, so one key has one spelling everywhere:
 
-| Key | Type | Notes |
+```yaml
+kui:
+  clusters:
+    - name: Production EU
+      bootstrapServers: broker-1.eu:9093,broker-2.eu:9093
+      security:
+        protocol: SASL_SSL
+        mechanism: SCRAM-SHA-512
+        username: kui
+        password: env:KUI_PROD_PASSWORD
+```
+
+The same cluster, entirely from the environment:
+
+```
+KUI_CLUSTERS_0_NAME=Production EU
+KUI_CLUSTERS_0_BOOTSTRAPSERVERS=broker-1.eu:9093,broker-2.eu:9093
+KUI_CLUSTERS_0_SECURITY_PROTOCOL=SASL_SSL
+KUI_CLUSTERS_0_SECURITY_MECHANISM=SCRAM-SHA-512
+KUI_CLUSTERS_0_SECURITY_USERNAME=kui
+KUI_CLUSTERS_0_SECURITY_PASSWORD=env:KUI_PROD_PASSWORD
+```
+
+The index must start at `0` and have no gaps. `kui.clusters.0` and `kui.clusters.2` with no `1` is
+refused, naming the gap, because it nearly always means a deleted entry or a mistyped variable name
+— and renumbering silently would hide both.
+
+| Key | Environment name | Default | Meaning |
+| --- | --- | --- | --- |
+| `kui.clusters.<n>.name` | `KUI_CLUSTERS_<N>_NAME` | *(required)* | The display name. 1–64 characters. |
+| `kui.clusters.<n>.id` | `KUI_CLUSTERS_<N>_ID` | *(slug of `name`)* | The URL slug. See "Renaming a cluster" below. |
+| `kui.clusters.<n>.bootstrapServers` | `…_BOOTSTRAPSERVERS` | *(required)* | `host:port` entries; a YAML list, or comma-separated. |
+| `kui.clusters.<n>.readOnly` | `…_READONLY` | `false` | Declared now, enforced in M5. Recorded on the profile and shown in the UI. |
+| `kui.clusters.<n>.security.protocol` | `…_SECURITY_PROTOCOL` | `PLAINTEXT` | `PLAINTEXT`, `SSL`, `SASL_PLAINTEXT` or `SASL_SSL`. `SASL_PLAINTEXT` authenticates but does **not** encrypt. |
+| `kui.clusters.<n>.security.mechanism` | `…_SECURITY_MECHANISM` | *(required for the two SASL protocols)* | See the mechanism table below. |
+| `kui.clusters.<n>.security.username` | `…_SECURITY_USERNAME` | *(required for PLAIN and SCRAM)* | |
+| `kui.clusters.<n>.security.password` | `…_SECURITY_PASSWORD` | *(required for PLAIN and SCRAM)* | A secret: literal, `env:NAME` or `file:/path`. |
+| `kui.clusters.<n>.security.serviceName` | `…_SECURITY_SERVICENAME` | *(required for GSSAPI)* | `sasl.kerberos.service.name`. |
+| `kui.clusters.<n>.security.principal` | `…_SECURITY_PRINCIPAL` | *(required for GSSAPI)* | |
+| `kui.clusters.<n>.security.keytab` | `…_SECURITY_KEYTAB` | *(unset)* | A path inside the container. |
+| `kui.clusters.<n>.security.useTicketCache` | `…_SECURITY_USETICKETCACHE` | `false` | Use an existing Kerberos ticket cache instead of a keytab. |
+| `kui.clusters.<n>.security.tokenEndpoint` | `…_SECURITY_TOKENENDPOINT` | *(required for OAUTHBEARER)* | |
+| `kui.clusters.<n>.security.clientId` | `…_SECURITY_CLIENTID` | *(required for OAUTHBEARER)* | |
+| `kui.clusters.<n>.security.clientSecret` | `…_SECURITY_CLIENTSECRET` | *(required for OAUTHBEARER)* | A secret. |
+| `kui.clusters.<n>.security.scope` | `…_SECURITY_SCOPE` | *(unset)* | |
+| `kui.clusters.<n>.security.profile` | `…_SECURITY_PROFILE` | *(unset)* | AWS named profile, `AWS_MSK_IAM` only. |
+| `kui.clusters.<n>.security.roleArn` / `.stsRegion` | `…_SECURITY_ROLEARN` / `…_STSREGION` | *(unset)* | `AWS_MSK_IAM` only. |
+| `kui.clusters.<n>.security.namespace` | `…_SECURITY_NAMESPACE` | *(required for AZURE_ENTRA)* | The Event Hubs namespace. |
+| `kui.clusters.<n>.security.ssl.truststore.location` | `…_SECURITY_SSL_TRUSTSTORE_LOCATION` | *(unset)* | A path. Mutually exclusive with `inline`. |
+| `kui.clusters.<n>.security.ssl.truststore.inline` | `…_SECURITY_SSL_TRUSTSTORE_INLINE` | *(unset)* | Base64 of the store's bytes. A secret. |
+| `kui.clusters.<n>.security.ssl.truststore.password` | `…_SECURITY_SSL_TRUSTSTORE_PASSWORD` | *(unset)* | A secret. |
+| `kui.clusters.<n>.security.ssl.truststore.type` | `…_SECURITY_SSL_TRUSTSTORE_TYPE` | `PKCS12` | `PKCS12`, `JKS` or `PEM`. |
+| `kui.clusters.<n>.security.ssl.keystore.*` | `…_SECURITY_SSL_KEYSTORE_*` | *(unset)* | The same four keys, for mutual TLS. |
+| `kui.clusters.<n>.security.ssl.keyPassword` | `…_SECURITY_SSL_KEYPASSWORD` | *(unset)* | A secret. Must be a literal here. |
+| `kui.clusters.<n>.security.ssl.verifyHostname` | `…_SECURITY_SSL_VERIFYHOSTNAME` | `true` | Leave it on. `false` also removes the check that the broker is who it claims to be. |
+| `kui.clusters.<n>.security.ssl.enabledProtocols` / `.cipherSuites` | `…` | *(unset)* | Comma-separated lists. |
+| `kui.clusters.<n>.properties.<kafka.property>` | *(not settable from the environment)* | *(empty)* | Raw Kafka client properties, applied last. |
+
+**Mechanism spellings, and how far each one is tested.** The values are upper-case and are exactly
+the ones Kafka's own documentation uses, so they can be copied across without translation. The last
+column is the honest answer to "does this actually work": a mechanism that is only unit-tested has
+had its rendered client properties checked against the vendor's documented example, and has never
+been pointed at a live broker by KUI's CI.
+
+| `mechanism` | Also requires | Integration-tested against a real broker |
 | --- | --- | --- |
-| `kui.clusters[].name` | string | Display name; the cluster id is derived from it (ADR-031). |
-| `kui.clusters[].bootstrapServers` | string | Comma-separated `host:port` list. |
-| `kui.clusters[].security.protocol` | `plaintext` \| `ssl` \| `saslPlaintext` \| `saslSsl` | `saslPlaintext` authenticates but does **not** encrypt. |
-| `kui.clusters[].security.mechanism` | `plain` \| `scramSha256` \| `scramSha512` \| `gssapi` \| `oauthBearer` \| `awsMskIam` \| `azureEntra` \| `gcpManagedKafka` | The SASL mechanism. |
-| `kui.clusters[].security.username` / `.password` | string / secret | For `plain` and the SCRAM mechanisms. |
-| `kui.clusters[].security.ssl.verifyHostname` | boolean | Leave on. Turning it off also removes the check that the broker is who it claims to be. |
-| `kui.clusters[].security.ssl.truststore` / `.keystore` | secret | Needed when the brokers use a private certificate authority. |
-| `kui.clusters[].properties` | map of string | Raw Kafka client properties, applied last. The escape hatch for a broker setting KUI has no typed key for. Prefer the typed keys: these are neither validated nor redacted. |
+| `PLAIN` | `username`, `password` | **yes** — SASL_PLAINTEXT container |
+| `SCRAM-SHA-256` | `username`, `password` | no — the SHA-512 variant is, and the code path is shared |
+| `SCRAM-SHA-512` | `username`, `password` | **yes** — SASL_PLAINTEXT container |
+| `GSSAPI` | `serviceName`, `principal`, and `keytab` or `useTicketCache` | no — property rendering only (needs a KDC) |
+| `OAUTHBEARER` | `tokenEndpoint`, `clientId`, `clientSecret` | no — property rendering only (needs an identity provider) |
+| `AWS_MSK_IAM` | *(optional `profile`, `roleArn`, `stsRegion`)* | no — property rendering only (needs AWS) |
+| `AZURE_ENTRA` | `namespace` | no — property rendering only (needs Azure) |
+| `GCP` | *(nothing)* | no — property rendering only (needs Google Cloud) |
 
-### `kui.store` — the metadata store (**M1, not accepted yet**)
+A `mechanism` set under `PLAINTEXT` or `SSL` is **refused**, not ignored. Ignoring it is how an
+operator ends up with an unauthenticated connection they believe is authenticated: the credentials
+were in the file, and nothing ever sent them.
 
-**These keys do not exist today.** This is the one section where a file written for M1 does *not*
-load on an M0 build: `kui.store` has no tolerance rule, so every key under it is reported as
-`is not a KUI configuration key` and the process refuses to start. Keep the block commented out
-until you are running an M1 build — `deployment/examples/production.yaml` ships it commented out
-for exactly this reason.
+**Renaming a cluster.** The id is what appears in every URL, every bookmark and every future RBAC
+rule. By default it is derived from the name (ADR-031): `Production EU` becomes `production-eu`.
+That means fixing a typo in a display name would otherwise change the id and break those links, so
+set `id` explicitly and the name becomes free to edit:
 
-From M1, `kui.store.*` configures the Kafka cluster holding KUI's own `__kui_*` topics, and the
-cluster registry moves into it so it can be edited without a restart. The keys and the operational
-detail — replication, the encryption key you cannot recover, why the config topic has one partition
-— are in [the metadata store guide](metadata-store.md). Running with no store at all remains
-supported: KUI then uses the file adapter and static configuration is the whole story.
+```yaml
+    - name: Production EU (Frankfurt)
+      id: prod-eu
+```
+
+Two clusters whose names produce the same id are refused at startup, naming both, because one of
+the two would otherwise be silently unreachable. A name with no letters or digits in it — `***`, or
+a name written entirely in a non-Latin script — is also refused, with the same instruction to set
+`id` explicitly: inventing `cluster-1` would put an identifier the operator never chose into their
+URLs.
+
+**The `properties` escape hatch.** Whatever the typed keys above render, the entries under
+`properties` are applied last and win. It exists so a broker setting KUI has no typed key for — or
+a mechanism it has not modelled yet — is usable without waiting for a release:
+
+```yaml
+      properties:
+        ssl.cipher.suites: TLS_AES_256_GCM_SHA384
+        sasl.login.callback.handler.class: com.example.MyHandler
+```
+
+Two things to know about it. It is **file-only**: a Kafka property name contains dots, and the
+`KUI_*` environment mapping replaces dots with underscores, so `ssl.cipher.suites` could not be
+spelled back out again — an environment variable under `properties` is therefore an error that says
+so rather than a setting that quietly does nothing. And a value whose key looks like a credential
+(anything containing `password`, `secret`, `key`, `token`, `credential`, `jaas`, `passwd` or
+`auth`) is redacted in every log line and diagnostic. A secret inside `properties` still uses
+`env:NAME`; the *value* travels through the environment, only the *key* cannot.
 
 ### `kui.rbac` — the authorization model (**M6**)
 
-**Accepted and ignored**, on the same terms as `kui.clusters`.
+**Accepted and ignored.** Any key under `kui.rbac` loads today and is read by nothing, so a file
+written for M6 still starts a build that has no authorization model yet.
 
 ## Which URLs KUI will call
 
@@ -324,10 +413,13 @@ asserts that its values are the defaults the code actually uses, so it cannot go
 
 ## What is not here yet
 
-Static configuration is all of it today: files, environment variables and command-line flags, read
-once at startup. There is no hot reload and no configuration wizard.
+Static configuration is read once at startup: there is no hot reload of the file and no
+configuration wizard.
 
-From M1 the cluster registry moves into KUI's own Kafka-backed metadata store (ADR-036 as amended
-by ADR-042), so `kui.clusters` can be changed without restarting anything. That does not change
-what is written here: the static file stays the canonical base, and the store is inserted as one
-more layer above it in the same precedence chain.
+The cluster registry is the exception. Records in KUI's own Kafka-backed metadata store (ADR-036 as
+amended by ADR-042) overlay `kui.clusters` at runtime, so a cluster can be added or edited without
+restarting anything — see [the metadata store guide](metadata-store.md). That does not change what
+is written here: the static file stays the canonical base, and the store is one more layer above it
+in the same precedence chain. A cluster the store knows about but the file does not is added; a
+cluster both describe is replaced whole by the store's version, never merged field by field, so
+removing `security` from a stored record cannot silently inherit the file's credentials.
