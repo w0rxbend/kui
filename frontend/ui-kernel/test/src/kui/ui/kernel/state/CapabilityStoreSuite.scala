@@ -25,7 +25,17 @@ final class StubStream {
   var closed: Boolean = false
 
   val handle: SseHandle[CapabilityEvent] =
-    SseHandle(frames.events, connection.signal, () => closed = true)
+    SseHandle(
+      frames.events,
+      connection.signal,
+      // The real handle reports the close through its connection signal, and a store that reads that
+      // back as "the server went away" is exactly the bug `stopSilencesThePollerInsteadOfRestartingIt`
+      // is about, so the stub has to do it too.
+      () => {
+        closed = true
+        connection.set(SseConnection.Closed("closed by the client"))
+      }
+    )
 
   def send(event: CapabilityEvent): Unit = frames.writer.onNext(Right(event))
 
@@ -282,6 +292,83 @@ class CapabilityStoreSuite extends FunSuite {
       case Right(CapabilityEvent.Delta(change)) => assertEquals(change.entry.key, clusterKey)
       case other => fail(s"expected a delta, got $other")
     }
+  }
+
+  test("theFallbackClosesTheStreamItReplacesRatherThanLeavingItRetrying") {
+    // An abandoned handle is unreachable through the store, so `stop()` can never close it, yet the
+    // browser keeps it retrying for the life of the tab and every capability delta is applied twice.
+    val fixture = new Fixture
+    val first = fixture.start()
+
+    first.die("the connection was lost and will not be retried")
+    fixture.fireTimers()
+
+    assertEquals(fixture.streams.size, 2)
+    assert(first.closed, "the stream the fallback replaced must be closed")
+  }
+
+  test("aReplacementStreamThatHasNotOpenedYetDoesNotClearTheStalenessBanner") {
+    // `CapabilityBanner` treats only `Closed` as stale. A fresh handle starts in `Connecting`, so
+    // letting that through took the banner down while the store was still disconnected and presented
+    // capability data up to thirty seconds old as if it were live (ADR-032).
+    val fixture = new Fixture
+    val first = fixture.start()
+
+    first.die("lost")
+    fixture.fireTimers()
+    assertEquals(current(fixture.store.connection), SseConnection.Closed("lost"))
+
+    fixture.streams.last.open()
+    assertEquals(current(fixture.store.connection), SseConnection.Open)
+  }
+
+  test("aFlapDoesNotLeaveASecondPollingChainRunning") {
+    // Two chains means two polls and two new streams per interval, for ever, and one more of each for
+    // every subsequent flap.
+    val fixture = new Fixture
+    val first = fixture.start()
+
+    first.die("lost")
+    fixture.fireTimers()
+    val second = fixture.streams.last
+    second.open()
+    second.die("lost again")
+
+    val streamsBefore = fixture.streams.size
+    val pollsBefore = fixture.polls
+    fixture.fireTimers()
+
+    assertEquals(fixture.streams.size - streamsBefore, 1, "only one chain may be reopening the stream")
+    assertEquals(fixture.polls - pollsBefore, 1, "only one chain may be polling")
+  }
+
+  test("stopSilencesThePollerInsteadOfRestartingIt") {
+    // Closing the handle makes it report `Closed`, which is exactly what a lost connection reports. Read
+    // back as one, a deliberate teardown left the tab polling and reopening the stream for ever against
+    // a gateway the user may no longer be authenticated to.
+    val fixture = new Fixture
+    val stream = fixture.start()
+    stream.die("lost")
+
+    fixture.store.stop()
+    val streamsBefore = fixture.streams.size
+    val pollsBefore = fixture.polls
+    fixture.fireTimers()
+
+    assertEquals(fixture.streams.size, streamsBefore, "a stopped store must not reopen the stream")
+    assertEquals(fixture.polls, pollsBefore, "a stopped store must not keep polling")
+  }
+
+  test("aClosedStreamStopsFeedingTheStoreOnceItHasBeenReplaced") {
+    // The subscriptions used to be owned by the window, which never dies.
+    val fixture = new Fixture
+    val first = fixture.start()
+    first.die("lost")
+    fixture.fireTimers()
+
+    first.send(snapshot(entry(down)))
+
+    assertEquals(current(fixture.store.states), Map.empty[CapabilityKey, CapabilityState])
   }
 
   test("stopClosesTheStream") {

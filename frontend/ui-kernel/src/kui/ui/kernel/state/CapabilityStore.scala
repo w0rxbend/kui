@@ -2,6 +2,7 @@ package kui.ui.kernel.state
 
 import scala.concurrent.duration.*
 
+import com.raquo.airstream.ownership.ManualOwner
 import com.raquo.laminar.api.L.*
 import io.circe.parser.decode
 import org.scalajs.dom
@@ -80,7 +81,28 @@ final class Capabilities(
   /** Whether the poller is currently standing in for the stream. */
   private var polling: Boolean = false
 
+  /** Which polling episode is current.
+    *
+    * A `setTimeout` cannot be unscheduled through the `schedule` function this store is given, so instead
+    * every callback carries the number of the episode that scheduled it and does nothing when that number is
+    * no longer current. Without it, a stream that flaps twice inside one poll interval leaves the first
+    * episode's pending callback alive alongside the second, and from then on two independent chains poll and
+    * re-open the stream on their own timers.
+    */
+  private var pollEpisode: Int = 0
+
+  /** Set by [[stop]]. A client-initiated close must not look like a lost connection and restart the poller.
+    */
+  private var stopped: Boolean = false
+
   private var handle: Option[SseHandle[CapabilityEvent]] = None
+
+  /** Owns the subscriptions on the current handle, so that replacing or closing it detaches them.
+    *
+    * They used to be owned by the window, which never dies: an abandoned handle's observers kept writing into
+    * this store for the life of the tab.
+    */
+  private var handleOwner: Option[ManualOwner] = None
 
   /** Opens the stream and starts keeping the picture up to date. Called once, by the shell. */
   def start(): Unit = connect()
@@ -105,8 +127,15 @@ final class Capabilities(
     CapabilityKey(ServiceId.unsafe(feature.serviceId), cluster)
 
   private def connect(): Unit = {
+    // The previous stream is closed first. Leaving it open left an `EventSource` retrying on its own for
+    // the life of the tab: unreachable through `handle`, so `stop()` could never close it, yet still a
+    // gateway subscriber delivering every capability delta into this store a second time.
+    releaseHandle()
+
     val opened = openStream()
+    val streamOwner = new ManualOwner
     handle = Some(opened)
+    handleOwner = Some(streamOwner)
 
     opened.events.foreach {
       // A frame we cannot read is logged and skipped, and the picture is left exactly as it was.
@@ -115,17 +144,35 @@ final class Capabilities(
       case Left(problem) => dom.console.warn(s"kui: ignoring an unreadable capability frame: $problem")
       case Right(CapabilityEvent.Snapshot(snapshot)) => applySnapshot(snapshot)
       case Right(CapabilityEvent.Delta(change)) => applyChange(change)
-    }(using unsafeWindowOwner): Unit
+    }(using streamOwner): Unit
 
-    opened.connection.foreach { current =>
-      connectionState.set(current)
-      current match {
-        // The stream is working again, so the poller stands down.
-        case SseConnection.Open => polling = false
-        case SseConnection.Closed(_) => beginPollingFallback()
-        case SseConnection.Connecting | SseConnection.Reconnecting(_) => ()
-      }
-    }(using unsafeWindowOwner): Unit
+    opened.connection.foreach {
+      // The stream is working again, so the poller stands down.
+      case SseConnection.Open =>
+        polling = false
+        connectionState.set(SseConnection.Open)
+      case SseConnection.Closed(reason) =>
+        connectionState.set(SseConnection.Closed(reason))
+        beginPollingFallback()
+      // "Trying" must not overwrite "stale". A replacement handle starts in `Connecting`, and letting that
+      // through took the staleness banner down every time the fallback had another go at the stream — the
+      // user was shown thirty-second-old capability data as if it were live (ADR-032).
+      case attempt @ (SseConnection.Connecting | SseConnection.Reconnecting(_)) =>
+        connectionState.now() match {
+          case SseConnection.Closed(_) => ()
+          case _ => connectionState.set(attempt)
+        }
+    }(using streamOwner): Unit
+  }
+
+  /** Detaches this store from the current handle and closes it. Safe to call when there is none. */
+  private def releaseHandle(): Unit = {
+    // Killed before closing, so that the `Closed("closed by the client")` the close produces is not read
+    // back as "the server went away" and used to start the poller again.
+    handleOwner.foreach(_.killSubscriptions())
+    handleOwner = None
+    handle.foreach(_.close())
+    handle = None
   }
 
   /** Starts asking for the whole picture on a timer, and keeps trying to get the stream back.
@@ -136,13 +183,14 @@ final class Capabilities(
     * the connection dropped.
     */
   private def beginPollingFallback(): Unit =
-    if !polling then {
+    if !polling && !stopped then {
       polling = true
-      tick()
+      pollEpisode += 1
+      tick(pollEpisode)
     }
 
-  private def tick(): Unit =
-    if polling then {
+  private def tick(episode: Int): Unit =
+    if polling && episode == pollEpisode then {
       poll().foreach {
         case Right(snapshot) => applySnapshot(snapshot)
         // A failed poll changes nothing. Both the stream and the poller being down means the picture
@@ -153,11 +201,12 @@ final class Capabilities(
 
       schedule(
         pollInterval,
-        () => {
+        () =>
           // Each tick is also another go at the stream: recovering onto it is what stops the polling.
-          if polling then connect()
-          tick()
-        }
+          if polling && episode == pollEpisode then {
+            connect()
+            tick(episode)
+          }
       )
     }
 
@@ -220,8 +269,13 @@ final class Capabilities(
 
   /** Closes the stream. For tests and for a shell that is shutting down; the application never calls it. */
   def stop(): Unit = {
+    stopped = true
     polling = false
-    handle.foreach(_.close())
+    // Invalidates any callback already scheduled, so the store really does go quiet rather than keep
+    // polling and reopening the stream against a gateway the user may no longer be authenticated to.
+    pollEpisode += 1
+    releaseHandle()
+    connectionState.set(SseConnection.Closed("closed by the client"))
   }
 }
 
