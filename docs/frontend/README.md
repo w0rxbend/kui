@@ -33,8 +33,18 @@ frontend/
     test/src/…          MUnit suites, run under jsdom
 ```
 
-Later milestones add sibling modules — `ui-clusters`, `ui-topics`, `ui-messages` — one per feature,
-plus `ui-shell`, which is the application entry point. Each is a *microfrontend*: it is compiled into
+```
+  ui-shell/             the application: router, layout, the shell's own pages
+    src/kui/ui/shell/
+      layout/           Layout, Header, Sidebar
+      page/             HomePage, SettingsPage, GalleryPage, the error pages
+      Main.scala        the one `@main` the whole frontend has
+      Page.scala        ShellPage and the history.state codec
+      ShellRouter.scala the single Router[Page]
+    resources/css/      30-shell.css
+```
+
+Later milestones add sibling modules — `ui-clusters`, `ui-topics`, `ui-messages` — one per feature. Each is a *microfrontend*: it is compiled into
 its own JavaScript module and downloaded only when the user actually needs it (ADR-012). See
 [`features.md`](features.md) for how to add one.
 
@@ -234,6 +244,83 @@ Both return an `SseHandle`: the events, a `Signal[SseConnection]` for the connec
   forwarding it would make every caller filter it out;
 - **`error` and `done` are terminal** (ADR-035). `error` carries the ordinary error envelope, so a
   failure after the headers were sent is handled by the same code as one before.
+
+## The shell
+
+### Structure
+
+`ui-shell` is the Scala.js **entry point**: the one `@main` in the whole frontend (ADR-012). The
+linker is run on this module, and feature microfrontends are reached from it only through
+`FeatureRegistry`'s dynamic imports — which is what lets the linker put each feature in a JavaScript
+module the browser downloads on demand.
+
+The frame is a header across the top, a navigation column on the left, a content region in the
+middle, and the toast host. The header and the sidebar are built once; only the content changes.
+Handing `Layout` a `Signal[HtmlElement]` rather than an element is what makes that true, and it is
+what keeps focus, scroll position and open menus in the frame alive across a navigation.
+
+The first focusable element in the document is a "skip to content" link. It is visually hidden until
+focused, so it costs sighted users nothing; without it a keyboard user tabs through every navigation
+entry before reaching the page, on every page, every time. It must stay first.
+
+### The route-before-import rule
+
+This is the one thing about the shell that is easy to get wrong and expensive to discover.
+
+A deep link — a bookmarked or pasted URL landing directly on a feature page — must resolve on the
+**first** load, before that feature's JavaScript module has been downloaded. If the router only
+learned about a URL once its feature had been imported, the very first address it saw would be one
+it could not match, and the user would get a 404 for a page that exists.
+
+So each feature contributes **two** things, and they travel separately (ADR-012 amendment 2):
+
+| | what it is | when it is loaded |
+| --- | --- | --- |
+| `List[Route[? <: Page, ?]]` | data — path shapes | eagerly, with the shell |
+| the render functions | code | on the first navigation, through `js.dynamicImport` |
+
+Route patterns cost a few bytes in `main.js` and pull nothing else in. `checkBundleShape`
+(BUILD-006) fails the build if a real class reference leaks across that line.
+
+Feature routes are appended **after** the shell's own, so a feature cannot accidentally shadow
+`/ui/settings` by declaring a pattern that also matches it.
+
+### Every route ends with `endOfSegments`
+
+Without it a pattern matches a *prefix*: `/settings` would also claim `/settings/anything`, and the
+404 for a mistyped sub-path would never appear. ADR-011 also asks for the explicit form as forward
+compatibility with Waypoint 10, where it becomes the only form.
+
+### Page elements are built once, not once per navigation
+
+`SplitRender.collectStatic` takes its view **by name** and re-evaluates it every time the page signal
+emits that page — including when it re-emits the page already on screen. The shell wraps each in a
+`lazy val`, which turns that into "built on first visit, reused afterwards". Getting this wrong does
+not look like a bug: the page simply loses its scroll position and any open menu on every update.
+
+### When something throws
+
+There is no error boundary and none is needed, because there is no render pass to fail. What there
+is instead are two escape routes, and each has its own answer:
+
+- an exception inside an Airstream callback goes to a global handler, whose default rethrows into an
+  empty stack where nobody sees it. `ErrorReporting.install()` replaces it with one that raises a
+  toast and writes the detail to the console;
+- an exception while *building* a page's element happens before anything is mounted, leaving the
+  content area blank with the shell still around it. `ErrorReporting.renderSafely` wraps every page's
+  construction so that a page which throws shows a panel saying so.
+
+### The component gallery
+
+`/ui/gallery` shows every kernel primitive, every tone and every size on one page, in whichever theme
+is switched on. It is a development page, not a product feature: its job is to make a change to a
+primitive reviewable, so that a change to the button's padding is seen next to the tag and the toast
+it has to line up with. Screenshots of both themes are in
+[`screenshots/`](screenshots/) and are regenerated when a primitive changes.
+
+![The component gallery in the light theme](screenshots/gallery-light.png)
+
+![The component gallery in the dark theme](screenshots/gallery-dark.png)
 
 ## What the user sees for a feature: the derivation table
 

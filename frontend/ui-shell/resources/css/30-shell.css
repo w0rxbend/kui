@@ -1,0 +1,200 @@
+/* The application frame: header across the top, navigation down the left, content in the middle.
+ *
+ * Everything here is layout and nothing is colour that is not a token. A rule that hard-codes a
+ * colour works in one theme and is wrong in the other, and nobody notices until somebody switches.
+ *
+ * The frame is a grid rather than a flex column with a nested flex row, because a grid lets the
+ * header span both columns and the sidebar reach the bottom of the viewport without either of them
+ * knowing the other's size. */
+
+.kui-shell {
+  display: grid;
+  grid-template-columns: var(--kui-sidebar-width, 15rem) 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "header header"
+    "sidebar content";
+  min-height: 100vh;
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+}
+
+/* Visible only when focused. A keyboard user's first Tab lands here; everyone else never sees it.
+ * It must stay the first focusable element in the document — moving it further down, on the
+ * grounds that it is invisible anyway, makes every page start with a walk through the navigation. */
+.kui-shell__skip {
+  position: absolute;
+  left: var(--kui-space-2);
+  top: -3rem;
+  z-index: 100;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+  border: 1px solid var(--kui-color-primary);
+  border-radius: var(--kui-radius-md);
+  transition: top var(--kui-duration-fast) ease;
+}
+
+.kui-shell__skip:focus {
+  top: var(--kui-space-2);
+}
+
+.kui-shell__header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-2) var(--kui-space-4);
+  border-bottom: 1px solid var(--kui-color-border);
+  background: var(--kui-color-surface);
+}
+
+.kui-shell__brand a {
+  font-weight: 700;
+  font-size: var(--kui-font-size-lg);
+  color: var(--kui-color-text);
+  text-decoration: none;
+}
+
+/* Holds the space the cluster switcher takes in M1, so that adding it does not move the theme
+ * button to a different place on screen. */
+.kui-shell__cluster-slot {
+  min-width: 0;
+}
+
+.kui-shell__header-spacer {
+  flex: 1 1 auto;
+}
+
+.kui-shell__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-shell__version {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-shell__sidebar {
+  grid-area: sidebar;
+  padding: var(--kui-space-3) var(--kui-space-2);
+  border-right: 1px solid var(--kui-color-border);
+  background: var(--kui-color-surface);
+}
+
+.kui-shell__sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-shell__sidebar-link {
+  display: block;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  color: var(--kui-color-text-muted);
+  text-decoration: none;
+}
+
+.kui-shell__sidebar-link:hover {
+  background: var(--kui-color-surface-raised);
+  color: var(--kui-color-text);
+}
+
+/* The current entry is marked by weight and a bar as well as by colour, so that it is still
+ * identifiable to somebody who cannot distinguish the two colours. */
+.kui-shell__sidebar-link--current {
+  background: var(--kui-color-surface-raised);
+  color: var(--kui-color-text);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 0 var(--kui-color-primary);
+}
+
+.kui-shell__content {
+  grid-area: content;
+  padding: var(--kui-space-4);
+  min-width: 0;
+}
+
+/* The content region is focusable so the skip link can move focus into it, but it must not gain a
+ * focus ring: nobody clicked it, and the ring would appear on every skip. */
+.kui-shell__content:focus {
+  outline: none;
+}
+
+.kui-shell__page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  max-width: 64rem;
+}
+
+.kui-shell__page-error-detail {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-shell__settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+/* The component gallery. A development page, so its styling only has to be legible, not designed. */
+.kui-shell__gallery-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding-bottom: var(--kui-space-4);
+  border-bottom: 1px solid var(--kui-color-border);
+}
+
+.kui-shell__gallery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--kui-space-3);
+}
+
+.kui-shell__gallery-icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: var(--kui-space-3);
+}
+
+.kui-shell__gallery-icon {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* Below this width the sidebar stops being a column and becomes a strip above the content. Nothing
+ * is hidden: a navigation that disappears on a narrow window is a navigation somebody cannot use. */
+@media (max-width: 48rem) {
+  .kui-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "sidebar"
+      "content";
+  }
+
+  .kui-shell__sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--kui-color-border);
+  }
+
+  .kui-shell__sidebar-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

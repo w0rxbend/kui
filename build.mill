@@ -420,6 +420,7 @@ object libs extends Module {
       mvn"io.opentelemetry:opentelemetry-sdk:${Versions.otelSdk}",
       mvn"io.opentelemetry:opentelemetry-sdk-extension-autoconfigure:${Versions.otelSdk}",
       mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+      mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
       mvn"com.softwaremill.sttp.tapir::tapir-otel4s-tracing::${Versions.tapir}",
       mvn"com.softwaremill.sttp.tapir::tapir-opentelemetry-metrics::${Versions.tapir}",
       mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}"
@@ -442,6 +443,8 @@ object libs extends Module {
       def mvnDeps = super.mvnDeps() ++ Seq(
         mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}",
         mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
         mvn"ch.qos.logback:logback-classic:${Versions.logback}",
         // Not only so the suites can capture output: `logback.xml` in this module's resources is on
         // the test classpath, so Logback parses it during the run. A typo in it — or an encoder

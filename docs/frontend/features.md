@@ -156,3 +156,29 @@ slot is simply empty. That is the intended behaviour.
 `PanelContext` is deliberately narrow: the cluster and a few string parameters. Passing the host
 page's state object would make the two features share a type, which is the coupling this whole
 arrangement exists to avoid.
+
+## Route patterns are registered before your feature is downloaded
+
+A bookmarked link to one of your pages has to work on the first load, when your module has not been
+fetched yet. So the shell needs your **route patterns** — which URLs you own — eagerly, and your
+**render functions** only once a route matches (ADR-012 amendment 2).
+
+That means a registry entry carries two things, and they must stay separate:
+
+```scala
+// Data. Path shapes. Linked against normally, and it costs a few bytes in main.js.
+def routes: List[Route[? <: Page, ?]]
+
+// Code. Everything reachable only through this thunk goes into your own JavaScript module.
+FeatureId.Topics -> (() => js.dynamicImport(new kui.ui.topics.TopicsFeature()))
+```
+
+If you put a route pattern inside the thunk, a deep link to your feature 404s until somebody has
+already navigated into it by hand — which nobody will notice in development, because you always
+arrive from the sidebar. `checkBundleShape` (BUILD-006) catches the opposite mistake: a class
+reference leaking out of the thunk, which puts your whole feature in `main.js` for every user.
+
+Your pages also need a `history.state` codec. Until UI-012 adds the first one, `PageCodec` in the
+shell only knows the shell's own pages, and a feature page serializes as `unknown` and comes back as
+`NotFound` — which means Back onto one re-parses the URL rather than restoring the state. Adding the
+first feature is where that gap is closed.

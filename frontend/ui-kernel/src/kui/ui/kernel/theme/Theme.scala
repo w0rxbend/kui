@@ -153,12 +153,17 @@ object Theme {
     * `matchMedia` gives both the current answer and an event when it changes, which is what makes `Auto`
     * genuinely automatic: a laptop switching to dark at sunset re-themes an open KUI tab without a reload.
     */
-  private def systemPrefersDark(): Signal[Boolean] = {
-    val query = dom.window.matchMedia(DarkQuery)
-    val prefers = Var(query.matches)
-    // The event carries the new value, but reading it off the query object avoids depending on
-    // a `MediaQueryListEvent` type that scala-js-dom does not expose.
-    query.addEventListener("change", (_: dom.Event) => prefers.set(query.matches))
-    prefers.signal
-  }
+  private def systemPrefersDark(): Signal[Boolean] =
+    // `matchMedia` is missing in some environments — jsdom does not implement it, and neither do a
+    // few embedded browsers. Its absence is not a reason to fail to start: the honest answer is then
+    // "the system does not ask for dark", so `Auto` behaves as light and the explicit choices still
+    // work. `Try` rather than a feature check because a browser that has the method but refuses the
+    // query (a hardened or headless configuration) has to be handled the same way.
+    Try(dom.window.matchMedia(DarkQuery)).toOption.fold(Val(false)) { query =>
+      val prefers = Var(query.matches)
+      // The event carries the new value, but reading it off the query object avoids depending on
+      // a `MediaQueryListEvent` type that scala-js-dom does not expose.
+      query.addEventListener("change", (_: dom.Event) => prefers.set(query.matches))
+      prefers.signal
+    }
 }
