@@ -135,7 +135,14 @@ trait KuiTests extends TestModule.Munit {
   * The default JavaScript environment is plain Node: no `document`, so only logic can be tested.
   * The two traits below swap that environment for one that has a DOM.
   */
-trait KuiJsTests extends KuiTests
+trait KuiJsTests extends ScalaJSModule with KuiTests {
+  // The shipped frontend is linked as ES modules (`KuiJsModule`), but a test binary is never loaded
+  // by a browser: it is handed to Node by the Scala.js test adapter. Node's ES-module loader cannot
+  // give the adapter's own bootstrap script the `require` function it needs, and the run dies with
+  // "ReferenceError: require is not defined" before a single test starts. Linking test binaries as
+  // CommonJS avoids that entirely and changes nothing about the artefact that ships.
+  override def moduleKind = ModuleKind.CommonJSModule
+}
 
 /** Test sources for one platform of a cross-compiled module.
   *
