@@ -4,7 +4,8 @@ import java.time.Instant
 
 import scala.concurrent.duration.FiniteDuration
 
-import cats.effect.kernel.{Clock, Ref, Temporal}
+import cats.effect.kernel.{Clock, Outcome, Ref, Temporal}
+import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import fs2.Stream
 import fs2.concurrent.Topic
@@ -128,19 +129,28 @@ object CircuitBreaker {
 
     def state: F[CircuitState] = memory.get.map(_.state)
 
-    def events: Stream[F, CircuitEvent] = topic.subscribe(EventBuffer)
+    def events: Stream[F, CircuitEvent] = topic.subscribeUnbounded
 
     def protect[A](call: F[A])(succeeded: A => Boolean): F[A] =
       Clock[F].realTimeInstant.flatMap { now =>
         admit(now).flatMap {
           case Left(openSince) => Temporal[F].raiseError[A](CircuitOpenException(upstream, openSince))
           case Right(isProbe) =>
-            call.attempt.flatMap {
-              case Right(value) if succeeded(value) => onSuccess() *> Temporal[F].pure(value)
-              case Right(value) =>
-                onFailure(isProbe, UnsuccessfulResponse) *> Temporal[F].pure(value)
-              case Left(error) => onFailure(isProbe, error) *> Temporal[F].raiseError[A](error)
-            }
+            // `guaranteeCase` and not a plain `flatMap`: `attempt` sees a value or an error, but
+            // never a cancellation, and a cancelled probe that released nothing would leave the
+            // claim set with no path that could ever clear it. A call timeout cancels, and so does
+            // a client disconnect, so that is the *likeliest* fate of a probe at a hung upstream.
+            call.attempt
+              .guaranteeCase {
+                case Outcome.Canceled() => onCancelled(isProbe)
+                case _ => Temporal[F].unit
+              }
+              .flatMap {
+                case Right(value) if succeeded(value) => onSuccess() *> Temporal[F].pure(value)
+                case Right(value) =>
+                  onFailure(isProbe, UnsuccessfulResponse) *> Temporal[F].pure(value)
+                case Left(error) => onFailure(isProbe, error) *> Temporal[F].raiseError[A](error)
+              }
         }
       }
 
@@ -220,16 +230,46 @@ object CircuitBreaker {
           }
       }
 
+    /** Releases a probe claim whose call was cancelled before it could answer.
+      *
+      * A cancelled probe told us nothing about the upstream, so the circuit goes back to open with
+      * a fresh timer rather than closing: the upstream still has to earn its way back with a probe
+      * that actually completes. The consecutive-failure run is left alone, because a cancellation
+      * is our decision, not the upstream's, and counting it as a failure would open circuits on
+      * upstreams that were merely called by a client that hung up.
+      *
+      * A cancelled non-probe call changes nothing: it never claimed anything.
+      */
+    private def onCancelled(isProbe: Boolean): F[Unit] =
+      Temporal[F].whenA(isProbe) {
+        Clock[F].realTimeInstant.flatMap { now =>
+          memory.update(current =>
+            current.copy(
+              state = CircuitState.Open,
+              openedAt = Some(now),
+              probeInFlight = false,
+              lastError = Some(ProbeCancelled)
+            )
+          ) *> publish(CircuitState.Open, now, Some(ProbeCancelled))
+        }
+      }
+
+    /** Hands a transition to the subscribers without ever making the caller wait for them.
+      *
+      * `publish` runs on the request fiber that was calling the upstream, inside the bulkhead
+      * permit. `subscribe(n)` gives each subscriber a bounded, *backpressuring* queue, so a
+      * subscriber that stopped draining — the capability fold behind a stalled log appender, say —
+      * would not miss transitions, it would stop every in-flight upstream call. Subscribers are
+      * therefore unbounded: the only things published here are transitions, which are rare by
+      * construction, and every subscriber is a stream whose lifetime is a resource that
+      * unsubscribes when it ends.
+      */
     private def publish(state: CircuitState, at: Instant, lastError: Option[String]): F[Unit] =
       topic.publish1(CircuitEvent(upstream, state, at, lastError)).void
   }
 
-  /** How many transitions a slow subscriber may fall behind before it starts missing them.
-    *
-    * Bounded on purpose: an unbounded topic buffer is a memory leak with a subscriber that stopped reading,
-    * and a capability registry that is 32 transitions behind has already lost the plot.
-    */
-  private val EventBuffer: Int = 32
+  /** The stand-in cause recorded when a probe was cancelled before the upstream answered. */
+  private val ProbeCancelled: String = "the probe was cancelled before the upstream answered"
 
   /** The stand-in cause recorded when a response arrived but did not count as a success.
     *

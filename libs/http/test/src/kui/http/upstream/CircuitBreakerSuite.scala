@@ -170,6 +170,57 @@ final class CircuitBreakerSuite extends CatsEffectSuite {
     }
   }
 
+  test("a cancelled probe releases the claim rather than wedging the circuit half-open") {
+    // The likeliest fate of a probe sent at a hung upstream: the caller's own call timeout
+    // cancels it. Nothing observes a cancellation except a cancellation-aware finaliser, so
+    // without one the probe claim is never released and every later call — including the
+    // readiness poll — is refused forever.
+    val program = for {
+      b <- breaker
+      _ <- fail(b).replicateA_(3) // -> Open
+      _ <- IO.sleep(reset + 1.second)
+      // The probe: admitted, never answers, cancelled from outside.
+      _ <- b.protect(IO.never[Unit]).timeoutTo(5.seconds, IO.unit)
+      afterCancellation <- b.state
+      // A fresh timer, so the upstream is left alone for another full reset...
+      refused <- b.protect(IO.unit).attempt
+      _ <- IO.sleep(reset + 1.second)
+      // ...and then the circuit can be probed again and recover, which is the whole point.
+      _ <- succeed(b)
+      recovered <- b.state
+    } yield (afterCancellation, refused, recovered)
+
+    TestControl.executeEmbed(program).map { (afterCancellation, refused, recovered) =>
+      assertEquals(afterCancellation, CircuitState.Open, "a cancelled probe left the circuit half-open")
+      assert(
+        refused.left.toOption.exists(_.isInstanceOf[CircuitOpenException]),
+        s"the reopened circuit admitted a second probe immediately: $refused"
+      )
+      assertEquals(recovered, CircuitState.Closed, "the circuit could never recover after a cancelled probe")
+    }
+  }
+
+  test("publishing a transition never waits for a subscriber that stopped reading") {
+    // `subscribe(n)` would give each subscriber a bounded, backpressuring queue: once full, the
+    // publisher blocks. The publisher here is the request fiber that was calling the upstream,
+    // holding a bulkhead permit, so a stalled subscriber would not miss transitions — it would
+    // stop every in-flight call to that upstream.
+    val fastToOpen = CircuitBreaker.make[IO](upstream, PositiveInt.unsafe(1), reset)
+
+    val program = for {
+      b <- fastToOpen
+      // A subscriber that subscribes and then never reads another element.
+      stalled <- b.events.evalMap(_ => IO.never[Unit]).compile.drain.start
+      _ <- IO.sleep(1.second)
+      // Three transitions per cycle (Open, HalfOpen, Closed), well past any plausible bound.
+      _ <- (fail(b) *> IO.sleep(reset + 1.second) *> succeed(b)).replicateA_(20)
+      _ <- stalled.cancel
+      state <- b.state
+    } yield state
+
+    TestControl.executeEmbed(program).map(state => assertEquals(state, CircuitState.Closed))
+  }
+
   test("the state has a numeric form, so the gauge can be graphed") {
     assertEquals(CircuitState.Closed.code, 0L)
     assertEquals(CircuitState.Open.code, 1L)
