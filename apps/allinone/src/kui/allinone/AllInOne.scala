@@ -5,10 +5,9 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.effect.kernel.Clock
 import cats.effect.{ExitCode, IO, IOApp, Resource}
 
-import kui.cluster.app.LogbackSelection
 import kui.config.{ConfigErrors, KuiConfigSource}
 import kui.http.KuiServer
-import kui.observability.{KuiLogger, Telemetry}
+import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
 
 /** The all-in-one process: the whole product on one port.
   *

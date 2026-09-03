@@ -9,7 +9,7 @@ import org.typelevel.log4cats.StructuredLogger
 import kui.cluster.api.ClusterApi
 import kui.config.{ConfigErrors, KuiConfigSource}
 import kui.http.KuiServer
-import kui.observability.{KuiLogger, Telemetry}
+import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
 
 /** The cluster service process.
   *

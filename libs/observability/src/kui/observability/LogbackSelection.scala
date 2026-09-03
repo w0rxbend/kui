@@ -1,10 +1,15 @@
-package kui.cluster.app
+package kui.observability
 
 import cats.effect.kernel.Sync
 
 import kui.config.LogFormat
 
 /** Choosing which Logback configuration this process uses.
+  *
+  * It lives beside the two files it chooses between rather than in any one process, because every KUI process
+  * has to make this choice and a copy per deployable is a copy that gets forgotten. It was forgotten once
+  * already: the gateway never called it, so `kui.telemetry.logFormat: text` did nothing in the one process an
+  * operator is most likely to be reading the logs of.
   *
   * `libs/observability` ships two: `logback.xml` writes one JSON object per line, which is what a log system
   * parses, and `logback-text.xml` writes a short human line, which is what a developer reading a terminal

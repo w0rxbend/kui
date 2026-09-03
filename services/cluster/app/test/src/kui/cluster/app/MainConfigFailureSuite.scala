@@ -119,7 +119,7 @@ final class MainConfigFailureSuite extends CatsEffectSuite {
   test("logbackSelectionOnlyOverridesForText") {
     // `json` is Logback's own default lookup, so the property is left unset: one fewer thing that
     // can be pointed at a file nobody expects.
-    assertEquals(LogbackSelection.resourceFor(LogFormat.Json), None)
-    assertEquals(LogbackSelection.resourceFor(LogFormat.Text), Some("logback-text.xml"))
+    assertEquals(kui.observability.LogbackSelection.resourceFor(LogFormat.Json), None)
+    assertEquals(kui.observability.LogbackSelection.resourceFor(LogFormat.Text), Some("logback-text.xml"))
   }
 }

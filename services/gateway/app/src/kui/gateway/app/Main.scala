@@ -6,7 +6,7 @@ import cats.effect.{ExitCode, IO, IOApp}
 import kui.config.{ConfigErrors, KuiConfigSource}
 import kui.gateway.api.GatewayApi
 import kui.http.KuiServer
-import kui.observability.{KuiLogger, Telemetry}
+import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
 
 /** The gateway process.
   *
@@ -19,6 +19,8 @@ import kui.observability.{KuiLogger, Telemetry}
   *   1. **Load and validate the configuration.** A bad configuration stops the process with every problem
   *      listed at once and a non-zero exit code. Starting with a silently defaulted value is how a deployment
   *      ends up listening on the wrong port for a week (CFG-001).
+  *   1. **Choose the log format.** Before any logger exists, because Logback configures itself on first use
+  *      (`LogbackSelection`).
   *   1. **Start telemetry.** This one never stops the process: an unreachable collector is a monitoring
   *      outage, and turning it into a KUI outage would mean a Friday-evening collector restart takes the
   *      product down (`Telemetry.resource`).
@@ -43,6 +45,9 @@ object Main extends IOApp {
 
   private def server(config: GatewayServiceConfig): Resource[IO, KuiServer.ServerBinding] =
     for {
+      // Before any logger exists, because Logback configures itself on first use and cannot be moved
+      // afterwards. Nothing between this line and `KuiLogger.make` may log.
+      _ <- Resource.eval(LogbackSelection[IO](config.telemetry.logFormat))
       logger <- Resource.eval(KuiLogger.make[IO](GatewayApi.ServiceName))
       startedAt <- Resource.eval(Clock[IO].realTimeInstant)
       _ <- Resource.eval(GatewayWiring.startupLog[IO](logger, config, startedAt))
