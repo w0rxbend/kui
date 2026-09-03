@@ -292,4 +292,53 @@ source it works from.
 
 ## Deviations
 
-*(filled in by the implementer, in the same commit)*
+Recorded by the implementer, in the same commit.
+
+1. **`KeyStoreMaterializer.resource` returns `Resource[F, Either[KuiError, Map[StoreRole, String]]]`,
+   not `Resource[F, Map[StoreRole, String]]`.** The spec's signature has nowhere to put the two
+   failures the spec itself then describes — a malformed base64 store, and an unwritable or
+   non-POSIX filesystem — so they would have had to be exceptions raised into `F` and translated
+   back into values one module later. `CLAUDE.md` says errors are values in business code and
+   exceptions are translated at adapter boundaries; this *is* the adapter boundary, so the
+   translation happens here and callers get a value. `ConnectionProperties.resource` already
+   returned an `Either`, so nothing downstream changed shape.
+
+2. **`ConnectionProperties.resource` takes an optional `log: Option[Logger[F]] = None`.** The two log
+   lines the Observability section requires need a logger, and `libs/kafka-auth` depends on
+   `log4cats-core` only — it has no `LoggerFactory` and no SLF4J binding, so it cannot make one.
+   Adding a `LoggerFactory[F]` context bound would have changed the signature every caller uses,
+   including STORE-005's, which is being written in parallel. An optional parameter adds the
+   capability without breaking a caller that does not pass it.
+
+3. **Base64 decoding is strict, with whitespace stripped first.** The obvious choice,
+   `Base64.getMimeDecoder`, silently *ignores* characters outside the alphabet, so a store pasted as
+   `!!!! not base64 !!!!` decodes to a few bytes rather than failing — and the
+   `noSecretAppearsInTheErrorWhenTheBase64IsInvalid` test would have had nothing to assert.
+   `Base64.getDecoder` on the value with `\s` removed accepts a YAML block scalar's line breaks and
+   refuses everything else. KAFKA-002's PEM decoder was corrected in the same way.
+
+4. **`contentIsZeroedBeforeDeletion` is not asserted directly**, and the test that stood in its place
+   is named `theStoreIsWrittenIntoTheDirectoryItWasGiven`. The zero fill happens in the release, in
+   between the last read and the unlink, and there is no point at which a test can observe the file
+   after the overwrite and before the delete without reaching inside the finalizer and changing what
+   is under test. The scrub is still implemented, and the deletion it precedes is asserted three
+   ways — on the happy path, on a failed body, and on cancellation. Recorded as a known gap rather
+   than covered by a test that would pass whether or not the scrub ran.
+
+5. **A cancellation test was added** (`filesAreDeletedWhenTheBodyIsCancelled`), which the spec does
+   not list. The gate review's finding F-07 makes a named cancellation test a condition of done for
+   every path in M1 that has one, and a keystore surviving a cancelled client startup is exactly the
+   leak that finding is about.
+
+6. **`CloudHandlers.resolvesClass` is `private[auth]` rather than private**, so that
+   `checkDoesNotInitializeTheClass` can probe it directly. The spec suggested driving that test
+   through a class loader that substitutes a class with a failing static initializer; the JVM
+   rejects a loader that returns a class whose name does not match the request, so the substitution
+   cannot be made without generating bytecode. Probing the function directly tests the same thing —
+   that the class resolves and that initialising it would have failed — with no machinery.
+
+7. **The error for a missing library is `ApplicationError.Unsupported` whose `feature` reads as a
+   sentence** (`"SASL mechanism AWS_MSK_IAM for cluster 'prod', whose … is not on the classpath (add
+   … )"`), because that case computes its message as `"$feature is not supported here"` and has no
+   field for a remedy. The resulting message is grammatical and contains the mechanism, the cluster,
+   the class and the coordinate, which is what the spec's acceptance text asks for.

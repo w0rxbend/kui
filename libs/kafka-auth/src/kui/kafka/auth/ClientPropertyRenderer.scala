@@ -244,7 +244,7 @@ object ClientPropertyRenderer {
       base64: Secret[String],
       field: String
   ): Either[NonEmptyList[ValidationError], String] =
-    Try(Base64.getMimeDecoder.decode(base64.value)).toEither.left
+    Try(Base64.getDecoder.decode(base64.value.replaceAll("\\s", ""))).toEither.left
       .map(_ =>
         NonEmptyList.one(
           ValidationError.Format(field, "valid base64", "<the configured value>")
