@@ -259,3 +259,20 @@ returns `KUI-STORE-CRYPTO`.
 ## Docs to update
 
 None in this task — see decision 1 above; the `metadata-store.md` §4.2 amendment is CFGOP-008's.
+
+## Deviations
+
+1. **`encryptPayload` fails through `StoreFailure`, a `RuntimeException` carrying a `StoreError`.**
+   The spec fixes the signature as `F[Json]`, and decision 3 requires the guard on
+   `isFullyEncrypted` to produce `StoreError.MalformedRecord` rather than a bare Scala assertion.
+   Those two together leave nowhere for the error to go except `F`'s error channel, so
+   `StoreError.scala` gains one exception type whose only purpose is to carry a named error across
+   that channel. It is caught and turned back into a `Left` inside `decryptPayload`, so the trait's
+   `Either`-returning methods are still total in the way their scaladoc claims.
+2. **`StoreError.DecryptionFailed` from `decryptBytes` carries an empty `where`.** The byte-level
+   method does not know a JSON path — it is handed an opaque AAD. `decryptPayload` rewrites the
+   error with the path before returning it, which is the only place a path exists.
+3. **The committed golden file `record-cluster-encrypted-k1.json` is generated, not hand-written.**
+   It was produced by encrypting a plaintext fixture under the test key `k1`, so the suite can
+   decrypt it as well as grep it. A hand-written file could only be grepped, which would not catch
+   an AAD change.

@@ -31,7 +31,40 @@ enum StoreError(val code: ErrorCode, val message: String) extends Product, Seria
     */
   case MalformedRecord(key: String, why: String)
       extends StoreError(ErrorCode.StoreEnvelope, s"store record '$key' is malformed: $why")
+
+  /** A record encrypted under a key this KUI no longer holds — a rotation that dropped the old key too early,
+    * or a topic written by a different deployment.
+    */
+  case UnknownKeyId(keyId: String, known: Set[String])
+      extends StoreError(
+        ErrorCode.StoreCrypto,
+        s"no encryption key with id '$keyId' is configured; the keyring holds ${known.toList.sorted.mkString(", ")}"
+      )
+
+  /** AES-GCM refused the ciphertext: the wrong key, a tampered record, or a field moved to a path the
+    * ciphertext was not bound to. `where` is the JSON path of the field and never its value, and there is
+    * deliberately no cause string — a JCE exception message is safe today and is not a thing to bet a secret
+    * on.
+    */
+  case DecryptionFailed(keyId: String, where: String)
+      extends StoreError(
+        ErrorCode.StoreCrypto,
+        s"the field '$where' could not be decrypted with key '$keyId'"
+      )
+
+  /** Key material that is not 32 bytes, not valid base64, or carries an id that is not a slug. */
+  case InvalidKeyMaterial(keyId: String, why: String)
+      extends StoreError(ErrorCode.StoreCrypto, s"encryption key '$keyId' is unusable: $why")
 }
+
+/** A store failure on a path whose signature is `F[A]` rather than `F[Either[StoreError, A]]`.
+  *
+  * Exactly one thing raises it: `FieldCrypto.encryptPayload`'s guard that no plaintext secret marker survives
+  * encryption. That guard is an invariant of KUI's own code, not a condition a caller can recover from, so it
+  * is not in the return type — but it still has to carry the named error rather than a bare assertion, so
+  * that what an operator sees is `KUI-STORE-CRYPTO` and not a stack trace.
+  */
+final class StoreFailure(val error: StoreError) extends RuntimeException(error.message)
 
 object StoreError {
 
