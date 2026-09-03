@@ -1016,7 +1016,11 @@ object services extends Module {
       )
 
       object test extends ScalaTests with KuiTests {
-        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+        // `services.gateway.application.test` is here for `FakeCapabilityRegistry`. The task asked for
+        // that fake to live in `libs/testkit`, and it cannot: `CapabilityRegistry` is a gateway type
+        // (ADR-041 §1a), and rule A5 forbids a library module from depending on a service module. One
+        // shared fake in the gateway's own test module is the arrangement that keeps both true.
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, application.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
           mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
