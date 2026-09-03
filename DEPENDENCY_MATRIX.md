@@ -136,7 +136,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | com.raquo | domtestutils_sjs1_3 | 19.0.0 | test | frontend/* | ADR-018 |
 | npm: codemirror (@codemirror/state, view, lang-json, lang-sql, legacy-modes, lint, search) | — | 6.x, pinned in `frontend/package.json` | js (static ESM via import map) | frontend/ui-kernel | ADR-025 |
 | npm: uplot | — | pinned in `frontend/package.json` | js (static ESM) | frontend/ui-kernel | ADR-025 |
-| org.scalablytyped.converter | mill-scalablytyped | one-off tool | build (not routine) | facade generation only | ADR-025 |
+| com.github.lolgab | mill-scalablytyped_mill1_3 | 0.4.1 | build (one-off, not routine) | facade generation only | ADR-025 (BUILD-006 spike 2 verified it generates and compiles under Mill 1.1.8 / Scala 3.9 / Scala.js 1.22; needs an npm `typescript` install, and generation runs through `compile`, not a named task) |
 
 ## Tests
 
@@ -150,7 +150,7 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | com.dimafeng | testcontainers-scala-munit_3 | 0.44.1 | test | libs/testkit, integration suites, e2e | ADR-018 |
 | com.dimafeng | testcontainers-scala-kafka_3 | 0.44.1 | test | libs/testkit | ADR-018 |
 | org.testcontainers | testcontainers-kafka | 2.0.5 | test | libs/testkit | ADR-018 |
-| com.microsoft.playwright | playwright | see open questions | test | e2e | ADR-018 |
+| com.microsoft.playwright | playwright | 1.62.0 | test | e2e | ADR-018 (BUILD-006 spike 3; pinned together with the browser build it downloads, Chromium 1234 / Chrome for Testing 151.0.7922.34 — the library only speaks to its own revision) |
 | org.bouncycastle | bcpkix-jdk18on | 1.85 | test | libs/testkit | ADR-018 |
 
 ## Explicitly excluded
@@ -173,9 +173,14 @@ WireMock, Mockito, Groovy, the official Java MCP SDK, datasketches 9.0.0, Chimne
 | Confluent 8.3.1 | Community License review documented in `docs/operations`; confirm optional-classpath packaging (ADR-014). | CTO | M3 |
 | io.kafbat.ui:serde-api | Exact published version and Maven coordinates for the bridge module (ADR-028). | Kafka Specialist | M6 |
 | at.favre.lib:bcrypt | Latest version and Java 21 compatibility (ADR-015). | Security Engineer | M6 |
-| com.microsoft.playwright | Latest JVM Playwright version and browser bundle pinning in CI (ADR-018). Resolved by task BUILD-006, which must land before E2E-001. | QA Engineer | M0 (BUILD-006) |
-| tapir-netty-server-cats | Spike: long-lived SSE responses on Netty 4.2 with fs2 backpressure; http4s-ember is the fallback (ADR-003). Resolved by task BUILD-006, which blocks HTTP-004. | Principal Scala Engineer | M0 (BUILD-006) |
 | Mill 1.2.0 | Stay on 1.1.8 until 1.2.0 final; re-check `mill-contrib-docker` API then. | Infrastructure Lead | ongoing |
-| mill-scalablytyped | Compatibility with Mill 1.1.x for the one-off facade generation (ADR-025). | Frontend Architect | M0 |
 | Laminar 18 / Waypoint 10 | Upgrade task once both are final (ADR-011). | Frontend Architect | after release |
 | opentelemetry-exporter-prometheus | Alpha status; fallback to `otel4s-sdk-exporter-prometheus 0.19.x` if unstable (ADR-009). | Infrastructure Lead | M1 |
+
+### Closed by BUILD-006
+
+| Item | Answer | Findings |
+| --- | --- | --- |
+| tapir-netty-server-cats | Netty keeps a `serverSentEventsBody` open past 10 minutes, flushes each event within ~2 ms, and cancels the fs2 stream within 8 ms of the client leaving. Netty stays; the http4s-ember fallback is not taken. | [docs/spikes/M0-netty-sse.md](docs/spikes/M0-netty-sse.md) |
+| mill-scalablytyped | 0.4.1 generates and compiles a `@codemirror/state` facade under Mill 1.1.8, Scala 3.9 and Scala.js 1.22. Stays as ADR-025's one-off generator. | [docs/spikes/M0-scalablytyped.md](docs/spikes/M0-scalablytyped.md) |
+| com.microsoft.playwright | 1.62.0, which downloads Chromium build 1234 (Chrome for Testing 151.0.7922.34). Both pinned in `build.mill`. | [docs/spikes/M0-playwright-pin.md](docs/spikes/M0-playwright-pin.md) |

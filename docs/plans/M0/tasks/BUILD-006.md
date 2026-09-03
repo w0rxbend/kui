@@ -132,3 +132,33 @@ Not applicable.
 `DEPENDENCY_MATRIX.md`: close the three "Open version questions" rows with the decisions —
 closed, not restated. `TECH_DEBT.md`: a row only if a spike forced an accepted compromise.
 ADR-003 or ADR-025 gain a consequence note if their fallback was taken.
+
+---
+
+## Implementation report (2026-09-03)
+
+All three spikes ran to a decision. Findings are in `docs/spikes/`; the three "Open version
+questions" rows in `DEPENDENCY_MATRIX.md` are closed, not restated.
+
+| Spike | Decision rule row taken | Outcome |
+| --- | --- | --- |
+| 1 — Netty SSE | "events flush individually, connection survives 10 min, cancellation within 1 s" → keep Netty | **Netty stays.** 612 events over 10+ minutes on one connection, each flushed ~2 ms after emission, stream cancelled 8 ms after the client left. Confirmed with `curl -N` *and* a real headless-Chromium `EventSource` (329 events, 0 errors, still OPEN at the end). No http4s-ember, no dependency change, no HTTP-004 idle-timeout guard, no ADR-003 consequence note. |
+| 2 — ScalablyTyped | the "yes" case: the plugin runs, so the row stays | **`mill-scalablytyped` 0.4.1 works** on Mill 1.1.8 / Scala 3.9 / Scala.js 1.22: 42 generated files, 3163 lines for `@codemirror/state`, compiled. The matrix row keeps its place and gains a version. ADR-025 needs no consequence note — its plan was proven, not contradicted. |
+| 3 — Playwright pin | "newest stable release that resolves and runs the smoke navigation" | **1.62.0**, browser build **1234** (Chrome for Testing 151.0.7922.34). Smoke navigation passed. Both numbers pinned in `build.mill`; the exact CI install command is in the findings document for E2E-001. |
+
+No `TECH_DEBT.md` row: no spike forced an accepted compromise.
+
+### Deviations from this specification
+
+1. **`./mill show Versions.playwright` cannot work.** `Versions` is a plain Scala object evaluated
+   while the build definition compiles; Mill's `show` only prints tasks. The two Playwright numbers
+   are re-exported by a small `versions` module, so the working commands are
+   `./mill show versions.playwright` and `./mill show versions.playwrightBrowser`. The pinned values
+   are still declared once, in `Versions`.
+2. **The bundle-shape task is `frontend.uiKernel.checkBundleShape`, not `frontend.uiShell.…`.**
+   There is no `uiShell` module in this build; `frontend.uiKernel` is the shell module BUILD-003
+   created. The task is defined on the `KuiFrontendModule` trait, so every future frontend module
+   inherits it.
+3. **Spike 1 used a real browser rather than Node for the `EventSource` half.** Node 24 has no
+   `EventSource` global, and the question was about browser behaviour anyway, so the spike drove
+   headless Chromium through the Playwright build that spike 3 had just pinned.
