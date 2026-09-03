@@ -1,92 +1,105 @@
 /* KUI design tokens — the authoritative set.
  *
  * This file is the whole visual vocabulary of the product. Every colour, spacing step, font size,
- * radius, shadow, stacking layer and animation duration a component is allowed to use is declared
- * here as a CSS custom property, and components reference them by name. Changing the look of KUI
- * means changing this file and nothing else.
+ * radius, shadow, stacking layer, density step and animation duration a component is allowed to use
+ * is declared here as a CSS custom property, and components reference them by name. Changing the
+ * look of KUI means changing this file and nothing else.
  *
- * ## What this is, and what it is not
+ * ## Where the values come from
  *
- * These are NOT placeholders waiting for a design import. Task UI-002 decided the set, the naming
- * and the constraints, from the two products already studied in `research/`:
+ * The *names* are KUI's. They were chosen in task UI-002, they are semantic (they say what a colour
+ * is for, never which component uses it), and they did not change when the design arrived.
  *
- *   - Kafbat's theme is a 1 664-line TypeScript object with one entry per component per state
- *     (`theme.button.primary.hover.background`). That is why changing its palette is a multi-day
- *     edit. KUI deliberately has ~45 *semantic* tokens and no component-scoped tokens at all: a
- *     button reads `--kui-color-primary`, so one edit here changes every button.
- *   - Kouncil has a single SCSS palette and no dark mode. Dark mode is table stakes for a tool
- *     operators stare at all day, so KUI keeps Kafbat's three-state model (light / dark / follow
- *     the system) but expresses it as custom properties, which are swappable at runtime instead of
- *     needing a rebuild.
- *   - Neither product checks colour contrast. KUI's `ContrastSuite` fails the build on any
- *     documented foreground/background pair that misses WCAG AA.
+ * The *values* are the "Kafka UI v2" design's, imported in task UI-013. The reading of that design
+ * — the source of every number below, with the artboard's own token names beside it — is
+ * `research/design/REFERENCE.md`. The mapping from its names to these is in
+ * `docs/frontend/tokens.md`.
  *
- * The full reasoning, the token table and the checked contrast pairs are in `docs/frontend/tokens.md`.
- * If the Claude Design project is ever imported, task UI-013 reconciles *values* against it. That is
- * an optional improvement, not a pending completion: NX-007 closes on this file.
+ * ## The structure the design brought, and why it matters
+ *
+ * The design is a Material-style surface / on-surface palette. Every colour is either a *container*
+ * or the *text colour that belongs on that container*, and the two are declared together. That is
+ * the property that makes a palette swappable: a component never decides what colour its text
+ * should be, it uses the one paired with the surface it sits on, so replacing the surface replaces
+ * the text with it and nothing has to be re-checked by eye.
+ *
+ * Two consequences are visible below. The neutral ramp is five surfaces deep rather than two, and
+ * every filled thing — a primary button, a status chip, the selected navigation item — has both its
+ * fill and its text declared as a pair.
  *
  * ## Provenance
  *
  * Every colour declaration ends with a trailing comment recording where its value came from. There
- * are exactly two markers, and every colour carries one of them:
+ * are exactly three markers, and every colour carries one of them:
  *
- *   - "seeded: kafbat" — the exact value from Kafbat's palette
- *     (`frontend/src/theme/theme.ts` in the reference checkout).
- *   - "kui" — a value KUI chose, including every value darkened or lightened to pass contrast.
+ *   - "design" — the value verbatim from the artboard.
+ *   - "design-adjusted; design #RRGGBB" — the value from the artboard, moved along its own hue by
+ *     the smallest amount that clears the contrast threshold its pair is documented at, with the
+ *     original recorded so that a later import does not "fix" it back to a failing value.
+ *   - "kui" — a value KUI chose, because the design has no colour for that role.
  *
- * Keep the marker when you change a value, so a later reconciliation can tell a deliberate KUI
- * decision from an inherited default. (CSS comments do not nest, so the markers cannot be shown
- * here literally; look at any colour line below for the exact form.)
+ * Keep the marker when you change a value. A future reconciliation needs to tell a deliberate KUI
+ * decision from an imported one, and after the fact there is no other way to know.
  *
- * ## The three-state theme
+ * ## The three axes, and why they are independent
  *
- * `Theme.install()` (see `theme/Theme.scala`) writes `data-theme="light"` or `data-theme="dark"` on
- * `<html>` when the user picks one explicitly, and writes nothing at all when the user picks
- * "follow the system". So there are three rule sets below:
+ * Three attributes on `<html>` select a palette, and they compose: any theme, with any accent, at
+ * either density.
  *
- *   1. `:root` — the light palette, and the default for everything that never changes with theme.
- *   2. `@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme="light"])` — the
- *      system's dark preference, which must NOT apply when the user has explicitly chosen light.
- *   3. `:root[data-theme="dark"]` — an explicit dark choice, which must win even on a system set to
- *      light. It comes last so that it does.
+ *   - `data-theme` — "light", "dark", or absent for "follow the system". Written by
+ *     `theme/Theme.scala`. Three states, not two: a user on "follow the system" whose laptop turns
+ *     dark at sunset expects KUI to turn with it, and one who picked light expects light at
+ *     midnight. This mechanism is KUI's; the design has no opinion on it.
+ *   - `data-accent` — "teal", "green", "amber", or absent for blue, the design's default. Written
+ *     by `theme/Appearance.scala`. The design ships four interchangeable seeds and the neutral ramp
+ *     is independent of all of them, so a seed redefines four colours and nothing else.
+ *   - `data-density` — "compact", or absent for the default. Written by `theme/Appearance.scala`.
+ *     Moves one value: the vertical padding in a table row.
+ *
+ * The rule sets below are ordered so that the CSS cascade resolves every combination correctly:
+ * light first, then the light accents, then the two dark blocks with their accents, then density.
+ * A more specific selector wins, and among equally specific ones the later wins; `ContrastSuite`
+ * resolves all eight theme/accent combinations the way a browser would and checks each of them, so
+ * a reordering that breaks a combination fails the build rather than shipping.
  */
 
 :root {
-  /* --- Colour ------------------------------------------------------------------------------ */
-
-  /* The page itself. Slightly off-white rather than pure white: a full-screen table of pure white
-   * is fatiguing, and it lets a raised card read as raised. */
-  --kui-color-surface: #f9fafa; /* seeded: kafbat */
-  /* Anything sitting above the page: cards, dialogs, drawers, dropdown menus, sticky headers. */
-  --kui-color-surface-raised: #ffffff; /* seeded: kafbat */
-  /* A separator that carries no meaning — a rule between table rows, the edge of a card. It is
-   * deliberately faint and is deliberately NOT contrast-checked, because nothing is lost if a user
-   * cannot see it. Anything a user must perceive uses `border-strong`. */
-  --kui-color-border: #d5dadd; /* seeded: kafbat */
-  /* The outline of an interactive control: an input, a select, an unfilled button. This one is
-   * contrast-checked at 3:1, because a control whose edge you cannot find is a control you cannot
-   * use (WCAG 1.4.11 Non-text Contrast). */
-  --kui-color-border-strong: #73848c; /* seeded: kafbat */
-  /* Body text. */
-  --kui-color-text: #171a1c; /* seeded: kafbat */
-  /* Secondary text: timestamps, row counts, help text. Kafbat's equivalent grey fails AA against
-   * its own background; this is the next step darker, which passes at 5.4:1. */
-  --kui-color-text-muted: #5c6970; /* kui */
-  /* The brand colour: primary buttons, links, the active navigation item, the focus ring. Darkened
-   * from Kafbat's blue so that white text on top of it clears AA. */
-  --kui-color-primary: #4a56d6; /* kui */
-  /* Text and icons drawn on top of `--kui-color-primary`. */
-  --kui-color-primary-contrast: #ffffff; /* seeded: kafbat */
-  /* Status colours. Each is used as *text or an icon on the page background*, never as a large
-   * fill behind body text, so each is checked at 4.5:1 against `surface`. */
-  --kui-color-success: #177a3c; /* kui */
-  --kui-color-warning: #8a5a00; /* kui */
-  --kui-color-danger: #cf1717; /* seeded: kafbat */
+  /* --- Colour: the neutral ramp -------------------------------------------------------- */
+  /*
+   * Five surfaces, ordered. Each is one step further from the page, and the pair of text
+   * colours below them (`text`, `text-muted`) is legible on every one of the five — that is
+   * what the contrast table checks, and it is why a component never has to pick a text colour:
+   * it uses the one that belongs to the surface it is drawn on.
+   */
+  --kui-color-surface: #f7f9fc; /* design */
+  --kui-color-surface-raised: #f0f3f8; /* design */
+  --kui-color-surface-elevated: #e9eef5; /* design */
+  --kui-color-surface-hover: #e0e6ef; /* design */
+  --kui-color-surface-overlay: #d6dee9; /* design */
+  --kui-color-text: #171c22; /* design */
+  --kui-color-text-muted: #4a525e; /* design */
+  --kui-color-border: #cbd2dc; /* design */
+  --kui-color-border-strong: #727b88; /* design */
+  --kui-color-selected: #dce5f5; /* design */
+  --kui-color-selected-contrast: #121c2b; /* design */
+  --kui-color-accent: #00695c; /* design */
+  --kui-color-accent-container: #9ff2e1; /* design */
+  --kui-color-accent-container-contrast: #00201c; /* design */
+  --kui-color-success: #2a722e; /* design-adjusted; design #2e7d32 */
+  --kui-color-success-container: #c8eac1; /* design */
+  --kui-color-warning: #7a4f00; /* design */
+  --kui-color-warning-container: #ffe1a8; /* design */
+  --kui-color-danger: #b3261e; /* design */
+  --kui-color-danger-container: #f9dedc; /* design */
   --kui-color-info: #2c5bb8; /* kui */
-  /* The keyboard focus ring. Same hue as primary so focus reads as "the thing you are about to
-   * act on", but it is its own token: a redesign may want focus to stay loud when primary goes
-   * quiet. */
-  --kui-color-focus: #4a56d6; /* kui */
+  --kui-color-state-layer: rgba(23, 28, 34, 0.06); /* design */
+
+  /* --- Colour: the accent (blue, the default seed) --------------------------------------- */
+  --kui-color-primary: #0b57d0; /* design */
+  --kui-color-primary-contrast: #ffffff; /* design */
+  --kui-color-primary-container: #d3e3fd; /* design */
+  --kui-color-primary-container-contrast: #041e49; /* design */
+  --kui-color-focus: #0b57d0; /* design; same value as primary, own token */
 
   /* --- Spacing ----------------------------------------------------------------------------- */
 
@@ -103,42 +116,77 @@
   --kui-space-7: 3rem; /* 48px */
   --kui-space-8: 4rem; /* 64px */
 
+  /* --- Density ----------------------------------------------------------------------------- */
+
+  /* The design treats density as a switch rather than a theme, and the switch moves exactly one
+   * value: the vertical padding inside a table row. An operator scanning thousands of topics wants
+   * more rows on screen; everything else — type size, gaps between sections, control heights —
+   * stays put, because shrinking those makes the interface harder to hit, not denser. The compact
+   * value is applied by `:root[data-density="compact"]` at the bottom of this file. */
+  --kui-density-row-padding-y: 15px; /* design */
+
   /* --- Typography -------------------------------------------------------------------------- */
 
-  /* Inter if the deployment ships it, otherwise the operating system's own interface font. The
-   * fallback is not a compromise: `system-ui` is the font the user's platform already renders text
-   * in, so it is guaranteed present and guaranteed hinted. */
-  --kui-font-family-sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Three families, and none of them is fetched from a third party at run time. KUI is installed
+   * inside private networks and air-gapped estates where a request to fonts.googleapis.com does not
+   * merely go slowly, it hangs; and it would leak the fact that this deployment exists to a party
+   * that has no business knowing. The families are named here so that a deployment which ships the
+   * font files (see docs/frontend/tokens.md, "Serving the fonts") gets the intended look, and every
+   * stack ends in a face the operating system is guaranteed to have, so a deployment that ships
+   * none of them still renders correctly — one step plainer, never broken. */
+
+  /* Display: headings, the wordmark, the large figures on the dashboard. */
+  --kui-font-family-display: "Space Grotesk", "Manrope", Inter, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif; /* design */
+  /* Body: table content, labels, prose. */
+  --kui-font-family-sans: Manrope, Inter, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif; /* design */
   /* Monospace matters more here than in most products: offsets, partition ids, keys, headers and
-   * JSON payloads are all easier to compare when digits line up. */
-  --kui-font-family-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+   * JSON payloads are all easier to compare when digits line up. The design has no opinion on which
+   * monospace face to use, so this stack is KUI's. */
+  --kui-font-family-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace; /* kui */
+  /* Icons. A ligature font: the element's text content is the icon name. */
+  --kui-font-family-icon: "Material Symbols Rounded", "Material Symbols Outlined",
+    sans-serif; /* design */
 
   --kui-font-size-xs: 0.6875rem; /* 11px — table metadata, badges */
   --kui-font-size-sm: 0.75rem; /* 12px — dense table cells */
-  --kui-font-size-md: 0.875rem; /* 14px — body; Kafbat's base size, and right for a dense tool */
+  --kui-font-size-md: 0.875rem; /* 14px — body; the design's base size */
   --kui-font-size-lg: 1rem; /* 16px — section headings */
   --kui-font-size-xl: 1.25rem; /* 20px — page titles */
+  --kui-font-size-2xl: 1.5rem; /* 24px — the largest heading */
+  --kui-font-size-3xl: 2rem; /* 32px — a single large figure, as on the dashboard */
 
   --kui-font-weight-regular: 400;
   --kui-font-weight-medium: 500;
   --kui-font-weight-bold: 600;
+  /* The design sets its display face heavier than its body face. Separate from `bold` because the
+   * two are used at different sizes and a single step cannot serve both. */
+  --kui-font-weight-display: 700;
 
   --kui-font-line-height-tight: 1.25; /* headings, table cells, buttons */
   --kui-font-line-height-normal: 1.5; /* prose, help text */
 
   /* --- Radius ------------------------------------------------------------------------------ */
 
-  --kui-radius-sm: 2px; /* tags, inline code */
-  --kui-radius-md: 4px; /* buttons, inputs, cards */
-  --kui-radius-lg: 8px; /* dialogs, drawers, popovers */
-  --kui-radius-pill: 9999px; /* status dots, counters */
+  /* The design is markedly rounder than the palette this file previously carried: what was a 4 px
+   * button is a 12 px button. Six steps, because the design uses radius to say how large a thing
+   * is — a tag, a control, a container, a panel — and four steps could not express that. */
+  --kui-radius-xs: 4px; /* inline code, the smallest chips */
+  --kui-radius-sm: 8px; /* tags, table cells that round */
+  --kui-radius-md: 12px; /* buttons, inputs, menu items */
+  --kui-radius-lg: 16px; /* cards, popovers */
+  --kui-radius-xl: 24px; /* dialogs, drawers, the largest panels */
+  --kui-radius-pill: 999px; /* status chips, counters, segmented controls */
 
   /* --- Elevation --------------------------------------------------------------------------- */
 
   /* Two levels only. A shadow says "this floats above the page"; a product with five subtly
-   * different shadows says nothing at all. */
-  --kui-shadow-sm: 0 1px 2px rgba(10, 10, 10, 0.08); /* seeded: kafbat */
-  --kui-shadow-md: 0 4px 16px rgba(10, 10, 10, 0.16); /* seeded: kafbat */
+   * different shadows says nothing at all. The colour is the design's shadow token, which is
+   * lighter and much heavier in dark than in light. */
+  --kui-shadow-sm: 0 1px 2px rgba(23, 28, 34, 0.16); /* design */
+  --kui-shadow-md: 0 6px 20px rgba(23, 28, 34, 0.16); /* design */
 
   /* --- Stacking ---------------------------------------------------------------------------- */
 
@@ -161,50 +209,167 @@
   color-scheme: light;
 }
 
-/* The system asked for dark, and the user has not overridden it. */
+/* --- The other three accent seeds, light theme ---------------------------------------------- */
+
+/* Blue is declared above, on `:root`, so a page with no `data-accent` attribute is already blue and
+ * the common case costs nothing. Only the four accent colours change; the neutral ramp above is
+ * untouched by the seed, which is exactly why a fourth accent is nearly free. */
+
+:root[data-accent="teal"] {
+  --kui-color-primary: #00796b; /* design */
+  --kui-color-primary-contrast: #ffffff; /* design */
+  --kui-color-primary-container: #b2f5e8; /* design */
+  --kui-color-primary-container-contrast: #00201c; /* design */
+  --kui-color-focus: #00796b; /* design; same value as primary, own token */
+}
+
+:root[data-accent="green"] {
+  --kui-color-primary: #2e6b14; /* design */
+  --kui-color-primary-contrast: #ffffff; /* design */
+  --kui-color-primary-container: #c7f0ae; /* design */
+  --kui-color-primary-container-contrast: #0a2a00; /* design */
+  --kui-color-focus: #2e6b14; /* design; same value as primary, own token */
+}
+
+:root[data-accent="amber"] {
+  --kui-color-primary: #8a5a00; /* design */
+  --kui-color-primary-contrast: #ffffff; /* design */
+  --kui-color-primary-container: #ffe0a3; /* design */
+  --kui-color-primary-container-contrast: #2a1a00; /* design */
+  --kui-color-focus: #8a5a00; /* design; same value as primary, own token */
+}
+
+/* --- Dark, because the system asked for it and the user has not overridden it ---------------- */
+
+/* Guarded by `:not([data-theme="light"])` so that a user who explicitly picked light stays light at
+ * midnight. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --kui-color-surface: #171a1c; /* seeded: kafbat */
-    --kui-color-surface-raised: #22282a; /* seeded: kafbat */
-    --kui-color-border: #2f3639; /* seeded: kafbat */
-    --kui-color-border-strong: #8f9ca3; /* seeded: kafbat */
-    --kui-color-text: #f1f2f3; /* seeded: kafbat */
-    --kui-color-text-muted: #abb5ba; /* seeded: kafbat */
-    --kui-color-primary: #8f9bff; /* kui */
-    --kui-color-primary-contrast: #0b0d0e; /* seeded: kafbat */
-    --kui-color-success: #5cd685; /* seeded: kafbat */
-    --kui-color-warning: #ffb84d; /* kui */
-    --kui-color-danger: #f5a3a3; /* seeded: kafbat */
-    --kui-color-info: #90caf9; /* seeded: kafbat */
-    --kui-color-focus: #8f9bff; /* kui */
+    --kui-color-surface: #0e1013; /* design */
+    --kui-color-surface-raised: #15181c; /* design */
+    --kui-color-surface-elevated: #1b1f25; /* design */
+    --kui-color-surface-hover: #242930; /* design */
+    --kui-color-surface-overlay: #2e343c; /* design */
+    --kui-color-text: #e3e6eb; /* design */
+    --kui-color-text-muted: #a6acb8; /* design */
+    --kui-color-border: #2a3038; /* design */
+    --kui-color-border-strong: #666d79; /* design */
+    --kui-color-selected: #3a4657; /* design */
+    --kui-color-selected-contrast: #dce5f5; /* design */
+    --kui-color-accent: #7fd8c7; /* design */
+    --kui-color-accent-container: #00504a; /* design */
+    --kui-color-accent-container-contrast: #b2f5e8; /* design */
+    --kui-color-success: #8fd36a; /* design */
+    --kui-color-success-container: #1e4416; /* design */
+    --kui-color-warning: #ffd180; /* design */
+    --kui-color-warning-container: #4a3200; /* design */
+    --kui-color-danger: #ffb4ab; /* design */
+    --kui-color-danger-container: #5c1b16; /* design */
+    --kui-color-info: #90caf9; /* kui */
+    --kui-color-state-layer: rgba(227, 230, 235, 0.08); /* design */
 
-    /* Shadows do almost nothing on a dark background; depth there comes from the raised surface
-     * being lighter than the page. Keep them, but heavier, so a dialog still detaches. */
-    --kui-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --kui-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
+    --kui-color-primary: #a8c7fa; /* design */
+    --kui-color-primary-contrast: #062e6f; /* design */
+    --kui-color-primary-container: #0b57d0; /* design */
+    --kui-color-primary-container-contrast: #d3e3fd; /* design */
+    --kui-color-focus: #a8c7fa; /* design; same value as primary, own token */
 
+    --kui-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45); /* design */
+    --kui-shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45); /* design */
     color-scheme: dark;
+  }
+
+  :root[data-accent="teal"]:not([data-theme="light"]) {
+    --kui-color-primary: #7fd8c7; /* design */
+    --kui-color-primary-contrast: #003731; /* design */
+    --kui-color-primary-container: #00756b; /* design-adjusted; design #00857a */
+    --kui-color-primary-container-contrast: #b2f5e8; /* design */
+    --kui-color-focus: #7fd8c7; /* design; same value as primary, own token */
+  }
+
+  :root[data-accent="green"]:not([data-theme="light"]) {
+    --kui-color-primary: #a6d98a; /* design */
+    --kui-color-primary-contrast: #0f3a00; /* design */
+    --kui-color-primary-container: #3d7822; /* design-adjusted; design #3e7a22 */
+    --kui-color-primary-container-contrast: #d9f5c6; /* design */
+    --kui-color-focus: #a6d98a; /* design; same value as primary, own token */
+  }
+
+  :root[data-accent="amber"]:not([data-theme="light"]) {
+    --kui-color-primary: #ffd180; /* design */
+    --kui-color-primary-contrast: #4a2e00; /* design */
+    --kui-color-primary-container: #8a5a00; /* design */
+    --kui-color-primary-container-contrast: #ffe7bf; /* design */
+    --kui-color-focus: #ffd180; /* design; same value as primary, own token */
   }
 }
 
-/* The user explicitly chose dark. Last, so it wins over a system set to light. */
+/* --- Dark, because the user chose it --------------------------------------------------------- */
+
+/* Written last so it wins over a system set to light. */
 :root[data-theme="dark"] {
-  --kui-color-surface: #171a1c; /* seeded: kafbat */
-  --kui-color-surface-raised: #22282a; /* seeded: kafbat */
-  --kui-color-border: #2f3639; /* seeded: kafbat */
-  --kui-color-border-strong: #8f9ca3; /* seeded: kafbat */
-  --kui-color-text: #f1f2f3; /* seeded: kafbat */
-  --kui-color-text-muted: #abb5ba; /* seeded: kafbat */
-  --kui-color-primary: #8f9bff; /* kui */
-  --kui-color-primary-contrast: #0b0d0e; /* seeded: kafbat */
-  --kui-color-success: #5cd685; /* seeded: kafbat */
-  --kui-color-warning: #ffb84d; /* kui */
-  --kui-color-danger: #f5a3a3; /* seeded: kafbat */
-  --kui-color-info: #90caf9; /* seeded: kafbat */
-  --kui-color-focus: #8f9bff; /* kui */
+  --kui-color-surface: #0e1013; /* design */
+  --kui-color-surface-raised: #15181c; /* design */
+  --kui-color-surface-elevated: #1b1f25; /* design */
+  --kui-color-surface-hover: #242930; /* design */
+  --kui-color-surface-overlay: #2e343c; /* design */
+  --kui-color-text: #e3e6eb; /* design */
+  --kui-color-text-muted: #a6acb8; /* design */
+  --kui-color-border: #2a3038; /* design */
+  --kui-color-border-strong: #666d79; /* design */
+  --kui-color-selected: #3a4657; /* design */
+  --kui-color-selected-contrast: #dce5f5; /* design */
+  --kui-color-accent: #7fd8c7; /* design */
+  --kui-color-accent-container: #00504a; /* design */
+  --kui-color-accent-container-contrast: #b2f5e8; /* design */
+  --kui-color-success: #8fd36a; /* design */
+  --kui-color-success-container: #1e4416; /* design */
+  --kui-color-warning: #ffd180; /* design */
+  --kui-color-warning-container: #4a3200; /* design */
+  --kui-color-danger: #ffb4ab; /* design */
+  --kui-color-danger-container: #5c1b16; /* design */
+  --kui-color-info: #90caf9; /* kui */
+  --kui-color-state-layer: rgba(227, 230, 235, 0.08); /* design */
 
-  --kui-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --kui-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
+  --kui-color-primary: #a8c7fa; /* design */
+  --kui-color-primary-contrast: #062e6f; /* design */
+  --kui-color-primary-container: #0b57d0; /* design */
+  --kui-color-primary-container-contrast: #d3e3fd; /* design */
+  --kui-color-focus: #a8c7fa; /* design; same value as primary, own token */
 
+  --kui-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45); /* design */
+  --kui-shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45); /* design */
   color-scheme: dark;
+}
+
+:root[data-theme="dark"][data-accent="teal"] {
+  --kui-color-primary: #7fd8c7; /* design */
+  --kui-color-primary-contrast: #003731; /* design */
+  --kui-color-primary-container: #00756b; /* design-adjusted; design #00857a */
+  --kui-color-primary-container-contrast: #b2f5e8; /* design */
+  --kui-color-focus: #7fd8c7; /* design; same value as primary, own token */
+}
+
+:root[data-theme="dark"][data-accent="green"] {
+  --kui-color-primary: #a6d98a; /* design */
+  --kui-color-primary-contrast: #0f3a00; /* design */
+  --kui-color-primary-container: #3d7822; /* design-adjusted; design #3e7a22 */
+  --kui-color-primary-container-contrast: #d9f5c6; /* design */
+  --kui-color-focus: #a6d98a; /* design; same value as primary, own token */
+}
+
+:root[data-theme="dark"][data-accent="amber"] {
+  --kui-color-primary: #ffd180; /* design */
+  --kui-color-primary-contrast: #4a2e00; /* design */
+  --kui-color-primary-container: #8a5a00; /* design */
+  --kui-color-primary-container-contrast: #ffe7bf; /* design */
+  --kui-color-focus: #ffd180; /* design; same value as primary, own token */
+}
+
+/* --- Density --------------------------------------------------------------------------------- */
+
+/* One value, both themes, every accent. Written last and outside every theme block because density
+ * is orthogonal to colour: an operator can be on dark amber and compact at the same time. */
+:root[data-density="compact"] {
+  --kui-density-row-padding-y: 9px; /* design */
 }
