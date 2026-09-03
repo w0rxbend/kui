@@ -325,3 +325,60 @@ port:
   navigation will follow.
 - `docs/frontend/tokens.md` — the colour-tag chip's foreground/background pairs, added to the
   contrast table so `ContrastSuite` checks them. Six choices means six rows.
+
+## Deviations
+
+Commit `929b189`.
+
+1. **CLAPI-008 has not landed, so there are no per-cluster registry entries yet and no display
+   name.** The switcher is written against `CapabilityKey.cluster`, which already exists, and renders
+   the slug where a name would go — the degradation the spec asks for. It is live and correct the
+   moment the gateway starts publishing per-cluster entries. **Owed by CLAPI-008:** a display name on
+   the entry. `prod-eu-1` is exactly the string this feature exists to stop people misreading, so the
+   fallback is a stopgap rather than an answer.
+
+2. **The palette is `None, Primary, Success, Warning, Danger, Accent`, not the spec's
+   `None, Info, Success, Warning, Danger, Tertiary`.** `--kui-color-info` has no container token and
+   there is no `tertiary`; the six chosen are exactly the container/paired-text pairs the token set
+   defines and the contrast table already checks. The user-facing labels stay colours ("Blue",
+   "Teal") rather than semantic names, because offering somebody "Warning" as a marker would suggest
+   the cluster is in a warning state — which is what the dot beside the tag means.
+
+3. **`docs/frontend/tokens.md` gains a note, not six rows.** The tag is a small filled square with no
+   text on it, so it introduces no new foreground/background pair; every fill it uses is already a
+   checked row. The note records why, so the absence does not read as an omission.
+
+4. **Choosing a colour is a native `<select>` on the row**, not a bespoke swatch menu. It is
+   keyboard- and screen-reader-correct for free, and a second custom popup inside an open listbox is
+   a focus-management problem with no user-visible gain.
+
+5. **`ClusterEntry.of` takes the registry's `Map[CapabilityKey, CapabilityState]`**, which is what
+   `CapabilityStore` exposes live, rather than a `CapabilitySnapshot`. It also folds a cluster's
+   several service entries to the **worst** of them, which the spec does not state: a dot reporting
+   the best of a cluster's services would be reassuring and wrong.
+
+6. **`ShellRouter.clusterInUrl` parses the path rather than decoding a page**, because the shell may
+   not name a feature's page types. The switcher navigates by asking the feature's own
+   `history.state` codec to build a brokers page from a tag — the same mechanism the Back button
+   already uses before a feature has been downloaded — so no feature class is named statically;
+   `checkBundleShape` still reports the feature in a module of its own and
+   `grep -rn "kui.ui.clusters" frontend/ui-shell/src` (excluding `ClustersRoutes` and the dynamic
+   import) is empty.
+
+7. **`CurrentCluster.selected` became `lazy`** now that it touches `localStorage`, so importing the
+   object does not.
+
+## Implementation report
+
+```
+./mill frontend.uiShell.compile           SUCCESS
+./mill frontend.uiKernel.test             SUCCESS (ClusterColorsSuite 7)
+./mill frontend.uiShell.test              SUCCESS (ClusterSwitcherSuite 13, ShellRouterSuite +3)
+./mill frontend.uiShell.checkBundleShape  1 feature module split out, main.js 966079 B of 1500000 B
+./mill frontend.uiShell.checkFormat       SUCCESS
+./mill frontend.uiShell.fix --check       SUCCESS
+./mill frontend.uiKernel.fix --check      SUCCESS
+./mill checkArchitecture                  75 modules, no layering violations
+grep -rn "kui.ui.clusters" frontend/ui-shell/src | grep -v ClustersRoutes | grep -v dynamicImport
+                                          no matches
+```

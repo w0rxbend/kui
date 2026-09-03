@@ -389,3 +389,58 @@ non-numeric value (which yields `None`, so the entry falls through to `Plain`).
   rule, as the pattern later features copy.
 - `TECH_DEBT.md` — two rows: the unvirtualized log-dir table (owner: SF-003, M2) and config synonyms
   carried by the contract but not rendered (owner: M5, with the config edit screen).
+
+## Deviations
+
+Commit `16e1f9d`.
+
+1. **There is no per-partition table, because there is no per-partition data.** `LogDirDto` carries a
+   directory's path, error, total and usable bytes, topic count and partition count — and no
+   topic-partition entries at all. BR-005's and PA-003's breakdown ("which topic is filling this
+   disk") therefore has nothing behind it. The screen shows what exists — one card per directory, its
+   path, its error, how full it is with a bar, and its counts — rather than fabricating rows or
+   inventing a second request, which this task's own rules forbid. **Owed:** `TECH_DEBT.md` TD-017
+   records the contract field, TD-018 the virtualization it will then need.
+
+2. **`LogDirView` therefore has a different shape** from the sketch: `totalBytes`, `usableBytes`, a
+   derived `usedBytes` and a `usedFraction`, instead of `partitions` and `largestPartitionBytes`.
+   `usedFraction` is `None` rather than zero on a broker too old to report sizes — an empty bar reads
+   as a disk with room on it, which is the opposite of a safe thing to leave on an operator's screen.
+
+3. **`ConfigSource.fromWire` matches case- and punctuation-insensitively.** The same source has been
+   spelled `DYNAMIC_BROKER_CONFIG` and `dynamic broker config` by different producers, and showing
+   "Unknown" for one of them would report a version difference as a problem.
+
+4. **`ConfigEntry` carries `documentation`**, rendered as a tooltip on the setting's name. The DTO has
+   the field and the `docs` query flag exists to fill it; discarding it here would have made the flag
+   pointless.
+
+5. **Search matches a redacted entry on its key alone**, never on a value. Matching the mask
+   characters would be a lie, and the real value is not in the browser.
+
+6. **`TabBody` is a shared helper the spec does not name.** Both tabs need the same four section
+   renderings with their own timestamps; writing it twice is how two tabs on one page end up
+   disagreeing about what "unavailable" looks like.
+
+7. **The tab's URL uses two route patterns with partial encoders.** A single pattern with an optional
+   segment encodes a page that names a tab to the tabless URL, so a link to a broker's configuration
+   opens on its log directories. That bug existed briefly and
+   `theTabIsInTheUrlSoAConfigsLinkOpensOnConfigs` is what found it.
+
+8. **`aStoredStateWithNoTabDecodesToLogDirs` is asserted against `ClustersRoutes.decodePage`
+   directly**, which is where the compatibility actually lives.
+
+## Implementation report
+
+```
+./mill frontend.uiClusters.compile        SUCCESS
+./mill frontend.uiClusters.test           0 failed, 85 tests
+                                          ConfigEntrySuite        9
+                                          LogDirViewSuite         7
+                                          DurationsSuite          4
+                                          BrokerDetailPageSuite  13
+./mill frontend.uiClusters.checkFormat    SUCCESS
+./mill frontend.uiClusters.fix --check    SUCCESS
+./mill frontend.uiShell.checkBundleShape  1 feature module split out
+./mill checkArchitecture                  75 modules, no layering violations
+```

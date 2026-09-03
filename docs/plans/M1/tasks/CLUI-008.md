@@ -262,3 +262,43 @@ Manual, once, against CFGOP-006's Compose stack, with the browser's network pane
   is how they end up behaving differently.
 - `docs/domain/cluster.md` — one line under the refresh endpoint: what the browser does with the
   202, so the server side's authors know what their `scrapedAt` is being compared against.
+
+## Deviations
+
+Commit `e3e3196`.
+
+1. **The button is on the brokers page and not on the dashboard.** The endpoint refreshes *one*
+   cluster. A dashboard-wide button would either fan out one request per row behind a single press —
+   hiding several independent failures behind one control, and multiplying load on the very cluster
+   whose row is already failing — or promise a refresh-everything the server does not offer. Neither
+   is better than putting the control where a single cluster is in scope. **Owed:** if the dashboard
+   is judged to need one, it belongs per row, in the status column, which is a column-table change to
+   CLUI-003 rather than a change here.
+
+2. **`requestRefresh` answers the 202's body**, so the flow can record what the server said the
+   request was taken at; the spec's sketch discarded it.
+
+3. **`RefreshFlow` takes its timer as a parameter**, not only its schedule. Airstream's delay is real
+   time; a suite that could only check a fifteen-second contract by waiting fifteen seconds is one
+   nobody runs.
+
+4. **A rejection disables the button for the session**, as the spec's degraded-behaviour section
+   requires for a permission error — but for *every* rejection rather than only a 403. A control that
+   would fail identically on every press is worse than one that says it has stopped trying, and
+   distinguishing the two would mean parsing the envelope's code to decide whether to keep offering
+   something that does not work.
+
+5. **`Rejected` raises no toast.** The spec makes it the one exception to "status text, not a toast".
+   The status line is `role="status"` with `aria-live="polite"`, so it is announced wherever the user
+   is; adding a toast would say the same thing twice, and `NotificationBus` is the shell's.
+
+## Implementation report
+
+```
+./mill frontend.uiClusters.compile        SUCCESS
+./mill frontend.uiClusters.test           0 failed, 99 tests
+                                          RefreshFlowSuite      9
+                                          RefreshButtonSuite    6
+./mill frontend.uiClusters.checkFormat    SUCCESS
+./mill frontend.uiClusters.fix --check    SUCCESS
+```

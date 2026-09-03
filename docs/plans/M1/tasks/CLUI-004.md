@@ -331,3 +331,46 @@ all of them, and the page shows no error — the section is `Ok`, one field is a
 - `docs/frontend/README.md` — one line pointing at `Skew` as the example of a derived figure that
   lives in the browser rather than in a DTO, and why (it is a property of the set of rows, not of
   any one row).
+
+## Deviations
+
+Commit `b86f91e`.
+
+1. **Skew is computed by the service, and the browser's copy is the fallback.** `BrokerDto` already
+   carries `replicaSkewPercent` and `leaderSkewPercent`, with its own scaladoc explaining that they
+   are computed server-side so that this table, an export and any other client round identically.
+   `BrokerRow.of` prefers those and falls back to `Skew.percentages` when they are absent, so a
+   deployment whose service predates the field still shows a number. `Skew` remains the written
+   definition of the rule and keeps every test the spec names.
+
+2. **The summary strip's cluster-level figures come from the cached cluster list, not from the
+   brokers response.** `BrokersResponse` carries brokers and nothing else; version, controller kind
+   and the partition counts live in `ClusterSummaryDto`. The page reads them from `queries.clusters`,
+   which the dashboard has usually already filled — so arriving by a link costs nothing and arriving
+   on a bookmark costs one cached response and no broker call. Until it arrives the strip renders
+   `—` rather than holding the table behind a spinner. The spec's "no second request" rule is about
+   not asking a *cluster* a new question, which this does not.
+
+3. **Leader and replica counts are `None` in M1**, so `Leaders`, `Replicas`, `In sync` and both skew
+   columns render `—` on a real cluster today. The columns and their sort keys exist, so filling them
+   is a data change. `BrokerDto.partitionCount` is the replica count; there is no separate field.
+
+4. **`BrokerSummary` lives in `BrokerRow.scala`**, which the spec explicitly permits.
+
+5. **`BrokersPage` takes `brokerHref` and `backHref` as well as `openBroker`**, for the reason
+   CLUI-003's rows did: a row that is drawn as a link needs a real address, and a suite asserting the
+   criterion has to see one.
+
+## Implementation report
+
+```
+./mill frontend.uiClusters.compile        SUCCESS
+./mill frontend.uiClusters.test           0 failed, 61 tests
+                                          SkewSuite             8
+                                          BrokerRowSuite        5
+                                          BrokerSummarySuite    6
+                                          BrokersPageSuite     12
+./mill frontend.uiClusters.checkFormat    SUCCESS
+./mill frontend.uiClusters.fix --check    SUCCESS
+./mill frontend.uiShell.checkBundleShape  1 feature module split out
+```
