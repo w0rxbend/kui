@@ -1,0 +1,210 @@
+/* KUI design tokens — the authoritative set.
+ *
+ * This file is the whole visual vocabulary of the product. Every colour, spacing step, font size,
+ * radius, shadow, stacking layer and animation duration a component is allowed to use is declared
+ * here as a CSS custom property, and components reference them by name. Changing the look of KUI
+ * means changing this file and nothing else.
+ *
+ * ## What this is, and what it is not
+ *
+ * These are NOT placeholders waiting for a design import. Task UI-002 decided the set, the naming
+ * and the constraints, from the two products already studied in `research/`:
+ *
+ *   - Kafbat's theme is a 1 664-line TypeScript object with one entry per component per state
+ *     (`theme.button.primary.hover.background`). That is why changing its palette is a multi-day
+ *     edit. KUI deliberately has ~45 *semantic* tokens and no component-scoped tokens at all: a
+ *     button reads `--kui-color-primary`, so one edit here changes every button.
+ *   - Kouncil has a single SCSS palette and no dark mode. Dark mode is table stakes for a tool
+ *     operators stare at all day, so KUI keeps Kafbat's three-state model (light / dark / follow
+ *     the system) but expresses it as custom properties, which are swappable at runtime instead of
+ *     needing a rebuild.
+ *   - Neither product checks colour contrast. KUI's `ContrastSuite` fails the build on any
+ *     documented foreground/background pair that misses WCAG AA.
+ *
+ * The full reasoning, the token table and the checked contrast pairs are in `docs/frontend/tokens.md`.
+ * If the Claude Design project is ever imported, task UI-013 reconciles *values* against it. That is
+ * an optional improvement, not a pending completion: NX-007 closes on this file.
+ *
+ * ## Provenance
+ *
+ * Every colour declaration ends with a trailing comment recording where its value came from. There
+ * are exactly two markers, and every colour carries one of them:
+ *
+ *   - "seeded: kafbat" — the exact value from Kafbat's palette
+ *     (`frontend/src/theme/theme.ts` in the reference checkout).
+ *   - "kui" — a value KUI chose, including every value darkened or lightened to pass contrast.
+ *
+ * Keep the marker when you change a value, so a later reconciliation can tell a deliberate KUI
+ * decision from an inherited default. (CSS comments do not nest, so the markers cannot be shown
+ * here literally; look at any colour line below for the exact form.)
+ *
+ * ## The three-state theme
+ *
+ * `Theme.install()` (see `theme/Theme.scala`) writes `data-theme="light"` or `data-theme="dark"` on
+ * `<html>` when the user picks one explicitly, and writes nothing at all when the user picks
+ * "follow the system". So there are three rule sets below:
+ *
+ *   1. `:root` — the light palette, and the default for everything that never changes with theme.
+ *   2. `@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme="light"])` — the
+ *      system's dark preference, which must NOT apply when the user has explicitly chosen light.
+ *   3. `:root[data-theme="dark"]` — an explicit dark choice, which must win even on a system set to
+ *      light. It comes last so that it does.
+ */
+
+:root {
+  /* --- Colour ------------------------------------------------------------------------------ */
+
+  /* The page itself. Slightly off-white rather than pure white: a full-screen table of pure white
+   * is fatiguing, and it lets a raised card read as raised. */
+  --kui-color-surface: #f9fafa; /* seeded: kafbat */
+  /* Anything sitting above the page: cards, dialogs, drawers, dropdown menus, sticky headers. */
+  --kui-color-surface-raised: #ffffff; /* seeded: kafbat */
+  /* A separator that carries no meaning — a rule between table rows, the edge of a card. It is
+   * deliberately faint and is deliberately NOT contrast-checked, because nothing is lost if a user
+   * cannot see it. Anything a user must perceive uses `border-strong`. */
+  --kui-color-border: #d5dadd; /* seeded: kafbat */
+  /* The outline of an interactive control: an input, a select, an unfilled button. This one is
+   * contrast-checked at 3:1, because a control whose edge you cannot find is a control you cannot
+   * use (WCAG 1.4.11 Non-text Contrast). */
+  --kui-color-border-strong: #73848c; /* seeded: kafbat */
+  /* Body text. */
+  --kui-color-text: #171a1c; /* seeded: kafbat */
+  /* Secondary text: timestamps, row counts, help text. Kafbat's equivalent grey fails AA against
+   * its own background; this is the next step darker, which passes at 5.4:1. */
+  --kui-color-text-muted: #5c6970; /* kui */
+  /* The brand colour: primary buttons, links, the active navigation item, the focus ring. Darkened
+   * from Kafbat's blue so that white text on top of it clears AA. */
+  --kui-color-primary: #4a56d6; /* kui */
+  /* Text and icons drawn on top of `--kui-color-primary`. */
+  --kui-color-primary-contrast: #ffffff; /* seeded: kafbat */
+  /* Status colours. Each is used as *text or an icon on the page background*, never as a large
+   * fill behind body text, so each is checked at 4.5:1 against `surface`. */
+  --kui-color-success: #177a3c; /* kui */
+  --kui-color-warning: #8a5a00; /* kui */
+  --kui-color-danger: #cf1717; /* seeded: kafbat */
+  --kui-color-info: #2c5bb8; /* kui */
+  /* The keyboard focus ring. Same hue as primary so focus reads as "the thing you are about to
+   * act on", but it is its own token: a redesign may want focus to stay loud when primary goes
+   * quiet. */
+  --kui-color-focus: #4a56d6; /* kui */
+
+  /* --- Spacing ----------------------------------------------------------------------------- */
+
+  /* A 4 px scale. Every margin, padding and gap in KUI is one of these nine values. The point of a
+   * scale is not tidiness: it is that a screen assembled from a small set of steps looks composed,
+   * and one assembled from arbitrary pixel values looks accidental. */
+  --kui-space-0: 0;
+  --kui-space-1: 0.25rem; /* 4px */
+  --kui-space-2: 0.5rem; /* 8px */
+  --kui-space-3: 0.75rem; /* 12px */
+  --kui-space-4: 1rem; /* 16px */
+  --kui-space-5: 1.5rem; /* 24px */
+  --kui-space-6: 2rem; /* 32px */
+  --kui-space-7: 3rem; /* 48px */
+  --kui-space-8: 4rem; /* 64px */
+
+  /* --- Typography -------------------------------------------------------------------------- */
+
+  /* Inter if the deployment ships it, otherwise the operating system's own interface font. The
+   * fallback is not a compromise: `system-ui` is the font the user's platform already renders text
+   * in, so it is guaranteed present and guaranteed hinted. */
+  --kui-font-family-sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Monospace matters more here than in most products: offsets, partition ids, keys, headers and
+   * JSON payloads are all easier to compare when digits line up. */
+  --kui-font-family-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --kui-font-size-xs: 0.6875rem; /* 11px — table metadata, badges */
+  --kui-font-size-sm: 0.75rem; /* 12px — dense table cells */
+  --kui-font-size-md: 0.875rem; /* 14px — body; Kafbat's base size, and right for a dense tool */
+  --kui-font-size-lg: 1rem; /* 16px — section headings */
+  --kui-font-size-xl: 1.25rem; /* 20px — page titles */
+
+  --kui-font-weight-regular: 400;
+  --kui-font-weight-medium: 500;
+  --kui-font-weight-bold: 600;
+
+  --kui-font-line-height-tight: 1.25; /* headings, table cells, buttons */
+  --kui-font-line-height-normal: 1.5; /* prose, help text */
+
+  /* --- Radius ------------------------------------------------------------------------------ */
+
+  --kui-radius-sm: 2px; /* tags, inline code */
+  --kui-radius-md: 4px; /* buttons, inputs, cards */
+  --kui-radius-lg: 8px; /* dialogs, drawers, popovers */
+  --kui-radius-pill: 9999px; /* status dots, counters */
+
+  /* --- Elevation --------------------------------------------------------------------------- */
+
+  /* Two levels only. A shadow says "this floats above the page"; a product with five subtly
+   * different shadows says nothing at all. */
+  --kui-shadow-sm: 0 1px 2px rgba(10, 10, 10, 0.08); /* seeded: kafbat */
+  --kui-shadow-md: 0 4px 16px rgba(10, 10, 10, 0.16); /* seeded: kafbat */
+
+  /* --- Stacking ---------------------------------------------------------------------------- */
+
+  /* Every `z-index` in KUI comes from this list, in this order. Hard-coded stacking values are how
+   * a dropdown ends up behind the dialog that opened it, and the bug is invisible until it is not. */
+  --kui-z-dropdown: 100;
+  --kui-z-drawer: 200;
+  --kui-z-dialog: 300;
+  --kui-z-toast: 400;
+
+  /* --- Motion ------------------------------------------------------------------------------ */
+
+  /* Short enough that the interface never feels like it is waiting for itself. The reset neutralises
+   * both of these when the user asks for reduced motion. */
+  --kui-duration-fast: 100ms;
+  --kui-duration-normal: 200ms;
+
+  /* Tell the browser which palette we are painting, so that form controls, scrollbars and the
+   * default text-selection colour it draws itself match. */
+  color-scheme: light;
+}
+
+/* The system asked for dark, and the user has not overridden it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --kui-color-surface: #171a1c; /* seeded: kafbat */
+    --kui-color-surface-raised: #22282a; /* seeded: kafbat */
+    --kui-color-border: #2f3639; /* seeded: kafbat */
+    --kui-color-border-strong: #8f9ca3; /* seeded: kafbat */
+    --kui-color-text: #f1f2f3; /* seeded: kafbat */
+    --kui-color-text-muted: #abb5ba; /* seeded: kafbat */
+    --kui-color-primary: #8f9bff; /* kui */
+    --kui-color-primary-contrast: #0b0d0e; /* seeded: kafbat */
+    --kui-color-success: #5cd685; /* seeded: kafbat */
+    --kui-color-warning: #ffb84d; /* kui */
+    --kui-color-danger: #f5a3a3; /* seeded: kafbat */
+    --kui-color-info: #90caf9; /* seeded: kafbat */
+    --kui-color-focus: #8f9bff; /* kui */
+
+    /* Shadows do almost nothing on a dark background; depth there comes from the raised surface
+     * being lighter than the page. Keep them, but heavier, so a dialog still detaches. */
+    --kui-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --kui-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
+
+    color-scheme: dark;
+  }
+}
+
+/* The user explicitly chose dark. Last, so it wins over a system set to light. */
+:root[data-theme="dark"] {
+  --kui-color-surface: #171a1c; /* seeded: kafbat */
+  --kui-color-surface-raised: #22282a; /* seeded: kafbat */
+  --kui-color-border: #2f3639; /* seeded: kafbat */
+  --kui-color-border-strong: #8f9ca3; /* seeded: kafbat */
+  --kui-color-text: #f1f2f3; /* seeded: kafbat */
+  --kui-color-text-muted: #abb5ba; /* seeded: kafbat */
+  --kui-color-primary: #8f9bff; /* kui */
+  --kui-color-primary-contrast: #0b0d0e; /* seeded: kafbat */
+  --kui-color-success: #5cd685; /* seeded: kafbat */
+  --kui-color-warning: #ffb84d; /* kui */
+  --kui-color-danger: #f5a3a3; /* seeded: kafbat */
+  --kui-color-info: #90caf9; /* seeded: kafbat */
+  --kui-color-focus: #8f9bff; /* kui */
+
+  --kui-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --kui-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
+
+  color-scheme: dark;
+}
