@@ -146,6 +146,37 @@ object GoldenDocuments {
       |  "requestedAt" : "2026-09-03T10:11:12.000Z"
       |}""".stripMargin
 
+  val clusterProfile: String =
+    """{
+      |  "id" : "prod-eu",
+      |  "name" : "Production EU",
+      |  "version" : 7,
+      |  "readOnly" : false,
+      |  "bootstrapServers" : "broker-1.example.com:9093,broker-2.example.com:9093",
+      |  "security" : {
+      |    "protocol" : "SASL_SSL",
+      |    "mechanism" : "SCRAM-SHA-512",
+      |    "truststoreConfigured" : true,
+      |    "keystoreConfigured" : false
+      |  },
+      |  "adminTimeoutMs" : 15000,
+      |  "adminBatchSize" : 200,
+      |  "adminParallelism" : 4,
+      |  "propertyKeys" : [
+      |    "sasl.jaas.config",
+      |    "ssl.endpoint.identification.algorithm"
+      |  ],
+      |  "updatedAt" : "2026-09-03T10:11:12.000Z"
+      |}""".stripMargin
+
+  val clusterChange: String =
+    """{
+      |  "id" : "prod-eu",
+      |  "version" : 8,
+      |  "change" : "updated",
+      |  "at" : "2026-09-03T10:11:12.000Z"
+      |}""".stripMargin
+
   /** Every sample, by file name, for the JVM suite to walk. */
   val all: Map[String, String] = Map(
     "ping-response.json" -> pingResponse,
@@ -153,6 +184,8 @@ object GoldenDocuments {
     "brokers-response.json" -> brokersResponse,
     "broker-configs-response.json" -> brokerConfigsResponse,
     "log-dirs-response.json" -> logDirsResponse,
-    "refresh-accepted.json" -> refreshAccepted
+    "refresh-accepted.json" -> refreshAccepted,
+    "cluster-profile.json" -> clusterProfile,
+    "cluster-change.json" -> clusterChange
   )
 }

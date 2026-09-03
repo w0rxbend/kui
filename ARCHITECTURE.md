@@ -510,6 +510,14 @@ and `tracestate` are outside that family and are handled by otel4s.
   an edge amends ADR-043:
   every Kafka-facing service → cluster-service (`ClusterProfile`, §10), and
   metrics-service → topic/consumer snapshot endpoints (30 s cadence, tolerant).
+  The cluster-service half of the first edge ships in M1:
+  `GET /internal/v1/clusters/{clusterId}/profile` is declared in
+  `services/cluster/contract/.../ProfileEndpoints.scala` (ETag = the store record's version,
+  `If-None-Match` answers 304), and the change stream
+  `GET /internal/v1/clusters/stream` in `services/cluster/api/.../ClusterStreamEndpoint.scala`
+  (an fs2 body cannot be described in a browser-compiled module). Both are **redacted in M1** —
+  no credential leaves either — because M1 has no consumer that builds a Kafka client from them;
+  M2's first consumer decides how it receives credentials.
 - Asynchronous internal events (`kui.internal.events` topic) stay `RESEARCH` for M6+; nothing
   in M0–M5 depends on them.
 
