@@ -1,0 +1,17 @@
+package build
+
+import mill.*
+
+/** Customises the build of the build itself.
+  *
+  * `ArchitectureRules` lives in `build-tests/src` so that it can be unit-tested like ordinary code.
+  * The `checkArchitecture` task in the root `build.mill` needs the same code. Rather than
+  * duplicating it, or shelling out to a compiled jar, the meta-build compiles that one directory
+  * alongside `build.mill`, so there is exactly one definition of the rules and the tests are
+  * testing the code the build actually runs.
+  */
+object `package` extends mill.meta.MillBuildRootModule {
+  def extraSources = Task.Sources(moduleDir / os.up / "build-tests" / "src")
+
+  override def sources = Task { super.sources() ++ extraSources() }
+}

@@ -10,6 +10,9 @@ import mill.scalajslib.*
 import mill.scalajslib.api.{JsEnvConfig, ModuleKind, ModuleSplitStyle}
 import com.goyeau.mill.scalafix.ScalafixModule
 
+// Compiled into the meta-build by `mill-build/build.mill`, and into `build-tests` for its unit tests.
+import kui.build.{ArchitectureRules, ModuleFacts}
+
 /** Every third-party version KUI pins, in one place.
   *
   * The numbers are the ones `DEPENDENCY_MATRIX.md` records; that file is the decision, this object
@@ -262,6 +265,71 @@ object depsSmoke extends KuiModule {
     mvn"io.github.cquiroz:scala-java-time_sjs1_3:${Versions.scalaJavaTime}",
     mvn"com.raquo:domtestutils_sjs1_3:${Versions.domtestutils}"
   )
+}
+
+/** The layering rules of ADR-041 and the tests that prove each one fires.
+  *
+  * The rules themselves are compiled twice: once here, so they can be unit-tested against synthetic
+  * module graphs, and once by the meta-build (`mill-build/build.mill`), so that `checkArchitecture`
+  * below runs exactly the code these tests cover.
+  */
+object `build-tests` extends KuiPureModule {
+  object test extends ScalaTests with KuiTests
+}
+
+/** Everything in this build that could have a dependency edge, as plain data.
+  *
+  * `depsSmoke` is excluded: it is a resolution probe, not a real module, and its whole purpose is
+  * to declare every coordinate in the project at once.
+  */
+private def declaredModules: Seq[JavaModule] = moduleInternal.modules.collect {
+  case m: JavaModule if m.moduleSegments.render != "depsSmoke" => m
+}.toSeq
+
+private def moduleGraph = Task.Anon {
+  val modules           = declaredModules
+  val declaredLibraries = Task.traverse(declaredModules)(_.mvnDeps)()
+
+  modules.zip(declaredLibraries).map { (module, libraries) =>
+    ModuleFacts(
+      id = module.moduleSegments.render,
+      moduleDeps = module.moduleDeps.map(_.moduleSegments.render).toSet,
+      mvnDeps = libraries.map(coordinateOf).toSet
+    )
+  }.toList
+}
+
+/** `mvn"org.typelevel::cats-core::2.13.0"` becomes `org.typelevel:cats-core`.
+  *
+  * The version is dropped because the rules are about which library, not which release, and the
+  * Scala suffix is dropped because `cats-core_3` and `cats-core_sjs1_3` are the same library.
+  */
+private def coordinateOf(dep: mill.scalalib.Dep): String = {
+  val organization = dep.dep.module.organization.value
+  val artifact     = dep.dep.module.name.value
+  val bare = List("_sjs1_3", "_sjs1_2.13", "_3", "_2.13")
+    .find(artifact.endsWith)
+    .fold(artifact)(suffix => artifact.dropRight(suffix.length))
+  s"$organization:$bare"
+}
+
+/** Fails the build on any module dependency that breaks the layering rules of ADR-041.
+  *
+  * This is what stops the hexagonal structure decaying. Nobody sets out to make `application`
+  * depend on Tapir; someone needs one type, adds one edge, and the edge is invisible in every
+  * later code review because reviewers read diffs, not dependency graphs. The check reports the
+  * rule, both modules and the reason, so whoever trips it learns why in the same minute.
+  */
+def checkArchitecture(): Task.Command[Unit] = Task.Command {
+  val modules    = moduleGraph()
+  val violations = ArchitectureRules.check(modules)
+
+  if (violations.isEmpty) {
+    println(s"checkArchitecture: ${modules.size} modules, no layering violations")
+  } else {
+    val report = violations.map(v => s"  ${v.message}").mkString("\n")
+    Task.fail(s"${violations.size} layering violation(s):\n$report")
+  }
 }
 
 /** Downloads every coordinate M0 pins and prints how many were fetched. Exits non-zero on the first

@@ -154,9 +154,28 @@ on nothing else from a service. It has no `domain` and no `infrastructure`: it h
 business rules (ADR-004) and its only outbound adapters are contract clients.
 
 The layering rules above are checked by `./mill checkArchitecture` on every build, not by
-review (ADR-041). In particular no `application` module — the gateway's included — may depend
-on `libs/contracts-core`, `libs/http`, Tapir or Circe; the `api` layer maps between
-application-owned types and wire DTOs.
+review (ADR-041). The task reads each module's declared `moduleDeps` and `mvnDeps` and fails on
+a forbidden edge, naming the rule, both modules and the reason the rule exists:
+
+| Rule | What it forbids |
+| --- | --- |
+| A1 | a service's `domain` depending on anything but `libs/kernel` and cats-core |
+| A2 | a service's `contract` depending on any `domain` or `application` module |
+| A3 | the `application` of a service **that owns a `domain`** depending on `libs/http`, `libs/contracts-core`, Tapir, Circe or an `infrastructure` module |
+| A4 | the gateway reaching into another service's `domain`, `application`, `infrastructure`, `api` or `app` — only `contract` is allowed |
+| A5 | anything under `libs/` depending on a service or on the frontend |
+| A6 | a cross-compiled core module (`kernel`, `contracts-core`, `security-core`) depending on a JVM-only library in its shared source set |
+| A8 | the gateway depending on `libs/kafka`, `libs/kafka-auth`, fs2-kafka or kafka-clients |
+
+A3 is scoped to services that own a `domain`, and the scoping is mechanical: a service is
+domain-owning when a `services/<name>/domain` module is declared in the build. The gateway
+declares none, so `services.gateway.application → libs/contracts-core` and `→ libs/http` are
+legal — the wire is the gateway's subject matter (ADR-041 §1a). Its real constraints are A4 and
+A8 instead. For every other service the original rule stands: `application` owns the types it
+returns and the `api` layer maps them to wire DTOs.
+
+A7 (the shell holding no static reference to a feature) is not checkable from module metadata and
+is enforced by the bundle-shape assertion in BUILD-006 instead.
 
 ## 4. Shared libraries and their public APIs
 
