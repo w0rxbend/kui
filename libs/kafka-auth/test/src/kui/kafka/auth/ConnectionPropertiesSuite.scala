@@ -5,6 +5,8 @@ import java.nio.file.{Files as JFiles, Path as JPath}
 import java.security.KeyStore
 import java.util.Base64
 
+import scala.util.Using
+
 import cats.effect.{IO, Ref}
 
 import kui.kernel.cluster.*
@@ -33,8 +35,11 @@ final class ConnectionPropertiesSuite extends KuiIOSuite {
     Base64.getEncoder.encodeToString(bytes.toByteArray)
   }
 
-  private def connection(security: ClusterSecurity): ClusterConnection = ClusterConnection(
-    id = ClusterId.unsafe("prod"),
+  private def connection(
+      security: ClusterSecurity,
+      id: ClusterId = ClusterId.unsafe("prod")
+  ): ClusterConnection = ClusterConnection(
+    id = id,
     bootstrapServers = BootstrapServers.unsafe("broker:9093"),
     security = security,
     overrides = ClientProperties.empty,
@@ -110,18 +115,26 @@ final class ConnectionPropertiesSuite extends KuiIOSuite {
       )
     )
 
+    // Counted by the materializer's directory prefix for a cluster id no other test uses. Counting
+    // every entry in the temporary directory, or using a shared cluster id, would make this test
+    // fail for another suite's reasons: suites run in parallel forks and all of them write there.
+    val misconfigured = ClusterId.unsafe("misconfigured")
     val temporaryDirectory = JPath.of(System.getProperty("java.io.tmpdir", "/tmp"))
+    val ours = KeyStoreMaterializer.directoryName(misconfigured, "")
+
+    def materializedDirectories: IO[Long] =
+      IO(Using.resource(JFiles.list(temporaryDirectory))(_.filter(_.getFileName.toString.startsWith(ours)).count()))
 
     for {
-      before <- IO(JFiles.list(temporaryDirectory).count())
+      before <- materializedDirectories
       result <- ConnectionProperties
-        .resource[IO](connection(security), ClientPurpose.Admin, "kui-admin-prod-1")
+        .resource[IO](connection(security, misconfigured), ClientPurpose.Admin, "kui-admin-1")
         .use(IO.pure)
-      after <- IO(JFiles.list(temporaryDirectory).count())
+      after <- materializedDirectories
     } yield {
       assertEquals(result.left.map(_.code), Left(ErrorCode.Unsupported))
       assert(result.left.exists(_.message.contains("aws-msk-iam-auth")), "no coordinate named")
-      assertEquals(after, before, "a directory was created despite the classpath check failing")
+      assertEquals(after, before, "a keystore directory was created despite the classpath check failing")
     }
   }
 
