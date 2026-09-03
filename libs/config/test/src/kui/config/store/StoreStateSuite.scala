@@ -128,6 +128,35 @@ final class StoreStateSuite extends KuiSuite {
     }
   }
 
+  test("outcomeIsRecordedPerOffset") {
+    // A writer cannot learn whether it won by comparing the map to what it wrote: by the time it looks, a
+    // third writer may have moved the key on again. It asks what the log did with *its own offset*, which
+    // is a fact rather than an inference — so the outcome has to be retrievable by offset.
+    val state = fold(StoreState.empty, List(record(key, 1L, "replica-a") -> 40L, record(key, 1L, "replica-b") -> 41L))
+    state.outcomeAt(40L) match {
+      case Some(StoreApplied.Accepted(StoreChange.Upserted(applied))) => assertEquals(applied.updatedBy, "replica-a")
+      case other => fail(s"offset 40 should have been accepted, got $other")
+    }
+    assertEquals(state.outcomeAt(41L), Some(StoreApplied.Ignored(key, 1L, 2L)))
+    assertEquals(state.outcomeAt(999L), None)
+  }
+
+  test("anUnreadableRecordsOutcomeIsAlsoRetrievable") {
+    val (state, _) = StoreState.empty.markUnreadable(key, 7L, "it is not valid JSON")
+    assertEquals(state.outcomeAt(7L), Some(StoreApplied.Unreadable(key, "it is not valid JSON")))
+  }
+
+  test("outcomeRingBufferIsBounded") {
+    // Unbounded history would grow for the life of the process, and its only reader is a writer asking
+    // about an offset it produced seconds ago.
+    val log = (0 until 2000).toList.map(i => record(StoreKey(StoreSection.Cluster, s"c$i"), 1L) -> i.toLong)
+    val state = fold(StoreState.empty, log)
+    assertEquals(state.outcomes.size, StoreState.OutcomeWindow)
+    // The most recent outcome is never the one dropped.
+    assert(state.outcomeAt(1999L).isDefined, "the newest outcome must survive")
+    assertEquals(state.outcomeAt(0L), None)
+  }
+
   test("theEmptyStateReportsNoLog") {
     assertEquals(StoreState.empty.lastAppliedOffset, -1L)
     assertEquals(StoreState.empty.nextVersion(key), 1L)

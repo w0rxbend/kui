@@ -84,6 +84,20 @@ enum StoreError(val code: ErrorCode, val message: String) extends Product, Seria
           "raise kui.store.replayTimeout, or check that the store cluster is keeping up"
       )
 
+  /** A write reached Kafka but the writer stopped waiting for it to come back around the log.
+    *
+    * The code is the ordinary retryable timeout and deliberately not a new `KUI-STORE-WRITE-TIMEOUT`. The
+    * record may well have been applied — what expired is the writer's patience, not the write — and a
+    * store-specific code would suggest the write failed, which is exactly what is not known. "Timeout,
+    * retryable, go and re-read" is the honest description of this state.
+    */
+  case WriteTimeout(offset: Long, afterMs: Long)
+      extends StoreError(
+        ErrorCode.Timeout,
+        s"the write produced at offset $offset was not read back within ${afterMs}ms; it may still have " +
+          "been applied, so re-read the record before retrying"
+      )
+
   /** The store cluster could not be reached, or refused the operation.
     *
     * `why` is a short classification written by the adapter — "not authorized to create topics", "no broker

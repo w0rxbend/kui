@@ -289,6 +289,7 @@ KUI does not fall over and it does not quietly lose your edits.
 | Store unreachable **while running** | The service keeps serving from the state it last replayed. Reads work. The affected capability turns `Degraded` with a reason, so the UI shows a banner instead of an empty page, and API responses carry the degraded envelope. |
 | A write attempted while degraded | Rejected with a store-unavailable error. Nothing is queued and nothing is silently dropped; the operator retries when the store is back. |
 | Two operators editing the same cluster at once | One write wins; the other gets `KUI-CONFIG-VERSION-CONFLICT` and is told to reload and retry. Both KUI replicas converge on the winner's record. |
+| A write that times out | `KUI-TIMEOUT` (408, retryable). **The write may still have been applied** — what expired is KUI's wait for the record to come back around the log, not the write itself. Re-read the record to find out. Retrying the same edit at the same base version is safe either way: if it landed, the retry is a version conflict and changes nothing; if it did not, the retry is a fresh write. |
 
 Watch `kui.store.replay.lag`, `kui.store.write.errors` and the store capability's state in the
 capability registry. A store capability that has been `Degraded` for more than one refresh

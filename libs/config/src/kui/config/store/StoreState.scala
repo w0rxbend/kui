@@ -25,8 +25,20 @@ object StoreApplied {
 final case class StoreState(
     records: Map[StoreKey, StoreRecord],
     lastAppliedOffset: Long,
-    unreadable: Map[StoreKey, String]
+    unreadable: Map[StoreKey, String],
+    outcomes: Vector[(Long, StoreApplied)]
 ) {
+
+  /** What the follower did with the record at one offset.
+    *
+    * A writer needs this and cannot get by with the resulting state. Two replicas both produce version 3 of
+    * one key; the partition orders them; one is accepted and one is ignored. The loser has to learn that it
+    * lost, and it cannot find out by comparing the map to what it wrote — by the time it looks, a third
+    * writer may have moved the key on again. So it asks what happened to *its own offset*, which is a fact
+    * about the log and not a guess about the present.
+    */
+  def outcomeAt(offset: Long): Option[StoreApplied] =
+    outcomes.collectFirst { case (recorded, applied) if recorded == offset => applied }
 
   /** The live record for a key. `None` for a key that was never written and for one that was deleted: a
     * tombstone is kept in `records` so that versions keep counting, but it is not a value anybody reads.
@@ -60,17 +72,22 @@ final case class StoreState(
   def apply(record: StoreRecord, offset: Long): (StoreState, StoreApplied) = {
     val expected = nextVersion(record.key)
     val advanced = copy(lastAppliedOffset = math.max(lastAppliedOffset, offset))
-    if record.version != expected then (advanced, StoreApplied.Ignored(record.key, record.version, expected))
-    else {
+    if record.version != expected then {
+      val ignored = StoreApplied.Ignored(record.key, record.version, expected)
+      (advanced.withOutcome(offset, ignored), ignored)
+    } else {
       val change =
         if record.deleted then StoreChange.Deleted(record.key, record.version, record.updatedAt)
         else StoreChange.Upserted(record)
+      val applied = StoreApplied.Accepted(change)
       (
-        advanced.copy(
-          records = advanced.records.updated(record.key, record),
-          unreadable = advanced.unreadable - record.key
-        ),
-        StoreApplied.Accepted(change)
+        advanced
+          .copy(
+            records = advanced.records.updated(record.key, record),
+            unreadable = advanced.unreadable - record.key
+          )
+          .withOutcome(offset, applied),
+        applied
       )
     }
   }
@@ -81,22 +98,45 @@ final case class StoreState(
     * cannot know what version the key is at, and guessing would make the next legitimate write look like a
     * lost race.
     */
-  def markUnreadable(key: StoreKey, offset: Long, reason: String): (StoreState, StoreApplied) =
+  def markUnreadable(key: StoreKey, offset: Long, reason: String): (StoreState, StoreApplied) = {
+    val applied = StoreApplied.Unreadable(key, reason)
     (
       copy(
         lastAppliedOffset = math.max(lastAppliedOffset, offset),
         unreadable = unreadable.updated(key, reason)
-      ),
-      StoreApplied.Unreadable(key, reason)
+      ).withOutcome(offset, applied),
+      applied
     )
+  }
 
   def unreadableKeys: List[StoreKey] = unreadable.keys.toList.sortBy(_.render)
+
+  /** Appends one outcome, dropping the oldest once the window is full.
+    *
+    * Bounded because it must be: an unbounded history would grow for the life of the process, and its only
+    * reader is a writer asking about an offset it produced seconds ago.
+    */
+  private def withOutcome(offset: Long, applied: StoreApplied): StoreState = {
+    val appended = outcomes :+ (offset -> applied)
+    copy(outcomes =
+      if appended.size > StoreState.OutcomeWindow then appended.drop(appended.size - StoreState.OutcomeWindow)
+      else appended
+    )
+  }
 }
 
 object StoreState {
 
+  /** How many per-offset outcomes are kept for writers to look their own write up in.
+    *
+    * At one metadata write a second — far more than any real deployment produces — this is seventeen minutes
+    * of history, which is orders of magnitude more than the seconds a writer waits. It is a window rather
+    * than a map because the alternative grows for ever.
+    */
+  val OutcomeWindow: Int = 1024
+
   /** Offset `-1` means "nothing applied yet", which is also what a store with no log reports. */
-  val empty: StoreState = StoreState(Map.empty, -1L, Map.empty)
+  val empty: StoreState = StoreState(Map.empty, -1L, Map.empty, Vector.empty)
 
   given CanEqual[StoreState, StoreState] = CanEqual.derived
 }

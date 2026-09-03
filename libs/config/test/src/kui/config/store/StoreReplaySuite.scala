@@ -138,7 +138,7 @@ final class StoreReplaySuite extends KuiIOSuite {
       state <- Ref.of[IO, StoreState](StoreState.empty)
       changes <- Topic[IO, StoreChange]
       log = (Stream.eval(started.complete(()).void).drain ++ Stream.never[IO]).onFinalize(released.update(_ + 1))
-      fiber <- KafkaConfigStore.follow[IO](fakeLog(0L, log), state, changes, crypto, logger).start
+      fiber <- KafkaConfigStore.follow[IO](fakeLog(0L, log), state, changes, crypto, None, logger).start
       _ <- started.get
       _ <- fiber.cancel
       outcome <- fiber.join

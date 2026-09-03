@@ -2,6 +2,7 @@ package kui.config.store
 
 import scala.concurrent.duration.FiniteDuration
 
+import cats.Parallel
 import cats.data.NonEmptySet
 import cats.effect.std.Supervisor
 import cats.effect.syntax.all.*
@@ -10,14 +11,15 @@ import cats.syntax.all.*
 import fs2.Stream
 import fs2.concurrent.Topic
 import fs2.io.file.Files
-import fs2.kafka.KafkaConsumer
+import fs2.kafka.{KafkaConsumer, KafkaProducer}
 import io.circe.Json
 import io.circe.parser.parse
+import io.circe.syntax.*
 import org.apache.kafka.common.TopicPartition
 import org.typelevel.log4cats.{Logger, LoggerFactory}
 
 import kui.config.{StoreConfig, StoreKafkaConfig}
-import kui.kernel.error.KuiError
+import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 
 /** The Kafka-backed `ConfigStore`: replay the whole log, then follow its tail forever.
   *
@@ -63,7 +65,7 @@ object KafkaConfigStore {
     */
   val ChangeBufferSize: Int = 256
 
-  def resource[F[_]: {Async, Files, LoggerFactory}](
+  def resource[F[_]: {Async, Parallel, Files, LoggerFactory}](
       config: StoreConfig,
       kafka: StoreKafkaConfig,
       crypto: FieldCrypto[F],
@@ -76,26 +78,37 @@ object KafkaConfigStore {
     for {
       state <- Resource.eval(Ref.of[F, StoreState](StoreState.empty))
       changes <- Resource.eval(Topic[F, StoreChange])
+      waiter <- Resource.eval(WriteWaiter.create[F])
+      producer <- StoreClients.producer[F](kafka, clientId)
       consumer <- StoreClients.consumer[F](kafka, clientId)
       log = kafkaLog(consumer, topic, partition)
       endOffset <- Resource.eval(prepare(log, topic, config.replayTimeout, logger))
       _ <- Resource.eval(replay(log, state, changes, crypto, topic, endOffset, config.replayTimeout, logger))
+      _ <- Resource.eval(waiter.advance(endOffset - 1L))
       // The follower is started under a supervisor owned by this resource, so releasing the resource
       // cancels the fiber *before* the consumer resource above it is finalized. A consumer closed
       // underneath a running poll is how an orderly shutdown turns into a stack trace.
       supervisor <- Supervisor[F]
       _ <- Resource.eval(
         supervisor.supervise(
-          follow(log, state, changes, crypto, logger)
+          follow(log, state, changes, crypto, Some(waiter), logger)
             .handleErrorWith(error =>
               logger.error(
                 s"store tail follower stopped: topic=$topic reason=${error.getClass.getSimpleName}; " +
                   "reads continue from the last replayed state and writes will be rejected"
-              )
+              ) *>
+                // Free every parked writer at once rather than leaving each to wait out its own timeout
+                // against a log nobody is reading any more.
+                waiter.fail(
+                  StoreError.Unreachable(
+                    kafka.bootstrapServers.value,
+                    s"the tail follower stopped with ${error.getClass.getSimpleName}"
+                  )
+                )
             )
         )
       )
-    } yield view(state, changes)
+    } yield writable(state, changes, waiter, producer, crypto, topic, config.writeTimeout, logger)
   }
 
   /** Assign the single partition, rewind, and find out where the log ends.
@@ -157,7 +170,7 @@ object KafkaConfigStore {
       for {
         started <- Clock[F].monotonic
         outcome <- log.records
-          .through(applyEach(state, changes, crypto, logger))
+          .through(applyEach(state, changes, crypto, None, logger))
           .takeThrough(offset => offset < endOffset - 1L)
           .compile
           .drain
@@ -191,9 +204,10 @@ object KafkaConfigStore {
       state: Ref[F, StoreState],
       changes: Topic[F, StoreChange],
       crypto: FieldCrypto[F],
+      waiter: Option[WriteWaiter[F]],
       logger: Logger[F]
   ): F[Unit] =
-    log.records.through(applyEach(state, changes, crypto, logger)).compile.drain
+    log.records.through(applyEach(state, changes, crypto, waiter, logger)).compile.drain
 
   /** Decodes, decrypts and folds one record, publishing what changed. Yields each record's offset.
     *
@@ -205,6 +219,7 @@ object KafkaConfigStore {
       state: Ref[F, StoreState],
       changes: Topic[F, StoreChange],
       crypto: FieldCrypto[F],
+      waiter: Option[WriteWaiter[F]],
       logger: Logger[F]
   ): fs2.Pipe[F, LogRecord, Long] =
     _.evalMap { record =>
@@ -236,7 +251,9 @@ object KafkaConfigStore {
                 logger.warn(s"store record unreadable: key=${key.render} offset=$offset reason=$reason")
             )
         }
-        folded.as(offset)
+        // The waiter is advanced *after* the state has been updated, so a writer that is woken and then
+        // reads the state cannot see a moment in which its own record has not landed yet.
+        (folded *> waiter.traverse_(_.advance(offset))).as(offset)
       }
     }
 
@@ -276,40 +293,163 @@ object KafkaConfigStore {
         }
     }
 
-  /** The read-only `ConfigStore` view over the replayed state.
+  /** The `ConfigStore` over the replayed state, with its write path.
     *
-    * `put` and `delete` are wired in STORE-007. Until then they refuse by name rather than half-working,
-    * which is what keeps every task ending on a green build without shipping a broken write.
+    * Reads are a lookup in the map the follower maintains. Writes produce to the log and then wait for their
+    * own record to come back around through that same follower, which is what makes "the write succeeded"
+    * mean "I have read my record from the log" rather than "I hopefully changed a local map".
     */
-  private def view[F[_]: Async](
+  private def writable[F[_]: Async](
       state: Ref[F, StoreState],
-      changeTopic: Topic[F, StoreChange]
+      changeTopic: Topic[F, StoreChange],
+      waiter: WriteWaiter[F],
+      producer: KafkaProducer[F, String, Option[String]],
+      crypto: FieldCrypto[F],
+      topic: String,
+      writeTimeout: FiniteDuration,
+      logger: Logger[F]
   ): ConfigStore[F] =
     new ConfigStore[F] {
+
       def get(key: StoreKey): F[Option[StoreRecord]] = state.get.map(_.get(key))
 
       def list(section: StoreSection): F[List[StoreRecord]] = state.get.map(_.list(section))
+
+      def changes: Stream[F, StoreChange] = changeTopic.subscribe(ChangeBufferSize)
+
+      def health: F[StoreHealth] =
+        state.get.map(current => StoreHealth.Healthy(current.lastAppliedOffset, java.time.Instant.EPOCH))
 
       def put(
           key: StoreKey,
           payload: Json,
           baseVersion: Option[Long],
           updatedBy: String
-      ): F[Either[KuiError, StoreRecord]] = Async[F].pure(Left(writesNotWiredYet))
+      ): F[Either[KuiError, StoreRecord]] =
+        state.get.flatMap { current =>
+          val actual = current.get(key).map(_.version)
+          if actual != baseVersion then
+            logger.warn(
+              s"store write conflict: key=${key.render} baseVersion=${baseVersion.fold("none")(_.toString)} " +
+                s"currentVersion=${actual.fold("none")(_.toString)} stage=precheck"
+            ) *> Async[F].pure(Left(conflict(key, baseVersion, actual)))
+          else
+            crypto
+              .encryptPayload(key, payload)
+              .attempt
+              .flatMap {
+                case Left(failure: StoreFailure) => Async[F].pure(Left(toKuiError(failure.error)))
+                case Left(other) => Async[F].raiseError[Either[KuiError, StoreRecord]](other)
+                case Right(encrypted) =>
+                  now[F].flatMap { at =>
+                    val record = StoreRecord(
+                      StoreRecord.CurrentEnvelopeVersion,
+                      key,
+                      current.nextVersion(key),
+                      at,
+                      updatedBy,
+                      deleted = false,
+                      encrypted
+                    )
+                    send(record).map(_.map(_ => record.copy(payload = payload)))
+                  }
+              }
+        }
 
       def delete(key: StoreKey, baseVersion: Long, updatedBy: String): F[Either[KuiError, Unit]] =
-        Async[F].pure(Left(writesNotWiredYet))
+        state.get.flatMap { current =>
+          current.get(key) match {
+            // Deleting a key that is already gone is a success: the caller's intent — "this key must not
+            // be there" — already holds, and no caller can act on the difference.
+            case None => Async[F].pure(Right(()))
+            case Some(existing) if existing.version != baseVersion =>
+              logger.warn(
+                s"store write conflict: key=${key.render} baseVersion=$baseVersion " +
+                  s"currentVersion=${existing.version} stage=precheck"
+              ) *> Async[F].pure(Left(conflict(key, Some(baseVersion), Some(existing.version))))
+            case Some(_) =>
+              now[F].flatMap(at =>
+                send(StoreRecord.tombstone(key, current.nextVersion(key), updatedBy, at)).map(_.void)
+              )
+          }
+        }
 
-      def changes: Stream[F, StoreChange] = changeTopic.subscribe(ChangeBufferSize)
+      /** Produce, then wait to read the record back, then ask the log what happened to *this* offset.
+        *
+        * Asking about the offset rather than comparing the map to what was written is the whole point. Two
+        * replicas both produce version 3 of one key; the partition orders them; the follower on every replica
+        * accepts the first and ignores the second. By the time the loser looks at the map, a third writer may
+        * have moved the key on again — so the only reliable question is "what did the log do with the record
+        * I produced", and the answer is a fact rather than an inference.
+        */
+      private def send(record: StoreRecord): F[Either[KuiError, Unit]] =
+        produce(record).flatMap {
+          case Left(error) => Async[F].pure(Left(toKuiError(error)))
+          case Right(offset) =>
+            waiter.await(offset, writeTimeout).flatMap {
+              case Left(error) =>
+                logger.error(s"store write timed out: key=${record.key.render} offset=$offset") *>
+                  Async[F].pure(Left(toKuiError(error)))
+              case Right(_) =>
+                state.get.map(_.outcomeAt(offset)).flatMap {
+                  case Some(StoreApplied.Accepted(_)) =>
+                    logger.info(
+                      s"store write accepted: key=${record.key.render} version=${record.version} offset=$offset " +
+                        s"updatedBy=${record.updatedBy}"
+                    ) *> Async[F].pure(Right(()))
+                  case Some(StoreApplied.Ignored(_, recordVersion, expectedVersion)) =>
+                    logger.warn(
+                      s"store write conflict: key=${record.key.render} baseVersion=${recordVersion - 1L} " +
+                        s"currentVersion=${expectedVersion - 1L} stage=readback"
+                    ) *> Async[F].pure(
+                      Left(conflict(record.key, Some(recordVersion - 1L), Some(expectedVersion - 1L)))
+                    )
+                  case Some(StoreApplied.Unreadable(_, reason)) =>
+                    Async[F].pure(Left(toKuiError(StoreError.MalformedRecord(record.key.render, reason))))
+                  // The outcome window rolled past this offset while the writer was waiting. Only
+                  // possible under a write rate this store will never see, and reported honestly as
+                  // "may have been applied, go and re-read" rather than guessed at.
+                  case None =>
+                    Async[F].pure(Left(toKuiError(StoreError.WriteTimeout(offset, writeTimeout.toMillis))))
+                }
+            }
+        }
 
-      def health: F[StoreHealth] =
-        state.get.map(current => StoreHealth.Healthy(current.lastAppliedOffset, java.time.Instant.EPOCH))
+      /** The send and its acknowledgement are one step: a cancellation between them would leave a record on
+        * the log that nobody is waiting for and nobody knows about.
+        */
+      private def produce(record: StoreRecord): F[Either[StoreError, Long]] =
+        Async[F]
+          .uncancelable(_ =>
+            producer
+              .produceOne_(topic, record.key.render, Some(record.asJson.noSpaces))
+              .flatten
+              .map(metadata => metadata.offset)
+          )
+          .attempt
+          .map {
+            case Right(offset) => Right(offset)
+            case Left(error) =>
+              Left(StoreError.Unreachable(topic, s"the producer failed with ${error.getClass.getSimpleName}"))
+          }
     }
 
-  private val writesNotWiredYet: KuiError =
-    kui.kernel.error.ApplicationError.Remote(
-      kui.kernel.error.ErrorCode.StoreNotConfigured,
-      "the store's write path is not wired yet (STORE-007)",
+  /** The envelope's timestamp: whole seconds, because a millisecond difference between two replicas writing
+    * "the same" record is noise to the person reading a diff.
+    */
+  private def now[F[_]: Async]: F[java.time.Instant] =
+    Clock[F].realTime.map(since =>
+      java.time.Instant.ofEpochMilli(since.toMillis).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+    )
+
+  private def conflict(key: StoreKey, baseVersion: Option[Long], current: Option[Long]): KuiError =
+    ApplicationError.Remote(
+      ErrorCode.ConfigVersionConflict,
+      s"${key.render} changed since it was read: this write was based on version " +
+        s"${baseVersion.fold("none")(_.toString)} and the store is at ${current.fold("none")(_.toString)}; " +
+        "re-read it and apply the change again",
       Nil
     )
+
+  private def toKuiError(error: StoreError): KuiError = StoreError.toKuiError(error)
 }

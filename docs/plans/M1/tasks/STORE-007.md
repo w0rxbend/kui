@@ -238,3 +238,44 @@ Implementation Report, and ship the tests below.
 - The produce itself is `uncancelable` around the send/ack pair; the wait for read-back is not.
 - **Test:** issue a write, cancel it while the waiter is outstanding, assert the waiter map is
   empty afterwards and that a subsequent write on the same key still completes.
+
+## Deviations
+
+1. **`StoreError.WriteTimeout` carries `(offset, afterMs)`, not `(key, offset, afterMs)`.** The
+   waiter is keyed by offset and knows nothing about store keys — that is what makes it a small,
+   separately testable piece rather than a second copy of the write path. The key is in the log
+   line the caller writes, where it belongs.
+2. **The read-back outcome distinguishes a fourth case the spec does not list: the outcome window
+   rolled past the offset while the writer waited.** It is only reachable at a write rate this
+   store will never see, and it is reported as `WriteTimeout` — "it may have been applied, go and
+   re-read" — rather than guessed at in either direction.
+3. **`WriteWaiter.await` checks "already past" inside the same atomic step that registers the
+   waiter.** The spec describes the two as separate concerns. Separating them leaves a window in
+   which the follower advances between the check and the registration, parking a writer for ever
+   against a record that has already gone by. That is the failure that shows up in production once
+   a month as an unexplained write timeout, and it is the reason this file exists at all.
+4. **The waiter is advanced after the state is updated, not alongside it.** A writer woken before
+   the state carried its record would read the map and not find itself, which is the one thing the
+   read-your-writes contract promises cannot happen.
+5. **Producer settings are on the `ProducerSettings` built in STORE-005**, where the producer is
+   created. `acks=all` and idempotence are set there; `delivery.timeout.ms` is left at the client
+   default rather than bound to `kui.store.writeTimeout`, because the two now bound different
+   things: `writeTimeout` bounds the wait for read-back, which is strictly longer than the produce
+   and is the number a user pressing Save experiences. Binding both to one knob would make a
+   produce give up exactly when the read-back wait was about to start.
+
+## Cancellation and shutdown, as implemented
+
+- **A cancelled write deregisters its waiter.** `await` runs its cleanup under `guarantee`, so
+  cancellation and timeout both remove the entry. `WriteWaiterSuite`'s
+  `aCancelledWaiterDoesNotStayInTheMap` asserts the map is empty afterwards and that a later write
+  on the same key still completes.
+- **The produce and its acknowledgement are `uncancelable` together.** A cancellation between them
+  would leave a record on the log that nobody is waiting for and nobody knows about.
+- **The wait for read-back is cancellable, and cancellation is reported honestly.** A caller
+  cancelled between "produced" and "read back" sees cancellation — not success, and not a
+  fabricated failure — because the record may well have landed and this process has no way to know
+  which.
+- **A dead follower frees every waiter at once.** `WriteWaiter.fail` is called from the follower's
+  error handler, so one broker failure does not turn into a minute of requests each waiting out
+  its own timeout. The failure is sticky: a writer arriving afterwards is told immediately.
