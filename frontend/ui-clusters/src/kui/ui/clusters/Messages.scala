@@ -174,6 +174,24 @@ object Messages {
     "A running broker always has at least one. It is worth checking what KUI is allowed to read on this " +
       "cluster."
 
+  // --- The forced refresh ---------------------------------------------------------------------------
+
+  val Refresh: String = "Refresh"
+
+  val RefreshRunning: String = "Asking the server to read this cluster now\u2026"
+
+  val RefreshCompleted: String = "Updated."
+
+  /** What is said when the schedule runs out with no new data.
+    *
+    * Every clause is deliberate: it is true, it does not claim the refresh failed, and it does not put the
+    * screen back as though the button had never been pressed.
+    */
+  val RefreshTimedOut: String =
+    "The refresh was accepted but the data has not been updated yet. It may still be running."
+
+  def refreshRejected(detail: String): String = s"The refresh was not accepted: $detail"
+
   val UnknownFailure: String = "the reason was not reported"
 
   def listFailed(detail: String): String = s"The cluster list could not be read: $detail"

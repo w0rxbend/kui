@@ -85,3 +85,23 @@
   gap: var(--kui-space-2);
   padding-bottom: var(--kui-space-4);
 }
+
+/* The refresh control, on the same line as the timestamp it acts on. */
+.kui-clusters__refresh {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+}
+
+.kui-clusters__refresh-status {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-clusters__scraped-at {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+}

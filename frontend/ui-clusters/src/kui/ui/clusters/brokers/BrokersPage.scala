@@ -7,9 +7,10 @@ import com.raquo.laminar.api.L.*
 import kui.contracts.Section
 import kui.contracts.cluster.{BrokerDto, ClusterSummaryDto}
 import kui.kernel.{BrokerId, ClusterId, Sort, SortOrder}
-import kui.ui.clusters.component.Bytes
-import kui.ui.clusters.{ClustersCss, ClustersQueries, Messages}
+import kui.ui.clusters.component.{Bytes, RefreshButton}
+import kui.ui.clusters.{ClustersCss, ClustersQueries, Messages, RefreshFlow}
 import kui.ui.kernel.component.*
+import kui.ui.kernel.state.FeatureState
 import kui.ui.kernel.time.Timestamps
 
 /** One cluster's brokers.
@@ -34,8 +35,9 @@ object BrokersPage {
       brokerHref: (ClusterId, BrokerId) => String,
       backHref: String,
       zone: Signal[String],
+      capability: Signal[FeatureState] = Val(FeatureState.Ready),
       now: () => Instant = () => Instant.now()
-  ): HtmlElement = {
+  )(using Owner): HtmlElement = {
     val sort: Var[Option[Sort[String]]] = Var(Some(Sort("broker", SortOrder.Asc)))
 
     val section: Signal[Option[Section[List[BrokerDto]]]] =
@@ -95,10 +97,17 @@ object BrokersPage {
       ),
       div(
         cls := ClustersCss.ScrapedAt,
-        dataAttr("testid") := "brokers-scraped-at",
-        text <-- section
-          .combineWith(zone)
-          .map((current, zoneId) => scrapedLine(current.flatMap(fetchedAt), zoneId, now()))
+        span(
+          dataAttr("testid") := "brokers-scraped-at",
+          text <-- section
+            .combineWith(zone)
+            .map((current, zoneId) => scrapedLine(current.flatMap(fetchedAt), zoneId, now()))
+        ),
+        // Beside the timestamp, where "how old is this" is already being answered.
+        RefreshButton(
+          new RefreshFlow(cluster, queries, section.map(_.flatMap(fetchedAt))),
+          capability
+        )
       )
     )
   }

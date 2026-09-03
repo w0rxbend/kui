@@ -188,6 +188,19 @@ an interface that merely hid a value it had in memory has reason to want to know
 this is. It is asserted twice: once in the contract's own tests, and once in the browser, where a
 suite feeds the screen a plaintext token and asserts it appears nowhere in the rendered DOM.
 
+### What the browser does with the 202
+
+`POST /clusters/{id}/refresh` answers `202 Accepted` and the time the request was taken. The browser
+then re-reads the snapshot at 1, 3, 6, 10 and 15 seconds and stops at the first read whose
+`scrapedAt` is **later than the one that was on screen when the button was pressed**.
+
+Two consequences for whoever writes the server side. `scrapedAt` has to advance on every successful
+scrape, including one that produced identical data — the browser compares that field and nothing
+else, because two scrapes of an unchanged cluster are identical bytes and comparing payloads would
+report "nothing happened" for a refresh that worked. And a scrape that takes longer than fifteen
+seconds is not an error: the browser says the refresh was accepted and has not landed yet, which is
+the truth, and leaves the button pressable.
+
 ## Ports
 
 Three traits, stated over an abstract `F[_]` with no bound at all, in domain types only.

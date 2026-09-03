@@ -74,6 +74,9 @@ class BrokersPageSuite extends FunSuite {
   }
 
   final private class Fixture {
+    // The page owns timers now (the refresh flow's), so it needs an owner. Killed with the mount.
+    given owner: com.raquo.airstream.ownership.ManualOwner = new com.raquo.airstream.ownership.ManualOwner
+
     val api = new FakeApi
     val opened: mutable.ListBuffer[(ClusterId, BrokerId)] = mutable.ListBuffer.empty
 
@@ -95,6 +98,7 @@ class BrokersPageSuite extends FunSuite {
     try check(fixture.page.ref)
     finally {
       root.unmount(): Unit
+      fixture.owner.killSubscriptions()
       dom.document.body.removeChild(container): Unit
     }
   }

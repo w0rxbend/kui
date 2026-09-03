@@ -629,6 +629,44 @@ in by the function that builds all the rows together. The alternative — each r
 skew — would need every row to know the others, and two rows computed against different denominators
 would fail to add up on the page they are shown on together.
 
+### Watching an accepted-but-asynchronous action: the 202 pattern
+
+Some of what KUI asks a server to do does not finish while the request is open. The forced cluster
+refresh is the first: the server answers `202 Accepted` — *I have started* — with no body, no
+completion signal and no estimate. M2's topic operations are next, and each one re-deriving this is
+how they end up behaving differently.
+
+**The rule: re-read on a bounded schedule until a timestamp advances, and end in a stated outcome
+either way.** For the refresh that is 1 s, 3 s, 6 s, 10 s and 15 s after the 202 — front-loaded,
+because a healthy cluster answers in well under a second and the user should see the result at once,
+and stretched at the end, because a cluster slow enough to need a forced refresh is exactly the one
+whose scrape takes seconds.
+
+Four things about it are decisions rather than details:
+
+- **Compare the timestamp, never the payload.** Two consecutive scrapes of a cluster where nothing
+  changed produce identical bytes. Comparing payloads reports "nothing happened" for an action that
+  worked perfectly, which is the wrong answer to the question the user asked.
+- **Running out of schedule is not a failure.** It is an unknown, and it says so: *"The refresh was
+  accepted but the data has not been updated yet. It may still be running."* Every clause is doing
+  work — it is true, it does not claim failure, and it does not quietly put the screen back as though
+  the button had never been pressed. The control returns to idle, because the product does not get to
+  decide on the user's behalf that something is broken.
+- **Nothing on screen changes until a read comes back.** Showing a new timestamp because a 202
+  arrived would be inventing data the server has not produced.
+- **The timers belong to the element's owner.** Airstream timers, not `js.timers`, so navigating away
+  kills the remaining reads: a timer that outlives its page is a request nobody is waiting for.
+
+The two alternatives were considered and are worth recording, because neither is obviously wrong.
+*Waiting a fixed time and reading once* is simple, and the right interval is a property of somebody's
+cluster rather than of this product — too short and the button looks broken, too long and a fast
+cluster feels slow. *Opening a stream so the server can say when it finished* is correct and wildly
+out of proportion for a button pressed a few times a day.
+
+The state machine lives apart from the control that drives it (`RefreshFlow` next to
+`RefreshButton`), and its schedule and its clock are both parameters. A fifteen-second contract that
+could only be tested by waiting fifteen real seconds would be a contract nobody checks.
+
 ### Putting state in the URL, and keeping it decodable across upgrades
 
 Some state belongs in the URL and some does not, and the test is not technical: **would somebody

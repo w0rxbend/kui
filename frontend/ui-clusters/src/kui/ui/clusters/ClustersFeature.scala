@@ -41,6 +41,10 @@ final class ClustersFeature extends KuiFeature {
 
   private val queries = new ClustersQueries(api)
 
+  // The page's own lifetime: this feature is built once, when the browser first navigates to it, and lives
+  // as long as the tab does.
+  private given Owner = unsafeWindowOwner
+
   // No capability signal is held here. M1's cluster screens are read-only, so there is no action to gate,
   // and the shell already draws the banner and the fallback panel from the same store. Holding a second
   // subscription would be a second opinion about the same state on the same screen.

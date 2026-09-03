@@ -21,6 +21,9 @@ object ClustersCss {
 
   val ScrapedAt = "kui-clusters__scraped-at"
 
+  val Refresh = "kui-clusters__refresh"
+  val RefreshStatus = "kui-clusters__refresh-status"
+
   val BrokersHeader = "kui-clusters__brokers-header"
 
   val TabBody = "kui-clusters__tab-body"
