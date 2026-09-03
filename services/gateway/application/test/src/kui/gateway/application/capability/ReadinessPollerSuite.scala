@@ -154,16 +154,26 @@ final class ReadinessPollerSuite extends CatsEffectSuite {
   }
 
   test("pollsDoNotOverlap") {
-    // A service slower than the interval is polled once at a time. Queueing polls behind each other
-    // would turn one slow service into a growing pile of calls that all time out together.
-    val program = stub(cluster, ServiceHealth.Slow(30.seconds)).flatMap { stub =>
-      fixture(List(stub)).use(_ => IO.sleep(interval * 6) *> stub.polls)
+    // A service slower than the interval is polled once at a time. Queueing polls behind each other would
+    // turn one slow service into a growing pile of calls that all time out together.
+    //
+    // The assertion is on concurrency, not on a count. A count cannot tell the two implementations apart:
+    // the scheduled loop is a single sequential fiber, so it can only overlap with a poll started from
+    // somewhere else -- which is exactly what `probeNow` does when a user presses "Retry now" while a slow
+    // poll is already in flight, and exactly what the poller's semaphore exists to prevent.
+    val program = stub(cluster, ServiceHealth.Slow(30.seconds)).flatMap { slow =>
+      Concurrency.wrap[IO](slow).flatMap { watched =>
+        fixture(List(watched)).use { (_, _, trigger) =>
+          // Long enough for a scheduled poll to be in flight, then a user's retry on top of it.
+          (IO.sleep(2.seconds) *> trigger.probe(cluster)).start *>
+            IO.sleep(interval * 6) *> (watched.peak, watched.polls).tupled
+        }
+      }
     }
 
-    TestControl.executeEmbed(program).map { polls =>
-      // Each poll is abandoned at the five-second budget, so in sixty seconds there is room for a
-      // handful -- but never one per tick per outstanding call.
-      assert(polls <= 6, s"a slow service was polled $polls times in six intervals; polls overlapped")
+    TestControl.executeEmbed(program).map { (peak, polls) =>
+      assertEquals(peak, 1, s"$peak calls to one service were in flight at once; polls overlapped")
+      assert(polls > 1, s"the slow service was polled $polls times; the test proved nothing")
     }
   }
 
@@ -252,5 +262,69 @@ final class ReadinessPollerSuite extends CatsEffectSuite {
         assert(message.contains("kafka"), s"the failing check should be named: $message")
       case other => fail(s"expected unavailable, got $other")
     }
+  }
+
+  /** A `StubServiceClient` that also records how many of its calls were in flight at the same time.
+    *
+    * It wraps rather than replaces the stub, so the answers, the health `Ref` and the counts stay exactly
+    * the ones every other test in this suite reasons about; the only thing added is the peak.
+    */
+  private object Concurrency {
+
+    trait Watched[F[_]] extends StubServiceClient[F] {
+      def peak: F[Int]
+    }
+
+    def wrap[F[_]: cats.effect.kernel.Async](
+        underlying: StubServiceClient[F]
+    ): F[Watched[F]] =
+      cats.effect.kernel.Ref.of[F, (Int, Int)]((0, 0)).map { inFlight =>
+        new Watched[F] {
+          val service: ServiceId = underlying.service
+          def health: cats.effect.kernel.Ref[F, ServiceHealth] = underlying.health
+          def polls: F[Int] = underlying.polls
+          def capabilityCalls: F[Int] = underlying.capabilityCalls
+          def circuit(event: kui.http.upstream.CircuitEvent): F[Unit] = underlying.circuit(event)
+          def circuitStates: fs2.Stream[F, kui.http.upstream.CircuitEvent] = underlying.circuitStates
+          def peak: F[Int] = inFlight.get.map(_._2)
+
+          def call[I, O](
+              endpoint: sttp.tapir.Endpoint[
+                kui.security.SignedPrincipal,
+                I,
+                kui.contracts.ErrorEnvelope,
+                O,
+                Any
+              ],
+              input: I
+          )(ctx: kui.gateway.application.client.CallContext): F[Either[kui.kernel.error.KuiError, O]] =
+            counted(underlying.call(endpoint, input)(ctx))
+
+          def callPublic[I, O](
+              endpoint: sttp.tapir.PublicEndpoint[I, kui.contracts.ErrorEnvelope, O, Any],
+              input: I
+          )(ctx: kui.gateway.application.client.CallContext): F[Either[kui.kernel.error.KuiError, O]] =
+            counted(underlying.callPublic(endpoint, input)(ctx))
+
+          def stream[I](
+              endpoint: sttp.tapir.Endpoint[
+                kui.security.SignedPrincipal,
+                I,
+                kui.contracts.ErrorEnvelope,
+                fs2.Stream[F, Byte],
+                sttp.capabilities.fs2.Fs2Streams[F]
+              ],
+              input: I
+          )(ctx: kui.gateway.application.client.CallContext): fs2.Stream[F, kui.http.sse.SseEvent] =
+            underlying.stream(endpoint, input)(ctx)
+
+          private def counted[A](call: F[A]): F[A] =
+            cats.effect.kernel.Resource
+              .make(inFlight.update((live, top) => (live + 1, math.max(top, live + 1))))(_ =>
+                inFlight.update((live, top) => (live - 1, top))
+              )
+              .use(_ => call)
+        }
+      }
   }
 }
