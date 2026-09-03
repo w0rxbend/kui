@@ -1039,7 +1039,9 @@ object services extends Module {
       * The types a use case returns are its own, and `api` maps them (ADR-033).
       */
     object application extends KuiJvmModule {
-      def moduleDeps = Seq(domain)
+      // `libs.cache` carries the `SnapshotCell` the topology snapshot is held in. It has no Kafka
+      // dependency, so rule A10 is unaffected, and it is not a wire module, so rule A3 is too.
+      def moduleDeps = Seq(domain, libs.cache)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
@@ -1050,7 +1052,18 @@ object services extends Module {
       )
 
       object test extends ScalaTests with KuiTests {
-        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+        // The domain's test module carries the profile and topology fixtures every suite here
+        // builds on. A generator of a domain type cannot live in `libs/testkit`: rule A5 forbids a
+        // library depending on a service.
+        def moduleDeps =
+          super.moduleDeps ++ Seq(libs.testkit.jvm, services.cluster.domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // Virtual time: the refresh loop's whole contract is about what happens after thirty
+          // seconds, and a suite that slept through that would be slow and flaky at once.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
+        )
       }
     }
 
@@ -1074,6 +1087,7 @@ object services extends Module {
         def mvnDeps =
           super.mvnDeps() ++ Seq(
             mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+            mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
             mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}",
             mvn"com.dimafeng::testcontainers-scala-kafka::${Versions.testcontainers}"
           )
