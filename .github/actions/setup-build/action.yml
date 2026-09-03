@@ -1,0 +1,40 @@
+# Everything every CI job needs before it can run a Mill task.
+#
+# It exists so the five jobs in ci.yml do not each carry their own copy of the JDK, Node and cache
+# configuration. Five copies drift: someone bumps the JDK in one job, the others keep building
+# against the old one, and the difference shows up as a mysterious failure in a single stage.
+name: Set up the KUI build
+description: Installs the JDK and Node that the Mill build needs, and restores the build caches.
+
+runs:
+  using: composite
+  steps:
+    - name: Install JDK 21 (Temurin)
+      # ADR-001 pins JDK 21; `temurin` is the distribution the toolchain document names.
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '21'
+
+    - name: Install Node.js
+      # Scala.js tests need a JavaScript engine (blocker B-002). Node is installed for every job,
+      # not only the test job, so that a job which later grows a JS step does not fail in a way
+      # that looks like a code problem. `docs/development/toolchain.md` asks for 20 or newer.
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Restore the dependency and build caches
+      uses: actions/cache@v4
+      with:
+        # `~/.cache/coursier` holds downloaded jars; `out/` holds Mill's incremental compilation
+        # state. Both are keyed on the files that decide what is in them, so a dependency change
+        # invalidates the cache instead of silently reusing a stale classpath.
+        path: |
+          ~/.cache/coursier
+          ~/.cache/mill
+          out
+        key: ${{ runner.os }}-mill-${{ hashFiles('build.mill', '.mill-version', 'mill-build/build.mill') }}
+        # A partial hit still saves most of the download time; Mill revalidates what it reuses.
+        restore-keys: |
+          ${{ runner.os }}-mill-

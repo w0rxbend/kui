@@ -1,0 +1,117 @@
+# The verdict a contributor gets on every push, and the same one the maintainers get.
+#
+# PLAN §49 lists the pipeline as a sequence of stages. Each stage is a separate job here, on
+# purpose: when GitHub says "style failed" the contributor already knows what to fix, whereas one
+# long job called "build" only says that something, somewhere, went wrong. The jobs are independent
+# and run in parallel; the sequence in PLAN §49 is a reading order, not a dependency chain.
+#
+# Stages PLAN §49 lists whose build tasks do not exist yet — integration tests, the OpenAPI diff,
+# the Docker build, E2E — are deliberately absent rather than stubbed. The task that creates each
+# one adds its own job (GW-007, INFRA-001, E2E-001). A job that always passes is worse than no job:
+# it looks like coverage.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer worthless, so stop paying for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Mill and coursier both honour this; it keeps the JVM out of the runner's swap on the larger
+  # link steps.
+  JAVA_OPTS: -Xmx3g
+
+jobs:
+  compile:
+    name: compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+      - name: Compile every module with -Werror
+        run: ./mill __.compile
+
+  style:
+    name: style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+      # Two separate steps, because they fail for different reasons and the fix differs:
+      # `checkFormat` means "run ./mill __.reformat", `fix --check` means "there is a lint rule
+      # violation you have to think about".
+      - name: Check formatting (scalafmt)
+        run: ./mill __.checkFormat
+      - name: Check lint rules (scalafix)
+        run: ./mill __.fix --check
+
+  architecture:
+    name: architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+      - name: Check the module layering rules (ADR-041)
+        run: ./mill checkArchitecture
+
+  test:
+    name: unit + property + contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+      # Scala.js tests are run by handing the linked JavaScript to a JavaScript engine, and the
+      # engine is Node (blocker B-002). Without Node the JS half of every cross-compiled module
+      # fails with `failed to start command List(node)`.
+      #
+      # The DOM suites additionally need the `jsdom` npm package, and it has to be installed into a
+      # `node_modules` directory at the repository root rather than globally: the generated test
+      # script `require`s it, and Node finds a module by walking up from the script's own directory.
+      # A global install plus NODE_PATH does not work here — that combination was tried and the run
+      # still failed with `Cannot find module 'jsdom'`. `--no-save` keeps CI from inventing a
+      # package.json the repository does not have.
+      - name: Install jsdom for the DOM test suites
+        run: npm install --no-save jsdom@30.0.1
+
+      # PLAN §49 asks for a single `./mill __.test`. That command is currently red for a reason
+      # that has nothing to do with KUI's code: when a Scala.js test module and any other test
+      # module run in one Mill invocation, the Scala.js side dies with
+      # `UnsupportedOperationException: <the other module>` (blocker B-003). Every module passes on
+      # its own. Until that is fixed the stage runs the JVM suites together and each Scala.js suite
+      # in an invocation of its own — the same coverage, three commands instead of one. A task that
+      # adds a Scala.js test module adds a line here; a task that adds a JVM one does not.
+      - name: Run the JVM test suites
+        run: ./mill libs.kernel.jvm.test build-tests.test
+      - name: Run the Scala.js test suite for libs/kernel
+        run: ./mill libs.kernel.js.test
+      - name: Run the Scala.js test suite for frontend/ui-kernel
+        run: ./mill frontend.uiKernel.test
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: out/**/test-report.xml
+          if-no-files-found: ignore
+
+  frontend:
+    name: frontend link + bundle shape
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+      - name: Link the frontend with the optimising linker
+        run: ./mill frontend.__.fullLinkJS
+      # ADR-012's lazy feature loading only exists if the linker actually emitted separate modules.
+      # The check skips, loudly, until UI-012 creates the first feature package.
+      - name: Check the bundle shape
+        run: ./mill frontend.uiKernel.checkBundleShape

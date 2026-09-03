@@ -80,3 +80,67 @@ explicit `if:` condition and the run is marked as such — they are never silent
 ## Docs to update
 
 `README.md`: what CI runs and how to reproduce each stage locally.
+
+---
+
+## Implementation report (2026-09-03)
+
+`.github/workflows/ci.yml` plus a composite action, `.github/actions/setup-build`, that installs
+JDK 21 (Temurin), Node and the caches once instead of five times.
+
+Five jobs, one per stage that has a build task today: `compile`, `style`, `architecture`, `test`,
+`frontend`. Integration tests, the OpenAPI diff, the Docker build and E2E are absent on purpose —
+this specification says the workflow lists only merged stages, and each later task adds its own job.
+
+### Verification
+
+`actionlint` reports no problems, and every command the workflow runs was executed locally against
+a clean checkout of the commit under test, in a separate git worktree so that another agent's
+in-flight edits could not flatter the result:
+
+```
+### compile
+472/472, SUCCESS] ./mill __.compile 9s
+### checkFormat
+21/21, SUCCESS] ./mill __.checkFormat 1s
+### fix --check
+358/358, SUCCESS] ./mill __.fix --check 1s
+### architecture
+checkArchitecture: 8 modules, no layering violations
+### jvm tests
+137/137, SUCCESS] ./mill libs.kernel.jvm.test build-tests.test
+### js kernel
+159/159, SUCCESS] ./mill libs.kernel.js.test
+### js frontend
+221/221, SUCCESS] ./mill frontend.uiKernel.test
+### frontend link
+245/245, SUCCESS] ./mill frontend.__.fullLinkJS
+### bundle shape
+checkBundleShape: no feature packages configured, nothing to assert yet (UI-012 adds the first feature module)
+```
+
+The wall-clock figure this specification asks for cannot be recorded yet: no run has happened on a
+GitHub runner, and a local warm-cache time on a developer machine is not the number the trend is
+about. The first real run supplies it.
+
+### Deviations from this specification
+
+1. **The test stage is three commands, not `./mill __.test`.** Running a Scala.js test module in the
+   same Mill invocation as any other test module fails inside Mill's own Scala.js test runner with
+   `UnsupportedOperationException`, with `-j 1` as well as in parallel. Every module passes alone.
+   Recorded as blocker **B-003**; the workflow runs the JVM suites together and each Scala.js suite
+   on its own, which is the same coverage. Collapsing it back is a one-line change.
+2. **`jsdom` is installed into the repository root, not globally.** The README's `npm install -g
+   jsdom` advice does not work: the generated test script `require`s jsdom and Node resolves that by
+   walking up from the script's directory, so `NODE_PATH` is ignored and the run fails with
+   `Cannot find module 'jsdom'`. Verified both ways; the README is corrected.
+3. **An `architecture` job was added.** PLAN §49 does not list it, but `checkArchitecture` exists
+   (BUILD-005) and is exactly the kind of rule that decays without a gate.
+4. **`act -j compile` was not used.** `act` is not installed in this environment. The workflow was
+   validated with `actionlint` and by running every command it contains against a clean worktree,
+   which is the stronger of the two checks — `act` proves the YAML runs, not that the build is green.
+5. **The deliberately-broken-branch experiment is left to the first real push.** It needs a GitHub
+   remote to observe, and this repository has no runs yet.
+
+Blocker **B-002** (no Node, so no Scala.js tests) is resolved by this task together with the local
+setup: CI installs Node in every job, and the JS suites were observed passing.

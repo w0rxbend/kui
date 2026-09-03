@@ -120,7 +120,9 @@ the module must also be free of `var`.
 ### A note on frontend tests
 
 Running Scala.js tests needs a JavaScript engine. Install **Node.js** (20 or newer) for the plain
-suites, and additionally `npm install -g jsdom` for the suites that need a `document`. Without Node
+suites, and additionally `npm install --no-save jsdom` **in the repository root** for the suites
+that need a `document` — a global install is not enough, because the generated test script resolves
+`jsdom` by walking up from its own directory. Without Node
 the frontend still compiles and links — only `./mill <module>.js.test` fails, with
 `failed to start command List(node)`. See
 [docs/development/toolchain.md](docs/development/toolchain.md) for the full setup, including the
@@ -130,6 +132,39 @@ version-manager trap that makes Node invisible to the build.
 every library version listed in [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md), even ones no module
 uses yet, so that a wrong version number is caught in seconds instead of surfacing weeks later when
 somebody finally writes the code that needs it.
+
+## What CI runs
+
+Every push to `main` and every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+Each stage of PLAN §49 is a separate GitHub Actions job, so a red check names the thing that broke
+rather than saying "build failed". Every one of them is a command you can run yourself:
+
+| Job | What it proves | Run it locally |
+| --- | --- | --- |
+| `compile` | Every module compiles, with warnings treated as errors | `./mill __.compile` |
+| `style` | Formatting and lint rules are clean | `./mill __.checkFormat` then `./mill __.fix --check` |
+| `architecture` | No module dependency breaks the layering rules of ADR-041 | `./mill checkArchitecture` |
+| `test` | Every unit, property and contract suite passes, on the JVM and in JavaScript | `./mill libs.kernel.jvm.test build-tests.test`, then `./mill libs.kernel.js.test`, then `./mill frontend.uiKernel.test` |
+| `frontend` | The frontend links with the optimising linker and has the bundle shape ADR-012 needs | `./mill frontend.__.fullLinkJS` then `./mill frontend.uiKernel.checkBundleShape` |
+
+Two things about the `test` stage are worth knowing before you are surprised by them.
+
+It needs **Node** on your `PATH` (see the note on frontend tests above) and `jsdom` installed into a
+`node_modules` directory at the repository root. CI does both for you; a laptop does not.
+
+It is also three commands rather than the one `./mill __.test` PLAN §49 asks for. Running a Scala.js
+test module in the same Mill invocation as any other test module currently fails inside Mill's own
+test runner, for reasons that have nothing to do with this code — see B-003 in
+[BLOCKERS.md](BLOCKERS.md). Each module is green on its own, so the coverage is the same; the
+command list is just longer until that is fixed.
+
+Stages PLAN §49 lists that have no build task yet — integration tests, the OpenAPI diff, the Docker
+build, end-to-end — are deliberately not in the workflow. The task that creates each one adds its
+own job. A job that cannot fail is not a check.
+
+Caching: `~/.cache/coursier`, `~/.cache/mill` and `out/` are cached, keyed on `build.mill`,
+`.mill-version` and `mill-build/build.mill`, so a dependency change invalidates the cache instead of
+reusing a stale classpath.
 
 ## Reading the design
 
