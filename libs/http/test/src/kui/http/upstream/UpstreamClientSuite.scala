@@ -192,19 +192,22 @@ final class UpstreamClientSuite extends CatsEffectSuite {
       UpstreamFixture.client(config, stub.backend).use { client =>
         for {
           outcome <- request(Method.POST).send(client.backend).attempt.timed
-          // The stub decrements its in-flight count in a `bracket` finaliser, so this reaching
-          // zero is the stub observing the cancellation rather than the call merely being
-          // abandoned by the caller.
-          stillRunning <- stub.peakInFlight
+          started <- stub.peakInFlight
+          // The stub decrements its *live* in-flight count in a `bracket` finaliser, so this
+          // reaching zero is the stub observing the cancellation rather than the call merely being
+          // abandoned by the caller with the effect still running. The high-water mark cannot say
+          // that: it only ever goes up.
+          stillRunning <- stub.inFlight
           calls <- stub.calls
-        } yield (outcome, stillRunning, calls)
+        } yield (outcome, started, stillRunning, calls)
       }
     }
 
-    TestControl.executeEmbed(program).map { case ((elapsed, outcome), peak, calls) =>
+    TestControl.executeEmbed(program).map { case ((elapsed, outcome), peak, stillRunning, calls) =>
       assertEquals(elapsed, 2.seconds)
       assertEquals(calls, 1)
       assertEquals(peak, 1)
+      assertEquals(stillRunning, 0, "the timeout returned but left the upstream call running")
       assertEquals(
         outcome.left.toOption.collect { case UpstreamFailure(e: InfrastructureError.Timeout) => e.afterMs },
         Some(2000L)

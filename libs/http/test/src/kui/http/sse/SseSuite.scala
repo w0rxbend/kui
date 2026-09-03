@@ -4,17 +4,20 @@ import java.time.Instant
 
 import scala.concurrent.duration.DurationInt
 
+import scala.jdk.CollectionConverters.*
+
 import cats.effect.IO
 import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import fs2.Stream
 import io.circe.Json
 import munit.CatsEffectSuite
+import org.typelevel.otel4s.oteljava.testkit.OtelJavaTestkit
 
 import kui.contracts.ErrorEnvelope
 import kui.contracts.sse.{DoneReason, SseEventName}
 import kui.kernel.CorrelationId
-import kui.observability.Telemetry
+import kui.observability.{MetricNames, Telemetry}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** That a stream behaves the same way whatever it is streaming.
@@ -227,15 +230,24 @@ final class SseSuite extends CatsEffectSuite {
     val source = Stream.emits(1.to(1000).toList).map(n => SseEvent.data("row", Json.fromInt(n))) ++
       Stream.emit(SseEvent.done(DoneReason.Exhausted, None))
 
-    val program = FakeStructuredLogger[IO].flatMap { logger =>
-      Sse
-        .stream[IO](source, SseConfig.default.copy(bufferSize = 8), streamName, Telemetry.noop[IO], logger)
-        .metered(10.milliseconds)
-        .compile
-        .toList
+    // A real in-memory meter rather than `Telemetry.noop`: the drop *count* is half the promise,
+    // and a no-op meter cannot tell a counted drop from a silent one. A stream that is shedding
+    // events is the only signal an operator gets that a consumer cannot keep up.
+    val program = OtelJavaTestkit.inMemory[IO]().use { testkit =>
+      val telemetry = Telemetry.fromProviders(testkit.tracerProvider, testkit.meterProvider)
+
+      for {
+        logger <- FakeStructuredLogger[IO]
+        events <- Sse
+          .stream[IO](source, SseConfig.default.copy(bufferSize = 8), streamName, telemetry, logger)
+          .metered(10.milliseconds)
+          .compile
+          .toList
+        metrics <- testkit.collectMetrics
+      } yield (events, metrics)
     }
 
-    TestControl.executeEmbed(program).map { events =>
+    program.map { (events, metrics) =>
       val rows = events.filter(_.name == "row")
 
       assert(rows.size < 1000, s"${rows.size} events survived an 8-deep buffer; nothing was dropped")
@@ -243,7 +255,46 @@ final class SseSuite extends CatsEffectSuite {
       // Dropping the *oldest* is right for a live view: the newest state is the one worth showing,
       // so whatever survives must include the end of the sequence.
       assertEquals(events.lastOption.map(_.name), Some(SseEventName.Done))
+
+      val dropped = metrics
+        .filter(_.getName == MetricNames.StreamEvents)
+        .flatMap(_.getData.getPoints.asScala.toList)
+        .filter(point =>
+          point.getAttributes.asMap.asScala.exists((key, value) =>
+            key.getKey == MetricNames.Attr.Event && value.toString == Sse.DroppedEvent
+          )
+        )
+
+      assert(dropped.nonEmpty, s"no drop was counted; ${metrics.map(_.getName)}")
+
+      // The gauge that is the leak detector: every stream this test opened has been closed.
+      val active = metrics
+        .filter(_.getName == MetricNames.StreamActive)
+        .flatMap(_.getData.getPoints.asScala.toList)
+
+      assert(active.nonEmpty, "the open-stream gauge was never recorded")
     }
+  }
+
+  test("a consumer that goes away never leaves the producer blocked on a full buffer") {
+    // The client disconnect, in miniature. The consumer stops after two events while the producer
+    // still has hundreds queued behind a four-deep buffer, so `concurrently` interrupts the
+    // producer and waits for its finaliser. A finaliser that *blocks* putting the terminator into
+    // a queue nobody is reading any more never returns — and because fs2 runs finalisers
+    // uncancelably, nothing can rescue it. The request fiber, the queue and whatever the source
+    // held open (a registry subscription, a Kafka consumer) would leak, one per disconnect.
+    val source = Stream.emits(1.to(1000).toList).map(n => SseEvent.data("row", Json.fromInt(n)))
+
+    val program = FakeStructuredLogger[IO].flatMap { logger =>
+      Sse
+        .stream[IO](source, SseConfig.default.copy(bufferSize = 4), streamName, Telemetry.noop[IO], logger)
+        .metered(10.milliseconds)
+        .take(2)
+        .compile
+        .toList
+    }
+
+    TestControl.executeEmbed(program).map(events => assertEquals(events.size, 2))
   }
 
   test("a buffer size of zero is treated as one rather than deadlocking") {

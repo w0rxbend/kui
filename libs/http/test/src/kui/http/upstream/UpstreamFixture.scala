@@ -45,6 +45,14 @@ trait RecordingUpstream {
   /** The most that were ever in flight at the same moment. */
   def peakInFlight: IO[Int]
 
+  /** How many are in flight *now*.
+    *
+    * The live count, not the high-water mark: it is how a suite observes that a cancelled call
+    * actually reached the backend's finaliser rather than being abandoned with the effect still
+    * running.
+    */
+  def inFlight: IO[Int]
+
   /** The hosts that were contacted, in order. */
   def hosts: IO[List[String]]
 
@@ -116,13 +124,14 @@ object UpstreamFixture {
       behaviour <- Ref.of[IO, ResponseKind](initial)
       perHost <- Ref.of[IO, Map[String, ResponseKind]](Map.empty)
       counter <- Ref.of[IO, Int](0)
-      inFlight <- Ref.of[IO, Int](0)
+      inFlightCount <- Ref.of[IO, Int](0)
       peak <- Ref.of[IO, Int](0)
       contacted <- Ref.of[IO, Vector[String]](Vector.empty)
     } yield new RecordingUpstream {
 
       def calls: IO[Int] = counter.get
       def peakInFlight: IO[Int] = peak.get
+      def inFlight: IO[Int] = inFlightCount.get
       def hosts: IO[List[String]] = contacted.get.map(_.toList)
       def set(kind: ResponseKind): IO[Unit] = behaviour.set(kind)
       def setFor(host: String, kind: ResponseKind): IO[Unit] = perHost.update(_.updated(host, kind))
@@ -133,9 +142,9 @@ object UpstreamFixture {
 
           val enter = counter.update(_ + 1) *>
             contacted.update(_ :+ host) *>
-            inFlight.updateAndGet(_ + 1).flatMap(now => peak.update(math.max(_, now)))
+            inFlightCount.updateAndGet(_ + 1).flatMap(now => peak.update(math.max(_, now)))
 
-          val leave = inFlight.update(_ - 1)
+          val leave = inFlightCount.update(_ - 1)
 
           // `guarantee` and not `flatMap`: a call the caller cancels — which is what a timeout
           // does — must still leave the in-flight count correct, or the bulkhead assertions would
