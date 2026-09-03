@@ -314,3 +314,68 @@ traffic, and the opt-in is bounded and visible.
   rather than read from a global inside it (which is what makes the suites above possible).
 - `docs/operations/configuration.md` — one line: user preferences are browser-local in M1 and are
   not an operator concern; there is nothing to configure and nothing to back up.
+
+## Deviations
+
+Commit `4c9d9f4`.
+
+1. **`ClustersFeature` was not edited, and the two cluster-side tests were not written.** The spec
+   lists `frontend/ui-clusters/src/kui/ui/clusters/ClustersFeature.scala` because "a preference
+   nothing reads is untestable end to end", and asks for
+   `aRefreshTickInvalidatesTheCacheAndDoesNotBlankTheTable`. The screens that would read the zone and
+   the caches the tick would invalidate are CLUI-002 through CLUI-005, and none of them exists yet —
+   the cluster contract's read DTOs (CLAPI-001/002) had not landed when this ran. Wiring a zone
+   signal into a page that renders no timestamps, and a timer into a cache with no entries, would be
+   two lines that assert nothing. **Owed:** those two lines and the one named test, in CLUI-003, in
+   the commit that first renders a `scrapedAt`.
+
+2. **`SearchableSelect` is a new kernel component, not a local one.** The spec calls for a
+   searchable timezone control and the kernel has none — `Select` wraps the native `<select>`, which
+   is the wrong control at several hundred entries, and the kernel's own note defers a combobox to
+   M2. Per the area's standing instruction (a screen that needs something the kernel lacks adds it to
+   the kernel), it was built in `kui.ui.kernel.component` with the full ARIA combobox contract, a row
+   in `A11ySuite`'s table and a seven-case suite of its own. M2's topic filter now has it already.
+
+3. **`RootPreference.persisted` widened from `private[theme]` to `private[kernel]`.** The two new
+   preferences are stored exactly the way the appearance ones are but are not matters of appearance,
+   so they live in `kui.ui.kernel.prefs` and need the helper across a package boundary. One qualifier
+   changed, with the reason in its scaladoc; no behaviour moved.
+
+4. **`TimeZoneList.entries` takes the runtime's list as a parameter** rather than `available()` being
+   the only entry point. That is what makes
+   `theListFallsBackToTheBrowserZoneAndUtcWhenIntlOffersNothing` testable without a browser that
+   lacks `Intl.supportedValuesOf`, and it is where the extra case
+   `aZoneTheRuntimeDoesNotKnowIsNotOffered` came from: a runtime that names a zone it cannot then
+   resolve would otherwise put a broken choice in the list. `RefreshRate.ticksOf` takes its timer for
+   the same reason — the suite counts ticks instead of waiting five real minutes.
+
+5. **The offset helpers live on `Timestamps`, not on `TimeZoneList`.** `Timestamps.offsetSeconds`,
+   `offsetLabel` and `isKnownZone` are public there because that is where the browser's zone database
+   is already reached (CLUI-001's deviation 1); a second facade would be two places that disagree
+   about what a zone is.
+
+6. **`changingAControlWritesToItsVarAndNothingElse` is two tests, not one.** The timezone control is
+   a combobox and is driven by keystrokes rather than by a `change` event, so it has its own case,
+   `changingTheTimezoneWritesOnlyTheTimezone`, making the same assertion.
+
+7. **The manual checks against the Compose stack were not run.** CFGOP-006 has not landed. The
+   default-is-silent half is asserted in `RefreshRateSuite.offEmitsNothing`, which is stronger than
+   the network-panel observation it stands in for: it asserts no timer is *created*, not merely that
+   no request is seen.
+
+## Implementation report
+
+```
+./mill frontend.uiKernel.compile        SUCCESS
+./mill frontend.uiKernel.test           0 failed
+                                        TimezoneSuite            7
+                                        RefreshRateSuite         5
+                                        SearchableSelectSuite    7
+                                        A11ySuite               14 (13 + the combobox row)
+./mill frontend.uiShell.test            0 failed, 12 suites
+                                        SettingsPageSuite        7
+./mill frontend.uiKernel.checkFormat    SUCCESS
+./mill frontend.uiKernel.fix --check    SUCCESS
+./mill frontend.uiShell.fix --check     SUCCESS
+./mill checkArchitecture                75 modules, no layering violations
+```
