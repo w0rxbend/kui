@@ -106,14 +106,13 @@ object ConsumerEndpoints {
     * parameter is what OpenAPI, Tapir, every HTTP client and every proxy already agree on; the reference
     * product's comma list has to be split by hand on both sides, and the two hand-written splits disagree
     * about a group id containing a comma.
-    */
-  /** Public, because the browser's own endpoint value is built from it.
     *
-    * The gateway rewrites `/internal/v1` to `/api/v1` and swaps the signed principal for the session, so the
-    * endpoint a browser calls cannot be the same *value* as the one this service serves. It can be — and is —
-    * built from the same pieces, and this is one of them. Were it private, `ui-consumers` would have to
-    * declare six query parameters of its own, which is the drift the whole cross-compiled contract exists to
-    * prevent: a parameter renamed here would then still compile there and 400 on the screen.
+    * It is public because the *browser's* own endpoint value is built from it. The gateway rewrites
+    * `/internal/v1` to `/api/v1` and swaps the signed principal for the session, so the endpoint a browser
+    * calls cannot be the same value as the one this service serves — but it can be, and is, built from the
+    * same pieces, and this is one of them. Were it private, `ui-consumers` would have to declare six query
+    * parameters of its own, which is the drift the cross-compiled contract exists to prevent: a parameter
+    * renamed here would still compile there and 400 on the screen.
     */
   val listParams: EndpointInput[GroupListParams] =
     query[Set[GroupState]](StateParam)
