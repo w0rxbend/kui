@@ -15,6 +15,7 @@ import kui.http.health.{HealthEndpoints, ReadinessCheck}
 import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.{ClusterId, ServiceId}
 import kui.message.application.BrowseUseCase
+import kui.message.application.produce.{ProduceUseCase, ResendUseCase}
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
 
@@ -46,21 +47,24 @@ object MessageApi {
   /** The routes, in the order the router tries them. */
   def routes[F[_]: {Async, Parallel}](
       browse: BrowseUseCase[F],
+      produce: ProduceUseCase[F],
+      resend: ResendUseCase[F],
       clusters: List[ClusterId],
       readiness: List[ReadinessCheck[F]],
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       logger: StructuredLogger[F],
       telemetry: Telemetry[F]
-  ): List[ServerEndpoint[Fs2Streams[F], F]] =
-    HealthEndpoints
-      .make[F](readiness, capabilityDocument[F](clusters)) ++ MessageRoutes[F](
-      browse,
-      principals,
-      rejections,
-      logger,
-      telemetry
-    )
+  ): List[ServerEndpoint[Fs2Streams[F], F]] = {
+    val secured = Securing[F](principals, rejections, logger)
+
+    HealthEndpoints.make[F](readiness, capabilityDocument[F](clusters)) ++
+      MessageRoutes[F](browse, principals, rejections, logger, telemetry) ++
+      // The two writes. They are `ServerEndpoint[Any, F]` — no stream capability — and widen into this
+      // list because Tapir's capability parameter is contravariant: a route that needs nothing of the
+      // interpreter runs on one that offers streaming.
+      MessageMutationRoutes[F](produce, resend, secured)
+  }
 
   /** The cross-cutting chain, outermost first, in the order the cluster service fixed and every service
     * copies: principal, then instrumentation, then the error envelope innermost.

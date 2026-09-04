@@ -6,6 +6,7 @@ import sttp.tapir.AnyEndpoint
 import kui.cluster.contract.ClusterEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
+import kui.message.contract.MessageMutationEndpoints
 import kui.topic.contract.TopicEndpoints
 
 /** That the one map naming the gateway's downstream services says what the rest of the gateway assumes.
@@ -19,6 +20,7 @@ final class ServiceContractsSuite extends FunSuite {
   private val cluster = ServiceId.unsafe("cluster")
   private val topic = ServiceId.unsafe("topic")
   private val consumer = ServiceId.unsafe("consumer")
+  private val message = ServiceId.unsafe("message")
 
   /** The public address of one endpoint, including its path parameters.
     *
@@ -32,7 +34,7 @@ final class ServiceContractsSuite extends FunSuite {
   }
 
   test("everyConfiguredServiceHasItsContract") {
-    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer))
+    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message))
     assertEquals(ServiceContracts.of(cluster), ClusterEndpoints.all)
     assertEquals(ServiceContracts.of(topic), TopicEndpoints.all)
     // Both of the consumer service's lists. Its mutations are published from a second object because
@@ -42,12 +44,17 @@ final class ServiceContractsSuite extends FunSuite {
       ServiceContracts.of(consumer),
       ConsumerEndpoints.all ++ ConsumerMutationEndpoints.all
     )
+    // Only the message service's *mutations*. Its other endpoint is the browse stream, which this
+    // derivation cannot proxy at all — a stream has to be relayed with its own cancellation and
+    // heartbeat handling rather than called and re-encoded, which `MessageStreamRoutes` does.
+    assertEquals(ServiceContracts.of(message), MessageMutationEndpoints.all)
   }
 
   test("a service the gateway has no contract for is not an error") {
     // A service deployed before the gateway build that routes it is configured, polled and reported in the
-    // capability snapshot; it simply has no proxied routes yet.
-    assertEquals(ServiceContracts.of(ServiceId.unsafe("message")), Nil)
+    // capability snapshot; it simply has no proxied routes yet. No service is in that position today, so
+    // the case is made with an id nothing serves rather than left untested until one is.
+    assertEquals(ServiceContracts.of(ServiceId.unsafe("schema")), Nil)
   }
 
   test("theTopicEndpointsAreProxiedAndNoneIsAggregated") {

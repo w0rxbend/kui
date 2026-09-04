@@ -3,12 +3,15 @@ package kui.ui.messages
 import com.raquo.laminar.api.L
 import com.raquo.laminar.api.L.*
 
-import kui.kernel.TopicName
+import kui.kernel.serde.SerdeName
+import kui.kernel.{ClusterId, TopicName}
 import kui.message.contract.BrowseAddress
+import kui.ui.kernel.api.ApiClient
 import kui.ui.kernel.component.*
 import kui.ui.kernel.query.UrlParams
 import kui.ui.kernel.sse.{SseConnection, SseError}
 import kui.ui.messages.browse.{BrowseQuery, BrowseSession}
+import kui.ui.messages.produce.{ProduceDraft, ProduceDrawer, ResendDrawer, ResendTarget}
 import kui.ui.messages.row.RecordTable
 
 /** The message browser: the screen the product is used on more than any other.
@@ -42,14 +45,59 @@ import kui.ui.messages.row.RecordTable
   * navigating away cannot leave a consumer running — which is the entire reason this screen streams over an
   * abortable fetch rather than the browser's own `EventSource`.
   *
-  * ## What is deliberately absent
+  * ## Writing, and the two verbs it needs
   *
-  * No Produce, no Resend, no Purge. Those are mutations governed by ADR-045's plan-token confirmation and
-  * ADR-047's read-only refusal and audit trail, and the message service serves none of them yet. No button is
-  * rendered for them, not even a disabled one: a disabled control for something that cannot be honoured end
-  * to end is a promise with a date on it (DEVPLAN §10 D8).
+  * Publish opens a form; an open record offers two more actions, and they are deliberately two rather than
+  * one, because they are different operations that produce different records.
+  *
+  *   - **Republish** opens the same publish form holding what the record contains, editable. What lands is a
+  *     new record you composed, re-encoded through a serde.
+  *   - **Copy to another topic** sends the record's *bytes* somewhere else, untouched: nothing is decoded and
+  *     nothing is re-encoded, so it works on a topic KUI cannot read and the copy is indistinguishable from
+  *     the original. This is the operation Kouncil has and the other reference products do not.
+  *
+  * Both go through the service's mutation endpoints, which refuse a read-only cluster before touching a Kafka
+  * client and write an audit record either way (ADR-047). Neither carries a plan token: ADR-045's question is
+  * "what will this do to what is already there", and appending to a log has no answer to it — the honest
+  * equivalent is the receipt, which is what these forms show.
+  *
+  * ## What is still deliberately absent
+  *
+  * Purge. It is the destructive operation on this screen, the one ADR-045's plan token exists for, and the
+  * service does not serve it yet. No button is rendered for it, not even a disabled one: a disabled control
+  * for something that cannot be honoured end to end is a promise with a date on it (DEVPLAN §10 D8).
   */
 object MessagesPage {
+
+  /** The serdes the picker offers, as `(wire value, label)`, plus "Automatic" first.
+    *
+    * "Automatic" is the empty value and it is the default: the service already chooses per topic, says which
+    * it used on every record, and is right for almost every topic. The picker exists for the ones it is not —
+    * a key written as a big-endian long that autodetection reads as four characters of nonsense, a value the
+    * producer double-encoded — where without an override the only way to read the topic is to edit the
+    * deployment's configuration, which somebody investigating an incident cannot do.
+    *
+    * The names are `SerdeName`'s own constants and not literals: they are the spellings the service resolves
+    * against and the ones an operator already has in their configuration file, and a picker that offered a
+    * fifth spelling would send a name nothing answers to. A deployment that configures a serde beyond these
+    * is not offered it here — that needs the service to publish its list, which no endpoint does yet, and
+    * inventing a name in the browser would be a control that fails on the deployments it was added for.
+    */
+  val Serdes: List[(String, String)] =
+    ("", Messages.SerdeAutomatic) ::
+      List(
+        SerdeName.String,
+        SerdeName.Json,
+        SerdeName.Int32,
+        SerdeName.Int64,
+        SerdeName.UInt32,
+        SerdeName.UInt64,
+        SerdeName.Uuid,
+        SerdeName.Base64,
+        SerdeName.Hex,
+        SerdeName.SchemaRegistry,
+        SerdeName.Fallback
+      ).map(name => name.value -> name.value)
 
   /** The four starts the screen offers, as `(value, label)`. The values are the ones `BrowseQuery` reads. */
   val StartKinds: List[(String, String)] =
@@ -62,9 +110,21 @@ object MessagesPage {
 
   def apply(
       topic: TopicName,
+      cluster: ClusterId,
+      api: ApiClient,
       zone: Signal[String],
       session: BrowseSession
   ): HtmlElement = {
+
+    /** What the two drawers are showing. `None` is closed.
+      *
+      * They are owned here, one of each, rather than by the row that opens them: a drawer per open record
+      * would mean a table with ten records open holds ten focus traps, and only one of them can be visible
+      * anyway. Republishing from a row is therefore "put this record's contents in the draft", which is also
+      * exactly what the Publish button does with an empty one.
+      */
+    val draft: Var[Option[ProduceDraft]] = Var(None)
+    val resendTarget: Var[Option[ResendTarget]] = Var(None)
 
     // --- The browse, read out of the URL ----------------------------------------------------------
 
@@ -81,16 +141,20 @@ object MessagesPage {
           UrlParams.signal(BrowseAddress.PartitionParam),
           UrlParams.signal(BrowseAddress.LimitParam),
           UrlParams.signal(BrowseAddress.QueryParam),
-          UrlParams.signal(BrowseAddress.LiveParam)
+          UrlParams.signal(BrowseAddress.LiveParam),
+          UrlParams.signal(BrowseAddress.KeySerdeParam),
+          UrlParams.signal(BrowseAddress.ValueSerdeParam)
         )
-        .map((seek, partitions, limit, contains, live) =>
+        .map((seek, partitions, limit, contains, live, keySerde, valueSerde) =>
           BrowseQuery.fromParams(
             Map(
               BrowseAddress.SeekParam -> split(seek),
               BrowseAddress.PartitionParam -> split(partitions),
               BrowseAddress.LimitParam -> limit.toList,
               BrowseAddress.QueryParam -> contains.toList,
-              BrowseAddress.LiveParam -> live.toList
+              BrowseAddress.LiveParam -> live.toList,
+              BrowseAddress.KeySerdeParam -> keySerde.toList,
+              BrowseAddress.ValueSerdeParam -> valueSerde.toList
             )
           )
         )
@@ -110,23 +174,47 @@ object MessagesPage {
 
     val pressed = new EventBus[Unit]
 
+    /** "Load more" is a second way to start a browse, so it gets a bus of its own rather than sharing the
+      * Read button's: the two do different things with the rows already on screen — Read replaces them, this
+      * appends to them — and one bus would have to carry which.
+      */
+    val more = new EventBus[Unit]
+
     div(
       cls := MessagesCss.Page,
       dataAttr("testid") := "page-messages",
       // The topic is the heading, not the word "Messages": the reader knows what screen they are on and what
       // they need to be sure of is which topic they are reading.
       h1(topic.value),
-      controls(query, startKind, running, rewrite, session, pressed),
+      controls(query, startKind, running, rewrite, session, pressed, draft, topic),
       // The Read button's subscription. `session.start` returns the browse's own events and binding them to
       // this element is what gives them a lifetime — a stream nothing is subscribed to is a request opened
       // and then ignored.
       pressed.events.sample(query).flatMapSwitch(session.start) --> Observer[Unit](_ => ()),
+      more.events.flatMapSwitch(_ => session.loadMore()) --> Observer[Unit](_ => ()),
       statusLine(session, running),
       RecordTable(
         records = session.rows,
         zone = zone,
         empty = emptyState(session, running),
-        testId = Some("messages-table")
+        testId = Some("messages-table"),
+        actions = record => recordActions(topic, record, draft, resendTarget)
+      ),
+      ProduceDrawer(cluster, draft, api),
+      ResendDrawer(cluster, resendTarget, api),
+      // Only after a browse has finished, and only when the *server* sent a continuation with it. It omits
+      // one whenever asking again would be pointless, so this is the server's answer to "is there more"
+      // rather than the browser guessing from a full page — which is the guess that would put this button
+      // under the last page of every topic.
+      child.maybe <-- session.canLoadMore.map(
+        Option.when(_)(
+          Button(
+            label = Val(Messages.LoadMore),
+            onClick = Observer[Unit](_ => more.writer.onNext(())),
+            variant = ButtonVariant.Secondary,
+            testId = Some("messages-load-more")
+          )
+        )
       ),
       // Navigating away must not leave a Kafka consumer running on the service. This is the browser half of
       // the milestone's cancellation criterion.
@@ -141,7 +229,9 @@ object MessagesPage {
       running: Signal[Boolean],
       rewrite: Map[String, Option[String]] => Unit,
       session: BrowseSession,
-      pressed: EventBus[Unit]
+      pressed: EventBus[Unit],
+      draft: Var[Option[ProduceDraft]],
+      topic: TopicName
   ): HtmlElement =
     div(
       cls := MessagesCss.Controls,
@@ -221,6 +311,18 @@ object MessagesPage {
           onEntered = raw => rewrite(Map(BrowseAddress.QueryParam -> Option(raw.trim).filter(_.nonEmpty)))
         )
       ),
+      serdePicker(
+        label = Messages.KeySerdeLabel,
+        chosen = query.map(_.keySerde.map(_.value).getOrElse("")),
+        testId = "messages-key-serde",
+        onChosen = raw => rewrite(Map(BrowseAddress.KeySerdeParam -> Option(raw).filter(_.nonEmpty)))
+      ),
+      serdePicker(
+        label = Messages.ValueSerdeLabel,
+        chosen = query.map(_.valueSerde.map(_.value).getOrElse("")),
+        testId = "messages-value-serde",
+        onChosen = raw => rewrite(Map(BrowseAddress.ValueSerdeParam -> Option(raw).filter(_.nonEmpty)))
+      ),
       L.label(
         cls := MessagesCss.ControlLabel,
         title := Messages.LiveHint,
@@ -255,7 +357,45 @@ object MessagesPage {
         onClick.compose(_.sample(running)) --> { isRunning =>
           if isRunning then session.stop() else pressed.writer.onNext(())
         }
+      ),
+      // Publish is on the control bar and not beside Read, because it is the screen's other job rather
+      // than a variant of its first one. Secondary, so that the primary action on a reading screen stays
+      // the one that reads.
+      Button(
+        label = Val(Messages.Publish),
+        onClick = Observer[Unit](_ => draft.set(Some(ProduceDraft.empty(topic)))),
+        variant = ButtonVariant.Secondary,
+        testId = Some("messages-publish")
       )
+    )
+
+  /** The two things worth doing to a record that is open on the screen.
+    *
+    * Both only fill in a `Var`; the drawers are already mounted and react to it. That is what keeps the
+    * request logic out of the table and lets a row disappear — a live tail redrawing — without taking a
+    * half-finished form with it.
+    */
+  private def recordActions(
+      topic: TopicName,
+      record: kui.message.contract.MessageDto,
+      draft: Var[Option[ProduceDraft]],
+      resendTarget: Var[Option[ResendTarget]]
+  ): List[HtmlElement] =
+    List(
+      Button(
+        label = Val(Messages.Republish),
+        onClick = Observer[Unit](_ => draft.set(Some(ProduceDraft.of(topic, record)))),
+        variant = ButtonVariant.Secondary,
+        size = Size.Sm,
+        testId = Some(s"record-${record.partition.value}-${record.offset.value}-republish")
+      ).amend(title := Messages.RepublishHint),
+      Button(
+        label = Val(Messages.Resend),
+        onClick = Observer[Unit](_ => resendTarget.set(Some(ResendTarget.of(topic, record)))),
+        variant = ButtonVariant.Secondary,
+        size = Size.Sm,
+        testId = Some(s"record-${record.partition.value}-${record.offset.value}-resend")
+      ).amend(title := Messages.ResendHint)
     )
 
   /** What the stream is doing, in words.
@@ -339,6 +479,30 @@ object MessagesPage {
       }
 
   /** A labelled control. */
+  /** One serde override, as a menu.
+    *
+    * Changing it rewrites the URL, which stops whatever browse is running — the same rule every other control
+    * on this bar follows, and for the same reason: the records already in the table were decoded the old way,
+    * and appending differently decoded ones to them would produce a list nothing on screen explains.
+    */
+  private def serdePicker(
+      label: String,
+      chosen: Signal[String],
+      testId: String,
+      onChosen: String => Unit
+  ): HtmlElement =
+    field(
+      label,
+      select(
+        cls := KernelCssField,
+        dataAttr("testid") := testId,
+        Serdes.map((value, text) => option(L.value := value, text)),
+        // `controlled`, so a serde arriving from a pasted URL while the menu is open cannot leave the DOM
+        // and the address bar disagreeing.
+        controlled(L.value <-- chosen, onChange.mapToValue --> { raw => onChosen(raw) })
+      )
+    )
+
   private def field(name: String, control: HtmlElement): HtmlElement =
     div(
       cls := MessagesCss.ControlGroup,

@@ -40,7 +40,8 @@ object RecordTable {
       records: Signal[List[MessageDto]],
       zone: Signal[String],
       empty: Signal[HtmlElement],
-      testId: Option[String] = None
+      testId: Option[String] = None,
+      actions: MessageDto => List[HtmlElement] = _ => Nil
   ): HtmlElement = {
 
     /** Which records are open, by key.
@@ -68,7 +69,7 @@ object RecordTable {
         cls := KernelCss.TableBody,
         children <-- records
           .combineWith(zone)
-          .map((rows, zoneId) => rows.map(record => rowsFor(record, zoneId, open)))
+          .map((rows, zoneId) => rows.map(record => rowsFor(record, zoneId, open, actions)))
           .map(_.flatten)
       ),
       // The empty state lives under the table so that the header stays above it and the columns still say
@@ -78,7 +79,12 @@ object RecordTable {
   }
 
   /** The summary row, and the detail row when it is open. */
-  private def rowsFor(record: MessageDto, zone: String, open: Var[Set[String]]): List[HtmlElement] = {
+  private def rowsFor(
+      record: MessageDto,
+      zone: String,
+      open: Var[Set[String]],
+      actions: MessageDto => List[HtmlElement]
+  ): List[HtmlElement] = {
     val key = keyOf(record)
     val isOpen = open.signal.map(_.contains(key))
 
@@ -128,7 +134,7 @@ object RecordTable {
         td(
           colSpan := 5,
           cls := KernelCss.TableCell,
-          child <-- isOpen.map(current => if current then RecordDetail(record) else emptyNode)
+          child <-- isOpen.map(current => if current then RecordDetail(record, actions) else emptyNode)
         )
       )
 

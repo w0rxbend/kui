@@ -172,3 +172,73 @@
 .kui-messages__decode-error p {
   margin: 0;
 }
+
+/* The two actions on an open record: republish it, or copy it somewhere else. They sit at the end of the
+ * detail rather than on the summary row, so that a table of a hundred records is not a table of two hundred
+ * buttons — and so that nothing destructive is one stray click away from a row somebody was scrolling past. */
+.kui-messages__row-actions {
+  display: flex;
+  gap: var(--kui-space-2);
+  padding-top: var(--kui-space-3);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+/* The publish and resend forms. One column: these are composition surfaces in a narrow drawer, and a
+ * two-column form in 30rem produces fields too short to read a JSON payload in. */
+.kui-messages__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-messages__form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-messages__form-row > .kui-field__control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Monospaced, because what goes in here is a key or a JSON document and proportional digits make an offset
+ * or an id painful to check character by character. */
+.kui-messages__form-text {
+  width: 100%;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  resize: vertical;
+}
+
+.kui-messages__form-headers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-messages__form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+}
+
+/* The receipt. It is a status region rather than a toast, so it stays on screen next to the form that
+ * produced it: the offsets in it are what somebody uses to go and find the record they just wrote. */
+.kui-messages__form-result {
+  padding: var(--kui-space-3);
+  border-left: 3px solid var(--kui-color-success);
+  background: var(--kui-color-surface);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-messages__form-result p,
+.kui-messages__form-result ul {
+  margin: 0;
+}
+
+.kui-messages__form-note {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}

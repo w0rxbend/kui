@@ -5,9 +5,10 @@ import com.raquo.waypoint.Route
 import org.scalajs.dom
 
 import kui.kernel.{ClusterId, TopicName}
-import kui.ui.kernel.api.Bootstrap
+import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
 import kui.ui.kernel.prefs.Timezone
+import kui.ui.kernel.state.AuthState
 import kui.ui.messages.browse.BrowseSession
 
 /** The message-browsing microfrontend.
@@ -71,6 +72,8 @@ final class MessagesFeature extends KuiFeature {
       case (Some(cluster), Some(topic)) =>
         MessagesPage(
           topic = topic,
+          cluster = cluster,
+          api = MessagesFeature.api,
           zone = Timezone.choice.signal,
           session = sessionFor(cluster, topic)
         )
@@ -139,4 +142,13 @@ object MessagesFeature {
     Bootstrap.absoluteApiBase(Bootstrap.gatewayRoot(bootstrap), dom.window.location.origin)
 
   private lazy val uiPrefix: String = s"${bootstrap.basePath.stripSuffix("/")}/ui"
+
+  /** The client the two writes go through.
+    *
+    * Built from `gatewayRoot` and not from `apiRoot`: every endpoint value already carries `/api/v1`, and a
+    * client based at the API root would ask for it twice. The browse stream is the exception that needs
+    * `apiRoot` above, because it builds its URL by hand — its response is a stream, which cannot be described
+    * by a cross-compiled endpoint value.
+    */
+  private lazy val api: ApiClient = ApiClient.make(Bootstrap.gatewayRoot(bootstrap), AuthState.current)
 }

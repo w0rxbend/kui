@@ -29,7 +29,7 @@ tested rather than asserted.
 | M0 Foundation | build, libraries, gateway, sample service, shell, single-process assembly, images, Compose | done |
 | M1 Cluster connectivity | real Kafka connections with production security, clusters and brokers, the metadata store | done |
 | M2 Topic explorer | topic list, search, detail, partitions, configuration | done |
-| M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | reading is done; publishing is not built |
+| M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | reading and publishing are done; resend is done; purge is not built |
 | M4 Consumer groups | groups, members, assignments, lag, offset reset | reading is done; offset reset is served but has no screen |
 | Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | done |
 | Configuration examples | a plain example, a secured example, and the reference for every key | built |
@@ -318,3 +318,47 @@ other, and the stack ran the weaker of them while the richer one sat unused and 
 resolved to the richer one.
 
 Neither was visible from the code. Both were visible within a minute of running it.
+
+## Point 3's other half, 2026-09-04 (publishing)
+
+**Point 3 is now met in full: a record can be read and one can be published.** Verified against the
+quickstart's seeded broker — through KUI's own HTTP API and then through the screen in a headless
+Chromium driven over the DevTools protocol, because the browser tool this session had was not
+connected.
+
+What works, and how it was checked:
+
+- **Publish.** `POST /api/v1/clusters/quickstart/topics/orders.v1/messages` with a key, a JSON
+  value, a header and `count: 2` answered
+  `{"records":[{"partition":2,"offset":0,…},{"partition":2,"offset":1,…}]}`. Browsing that
+  partition immediately afterwards returned both records with the value decoded as JSON, the key as
+  a string and the `trace` header intact. The same thing done from the screen — Publish, fill the
+  form, submit — answered "Published 1 record. partition 3, offset 3".
+- **Resend.** `POST …/topics/orders.v1/messages/resend` with one range answered
+  `{"toTopic":"orders.dlq","read":2,"written":2}`, and reading `orders.dlq` back showed the two
+  records with the same key, the same value and the same header. From the screen: open a record,
+  press *Copy to another topic*, and the drawer reports "Read 1 and wrote 1 into orders.dlq."
+- **Republish from the browser.** Opening a record and pressing *Republish* fills the publish form
+  with that record's key, value and headers, editable, with the partition left for Kafka to choose.
+- **Read-only refusal (ADR-047).** A second cluster configured `readOnly: true` answered
+  `KUI-READ-ONLY` — *"cluster Quickstart (read-only) is configured read-only, so produce is not
+  accepted"* — and the service log carries `produce on orders.v1: refused`. The refusal happens
+  before a producer is opened, which the unit suites assert by counting.
+- **A partition the topic does not have** answers `KUI-VALIDATION` with
+  *"topic orders.v1 has 6 partitions, numbered 0 to 5"* rather than an exception at send time.
+- **Same-topic resend** is refused in the drawer before a request is sent, and again by the service.
+
+### What is not built
+
+Purge (`MS-008`). It is the destructive operation on this screen — it moves a log's low watermark
+and the records below it are gone — and it is the one that needs ADR-045's plan token. No control is
+rendered for it, not even a disabled one.
+
+### One thing worth knowing
+
+Asking a broker whether a topic exists *creates* it when that broker is configured with
+`auto.create.topics.enable=true`, which the quickstart's is. Publishing to a name that does not
+exist therefore succeeds on such a cluster. No Kafka client can avoid this — any metadata lookup has
+the same effect — and KUI never creates a topic of its own accord; the remedy is the broker setting.
+`KafkaRecordProducer` says so where the check is made, rather than claiming a guarantee it does not
+have.

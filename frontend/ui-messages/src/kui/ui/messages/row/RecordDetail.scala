@@ -26,7 +26,12 @@ import kui.ui.messages.{Messages, MessagesCss}
   */
 object RecordDetail {
 
-  def apply(record: MessageDto): HtmlElement =
+  /** @param actions
+    *   what can be done with this record, rendered under it. Passed in rather than built here because the two
+    *   things worth doing to a record — republishing it and copying it elsewhere — both open a drawer the
+    *   *page* owns, and a detail row that owned one would give every open record a drawer of its own.
+    */
+  def apply(record: MessageDto, actions: MessageDto => List[HtmlElement] = _ => Nil): HtmlElement =
     div(
       cls := MessagesCss.Detail,
       dataAttr("testid") := s"record-${record.partition.value}-${record.offset.value}-detail",
@@ -43,7 +48,18 @@ object RecordDetail {
       ),
       payload(Messages.KeyHeading, record.key, "key"),
       payload(Messages.ValueHeading, record.value, "value"),
-      headers(record)
+      headers(record),
+      // Under the record, not above it: these two write to a cluster, and the honest place for a control
+      // that does that is after what it acts on rather than beside the first thing a reader's eye lands on.
+      actions(record) match {
+        case Nil => emptyNode
+        case buttons =>
+          div(
+            cls := MessagesCss.RowActions,
+            dataAttr("testid") := s"record-${record.partition.value}-${record.offset.value}-actions",
+            buttons
+          )
+      }
     )
 
   private def payload(heading: String, decoded: DecodedPayloadDto, testId: String): HtmlElement =

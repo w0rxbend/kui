@@ -41,6 +41,18 @@ object Messages {
 
   val LimitLabel: String = "Records"
 
+  /** The two serde overrides. "Automatic" is the default and is a claim about behaviour, not an absence: the
+    * service picks per topic and says which it used on every record.
+    */
+  /** The button under a finished browse. "More" and not "Next page": the records join onto the ones already
+    * on screen rather than replacing them, and "next page" promises a replacement.
+    */
+  val LoadMore: String = "Load more"
+
+  val KeySerdeLabel: String = "Key as"
+  val ValueSerdeLabel: String = "Value as"
+  val SerdeAutomatic: String = "Automatic"
+
   val LiveLabel: String = "Follow live"
   val LiveHint: String =
     "Start at the end and keep the stream open, so new records appear as they are produced."
@@ -109,8 +121,88 @@ object Messages {
   val FallbackNote: String =
     "Shown as raw bytes, because no configured serde could read it."
 
-  // What is deliberately not here: any wording for publishing or resending a record. Those are mutations,
-  // governed by ADR-045's plan-token confirmation and ADR-047's read-only refusal and audit, and the message
-  // service does not serve them yet. A control that cannot be honoured end to end is a promise with a date
-  // on it (DEVPLAN §10 D8).
+  // --- Publishing ------------------------------------------------------------------------------
+
+  val Publish: String = "Publish"
+
+  val ProduceTopicLabel: String = "Topic"
+  val ProducePartitionLabel: String = "Partition"
+  val ProducePartitionPlaceholder: String = "Let Kafka choose"
+
+  val ProduceKeyLabel: String = "Key"
+
+  /** Not "empty key". A record with no key at all is partitioned round-robin and never compacted against
+    * another record; a record whose key is the empty string is neither of those things. The label says which
+    * one the switch means, because the text box cannot.
+    */
+  val ProduceNoKeyLabel: String = "No key"
+
+  val ProduceValueLabel: String = "Value"
+
+  /** The word matters more than any other on this screen. Publishing a record with no value to a compacted
+    * topic *deletes* the key, and a switch labelled "empty" would hide that behind a word people read as
+    * harmless.
+    */
+  val ProduceTombstoneLabel: String = "Tombstone (deletes this key on a compacted topic)"
+
+  val ProduceHeadersLabel: String = "Headers"
+  val ProduceHeaderNamePlaceholder: String = "Name"
+  val ProduceHeaderValuePlaceholder: String = "Value"
+  val ProduceAddHeader: String = "Add a header"
+  val ProduceRemoveHeader: String = "Remove"
+
+  val ProduceCountLabel: String = "Copies"
+  val ProduceCountHint: String =
+    "How many identical records to publish. One is the ordinary case; more is for filling a topic while " +
+      "testing a consumer."
+
+  /** The offsets are the point of this sentence. Somebody who has just published needs to be able to go and
+    * find the record, and "published successfully" leaves them searching their own topic for it.
+    */
+  def published(records: Int): String =
+    if records == 1 then "Published 1 record." else s"Published $records records."
+
+  def landedAt(partition: Int, offset: Long): String = s"partition $partition, offset $offset"
+
+  /** Opening the publish form with this record's contents already in it. It is a *new* record when it is
+    * sent, which is why the verb is not "resend".
+    */
+  val Republish: String = "Republish"
+  val RepublishHint: String =
+    "Open the publish form holding this record's key, value and headers, ready to edit and send again."
+
+  // --- Resending -------------------------------------------------------------------------------
+
+  val Resend: String = "Copy to another topic"
+  val ResendHint: String =
+    "Copy this record into another topic exactly as it is — the same bytes, the same headers, nothing " +
+      "decoded on the way."
+
+  val ResendDestinationLabel: String = "Destination topic"
+  val ResendDestinationPlaceholder: String = "The topic to copy into"
+
+  val ResendExplanation: String =
+    "The record is copied byte for byte, headers included, and is never decoded — so this works even on a " +
+      "topic KUI cannot read. Kafka chooses the partition in the destination."
+
+  val ResendDestinationRequired: String = "A destination topic is needed."
+
+  val ResendSameTopic: String =
+    "The destination is the topic being read. Copying a topic into itself would read back what it just " +
+      "wrote; choose another topic."
+
+  val ResendRangeInvalid: String = "This record's partition and offset cannot be read."
+
+  def resendSource(topic: String, partition: Int, from: Long, until: Long): String = {
+    val count = until - from
+    val what = if count == 1L then s"offset $from" else s"offsets $from to ${until - 1}"
+    s"Copying $what of $topic, partition $partition."
+  }
+
+  /** Both numbers, always. They differ whenever retention removed part of the source under the copy, and a
+    * screen that showed only the second could not tell "there was nothing left to copy" from "the copy did
+    * nothing".
+    */
+  def resent(read: Long, written: Long, destination: String): String =
+    s"Read $read and wrote $written into $destination."
 }

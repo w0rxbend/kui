@@ -1,0 +1,133 @@
+package kui.message.contract
+
+import sttp.tapir.*
+import sttp.tapir.json.circe.jsonBody
+
+import kui.contracts.KernelSchemas.given
+import kui.contracts.{ErrorEnvelope, KuiEndpoint}
+import kui.kernel.{ClusterId, TopicName}
+import kui.security.SignedPrincipal
+
+/** The two calls that write to a topic: publishing a record, and copying a range of records into another one.
+  *
+  * ==Why they are here and the browse endpoint is not==
+  *
+  * `MessageEndpoints`, next door, is JVM-only: its response is an event stream, which needs `fs2` and a
+  * server-side stream body, and neither links for the browser. These two are ordinary request/response calls
+  * with JSON on both sides, so they live in the cross-compiled half — which means the browser's produce form
+  * and the gateway's proxy route are both derived from the same value the service serves, rather than from
+  * three people's separate ideas of the path. That divergence is the defect this project has shipped before.
+  *
+  * ==The marker (ADR-047)==
+  *
+  * Both carry `KuiEndpoint.MutationKey`, so the per-cluster read-only refusal and M5's enumeration have
+  * something to key on that is not a naming convention, and both carry the CSRF header from the day they
+  * exist rather than from the day there is a session to bind it to — a header added later has to be added to
+  * every client that already shipped.
+  *
+  * ==Why there is no plan token here (ADR-045)==
+  *
+  * ADR-045 requires a plan for a destructive operation, and asks a specific question: *what exactly will this
+  * do to what is already there?* Publishing and resending have no answer to that question, because they take
+  * nothing away. They append. An operator can see the whole of what a produce will do by reading the form
+  * they filled in, and the whole of what a resend will do from the range and the destination — and the server
+  * answers both with what actually landed, offset by offset, which is a receipt rather than an offer.
+  *
+  * A purge is the operation on this service that *is* destructive, and it is the one that will carry a plan.
+  */
+object MessageMutationEndpoints {
+
+  export BrowseAddress.{ClustersSegment, TopicsSegment, MessagesSegment, ClusterIdParam, TopicNameParam}
+
+  /** The last path segment of a resend. The verb is in the path because a resend is not "create a message
+    * here" — it names records that already exist somewhere else, and a bare `POST` to the destination's
+    * message collection could not say so.
+    */
+  val ResendSegment: String = "resend"
+
+  /** The operation names, as they appear in the audit record and in the endpoint's marker.
+    *
+    * `val`s rather than literals at the use site because the same strings are
+    * `MutationKind.Produce.operation` and `MutationKind.Resend.operation` in `libs/security-core`, and the
+    * api module's suite — the one place that can see both a contract and an application type — asserts the
+    * two sets are equal.
+    */
+  val ProduceOperation: String = "produce"
+  val ResendOperation: String = "resend"
+
+  private val base = "internal" / "v1" / ClustersSegment
+
+  private val clusterIdPath: EndpointInput[ClusterId] =
+    path[ClusterId](ClusterIdParam).description("The configured cluster's slug id")
+
+  private val topicNamePath: EndpointInput[TopicName] =
+    path[TopicName](TopicNameParam).description("The topic's name, as Kafka spells it")
+
+  private def messagesOf: EndpointInput[(ClusterId, TopicName)] =
+    base / clusterIdPath / TopicsSegment / topicNamePath / MessagesSegment
+
+  /** Publish a record — or `count` copies of it — to a topic.
+    *
+    * A `POST` to the topic's message collection, which is what it is: a new record appended to a log. The
+    * answer is where every copy landed, so the caller can link straight to the record it just wrote.
+    */
+  val produce: Endpoint[
+    SignedPrincipal,
+    (String, ClusterId, TopicName, ProduceRequestDto),
+    ErrorEnvelope,
+    ProduceResultDto,
+    Any
+  ] =
+    KuiEndpoint
+      .mutation(ProduceOperation, destructive = false)
+      .post
+      .in(messagesOf)
+      .in(jsonBody[ProduceRequestDto])
+      .out(jsonBody[ProduceResultDto])
+      .name("message.produce")
+      .summary("Publish a record to a topic")
+      .description(
+        KuiEndpoint.mutationNote(ProduceOperation, destructive = false) +
+          "The key and the value are text, turned into bytes by the named serde — the same serde the " +
+          "browser would read them back with. An absent value is a tombstone and not an empty one. " +
+          "The answer names the partition, offset and timestamp the broker assigned to every record " +
+          "written; a shorter list than the requested count means the batch failed part-way and what " +
+          "landed stayed landed. Refused with KUI-READ-ONLY on a read-only cluster, before a producer " +
+          "is opened."
+      )
+      .tag("message")
+
+  /** Copy a range of records into another topic, byte for byte.
+    *
+    * `destructive = false` for the same reason as `produce`: it appends to the destination and does not touch
+    * the source. What it *can* do is append a great deal, which is why the service caps the range and says
+    * the number in the refusal rather than starting a copy nobody can stop.
+    */
+  val resend: Endpoint[
+    SignedPrincipal,
+    (String, ClusterId, TopicName, ResendRequestDto),
+    ErrorEnvelope,
+    ResendResultDto,
+    Any
+  ] =
+    KuiEndpoint
+      .mutation(ResendOperation, destructive = false)
+      .post
+      .in(messagesOf / ResendSegment)
+      .in(jsonBody[ResendRequestDto])
+      .out(jsonBody[ResendResultDto])
+      .name("message.resend")
+      .summary("Copy a range of records into another topic")
+      .description(
+        KuiEndpoint.mutationNote(ResendOperation, destructive = false) +
+          "The records are re-written byte for byte, headers included, and are never deserialized — so a " +
+          "topic KUI cannot decode can still be replayed, which is the case a resend is most often needed " +
+          "for. It is not atomic: cancelled or failed halfway it leaves what it already wrote, and the " +
+          "answer reports how many records were read and how many were written, which differ whenever " +
+          "retention removed part of the source under the copy."
+      )
+      .tag("message")
+
+  /** Every mutating endpoint this service serves. */
+  val all: List[AnyEndpoint] = List(produce, resend)
+}

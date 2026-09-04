@@ -4,7 +4,11 @@ import com.raquo.laminar.api.L.*
 import munit.FunSuite
 import org.scalajs.dom
 
+import sttp.tapir.{Endpoint, PublicEndpoint}
+
+import kui.contracts.ErrorEnvelope
 import kui.kernel.{ClusterId, TopicName}
+import kui.ui.kernel.api.{ApiClient, ApiError}
 import kui.ui.messages.browse.{BrowseEvent, BrowseQuery, BrowseSession}
 import kui.ui.kernel.sse.SseHandle
 
@@ -25,6 +29,28 @@ import kui.ui.kernel.sse.SseHandle
 final class MessagesPageSuite extends FunSuite {
 
   private val topic = TopicName.unsafe("orders.v1")
+  private val cluster = ClusterId.unsafe("quickstart")
+
+  /** A client that would fail the test if the page called it while mounting.
+    *
+    * Mounting must send nothing: the publish and resend drawers are built with the page and are closed, and
+    * a drawer that fetched something in order to render itself closed would put a request on every visit to
+    * a screen whose whole point is that it reads nothing until asked.
+    */
+  private object StubApi extends ApiClient {
+    def call[I, O](
+        endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any],
+        input: I
+    ): EventStream[Either[ApiError, O]] =
+      fail("mounting the screen must not call the API")
+
+    def callSecure[A, I, O](
+        endpoint: Endpoint[A, I, ErrorEnvelope, O, Any],
+        security: A,
+        input: I
+    ): EventStream[Either[ApiError, O]] =
+      fail("mounting the screen must not call the API")
+  }
 
   /** A session whose stream opener would fail the test if the page ever called it on mount. */
   private def session: BrowseSession =
@@ -40,7 +66,7 @@ final class MessagesPageSuite extends FunSuite {
   private def mounted(body: dom.Element => Unit): Unit = {
     val container = dom.document.createElement("div")
     dom.document.body.appendChild(container): Unit
-    val root = render(container, MessagesPage(topic, Val("UTC"), session))
+    val root = render(container, MessagesPage(topic, cluster, StubApi, Val("UTC"), session))
     try body(container)
     finally {
       root.unmount(): Unit

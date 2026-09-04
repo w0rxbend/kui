@@ -30,4 +30,14 @@ object MessagesCss {
   val Headers = "kui-messages__headers"
   val HeaderName = "kui-messages__header-name"
   val DecodeError = "kui-messages__decode-error"
+
+  val RowActions = "kui-messages__row-actions"
+
+  val Form = "kui-messages__form"
+  val FormRow = "kui-messages__form-row"
+  val FormText = "kui-messages__form-text"
+  val FormHeaders = "kui-messages__form-headers"
+  val FormActions = "kui-messages__form-actions"
+  val FormResult = "kui-messages__form-result"
+  val FormNote = "kui-messages__form-note"
 }

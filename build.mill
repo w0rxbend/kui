@@ -1532,7 +1532,11 @@ object services extends Module {
       * cursor a browser is holding.
       */
     object application extends KuiJvmModule {
-      def moduleDeps = Seq(domain, libs.cache)
+      // `libs.securityCore.jvm` is here for `AuditSink`, `MutationKind` and `MutationRecord`, which
+      // ADR-047 declares once in that module because three services write through them. It carries no
+      // transport and no serialisation, so rule A3 is unaffected: what A3 forbids this layer is
+      // knowing how anything is *sent*, and an audit record is a domain fact, not a wire shape.
+      def moduleDeps = Seq(domain, libs.cache, libs.securityCore.jvm)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
@@ -1623,6 +1627,7 @@ object services extends Module {
           libs.serde,
           libs.config,
           libs.kernel.jvm,
+          libs.securityCore.jvm,
           libs.observability
         )
 
@@ -1632,6 +1637,10 @@ object services extends Module {
         mvn"co.fs2::fs2-core::${Versions.fs2}",
         mvn"co.fs2::fs2-io::${Versions.fs2}",
         mvn"org.apache.kafka:kafka-clients:${Versions.kafkaClients}",
+        // The producer behind `RecordProducer` is fs2-kafka's, per ADR-006 Amendment 1: a produce is a
+        // dispatch and an acknowledgement, which is exactly the nested effect fs2-kafka's `produce`
+        // already hands back. The browse consumer next door uses the raw client, and that file says why.
+        mvn"org.typelevel::fs2-kafka::${Versions.fs2Kafka}",
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )

@@ -5,6 +5,7 @@ import sttp.tapir.AnyEndpoint
 import kui.cluster.contract.ClusterEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
+import kui.message.contract.MessageMutationEndpoints
 import kui.topic.contract.TopicEndpoints
 
 /** Which published contract belongs to which service id.
@@ -28,7 +29,12 @@ object ServiceContracts {
       // objects: the reads are ordinary contract endpoints and the four mutation endpoints carry the
       // marker and the CSRF header ADR-047 requires. The gateway proxies them all the same way — it
       // rewrites the prefix and forwards the inputs, and the marker is read by policy, not by routing.
-      ServiceId.unsafe("consumer") -> (ConsumerEndpoints.all ++ ConsumerMutationEndpoints.all)
+      ServiceId.unsafe("consumer") -> (ConsumerEndpoints.all ++ ConsumerMutationEndpoints.all),
+      // Only the mutations. The message service's other endpoint is the browse *stream*, which is not a
+      // request/response call and cannot be proxied by this derivation at all — `MessageStreamRoutes`
+      // carries it, over `StreamProxy`, because a stream needs its own cancellation and heartbeat
+      // handling rather than a request forwarded and a response awaited.
+      ServiceId.unsafe("message") -> MessageMutationEndpoints.all
     )
 
   def of(service: ServiceId): List[AnyEndpoint] = byService.getOrElse(service, Nil)
