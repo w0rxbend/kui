@@ -3,16 +3,23 @@ package kui.ui.messages.browse
 import sttp.tapir.DecodeResult
 
 import kui.kernel.browse.SeekMode
+import kui.kernel.serde.SerdeName
 import kui.kernel.{Offset, PartitionId}
 import kui.message.contract.{BrowseAddress, BrowseParams}
 
 /** Everything one browse asks for, as one value.
   *
   * It is the browser's mirror of what the service reads, and it holds only what a *person* chooses on the
-  * screen: where to start, which partitions, how many records, what text they must contain, and whether to
-  * keep following. Serdes and isolation level are deliberately absent — the service picks the serde it has
-  * been configured to pick and says which it used on every record, and offering a dropdown for a choice with
-  * one right answer is a control that only makes a screen wrong.
+  * screen: where to start, which partitions, how many records, what text they must contain, how to decode the
+  * two halves of a record, and whether to keep following.
+  *
+  * The isolation level is deliberately absent, and the serdes deliberately are not. The service already
+  * chooses a serde per topic and says which it used on every record, and for the overwhelming majority of
+  * topics that choice is right — which is why both are `None` by default and the controls read "Automatic".
+  * They exist for the topic where it is wrong: a key written as a big-endian long that autodetection reads as
+  * a four-character string, or a value the producer double-encoded. Without an override the only way to read
+  * such a topic is to change the deployment's configuration, which an operator investigating an incident
+  * cannot do.
   *
   * @param live
   *   tail mode. It is exclusive with a start position and the *server* refuses the combination, so this
@@ -23,6 +30,8 @@ final case class BrowseQuery(
     partitions: List[PartitionId],
     limit: Option[Int],
     contains: Option[String],
+    keySerde: Option[SerdeName],
+    valueSerde: Option[SerdeName],
     live: Boolean
 )
 
@@ -36,7 +45,15 @@ object BrowseQuery {
     * expect it.
     */
   val Default: BrowseQuery =
-    BrowseQuery(seek = SeekMode.Latest, partitions = Nil, limit = None, contains = None, live = false)
+    BrowseQuery(
+      seek = SeekMode.Latest,
+      partitions = Nil,
+      limit = None,
+      contains = None,
+      keySerde = None,
+      valueSerde = None,
+      live = false
+    )
 
   given CanEqual[BrowseQuery, BrowseQuery] = CanEqual.derived
 
@@ -60,6 +77,10 @@ object BrowseQuery {
       List(
         query.limit.map(BrowseAddress.LimitParam -> _.toString),
         query.contains.map(BrowseAddress.QueryParam -> _),
+        // Sent only when the user overrode it. Absent means "let the service choose", which is what it
+        // does anyway, and a URL that spells out every default is one a person cannot read.
+        query.keySerde.map(BrowseAddress.KeySerdeParam -> _.value),
+        query.valueSerde.map(BrowseAddress.ValueSerdeParam -> _.value),
         // Sent only when it is on. `live=false` and no `live` at all mean the same thing to the server, and
         // the shorter URL is the one a person can read.
         Option.when(query.live)(BrowseAddress.LiveParam -> "true")
@@ -100,9 +121,25 @@ object BrowseQuery {
       partitions = partitions,
       limit = params.getOrElse(BrowseAddress.LimitParam, Nil).headOption.flatMap(_.toIntOption).filter(_ > 0),
       contains = params.getOrElse(BrowseAddress.QueryParam, Nil).headOption.map(_.trim).filter(_.nonEmpty),
+      keySerde = serdeIn(params, BrowseAddress.KeySerdeParam),
+      valueSerde = serdeIn(params, BrowseAddress.ValueSerdeParam),
       live = params.getOrElse(BrowseAddress.LiveParam, Nil).headOption.contains("true")
     )
   }
+
+  /** A serde name from a URL, or none.
+    *
+    * A name that will not parse is dropped rather than fatal, exactly as an unreadable seek is: the value
+    * came from a link somebody was sent, and it should cost the recipient that one setting rather than the
+    * whole screen. Dropping it means the service chooses, which is the behaviour with no override at all.
+    */
+  private def serdeIn(params: Map[String, List[String]], name: String): Option[SerdeName] =
+    params
+      .getOrElse(name, Nil)
+      .headOption
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .flatMap(SerdeName.fromString(_).toOption)
 
   /** The four ways a person can say where to start, as the screen offers them.
     *

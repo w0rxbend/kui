@@ -4,6 +4,7 @@ import munit.FunSuite
 
 import kui.contracts.PublicApi
 import kui.kernel.browse.SeekMode
+import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 import kui.message.contract.{BrowseAddress, GoldenDocuments}
 import kui.ui.kernel.sse.SseError
@@ -82,6 +83,30 @@ final class BrowseWireSuite extends FunSuite {
     )
   }
 
+  test("noSerdeOverrideMeansNoSerdeParameterAtAll") {
+    // Absent is what the service already does — it chooses per topic — so spelling out the default would
+    // make every browse URL longer and none of them clearer.
+    val query = BrowseQuery.queryString(BrowseQuery.Default)
+    assert(!query.contains(BrowseAddress.KeySerdeParam), query)
+    assert(!query.contains(BrowseAddress.ValueSerdeParam), query)
+  }
+
+  test("aSerdeOverrideIsSentUnderTheServicesOwnParameterNames") {
+    val query =
+      BrowseQuery.queryString(
+        BrowseQuery.Default.copy(keySerde = Some(SerdeName.Int64), valueSerde = Some(SerdeName.Json))
+      )
+    assert(query.contains(s"${BrowseAddress.KeySerdeParam}=Int64"), query)
+    assert(query.contains(s"${BrowseAddress.ValueSerdeParam}=Json"), query)
+  }
+
+  test("aSerdeNameThatWillNotParseCostsThatOneSettingAndNotTheScreen") {
+    // The value came from a link somebody was sent. Dropping it means the service chooses, which is the
+    // behaviour with no override at all — a far better answer than a blank page.
+    val parsed = BrowseQuery.fromParams(Map(BrowseAddress.KeySerdeParam -> List("1nvalid name")))
+    assertEquals(parsed.keySerde, None)
+  }
+
   test("theQueryRoundTripsThroughItsOwnParameters") {
     val query =
       BrowseQuery(
@@ -89,6 +114,8 @@ final class BrowseWireSuite extends FunSuite {
         partitions = List(PartitionId.unsafe(0), PartitionId.unsafe(3)),
         limit = Some(200),
         contains = Some("order-42"),
+        keySerde = Some(SerdeName.Int64),
+        valueSerde = Some(SerdeName.Json),
         live = false
       )
 
