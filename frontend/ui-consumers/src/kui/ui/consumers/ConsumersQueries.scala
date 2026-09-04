@@ -5,7 +5,14 @@ import scala.concurrent.duration.*
 import com.raquo.laminar.api.L.*
 
 import kui.consumer.contract.GroupListParams
-import kui.consumer.contract.dto.{GroupDetailDto, GroupPageDto, LagDeltaDto}
+import kui.consumer.contract.dto.{
+  GroupDetailDto,
+  GroupPageDto,
+  LagDeltaDto,
+  ResetApplyRequest,
+  ResetPlanDto,
+  ResetPlanRequest
+}
 import kui.contracts.ErrorEnvelope
 import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{ClusterId, GroupId, TopicName}
@@ -96,6 +103,34 @@ final class ConsumersQueries(api: ApiClient) {
       since: Option[String]
   ): EventStream[Either[ApiError, LagDeltaDto]] =
     call(ConsumersApi.lag, (cluster, groups, since))
+
+  /** What a reset would do. Reads; changes nothing.
+    *
+    * Not a cache, and it must never become one. A plan is a statement about the cluster *now* and it carries
+    * a token that expires in five minutes; serving a cached one would let an operator confirm a plan computed
+    * against offsets that have since moved, which is the exact failure the two-phase flow exists to prevent.
+    */
+  def planReset(
+      cluster: ClusterId,
+      group: GroupId,
+      request: ResetPlanRequest
+  ): EventStream[Either[ApiError, ResetPlanDto]] =
+    call(ConsumersApi.planReset, (cluster, group, request))
+
+  /** Write the offsets a plan token names, and answer with what was written.
+    *
+    * The group's own cached detail is dropped on success, because its committed offsets and its lag have just
+    * changed and everything on screen about them is now wrong.
+    */
+  def applyReset(
+      cluster: ClusterId,
+      group: GroupId,
+      token: String
+  ): EventStream[Either[ApiError, ResetPlanDto]] =
+    call(ConsumersApi.applyReset, (cluster, group, ResetApplyRequest(token))).map { outcome =>
+      if outcome.isRight then invalidateCluster(cluster)
+      outcome
+    }
 
   /** Every request this feature makes, with its health report attached.
     *

@@ -7,6 +7,7 @@ import com.raquo.laminar.api.L.*
 import kui.consumer.contract.dto.GroupDetailDto
 import kui.contracts.consumer.AssignmentFreshness
 import kui.kernel.{ClusterId, GroupId}
+import kui.ui.consumers.reset.ResetWizard
 import kui.ui.consumers.{ConsumersCss, ConsumersQueries, GroupStateChip, Messages, Numbers}
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
@@ -95,7 +96,7 @@ object GroupDetailPage {
       child.maybe <-- detail.map(
         _.map(current =>
           StaleDataOverlay(
-            content = body(current, zone, now),
+            content = body(current, zone, now, wizard(cluster, group, queries, current, zone, now)),
             stale = stale,
             fetchedAt = observedAt,
             zone = zone,
@@ -107,8 +108,41 @@ object GroupDetailPage {
     )
   }
 
-  /** The summary strip, the members and the per-topic assignment tables. */
-  private def body(group: GroupDetailDto, zone: Signal[String], now: () => Instant): HtmlElement =
+  /** The offset-reset wizard, or nothing at all.
+    *
+    * Nothing at all while the group holds no offsets on any topic: there is nothing to reset, and a form
+    * whose topic list is empty is a control that can only refuse.
+    *
+    * There is no second confirmation around it and no disabled state for a group that has members. The
+    * *server* refuses a reset of a live group — that check is made at plan time and again immediately before
+    * the write, because the group can gain a member in between — and a screen that made its own copy of the
+    * rule would be a second opinion about a safety property, which is how the two come to disagree.
+    */
+  private def wizard(
+      cluster: ClusterId,
+      group: GroupId,
+      queries: ConsumersQueries,
+      detail: GroupDetailDto,
+      zone: Signal[String],
+      now: () => Instant
+  ): Option[HtmlElement] =
+    Option.when(detail.topics.nonEmpty)(
+      ResetWizard(
+        topics = detail.topics,
+        plan = request => queries.planReset(cluster, group, request),
+        applyPlan = token => queries.applyReset(cluster, group, token),
+        zone = zone,
+        now = now
+      )
+    )
+
+  /** The summary strip, the members, the per-topic assignment tables, and the reset wizard under them. */
+  private def body(
+      group: GroupDetailDto,
+      zone: Signal[String],
+      now: () => Instant,
+      reset: Option[HtmlElement]
+  ): HtmlElement =
     div(
       summary(group, zone, now),
       sectionTag(
@@ -129,7 +163,10 @@ object GroupDetailPage {
             testId = Some("group-assignments-empty")
           )
         else div(group.topics.map(LagTable.apply))
-      )
+      ),
+      // Last on the page, under the numbers it changes. An operator should have read where the group is
+      // before being offered a control that moves it.
+      reset
     )
 
   /** State, total lag, protocol, assignor, coordinator and "as of", on one strip.

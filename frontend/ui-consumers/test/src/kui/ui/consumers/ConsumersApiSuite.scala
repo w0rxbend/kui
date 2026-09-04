@@ -131,7 +131,7 @@ final class ConsumersApiSuite extends FunSuite {
 
   test("everyEndpointIsInTheAllList") {
     // A client written and then forgotten here is a client no suite walks.
-    assertEquals(ConsumersApi.all.size, 4)
+    assertEquals(ConsumersApi.all.size, 6)
   }
 
   // --- The recorded documents ------------------------------------------------------------------

@@ -183,3 +183,36 @@
   font-family: var(--kui-font-family-mono);
   font-size: var(--kui-font-size-sm);
 }
+
+/* --- The offset-reset wizard (ADR-045) ------------------------------------------------------- */
+
+/* The composer. A column and not a row: each control is a decision that narrows the next one, and a
+   row of them reads as a set of unrelated settings. */
+.kui-consumers__reset-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  max-width: 32rem;
+  margin-top: var(--kui-space-3);
+}
+
+/* The plan and the receipt share one block, because they are one document: the apply call answers with
+   what it wrote, and two blocks would be two chances to render them differently. */
+.kui-consumers__reset-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  margin-top: var(--kui-space-3);
+}
+
+/* Warnings sit above the table they qualify, because clamping changes how every number under them
+   should be read. Marked, not coloured alone: colour is not available to every reader. */
+.kui-consumers__reset-warnings {
+  margin: 0;
+  padding-left: var(--kui-space-5);
+  color: var(--kui-color-warning);
+}
+
+.kui-consumers__reset-warnings:empty {
+  display: none;
+}

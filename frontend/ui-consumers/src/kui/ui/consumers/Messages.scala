@@ -145,7 +145,74 @@ object Messages {
   val AssignmentsUnknown: String =
     "The current assignments could not be read, so the partitions below may be held by somebody else now."
 
-  // What is deliberately not here: any offset-reset wording. Resetting offsets is a mutation, governed by
+  // --- The offset-reset wizard (ADR-045) -------------------------------------------------------
+
+  val ResetHeading: String = "Reset offsets"
+
+  val ResetOpen: String = "Reset offsets…"
+  val ResetClose: String = "Cancel"
+
+  /** The sentence above the form. It says what the two steps are, because a two-step flow the user was not
+    * told about reads as a button that did not work.
+    */
+  val ResetIntro: String =
+    "Choose where this group should start reading from. KUI works out the exact offset for every partition " +
+      "and shows you what it would write; nothing changes until you confirm that."
+
+  val ResetTopicLabel: String = "Topic"
+  val ResetTargetLabel: String = "Move to"
+  val ResetOffsetLabel: String = "Offset"
+  val ResetTimestampLabel: String = "Point in time"
+  val ResetShiftLabel: String = "Records to shift by"
+  val ResetDurationLabel: String = "Minutes to rewind"
+
+  val ResetOffsetHint: String = "The same offset on every partition in scope."
+  val ResetTimestampHint: String =
+    "In your own time zone. Each partition moves to its first record at or after this moment."
+  val ResetShiftHint: String = "Negative rewinds, positive skips forward."
+  val ResetDurationHint: String = "Counted back from now, at the moment you ask for the plan."
+
+  val ResetPreview: String = "Show me what this would do"
+  val ResetPlanning: String = "Working out the offsets…"
+  val ResetApply: String = "Apply this plan"
+  val ResetApplying: String = "Writing the offsets…"
+  val ResetStartAgain: String = "Start again"
+  val ResetDone: String = "Done"
+
+  val ResetPlanHeading: String = "What this would do"
+  val ResetReceiptHeading: String = "What was written"
+
+  val ResetColumnPartition: String = "Partition"
+  val ResetColumnFrom: String = "From"
+  val ResetColumnTo: String = "To"
+  val ResetColumnChange: String = "Change"
+
+  /** For a partition the group has never committed on. Never a zero, which would say the consumer is at the
+    * beginning of the log when in fact nobody knows where it is.
+    */
+  val ResetNoCurrent: String = "This group has never committed an offset on this partition"
+
+  val ResetNoOp: String =
+    "Every partition is already exactly where this would put it, so there is nothing to apply."
+
+  val ResetApplied: String =
+    "The offsets below were written. The group will read from them the next time it starts."
+
+  def resetExpires(at: String): String = s"This plan can be applied until $at. After that, ask for a new one."
+
+  val ResetExpired: String =
+    "This plan has expired, so it was not applied. Ask for a new one — the cluster may have moved since."
+
+  // --- What the form refuses before it is a request ---------------------------------------------
+
+  val NoTopic: String = "Choose which topic to reset this group on."
+  val NoPartitions: String = "This group holds no partitions on that topic, so there is nothing to reset."
+  val BadOffset: String = "An offset is a whole number, and never negative."
+  val BadTimestamp: String = "Give a date and a time to move to."
+  val BadShift: String = "A shift is a whole number of records. Negative rewinds; positive skips forward."
+  val BadDuration: String = "Give a whole number of minutes to rewind, greater than zero."
+
+  // What is deliberately not here: any delete-group or delete-offsets wording. Resetting offsets is a mutation, governed by
   // ADR-045's plan-token confirmation and ADR-047's read-only refusal and audit. A control for it that this
   // screen cannot honour end to end would be a promise with a date on it (DEVPLAN §10 D8), so there is no
   // button and no sentence for one.

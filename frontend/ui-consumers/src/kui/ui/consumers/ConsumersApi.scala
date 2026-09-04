@@ -4,8 +4,15 @@ import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
 import kui.consumer.contract.dto.ConsumerCodecs.given
-import kui.consumer.contract.dto.{GroupDetailDto, GroupPageDto, LagDeltaDto}
-import kui.consumer.contract.{ConsumerEndpoints, GroupListParams}
+import kui.consumer.contract.dto.{
+  GroupDetailDto,
+  GroupPageDto,
+  LagDeltaDto,
+  ResetApplyRequest,
+  ResetPlanDto,
+  ResetPlanRequest
+}
+import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints, GroupListParams}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
 import kui.gateway.contract.TopicOverviewEndpoints
 import kui.gateway.contract.dto.TopicOverviewDto
@@ -108,6 +115,42 @@ object ConsumersApi {
   val topicOverview: PublicEndpoint[(ClusterId, TopicName), ErrorEnvelope, TopicOverviewDto, Any] =
     TopicOverviewEndpoints.overview
 
-  /** Every client this module has. The suite walks it, so a fifth endpoint cannot be added untested. */
-  val all: List[AnyEndpoint] = List(list, detail, lag, topicOverview)
+  private val offsetsBase =
+    groupsBase / groupIdPath / ConsumerMutationEndpoints.OffsetsSegment
+
+  /** `POST …/consumer-groups/{groupId}/offsets/plan` — what a reset would do. Changes nothing.
+    *
+    * The wizard's first request, and the only one that takes a specification. It resolves the operator's
+    * intent — "the beginning", "09:00 this morning", "offset 900 000" — against the group's live offsets and
+    * answers with the exact numbers that would be written, any clamping as a warning, and a token (ADR-045).
+    *
+    * The CSRF header the service declares is deliberately absent here. `ApiClient` puts it on every request
+    * that is not a `GET`, so declaring it would put a second, empty one on the wire and a header declared in
+    * two places is a header that stops agreeing.
+    */
+  val planReset: PublicEndpoint[(ClusterId, GroupId, ResetPlanRequest), ErrorEnvelope, ResetPlanDto, Any] =
+    KuiEndpoint.base.post
+      .in(offsetsBase / ConsumerMutationEndpoints.PlanSegment)
+      .in(jsonBody[ResetPlanRequest])
+      .out(jsonBody[ResetPlanDto])
+      .name("consumer.offsets.plan")
+
+  /** `POST …/consumer-groups/{groupId}/offsets` — write the offsets a plan token names.
+    *
+    * It takes **only** the token. There is no path in this contract, and therefore none in this client, that
+    * takes a specification and writes offsets in one hop: the offsets that get written are the ones the
+    * operator read, not a re-resolution of the same request against a cluster that has moved since.
+    *
+    * That is also why the wizard's Apply button cannot exist before a plan does. It is not disabled by a rule
+    * somebody wrote on the screen; there is nothing to send.
+    */
+  val applyReset: PublicEndpoint[(ClusterId, GroupId, ResetApplyRequest), ErrorEnvelope, ResetPlanDto, Any] =
+    KuiEndpoint.base.post
+      .in(offsetsBase)
+      .in(jsonBody[ResetApplyRequest])
+      .out(jsonBody[ResetPlanDto])
+      .name("consumer.offsets.apply")
+
+  /** Every client this module has. The suite walks it, so a seventh endpoint cannot be added untested. */
+  val all: List[AnyEndpoint] = List(list, detail, lag, topicOverview, planReset, applyReset)
 }

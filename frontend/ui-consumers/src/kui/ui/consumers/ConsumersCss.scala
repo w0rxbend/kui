@@ -31,4 +31,8 @@ object ConsumersCss {
   val TopicName = "kui-consumers__topic-name"
   val PartitionList = "kui-consumers__partitions"
   val Anomaly = "kui-consumers__anomaly"
+
+  val ResetForm = "kui-consumers__reset-form"
+  val ResetPlan = "kui-consumers__reset-plan"
+  val ResetWarnings = "kui-consumers__reset-warnings"
 }
