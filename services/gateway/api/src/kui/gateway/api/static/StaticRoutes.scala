@@ -181,8 +181,9 @@ object StaticRoutes {
     *
     * Almost nothing here is a 404. `libs/http`'s reject handler only sees paths that reach no endpoint at
     * all, and every path under `/ui/…` reaches this one — what would be "not found" anywhere else is the SPA
-    * fallback, answered `200` with `index.html`. The three real failures are a traversal attempt (`400`), the
-    * linked frontend being entirely absent (`503`, see [[AssetsMissingPage]]).
+    * fallback, answered `200` with `index.html`. The exceptions are a traversal attempt (`400`), the linked
+    * frontend being entirely absent (`503`, see [[AssetsMissingPage]]), and a missing file whose name is
+    * unmistakably a static asset rather than a screen (`404`, see [[namesAnAsset]]).
     */
   private def respond[F[_]: Sync](
       bootstrap: BootstrapConfig,
@@ -214,11 +215,41 @@ object StaticRoutes {
                 case Some(bytes) =>
                   val (contentType, cacheControl) = asset(nonEmpty.last)
                   Right((StatusCode.Ok, bytes, contentType, cacheControl))
+                case None if namesAnAsset(nonEmpty.last) =>
+                  // A miss on something that is unmistakably a static asset is a real 404, not a route
+                  // into the single-page application. See [[namesAnAsset]] for why that distinction
+                  // has to be made here.
+                  Left((StatusCode.NotFound, s"no such asset: ${nonEmpty.last}"))
                 case None => indexOrMissing(bootstrap, resourcePrefix)
               }
           }
       }
     }
+
+  /** Whether a final path segment names a file this deployment ships rather than a screen it routes to.
+    *
+    * The single-page fallback exists so that `/ui/clusters/quickstart/topics/orders.v1` — a path with no
+    * file behind it — is answered with `index.html`, leaving the browser's router to decide what it means.
+    * Applied to *every* miss, though, it also answers a request for a missing JavaScript module with an
+    * HTML document and status `200`, and that is the difference between a page that reports a problem and
+    * a page that is silently blank.
+    *
+    * That is not hypothetical. `main.js` is served `no-cache`, but the per-feature module files it imports
+    * are named by content hash and served `immutable` for a year. After a redeploy, a browser still holding
+    * the previous build's `main.js` asks for the previous build's chunk names. Those files are gone. With
+    * the fallback applied, each of those requests succeeded with an HTML document that the browser then
+    * tried to evaluate as an ES module, and the application never started — with nothing in the network log
+    * marked as a failure, because every response was a `200`. This was reproduced on 2026-09-04 by
+    * upgrading a running quickstart underneath an open browser profile.
+    *
+    * The test is the extension, and only against the extensions in [[ContentTypes]]. It cannot be "has a
+    * dot": Kafka topic names contain dots, so `topics/orders.v1` is a screen, and `v1` is deliberately not
+    * in that table. `js`, `css`, `map`, `png`, `woff2` and the rest are, and none of them is a plausible
+    * ending for a KUI route — except `html`, which is excluded so that a hand-typed `/ui/index.html` still
+    * reaches the shell.
+    */
+  private def namesAnAsset(name: String): Boolean =
+    extensionOf(name).exists(extension => extension != "html" && ContentTypes.contains(extension))
 
   /** The path segments a request is safe to resolve against the classpath, or `None` when it is not.
     *

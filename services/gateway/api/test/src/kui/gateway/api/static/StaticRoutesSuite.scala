@@ -106,6 +106,41 @@ final class StaticRoutesSuite extends KuiIOSuite {
     }
   }
 
+  test("aMissingAssetIs404RatherThanTheShell") {
+    // The upgrade case, and the reason this test exists rather than a comment. `main.js` is served
+    // `no-cache`, but the per-feature module files it imports are named by content hash and served
+    // `immutable` for a year. Redeploy KUI under an open browser and that browser asks for the previous
+    // build's chunk names, which no longer exist. If the single-page fallback answers those, the browser
+    // receives an HTML document with status 200 where it expected a JavaScript module, evaluates it as
+    // one, and shows a blank page — with nothing in its network log marked as having failed.
+    //
+    // The distinguishing test is the file extension, so the two halves are asserted together: a name
+    // ending in a known asset extension is a 404, and a route whose last segment merely *contains* a dot
+    // — which every Kafka topic name does — is still the shell.
+    val missingAssets = List(
+      "/ui/internal-deadbeefdeadbeef.js",
+      "/ui/gone.css",
+      "/ui/main.js.map",
+      "/ui/missing.woff2"
+    )
+
+    server().use { running =>
+      missingAssets.traverse { path =>
+        running.get(path).map { response =>
+          assertEquals(response.code.code, 404, s"$path: ${response.body}")
+          assert(!response.body.contains(IndexHtml.BootstrapElementId), s"$path served the shell")
+        }
+      } *> running.get("/ui/clusters/local/topics/orders.v1").map { response =>
+        assertEquals(response.code.code, 200, response.body)
+        assert(response.body.contains(IndexHtml.BootstrapElementId), response.body)
+      } *> running.get("/ui/index.html").map { response =>
+        // `html` is the one extension left out of the rule, so that a hand-typed `/ui/index.html` is
+        // still answered rather than turned into a 404 by a change meant for JavaScript modules.
+        assertEquals(response.code.code, 200, response.body)
+      }
+    }
+  }
+
   test("doesNotServeIndexForAnUnknownApiPath") {
     // The static routes only claim `/ui/**` and `/`; a typo under `/api/v1` must reach the reject handler
     // and come back as the error envelope, never as HTML that looks like a working page.
