@@ -2012,6 +2012,44 @@ object services extends Module {
       }
     }
 
+    /** The adapters. The only module in the consumer tree with a Kafka client on its classpath
+      * (rule A10), and the only one `app` is allowed to see beside `api` and `application`
+      * (rule A9).
+      *
+      * `services.cluster.client` is the credential-bearing profile consumer of ADR-046, and rule
+      * A11 is what admits that one edge and admits nothing else of the cluster service.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps =
+        Seq(
+          domain,
+          application,
+          libs.kafka,
+          libs.cache,
+          libs.http,
+          libs.observability,
+          libs.securityCore.jvm,
+          libs.kernel.jvm,
+          services.cluster.client
+        )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
     /** The published wire shape of `kui-consumer-service`.
       *
       * Cross-compiled, because the browser decodes exactly what this service encodes, from one
