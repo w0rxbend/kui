@@ -1,0 +1,126 @@
+# KUI against a secured broker: SASL_SSL with SCRAM-SHA-512 and a private certificate authority.
+#
+# WHY THIS EXISTS. `deployment/examples/production.yaml` documents a secured cluster, and for a
+# long time nobody had ever run KUI against one end to end -- the adapter suites in `libs/testkit`
+# cover SASL and TLS at the port level, but never the two together and never the whole path from a
+# configuration file to a rendered screen. The first run of this file found a defect in the loader
+# that made every documented secured cluster permanently unreachable, so the file stays, and the
+# next person changing anything under `kui.clusters[].security` can run it in about a minute.
+#
+# HOW TO RUN IT
+#
+#     ./generate-certs.sh                       # once; writes ./certs, which is git-ignored
+#     docker compose -f docker-compose.secured.yml up -d
+#     open http://localhost:18081
+#
+# The KUI image is the one `./mill deployment.docker.allinone.docker.build` produces. Change the
+# `image:` line below if yours is tagged differently.
+#
+# `kui-secured.yaml` is `deployment/examples/production.yaml` with three lines changed: the two
+# bootstrap addresses, and `devInsecureCookies`, which plain HTTP on localhost needs and which no
+# real deployment may ever set. Keeping it a near-copy is the point -- what is being tested is the
+# example a newcomer copies, not a file written to pass.
+
+name: kui-secured
+
+services:
+  kafka-secured:
+    image: apache/kafka:4.3.1
+    container_name: kui-secured-kafka
+    environment:
+      CLUSTER_ID: kui-secured-000000001
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-secured:9094
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
+      # CLIENT is the only listener KUI is given: SASL_SSL with SCRAM-SHA-512.
+      # ADMIN is a plaintext listener on the private network, used once to create the SCRAM
+      # user and to seed data -- the bootstrap problem every SCRAM cluster has.
+      KAFKA_LISTENERS: CLIENT://0.0.0.0:9093,BROKER://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094,ADMIN://0.0.0.0:9095
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-secured:9093,BROKER://kafka-secured:9092,ADMIN://kafka-secured:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,BROKER:PLAINTEXT,ADMIN:PLAINTEXT,CLIENT:SASL_SSL
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      KAFKA_LISTENER_NAME_CLIENT_SCRAM___SHA___512_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required;"
+      KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/broker.keystore.p12
+      KAFKA_SSL_KEYSTORE_PASSWORD: kui-secured-demo
+      KAFKA_SSL_KEY_PASSWORD: kui-secured-demo
+      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
+      KAFKA_SSL_CLIENT_AUTH: none
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - ./certs:/etc/kafka/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9095 --list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 15s
+    networks: [kui-secured]
+
+  # Creates the SCRAM user KUI authenticates as, then seeds the same data the quickstart seeds.
+  provision:
+    image: apache/kafka:4.3.1
+    container_name: kui-secured-provision
+    depends_on:
+      kafka-secured:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka-secured:9095 \
+          --alter --add-config 'SCRAM-SHA-512=[password=kui-scram-secret]' --entity-type users --entity-name kui
+        echo "SCRAM user created"
+        exec /bin/bash /seed/seed.sh
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-secured:9095
+    volumes:
+      - ../quickstart/seed:/seed:ro
+    networks: [kui-secured]
+    restart: "no"
+
+  consumer:
+    image: apache/kafka:4.3.1
+    container_name: kui-secured-consumer
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/seed/consume.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-secured:9095
+    volumes:
+      - ../quickstart/seed:/seed:ro
+    networks: [kui-secured]
+    restart: unless-stopped
+
+  kui:
+    image: kui-allinone:0.1.0-SNAPSHOT
+    container_name: kui-secured-kui
+    command: ["--config", "/etc/kui/kui.yaml"]
+    ports:
+      - "18081:8080"
+    environment:
+      KUI_TELEMETRY_LOGFORMAT: text
+      KUI_PRINCIPAL_KEY: "e2e-only-not-a-real-key-0123456789abcdef0123456789abcdef"
+      KUI_ANALYTICS_PASSWORD: kui-scram-secret
+      KUI_CURSOR_KEY: "e2e-only-cursor-key-0123456789abcdef0123456789"
+      KUI_ANALYTICS_TRUSTSTORE_PASSWORD: kui-secured-demo
+    volumes:
+      - ./kui-secured.yaml:/etc/kui/kui.yaml:ro
+      - ./certs/kafka-ca.p12:/etc/kui/certs/kafka-ca.p12:ro
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      kafka-secured:
+        condition: service_healthy
+    networks: [kui-secured]
+    restart: unless-stopped
+
+networks:
+  kui-secured:
+    driver: bridge
