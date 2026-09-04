@@ -187,25 +187,70 @@ controller, 170.9 GiB, 83 in-sync replicas.
 
 ### Known problems that are not fixed
 
-- **A cluster's per-cluster capability is reported `available` even when that cluster is
-  unreachable.** `/api/v1/capabilities` says `available` for the `dead` cluster whose dashboard row
-  correctly says otherwise. The dashboard is right because it reads the row's own section; anything
-  driven by the capability registry — the sidebar, the switcher — is not. This is the unfinished half
-  of CLAPI-008.
-- **`HEAD /ui/main.js` returns 400** while `GET` returns 200. Browsers fetch scripts with `GET`, so
-  nothing is broken on screen, but a health checker or a link checker using `HEAD` gets a wrong answer.
-- **Timestamps disagree between screens.** The dashboard renders `UTC+03:00` and the brokers page
-  `UTC+02:59` for the same zone, from `Timestamps`' `Intl`-based offset assembly (CLUI-007's
-  deviation 4).
-- **The cluster switcher renders the slug, not the display name** — CLUI's finding 3, owed by CLAPI-008.
 - **No per-partition data on the log-directories tab** — `TECH_DEBT.md` TD-017 and TD-018.
-- **`SnapshotFreshness` loses the error's code**, so every failing scrape is reported as
-  `UPSTREAM_UNAVAILABLE` regardless of whether it was a timeout or an auth failure — CLAPI-004's
-  deviation 2.
 - **No per-broker WARN rate limit** on the log-directory fallback — owed to CLDOM-006.
-- **One rarely flaky test**: `BrokerDetailUseCaseSuite.logDirsFallsBackToTheSnapshotWhenTheLiveCallFails`
-  failed once in roughly thirty runs under artificial CPU starvation. It now prints the admin calls it
-  observed when it fails, so the next occurrence arrives with evidence.
+- **`KafkaConfigStoreLiveSuite` is flaky when the whole repository's tests run at once.** It passes
+  every time on its own (`./mill libs.config.test`) and failed in three of five full `./mill __.test`
+  runs on 2026-09-04, with `UnknownTopicOrPartitionException` during bootstrap and with a replica
+  that had not converged. It is a live-Kafka Testcontainers suite competing with three other
+  Testcontainers suites for one machine, not a defect in the code under test — but it is a test
+  asserting on timing under contention, which is the same class of problem as the flake fixed below,
+  and it is owed the same treatment.
+
+### The six defects the integration pass left open — all fixed, 2026-09-04
+
+Each was reproduced first, as a test that failed against the code as it stood, and the observed
+failure is recorded here beside its fix.
+
+1. **A dead cluster's per-cluster capability reported `available`.** `CapabilityReportUseCase.stateOf`
+   reported `Available` for every managed cluster whatever its snapshot said, so
+   `/api/v1/capabilities` called a cluster available whose own dashboard row said `Unavailable`. The
+   dashboard was right because it reads the row's own section; the sidebar and the cluster switcher,
+   which read the capability registry, were wrong. The invariant that rule protected — one dead
+   cluster must not dim the cluster feature for everybody, DEVPLAN D4 and ADR-039 §6 — is now
+   enforced only where it belongs, on the *service's* key, which `ReadinessPoller.summarise` builds
+   from readiness and the circuit and never from a cluster's status. A cluster that is not answering
+   is reported `Degraded` on its own key, carrying the failure's own message. The seam is tested in
+   `apps/allinone/test`'s new `CapabilitySeamSuite`, the only module that compiles against both the
+   cluster service's mapping and the gateway's fold — which is exactly why the defect survived: every
+   test on both sides passed, because each side was consistent with what it believed the other did.
+   **Observed before the fix:** `document.clusters(dead).status` was `available` and the fold returned
+   `Available`.
+2. **The cluster switcher rendered the slug, not the display name.** The capability stream carried no
+   name, so `ClusterEntry.of` had nothing but the id to label a row with. `ClusterCapability` now
+   carries the operator's own name (and the reason a cluster is not available), `CapabilityEntry`
+   carries it to the browser, and the store remembers it across frames that do not repeat it.
+   **Observed before the fix:** the switcher rendered `prod-eu-1` where the configuration said
+   `Production EU (primary)`.
+3. **`SnapshotFreshness` lost the error's code.** It flattened the `KuiError` into a sentence written
+   for a person, so `SectionMapping` had nothing left to classify and reported every failing scrape as
+   `UPSTREAM_UNAVAILABLE`. It carries the error itself now. **Observed before the fix:** a
+   `Timeout` produced `Section.Unavailable(UpstreamUnavailable, …)` instead of `UpstreamTimeout`.
+4. **Timestamps disagreed between screens.** `Timestamps.Fields.offsetSeconds` subtracted an instant's
+   *milliseconds* from a wall clock measured in whole seconds, so an instant a few hundred
+   milliseconds past the second gave 10799 seconds instead of 10800 — rendered `UTC+02:59`.
+   **Observed before the fix:** `offsetSeconds("Europe/Warsaw", …)` returned 7199 rather than 7200 for
+   an instant 501 ms past the second.
+5. **`HEAD` on the frontend bundle returned 400 while `GET` returned 200.** Two causes, both fixed:
+   the static routes declared no `HEAD` endpoint, and `libs/http`'s `ErrorInterceptor.shouldRespond`
+   treated a *method* mismatch as a request to answer rather than as a routing question, so the first
+   endpoint declaring the path answered `400 KUI-VALIDATION` and no later endpoint was ever tried.
+   A path served for one method and not another now falls through to the reject handler and answers
+   `404 KUI-ROUTE-NOT-FOUND` naming the method — a documented behaviour change, asserted in
+   `SessionMiddlewareSuite`. **Observed before the fix:** `HEAD /ui/main.js` → 400, `GET` → 200.
+6. **One rarely flaky test.** `BrokerDetailUseCaseSuite.logDirsFallsBackToTheSnapshotWhenTheLiveCallFails`
+   depended on a race between two fibers: a cluster's topology cell and its capability cell load
+   independently, and a topology built before the probe answers skips `describeLogDirs` entirely, so
+   there was nothing to fall back to. `ClusterRig.settled` now means the stronger thing — the probe has
+   answered *and* the topology in the cells was built from it — and it asserts that as a condition
+   rather than waiting a duration. One forced refresh was not enough either: `SnapshotCell` publishes
+   its new state before clearing the in-flight slot, and `refresh` joins an in-flight load, so it
+   refreshes until the topology's feature set matches the probe's. **Observed before the fix:** with a
+   20 ms delay on the admin port the fallback found no directories on every run, deterministically.
+
+Two contract fields were added for defects 1 and 2 — `ClusterCapability.name` and `.reason`, and
+`CapabilityEntry.name` — all optional and defaulted, so an older service or an older browser still
+decodes. Both OpenAPI documents and the golden documents were regenerated.
 
 ### Next step
 
