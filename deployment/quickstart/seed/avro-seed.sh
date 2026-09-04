@@ -32,6 +32,10 @@
 #                KUI_REGISTRY_URL  — required, the registry's Confluent-compatible base URL
 #                KUI_AVRO_TOPIC    — optional, default orders.avro
 #                KUI_SEED_TIMEOUT_SECONDS — optional, default 120
+#                KUI_SEED_USERNAME, KUI_SEED_PASSWORD — optional. Set them when the KUI being
+#                seeded has `kui.auth.type: form`, which the --with-auth quickstart does.
+#                Producing is a mutation, so without a signed-in principal that may write to the
+#                topic it is refused with a 401 and no Avro record is ever written.
 #   Exit code    0 when the topic ends up holding decodable Avro records.
 #
 # Idempotent, in the same sense as its neighbour: registering a schema that is already registered
@@ -47,6 +51,8 @@ readonly CLUSTER="${KUI_CLUSTER_ID:-}"
 readonly REGISTRY="${KUI_REGISTRY_URL:-}"
 readonly TOPIC="${KUI_AVRO_TOPIC:-orders.avro}"
 readonly TIMEOUT_SECONDS="${KUI_SEED_TIMEOUT_SECONDS:-120}"
+readonly USERNAME="${KUI_SEED_USERNAME:-}"
+readonly PASSWORD="${KUI_SEED_PASSWORD:-}"
 readonly COOKIES="$(mktemp)"
 
 log() { printf '[avro-seed] %s\n' "$*"; }
@@ -107,6 +113,38 @@ while :; do
   [[ $(date +%s) -lt ${deadline} ]] || die "KUI did not answer at ${BASE_URL} within ${TIMEOUT_SECONDS}s."
   sleep 2
 done
+
+# ---------------------------------------------------------------------------------------------
+# Step 2b: signing in, when this deployment has a login
+# ---------------------------------------------------------------------------------------------
+#
+# Skipped entirely when no username was given, which is the default and the ordinary quickstart.
+#
+# Signing in REPLACES the session — a new id and a new CSRF secret, which is ADR-019's defence
+# against session fixation — so the token fetched above is dead the moment the login succeeds. That
+# is why `/auth/me` is asked a second time afterwards rather than the first answer being reused: the
+# first version of this signed in, kept the old token, and had every produce refused with a 403 that
+# said nothing about a login.
+
+if [[ -n "${USERNAME}" ]]; then
+  log "signing in as ${USERNAME}"
+  status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+    -b "${COOKIES}" -c "${COOKIES}" \
+    -H 'Content-Type: application/json' \
+    -H "X-Csrf-Token: ${csrf}" \
+    --data "{\"username\":\"${USERNAME}\",\"password\":\"${PASSWORD}\"}" \
+    "${BASE_URL}/api/v1/auth/login")
+
+  case "${status}" in
+    2*) : ;;
+    *) die "KUI refused the sign-in for '${USERNAME}' (HTTP ${status})." ;;
+  esac
+
+  identity=$(curl -sS -c "${COOKIES}" -b "${COOKIES}" "${BASE_URL}/api/v1/auth/me") \
+    || die "KUI did not answer /auth/me after the sign-in."
+  csrf=$(printf '%s' "${identity}" | sed -n 's/.*"csrfToken":"\([^"]*\)".*/\1/p')
+  [[ -n "${csrf}" ]] || die "the session after signing in carried no CSRF token."
+fi
 
 # ---------------------------------------------------------------------------------------------
 # Step 3: the records

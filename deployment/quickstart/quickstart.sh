@@ -4,6 +4,7 @@
 # in it.
 #
 #   deployment/quickstart/quickstart.sh          start everything and print the URL
+#   deployment/quickstart/quickstart.sh --with-auth   the same, but with a login and two roles
 #   deployment/quickstart/quickstart.sh down     stop everything and remove it, volumes included
 #   deployment/quickstart/quickstart.sh logs     follow the logs
 #   deployment/quickstart/quickstart.sh status   what is running
@@ -23,6 +24,17 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/../.." && pwd)"
 COMPOSE_FILE="${HERE}/docker-compose.quickstart.yml"
+AUTH_FILE="${HERE}/docker-compose.auth.yml"
+
+# `--with-auth` swaps KUI's configuration file for one that has `kui.auth` and `kui.rbac` filled in.
+# It is a Compose override rather than a second topology: the broker, the data and the registry are
+# the same, so the only difference between the two runs is the login. It is accepted before the
+# subcommand so that `--with-auth down` tears the same thing down.
+WITH_AUTH=false
+if [[ "${1:-}" == "--with-auth" ]]; then
+  WITH_AUTH=true
+  shift
+fi
 
 KUI_VERSION="${KUI_VERSION:-0.1.0-SNAPSHOT}"
 KUI_IMAGE="kui-allinone:${KUI_VERSION}"
@@ -33,7 +45,11 @@ export KUI_VERSION KUI_PORT
 export KUI_QUICKSTART_KAFKA_PORT="${KAFKA_PORT}"
 
 compose() {
-  docker compose --project-directory "${HERE}" -f "${COMPOSE_FILE}" "$@"
+  if [ "${WITH_AUTH}" = true ]; then
+    docker compose --project-directory "${HERE}" -f "${COMPOSE_FILE}" -f "${AUTH_FILE}" "$@"
+  else
+    docker compose --project-directory "${HERE}" -f "${COMPOSE_FILE}" "$@"
+  fi
 }
 
 say()  { printf '%s\n' "$*"; }
@@ -145,6 +161,16 @@ up() {
 
   say ""
   say "  KUI is running:  http://localhost:${KUI_PORT}/ui/"
+  if [ "${WITH_AUTH}" = true ]; then
+    say ""
+    say "  It asks you to sign in. Two accounts, both spelled out in kui-quickstart-auth.yaml:"
+    say ""
+    say "    admin  / quickstart-admin    may do everything on this cluster"
+    say "    viewer / quickstart-viewer   may look at topics and read records, and nothing else"
+    say ""
+    say "  Sign in as viewer to see the difference: the create, edit, add-partitions, empty and"
+    say "  delete controls are absent rather than present and refused."
+  fi
   say ""
 }
 
@@ -164,6 +190,6 @@ case "${1:-up}" in
   logs)    require_docker; compose logs -f ;;
   status)  require_docker; compose ps ;;
   *)
-    die "Usage: ${0} [up|down|logs|status]"
+    die "Usage: ${0} [--with-auth] [up|down|logs|status]"
     ;;
 esac

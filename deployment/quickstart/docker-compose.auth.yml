@@ -1,0 +1,29 @@
+# The quickstart, with a login in front of it.
+#
+# A Compose *override*: it is applied on top of docker-compose.quickstart.yml and changes exactly one
+# thing — which configuration file KUI reads. Everything else, the broker and its data included, is
+# the same environment. That is the point: the difference between "KUI with no authentication" and
+# "KUI with a login and two roles" should be one file and nothing else.
+#
+# Do not run this by hand. Run:
+#
+#     deployment/quickstart/quickstart.sh --with-auth
+#
+# and sign in as `admin` / `quickstart-admin`, or as `viewer` / `quickstart-viewer` to see a role
+# with fewer permissions render fewer controls. ./kui-quickstart-auth.yaml has the accounts and the
+# roles, with the reasoning beside each.
+
+services:
+  kui:
+    command: ["--config", "/etc/kui/kui-quickstart-auth.yaml"]
+    volumes:
+      - ./kui-quickstart-auth.yaml:/etc/kui/kui-quickstart-auth.yaml:ro
+
+  # The Avro seed goes through KUI's produce API, which is a mutation, and a mutation now needs a
+  # signed-in principal that may write to the topic. It signs in as `admin` first. Without this the
+  # seed would fail with a 401 and the Avro half of the demonstration would silently be missing from
+  # exactly the run where authorization is being demonstrated.
+  avro-seed:
+    environment:
+      KUI_SEED_USERNAME: admin
+      KUI_SEED_PASSWORD: quickstart-admin

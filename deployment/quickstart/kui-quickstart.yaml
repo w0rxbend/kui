@@ -27,8 +27,16 @@ kui:
     devInsecureCookies: true
 
   auth:
-    # The only value the current release accepts. Real authentication arrives with the identity
-    # service in M6; anything else here fails the load with a message saying so.
+    # No login. This is KUI's default and it is what a quickstart should be: a newcomer who meets a
+    # password prompt before they have seen a topic list has not seen the product.
+    #
+    # `form` and `oidc` are the other two values, and both work. To see the sign-in screen, the role
+    # gating and the account menu against this same broker, run
+    #
+    #     deployment/quickstart/quickstart.sh --with-auth
+    #
+    # which swaps in ./kui-quickstart-auth.yaml. `ldap` is refused at start-up by name rather than
+    # being treated as an unknown word.
     type: disabled
 
   topics:

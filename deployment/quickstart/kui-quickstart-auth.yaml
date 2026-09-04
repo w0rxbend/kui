@@ -1,0 +1,171 @@
+# The quickstart's KUI configuration, WITH A LOGIN.
+#
+# This is ./kui-quickstart.yaml with two blocks filled in — `kui.auth` and `kui.rbac` — and nothing
+# else changed. It exists so that "authentication works" is something you can see rather than
+# something a document claims, and so that the difference between the default (no login at all) and
+# this one is a diff of two files rather than a paragraph.
+#
+# Run it with:
+#
+#     deployment/quickstart/quickstart.sh --with-auth
+#
+# Then sign in as either of:
+#
+#     admin  / quickstart-admin     may do everything on this cluster
+#     viewer / quickstart-viewer    may look at topics and read records, and nothing else
+#
+# Signed in as `viewer`, the create-topic button, the topic-configuration editor, "Add partitions",
+# "Empty topic" and "Delete topic" are not on the screen. They are not disabled — they are absent,
+# because the browser is told the same permission set the gateway refuses with.
+#
+# THIS IS A DEMONSTRATION CONFIGURATION AND ITS PASSWORDS ARE PUBLIC. There is no TLS, the session
+# cookie is served without `Secure` so that plain HTTP on localhost works, and the two password
+# hashes below are in a public repository. All three are wrong anywhere a network can reach.
+
+kui:
+  server:
+    # Every interface. Binding 127.0.0.1 inside a container makes the process unreachable from
+    # outside it, which looks exactly like a crash and is not one.
+    host: "0.0.0.0"
+    port: 8080
+    basePath: "/"
+
+    # Plain HTTP on localhost, so the session cookie cannot carry `Secure` or the browser will
+    # refuse to send it back. KUI warns about this on every start and the warning is correct:
+    # never set it anywhere a network can reach.
+    devInsecureCookies: true
+
+  auth:
+    # A login form with two accounts held in this file. The smallest credible deployment: a shared
+    # instance with a few named people and no directory server to ask.
+    #
+    # THE PASSWORDS ARE IN THIS REPOSITORY AND EVERYONE CAN READ THEM. That is fine for a
+    # demonstration on a laptop and is wrong anywhere a network can reach. A real deployment writes
+    # `passwordHash: "env:KUI_ADA_HASH"` and keeps the hash out of the file; see
+    # docs/operations/authentication.md.
+    #
+    # A hash names its own algorithm, cost and salt, so raising the cost later does not invalidate
+    # the hashes already written. Produce one with:
+    #
+    #     ./mill services.identity.app.runMain kui.identity.app.HashPassword
+    #
+    # which reads the password from standard input, so it never reaches `ps` or a shell history.
+    type: form
+    users:
+      # Password: quickstart-admin
+      - name: admin
+        passwordHash: "pbkdf2-sha256$210000$XC3iqjVZVXLOxdQ_XOBsGA$vAP_bescrRwxKG0x2hwV4whRWaghTJZORzHeBiOP76w"
+        groups: [operators]
+      # Password: quickstart-viewer
+      - name: viewer
+        passwordHash: "pbkdf2-sha256$210000$0y6raPVUTElFb7dJQAbEVA$AwALno5FnJFzpkRDseIvafLdRJIVhmfF3uve99WIA2A"
+        groups: [readers]
+
+  topics:
+    # A topic is internal when Kafka says so OR when its name starts with this prefix. The default is
+    # `__`, which catches Kafka's own `__consumer_offsets`. The quickstart lowers it to a single
+    # underscore because it seeds `_schemas` — the topic Confluent Schema Registry keeps its schemas
+    # in — and a single leading underscore is the convention infrastructure topics like that use. With
+    # this set, the topics screen shows the seven topics that are yours and hides `_schemas` and
+    # `__consumer_offsets` behind the "show internal topics" switch.
+    internalPrefix: "_"
+
+  telemetry:
+    # Overridden to `text` by the Compose file, because `docker compose logs` is read by a person.
+    logFormat: json
+    hashUserIds: true
+
+  # ---------------------------------------------------------------------------------------------
+  # The broker this quickstart starts.
+  #
+  # `kafka:9092` and not `localhost:9092`: KUI reaches the broker across the Compose network by
+  # container name. The port published on your machine is for your own tools.
+  #
+  # `id` is optional. Without it KUI derives one from the name — `Quickstart (local)` would become
+  # `quickstart-local` — and that derived id appears in every URL. Setting it explicitly here means
+  # the name can be edited later without breaking a bookmark.
+  #
+  # There is no `security` block, so this cluster is PLAINTEXT: no authentication and no encryption,
+  # which is what the broker this quickstart starts offers. See
+  # docs/operations/configuration.md for the SASL and TLS keys a real cluster needs.
+  clusters:
+    - name: "Quickstart (local)"
+      id: "quickstart"
+      bootstrapServers:
+        - "kafka:9092"
+
+      # The Schema Registry this quickstart starts beside the broker.
+      #
+      # Setting this is the whole on/off switch for schema-aware decoding on this cluster: with it,
+      # KUI fetches each record's schema by the id inside the record and shows the decoded value;
+      # without it, an Avro payload has no valid text reading at all and renders as bytes. The
+      # address is the Confluent-compatible endpoint of Apicurio Registry — any registry speaking
+      # that API works, and `url` may list several addresses for a registry cluster.
+      schemaRegistry:
+        url:
+          - "http://schema-registry:8080/apis/ccompat/v7"
+
+      # Which serde reads which topic.
+      #
+      # `defaultValue` is deliberately NOT set to SchemaRegistry here. Only one topic in this
+      # quickstart is Avro, and the other seven are JSON or plain text; a per-topic pattern says
+      # exactly that, and it is also the setting an operator is most likely to need on a real
+      # cluster where one team's topics are Avro and another's are not. A cluster that is Avro
+      # throughout writes `defaultValue: SchemaRegistry` instead and no patterns at all.
+      #
+      # The pattern matches a whole topic name. `orders\.avro` matches the topic of that name and
+      # not `orders.avro.retry`, because the dot is escaped and the match is anchored at both ends.
+      serde:
+        patterns:
+          - serde: SchemaRegistry
+            topicValuesPattern: "orders\\.avro"
+
+  # ---------------------------------------------------------------------------------------------
+  # Two roles, so that the difference authorization makes is visible rather than described.
+  #
+  # `operators` may do everything on this cluster. `readers` may look at topics and read their
+  # records, and may do nothing else — no creating a topic, no editing a configuration, no adding
+  # partitions, no emptying and no deleting. Signed in as `viewer`, those controls are not present
+  # on the screen at all: the same policy value that the gateway refuses with is what `/auth/me`
+  # returns to the browser, so the interface hides exactly what the server would refuse rather than
+  # offering a button that fails.
+  #
+  # `provider: FORM` because these people signed in with the form above. `kind: group` matches the
+  # `groups:` list on the account. `value` on a permission is a regular expression matched against
+  # the whole resource name; a TOPIC permission without one grants nothing at all, which is why the
+  # configuration loader refuses it at start-up instead of silently granting nothing.
+  # ---------------------------------------------------------------------------------------------
+  rbac:
+    roles:
+      - name: operators
+        clusters: [quickstart]
+        subjects:
+          - provider: FORM
+            kind: group
+            value: operators
+        permissions:
+          - resource: TOPIC
+            value: ".*"
+            actions: [ALL]
+          - resource: CONSUMER
+            value: ".*"
+            actions: [ALL]
+          - resource: CLUSTERCONFIG
+            actions: [ALL]
+          - resource: SCHEMA
+            value: ".*"
+            actions: [ALL]
+
+      - name: readers
+        clusters: [quickstart]
+        subjects:
+          - provider: FORM
+            kind: group
+            value: readers
+        permissions:
+          - resource: TOPIC
+            value: ".*"
+            actions: [VIEW, MESSAGES_READ]
+          - resource: CONSUMER
+            value: ".*"
+            actions: [VIEW]
