@@ -1,0 +1,1580 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI Consumer service",
+    "version" : "1.0.0"
+  },
+  "paths" : {
+    "/internal/v1/clusters/{clusterId}/consumer-groups" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "The cluster's consumer groups, with lag and pace",
+        "description" : "Read from the group snapshot rather than from a live describe, so the lag and the end offsets it was computed against come from the same pass. A group whose lag could not be computed reports null, never zero, and says how many partitions were excluded.",
+        "operationId" : "consumer.list",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "state",
+            "in" : "query",
+            "description" : "Keep only groups in these states; repeat the parameter for more than one. Empty means all",
+            "required" : false,
+            "schema" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "Substring match over the group id. Not over member hosts or topic names",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "sort",
+            "in" : "query",
+            "description" : "Which column to sort by",
+            "required" : false,
+            "schema" : {
+              "default" : "id",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "direction",
+            "in" : "query",
+            "description" : "Which way to sort",
+            "required" : false,
+            "schema" : {
+              "default" : "asc",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "page",
+            "in" : "query",
+            "description" : "Which page, numbered from one",
+            "required" : false,
+            "schema" : {
+              "default" : 1,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "pageSize",
+            "in" : "query",
+            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "required" : false,
+            "schema" : {
+              "default" : 25,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageDto_A"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: query parameter page, Invalid value for: query parameter pageSize",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/consumer-groups/lag" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Which groups' lag changed since the given token",
+        "description" : "The token is issued by this service and carries the snapshot version it was cut from. A client clock is not a version: sending the browser's own timestamp back, as the reference product does, silently drops or replays updates whenever the two clocks disagree.",
+        "operationId" : "consumer.lag",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "group",
+            "in" : "query",
+            "description" : "Only these groups; repeat the parameter. Empty means every group on the cluster",
+            "required" : false,
+            "schema" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          {
+            "name" : "since",
+            "in" : "query",
+            "description" : "The opaque token from the previous answer. Absent, unrecognised or expired means send everything",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LagDeltaDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/consumer-groups/{groupId}" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "One consumer group: members, assignments and per-partition lag",
+        "description" : "An unknown group answers 200 with an empty group in state DEAD, not 404: the port fabricates a dead group for a describe of a group that does not exist, and a stale bookmark should show an empty page rather than an error.",
+        "operationId" : "consumer.detail",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id, as Kafka knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GroupDetailDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Delete a consumer group",
+        "description" : "Mutation (consumer.group.delete). This call changes the cluster and cannot be undone. Refused with KUI-GROUP-NOT-EMPTY while the group still has members — the one refusal an operator can act on directly, by stopping the consumers.",
+        "operationId" : "consumer.group.delete",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/topics/{topic}/consumer-groups" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Every consumer group that reads this topic, with its lag on this topic alone",
+        "description" : "Feeds the gateway's topic-overview aggregation. A group's lag here is its lag on this topic, which is not its total lag whenever it consumes more than one.",
+        "operationId" : "consumer.forTopic",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topic",
+            "in" : "path",
+            "description" : "The topic name",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicConsumersDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets/plan" : {
+      "post" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "What resetting this group's offsets would do",
+        "description" : "Part of the consumer.offsets.reset flow. This call changes nothing. Resolves the request against the group's live offsets and returns the exact offsets that would be written, any clamping as a warning, and a token valid for five minutes. Changes nothing. Refused on a read-only cluster, so that the wizard never renders a plan that cannot be applied.",
+        "operationId" : "consumer.offsets.plan",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResetPlanRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResetPlanDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets" : {
+      "post" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Write the offsets a plan token names",
+        "description" : "Mutation (consumer.offsets.reset). This call changes the cluster and cannot be undone. Takes only a plan token. The group's state and member list are re-checked immediately before the write, because the group may have become active since the plan was made. An expired or tampered token is a validation error, never a silent re-plan.",
+        "operationId" : "consumer.offsets.apply",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResetApplyRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResetPlanDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Delete a group's committed offsets for one topic",
+        "description" : "Mutation (consumer.offsets.delete). This call changes the cluster and cannot be undone. Answers with the partitions whose offsets were removed, so that 'the group had none' and 'they were deleted' are distinguishable — which an empty 204 body cannot do.",
+        "operationId" : "consumer.offsets.delete",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topic",
+            "in" : "query",
+            "description" : "Delete this group's committed offsets for this topic",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeletedOffsetsDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: query parameter topic",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live" : {
+      "get" : {
+        "description" : "Whether the process should be restarted. Never depends on an upstream.",
+        "operationId" : "health.live",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LivenessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready" : {
+      "get" : {
+        "description" : "Whether the service can serve requests now, and which checks say otherwise.",
+        "operationId" : "health.ready",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities" : {
+      "get" : {
+        "description" : "What this service can currently do, per cluster.",
+        "operationId" : "capabilities",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceCapabilities"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AssignmentFreshnessDto" : {
+        "title" : "AssignmentFreshnessDto",
+        "description" : "Whether the assignments are current, and when they were last seen if not",
+        "type" : "object",
+        "required" : [
+          "status"
+        ],
+        "properties" : {
+          "status" : {
+            "description" : "How fresh the assignments are: CURRENT, LAST_SEEN, UNKNOWN",
+            "type" : "string"
+          },
+          "observedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "CheckResult" : {
+        "title" : "CheckResult",
+        "description" : "One readiness check and its result",
+        "type" : "object",
+        "required" : [
+          "name",
+          "healthy"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "healthy" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterCapability" : {
+        "title" : "ClusterCapability",
+        "type" : "object",
+        "required" : [
+          "configured",
+          "status"
+        ],
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "features" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DeletedOffsetsDto" : {
+        "title" : "DeletedOffsetsDto",
+        "description" : "Which partitions' committed offsets were deleted",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "topic"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "GroupDetailDto" : {
+        "title" : "GroupDetailDto",
+        "description" : "One consumer group: its members, their assignments, and its lag per partition",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "state",
+          "protocol",
+          "isSimple",
+          "partitionAssignor",
+          "excludedPartitions",
+          "assignments",
+          "observedAt"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "state" : {
+            "description" : "A consumer group's lifecycle state: STABLE, EMPTY, DEAD, PREPARING_REBALANCE, COMPLETING_REBALANCE, UNKNOWN",
+            "type" : "string"
+          },
+          "protocol" : {
+            "description" : "Which group protocol a member speaks: CLASSIC, CONSUMER, UNKNOWN",
+            "type" : "string"
+          },
+          "isSimple" : {
+            "type" : "boolean"
+          },
+          "partitionAssignor" : {
+            "type" : "string"
+          },
+          "coordinatorId" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "members" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MemberDto"
+            }
+          },
+          "topics" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TopicSubscriptionDto"
+            }
+          },
+          "totalLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "excludedPartitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "assignments" : {
+            "$ref" : "#/components/schemas/AssignmentFreshnessDto"
+          },
+          "observedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "stale" : {
+            "$ref" : "#/components/schemas/StaleDto"
+          }
+        }
+      },
+      "GroupSummaryDto" : {
+        "title" : "GroupSummaryDto",
+        "description" : "One consumer group as the list shows it; totalLag is null when it could not be computed",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "state",
+          "protocol",
+          "isSimple",
+          "members",
+          "topics",
+          "partitions",
+          "excludedPartitions"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "state" : {
+            "description" : "A consumer group's lifecycle state: STABLE, EMPTY, DEAD, PREPARING_REBALANCE, COMPLETING_REBALANCE, UNKNOWN",
+            "type" : "string"
+          },
+          "protocol" : {
+            "description" : "Which group protocol a member speaks: CLASSIC, CONSUMER, UNKNOWN",
+            "type" : "string"
+          },
+          "isSimple" : {
+            "type" : "boolean"
+          },
+          "members" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "topics" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "coordinatorId" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "pace" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "excludedPartitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "incomplete" : {
+            "$ref" : "#/components/schemas/IncompleteDto"
+          }
+        }
+      },
+      "IncompleteDto" : {
+        "title" : "IncompleteDto",
+        "description" : "Which parts of this group's row could not be read, and why",
+        "type" : "object",
+        "required" : [
+          "membersKnown",
+          "offsetsKnown",
+          "endOffsetsKnown",
+          "note"
+        ],
+        "properties" : {
+          "membersKnown" : {
+            "type" : "boolean"
+          },
+          "offsetsKnown" : {
+            "type" : "boolean"
+          },
+          "endOffsetsKnown" : {
+            "type" : "boolean"
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "LagDeltaDto" : {
+        "title" : "LagDeltaDto",
+        "description" : "Groups whose lag changed since the given token, the groups that are gone, and a new token",
+        "type" : "object",
+        "required" : [
+          "token",
+          "nextPollMs",
+          "full"
+        ],
+        "properties" : {
+          "changed" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/LagUpdateDto"
+            }
+          },
+          "gone" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a consumer group id",
+              "type" : "string"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "nextPollMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "full" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "LagUpdateDto" : {
+        "title" : "LagUpdateDto",
+        "description" : "One group's changed lag, pace, state and member count",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "state",
+          "members"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "totalLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "pace" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "state" : {
+            "description" : "A consumer group's lifecycle state: STABLE, EMPTY, DEAD, PREPARING_REBALANCE, COMPLETING_REBALANCE, UNKNOWN",
+            "type" : "string"
+          },
+          "members" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "LivenessReport" : {
+        "title" : "LivenessReport",
+        "description" : "Whether the process should be restarted",
+        "type" : "object",
+        "required" : [
+          "alive",
+          "at"
+        ],
+        "properties" : {
+          "alive" : {
+            "type" : "boolean"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "Map_ClusterId_ClusterCapability" : {
+        "title" : "Map_ClusterId_ClusterCapability",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/ClusterCapability"
+        }
+      },
+      "Map_Long" : {
+        "title" : "Map_Long",
+        "type" : "object",
+        "additionalProperties" : {
+          "type" : "integer",
+          "format" : "int64"
+        }
+      },
+      "MemberDto" : {
+        "title" : "MemberDto",
+        "description" : "One consumer in the group, with the partitions it holds",
+        "type" : "object",
+        "required" : [
+          "memberId",
+          "clientId",
+          "host",
+          "rebalancing"
+        ],
+        "properties" : {
+          "memberId" : {
+            "type" : "string"
+          },
+          "groupInstanceId" : {
+            "type" : "string"
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "host" : {
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rebalancing" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "PageDto_A" : {
+        "title" : "PageDto_A",
+        "description" : "One page of a list: the items, and where the page sits in the whole",
+        "type" : "object",
+        "required" : [
+          "page"
+        ],
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/GroupSummaryDto"
+            }
+          },
+          "page" : {
+            "$ref" : "#/components/schemas/PageInfo"
+          }
+        }
+      },
+      "PageInfo" : {
+        "title" : "PageInfo",
+        "description" : "Where this page sits in the list; pageCount is derived from totalItems and pageSize",
+        "type" : "object",
+        "required" : [
+          "page",
+          "pageSize"
+        ],
+        "properties" : {
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalItems" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "nextPageToken" : {
+            "description" : "An opaque continuation token",
+            "type" : "string"
+          }
+        }
+      },
+      "PartitionDto" : {
+        "title" : "PartitionDto",
+        "description" : "One partition's committed offset, end offset and lag, with why the lag is absent",
+        "type" : "object",
+        "required" : [
+          "partition"
+        ],
+        "properties" : {
+          "partition" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "committed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "begin" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "end" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "lag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "anomalies" : {
+            "type" : "array",
+            "items" : {
+              "description" : "Why a partition's lag is not a plain number: NO_COMMIT, COMMITTED_BEYOND_END, COMMITTED_BEFORE_START, NO_LEADER",
+              "type" : "string"
+            }
+          },
+          "memberId" : {
+            "type" : "string"
+          },
+          "host" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PlannedPartitionDto" : {
+        "title" : "PlannedPartitionDto",
+        "description" : "What one partition's committed offset is now and what it would become",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "proposed"
+        ],
+        "properties" : {
+          "partition" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "current" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "proposed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "delta" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ReadinessReport" : {
+        "title" : "ReadinessReport",
+        "description" : "Whether the service can serve requests now",
+        "type" : "object",
+        "required" : [
+          "ready",
+          "at"
+        ],
+        "properties" : {
+          "ready" : {
+            "type" : "boolean"
+          },
+          "checks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CheckResult"
+            }
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ResetApplyRequest" : {
+        "title" : "ResetApplyRequest",
+        "description" : "The plan token, and nothing else",
+        "type" : "object",
+        "required" : [
+          "token"
+        ],
+        "properties" : {
+          "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ResetPlanDto" : {
+        "title" : "ResetPlanDto",
+        "description" : "Exactly what a reset would write, and the token that applies it unchanged",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "topic",
+          "target",
+          "noOp",
+          "token",
+          "expiresAt"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "target" : {
+            "description" : "Where a reset moves the offsets: EARLIEST, LATEST, TIMESTAMP, OFFSET, SHIFT_BY, DURATION",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PlannedPartitionDto"
+            }
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ResetWarningDto"
+            }
+          },
+          "noOp" : {
+            "type" : "boolean"
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ResetPlanRequest" : {
+        "title" : "ResetPlanRequest",
+        "description" : "Ask what a reset would do. TIMESTAMP needs timestamp, OFFSET needs offsets, SHIFT_BY needs shiftBy, DURATION needs durationMs.",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "target"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          "target" : {
+            "description" : "Where a reset moves the offsets: EARLIEST, LATEST, TIMESTAMP, OFFSET, SHIFT_BY, DURATION",
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "offsets" : {
+            "$ref" : "#/components/schemas/Map_Long"
+          },
+          "shiftBy" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ResetWarningDto" : {
+        "title" : "ResetWarningDto",
+        "description" : "Something the operator should see before applying the plan",
+        "type" : "object",
+        "required" : [
+          "kind",
+          "message"
+        ],
+        "properties" : {
+          "kind" : {
+            "type" : "string"
+          },
+          "partition" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ServiceCapabilities" : {
+        "title" : "ServiceCapabilities",
+        "type" : "object",
+        "required" : [
+          "service",
+          "clusters"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "clusters" : {
+            "$ref" : "#/components/schemas/Map_ClusterId_ClusterCapability"
+          }
+        }
+      },
+      "StaleDto" : {
+        "title" : "StaleDto",
+        "description" : "This is the last good answer, fetched at this time, for this reason",
+        "type" : "object",
+        "required" : [
+          "fetchedAt",
+          "reason"
+        ],
+        "properties" : {
+          "fetchedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "reason" : {
+            "description" : "Why a capability is not available",
+            "type" : "string"
+          }
+        }
+      },
+      "TopicConsumerRowDto" : {
+        "title" : "TopicConsumerRowDto",
+        "description" : "A group that consumes this topic, with its lag on this topic alone",
+        "type" : "object",
+        "required" : [
+          "group",
+          "partitions",
+          "dormant"
+        ],
+        "properties" : {
+          "group" : {
+            "$ref" : "#/components/schemas/GroupSummaryDto"
+          },
+          "topicLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dormant" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "TopicConsumersDto" : {
+        "title" : "TopicConsumersDto",
+        "description" : "Every consumer group that reads this topic",
+        "type" : "object",
+        "properties" : {
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TopicConsumerRowDto"
+            }
+          }
+        }
+      },
+      "TopicSubscriptionDto" : {
+        "title" : "TopicSubscriptionDto",
+        "description" : "One subscribed topic and this group's position in each of its partitions",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "excludedPartitions"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "lag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "excludedPartitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PartitionDto"
+            }
+          }
+        }
+      }
+    }
+  }
+}

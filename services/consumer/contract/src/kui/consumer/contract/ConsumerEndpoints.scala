@@ -239,6 +239,22 @@ object ConsumerEndpoints {
       )
       .tag("consumer")
 
-  /** Every read endpoint this service serves. Nothing is routed that is not in this list. */
-  val all: List[AnyEndpoint] = List(list, detail, lag, forTopic)
+  /** Every read endpoint this service serves, **in the order a router must try them**. Nothing is routed
+    * that is not in this list.
+    *
+    * `lag` comes before `detail` and the order is load bearing. `/consumer-groups/lag` and
+    * `/consumer-groups/{groupId}` both match the path `/consumer-groups/lag`, and a router that tries
+    * `detail` first answers the poll with a description of a consumer group whose id is the string "lag".
+    *
+    * What makes that worth a comment rather than a shrug is that it does not look like a failure. Describing
+    * a group that does not exist answers with a fabricated dead group (`GroupAdmin.describeGroups`), so the
+    * shadowed poll returns `200` and a perfectly well-formed document — an empty group in state `DEAD` — and
+    * the browser's lag column simply stops updating with nothing anywhere saying why. It was found by
+    * calling the endpoint against a running cluster, and it is invisible to every test that exercises the
+    * two endpoints separately.
+    *
+    * The gateway derives its proxy routes from this list in this order (`ContractRouting.derive`), so the
+    * order here is the order the public API is served in as well.
+    */
+  val all: List[AnyEndpoint] = List(list, lag, detail, forTopic)
 }

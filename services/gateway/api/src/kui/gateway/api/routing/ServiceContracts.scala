@@ -3,6 +3,7 @@ package kui.gateway.api.routing
 import sttp.tapir.AnyEndpoint
 
 import kui.cluster.contract.ClusterEndpoints
+import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.topic.contract.TopicEndpoints
 
@@ -22,7 +23,12 @@ object ServiceContracts {
   val byService: Map[ServiceId, List[AnyEndpoint]] =
     Map(
       ServiceId.unsafe("cluster") -> ClusterEndpoints.all,
-      ServiceId.unsafe("topic") -> TopicEndpoints.all
+      ServiceId.unsafe("topic") -> TopicEndpoints.all,
+      // Both lists, because the consumer service publishes its reads and its mutations from two
+      // objects: the reads are ordinary contract endpoints and the four mutation endpoints carry the
+      // marker and the CSRF header ADR-047 requires. The gateway proxies them all the same way — it
+      // rewrites the prefix and forwards the inputs, and the marker is read by policy, not by routing.
+      ServiceId.unsafe("consumer") -> (ConsumerEndpoints.all ++ ConsumerMutationEndpoints.all)
     )
 
   def of(service: ServiceId): List[AnyEndpoint] = byService.getOrElse(service, Nil)

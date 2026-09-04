@@ -4,6 +4,7 @@ import munit.FunSuite
 import sttp.tapir.AnyEndpoint
 
 import kui.cluster.contract.ClusterEndpoints
+import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.topic.contract.TopicEndpoints
 
@@ -17,6 +18,7 @@ final class ServiceContractsSuite extends FunSuite {
 
   private val cluster = ServiceId.unsafe("cluster")
   private val topic = ServiceId.unsafe("topic")
+  private val consumer = ServiceId.unsafe("consumer")
 
   /** The public address of one endpoint, including its path parameters.
     *
@@ -30,9 +32,16 @@ final class ServiceContractsSuite extends FunSuite {
   }
 
   test("everyConfiguredServiceHasItsContract") {
-    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic))
+    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer))
     assertEquals(ServiceContracts.of(cluster), ClusterEndpoints.all)
     assertEquals(ServiceContracts.of(topic), TopicEndpoints.all)
+    // Both of the consumer service's lists. Its mutations are published from a second object because
+    // they carry a marker and a CSRF header the reads do not; forgetting the second list here would
+    // leave the offset reset unroutable while every one of its own tests stayed green.
+    assertEquals(
+      ServiceContracts.of(consumer),
+      ConsumerEndpoints.all ++ ConsumerMutationEndpoints.all
+    )
   }
 
   test("a service the gateway has no contract for is not an error") {

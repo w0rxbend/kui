@@ -11,10 +11,14 @@ import org.typelevel.log4cats.StructuredLogger
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
 import kui.config.{ClusterConfig, TopicsConfig}
+import kui.consumer.api.ConsumerApi
+import kui.consumer.app.ConsumerWiring
 import kui.gateway.api.InfoRoutes
 import kui.gateway.app.{GatewayServer, GatewayWiring}
 import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.kernel.ServiceId
+import kui.message.api.MessageApi
+import kui.message.app.MessageWiring
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 import kui.topic.api.TopicApi
@@ -120,14 +124,19 @@ object AllInOneWiring {
       )
     } yield gateway
 
-  /** The services this build contains, in the order they were added.
+  /** The services this build contains, in the order `ServiceClients` keeps them — by id, alphabetically.
+    *
+    * Sorted rather than in the order the wiring adds them, because `ServiceClients.of` sorts, and
+    * `AllInOneWiringSuite` asserts this list *equals* what the wiring produced. A list in a different order
+    * would make that assertion fail for a reason that has nothing to do with a missing service, which is the
+    * thing it exists to catch.
     *
     * It is written out rather than derived from the wiring because the startup log has to name them before
     * anything has been constructed, and because it is the list a reader checks against `ROADMAP.md` to see
     * which milestone's services are actually in this binary. [[services]] must agree with it, and
     * `AllInOneWiringSuite` asserts that it does rather than leaving the two to drift.
     */
-  val Services: List[ServiceId] = List(ClusterApi.Id, TopicApi.Id)
+  val Services: List[ServiceId] = List(ClusterApi.Id, ConsumerApi.Id, MessageApi.Id, TopicApi.Id)
 
   /** Every KUI service, wired in this process and reachable in memory.
     *
@@ -151,6 +160,27 @@ object AllInOneWiring {
       // itself over a socket to read a list it is holding in memory would add a listener, a timeout
       // and a failure mode to a lookup that cannot fail; see `ConfiguredClusterProfiles`.
       topicService <- TopicWiring.make[F](clusters, topics.refreshInterval, telemetry, principals, logger)
+      // The consumer service reads the same `kui.clusters[]`, for the same reason the topic service
+      // does: this process is already holding the list, and calling itself over a socket to read it
+      // would add a listener, a timeout and a failure mode to a lookup that cannot fail.
+      //
+      // Its refresh interval is its own constant rather than `kui.topics.refreshInterval`. Describing
+      // every consumer group on a cluster and describing its topics are different costs against
+      // different broker paths, and one knob for both would mean tuning the cheaper one by the
+      // expensive one. A `kui.consumers` section is what replaces the constant when an operator needs
+      // to turn it.
+      consumerService <- ConsumerWiring.make[F](
+        clusters,
+        ConsumerWiring.DefaultRefreshInterval,
+        telemetry,
+        principals,
+        logger
+      )
+      // The message service reads the same `kui.clusters[]` again, and holds nothing else. Unlike the
+      // topic and consumer services it keeps no snapshot and runs no background scrape: it opens a
+      // Kafka consumer when somebody browses, streams what was asked for, and closes it again. So
+      // there is no interval to configure here and nothing for a broker outage to make stale.
+      messageService <- MessageWiring.make[F](clusters, telemetry, principals, logger)
     } yield ServiceClients.of[F](
       List[ServiceClient[F]](
         InProcessServiceClient.make[F](
@@ -163,6 +193,18 @@ object AllInOneWiring {
           TopicApi.Id,
           topicService.routes,
           topicService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          ConsumerApi.Id,
+          consumerService.routes,
+          consumerService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          MessageApi.Id,
+          messageService.routes,
+          messageService.interceptors,
           principals
         )
       )
