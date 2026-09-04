@@ -162,10 +162,17 @@
 
 /* --- The partition table ---------------------------------------------------------------------- */
 
+/* One line, never two. A partition row is a fixed height because the windowed table works out which
+ * rows are in view from that height, and the cell clips what does not fit — so a wrapped second line
+ * of chips was drawn below the row's bottom edge and vanished, silently. The Scala side now shows
+ * the first three replicas and rolls the rest into a "+N" chip, which is what keeps this line short
+ * enough to fit; `nowrap` is here so that a longer broker id than expected clips visibly at the
+ * right-hand edge instead of disappearing downwards. */
 .kui-topics__replicas {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--kui-space-2);
+  overflow: hidden;
 }
 
 /* --- The settings tab ------------------------------------------------------------------------- */

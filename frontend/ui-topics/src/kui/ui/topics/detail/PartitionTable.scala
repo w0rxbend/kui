@@ -148,23 +148,49 @@ object PartitionTable {
         )
     }
 
+  /** How many replica chips a row shows before the rest are rolled into one. */
+  private val VisibleReplicas: Int = 3
+
   /** Every replica as a chip: the leader marked, and anything out of sync marked differently.
     *
     * Both marks are words as well as colours. A chip that carried "out of sync" in its colour alone would be
     * invisible to about one man in twelve, and this is a column where the whole point is spotting the odd one
     * out.
+    *
+    * ## Why the chips are counted rather than wrapped
+    *
+    * They used to be allowed to wrap onto a second line. A partition row is a fixed height — the windowed
+    * table computes which rows are in view from that height, so it cannot be anything else — and its cells
+    * clip what does not fit. So on a replication factor of four or more the extra chips were drawn below the
+    * bottom edge of the row and simply disappeared, with nothing on screen saying that any had. The one chip
+    * a reader is hunting for is the out-of-sync one, and it was as likely to be hidden as any other.
+    *
+    * The row now shows the first three, in the assignment order Kafka gave them, and rolls the remainder into
+    * a "+N" chip whose tooltip names every one of them. The overflow chip takes the warning colour if
+    * anything it is hiding is out of sync, so a row with a problem is still marked at a glance even when the
+    * problem is in the part that did not fit.
     */
-  private def replicaChips(row: PartitionDto): Modifier[HtmlElement] =
+  private def replicaChips(row: PartitionDto): Modifier[HtmlElement] = {
+    val (shown, rest) = row.replicas.splitAt(VisibleReplicas)
+
     div(
       cls := TopicsCss.Replicas,
-      row.replicas.map { replica =>
+      shown.map { replica =>
         Tag(
           label = Val(replicaLabel(replica)),
           tone = toneOf(replica),
           testId = Some(s"partition-row-${row.partition.value}-replica-${replica.broker.value}")
         )
-      }
+      },
+      Option.when(rest.nonEmpty)(
+        Tag(
+          label = Val(Messages.moreReplicas(rest.size)),
+          tone = if rest.exists(!_.inSync) then Tone.Warning else Tone.Neutral,
+          testId = Some(s"partition-row-${row.partition.value}-replica-overflow")
+        ).amend(title := rest.map(replicaLabel).mkString(", "))
+      )
     )
+  }
 
   private[detail] def replicaLabel(replica: ReplicaDto): String =
     if replica.leader then Messages.replicaLeader(replica.broker.value)

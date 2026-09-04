@@ -131,6 +131,9 @@ object Messages {
     */
   def replicaOutOfSync(broker: Int): String = s"$broker out of sync"
 
+  /** The chip standing in for the replicas that did not fit on the row. Its tooltip names them all. */
+  def moreReplicas(count: Int): String = s"+$count"
+
   val NoPartitionsTitle: String = "No partitions"
 
   val NoPartitions: String =
