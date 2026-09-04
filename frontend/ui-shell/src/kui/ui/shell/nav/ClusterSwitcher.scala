@@ -69,6 +69,14 @@ object ClusterSwitcher {
     div(
       cls := ShellCss.ClusterSwitcher,
       Components.testIdAttr(testId),
+      // A deployment with one cluster is not asking the user to choose; see `SoleCluster`. The
+      // selection is filled in, and the user is *not* navigated anywhere — that would move somebody
+      // who had deliberately opened another page, and the only thing missing was the sidebar's
+      // cluster-scoped entries, which appear the moment the selection exists.
+      // A signal and not its `.changes`: the one cluster is usually already in the registry by the
+      // time this mounts, and `.changes` would skip exactly that case — the common one.
+      entries.combineWith(current.signal).map(SoleCluster.choice) -->
+        Observer[Option[ClusterId]](_.foreach(id => current.set(Some(id)))),
       button(
         idAttr := triggerId,
         tpe := "button",

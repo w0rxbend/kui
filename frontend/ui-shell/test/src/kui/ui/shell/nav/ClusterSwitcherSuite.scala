@@ -268,4 +268,39 @@ class ClusterSwitcherSuite extends FunSuite {
       assert(root.textContent.contains("No clusters configured"), root.textContent)
     }
   }
+
+  test("theOnlyClusterIsChosenWithoutBeingAskedFor") {
+    // A single-cluster deployment is not asking the user to make a choice, and until one is made the
+    // sidebar has no Topics and no Consumers entry in it — with nothing on screen to say that opening
+    // the switcher is what brings them back.
+    val fixture = new Fixture(Map(entryFor("only") -> CapabilityState.Available))
+    mounted(fixture.element) { _ =>
+      assertEquals(fixture.chosen.now().map(_.value), Some("only"))
+      // Selected, not navigated to: moving somebody who deliberately opened another page is a
+      // different and much ruder thing than filling in a blank.
+      assertEquals(fixture.opened.toList, Nil)
+    }
+  }
+
+  test("twoClustersAreLeftForThePersonToChooseBetween") {
+    val fixture = new Fixture(
+      Map(entryFor("prod") -> CapabilityState.Available, entryFor("staging") -> CapabilityState.Available)
+    )
+    mounted(fixture.element) { _ =>
+      assertEquals(fixture.chosen.now(), None)
+    }
+  }
+
+  test("anExistingChoiceIsNeverOverriddenByTheSoleClusterRule") {
+    // The stored choice, or the one a pasted URL set, names a cluster the registry has not reported
+    // yet. Replacing it with the one cluster that has reported would move the recipient of a link
+    // away from what the sender saw.
+    val fixture = new Fixture(
+      Map(entryFor("only") -> CapabilityState.Available),
+      current = Some(cluster("elsewhere"))
+    )
+    mounted(fixture.element) { _ =>
+      assertEquals(fixture.chosen.now().map(_.value), Some("elsewhere"))
+    }
+  }
 }
