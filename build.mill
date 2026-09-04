@@ -1458,6 +1458,20 @@ object services extends Module {
     */
   object message extends Module {
 
+    /** Business rules and the ports they are stated in terms of. Rule A1 allows it `libs/kernel` and
+      * cats-core and nothing else, which is why `DecodedRecord` carries a `String` and not circe's
+      * `Json`, and why every port here is declared in domain terms and satisfied by an adapter over
+      * the library types.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
     /** The published wire shape of `kui-message-service`.
       *
       * Cross-compiled for the reason every KUI contract is: the browser decodes exactly what the
