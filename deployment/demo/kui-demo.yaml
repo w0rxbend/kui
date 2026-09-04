@@ -1,0 +1,139 @@
+# The demonstration environment's KUI configuration: three clusters, complete, nothing to edit.
+#
+# THIS FILE IS THE "ZERO CONFIGURATION" PROMISE. It ships in the repository already naming all three
+# of the clusters `docker-compose.demo.yml` starts. Nobody types an address, nobody generates a
+# password, nobody copies a certificate. The two secrets the secured cluster needs are written below
+# as `env:` references and supplied by the Compose file that starts the stack.
+#
+# THIS IS A DEMONSTRATION CONFIGURATION, NOT A PRODUCTION ONE. Two of the three clusters have no
+# authentication and no encryption, and `devInsecureCookies` below is a setting no deployment
+# reachable by a network may ever have. `../examples/production.yaml` is the file to copy for real
+# work; `../examples/minimal.yaml` is the file to copy for a first cluster of your own.
+#
+# Every key here can also be given as an environment variable -- `kui.server.port` becomes
+# `KUI_SERVER_PORT` -- or as a command-line flag `--kui.server.port=9090`. Flags beat the
+# environment, the environment beats this file, and this file beats the built-in defaults.
+
+kui:
+  server:
+    # Every interface. Binding 127.0.0.1 inside a container makes the process unreachable from
+    # outside it, which looks exactly like a crash and is not one. Control who can reach KUI with
+    # your network, not with this key.
+    host: "0.0.0.0"
+    port: 8080
+    basePath: "/"
+
+    # Plain HTTP on localhost, so the session cookie cannot carry `Secure` or the browser will
+    # refuse to send it back. KUI warns about this on every start and the warning is correct: never
+    # set it anywhere a network can reach.
+    devInsecureCookies: true
+
+  auth:
+    # The only value the current release accepts. Real authentication arrives with the identity
+    # service in M6; anything else here fails the load with a message saying so.
+    type: disabled
+
+  topics:
+    # A topic is internal when Kafka says so OR when its name starts with this prefix. The default
+    # is `__`, which catches Kafka's own `__consumer_offsets`. This lowers it to a single underscore
+    # because the seed data includes `_schemas` -- the topic Confluent Schema Registry keeps its
+    # schemas in -- and a single leading underscore is the convention infrastructure topics use.
+    # With this set, the topics screen shows the seven topics that are yours and hides the rest
+    # behind the "show internal topics" switch.
+    internalPrefix: "_"
+
+  telemetry:
+    # Overridden to `text` by the Compose file, because `docker compose logs` is read by a person.
+    logFormat: json
+    hashUserIds: true
+
+  # ===============================================================================================
+  # The three clusters.
+  #
+  # Nothing here is checked against a broker at start-up: reachability is not knowable from a file,
+  # and a cluster that is spelled correctly and unreachable shows as unavailable on the dashboard
+  # rather than stopping KUI from starting. That is exactly the behaviour `demo.sh stop prod`
+  # exercises -- stop a cluster and the other two carry on, with the stopped one reported rather
+  # than hidden.
+  #
+  # Every address is a container name on the Compose network, not `localhost`. KUI reaches the
+  # brokers across that private network; the ports published on your machine are for your own tools.
+  #
+  # `id` is optional -- without it KUI derives one from the name -- and is set explicitly on all
+  # three because the derived id appears in every URL, so setting it means the display name can be
+  # edited later without breaking a bookmark.
+  # ===============================================================================================
+  clusters:
+
+    # ---------------------------------------------------------------------------------------------
+    # 1. Development: one broker, plain text. The everyday case.
+    #
+    # No `security` block at all, which means PLAINTEXT: no authentication and no encryption. That
+    # is what this broker offers, and it is the shortest cluster entry there is.
+    # ---------------------------------------------------------------------------------------------
+    - name: "Development"
+      id: "development"
+      bootstrapServers:
+        - "kafka-dev:9092"
+
+    # ---------------------------------------------------------------------------------------------
+    # 2. Production-shaped: three brokers.
+    #
+    # All three are listed. One would be enough -- a Kafka client is told about the rest of the
+    # cluster in the first metadata response, so any single live broker bootstraps the whole thing --
+    # but a one-address list makes that one broker a single point of failure for STARTING UP, which
+    # defeats the purpose of having three. Real deployments list several for the same reason.
+    #
+    # This is the cluster where replication factor, in-sync replicas and partition leadership are
+    # real numbers rather than a column of ones.
+    # ---------------------------------------------------------------------------------------------
+    - name: "Production"
+      id: "production"
+      bootstrapServers:
+        - "kafka-prod-1:9092"
+        - "kafka-prod-2:9092"
+        - "kafka-prod-3:9092"
+
+    # ---------------------------------------------------------------------------------------------
+    # 3. Secured: SASL over TLS.
+    #
+    # `SASL_SSL` is the protocol -- authenticate AND encrypt. `SCRAM-SHA-512` is the mechanism: how
+    # the password is proved without ever being sent. Both spellings are Kafka's own, upper case, so
+    # they can be copied straight out of Kafka's documentation. The pair people get wrong is
+    # `SASL_PLAINTEXT`, which authenticates but does NOT encrypt -- it sends the credentials in the
+    # clear -- and is only ever safe inside a network you already trust completely.
+    #
+    # This entry is `../examples/production.yaml`'s secured cluster with the address changed. That
+    # is deliberate: what is being demonstrated is the example a newcomer copies, not a special file
+    # written to work here.
+    # ---------------------------------------------------------------------------------------------
+    - name: "Secured"
+      id: "secured"
+      bootstrapServers:
+        - "kafka-secured:9093"
+      security:
+        protocol: SASL_SSL
+        mechanism: SCRAM-SHA-512
+        username: "kui"
+        # Never a literal, even here. The Compose file sets this variable; a real deployment gets it
+        # from whatever delivers its secrets. If yours mounts files rather than setting variables --
+        # which is what Kubernetes Secrets and Docker Compose secrets do -- the `file:` form works
+        # too: `password: "file:/run/secrets/kui-kafka-password"`.
+        password: "env:KUI_DEMO_SECURED_PASSWORD"
+        ssl:
+          # Whether the broker's certificate must match the host name connected to. Leave this on.
+          # Turning it off to make a certificate error go away also removes the check that the broker
+          # is who it claims to be, which is most of what TLS was doing for you. It stays on here,
+          # and passes, because the demonstration certificate names `kafka-secured` among its
+          # subject alternative names -- which is the address above.
+          verifyHostname: true
+          # Only needed when the brokers use a private certificate authority the container's own
+          # trust store has never heard of, which is exactly the case here: this authority was
+          # created by ../secured/generate-certs.sh a few seconds before KUI started.
+          truststore:
+            location: "/etc/kui/certs/kafka-ca.p12"
+            password: "env:KUI_DEMO_TRUSTSTORE_PASSWORD"
+            type: PKCS12
+
+  # Declared so the shape exists; read by nothing yet. The authorization model is M6.
+  rbac: {}

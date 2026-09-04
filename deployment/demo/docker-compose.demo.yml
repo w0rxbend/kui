@@ -1,0 +1,461 @@
+# The demonstration environment: three Kafka clusters, deliberately different, and one KUI that
+# already knows all three.
+#
+# THIS IS A DEMONSTRATION ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. Two of the three brokers speak
+# plain text with no authentication and no encryption, the third's credentials are written in this
+# file in plain sight, and KUI serves its session cookie without `Secure` so that plain HTTP on
+# localhost works at all. Every one of those is wrong anywhere a network can reach it.
+#
+# Do not run this file by hand -- run `deployment/demo/demo.sh`, which builds the KUI image if it is
+# missing, generates the demonstration certificate authority if it is missing, checks the ports, and
+# then calls this file. The script is the documented entry point; this file is what it drives.
+#
+# WHY THREE CLUSTERS. Managing more than one Kafka cluster from one place is what KUI is for, and a
+# single cluster cannot show it: no cluster switcher, no per-cluster capability state, and above all
+# no way to see one cluster fail while the others carry on, which is the property the whole
+# architecture exists to have. The three are also different on purpose --
+#
+#   development   one broker, plain text. The everyday case, and the cheapest thing to run.
+#   production    three brokers. Replication factor, in-sync replicas, under-replication and a real
+#                 controller election are only visible here; a single broker can never show any of
+#                 them, because every topic on it has exactly one replica by necessity.
+#   secured       SASL over TLS, reusing ../secured/ rather than inventing a second certificate
+#                 scheme. It proves the documented secured path works from a file a user can copy.
+
+name: kui-demo
+
+# -------------------------------------------------------------------------------------------------
+# Settings every broker in this file shares.
+#
+# The heap cap is the one worth explaining. A Kafka broker with no `KAFKA_HEAP_OPTS` sizes its heap
+# from the host's memory, which is fine for one broker and wasteful for five: on a 32 GB laptop the
+# five would reserve several gigabytes between them before a single message existed. 512 MiB is far
+# more than a demonstration's eight topics and a few hundred messages will ever need.
+# -------------------------------------------------------------------------------------------------
+x-kafka-common: &kafka-common
+  image: apache/kafka:4.3.1
+  restart: unless-stopped
+  environment: &kafka-common-env
+    KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    # Do not wait three seconds for other consumers to join a group that will only ever have one.
+    KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+# A Kafka container reports itself started long before it can answer a client: the process is up and
+# the port accepts connections while the controller is still electing itself and publishing the
+# cluster's metadata. `kafka-topics.sh --list` is a real metadata request over the real client
+# protocol, so it cannot pass until the broker can genuinely serve a client. That is the difference
+# between "started" and "ready".
+#
+# On the three-broker cluster this is necessary and NOT sufficient -- see wait-for-brokers.sh.
+x-kafka-healthcheck: &kafka-healthcheck
+  test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+  interval: 5s
+  timeout: 10s
+  retries: 30
+  start_period: 15s
+
+services:
+
+  # ===============================================================================================
+  # CLUSTER 1 -- development. One broker, plain text, KRaft mode: it is its own controller and there
+  # is no ZooKeeper. This is the quickstart's broker, in this stack alongside two others.
+  # ===============================================================================================
+  kafka-dev:
+    <<: *kafka-common
+    container_name: kui-demo-kafka-dev
+    ports:
+      # For YOUR tools -- kcat, an IDE, a console consumer. KUI does not use this route; it reaches
+      # the broker across the private network below, by container name.
+      - "${KUI_DEMO_DEV_PORT:-19092}:29092"
+    environment:
+      <<: *kafka-common-env
+      # A fixed cluster id rather than a generated one, so the broker formats its storage the same
+      # way on every machine and a support question about it is answerable.
+      CLUSTER_ID: kui-demo-dev-00000001
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-dev:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Three listeners, because the address a client must be told depends on where the client is. A
+      # container on this network resolves `kafka-dev`; a program on your laptop cannot, and resolves
+      # `localhost`. A Kafka client always reconnects to the address the broker ADVERTISES rather
+      # than the one it was handed, which is why getting this wrong produces the classic failure
+      # where the first connection works and every later one hangs.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-dev:9092,EXTERNAL://localhost:${KUI_DEMO_DEV_PORT:-19092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      # One broker, so every internal topic has to be content with a single replica. The defaults
+      # are 3 and the broker refuses to create the consumer-offsets topic without them.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck: *kafka-healthcheck
+    networks: [kui-demo]
+
+  # The data. ./seed/seed.sh is told which PROFILE to apply and reads that profile's tables out of
+  # ./seed/profiles/<name>/. That is the whole reason the three clusters do not look alike: the
+  # development profile is small and scruffy, the production one is large and properly configured,
+  # and the secured one is a third, smaller shape again. Switching clusters in KUI therefore shows
+  # you something, which is the entire point of running three.
+  seed-dev:
+    image: apache/kafka:4.3.1
+    container_name: kui-demo-seed-dev
+    depends_on:
+      kafka-dev:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/seed/seed.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-dev:9092
+      KUI_SEED_PROFILE: development
+    volumes:
+      - ./seed:/seed:ro
+    networks: [kui-demo]
+    # A seed that failed and was restarted would seed twice. It is written to be safe to re-run, but
+    # a restart loop hiding a real error is worse than a visible failure.
+    restart: "no"
+
+  # The one consumer group on this cluster that is actually ALIVE. seed.sh can write the committed
+  # offsets of a group that has stopped, because a stopped group is nothing but those offsets sitting
+  # in Kafka. It cannot fake a running one: a group has members only while some process holds a
+  # session open, and a seed job exits. The two states look completely different on a consumer-groups
+  # screen, and a reader who only ever sees dead groups cannot tell which of them is the broken one.
+  consumer-dev:
+    image: apache/kafka:4.3.1
+    container_name: kui-demo-consumer-dev
+    depends_on:
+      seed-dev:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/seed/consume.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-dev:9092
+      KUI_DEMO_GROUP: order-notifier
+      KUI_DEMO_TOPIC: orders.v1
+    volumes:
+      - ./seed:/seed:ro
+    networks: [kui-demo]
+    restart: unless-stopped
+
+  # ===============================================================================================
+  # CLUSTER 2 -- production-shaped. Three brokers, each one also a controller, forming a quorum of
+  # three. This is the cluster that has something to show:
+  #
+  #   * topics with a replication factor of 3 and `min.insync.replicas=2`, which is the durability
+  #     setting a topic you cannot lose actually uses;
+  #   * a leader and two followers per partition, spread across brokers, so partition leadership is
+  #     a real thing on screen rather than "broker 1" repeated;
+  #   * under-replication you can cause on purpose -- `demo.sh stop prod-broker` stops one broker,
+  #     the partitions it led are re-elected onto the survivors, and the in-sync replica count
+  #     drops from 3 to 2 while the cluster keeps serving;
+  #   * a controller election, because the controller quorum survives losing one of its three.
+  #
+  # None of that is visible on a single-broker cluster, at all, ever.
+  # ===============================================================================================
+  kafka-prod-1:
+    <<: *kafka-common
+    container_name: kui-demo-kafka-prod-1
+    ports:
+      - "${KUI_DEMO_PROD_PORT_1:-19093}:29092"
+    environment:
+      <<: *kafka-common-env
+      # All three brokers share this id. It identifies the CLUSTER, not the node -- brokers that
+      # disagree about it refuse to form one.
+      CLUSTER_ID: kui-demo-prod-0000001
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # The quorum: all three nodes, by the name they answer to on this network. Every node is given
+      # the identical list; that list is how they find each other in the first place.
+      KAFKA_CONTROLLER_QUORUM_VOTERS: &prod-quorum 1@kafka-prod-1:9093,2@kafka-prod-2:9093,3@kafka-prod-3:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-prod-1:9092,EXTERNAL://localhost:${KUI_DEMO_PROD_PORT_1:-19093}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      # Three brokers, so Kafka's own internal topics get the replication they are meant to have.
+      # This is not decoration either: `__consumer_offsets` with three replicas is why stopping a
+      # broker does not lose every consumer group's committed position.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck: *kafka-healthcheck
+    networks: [kui-demo]
+
+  kafka-prod-2:
+    <<: *kafka-common
+    container_name: kui-demo-kafka-prod-2
+    ports:
+      - "${KUI_DEMO_PROD_PORT_2:-19094}:29092"
+    environment:
+      <<: *kafka-common-env
+      CLUSTER_ID: kui-demo-prod-0000001
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: *prod-quorum
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-prod-2:9092,EXTERNAL://localhost:${KUI_DEMO_PROD_PORT_2:-19094}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck: *kafka-healthcheck
+    networks: [kui-demo]
+
+  # The broker `demo.sh stop prod-broker` stops. It is node 3 rather than node 1 for no deeper
+  # reason than that stopping the first of anything reads like a special case; there is nothing
+  # special about it, which is the point of stopping it.
+  kafka-prod-3:
+    <<: *kafka-common
+    container_name: kui-demo-kafka-prod-3
+    ports:
+      - "${KUI_DEMO_PROD_PORT_3:-19095}:29092"
+    environment:
+      <<: *kafka-common-env
+      CLUSTER_ID: kui-demo-prod-0000001
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: *prod-quorum
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-prod-3:9092,EXTERNAL://localhost:${KUI_DEMO_PROD_PORT_3:-19095}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck: *kafka-healthcheck
+    networks: [kui-demo]
+
+  # THE GATE. Three healthy brokers are not the same thing as one cluster of three: each broker
+  # answers a metadata request the moment it is up, whether or not the other two have joined, so all
+  # three health checks can be green while the cluster contains one broker. A topic created in that
+  # window gets one replica instead of three, silently, and the cluster whose whole purpose is to
+  # show replication spends the rest of the run showing none.
+  #
+  # wait-for-brokers.sh waits for all three to be registered AND for a three-replica topic to be
+  # accepted. Everything that touches this cluster waits for this service to exit successfully.
+  kafka-prod-ready:
+    image: apache/kafka:4.3.1
+    container_name: kui-demo-kafka-prod-ready
+    depends_on:
+      kafka-prod-1: { condition: service_healthy }
+      kafka-prod-2: { condition: service_healthy }
+      kafka-prod-3: { condition: service_healthy }
+    entrypoint: ["/bin/bash", "/demo/wait-for-brokers.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-prod-1:9092,kafka-prod-2:9092,kafka-prod-3:9092
+      KUI_EXPECTED_BROKERS: 3
+    volumes:
+      - ./wait-for-brokers.sh:/demo/wait-for-brokers.sh:ro
+    networks: [kui-demo]
+    restart: "no"
+
+  seed-prod:
+    image: apache/kafka:4.3.1
+    container_name: kui-demo-seed-prod
+    depends_on:
+      kafka-prod-ready:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/seed/seed.sh"]
+    environment:
+      # Every broker, not one. A bootstrap list with a single address still works -- the client is
+      # told about the others in the first metadata response -- but naming all three means the seed
+      # survives that one broker being the one that is slow to start.
+      KAFKA_BOOTSTRAP_SERVERS: kafka-prod-1:9092,kafka-prod-2:9092,kafka-prod-3:9092
+      KUI_SEED_PROFILE: production
+      # The seed's own broker-count wait, set to what this profile is written for. It overlaps with
+      # kafka-prod-ready above on purpose: the gate proves a three-replica topic can actually be
+      # PLACED, this proves the seed is not about to create one before all three have registered.
+      # Neither is expensive and between them there is no window in which a topic gets one replica.
+      KUI_SEED_EXPECT_BROKERS: "3"
+    volumes:
+      - ./seed:/seed:ro
+    networks: [kui-demo]
+    restart: "no"
+
+  consumer-prod:
+    image: apache/kafka:4.3.1
+    container_name: kui-demo-consumer-prod
+    depends_on:
+      seed-prod:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/seed/consume.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-prod-1:9092,kafka-prod-2:9092,kafka-prod-3:9092
+      KUI_DEMO_GROUP: search-indexer
+      KUI_DEMO_TOPIC: search.index-updates
+      # Three members in one container, so the group's members screen shows an assignment spread
+      # across three consumers rather than one consumer owning every partition. That is the shape a
+      # real group has, and the one an operator reads when a single member is stuck.
+      KUI_DEMO_MEMBERS: "3"
+    volumes:
+      - ./seed:/seed:ro
+    networks: [kui-demo]
+    restart: unless-stopped
+
+  # ===============================================================================================
+  # CLUSTER 3 -- secured. SASL_SSL with SCRAM-SHA-512, behind a private certificate authority.
+  #
+  # This is ../secured/docker-compose.secured.yml's broker, configuration for configuration, in this
+  # stack. It reuses ../secured/certs -- generated by ../secured/generate-certs.sh, which demo.sh
+  # runs for you when the directory is missing -- rather than inventing a second certificate scheme,
+  # because the point of a secured cluster in a demonstration is to prove that the documented path
+  # works, and two paths would prove nothing about either.
+  #
+  # The service is named `kafka-secured` and cannot be renamed: the broker's certificate names that
+  # host in its subject alternative names, hostname verification is left ON as any real deployment
+  # should leave it, and a certificate that does not name the address is one the handshake rejects.
+  #
+  # It publishes no host port. A TLS listener reached through a published port would have to
+  # advertise `localhost`, and then the certificate, the advertised address and the address KUI
+  # connects to would have to agree -- solvable, and a distraction from what this cluster is here to
+  # demonstrate. Your own tools can use the other two clusters.
+  # ===============================================================================================
+  kafka-secured:
+    <<: *kafka-common
+    container_name: kui-demo-kafka-secured
+    environment:
+      <<: *kafka-common-env
+      CLUSTER_ID: kui-demo-secured-00001
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-secured:9094
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
+      # CLIENT is the only listener KUI is given: SASL_SSL with SCRAM-SHA-512.
+      # ADMIN is a plaintext listener on the private network, used once to create the SCRAM user and
+      # to seed the data. That is the bootstrap problem every SCRAM cluster has: the credential has
+      # to be created before anyone can authenticate with it.
+      KAFKA_LISTENERS: CLIENT://0.0.0.0:9093,BROKER://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094,ADMIN://0.0.0.0:9095
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-secured:9093,BROKER://kafka-secured:9092,ADMIN://kafka-secured:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,BROKER:PLAINTEXT,ADMIN:PLAINTEXT,CLIENT:SASL_SSL
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      KAFKA_LISTENER_NAME_CLIENT_SCRAM___SHA___512_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required;"
+      KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/broker.keystore.p12
+      KAFKA_SSL_KEYSTORE_PASSWORD: kui-secured-demo
+      KAFKA_SSL_KEY_PASSWORD: kui-secured-demo
+      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
+      KAFKA_SSL_CLIENT_AUTH: none
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - ../secured/certs:/etc/kafka/secrets:ro
+    healthcheck:
+      # Against the ADMIN listener: a health check has no credentials, and a check that fails for
+      # want of a password would report a working broker as broken for ever.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9095 --list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+    networks: [kui-demo]
+
+  # Creates the SCRAM user KUI authenticates as, then seeds the same data as the other two clusters.
+  seed-secured:
+    image: apache/kafka:4.3.1
+    container_name: kui-demo-seed-secured
+    depends_on:
+      kafka-secured:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka-secured:9095 \
+          --alter --add-config 'SCRAM-SHA-512=[password=kui-scram-secret]' --entity-type users --entity-name kui
+        echo "[secured] SCRAM user 'kui' created"
+        exec /bin/bash /seed/seed.sh
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-secured:9095
+      KUI_SEED_PROFILE: secured
+    volumes:
+      - ./seed:/seed:ro
+    networks: [kui-demo]
+    restart: "no"
+
+  consumer-secured:
+    image: apache/kafka:4.3.1
+    container_name: kui-demo-consumer-secured
+    depends_on:
+      seed-secured:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/seed/consume.sh"]
+    environment:
+      # The plaintext ADMIN listener again, for the same reason as the seed above: this container is
+      # scenery, and giving it credentials would only mean a second copy of them to keep in step.
+      # What is being demonstrated over SASL_SSL is KUI's connection, not this one.
+      KAFKA_BOOTSTRAP_SERVERS: kafka-secured:9095
+      KUI_DEMO_GROUP: secure-audit-stream
+      KUI_DEMO_TOPIC: audit.log.raw
+    volumes:
+      - ./seed:/seed:ro
+    networks: [kui-demo]
+    restart: unless-stopped
+
+  # ===============================================================================================
+  # KUI, in its all-in-one shape: the gateway and every service in one process (ADR-005). The
+  # distributed shape lives in ../compose/docker-compose.yml and exists to demonstrate fault
+  # isolation between KUI's own processes; this stack demonstrates fault isolation between CLUSTERS,
+  # which is a different property and needs only one KUI.
+  # ===============================================================================================
+  kui:
+    image: kui-allinone:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-demo-kui
+    command: ["--config", "/etc/kui/kui-demo.yaml"]
+    ports:
+      - "${KUI_PORT:-18080}:8080"
+    environment:
+      # Human-readable log lines. The images default to one JSON object per line, which is right for
+      # a log collector and unreadable for the person who just started the demonstration.
+      KUI_TELEMETRY_LOGFORMAT: text
+      # The secured cluster's two secrets. kui-demo.yaml refers to them as `env:` references rather
+      # than writing them down, which is the habit a real deployment needs; here the values are
+      # supplied by the stack itself, so nobody has to set anything. They match
+      # ../secured/generate-certs.sh and the SCRAM user created above, and they are worthless
+      # outside this laptop.
+      KUI_DEMO_SECURED_PASSWORD: kui-scram-secret
+      KUI_DEMO_TRUSTSTORE_PASSWORD: kui-secured-demo
+    volumes:
+      - ./kui-demo.yaml:/etc/kui/kui-demo.yaml:ro
+      - ../secured/certs/kafka-ca.p12:/etc/kui/certs/kafka-ca.p12:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      # Wait for the data on all three, so the first screen is never a half-seeded cluster.
+      seed-dev:
+        condition: service_completed_successfully
+        # But start anyway if a seed failed. KUI's central design position is that it stays up and
+        # reports what is broken rather than vanishing along with it, and a demonstration that
+        # showed a blank page because one topic could not be created would be contradicting the
+        # product it is demonstrating. `required: false` means "wait for it, but start regardless".
+        required: false
+      seed-prod:
+        condition: service_completed_successfully
+        required: false
+      seed-secured:
+        condition: service_completed_successfully
+        required: false
+    networks: [kui-demo]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/v1/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+networks:
+  kui-demo:
+    driver: bridge
+
+# No volumes. Every broker keeps its log directory inside its own container's writable layer, so
+# removing the container removes the data and there is nothing left on the machine for anyone to
+# find months later. A demonstration's data is a demonstration, not something to preserve.
