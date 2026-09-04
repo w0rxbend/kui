@@ -335,3 +335,58 @@
   display: inline-flex;
   gap: var(--kui-space-1, 0.25rem);
 }
+
+/* --- The smart filter (MS-007) --------------------------------------------------------------
+   A disclosure under the control bar. It is a paragraph of expression with its own help and its
+   own failure, which is why it is not one more control wedged between two dropdowns. */
+
+.kui-messages__filter summary {
+  cursor: pointer;
+  color: var(--kui-color-accent);
+}
+
+.kui-messages__filter-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2, 0.5rem);
+  padding: var(--kui-space-2, 0.5rem) 0;
+}
+
+/* Monospace, because what is typed here is a program: alignment and the difference between a dot
+   and a comma both matter, and a proportional font hides them. */
+.kui-messages__filter-input {
+  width: 100%;
+  padding: var(--kui-space-2, 0.5rem);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md, 8px);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  resize: vertical;
+}
+
+.kui-messages__filter-input:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 1px;
+}
+
+.kui-messages__filter-hint {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-messages__filter-actions {
+  display: flex;
+  gap: var(--kui-space-2, 0.5rem);
+}
+
+/* The compile failure, with its line and column. It sits directly under the box it is about, which
+   is the only place a person looks after pressing Apply. */
+.kui-messages__filter-error {
+  margin: 0;
+  color: var(--kui-color-danger);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}

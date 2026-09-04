@@ -13,7 +13,13 @@ import kui.kernel.error.KuiError
 import kui.kernel.serde.Target
 import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 import kui.message.application.cursor.{BrowseCursor, CursorCodec}
-import kui.message.domain.ports.{ClusterProfileSource, SerdeSource}
+import kui.message.domain.ports.{
+  ClusterProfileSource,
+  CompiledFilter,
+  FilterSource,
+  FilterVerdict,
+  SerdeSource
+}
 import kui.message.domain.{BrowseLimits, BrowseRequest, DecodeError, DecodedRecord, FilterRef, RenderedHeader}
 
 /** Why a browse stopped. */
@@ -49,7 +55,14 @@ enum BrowseEvent {
   /** Progress. `read` counts records taken from Kafka, `delivered` counts the ones that survived the filter;
     * the gap between them is the number that tells a user their filter is doing something.
     */
-  case Consumed(bytes: Long, read: Long, delivered: Long, elapsed: FiniteDuration, budget: PollBudget)
+  case Consumed(
+      bytes: Long,
+      read: Long,
+      delivered: Long,
+      filterErrors: Long,
+      elapsed: FiniteDuration,
+      budget: PollBudget
+  )
 
   /** The browse ended on purpose. `cursor` is the signed continuation of ADR-026, and it is `None` whenever
     * asking again would be pointless.
@@ -125,7 +138,8 @@ object BrowseUseCase {
       clusters: ClusterProfileSource[F],
       serdes: SerdeSource[F],
       source: RecordSource[F],
-      cursors: CursorCodec[F]
+      cursors: CursorCodec[F],
+      filters: FilterSource[F]
   ): BrowseUseCase[F] =
     new BrowseUseCase[F] {
 
@@ -177,22 +191,46 @@ object BrowseUseCase {
         Stream.emit(BrowseEvent.Phase(ResolvingCluster)) ++
           Stream.eval(clusters.cluster(request.cluster)).flatMap {
             case Left(error) => Stream.emit(BrowseEvent.Failed(error))
-            case Right(_) => reading(request, budget)
+            // The smart filter is compiled *before* any Kafka client is opened, and a compile failure ends
+            // the request rather than the stream. An expression with a typo in it must not open a consumer
+            // and read a million records to tell the user nothing matched.
+            case Right(_) =>
+              Stream.eval(predicateFor(request)).flatMap {
+                case Left(error) => Stream.emit(BrowseEvent.Failed(error))
+                case Right(predicate) => reading(request, budget, predicate)
+              }
           }
 
-      private def reading(request: BrowseRequest, budget: PollBudget): Stream[F, BrowseEvent] =
+      /** The compiled smart filter, or the one that lets everything through.
+        *
+        * "No filter" is a predicate rather than a branch around the filtering code, so that the filtered and
+        * unfiltered paths cannot drift apart — and they have drifted in every product where one of them was
+        * an `if`.
+        */
+      private def predicateFor(request: BrowseRequest): F[Either[KuiError, Option[CompiledFilter[F]]]] =
+        request.filter match {
+          case None => Option.empty[CompiledFilter[F]].asRight[KuiError].pure[F]
+          case Some(reference) => filters.compile(request.cluster, reference).map(_.map(Some(_)))
+        }
+
+      private def reading(
+          request: BrowseRequest,
+          budget: PollBudget,
+          filter: Option[CompiledFilter[F]]
+      ): Stream[F, BrowseEvent] =
         Stream.emit(BrowseEvent.Phase(ReadingRecords)) ++
           Stream
             .eval((Clock[F].monotonic, Ref.of[F, State](State.empty)).tupled)
             .flatMap { case (startedAt, state) =>
-              records(request, budget, state) ++ ending(request, budget, state, startedAt)
+              records(request, budget, state, filter) ++ ending(request, budget, state, startedAt)
             }
 
       /** The record events, and the progress events between them. */
       private def records(
           request: BrowseRequest,
           budget: PollBudget,
-          state: Ref[F, State]
+          state: Ref[F, State],
+          filter: Option[CompiledFilter[F]]
       ): Stream[F, BrowseEvent] =
         source
           .browse(request, budget)
@@ -202,7 +240,7 @@ object BrowseUseCase {
           .takeThrough(_.isRight)
           .evalMap {
             case Left(error) => state.update(_.copy(failure = Some(error))).as(Step.stop)
-            case Right(raw) => deliver(request, budget, state, raw)
+            case Right(raw) => deliver(request, budget, state, raw, filter)
           }
           .takeThrough(_.more)
           .flatMap(step => Stream.chunk(step.events))
@@ -212,18 +250,26 @@ object BrowseUseCase {
           request: BrowseRequest,
           budget: PollBudget,
           state: Ref[F, State],
-          raw: RawRecord
+          raw: RawRecord,
+          filter: Option[CompiledFilter[F]]
       ): F[Step] =
         for {
           record <- decode(request, raw)
-          matched = matches(request, record)
+          // Both filters, in the cheap-first order: the substring is a `contains` over text already in
+          // hand, and the expression is a program. A record the substring rejected is never handed to the
+          // engine, which is what keeps a smart filter's cost proportional to what it is asked about.
+          verdict <-
+            if matches(request, record) then verdictOf(filter, record)
+            else FilterVerdict.DidNotMatch.pure[F]
+          matched = verdict == FilterVerdict.Matched
           elapsed <- Clock[F].monotonic
-          next <- state.updateAndGet(_.saw(raw, matched))
+          next <- state.updateAndGet(_.saw(raw, matched, failed(verdict)))
         } yield {
           val progress =
             if matched && next.delivered % ProgressEvery.toLong == 0L then
               Chunk.singleton(
-                BrowseEvent.Consumed(next.bytes, next.read, next.delivered, elapsed, budget)
+                BrowseEvent
+                  .Consumed(next.bytes, next.read, next.delivered, next.filterErrors, elapsed, budget)
               )
             else Chunk.empty[BrowseEvent]
 
@@ -257,7 +303,14 @@ object BrowseUseCase {
                 else BrowseEnd.Exhausted
 
               Stream.emit(
-                BrowseEvent.Consumed(finalState.bytes, finalState.read, finalState.delivered, elapsed, budget)
+                BrowseEvent.Consumed(
+                  finalState.bytes,
+                  finalState.read,
+                  finalState.delivered,
+                  finalState.filterErrors,
+                  elapsed,
+                  budget
+                )
               ) ++ Stream.eval(cursorFor(request, finalState, reason)).map(BrowseEvent.Finished(reason, _))
           }
         }
@@ -284,6 +337,16 @@ object BrowseUseCase {
 
             cursors.encode(cursor).map(_.toOption)
           }
+
+      /** The smart filter's answer about one record, or `Matched` when there is no smart filter.
+        *
+        * A record the filter could not decide about is **excluded** and counted, never delivered and never
+        * fatal (ADR-017). Excluded because a filter is a narrowing and a user who asked for failures does not
+        * want successes when the predicate breaks; counted because a filter that errors on every record would
+        * otherwise look exactly like a filter that matches nothing.
+        */
+      private def verdictOf(filter: Option[CompiledFilter[F]], record: DecodedRecord): F[FilterVerdict] =
+        filter.fold(FilterVerdict.Matched.pure[F])(_.test(record))
 
       private def decode(request: BrowseRequest, raw: RawRecord): F[DecodedRecord] =
         for {
@@ -353,26 +416,34 @@ object BrowseUseCase {
     * `first` and `last` are the boundary offsets per partition, and they are what a continuation cursor is
     * built from: a forward browse resumes after `last`, a backward one before `first`.
     */
+  /** True when the filter answered neither way about this record. */
+  private def failed(verdict: FilterVerdict): Boolean = verdict match {
+    case FilterVerdict.Failed(_) => true
+    case FilterVerdict.Matched | FilterVerdict.DidNotMatch => false
+  }
+
   final private case class State(
       read: Long,
       bytes: Long,
       delivered: Long,
+      filterErrors: Long,
       first: Map[PartitionId, Offset],
       last: Map[PartitionId, Offset],
       failure: Option[KuiError]
   ) {
 
-    def saw(raw: RawRecord, matched: Boolean): State =
+    def saw(raw: RawRecord, matched: Boolean, filterFailed: Boolean): State =
       copy(
         read = read + 1L,
         bytes = bytes + raw.keySize.toLong + raw.valueSize.toLong + raw.headersSize.toLong,
         delivered = if matched then delivered + 1L else delivered,
+        filterErrors = if filterFailed then filterErrors + 1L else filterErrors,
         first = if first.contains(raw.partition) then first else first.updated(raw.partition, raw.offset),
         last = last.updated(raw.partition, raw.offset)
       )
   }
 
   private object State {
-    val empty: State = State(0L, 0L, 0L, Map.empty, Map.empty, None)
+    val empty: State = State(0L, 0L, 0L, 0L, Map.empty, Map.empty, None)
   }
 }

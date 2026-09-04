@@ -32,6 +32,64 @@ final class BrowseWireSuite extends FunSuite {
 
   private def urlFor(query: BrowseQuery): String = BrowseStream.url(root, cluster, topic, query)
 
+  // --- The smart filter -------------------------------------------------------------------------
+
+  test("aSmartFilterTravelsAsItsIdAndItsSource") {
+    // Both, always together (ADR-017). The id is the short handle a URL can carry; the source is what lets
+    // a replica that has never seen the id compile it instead of telling the user their filter expired,
+    // and what puts the expression back in the editor for whoever opens the link.
+    val query = BrowseQuery.Default.copy(
+      filterId = Some("0123456789abcdef"),
+      filterSource = Some("record.value.status == 'FAILED'")
+    )
+
+    val url = urlFor(query)
+
+    assert(url.contains(s"${BrowseAddress.FilterIdParam}=0123456789abcdef"), url)
+    assert(url.contains(s"${BrowseAddress.FilterSourceParam}="), url)
+    // Percent-encoded, because an expression contains spaces, quotes and equals signs, every one of which
+    // would otherwise end the parameter early and send the server half a program.
+    assert(!url.contains("record.value.status == "), url)
+  }
+
+  test("aBrowseWithNoSmartFilterSendsNeitherParameter") {
+    val url = urlFor(BrowseQuery.Default)
+
+    assert(!url.contains(BrowseAddress.FilterIdParam), url)
+    assert(!url.contains(BrowseAddress.FilterSourceParam), url)
+  }
+
+  test("aSmartFilterSurvivesTheRoundTripThroughAUrl") {
+    val expression = "record.value.status == 'FAILED' && record.headers['x'] == 'y'"
+
+    val read = BrowseQuery.fromParams(
+      Map(
+        BrowseAddress.FilterIdParam -> List("0123456789abcdef"),
+        BrowseAddress.FilterSourceParam -> List(expression)
+      )
+    )
+
+    assertEquals(read.filterId, Some("0123456789abcdef"))
+    assertEquals(read.filterSource, Some(expression))
+  }
+
+  test("aSmartFilterIsStillSentAlongsideACursor") {
+    // Unlike the seek, which a cursor replaces. A cursor names a position; which records at that position
+    // are worth delivering is still the filter's decision, and dropping it on "load more" would make the
+    // second page wider than the first.
+    val query = BrowseQuery.Default.copy(
+      filterId = Some("0123456789abcdef"),
+      filterSource = Some("record.partition == 0"),
+      cursor = Some("cursor.v1.signed")
+    )
+
+    val url = urlFor(query)
+
+    assert(url.contains(BrowseAddress.FilterIdParam), url)
+    assert(url.contains(BrowseAddress.CursorParam), url)
+    assert(!url.contains(BrowseAddress.SeekParam), url)
+  }
+
   // --- The address ------------------------------------------------------------------------------
 
   test("theBrowseUrlIsBuiltFromTheContractsOwnSegments") {

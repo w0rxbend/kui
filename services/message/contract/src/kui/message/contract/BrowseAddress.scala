@@ -54,6 +54,26 @@ object BrowseAddress {
   /** Tail mode: start at the end and keep the stream open. */
   val LiveParam: String = "live"
 
+  /** The registered smart filter this browse runs (MS-007, ADR-017).
+    *
+    * An id and not the expression itself, because a CEL program can be a paragraph and this parameter is in a
+    * URL somebody sends to a colleague.
+    */
+  val FilterIdParam: String = "filterId"
+
+  /** The expression the id was minted from, sent alongside it (ADR-017).
+    *
+    * It looks redundant and is the opposite. The id is `sha256(source)`, so any replica can check that the
+    * two agree — and a replica that has never seen this id, which is every replica after a restart and half
+    * of them behind a load balancer, compiles the carried source instead of telling the user their filter has
+    * expired. Kafbat's equivalent id is salted per process, which is exactly the failure this avoids.
+    */
+  val FilterSourceParam: String = "filterSource"
+
+  /** Where a filter is registered and where one is tried against a single record. */
+  val FiltersSegment: String = "filters"
+  val TestSegment: String = "test"
+
   /** The signed continuation from a finished browse (ADR-026): "carry on from where that stopped".
     *
     * It replaces the start position rather than adding to one, so it is refused alongside `seekTo` rather

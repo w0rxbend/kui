@@ -51,7 +51,7 @@ object MessageMapping {
     case BrowseEvent.Record(record) =>
       Some(SseEvent.data(EventNames.Message, message(record).asJson))
 
-    case BrowseEvent.Consumed(bytes, read, delivered, elapsed, budget) =>
+    case BrowseEvent.Consumed(bytes, read, delivered, filterErrors, elapsed, budget) =>
       Some(
         SseEvent.data(
           EventNames.Consumed,
@@ -59,10 +59,11 @@ object MessageMapping {
             bytes = bytes,
             records = read,
             elapsedMs = elapsed.toMillis,
-            // Nothing evaluates a smart filter yet, so no filter can have thrown. Reporting the honest
-            // zero is better than omitting the field: a client that had to tell "no errors" from "this
-            // server does not count them" would have to know which build it was talking to.
-            filterErrors = 0L,
+            // Records the smart filter threw on rather than answered about. It is the only field that
+            // would ever say that a filter is broken on every record: without it, an expression naming a
+            // field the topic does not have looks exactly like an expression that matches nothing, and
+            // the user concludes their data is missing.
+            filterErrors = filterErrors,
             budget = BudgetDto(
               recordsLeft = math.max(0, budget.recordsLeft - read.toInt),
               bytesLeft = math.max(0L, budget.bytesLeft - bytes),

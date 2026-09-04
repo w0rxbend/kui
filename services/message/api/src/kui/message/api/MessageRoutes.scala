@@ -13,7 +13,7 @@ import kui.kernel.browse.PollBudget
 import kui.kernel.error.{DomainError, FieldError, KuiError}
 import kui.message.application.{BrowseEvent, BrowseUseCase}
 import kui.message.contract.{BrowseStreamParams, MessageEndpoints}
-import kui.message.domain.{BrowseLimits, BrowseRequest}
+import kui.message.domain.{BrowseLimits, BrowseRequest, FilterRef}
 import kui.observability.{Correlation, Telemetry}
 import kui.security.PrincipalCodec
 
@@ -157,8 +157,18 @@ object MessageRoutes {
       keySerde = params.keySerde,
       valueSerde = params.valueSerde,
       stringFilter = params.stringFilter,
-      filter = None,
+      filter = filterOf(params),
       live = params.live.getOrElse(false),
       limits = limits
     )
+
+  /** The smart filter this browse names, if it names one.
+    *
+    * A `filterSource` with no `filterId` is dropped rather than refused, and that is deliberate: the id is
+    * the handle, and a source without one is a caller who has not registered their expression yet. A
+    * malformed id *is* refused, by `FilterRef.of`, which is what turns `filterId=nonsense` into a 400 naming
+    * the parameter instead of a stream that opens a consumer and then fails.
+    */
+  private def filterOf(params: BrowseStreamParams): Option[FilterRef] =
+    params.filterId.flatMap(id => FilterRef.of(id, params.filterSource).toOption)
 }

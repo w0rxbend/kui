@@ -15,6 +15,14 @@ object MessagesCss {
   val Status = "kui-messages__status"
   val StatusPhase = "kui-messages__status-phase"
 
+  /** The smart-filter editor (MS-007). */
+  val Filter = "kui-messages__filter"
+  val FilterBody = "kui-messages__filter-body"
+  val FilterInput = "kui-messages__filter-input"
+  val FilterHint = "kui-messages__filter-hint"
+  val FilterActions = "kui-messages__filter-actions"
+  val FilterError = "kui-messages__filter-error"
+
   val Table = "kui-messages__table"
 
   /** The table view (MS-004): the flattened grid, its scroll box, its column picker and its cells. */

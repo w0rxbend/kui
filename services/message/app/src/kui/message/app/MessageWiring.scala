@@ -4,26 +4,26 @@ import cats.Parallel
 import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
 import fs2.io.file.Files
-import sttp.client4.Backend
-import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import org.typelevel.log4cats.StructuredLogger
 import sttp.capabilities.fs2.Fs2Streams
+import sttp.client4.Backend
+import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
 import kui.cache.CacheMetrics
 import kui.config.{ClusterConfig, UrlPolicy}
 import kui.contracts.capability.ServiceCapabilities
+import kui.filter.{CelFilterEngine, FilterLimits, FilterMetrics, MessageFilterPort}
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
-import kui.filter.{CelFilterEngine, FilterLimits, FilterMetrics, MessageFilterPort}
 import kui.kafka.{AdminClientPool, AdminMetrics}
 import kui.kernel.{ClusterId, Secret}
 import kui.message.api.{MessageApi, MessageRoutes}
-import kui.message.application.{BrowseUseCase, FilterUseCase}
 import kui.message.application.cursor.CursorCodec
 import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
 import kui.message.application.purge.{PurgeToken, PurgeUseCase}
+import kui.message.application.{BrowseUseCase, FilterUseCase}
 import kui.message.infrastructure.{
   BrowseTuning,
   CelFilterSource,

@@ -1705,6 +1705,10 @@ object services extends Module {
           application,
           libs.kafka,
           libs.serde,
+          // The CEL engine of MS-007. It is named in exactly one file — `CelFilterSource`, the adapter
+          // that satisfies the domain's `FilterSource` port — which is what keeps CEL a dependency of an
+          // adapter rather than of the service: dropping it would cost one file, not the browse pipeline.
+          libs.filter,
           libs.config,
           libs.kernel.jvm,
           libs.securityCore.jvm,

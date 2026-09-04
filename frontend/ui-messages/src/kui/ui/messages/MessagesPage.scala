@@ -1,18 +1,22 @@
 package kui.ui.messages
 
+import java.time.Instant
+
 import com.raquo.laminar.api.L
 import com.raquo.laminar.api.L.*
 
 import kui.kernel.{ClusterId, TopicName}
-import kui.message.contract.BrowseAddress
+import kui.message.contract.{BrowseAddress, MessageDto}
 import kui.ui.kernel.api.ApiClient
 import kui.ui.kernel.component.*
+import kui.ui.kernel.file.Download
 import kui.ui.kernel.query.UrlParams
 import kui.ui.kernel.sse.{SseConnection, SseError}
 import kui.ui.messages.browse.{BrowseQuery, BrowseSession}
+import kui.ui.messages.filter.FilterEditor
 import kui.ui.messages.produce.{ProduceDraft, ProduceDrawer, ResendDrawer, ResendTarget}
 import kui.ui.messages.row.RecordTable
-import kui.ui.messages.table.FlatTable
+import kui.ui.messages.table.{FlatTable, FlattenLimits, JsonFlattener, RecordCsv, RecordSource}
 
 /** The message browser: the screen the product is used on more than any other.
   *
@@ -101,6 +105,14 @@ object MessagesPage {
     val draft: Var[Option[ProduceDraft]] = Var(None)
     val resendTarget: Var[Option[ResendTarget]] = Var(None)
 
+    /** Which of the table view's columns the user has put away.
+      *
+      * Owned here rather than inside the table because two things read it: the table, which does not draw
+      * them, and the export, which must not write them. A file that came back with the columns somebody had
+      * just hidden would be an export of a screen they are not looking at.
+      */
+    val hiddenColumns: Var[Set[String]] = Var(Set.empty)
+
     // --- The browse, read out of the URL ----------------------------------------------------------
 
     /** Every parameter of a browse, assembled from the address bar.
@@ -118,9 +130,11 @@ object MessagesPage {
           UrlParams.signal(BrowseAddress.QueryParam),
           UrlParams.signal(BrowseAddress.LiveParam),
           UrlParams.signal(BrowseAddress.KeySerdeParam),
-          UrlParams.signal(BrowseAddress.ValueSerdeParam)
+          UrlParams.signal(BrowseAddress.ValueSerdeParam),
+          UrlParams.signal(BrowseAddress.FilterIdParam),
+          UrlParams.signal(BrowseAddress.FilterSourceParam)
         )
-        .map((seek, partitions, limit, contains, live, keySerde, valueSerde) =>
+        .map((seek, partitions, limit, contains, live, keySerde, valueSerde, filterId, filterSource) =>
           BrowseQuery.fromParams(
             Map(
               BrowseAddress.SeekParam -> split(seek),
@@ -129,7 +143,9 @@ object MessagesPage {
               BrowseAddress.QueryParam -> contains.toList,
               BrowseAddress.LiveParam -> live.toList,
               BrowseAddress.KeySerdeParam -> keySerde.toList,
-              BrowseAddress.ValueSerdeParam -> valueSerde.toList
+              BrowseAddress.ValueSerdeParam -> valueSerde.toList,
+              BrowseAddress.FilterIdParam -> filterId.toList,
+              BrowseAddress.FilterSourceParam -> filterSource.toList
             )
           )
         )
@@ -172,6 +188,10 @@ object MessagesPage {
       // they need to be sure of is which topic they are reading.
       h1(topic.value),
       controls(query, startKind, running, rewrite, session, pressed, draft, topic, view),
+      // The smart filter, under the control bar rather than on it: it is a paragraph of expression with
+      // its own help and its own failure, and a multi-line box wedged between two dropdowns would make the
+      // bar unreadable for the sake of a control most browses do not use.
+      FilterEditor(cluster, api, query.map(_.filterSource), rewrite),
       // The Read button's subscription. `session.start` returns the browse's own events and binding them to
       // this element is what gives them a lifetime — a stream nothing is subscribed to is a request opened
       // and then ignored.
@@ -188,6 +208,7 @@ object MessagesPage {
             records = session.rows,
             zone = zone,
             empty = emptyState(session, running),
+            hidden = hiddenColumns,
             testId = Some("messages-grid")
           )
         case _ =>
@@ -215,6 +236,21 @@ object MessagesPage {
           )
         )
       ),
+      // The export, under the table rather than on the control bar: it is about what has already been read
+      // rather than about what to read next, and a control that exports an empty screen would be offering
+      // to hand somebody a file with a header row in it.
+      child.maybe <-- session.rows
+        .combineWith(view)
+        .map((rows, current) =>
+          Option.when(rows.nonEmpty)(
+            Button(
+              label = Val(Messages.ExportCsv),
+              onClick = Observer[Unit](_ => exportCsv(topic, rows, current, hiddenColumns.now())),
+              variant = ButtonVariant.Secondary,
+              testId = Some("messages-export")
+            ).amend(title := Messages.ExportHint)
+          )
+        ),
       // Navigating away must not leave a Kafka consumer running on the service. This is the browser half of
       // the milestone's cancellation criterion.
       onUnmountCallback(_ => session.stop())
@@ -422,6 +458,45 @@ object MessagesPage {
         testId = Some(s"record-${record.partition.value}-${record.offset.value}-resend")
       ).amend(title := Messages.ResendHint)
     )
+
+  /** Hands the user the records on screen as a CSV file.
+    *
+    * Which shape depends on which view they are in, because the two views are two different answers to "what
+    * is on screen": the list view exports the record, and the table view exports its grid — the columns the
+    * flattener produced, minus the ones the user put away. Exporting the grid as raw JSON would throw away
+    * the work of choosing those columns; exporting the list view as a hundred flattened columns would produce
+    * a file that has nothing to do with the screen it came from.
+    */
+  private def exportCsv(
+      topic: TopicName,
+      rows: List[MessageDto],
+      view: String,
+      hidden: Set[String]
+  ): Unit = {
+    val content =
+      if view == Messages.ViewTable then {
+        val limits = FlattenLimits.Default
+        val flattened =
+          rows
+            .take(limits.maxRows.max(0))
+            .toVector
+            .map(record => JsonFlattener.flatten(RecordSource.of(record), limits))
+
+        val paths = JsonFlattener.columns(flattened, limits).filterNot(hidden.contains).toList
+
+        RecordCsv.ofGrid(rows.take(limits.maxRows.max(0)), paths, limits)
+      } else RecordCsv.ofRecords(rows)
+
+    Download.text(
+      name = RecordCsv.fileName(topic.value, Instant.now()),
+      mediaType = Messages.CsvMediaType,
+      content = content,
+      // Excel on Windows reads a plain UTF-8 CSV as the system code page, which turns every non-ASCII
+      // character in a Kafka payload into mojibake. A topic with German or Japanese text in it is the
+      // ordinary case, and every other reader ignores the mark.
+      withBom = true
+    )
+  }
 
   /** One of the two view buttons. The one that is already on is drawn as the primary, which is how the rest
     * of KUI shows a chosen option, and pressing it again is harmless.

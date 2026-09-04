@@ -2,10 +2,11 @@ package kui.gateway.api.routing
 
 import sttp.tapir.AnyEndpoint
 
-import kui.cluster.contract.ClusterEndpoints
+import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
-import kui.message.contract.MessageMutationEndpoints
+import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints}
+import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
 /** Which published contract belongs to which service id.
@@ -23,7 +24,13 @@ object ServiceContracts {
 
   val byService: Map[ServiceId, List[AnyEndpoint]] =
     Map(
-      ServiceId.unsafe("cluster") -> ClusterEndpoints.all,
+      // Both lists. `ClusterWriteEndpoints` used to be deliberately absent, so that the one write M1
+      // shipped had no public route while it had no screen. It has a screen now — the cluster
+      // administration page — and an endpoint the browser cannot reach would make that screen a set of
+      // buttons that answer 404. What keeps an unauthorised caller out is `ApplicationConfig.Edit`, which
+      // is a rule the product can state, rather than the absence of a route, which is only a rule nobody
+      // has got round to breaking.
+      ServiceId.unsafe("cluster") -> (ClusterEndpoints.all ++ ClusterWriteEndpoints.all),
       // Both lists, because the topic service publishes its reads and its administration from two
       // objects: `TopicEndpoints` states that nothing in it changes a cluster, and `TopicAdminEndpoints`
       // carries create, configure, grow and delete with the marker, the plan phases and the CSRF header
@@ -39,7 +46,17 @@ object ServiceContracts {
       // request/response call and cannot be proxied by this derivation at all — `MessageStreamRoutes`
       // carries it, over `StreamProxy`, because a stream needs its own cancellation and heartbeat
       // handling rather than a request forwarded and a response awaited.
-      ServiceId.unsafe("message") -> MessageMutationEndpoints.all
+      // The mutations and the two filter endpoints. `FilterEndpoints` changes nothing on a cluster — one
+      // compiles an expression, the other runs it against a record the caller sent — but both are still
+      // ordinary request/response calls the browser has to be able to reach, and a filter editor with no
+      // route to register against is a filter engine nothing can use, which is what MS-007 was.
+      ServiceId.unsafe("message") -> (MessageMutationEndpoints.all ++ FilterEndpoints.all),
+      // Both lists, for the same reason as the topic and consumer services: the schema service
+      // publishes its five reads from one object and its three bodied endpoints from another. The
+      // second list holds the two compatibility writes *and* the compatibility check, which is not a
+      // mutation at all — it is grouped by request shape, not by effect — so leaving that list out
+      // would silently drop the one endpoint a registration flow needs most.
+      ServiceId.unsafe("schema") -> (SchemaEndpoints.all ++ SchemaMutationEndpoints.all)
     )
 
   def of(service: ServiceId): List[AnyEndpoint] = byService.getOrElse(service, Nil)

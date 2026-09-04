@@ -13,8 +13,17 @@ import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.serde.{PayloadKind, SerdeName, SerdeUse, Target}
 import kui.kernel.{ClusterId, Offset, PartitionId, Secret, TopicName}
 import kui.message.application.cursor.{BrowseCursor, CursorCodec}
-import kui.message.domain.ports.{BrowseCluster, ClusterProfileSource, SerdeChoice, SerdeSource}
-import kui.message.domain.{BrowseLimits, BrowseRequest, Decoded, TimestampType}
+import kui.message.domain.ports.{
+  BrowseCluster,
+  ClusterProfileSource,
+  CompiledFilter,
+  FilterSample,
+  FilterSource,
+  FilterVerdict,
+  SerdeChoice,
+  SerdeSource
+}
+import kui.message.domain.{BrowseLimits, BrowseRequest, Decoded, DecodedRecord, FilterRef, TimestampType}
 import kui.testkit.KuiIOSuite
 
 /** The browse use case's promises: a record that cannot be decoded is still delivered, a browse accounts for
@@ -119,9 +128,58 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
 
   private def useCase(
       records: List[Either[KuiError, RawRecord]],
-      failsOn: String = "<nothing fails>"
+      failsOn: String = "<nothing fails>",
+      filters: FilterSource[IO] = FilterSource.unsupported[IO]
   ): BrowseUseCase[IO] =
-    BrowseUseCase.make[IO](clusters, serdes(failsOn), source(records), CursorCodec.hmacSha256[IO](key))
+    BrowseUseCase.make[IO](
+      clusters,
+      serdes(failsOn),
+      source(records),
+      CursorCodec.hmacSha256[IO](key),
+      filters
+    )
+
+  /** A smart filter that answers by looking at the value's text, so that a test can say which records it
+    * keeps without writing an expression the CEL engine would have to compile.
+    */
+  private def filterOver(verdict: DecodedRecord => FilterVerdict): FilterSource[IO] =
+    new FilterSource[IO] {
+      def compile(cluster: ClusterId, filter: FilterRef): IO[Either[KuiError, CompiledFilter[IO]]] =
+        IO.pure(
+          Right(new CompiledFilter[IO] {
+            def test(record: DecodedRecord): IO[FilterVerdict] = IO.pure(verdict(record))
+          })
+        )
+
+      def register(cluster: ClusterId, source: String): IO[Either[KuiError, String]] =
+        IO.pure(Right("0123456789abcdef"))
+
+      def check(
+          cluster: ClusterId,
+          source: String,
+          record: FilterSample
+      ): IO[Either[KuiError, FilterVerdict]] =
+        IO.pure(Right(FilterVerdict.Matched))
+    }
+
+  /** A browse that names a smart filter. The id is well-formed because `FilterRef` refuses anything else. */
+  private def filtered(limit: Int): BrowseRequest =
+    BrowseRequest
+      .of(
+        cluster = cluster,
+        topic = topic,
+        seek = SeekMode.Beginning,
+        direction = Some(Direction.Forward),
+        partitions = None,
+        limit = Some(limit),
+        isolation = None,
+        keySerde = None,
+        valueSerde = None,
+        stringFilter = None,
+        filter = FilterRef.of("0123456789abcdef", Some("record.value.status == 'PAID'")).toOption,
+        live = false
+      )
+      .getOrElse(fail("the request under test is not a legal browse"))
 
   private def events(browse: BrowseUseCase[IO], of: BrowseRequest): IO[List[BrowseEvent]] =
     browse.browse(of, budget).compile.toList
@@ -246,6 +304,73 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
 
   // ------------------------------------------------------------------------------------ the ending
 
+  // ------------------------------------------------------------------------------- the smart filter
+
+  test("a smart filter that will not compile ends the browse before a single record is read") {
+    // Before, and not during: an expression with a typo in it must not open a Kafka consumer and read a
+    // million records in order to tell the user that nothing matched.
+    val refusing = new FilterSource[IO] {
+      def compile(cluster: ClusterId, filter: FilterRef): IO[Either[KuiError, CompiledFilter[IO]]] =
+        IO.pure(Left(ApplicationError.Invalid("line 1, column 8: undeclared reference to 'staus'", Nil)))
+
+      def register(cluster: ClusterId, source: String): IO[Either[KuiError, String]] =
+        IO.pure(Left(ApplicationError.Invalid("nope", Nil)))
+
+      def check(
+          cluster: ClusterId,
+          source: String,
+          record: FilterSample
+      ): IO[Either[KuiError, FilterVerdict]] =
+        IO.pure(Left(ApplicationError.Invalid("nope", Nil)))
+    }
+
+    val records = List(raw(0, "one"), raw(1, "two")).map(_.asRight[KuiError])
+
+    events(useCase(records, filters = refusing), filtered(10)).map { produced =>
+      assert(delivered(produced).isEmpty, "records were read despite the filter not compiling")
+      assert(produced.exists {
+        case BrowseEvent.Failed(_) => true
+        case _ => false
+      })
+    }
+  }
+
+  test("records the smart filter rejects are read and not delivered") {
+    val records = List(raw(0, "keep"), raw(1, "drop"), raw(2, "keep")).map(_.asRight[KuiError])
+
+    val keeping = filterOver(record =>
+      if record.value.text == "keep" then FilterVerdict.Matched else FilterVerdict.DidNotMatch
+    )
+
+    events(useCase(records, filters = keeping), filtered(10)).map { produced =>
+      assertEquals(delivered(produced), List("keep", "keep"))
+
+      // Three read, two delivered. The gap is what tells a user the filter is doing something, and
+      // without it a narrow filter and an empty topic are the same screen.
+      val consumed = produced.collect { case event: BrowseEvent.Consumed => event }.last
+      assertEquals((consumed.read, consumed.delivered), (3L, 2L))
+    }
+  }
+
+  test("a record the filter threw on is excluded and counted rather than delivered or fatal") {
+    // ADR-017's rule, and the reason `FilterVerdict` has three cases. A filter that errors on every
+    // record would otherwise be indistinguishable from a filter that matches nothing, and the user would
+    // conclude their data is missing rather than their expression is wrong.
+    val records = List(raw(0, "good"), raw(1, "broken"), raw(2, "good")).map(_.asRight[KuiError])
+
+    val throwing = filterOver(record =>
+      if record.value.text == "broken" then FilterVerdict.Failed("no such field 'status'")
+      else FilterVerdict.Matched
+    )
+
+    events(useCase(records, filters = throwing), filtered(10)).map { produced =>
+      assertEquals(delivered(produced), List("good", "good"))
+
+      val consumed = produced.collect { case event: BrowseEvent.Consumed => event }.last
+      assertEquals(consumed.filterErrors, 1L)
+    }
+  }
+
   test("a browse that ran out of records says exhausted and offers no cursor") {
     val records = List(raw(0, "one"), raw(1, "two")).map(_.asRight[KuiError])
 
@@ -323,7 +448,8 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
       clusters,
       serdes("<nothing fails>"),
       (_, _) => Stream.raiseError[IO](new IllegalStateException("the record source must not be reached")),
-      CursorCodec.hmacSha256[IO](key)
+      CursorCodec.hmacSha256[IO](key),
+      FilterSource.unsupported[IO]
     )
 
     events(browse, request(10, of = ClusterId.unsafe("nowhere"))).map { produced =>

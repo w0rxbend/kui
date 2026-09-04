@@ -14,9 +14,9 @@ import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
 import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.{ClusterId, ServiceId}
-import kui.message.application.BrowseUseCase
 import kui.message.application.produce.{ProduceUseCase, ResendUseCase}
 import kui.message.application.purge.PurgeUseCase
+import kui.message.application.{BrowseUseCase, FilterUseCase}
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
 
@@ -48,6 +48,7 @@ object MessageApi {
   /** The routes, in the order the router tries them. */
   def routes[F[_]: {Async, Parallel}](
       browse: BrowseUseCase[F],
+      filters: FilterUseCase[F],
       produce: ProduceUseCase[F],
       resend: ResendUseCase[F],
       purge: PurgeUseCase[F],
@@ -66,7 +67,11 @@ object MessageApi {
       // `ServerEndpoint[Any, F]` — no stream capability — and widen into this list because Tapir's
       // capability parameter is contravariant: a route that needs nothing of the interpreter runs on
       // one that offers streaming.
-      MessageMutationRoutes[F](produce, resend, purge, secured)
+      MessageMutationRoutes[F](produce, resend, purge, secured) ++
+      // Registering and testing a filter. They are neither browse nor mutation: they change nothing on
+      // the cluster and open no Kafka client, which is why they are a third list rather than an addition
+      // to either of the other two.
+      FilterRoutes[F](filters, secured)
   }
 
   /** The cross-cutting chain, outermost first, in the order the cluster service fixed and every service

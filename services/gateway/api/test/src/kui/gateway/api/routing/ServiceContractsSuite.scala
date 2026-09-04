@@ -3,10 +3,10 @@ package kui.gateway.api.routing
 import munit.FunSuite
 import sttp.tapir.AnyEndpoint
 
-import kui.cluster.contract.ClusterEndpoints
+import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
-import kui.message.contract.MessageMutationEndpoints
+import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
 /** That the one map naming the gateway's downstream services says what the rest of the gateway assumes.
@@ -35,7 +35,11 @@ final class ServiceContractsSuite extends FunSuite {
 
   test("everyConfiguredServiceHasItsContract") {
     assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message))
-    assertEquals(ServiceContracts.of(cluster), ClusterEndpoints.all)
+    // Both of the cluster service's lists. `ClusterWriteEndpoints` used to be deliberately absent, so
+    // that the one write M1 shipped had no public route while it had no screen; the administration screen
+    // exists now, and an endpoint the browser cannot reach would make it a set of buttons that answer 404.
+    // What keeps an unauthorised caller out is `ApplicationConfig.Edit`.
+    assertEquals(ServiceContracts.of(cluster), ClusterEndpoints.all ++ ClusterWriteEndpoints.all)
     // Both of the topic service's lists. Its administration endpoints are published from a second
     // object because they carry a marker, a CSRF header and — for the two that cannot be undone — a plan
     // phase the reads do not; forgetting the second list here would leave create, configure, grow and
@@ -48,10 +52,15 @@ final class ServiceContractsSuite extends FunSuite {
       ServiceContracts.of(consumer),
       ConsumerEndpoints.all ++ ConsumerMutationEndpoints.all
     )
-    // Only the message service's *mutations*. Its other endpoint is the browse stream, which this
-    // derivation cannot proxy at all — a stream has to be relayed with its own cancellation and
-    // heartbeat handling rather than called and re-encoded, which `MessageStreamRoutes` does.
-    assertEquals(ServiceContracts.of(message), MessageMutationEndpoints.all)
+    // The message service's mutations and its two filter endpoints. The filter endpoints change nothing
+    // on a cluster — one compiles an expression, the other runs it against a record the caller sent — but
+    // they are ordinary request/response calls a browser has to reach, and leaving them out is what makes
+    // a filter engine nothing can use.
+    //
+    // Its remaining endpoint is the browse stream, which this derivation cannot proxy at all: a stream has
+    // to be relayed with its own cancellation and heartbeat handling rather than called and re-encoded,
+    // which `MessageStreamRoutes` does.
+    assertEquals(ServiceContracts.of(message), MessageMutationEndpoints.all ++ FilterEndpoints.all)
   }
 
   test("a service the gateway has no contract for is not an error") {

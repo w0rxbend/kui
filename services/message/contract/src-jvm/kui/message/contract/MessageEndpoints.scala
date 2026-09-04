@@ -37,6 +37,14 @@ final case class BrowseStreamParams(
     valueSerde: Option[SerdeName],
     stringFilter: Option[String],
     live: Option[Boolean],
+    /** A registered smart filter, and the expression it was minted from (MS-007, ADR-017).
+      *
+      * The source travels with the id on every request so that any replica can serve a browse: the id is a
+      * content hash, so the two are checked against each other, and a replica with a cold cache recompiles
+      * instead of answering "that filter has expired".
+      */
+    filterId: Option[String],
+    filterSource: Option[String],
     /** The signed continuation of a previous browse. Exclusive with `seek`: it *is* a start position. */
     cursor: Option[String]
 )
@@ -77,6 +85,8 @@ object MessageEndpoints {
     ValueSerdeParam,
     QueryParam,
     LiveParam,
+    FilterIdParam,
+    FilterSourceParam,
     CursorParam
   }
 
@@ -127,6 +137,8 @@ object MessageEndpoints {
         Option[SerdeName],
         Option[String],
         Option[Boolean],
+        Option[String],
+        Option[String],
         Option[String]
     )
   ] =
@@ -149,6 +161,18 @@ object MessageEndpoints {
       .and(query[Option[SerdeName]](ValueSerdeParam).description("The serde to read values with"))
       .and(query[Option[String]](QueryParam).description("A plain substring the decoded record must contain"))
       .and(query[Option[Boolean]](LiveParam).description("Tail: start at the end and stay open"))
+      .and(
+        query[Option[String]](FilterIdParam)
+          .description("A registered smart filter (MS-007). Only records it matches are delivered")
+      )
+      .and(
+        query[Option[String]](FilterSourceParam)
+          .description(
+            "The expression that id was minted from. Sent alongside the id so that a replica which has " +
+              "never seen it can compile it rather than refusing a filter the caller registered a moment " +
+              "ago on another replica"
+          )
+      )
       .and(
         query[Option[String]](CursorParam)
           .description(
@@ -208,6 +232,8 @@ object MessageEndpoints {
       Option[SerdeName],
       Option[String],
       Option[Boolean],
+      Option[String],
+      Option[String],
       Option[String]
   )
 
@@ -224,7 +250,9 @@ object MessageEndpoints {
       valueSerde = raw._9,
       stringFilter = raw._10,
       live = raw._11,
-      cursor = raw._12
+      filterId = raw._12,
+      filterSource = raw._13,
+      cursor = raw._14
     )
 
   private def fromParams(params: BrowseStreamParams): Flat =
@@ -240,6 +268,8 @@ object MessageEndpoints {
       params.valueSerde,
       params.stringFilter,
       params.live,
+      params.filterId,
+      params.filterSource,
       params.cursor
     )
 

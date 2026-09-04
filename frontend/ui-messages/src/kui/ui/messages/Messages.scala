@@ -66,6 +66,31 @@ object Messages {
       "shown the moment you resume."
   val TryAgain: String = "Try again"
 
+  // --- The smart filter (MS-007) -----------------------------------------------------------------
+
+  val SmartFilterLabel: String = "Smart filter"
+  val SmartFilterActive: String = "Smart filter (on)"
+  val SmartFilterApply: String = "Apply filter"
+  val SmartFilterClear: String = "Clear filter"
+  val SmartFilterPlaceholder: String = "record.value.status == 'FAILED'"
+
+  /** What a person can write, in one line. The variables are the ones `CelEnvironment` exposes; a hint that
+    * named one it does not would be a documented feature that fails to compile the first time it is pasted.
+    */
+  val SmartFilterHint: String =
+    "A CEL expression evaluated on the service, once per record, over record.value, record.key, " +
+      "record.valueAsText, record.keyAsText, record.headers, record.partition, record.offset and " +
+      "record.timestampMs. Only records it returns true for are delivered."
+
+  // --- The export (MS-011) -----------------------------------------------------------------------
+
+  val ExportCsv: String = "Export CSV"
+  val ExportHint: String =
+    "Downloads exactly what is on screen: the same records, in the same order, with the columns this " +
+      "view shows. Nothing is read from Kafka again."
+
+  val CsvMediaType: String = "text/csv;charset=utf-8"
+
   // --- The status line -------------------------------------------------------------------------
 
   val Connecting: String = "Connecting"

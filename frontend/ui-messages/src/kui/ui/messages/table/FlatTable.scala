@@ -41,18 +41,22 @@ import kui.ui.messages.{Messages, MessagesCss}
   */
 object FlatTable {
 
+  /** @param hidden
+    *   the columns the user has put away, owned by the screen rather than by this component.
+    *
+    * It is a parameter because the export has to agree with the table: a file that came back with the columns
+    * somebody had just hidden would be an export of a screen they are not looking at. Empty by default, and
+    * never pruned when a column stops appearing — a column hidden on Monday should still be hidden when the
+    * record that has that field comes back.
+    */
   def apply(
       records: Signal[List[MessageDto]],
       zone: Signal[String],
       empty: Signal[HtmlElement],
+      hidden: Var[Set[String]] = Var(Set.empty),
       limits: FlattenLimits = FlattenLimits.Default,
       testId: Option[String] = None
   ): HtmlElement = {
-
-    /** The columns the user has put away. Empty by default, and never pruned when a column stops appearing: a
-      * column hidden on Monday should still be hidden when the record that has that field comes back.
-      */
-    val hidden: Var[Set[String]] = Var(Set.empty)
 
     val rows: Signal[Vector[(MessageDto, FlatRow)]] =
       records.map(current =>

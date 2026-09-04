@@ -33,6 +33,15 @@ final case class BrowseQuery(
     keySerde: Option[SerdeName],
     valueSerde: Option[SerdeName],
     live: Boolean,
+    /** The registered smart filter this browse runs, and the expression it was minted from (MS-007).
+      *
+      * Both, always together. The id is the short handle a URL can carry; the source travels with it so that
+      * whichever replica answers can compile it rather than telling the user their filter has expired — and
+      * so that a link somebody was sent shows the *expression* in the editor rather than sixteen hexadecimal
+      * characters nobody can read.
+      */
+    filterId: Option[String] = None,
+    filterSource: Option[String] = None,
     /** The signed continuation of a finished browse (ADR-026).
       *
       * It is never read out of a URL and never written into one: a cursor is a five-minute-old statement
@@ -61,6 +70,8 @@ object BrowseQuery {
       keySerde = None,
       valueSerde = None,
       live = false,
+      filterId = None,
+      filterSource = None,
       cursor = None
     )
 
@@ -98,6 +109,12 @@ object BrowseQuery {
         // Sent only when it is on. `live=false` and no `live` at all mean the same thing to the server, and
         // the shorter URL is the one a person can read.
         Option.when(query.live && query.cursor.isEmpty)(BrowseAddress.LiveParam -> "true"),
+        // The smart filter, and only when there is one. It is sent alongside a cursor too, unlike the seek:
+        // a cursor names a position, and which records at that position are worth delivering is still this
+        // filter's decision. The server also carries the id inside the cursor, so leaving it off a "load
+        // more" would not widen the page — it would simply make the two disagree about the source.
+        query.filterId.map(BrowseAddress.FilterIdParam -> _),
+        query.filterSource.map(BrowseAddress.FilterSourceParam -> _),
         query.cursor.map(BrowseAddress.CursorParam -> _)
       ).flatten
 
@@ -138,9 +155,15 @@ object BrowseQuery {
       contains = params.getOrElse(BrowseAddress.QueryParam, Nil).headOption.map(_.trim).filter(_.nonEmpty),
       keySerde = serdeIn(params, BrowseAddress.KeySerdeParam),
       valueSerde = serdeIn(params, BrowseAddress.ValueSerdeParam),
-      live = params.getOrElse(BrowseAddress.LiveParam, Nil).headOption.contains("true")
+      live = params.getOrElse(BrowseAddress.LiveParam, Nil).headOption.contains("true"),
+      filterId = text(params, BrowseAddress.FilterIdParam),
+      filterSource = text(params, BrowseAddress.FilterSourceParam)
     )
   }
+
+  /** A parameter's first non-empty value, trimmed. */
+  private def text(params: Map[String, List[String]], name: String): Option[String] =
+    params.getOrElse(name, Nil).headOption.map(_.trim).filter(_.nonEmpty)
 
   /** A serde name from a URL, or none.
     *
