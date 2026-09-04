@@ -779,3 +779,224 @@ screenshots. The cluster switcher, the topic and group tables, the message viewe
 overlay were each verified through the endpoint that backs them and through the served
 `/ui/` bundle returning 200 — but nobody looked at the rendered pixels. That is the one part of the
 demonstration this pass asserts rather than proves.
+
+## Point 6 closed, and the four open defects, 2026-09-04 (fault isolation and error surfaces)
+
+The pass before this one recorded point 6 as *partly* met, with the reason stated precisely: the
+topic list carried a freshness envelope so a stale list was marked stale, and the consumer-group
+list did not. It also left four defects open. This pass closes the bar point and all four.
+
+### The bar point: the consumer-group list now says when it is stale
+
+`GET /api/v1/clusters/{c}/consumer-groups` used to answer a bare `200` carrying the rows of the last
+successful scrape, whether or not the cluster was still answering. The browser had no way to tell
+that from a live answer, so the screen went on showing lag figures from before the broker died with
+nothing anywhere saying so.
+
+That mattered more here than anywhere else in the product. Lag is the one number on this screen that
+is supposed to move on its own, and an operator reads it to decide whether their consumers are
+keeping up. A dead broker makes it **freeze** rather than climb — so a frozen lag column looks
+exactly like a cluster that has caught up, and the screen quietly told the reader the opposite of the
+truth.
+
+The envelope the topic list already used now runs the whole way through:
+
+| Layer | What changed |
+| --- | --- |
+| `services/consumer/contract` | `GroupsResponse(groups: Section[GroupPageDto], incompleteCoordinators: Int)`, mirroring `TopicsResponse`. `ConsumerEndpoints.list` returns it |
+| `services/consumer/api` | `ConsumerSections` translates the application layer's existing `SnapshotFreshness` verdict into the wire vocabulary, in one place |
+| gateway | nothing: its public routes are derived from the service contract, so the new document travels unchanged. `openapi.json` regenerated |
+| `frontend/ui-consumers` | `ConsumersApi.list` decodes the envelope; `GroupListPage` dims the table, stamps it with the server's `fetchedAt` and shows the reason |
+
+Two rules in the browser are worth writing down. The **server's section wins** over "the last request
+failed": the server knows its scrape of the cluster failed, whereas a failed request only says that
+this one call did not get through. And the badge's time is the server's `fetchedAt` and not the
+moment the browser's request returned — a cached snapshot answered in a millisecond is not fresh
+data, and stamping it with the request time would claim it was.
+
+**The seam is tested, not the two sides.** That is deliberate: this defect survived because each half
+was asserted against its own idea of the answer. Two golden documents — a fresh list and a stale one
+whose rows are byte-identical to it — are encoded from the contract's own samples and committed.
+`ConsumerRoutesSuite` asserts that the live routes produce that shape for a cluster that has stopped
+answering; `GroupListFreshnessSuite` feeds the same committed text through the endpoint the *browser*
+declares, into the real page, and asserts the table is dimmed, the badge appears, the rows survive,
+and a section with no rows renders an explanation rather than an empty table.
+
+### Defect 1 — error text leaked internals
+
+`Stale: UPSTREAM_UNAVAILABLE` and `kafka answered with status 502` were being shown verbatim. The
+second is worse than unhelpful: no Kafka broker speaks HTTP, so there is no 502 to go and look for,
+and the thing that is actually wrong — the broker cannot be reached — was never stated.
+
+An error code belongs in a log line and in a support conversation; a screen needs a sentence. Both
+survive, in different places:
+
+- `ReasonCode.sentence` gives each reason its operator-facing wording beside the wire spelling, in
+  the one module the services and the browser share. `ReasonCode.of` moves the error-to-reason
+  classification there too, so the topic list and the group list cannot describe one outage two ways.
+- `StaleReason` carries the code separately from the message. The badge reads
+  `Stale: the cluster is not answering` and puts the code in its tooltip beside the fetch time.
+- `UserFacing.sentence` is the single rewriting rule, used by `ApiError.userMessage` and by the
+  browse screen's status line. It rewrites **only** the three codes meaning "something KUI depends on
+  is not working"; every other message stays the server's own words, which name the topic or cluster
+  the request was about, and an unknown code is passed through rather than replaced with a guess.
+
+### Defect 2 — the Consumers tab depended on browsing history
+
+The tab strip on a topic page was derived from the features that happened to have been downloaded, so
+a fresh page load offered Overview and Settings and the same page after a detour through Consumers
+offered three tabs. A feature is already registered twice — a static half the shell draws the sidebar
+from before anything is downloaded, and a dynamic half that is the code — and a tab's heading is one
+word of data that belongs in the static half. `FeatureRoutes.guestTabs` now declares it, `GuestTabs`
+builds the strip from the static registrations and takes no loaded-feature list at all, and opening a
+guest's tab is what imports that guest's module. ADR-012's promise is intact: nothing is downloaded
+in order to draw a tab.
+
+### Defect 3 — the flaky test, diagnosed
+
+`UpstreamClientSuite`'s "one log line per circuit transition" was mitigated with a three-minute
+timeout and never diagnosed. The timeout was never the problem — the case runs in eighteen
+milliseconds of *simulated* time, so no amount of machine load could push it past thirty seconds.
+
+It was racing a subscription. `UpstreamClient` wrote circuit-transition log lines from a fiber
+started with `.background`, and starting a fiber is not the same as that fiber having subscribed to
+the breaker's `Topic`; a `Topic` delivers only to subscribers that already exist. The case papered
+over that with a one-second sleep before reading the log, which is ordering by hope.
+
+That race is a real defect and not only a test problem: an upstream that is already down when KUI
+starts trips its circuit inside the same window, and the one INFO line telling an operator the
+circuit opened is published to nobody. `CircuitBreaker.subscribed` is a `Resource` whose acquisition
+registers the subscription, so the client cannot be handed out before something is listening. The
+sleep and the raised timeout are both gone.
+
+### Defect 4 — the caching replacement, landed
+
+The `immutable` header was removed last pass and its replacement was left outstanding. Every static
+asset now carries a strong `ETag` computed from its bytes — SHA-256 truncated to sixteen bytes — and
+`If-None-Match` is answered `304` with no body, following RFC 9110 for lists, `W/` and `*`.
+`index.html` is hashed after its bootstrap block is rendered in, so a configuration-only deployment
+still invalidates it.
+
+Correctness is unchanged: every asset is still revalidated, so no browser can assemble a page from
+two builds. What changes is the price — a round trip instead of a six-megabyte download per load. The
+validator comes from the content and never from the name, which is the whole lesson of the defect it
+replaces.
+
+### Every fix has a test, and every test was seen to fail first
+
+| Fix | The failure that was observed first |
+| --- | --- |
+| Freshness envelope | `aListReadFromADeadClusterIsMarkedStaleOnTheWire`, `aListReadFromAHealthyClusterIsMarkedFreshOnTheWire`: `groups.status` was `None` — no envelope on the wire at all |
+| Error text | `anUpstreamFailureIsRewrittenIntoASentenceAboutTheCluster`: obtained `kafka answered with status 502`. `theBadgeSaysWhatHappenedInWordsAndKeepsTheCodeForSupport`: obtained `Last updated 3 hours agoStale: UPSTREAM_UNAVAILABLE` |
+| Consumers tab | `theTopicPageOffersAConsumersTabBeforeAnyFeatureHasBeenDownloaded`: `the topic page's guest tabs are List(), with nothing loaded` |
+| Flaky test | `aCircuitThatOpensImmediatelyAfterStartUpIsStillLogged`: obtained `0` log lines, expected `1` |
+| ETag | four cases in `StaticRoutesSuite` against the previous revision: `/ui/ was served with no ETag`, `no ETag on the first response`, and two more |
+
+### What was not done in this pass
+
+- **The product was not driven in a browser for these changes.** Other agents were mid-edit in
+  `frontend/ui-topics` and `services/gateway/application` throughout, and the working tree would not
+  link the frontend, so the all-in-one process could not be started. Every claim above rests on the
+  suites named beside it and on the failures recorded in the table, not on a screen anybody looked
+  at. Given what this project has learned about green suites, that gap is the first thing the next
+  pass should close: stop the quickstart's broker, open the group list, and read the badge.
+- `docs/api/openapi.json` was regenerated by a concurrent pass and carries this change along with
+  theirs; only `services/consumer/api/openapi.json` was committed here.
+
+## The dashboard, and choosing a serde when you publish — 2026-09-04
+
+Two of the gaps this document listed under "Missing features" are closed: `UI-012`, a real dashboard
+instead of a signpost, and `MP-004`, choosing how a record is serialized when publishing. Everything
+below was run against the quickstart's broker and read on a screen.
+
+### What the dashboard shows now
+
+The first screen after the quickstart used to be a card saying a dashboard was not built yet. It now
+shows the fleet in a strip — clusters online, brokers, topics, partitions, consumer groups — and one
+card per cluster carrying that cluster's health, brokers and controller, its topic and partition
+totals with the biggest topics drawn as bars, and its consumer groups counted by state with their
+total lag. Quantities are drawn as bars beside the figure, which is the design's rule
+(`research/design/REFERENCE.md`, "Notable interaction patterns"): comparing 50 against 12 costs a
+reader two parses and comparing two bars costs none.
+
+Where the numbers come from: the gateway's existing `/api/v1/clusters` aggregation gained two more
+sections per cluster, filled by one call each to the topic service's `listTopics` and the consumer
+service's `list` — both served from those services' own timed snapshots, neither touching a broker on
+the request path, and all of them issued in parallel so the response is bounded by the slowest single
+call rather than by their sum.
+
+**Every figure was checked against what the broker reports.** With the quickstart running:
+
+| KUI says | The broker says |
+| --- | --- |
+| 9 topics | `kafka-topics.sh --list \| wc -l` → 9 |
+| 83 partitions | `kafka-topics.sh --describe \| grep -c "Partition:"` → 83 |
+| Largest: `__consumer_offsets` 50, `analytics.pageviews` 12, `orders.v1` 6, `inventory.stock-levels` 4, `customers.profiles` 3 | the same five, same counts |
+| 3 consumer groups, 1 Stable and 2 Empty | `kafka-consumer-groups.sh --describe --all-groups --state` → `analytics-indexer` Stable, `order-fulfilment` Empty, `payments-ledger-sync` Empty |
+| Total lag 9 | `0 + 9 + 0` over the three groups |
+| 1 broker, controller 1 | `describeCluster` |
+
+Two figures are deliberately `—`: the cluster's Kafka version, which this broker does not report, and
+— on the *first* reading after start-up — the total lag, because one group had not had its lag
+computed yet. The lag tile said so in words: *"Lag is not totalled: 1 of 3 groups reported none."*
+Thirty seconds later it read 9. That is the rule this screen is built on: **a figure nobody can
+compute is absent and says why, never zero and never a partial sum.** A partial sum is the worse
+failure, because it looks exact, and it grows when an outage ends — an operator would read a recovery
+as a change in their fleet. The same rule makes the fleet-wide totals absent unless every cluster
+contributed, and makes a cluster's partition total absent when it holds more topics than the gateway
+summed in one page.
+
+### Independent statuses, observed
+
+`docker stop kui-quickstart-kafka`, then `GET /api/v1/clusters` every twenty seconds. The first
+reading after the broker died:
+
+```
+outer ok | summary stale | topics ok  | groups stale
+outer ok | summary stale | topics stale | groups stale
+```
+
+Three sections of one row in three different states in the same document, because three services
+noticed at three different moments. That is the whole argument, and it is why the totals are not
+folded into one status. On the screen each panel carried its own marker — *"Last read 10 minutes ago
+— cluster not responding"* — over figures that stayed readable, and the consumer panel's lag went to
+`—` with its reason underneath while the topic panel above it still showed 9 topics and 83
+partitions. Nothing went blank and nothing crashed.
+
+A section for a service this deployment does not run is `not_configured` and is hidden entirely, not
+drawn as an error: four permanent red panels on every dashboard of every installation is how an
+operator learns to stop reading red (ADR-032).
+
+### Choosing a serde when you publish
+
+The publish drawer has two new menus, *Write key as* and *Write value as*, offering the same eleven
+serdes the browse bar offers for reading, from one list (`SerdeChoices`) that both read — two lists
+maintained apart is how "publish with a serde nobody can read back" becomes possible. "Automatic" is
+the default and sends no name at all, so the record is written with the serde it would have been read
+with; and **Republish** starts on the serde the record it came from was decoded with, so republishing
+round-trips by default and choosing anything else is a deliberate act.
+
+Driven in a browser against the quickstart:
+
+- *Write value as* `Json` with `{"orderId":"SERDE-PICKER","note":"published as Json"}` → *"Published
+  1 record. partition 2, offset 0"*, and `kafka-console-consumer.sh` read exactly those bytes back.
+- *Write value as* `Json` with `not json at all` → refused in the drawer, with the form's contents
+  still in it: `expected null got 'not js...' (line 1, column 1)`.
+- *Write value as* `Int64` with `17` → published, and the raw bytes on the partition are
+  `00 00 00 00 00 00 00 11` — eight bytes, big-endian, seventeen. The picker is not decorative.
+
+The serde override for *reading* was already built and is reachable: the browse bar's *Key as* and
+*Value as* menus were verified to carry the same eleven names.
+
+### What is rough
+
+- **The `Json` serde's refusal is circe's own wording.** `expected null got 'not js...' (line 1,
+  column 1)` is a parser's message, not an operator's. It is at least attached to the field and does
+  not lose the composed record; it should be a sentence.
+- **One cluster fills the whole card grid.** The cards are an `auto-fit` grid with a minimum column
+  width, so a single-cluster deployment gets one very wide card. Correct, and not pretty.
+- **Nothing here was tested with more than one cluster on screen.** The magnitude bars across
+  clusters, and the "N clusters not counted" note on a partial total, are covered by unit tests and
+  were not seen on a screen.
+- **`docs/api/openapi.json` carries a concurrent pass's endpoints as well as these**, because it is
+  regenerated whole and another agent was adding topic creation and deletion at the same time.
