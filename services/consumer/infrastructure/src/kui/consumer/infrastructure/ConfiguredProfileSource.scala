@@ -37,7 +37,9 @@ final class ConfiguredProfileSource[F[_]: Applicative](clusters: List[ClusterCon
     extends ClusterProfileSource[F] {
 
   private val views: List[ClusterProfileView] =
-    clusters.map(cluster => ClusterProfileView(cluster.id, cluster.name, cluster.readOnly)).sortBy(_.cluster.value)
+    clusters
+      .map(cluster => ClusterProfileView(cluster.id, cluster.name, cluster.readOnly))
+      .sortBy(_.cluster.value)
 
   private val connections: Map[ClusterId, ClusterConnection] =
     clusters.map(cluster => cluster.id -> cluster.connection).toMap
@@ -64,9 +66,9 @@ final class ConfiguredProfileSource[F[_]: Applicative](clusters: List[ClusterCon
 
   /** The connection material for one cluster, for the module that builds Kafka clients.
     *
-    * `None` means the cluster is not configured, which every caller must turn into
-    * `KUI-CLUSTER-NOT-FOUND` rather than into an empty result: "KUI has never heard of this cluster" and
-    * "this cluster has no consumer groups" are different screens.
+    * `None` means the cluster is not configured, which every caller must turn into `KUI-CLUSTER-NOT-FOUND`
+    * rather than into an empty result: "KUI has never heard of this cluster" and "this cluster has no
+    * consumer groups" are different screens.
     */
   def connectionFor(cluster: ClusterId): Option[ClusterConnection] = connections.get(cluster)
 }

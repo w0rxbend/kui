@@ -47,12 +47,12 @@ final case class MessageServer[F[_]](
   *
   * Nothing. No Kafka connection is opened while this is being built, and none is held afterwards either —
   * which is the difference between this service and the topic service, and it is worth understanding. The
-  * topic service keeps a background scrape and a snapshot per cluster because a topic list is a thing you
-  * ask about repeatedly. A browse is not: it opens a consumer, reads what was asked for, and closes it. So
-  * the only long-lived things here are the serdes, and they are values.
+  * topic service keeps a background scrape and a snapshot per cluster because a topic list is a thing you ask
+  * about repeatedly. A browse is not: it opens a consumer, reads what was asked for, and closes it. So the
+  * only long-lived things here are the serdes, and they are values.
   *
-  * That is why a broker being down delays nothing at startup and fails nothing at startup. It shows up
-  * where it should — on the stream that tried to read it, as a terminal `error` event naming the cluster.
+  * That is why a broker being down delays nothing at startup and fails nothing at startup. It shows up where
+  * it should — on the stream that tried to read it, as a terminal `error` event naming the cluster.
   *
   * ==Why the `Resource` still matters==
   *
@@ -71,13 +71,12 @@ object MessageWiring {
     *   the configured clusters, from `kui.clusters[]`. In the all-in-one deployment this is the same list
     *   every other service was given, read once from the same file — see
     *   [[kui.message.infrastructure.ConfiguredClusterProfiles]] for why this shape does not go through the
-    *   HTTP profile client.
-    * The cursor signing key is generated here, once per process. That is the honest shape for the
-    * all-in-one deployment, which is one process: a cursor outlives a page but not a restart, and its
-    * one-hour lifetime makes that indistinguishable from expiry to anyone using it. The moment this service
-    * runs as several replicas the key becomes configuration (`kui.streaming.cursorKey`), because a cursor
-    * minted by one replica and rejected by its neighbour is the exact failure the signed cursor exists to
-    * remove — see `CursorCodec.hmacSha256`.
+    *   HTTP profile client. The cursor signing key is generated here, once per process. That is the honest
+    *   shape for the all-in-one deployment, which is one process: a cursor outlives a page but not a restart,
+    *   and its one-hour lifetime makes that indistinguishable from expiry to anyone using it. The moment this
+    *   service runs as several replicas the key becomes configuration (`kui.streaming.cursorKey`), because a
+    *   cursor minted by one replica and rejected by its neighbour is the exact failure the signed cursor
+    *   exists to remove — see `CursorCodec.hmacSha256`.
     */
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
@@ -136,10 +135,9 @@ object MessageWiring {
     * classpath and configured — whatever else that cluster has.
     *
     * The factory list is empty here because no registry serde is configured in this build. That is not a
-    * stub: `ClusterSerdes.resource` with no factories is exactly "the built-ins and the fallback", which is
-    * a complete and correct serde set for a cluster nobody has configured serdes for, and it is what makes
-    * the seeded quickstart render JSON as JSON and plain log lines as text without anybody configuring
-    * anything.
+    * stub: `ClusterSerdes.resource` with no factories is exactly "the built-ins and the fallback", which is a
+    * complete and correct serde set for a cluster nobody has configured serdes for, and it is what makes the
+    * seeded quickstart render JSON as JSON and plain log lines as text without anybody configuring anything.
     */
   private def serdesFor[F[_]: Async](
       clusters: List[ClusterConfig]
@@ -155,8 +153,8 @@ object MessageWiring {
   /** The profile version the serde registry keys its caches on.
     *
     * One, and constant, because a statically configured cluster's serde profile changes when the process is
-    * restarted with a different file — and a restart replaces the cache along with everything else. It
-    * starts mattering when profiles can be edited at run time (M5).
+    * restarted with a different file — and a restart replaces the cache along with everything else. It starts
+    * mattering when profiles can be edited at run time (M5).
     */
   val ProfileVersion: Long = 1L
 }

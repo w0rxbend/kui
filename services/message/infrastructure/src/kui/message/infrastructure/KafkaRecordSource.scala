@@ -19,8 +19,8 @@ import kui.message.domain.BrowseRequest
   *   how long one `poll` waits. Short, because it is also how long a cancelled browse takes to notice: the
   *   chain from a closed browser tab to a closed Kafka consumer runs between two polls, never through one
   * @param emptyPollsBeforeEnd
-  *   how many polls may return nothing before a bounded browse concludes it has read everything there is.
-  *   It is not zero because the first poll after an assignment routinely returns nothing while the consumer
+  *   how many polls may return nothing before a bounded browse concludes it has read everything there is. It
+  *   is not zero because the first poll after an assignment routinely returns nothing while the consumer
   *   finds the leaders, and a browse that gave up there would report an empty topic that is not empty
   */
 final case class BrowseTuning(pollTimeout: FiniteDuration, emptyPollsBeforeEnd: Int)
@@ -36,20 +36,20 @@ object BrowseTuning {
   * ==Two promises, and how each is kept==
   *
   * **It never materialises a topic.** A forward browse seeks and streams, emitting each record as it is
-  * polled. A backward browse — which Kafka cannot do, because a consumer only ever moves forward — walks
-  * each partition in *windows*: it seeks to `high - limit`, reads that window forwards, hands it back
+  * polled. A backward browse — which Kafka cannot do, because a consumer only ever moves forward — walks each
+  * partition in *windows*: it seeks to `high - limit`, reads that window forwards, hands it back
   * newest-first, and only if the caller wants more does it drop the window down and read the one below.
   * Neither path ever holds more than one window of one round in memory, whatever the size of the topic.
   *
-  * **Cancellation reaches the consumer.** The consumer is a `Resource`, opened by [[open]] inside the
-  * stream, so fs2 closes it when the stream completes *or is cancelled*. The poll loop is a sequence of
-  * short polls rather than one long one precisely so that a cancellation lands promptly between two of
-  * them: a browser tab that goes away closes a Kafka consumer within one `pollTimeout`.
+  * **Cancellation reaches the consumer.** The consumer is a `Resource`, opened by [[open]] inside the stream,
+  * so fs2 closes it when the stream completes *or is cancelled*. The poll loop is a sequence of short polls
+  * rather than one long one precisely so that a cancellation lands promptly between two of them: a browser
+  * tab that goes away closes a Kafka consumer within one `pollTimeout`.
   *
   * @param open
   *   a consumer for one cluster at one isolation level. It returns `Either` because a cluster nobody
-  *   configured, or one whose credentials are wrong, is a failure the browse reports as an event rather
-  *   than as a raised exception.
+  *   configured, or one whose credentials are wrong, is a failure the browse reports as an event rather than
+  *   as a raised exception.
   */
 final class KafkaRecordSource[F[_]: Temporal](
     open: (ClusterId, IsolationLevel) => Resource[F, Either[KuiError, BrowseConsumer[F]]],
@@ -86,11 +86,11 @@ final class KafkaRecordSource[F[_]: Temporal](
 
   /** Turns a seek into a concrete half-open offset range per partition.
     *
-    * Every range is clamped into `[beginning, end)` because every one of the three inputs can be outside
-    * it: a user can type an offset that retention has deleted, a cursor can outlive the records it names,
-    * and a timestamp can name a moment before the topic existed. Clamping is right where refusing is not —
-    * "the oldest record you still have" is what the user meant — and it is done once, here, so that no
-    * later arithmetic has to wonder.
+    * Every range is clamped into `[beginning, end)` because every one of the three inputs can be outside it:
+    * a user can type an offset that retention has deleted, a cursor can outlive the records it names, and a
+    * timestamp can name a moment before the topic existed. Clamping is right where refusing is not — "the
+    * oldest record you still have" is what the user meant — and it is done once, here, so that no later
+    * arithmetic has to wonder.
     */
   private def plan(consumer: BrowseConsumer[F], request: BrowseRequest): EitherT[F, KuiError, List[Window]] =
     for {
@@ -138,9 +138,9 @@ final class KafkaRecordSource[F[_]: Temporal](
   /** Where each partition starts, before clamping.
     *
     * `AtTimestamp` is the only mode that has to ask the broker, and the only one where a partition can
-    * legitimately have no answer: nothing was written to it at or after that moment. Such a partition
-    * starts at its end offset, so a forward browse shows nothing from it rather than showing it from the
-    * beginning — which is what treating the missing answer as zero would do.
+    * legitimately have no answer: nothing was written to it at or after that moment. Such a partition starts
+    * at its end offset, so a forward browse shows nothing from it rather than showing it from the beginning —
+    * which is what treating the missing answer as zero would do.
     */
   private def startOffsets(
       consumer: BrowseConsumer[F],
@@ -162,7 +162,9 @@ final class KafkaRecordSource[F[_]: Temporal](
 
       case SeekMode.AtTimestamp(millis) =>
         EitherT(consumer.offsetsForTimes(request.topic, chosen, millis)).map(found =>
-          chosen.map(partition => partition -> found.get(partition).flatten.getOrElse(endOf(end, partition))).toMap
+          chosen
+            .map(partition => partition -> found.get(partition).flatten.getOrElse(endOf(end, partition)))
+            .toMap
         )
     }
 
@@ -181,8 +183,8 @@ final class KafkaRecordSource[F[_]: Temporal](
         case Right(_) => polling(consumer, windows, request.limit)
       }
 
-  /** The poll loop, as a stream, so a record reaches the browser as it arrives rather than when the last
-    * one does.
+  /** The poll loop, as a stream, so a record reaches the browser as it arrives rather than when the last one
+    * does.
     */
   private def polling(
       consumer: BrowseConsumer[F],
@@ -216,8 +218,8 @@ final class KafkaRecordSource[F[_]: Temporal](
   /** The window walk.
     *
     * One round reads at most `limit` records per partition and hands them back newest-first. If the caller
-    * still wants more, the next round starts where this one began and reads the window below it. A
-    * partition that has reached its oldest retained record drops out; when they all have, the walk ends.
+    * still wants more, the next round starts where this one began and reads the window below it. A partition
+    * that has reached its oldest retained record drops out; when they all have, the walk ends.
     *
     * The bound is what makes this safe on a topic of any size: the walk never reads from the beginning and
     * never keeps more than one round.
@@ -252,9 +254,9 @@ final class KafkaRecordSource[F[_]: Temporal](
 
   /** Reads one bounded window on each of several partitions, to their ends.
     *
-    * Unlike the forward path this one accumulates, because the round has to be sorted before any of it can
-    * be shown: a record is only "the newest" once every partition in the round has been read. The
-    * accumulation is bounded by the round, which is bounded by the caller's limit.
+    * Unlike the forward path this one accumulates, because the round has to be sorted before any of it can be
+    * shown: a record is only "the newest" once every partition in the round has been read. The accumulation
+    * is bounded by the round, which is bounded by the caller's limit.
     */
   private def readWindows(
       consumer: BrowseConsumer[F],
@@ -270,9 +272,8 @@ final class KafkaRecordSource[F[_]: Temporal](
         consumer.poll(tuning.pollTimeout).flatMap {
           case Left(error) => error.asLeft[List[RawRecord]].pure[F]
           case Right(polled) =>
-            val kept = polled.filter(record =>
-              round.exists(window => window.holds(record.partition, record.offset))
-            )
+            val kept =
+              polled.filter(record => round.exists(window => window.holds(record.partition, record.offset)))
             drain(progress.after(polled), taken ++ kept)
         }
 
@@ -306,8 +307,8 @@ object KafkaRecordSource {
     /** Splits this window into the newest `size` records and whatever is left below them.
       *
       * The pair is the whole of the backward walk's arithmetic and the one place an off-by-one here would
-      * duplicate or drop exactly one record per page: the two halves are `[from, high)` and `[low, from)`,
-      * so they are adjacent, half-open in the same direction, and cover the window exactly once.
+      * duplicate or drop exactly one record per page: the two halves are `[from, high)` and `[low, from)`, so
+      * they are adjacent, half-open in the same direction, and cover the window exactly once.
       *
       * `None` for a window with nothing in it, which is how a partition that has been walked back to its
       * oldest retained record drops out of the round.
@@ -346,9 +347,9 @@ object KafkaRecordSource {
 
   /** Newest first, and by offset within a partition.
     *
-    * The second half is not decoration. Records that share a timestamp are ordinary — a batch written in
-    * one millisecond — and an order that used the timestamp alone would reorder a partition, which shows a
-    * user a reply above the request that caused it.
+    * The second half is not decoration. Records that share a timestamp are ordinary — a batch written in one
+    * millisecond — and an order that used the timestamp alone would reorder a partition, which shows a user a
+    * reply above the request that caused it.
     */
   private val Newest: Ordering[RawRecord] =
     Ordering

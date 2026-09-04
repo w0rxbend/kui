@@ -23,9 +23,9 @@ import kui.security.Principal
   * ==Why this is written out and not derived==
   *
   * Every other proxied route in the gateway comes from `ContractRouting.derive`, which calls the upstream,
-  * decodes its answer and re-encodes it. That is exactly the wrong thing to do to a stream: it would read
-  * the whole browse into memory before the browser saw its first record, and it would break the one property
-  * this milestone is about — a browser tab that goes away must close a Kafka consumer.
+  * decodes its answer and re-encodes it. That is exactly the wrong thing to do to a stream: it would read the
+  * whole browse into memory before the browser saw its first record, and it would break the one property this
+  * milestone is about — a browser tab that goes away must close a Kafka consumer.
   *
   * So this route relays instead. It still writes no path: the endpoint value is the message service's own,
   * and `ContractRouting.rewritePrefix` turns `/internal/v1` into `/api/v1` the same way it does for every
@@ -35,12 +35,12 @@ import kui.security.Principal
   *
   *   1. **Cancellation travels.** The browser aborts, Tapir cancels this stream, `ServiceClient.stream`
   *      cancels the upstream call, the message service's fiber is cancelled, and its Kafka consumer's
-  *      `Resource` finaliser closes it. Nothing in this file arranges that; it works because every link is
-  *      a stream and none of them buffers the whole thing.
-  *   1. **The stream always ends with a terminal event.** If the upstream process dies mid-body the
-  *      browser would otherwise see a connection that simply stops, which it can only render as "the
-  *      search finished, apparently". [[StreamProxy.withTerminalEvent]] appends an `error` event saying
-  *      the message service went away (ADR-035).
+  *      `Resource` finaliser closes it. Nothing in this file arranges that; it works because every link is a
+  *      stream and none of them buffers the whole thing.
+  *   1. **The stream always ends with a terminal event.** If the upstream process dies mid-body the browser
+  *      would otherwise see a connection that simply stops, which it can only render as "the search finished,
+  *      apparently". [[StreamProxy.withTerminalEvent]] appends an `error` event saying the message service
+  *      went away (ADR-035).
   *   1. **The events are not rewritten.** They are re-encoded from the parsed form the client hands back,
   *      field for field, by the same `SseEvent.render` the service used — including the `id:` line that
   *      carries the continuation cursor.
@@ -58,8 +58,8 @@ object MessageStreamRoutes {
         .serverLogicSuccess(request => params => Async[F].pure(relay[F](client, request, params)))
     )
 
-  /** The public shape of the message service's stream endpoint: its own inputs and outputs, with the
-    * internal prefix rewritten and the signed principal replaced by the inbound request.
+  /** The public shape of the message service's stream endpoint: its own inputs and outputs, with the internal
+    * prefix rewritten and the signed principal replaced by the inbound request.
     */
   def publicEndpoint[F[_]]
       : Endpoint[ServerRequest, BrowseStreamParams, ErrorEnvelope, Stream[F, Byte], Fs2Streams[F]] = {
@@ -99,9 +99,9 @@ object MessageStreamRoutes {
 
   /** Who is asking, under which correlation id, and about which cluster.
     *
-    * The correlation id is read off the request and never minted here: `EdgeHeaders` has already attached
-    * the authoritative one, and a second id would mean the value a user quotes from an error event matches
-    * no log line anywhere.
+    * The correlation id is read off the request and never minted here: `EdgeHeaders` has already attached the
+    * authoritative one, and a second id would mean the value a user quotes from an error event matches no log
+    * line anywhere.
     */
   private def context[F[_]: Async](request: ServerRequest, params: BrowseStreamParams): F[CallContext] =
     ErrorInterceptor.correlationIdOf[F](request).map { correlationId =>
@@ -114,8 +114,8 @@ object MessageStreamRoutes {
     }
 
   /** The cluster a request is about, for anything that keys on it. It comes from the path, never from an
-    * inbound header, which the edge strips (ADR-040) so that a caller cannot label another cluster's
-    * metrics as its own.
+    * inbound header, which the edge strips (ADR-040) so that a caller cannot label another cluster's metrics
+    * as its own.
     */
   def clusterOf(request: ServerRequest): Option[kui.kernel.ClusterId] =
     ClusterScope.clusterOf(ClusterScope.of(request.uri.path.toList))

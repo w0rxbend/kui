@@ -47,10 +47,9 @@ final case class BrowseStreamParams(
   * build. Describing an event-stream body needs `fs2` and a stream capability, and the Scala.js half has no
   * use for either: a browser opens this address with `EventSource`, which takes a URL, not a Tapir endpoint.
   *
-  * What the browser *does* share is the thing that could silently drift — the documents *inside* the
-  * stream, which are this module's own `MessageDto`, `ConsumedDto` and `PhaseDto`, compiled into both
-  * halves from one file. The seam that has ever caused a defect in this project is the payload, not the
-  * path.
+  * What the browser *does* share is the thing that could silently drift — the documents *inside* the stream,
+  * which are this module's own `MessageDto`, `ConsumedDto` and `PhaseDto`, compiled into both halves from one
+  * file. The seam that has ever caused a defect in this project is the payload, not the path.
   */
 object MessageEndpoints {
 
@@ -151,8 +150,8 @@ object MessageEndpoints {
     *
     * It is the same body `kui.http.sse.Sse.body` produces — `text/event-stream`, UTF-8, framing left to the
     * caller — written out because a contract module may not depend on `libs/http`, which is a wire module a
-    * service's published shape has no business reaching into. Two lines of Tapir is a cheaper price than
-    * that edge, and `SseSuite` pins the bytes on the other side of it.
+    * service's published shape has no business reaching into. Two lines of Tapir is a cheaper price than that
+    * edge, and `SseSuite` pins the bytes on the other side of it.
     */
   private def sseBody[F[_]] =
     streamTextBody(sttp.capabilities.fs2.Fs2Streams[F])(
@@ -182,9 +181,9 @@ object MessageEndpoints {
       )
       .tag("message")
 
-  /** Tapir flattens `path.and(path).and(query)…` into one wide tuple; this is the only place that width
-    * is ever written down, and it is written down twice — once each way — so that a parameter added to the
-    * query and forgotten here fails to compile rather than arriving as the wrong field.
+  /** Tapir flattens `path.and(path).and(query)…` into one wide tuple; this is the only place that width is
+    * ever written down, and it is written down twice — once each way — so that a parameter added to the query
+    * and forgotten here fails to compile rather than arriving as the wrong field.
     */
   private type Flat = (
       ClusterId,

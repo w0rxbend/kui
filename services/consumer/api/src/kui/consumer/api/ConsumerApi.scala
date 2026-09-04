@@ -35,8 +35,8 @@ import kui.security.{Principal, PrincipalCodec, RequestDigest, RequestDigests, S
   *   - it binds the endpoints `services/consumer/contract` publishes to the use cases in
   *     `services/consumer/application`, with no path written out here (ADR-003);
   *   - it verifies the gateway's signed principal before any use case runs (ADR-020);
-  *   - it maps a `KuiError` to the one error envelope and the one status, through
-  *     `ErrorEnvelope.statusOf` (ADR-034);
+  *   - it maps a `KuiError` to the one error envelope and the one status, through `ErrorEnvelope.statusOf`
+  *     (ADR-034);
   *   - it maps application types to contract types ([[ConsumerMapping]], ADR-033);
   *   - it starts nothing. `services/consumer/app` is the only module in this service allowed to.
   */
@@ -139,8 +139,8 @@ object ConsumerApi {
       *
       * ADR-020 binds a signed principal to one call by hashing the method, the path **and the body**. The
       * gateway signs with the body it is about to send; a service must therefore hash the same bytes, or
-      * every bodied call is refused as `request_mismatch` — which is exactly what happened the first time
-      * the reset wizard was called end to end against a real cluster.
+      * every bodied call is refused as `request_mismatch` — which is exactly what happened the first time the
+      * reset wizard was called end to end against a real cluster.
       *
       * Tapir runs security logic *before* it decodes the body, and a `ServerRequest` does not expose the raw
       * bytes, so a bodied endpoint cannot compute that hash where [[apply]] verifies. This variant therefore
@@ -150,14 +150,14 @@ object ConsumerApi {
       * value through this very contract (`SttpServiceClient`), and both sides print with circe's
       * `Printer.noSpaces` over a hand-written field order.
       *
-      * The cost is real and worth stating: the body of an unauthenticated request is decoded before the
-      * token is checked, which [[apply]] avoids. It is bounded — a few hundred bytes of JSON through a codec
-      * that refuses anything it does not recognise — and it buys back the binding that stops a token minted
-      * for one reset from being replayed with a different one, which is the property that actually matters
-      * on a destructive endpoint. The alternative considered and rejected was for the gateway to sign the
-      * request line alone for bodied calls: that is a one-line change, it is invisible in every existing
-      * test because every endpoint shipped so far has an empty body, and it would quietly drop the body
-      * binding for every service at once.
+      * The cost is real and worth stating: the body of an unauthenticated request is decoded before the token
+      * is checked, which [[apply]] avoids. It is bounded — a few hundred bytes of JSON through a codec that
+      * refuses anything it does not recognise — and it buys back the binding that stops a token minted for
+      * one reset from being replayed with a different one, which is the property that actually matters on a
+      * destructive endpoint. The alternative considered and rejected was for the gateway to sign the request
+      * line alone for bodied calls: that is a one-line change, it is invisible in every existing test because
+      * every endpoint shipped so far has an empty body, and it would quietly drop the body binding for every
+      * service at once.
       */
     def withBody[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any])(
         bodyOf: I => Array[Byte]
@@ -252,6 +252,7 @@ object ConsumerApi {
   /** The document's version, which is the *contract's* version and not the build's. */
   val Version: String = "1.0.0"
 
-  /** The instant a document is stamped with, when one has to be. Fixed, for the same reason as the version. */
+  /** The instant a document is stamped with, when one has to be. Fixed, for the same reason as the version.
+    */
   val GeneratedAt: Instant = Instant.EPOCH
 }

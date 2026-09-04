@@ -11,8 +11,8 @@ import sttp.apispec.openapi.circe.*
   * a merge nobody could run.
   *
   * A committed generated file is only trustworthy if something fails when it goes stale, which is what
-  * `--check` is for: `./mill services.consumer.api.openApiCheck` fails when the file on disk no longer matches
-  * the endpoints, and CI runs it.
+  * `--check` is for: `./mill services.consumer.api.openApiCheck` fails when the file on disk no longer
+  * matches the endpoints, and CI runs it.
   */
 object OpenApiDocument {
 

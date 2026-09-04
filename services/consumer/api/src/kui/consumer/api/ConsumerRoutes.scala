@@ -15,8 +15,8 @@ import kui.kernel.SortOrder
   *
   *   - a request that names something KUI has never heard of **fails**: an unknown cluster id is
   *     `404 KUI-CLUSTER-NOT-FOUND`;
-  *   - a request that names something real which could not be read **succeeds**, with the answer carrying
-  *     the reason it is thin — `stale`, an `incomplete` note, a `null` lag.
+  *   - a request that names something real which could not be read **succeeds**, with the answer carrying the
+  *     reason it is thin — `stale`, an `incomplete` note, a `null` lag.
   *
   * An unknown *group* is deliberately in neither category. Describing a group that does not exist answers
   * with a fabricated dead group (`GroupAdmin.describeGroups`), so `detail` answers 200 with an empty group in

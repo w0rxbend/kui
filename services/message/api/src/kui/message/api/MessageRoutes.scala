@@ -24,13 +24,13 @@ import kui.security.PrincipalCodec
   * Two places, and which one is not a detail. A request the domain refuses — a live browse anchored to an
   * offset, an empty partition subset — never opens a stream at all: it is a 400 with the field named, which
   * is what lets the browser underline the control the user got wrong. Everything after that is inside a
-  * stream whose status line has already been sent, so it becomes the terminal `error` event carrying the
-  * same envelope (ADR-035).
+  * stream whose status line has already been sent, so it becomes the terminal `error` event carrying the same
+  * envelope (ADR-035).
   *
   * ==Cancellation==
   *
-  * Nothing here has to arrange it, and that is the point worth writing down. The stream this route returns
-  * is the use case's, over the record source's, over a `Resource`-held Kafka consumer. When the browser goes
+  * Nothing here has to arrange it, and that is the point worth writing down. The stream this route returns is
+  * the use case's, over the record source's, over a `Resource`-held Kafka consumer. When the browser goes
   * away Tapir cancels the response stream, fs2 runs the finalisers, and the consumer is closed. Adding an
   * idle timeout or a manual abort here would be a second mechanism doing the same job less reliably.
   */
@@ -38,10 +38,10 @@ object MessageRoutes {
 
   /** How much one browse may consume before it stops of its own accord.
     *
-    * Deliberately not `PollBudget.Conservative`: this is the product's answer rather than a test's, and it
-    * is generous in bytes and time because a filtered scan over a real topic legitimately reads a great deal
-    * to match a little. The record ceiling is `BrowseLimits.Default.max`, so the budget can never be the
-    * thing that stops a browse the caller's own `limit` would have ended.
+    * Deliberately not `PollBudget.Conservative`: this is the product's answer rather than a test's, and it is
+    * generous in bytes and time because a filtered scan over a real topic legitimately reads a great deal to
+    * match a little. The record ceiling is `BrowseLimits.Default.max`, so the budget can never be the thing
+    * that stops a browse the caller's own `limit` would have ended.
     */
   val DefaultBudget: PollBudget =
     PollBudget.unsafe(

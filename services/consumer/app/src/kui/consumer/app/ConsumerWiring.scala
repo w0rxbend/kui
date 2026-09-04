@@ -174,8 +174,8 @@ object ConsumerWiring {
     *
     * A function rather than a map so that a cluster the profile source does not know about still produces a
     * port — one that refuses every call with `KUI-CLUSTER-NOT-FOUND`. The alternative, a `Map.apply`, throws,
-    * and the one caller that reaches this with an unchecked id is the offset reset: a `NoSuchElementException`
-    * there would become a 500 where the honest answer is a 404.
+    * and the one caller that reaches this with an unchecked id is the offset reset: a
+    * `NoSuchElementException` there would become a 500 where the honest answer is a 404.
     */
   private def portsFor[F[_]: Async](
       profiles: ConfiguredProfileSource[F],

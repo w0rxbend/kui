@@ -1,6 +1,7 @@
 package kui.message.application
 
 import java.nio.charset.StandardCharsets
+
 import scala.concurrent.duration.FiniteDuration
 
 import cats.effect.kernel.{Clock, Concurrent, Ref}
@@ -31,32 +32,32 @@ object BrowseEnd {
 
 /** One thing a browse has to say, in the vocabulary of this layer rather than of the wire.
   *
-  * These are not SSE events and they deliberately do not know that SSE exists: rule A3 keeps `libs/http`
-  * and the contract out of this module, and `services/message/api` is the one place that maps a
-  * [[BrowseEvent]] onto a frame (ADR-033). The mapping is one `match`, and having it in one place is what
-  * lets the use case be tested by reading a list.
+  * These are not SSE events and they deliberately do not know that SSE exists: rule A3 keeps `libs/http` and
+  * the contract out of this module, and `services/message/api` is the one place that maps a [[BrowseEvent]]
+  * onto a frame (ADR-033). The mapping is one `match`, and having it in one place is what lets the use case
+  * be tested by reading a list.
   */
 enum BrowseEvent {
 
-  /** What the browse is doing, in words, for the status line of a stream that has not produced a record
-    * yet. A browse that said nothing until its first record is indistinguishable from a hung one.
+  /** What the browse is doing, in words, for the status line of a stream that has not produced a record yet.
+    * A browse that said nothing until its first record is indistinguishable from a hung one.
     */
   case Phase(name: String)
 
   case Record(record: DecodedRecord)
 
-  /** Progress. `read` counts records taken from Kafka, `delivered` counts the ones that survived the
-    * filter; the gap between them is the number that tells a user their filter is doing something.
+  /** Progress. `read` counts records taken from Kafka, `delivered` counts the ones that survived the filter;
+    * the gap between them is the number that tells a user their filter is doing something.
     */
   case Consumed(bytes: Long, read: Long, delivered: Long, elapsed: FiniteDuration, budget: PollBudget)
 
-  /** The browse ended on purpose. `cursor` is the signed continuation of ADR-026, and it is `None`
-    * whenever asking again would be pointless.
+  /** The browse ended on purpose. `cursor` is the signed continuation of ADR-026, and it is `None` whenever
+    * asking again would be pointless.
     */
   case Finished(reason: BrowseEnd, cursor: Option[String])
 
-  /** The browse ended because something broke. It carries the ordinary `KuiError`, so the layer above
-    * renders it with the code it already knows rather than with a second error shape (ADR-034).
+  /** The browse ended because something broke. It carries the ordinary `KuiError`, so the layer above renders
+    * it with the code it already knows rather than with a second error shape (ADR-034).
     */
   case Failed(error: KuiError)
 }
@@ -76,8 +77,8 @@ object BrowseEvent {
   * bytes, not an error page, and must certainly not stop at the first line.
   *
   * Nothing here materialises a topic. Records arrive one at a time from [[RecordSource]] and leave one at a
-  * time; the only state kept is a handful of counters and the first and last offset seen per partition,
-  * which is what the continuation cursor is built from.
+  * time; the only state kept is a handful of counters and the first and last offset seen per partition, which
+  * is what the continuation cursor is built from.
   */
 trait BrowseUseCase[F[_]] {
   def browse(request: BrowseRequest, budget: PollBudget): Stream[F, BrowseEvent]
@@ -164,8 +165,7 @@ object BrowseUseCase {
           )
         }
 
-      /** The terminal events: either the failure that stopped the browse, or the accounting and the
-        * cursor.
+      /** The terminal events: either the failure that stopped the browse, or the accounting and the cursor.
         */
       private def ending(
           request: BrowseRequest,
@@ -190,10 +190,10 @@ object BrowseUseCase {
 
       /** A continuation, but only where continuing means anything.
         *
-        * A browse that reached the end of every partition has nothing to continue, and handing the browser
-        * a cursor there would put a "load more" button under a screen that can only ever answer "nothing".
-        * A cursor that fails to sign is dropped rather than raised: the page the user is looking at is
-        * correct, and the honest consequence is a missing button, not a failed browse.
+        * A browse that reached the end of every partition has nothing to continue, and handing the browser a
+        * cursor there would put a "load more" button under a screen that can only ever answer "nothing". A
+        * cursor that fails to sign is dropped rather than raised: the page the user is looking at is correct,
+        * and the honest consequence is a missing button, not a failed browse.
         */
       private def cursorFor(
           request: BrowseRequest,
@@ -254,8 +254,8 @@ object BrowseUseCase {
   /** A header's bytes as text.
     *
     * UTF-8 with replacement, never an exception: a header nobody can read is still a header worth showing
-    * beside the record, and a browse that failed on one would fail on every record of a topic whose
-    * producer writes a binary trace id.
+    * beside the record, and a browse that failed on one would fail on every record of a topic whose producer
+    * writes a binary trace id.
     */
   def render(header: RawHeader): RenderedHeader =
     RenderedHeader(header.key, header.value.fold("")(new String(_, StandardCharsets.UTF_8)))
@@ -268,8 +268,8 @@ object BrowseUseCase {
 
   private object Step {
 
-    /** What a failure produces: no events of its own — `ending` writes the terminal one — and no appetite
-      * for more.
+    /** What a failure produces: no events of its own — `ending` writes the terminal one — and no appetite for
+      * more.
       */
     val stop: Step = Step(Chunk.empty, more = false)
   }

@@ -29,8 +29,8 @@ import kui.security.{Principal, PrincipalCodec, RequestDigest, SignedPrincipal}
   *
   *   - A failure before the stream opens is an ordinary HTTP error response, with a status from
   *     `ErrorEnvelope.statusOf` like every other failure in KUI. A failure *after* it has opened cannot be —
-  *     the status line has already gone — so it becomes the stream's terminal `error` event carrying the
-  *     same envelope (ADR-034, ADR-035). One envelope, two places it can appear.
+  *     the status line has already gone — so it becomes the stream's terminal `error` event carrying the same
+  *     envelope (ADR-034, ADR-035). One envelope, two places it can appear.
   *   - The endpoint's capability is `Fs2Streams[F]` rather than `Any`, which is why [[Securing]] has a
   *     `stream` method of its own rather than reusing the request/response one.
   *
@@ -58,7 +58,13 @@ object MessageApi {
       telemetry: Telemetry[F]
   ): List[ServerEndpoint[Fs2Streams[F], F]] =
     HealthEndpoints
-      .make[F](readiness, capabilityDocument[F](clusters)) ++ MessageRoutes[F](browse, principals, rejections, logger, telemetry)
+      .make[F](readiness, capabilityDocument[F](clusters)) ++ MessageRoutes[F](
+      browse,
+      principals,
+      rejections,
+      logger,
+      telemetry
+    )
 
   /** The cross-cutting chain, outermost first, in the order the cluster service fixed and every service
     * copies: principal, then instrumentation, then the error envelope innermost.
@@ -86,9 +92,9 @@ object MessageApi {
       *
       * The logic returns `Either` because a browse has two kinds of failure and they must not look alike. A
       * request that could never have worked — a live browse anchored to an offset, a partition subset that
-      * names none — fails *before* the stream opens, as an ordinary 400 the browser can show beside the
-      * field that caused it. Everything that goes wrong once records are flowing becomes the stream's
-      * terminal `error` event instead, because by then the status line has already been sent (ADR-035).
+      * names none — fails *before* the stream opens, as an ordinary 400 the browser can show beside the field
+      * that caused it. Everything that goes wrong once records are flowing becomes the stream's terminal
+      * `error` event instead, because by then the status line has already been sent (ADR-035).
       */
     def stream[I](
         endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, Stream[F, Byte], Fs2Streams[F]]
@@ -135,10 +141,10 @@ object MessageApi {
   /** What `GET /capabilities` answers.
     *
     * The message service holds no snapshot and no background scrape: it opens a consumer when somebody
-    * browses and closes it again afterwards. So there is nothing it can usefully say about a cluster's
-    * health *before* being asked to read one, and claiming a cluster is unhealthy on the strength of no
-    * evidence would dim a sidebar entry that works. Every configured cluster is therefore reported
-    * available, and a cluster that turns out to be unreachable says so on the stream that tried to read it.
+    * browses and closes it again afterwards. So there is nothing it can usefully say about a cluster's health
+    * *before* being asked to read one, and claiming a cluster is unhealthy on the strength of no evidence
+    * would dim a sidebar entry that works. Every configured cluster is therefore reported available, and a
+    * cluster that turns out to be unreachable says so on the stream that tried to read it.
     */
   def capabilityDocument[F[_]: Sync](clusters: List[ClusterId]): F[ServiceCapabilities] =
     ServiceCapabilities(

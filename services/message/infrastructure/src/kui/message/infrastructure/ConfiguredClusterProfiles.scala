@@ -23,9 +23,9 @@ import kui.message.domain.ports.{BrowseCluster, ClusterProfileSource}
   *
   * ==What it carries that the domain cannot see==
   *
-  * A [[BrowseCluster]] deliberately holds no connection material, so that a password cannot reach a log
-  * line that prints a request. The adapter that opens Kafka consumers does need it, so this class holds
-  * both: the view the domain gets, and the [[connectionFor]] lookup only `infrastructure` can see.
+  * A [[BrowseCluster]] deliberately holds no connection material, so that a password cannot reach a log line
+  * that prints a request. The adapter that opens Kafka consumers does need it, so this class holds both: the
+  * view the domain gets, and the [[connectionFor]] lookup only `infrastructure` can see.
   */
 final class ConfiguredClusterProfiles[F[_]: {Clock, cats.Monad}] private (clusters: List[ClusterConfig])
     extends ClusterProfileSource[F] {
@@ -55,8 +55,8 @@ final class ConfiguredClusterProfiles[F[_]: {Clock, cats.Monad}] private (cluste
         )
     }
 
-  /** The connection material for a cluster, for the adapter that opens Kafka clients. `None` is the same
-    * "not configured" the domain sees as `KUI-CLUSTER-NOT-FOUND`.
+  /** The connection material for a cluster, for the adapter that opens Kafka clients. `None` is the same "not
+    * configured" the domain sees as `KUI-CLUSTER-NOT-FOUND`.
     */
   def connectionFor(id: ClusterId): Option[ClusterConnection] = byId.get(id).map(_.connection)
 

@@ -26,19 +26,18 @@ import kui.message.domain.TimestampType
   *
   * ==Everything Kafka-shaped stops here==
   *
-  * A `ConsumerRecord`, a `TopicPartition` and a `KafkaException` all exist inside this file and nowhere
-  * above it. That is the whole reason the port exists: the arithmetic of seeking and window-walking is
-  * tested against an in-memory log, and this file is the thin, boring half that a Testcontainers suite
-  * covers.
+  * A `ConsumerRecord`, a `TopicPartition` and a `KafkaException` all exist inside this file and nowhere above
+  * it. That is the whole reason the port exists: the arithmetic of seeking and window-walking is tested
+  * against an in-memory log, and this file is the thin, boring half that a Testcontainers suite covers.
   *
   * ==Why the raw client and not fs2-kafka==
   *
-  * fs2-kafka's consumer stream is built around subscription and rebalance. A browse does neither: it
-  * assigns explicit partitions, seeks each to a computed offset, and reads a bounded window. Doing that
-  * through a stream that expects to own the assignment is more code, not less, and it hides the one call
-  * whose timing this milestone cares about — `poll`. The *settings* still come from
-  * [[kui.kafka.ConsumerFactory]], so the security handling, the client id and the four KUI defaults
-  * (`enable.auto.commit=false` above all) are the shared ones and cannot drift.
+  * fs2-kafka's consumer stream is built around subscription and rebalance. A browse does neither: it assigns
+  * explicit partitions, seeks each to a computed offset, and reads a bounded window. Doing that through a
+  * stream that expects to own the assignment is more code, not less, and it hides the one call whose timing
+  * this milestone cares about — `poll`. The *settings* still come from [[kui.kafka.ConsumerFactory]], so the
+  * security handling, the client id and the four KUI defaults (`enable.auto.commit=false` above all) are the
+  * shared ones and cannot drift.
   *
   * ==Threading and cancellation==
   *
@@ -130,9 +129,9 @@ object KafkaBrowseConsumer {
 
   /** A consumer for one browse of one cluster, closed when that browse ends or is cancelled.
     *
-    * The `Either` is part of the result rather than a raised failure because the two things that can go
-    * wrong here — a cluster this deployment does not have, and connection material the client refuses —
-    * are both answers a browse reports as its terminal `error` event.
+    * The `Either` is part of the result rather than a raised failure because the two things that can go wrong
+    * here — a cluster this deployment does not have, and connection material the client refuses — are both
+    * answers a browse reports as its terminal `error` event.
     *
     * @param connections
     *   the configured clusters. `None` is `KUI-CLUSTER-NOT-FOUND`, which is a 404 at the edge.
@@ -160,8 +159,8 @@ object KafkaBrowseConsumer {
   /** The one Kafka property this file sets that the shared factory does not.
     *
     * Isolation is per browse and not per cluster — a user asking to see uncommitted records is asking about
-    * this read, not reconfiguring their deployment — so it is applied here, where the browse's own choice
-    * is in hand.
+    * this read, not reconfiguring their deployment — so it is applied here, where the browse's own choice is
+    * in hand.
     */
   val IsolationKey: String = "isolation.level"
 
@@ -187,8 +186,8 @@ object KafkaBrowseConsumer {
     *
     * A consumer whose broker has already gone away throws on close, and a `Resource` finaliser that raised
     * would replace the answer the user was about to receive with an exception about tidying up. The failure
-    * is logged, because a consumer that cannot be closed is worth knowing about, and swallowed, because it
-    * is not the caller's problem.
+    * is logged, because a consumer that cannot be closed is worth knowing about, and swallowed, because it is
+    * not the caller's problem.
     */
   private def closeQuietly[F[_]: Async](
       consumer: KafkaConsumer[Array[Byte], Array[Byte]],
@@ -207,8 +206,8 @@ object KafkaBrowseConsumer {
   /** A Kafka record, as the layers above it are allowed to see it.
     *
     * `serializedKeySize` is `-1` for an absent key, which is Kafka's way of saying "there was none". It is
-    * turned into zero here rather than carried up, because a size of minus one on a screen is a number a
-    * user has to be taught to read, and the absence is already visible in the payload itself.
+    * turned into zero here rather than carried up, because a size of minus one on a screen is a number a user
+    * has to be taught to read, and the absence is already visible in the payload itself.
     */
   private[infrastructure] def rawRecordOf(record: ConsumerRecord[Array[Byte], Array[Byte]]): RawRecord = {
     val headers = record

@@ -1,15 +1,14 @@
 package kui.consumer.api
 
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 import scala.concurrent.duration.FiniteDuration
 
-import java.nio.charset.StandardCharsets
-
 import cats.effect.kernel.{Async, Clock}
+import cats.syntax.all.*
 import io.circe.Printer
 import io.circe.syntax.*
-import cats.syntax.all.*
 import sttp.tapir.server.ServerEndpoint
 
 import kui.consumer.application.*
@@ -73,13 +72,13 @@ object ConsumerMutationRoutes {
   ): ServerEndpoint[Any, F] =
     secured.withBody(ConsumerMutationEndpoints.planReset)((_, _, _, request) => bytesOf(request)) {
       _ => (_, cluster, group, request) =>
-      specOf(request) match {
-        case Left(error) => error.asLeft[ResetPlanDto].pure[F]
-        case Right(spec) =>
-          scopeOf(snapshots, cluster, group, request).flatMap(scope =>
-            reset.plan(cluster, group, scope, spec).map(_.map(ConsumerMapping.plan))
-          )
-      }
+        specOf(request) match {
+          case Left(error) => error.asLeft[ResetPlanDto].pure[F]
+          case Right(spec) =>
+            scopeOf(snapshots, cluster, group, request).flatMap(scope =>
+              reset.plan(cluster, group, scope, spec).map(_.map(ConsumerMapping.plan))
+            )
+        }
     }
 
   /** Apply exactly the plan the token names.
@@ -95,10 +94,10 @@ object ConsumerMutationRoutes {
   ): ServerEndpoint[Any, F] =
     secured.withBody(ConsumerMutationEndpoints.applyReset)((_, _, _, request) => bytesOf(request)) {
       _ => (_, cluster, group, request) =>
-      for {
-        answer <- reset.apply(cluster, group, request.token)
-        now <- Clock[F].realTimeInstant
-      } yield answer.map(plan => ConsumerMapping.appliedPlan(plan, request.token, expiryOf(now)))
+        for {
+          answer <- reset.apply(cluster, group, request.token)
+          now <- Clock[F].realTimeInstant
+        } yield answer.map(plan => ConsumerMapping.appliedPlan(plan, request.token, expiryOf(now)))
     }
 
   /** Delete a group outright. Refused with `KUI-GROUP-NOT-EMPTY` while it still has members. */
@@ -150,8 +149,8 @@ object ConsumerMutationRoutes {
     * The set comes from the last snapshot pass, so it is the partitions the group was *known* to hold an
     * offset for up to thirty seconds ago. That staleness is visible rather than hidden: the plan that comes
     * back names every partition that would be written, so an operator who expected a twelfth partition can
-    * see that only eleven are listed and re-plan. Resolving it live would mean a describe on the request
-    * path for a number the plan is about to re-read anyway.
+    * see that only eleven are listed and re-plan. Resolving it live would mean a describe on the request path
+    * for a number the plan is about to re-read anyway.
     */
   private def scopeOf[F[_]: Async](
       snapshots: GroupSnapshots[F],
@@ -202,7 +201,8 @@ object ConsumerMutationRoutes {
     request.target match {
       case ResetTarget.Earliest => Right(ResetSpec.ToEarliest)
       case ResetTarget.Latest => Right(ResetSpec.ToLatest)
-      case ResetTarget.Timestamp => request.timestamp.fold(missing("timestamp"))(at => Right(ResetSpec.ToTimestamp(at)))
+      case ResetTarget.Timestamp =>
+        request.timestamp.fold(missing("timestamp"))(at => Right(ResetSpec.ToTimestamp(at)))
       case ResetTarget.ShiftBy => request.shiftBy.fold(missing("shiftBy"))(by => Right(ResetSpec.ShiftBy(by)))
       case ResetTarget.Duration =>
         request.durationMs.fold(missing("durationMs"))(ms =>
@@ -234,7 +234,9 @@ object ConsumerMutationRoutes {
             Offset.from(value) match {
               case Right(offset) => Right(TopicPartition(topic, partition) -> offset)
               case Left(_) =>
-                Left(ApplicationError.Invalid(s"$value is not a valid offset for partition $key", Nil): KuiError)
+                Left(
+                  ApplicationError.Invalid(s"$value is not a valid offset for partition $key", Nil): KuiError
+                )
             }
         }
       }

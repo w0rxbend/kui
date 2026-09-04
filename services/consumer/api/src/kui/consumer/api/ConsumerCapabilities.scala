@@ -5,12 +5,7 @@ import cats.syntax.all.*
 
 import kui.cache.SnapshotStatus
 import kui.consumer.application.{ClusterProfileSource, GroupSnapshots}
-import kui.contracts.capability.{
-  CapabilityState,
-  ClusterCapability,
-  DegradedReason,
-  ReasonCode
-}
+import kui.contracts.capability.{CapabilityState, ClusterCapability, DegradedReason, ReasonCode}
 import kui.kernel.ClusterId
 
 /** What the consumer service can currently do, per cluster, as the gateway reads it.
@@ -52,7 +47,8 @@ object ConsumerCapabilities {
                 // It is configured — it came from the profile source — so it is degraded and starting,
                 // never absent from the map, which would read as "not configured".
                 case None => starting.pure[F]
-                case Some(cell) => cell.get.map(snapshot => capabilityOf(snapshot.value.isDefined, snapshot.status))
+                case Some(cell) =>
+                  cell.get.map(snapshot => capabilityOf(snapshot.value.isDefined, snapshot.status))
               }
               .map(profile.cluster -> _)
           ).map(_.toMap)
@@ -72,7 +68,13 @@ object ConsumerCapabilities {
   def capabilityOf(hasValue: Boolean, status: SnapshotStatus): ClusterCapability =
     (hasValue, status) match {
       case (true, SnapshotStatus.Online) =>
-        ClusterCapability(configured = true, features = Nil, status = CapabilityState.Available.status, name = None, reason = None)
+        ClusterCapability(
+          configured = true,
+          features = Nil,
+          status = CapabilityState.Available.status,
+          name = None,
+          reason = None
+        )
 
       case (_, SnapshotStatus.Offline(error, _)) =>
         ClusterCapability(

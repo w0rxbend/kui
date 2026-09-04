@@ -1,8 +1,7 @@
 package kui.ui.messages.row
 
-import io.circe.parser.parse
-
 import com.raquo.laminar.api.L.*
+import io.circe.parser.parse
 
 import kui.contracts.message.{DecodeErrorDto, DecodedPayloadDto}
 import kui.message.contract.MessageDto

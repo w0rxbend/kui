@@ -29,10 +29,10 @@ import kui.kernel.GroupId
 
 /** Application types to wire types, and nothing else (ADR-033).
   *
-  * Nothing here computes. Every number on the wire — a total lag, an excluded-partition count, a delta —
-  * was computed once in `services/consumer/domain`, where the anomaly rules live, and is copied across. A
-  * mapping that re-derived a total would be a second rule that can disagree with the first, which is the
-  * defect `LagMath` exists to make impossible.
+  * Nothing here computes. Every number on the wire — a total lag, an excluded-partition count, a delta — was
+  * computed once in `services/consumer/domain`, where the anomaly rules live, and is copied across. A mapping
+  * that re-derived a total would be a second rule that can disagree with the first, which is the defect
+  * `LagMath` exists to make impossible.
   *
   * The two `GroupSortField` enums meet here, and only here. They are two enums on purpose: one is the wire
   * vocabulary in `libs/contracts-core` (build rule A14), the other is the application's own, and rule A3
@@ -50,8 +50,8 @@ object ConsumerMapping {
     case WireSortField.State => AppSortField.State
   }
 
-  /** Which parts of a row could not be read. `None` — rendered as `null` — is the ordinary case, so a
-    * browser can treat any value at all as "show the warning".
+  /** Which parts of a row could not be read. `None` — rendered as `null` — is the ordinary case, so a browser
+    * can treat any value at all as "show the warning".
     */
   def incomplete(completeness: GroupCompleteness): Option[IncompleteDto] =
     Option.when(!completeness.isComplete)(
@@ -155,7 +155,8 @@ object ConsumerMapping {
   def stale(freshness: SnapshotFreshness): Option[StaleDto] = freshness match {
     case SnapshotFreshness.Fresh(_) => None
     case SnapshotFreshness.Stale(at, reason) => Some(StaleDto(at, ConsumerReasons.of(reason)))
-    case SnapshotFreshness.Unavailable(reason) => Some(StaleDto(java.time.Instant.EPOCH, ConsumerReasons.of(reason)))
+    case SnapshotFreshness.Unavailable(reason) =>
+      Some(StaleDto(java.time.Instant.EPOCH, ConsumerReasons.of(reason)))
   }
 
   def detail(view: GroupDetailView): GroupDetailDto =
@@ -189,7 +190,10 @@ object ConsumerMapping {
 
   // ------------------------------------------------------------------ the topic page's Consumers tab
 
-  def topicConsumers(view: TopicConsumersView, groupsOf: GroupId => Option[ConsumerGroup]): TopicConsumersDto =
+  def topicConsumers(
+      view: TopicConsumersView,
+      groupsOf: GroupId => Option[ConsumerGroup]
+  ): TopicConsumersDto =
     TopicConsumersDto(
       view.groups.map { row =>
         val onThisTopic = groupsOf(row.groupId).flatMap(_.subscriptions.find(_.topic == view.topic))

@@ -10,14 +10,14 @@ import kui.message.application.RawRecord
   *
   * ==Why this exists rather than a Kafka consumer passed around==
   *
-  * Everything difficult about browsing is arithmetic: which offsets a seek resolves to, how a backward
-  * browse walks a partition in windows, when a bounded read knows it has reached the end. None of that is
-  * about Kafka, and all of it is wrong in ways only a test can find — an off-by-one at a window boundary
-  * duplicates or drops exactly one record per page, which is the kind of defect that survives a demo.
+  * Everything difficult about browsing is arithmetic: which offsets a seek resolves to, how a backward browse
+  * walks a partition in windows, when a bounded read knows it has reached the end. None of that is about
+  * Kafka, and all of it is wrong in ways only a test can find — an off-by-one at a window boundary duplicates
+  * or drops exactly one record per page, which is the kind of defect that survives a demo.
   *
-  * With this seam the arithmetic lives in [[KafkaRecordSource]] and is tested against an in-memory log,
-  * while [[KafkaBrowseConsumer]] holds the Kafka calls and nothing else. Without it, every one of those
-  * tests would need a broker.
+  * With this seam the arithmetic lives in [[KafkaRecordSource]] and is tested against an in-memory log, while
+  * [[KafkaBrowseConsumer]] holds the Kafka calls and nothing else. Without it, every one of those tests would
+  * need a broker.
   *
   * ==What an implementation promises==
   *
@@ -33,11 +33,13 @@ trait BrowseConsumer[F[_]] {
   /** The oldest offset each partition still holds — not zero on a topic that retention or compaction has
     * trimmed, which is why it is asked for rather than assumed.
     */
-  def beginningOffsets(topic: TopicName, partitions: List[PartitionId]): F[Either[KuiError, Map[PartitionId, Long]]]
+  def beginningOffsets(
+      topic: TopicName,
+      partitions: List[PartitionId]
+  ): F[Either[KuiError, Map[PartitionId, Long]]]
 
   /** The offset the next record written will get. Under `READ_COMMITTED` this is the last stable offset,
-    * which can be well behind the physical end while a transaction is open — a normal condition, not a
-    * fault.
+    * which can be well behind the physical end while a transaction is open — a normal condition, not a fault.
     */
   def endOffsets(topic: TopicName, partitions: List[PartitionId]): F[Either[KuiError, Map[PartitionId, Long]]]
 

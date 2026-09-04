@@ -21,10 +21,10 @@ import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
 import kui.gateway.api.{
   CapabilityRoutes,
   ClusterOverviewRoutes,
-  MessageStreamRoutes,
   EdgeHeaders,
   GatewayApi,
   InfoRoutes,
+  MessageStreamRoutes,
   TopicOverviewRoutes
 }
 import kui.gateway.application.capability.{
@@ -320,8 +320,8 @@ object GatewayWiring {
   /** The service the topic-page aggregation calls. Its other five endpoints are proxied untouched. */
   val TopicServiceId: ServiceId = ServiceId.unsafe("topic")
 
-  /** The service whose browse stream is relayed. It has no proxied endpoints: a stream cannot be called
-    * and re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.
+  /** The service whose browse stream is relayed. It has no proxied endpoints: a stream cannot be called and
+    * re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.
     */
   val MessageServiceId: ServiceId = ServiceId.unsafe("message")
 

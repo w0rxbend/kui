@@ -7,13 +7,12 @@ import io.circe.syntax.*
 import kui.contracts.ErrorEnvelope
 import kui.contracts.message.{DecodeErrorDto, DecodedPayloadDto}
 import kui.contracts.sse.DoneReason
-import kui.message.contract.BrowseAddress
 import kui.http.sse.SseEvent
 import kui.kernel.CorrelationId
 import kui.kernel.serde.{PayloadKind, Target}
 import kui.message.application.{BrowseEnd, BrowseEvent}
-import kui.message.contract.{BudgetDto, ConsumedDto, MessageDto, PhaseDto}
-import kui.message.domain.{Decoded, DecodeError, DecodedRecord, TimestampType}
+import kui.message.contract.{BrowseAddress, BudgetDto, ConsumedDto, MessageDto, PhaseDto}
+import kui.message.domain.{DecodeError, Decoded, DecodedRecord, TimestampType}
 
 /** A [[BrowseEvent]] as one frame of a server-sent-events stream.
   *
@@ -26,9 +25,9 @@ import kui.message.domain.{Decoded, DecodeError, DecodedRecord, TimestampType}
   *
   * `Failed` renders as `event: error` carrying the ordinary [[kui.contracts.ErrorEnvelope]] — the same
   * document a failed HTTP request would have carried, so a client renders a mid-stream failure with the code
-  * it already knows (ADR-034). And `Finished` renders as `event: done` carrying the reason and the cursor,
-  * so a client can tell "there is nothing more" from "this request stopped" (ADR-035). Every stream ends
-  * with exactly one of the two.
+  * it already knows (ADR-034). And `Finished` renders as `event: done` carrying the reason and the cursor, so
+  * a client can tell "there is nothing more" from "this request stopped" (ADR-035). Every stream ends with
+  * exactly one of the two.
   */
 object MessageMapping {
 

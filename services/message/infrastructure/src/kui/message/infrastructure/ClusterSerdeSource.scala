@@ -22,22 +22,21 @@ import kui.serde.{
   *
   * ==Why this module and not the use case==
   *
-  * The domain states decoding as a port precisely so that it can say "a decode never fails a browse"
-  * without naming a serde library. This is the file where that promise is kept, and it is kept by never
-  * returning a failure at all from [[decode]]: every path ends in a [[Decoded]], and the reason the
-  * intended serde did not work travels beside it as a `Some(cause)` that the record carries to the screen.
+  * The domain states decoding as a port precisely so that it can say "a decode never fails a browse" without
+  * naming a serde library. This is the file where that promise is kept, and it is kept by never returning a
+  * failure at all from [[decode]]: every path ends in a [[Decoded]], and the reason the intended serde did
+  * not work travels beside it as a `Some(cause)` that the record carries to the screen.
   *
   * ==How a serde is chosen when the caller names none==
   *
-  * Auto-detection first, then the configured resolution order. That order matters for the seeded
-  * quickstart and for every real cluster like it: `orders.v1` holds JSON and must render as JSON so the
-  * table view can flatten it, while `audit.log.raw` holds plain log lines that no JSON parser will accept —
-  * and both have to work on the same screen with nobody configuring anything. Auto-detection asks each
-  * serde whether *these bytes* are its own, which answers both questions from the record rather than from a
-  * setting.
+  * Auto-detection first, then the configured resolution order. That order matters for the seeded quickstart
+  * and for every real cluster like it: `orders.v1` holds JSON and must render as JSON so the table view can
+  * flatten it, while `audit.log.raw` holds plain log lines that no JSON parser will accept — and both have to
+  * work on the same screen with nobody configuring anything. Auto-detection asks each serde whether *these
+  * bytes* are its own, which answers both questions from the record rather than from a setting.
   *
-  * A cluster that has no serdes built — one this deployment does not configure — is not an error either.
-  * Its records decode through the fallback, which is the terminal case the whole resolution order is built
+  * A cluster that has no serdes built — one this deployment does not configure — is not an error either. Its
+  * records decode through the fallback, which is the terminal case the whole resolution order is built
   * around.
   */
 final class ClusterSerdeSource[F[_]: Sync](serdes: Map[ClusterId, ClusterSerdes[F]]) extends SerdeSource[F] {

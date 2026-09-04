@@ -11,21 +11,21 @@ import kui.message.domain.{BrowseRequest, TimestampType}
 
 /** One Kafka header, still as bytes.
   *
-  * Bytes and not text, because rendering a header is a decision — some are UTF-8, some are the
-  * big-endian integers Spring's retry machinery writes — and a port that handed text down would have made
-  * that decision inside the adapter where no test can see it.
+  * Bytes and not text, because rendering a header is a decision — some are UTF-8, some are the big-endian
+  * integers Spring's retry machinery writes — and a port that handed text down would have made that decision
+  * inside the adapter where no test can see it.
   */
 final case class RawHeader(key: String, value: Option[Array[Byte]])
 
 /** One record as it left the broker: nothing decoded, nothing rendered, nothing filtered.
   *
   * `key` and `value` are `Option` because Kafka's are nullable, and the difference matters twice over: a
-  * record with no key is ordinary, and a record with a null *value* is a tombstone, which is a fact about
-  * the data rather than a missing field.
+  * record with no key is ordinary, and a record with a null *value* is a tombstone, which is a fact about the
+  * data rather than a missing field.
   *
-  * The three sizes are the *serialised* sizes, taken before anything decoded them. They are the only
-  * numbers on this record that survive decoding unchanged, and they are what an operator hunting the record
-  * that is filling a partition actually needs.
+  * The three sizes are the *serialised* sizes, taken before anything decoded them. They are the only numbers
+  * on this record that survive decoding unchanged, and they are what an operator hunting the record that is
+  * filling a partition actually needs.
   */
 final case class RawRecord(
     partition: PartitionId,
@@ -52,9 +52,8 @@ final case class RawRecord(
   *
   * ==What an implementation must promise==
   *
-  *   - **it never materialises a topic.** Records are emitted as they are polled, and a backward browse
-  *     reads bounded offset windows rather than reading a partition from its beginning and keeping the
-  *     tail.
+  *   - **it never materialises a topic.** Records are emitted as they are polled, and a backward browse reads
+  *     bounded offset windows rather than reading a partition from its beginning and keeping the tail.
   *   - **it is a `Resource` underneath.** The consumer it opens is closed when the stream is finished *or
   *     cancelled*, so a browser tab that goes away closes a Kafka consumer rather than leaking one.
   */
