@@ -286,6 +286,54 @@ refused, naming the gap, because it nearly always means a deleted entry or a mis
 | `kui.clusters.<n>.admin.parallelism` | `…_ADMIN_PARALLELISM` | `4` | How many chunks are in flight at once against this one cluster. |
 | `kui.clusters.<n>.properties.<kafka.property>` | *(not settable from the environment)* | *(empty)* | Raw Kafka client properties, applied last. |
 
+### `kui.clusters.<n>.schemaRegistry` — where the schemas are
+
+Optional, and its absence is a supported configuration rather than a missing one. A cluster with no
+`schemaRegistry` block has no Schemas screen: the schema service reports that cluster as
+**not configured**, the browser hides the feature for it, and nothing anywhere turns red. That is a
+different state from a registry that is configured and unreachable, which shows the feature
+*degraded* with the reason and a retry — the two must never look alike, or a deployment that never
+wanted a registry carries a permanently red panel nobody can clear.
+
+```yaml
+kui:
+  clusters:
+    - name: "Production"
+      bootstrapServers: ["kafka:9092"]
+      schemaRegistry:
+        url: ["http://schema-registry-1:8081", "http://schema-registry-2:8081"]
+        callTimeout: 10s
+        auth:
+          type: basic
+          username: kui
+          password: env:KUI_REGISTRY_PASSWORD
+```
+
+| Key | Environment | Default | Meaning |
+| --- | --- | --- | --- |
+| `kui.clusters.<n>.schemaRegistry.url` | `…_SCHEMAREGISTRY_URL` | *(unset — the feature is off)* | One or more registry addresses, in preference order; a YAML list or comma-separated. A second address is a registry cluster, and KUI fails over to it. Setting this key is what switches the feature on. |
+| `kui.clusters.<n>.schemaRegistry.callTimeout` | `…_SCHEMAREGISTRY_CALLTIMEOUT` | `10s` | The whole-call budget, retries included (1s … 60s). Short on purpose: a registry is routinely the least reliable component in a deployment, and a screen that waits a minute for it has taken the outage on instead of reporting it. |
+| `kui.clusters.<n>.schemaRegistry.auth.type` | `…_SCHEMAREGISTRY_AUTH_TYPE` | `none` | `none`, `basic` or `oauth`. |
+| `kui.clusters.<n>.schemaRegistry.auth.username` | `…_AUTH_USERNAME` | *(required for `basic`)* | |
+| `kui.clusters.<n>.schemaRegistry.auth.password` | `…_AUTH_PASSWORD` | *(required for `basic`)* | A secret: literal, `env:NAME` or `file:/path`. |
+| `kui.clusters.<n>.schemaRegistry.auth.tokenEndpoint` | `…_AUTH_TOKENENDPOINT` | *(required for `oauth`)* | The OAuth 2.0 token endpoint. KUI posts a client-credentials grant to it and sends the bearer token to the registry. |
+| `kui.clusters.<n>.schemaRegistry.auth.clientId` | `…_AUTH_CLIENTID` | *(required for `oauth`)* | |
+| `kui.clusters.<n>.schemaRegistry.auth.clientSecret` | `…_AUTH_CLIENTSECRET` | *(required for `oauth`)* | A secret. |
+| `kui.clusters.<n>.schemaRegistry.auth.scope` | `…_AUTH_SCOPE` | *(unset)* | Sent with the grant when the issuer needs one. |
+
+**Basic or OAuth, never both.** A file that sets `type: basic` and also carries `clientSecret` is
+refused, naming the surplus keys. Accepting both would mean one of the two silently losing — and the
+one that loses is always the one somebody changes when the other expires, producing an outage that
+looks like a registry problem rather than a configuration one.
+
+**The token is cached** until thirty seconds before it expires, and it is fetched over its own HTTP
+client rather than the registry's, so a token request can never be failed over onto a registry
+address. An issuer that will not answer degrades that cluster's Schemas screen and nothing else.
+
+**A private address is allowed only if you allowed it.** Registry URLs go through the same
+`KUI_ALLOW_PRIVATE_UPSTREAMS` check as every other upstream address. A registry at
+`http://schema-registry:8081` inside a Compose network needs it; see "Outbound addresses" below.
+
 ### `kui.clusters.<n>.serde` — which decoder reads which topic
 
 Most production Kafka traffic is Avro, Protobuf or JSON Schema, and a record in any of those formats

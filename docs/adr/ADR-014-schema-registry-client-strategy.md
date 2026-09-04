@@ -80,6 +80,44 @@ therefore two deliberate steps and not one commit: adding `packages.confluent.io
 resolver, and recording in `docs/operations` that a KUI built with Protobuf support carries a
 CCL component.
 
+**Amendment 2 — Protobuf decodes after all, by parsing the schema ourselves.**
+
+Amendment 1 concluded that Protobuf could not be decoded without Confluent's CCL-licensed
+`kafka-protobuf-provider`, and left a Protobuf payload rendering as a named refusal. That conclusion
+was about *libraries*, and it skipped the third option: writing the reader.
+
+What a viewer needs from a `.proto` schema is a field table — number, name, label, type — and what it
+needs from the payload is the published wire encoding. Both are small and both are stable: the
+encoding has not changed since 2008, and the language subset a schema *held in a registry* uses is
+narrow, because a registry schema has to be self-contained enough for a consumer to compile.
+`libs/serde-confluent` therefore contains:
+
+- `ProtoSchema` — a recursive-descent parser for that subset: `syntax`, `package`, `option`,
+  `message` (nested), `enum`, `oneof`, `map<k, v>`, `reserved`, every scalar type, and the three
+  field labels. `import` is parsed and *refused at use*: a field whose type comes from another file
+  cannot be decoded, and the failure names the file rather than silently rendering the field as an
+  unknown number.
+- `ProtobufPayload` — the wire decoder, including Confluent's message-index prefix (the varint path
+  that says which message of the schema a record is, which Avro and JSON Schema do not have). It
+  follows Protobuf's canonical JSON mapping where that mapping has an opinion: 64-bit integers as
+  strings, `bytes` as base64, enums by name. Fields the schema does not declare are *shown*, as
+  `unknown_<n>`, because the usual cause is a record written with a newer schema and an operator
+  cannot otherwise discover that.
+
+**Decision.** KUI reads Protobuf and does not write it. Encoding needs the reverse of the same table
+plus canonical-JSON parsing for every scalar type; a decode that is subtly wrong shows one bad row on
+a screen, while an encode that is subtly wrong puts a malformed record in a topic that outlives the
+mistake. The produce path refuses a Protobuf schema by name until an encoder exists and has been
+tested against real producers.
+
+**Tradeoff.** KUI now owns a parser for a language it does not control. The mitigation is scope —
+schema text, not arbitrary `.proto` files — and tests: the decoder is checked against bytes produced
+by `protoc` itself, not only against the encoder in its own suite.
+
+**What this reverses.** The build change and the licence note Amendment 1 anticipated are no longer
+needed. `libs/serde-confluent` still contains no Confluent code, and a KUI operator still has nothing
+extra to agree to.
+
 ## Evidence
 
 - `research/scala/ecosystem-mapping.md` F7 (versions, Confluent Community License, dead
