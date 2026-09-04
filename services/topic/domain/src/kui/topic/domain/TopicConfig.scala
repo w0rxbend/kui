@@ -125,3 +125,41 @@ object TopicConfig {
 
   given CanEqual[TopicConfig, TopicConfig] = CanEqual.derived
 }
+
+/** What the Settings tab renders.
+  *
+  * Two cases and not a bare `List`, because an empty list is a valid answer that means one of two things a
+  * caller must be able to tell apart: the topic genuinely has no configuration the broker will report, or the
+  * caller may see the topic but not its configuration. An empty table reads as "this topic has no settings",
+  * which is a statement of fact KUI would be making up.
+  *
+  * "Not permitted" is a case of the *result* and not a `TopicError.Forbidden`. Making it an error would give
+  * the whole topic page a 403, and the partitions the user is perfectly entitled to see would disappear along
+  * with the tab they are not.
+  */
+enum TopicConfigView {
+
+  /** Entries, sorted by name. Possibly empty, which the screen renders as "no overrides". */
+  case Entries(values: List[TopicConfigEntry])
+
+  /** The topic exists and the caller may not read its configuration. */
+  case NotPermitted(detail: String)
+
+  def entries: List[TopicConfigEntry] = this match {
+    case Entries(values) => values
+    case NotPermitted(_) => Nil
+  }
+
+  def isPermitted: Boolean = this match {
+    case Entries(_) => true
+    case NotPermitted(_) => false
+  }
+}
+
+object TopicConfigView {
+
+  /** Builds the permitted case, sorting once so that no caller has to remember to. */
+  def of(values: List[TopicConfigEntry]): TopicConfigView = Entries(values.sorted)
+
+  given CanEqual[TopicConfigView, TopicConfigView] = CanEqual.derived
+}

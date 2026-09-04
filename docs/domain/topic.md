@@ -15,6 +15,7 @@ resolver of cluster configuration in the product, and it is not this one.
 **Modelled.** This document grows one section per task as the layers land.
 
 - The model and its invariants — below. (TOP-011.)
+- The ports the use cases are stated in terms of — below. (TOP-012.)
 
 ## Why the model refuses to answer
 
@@ -125,3 +126,76 @@ cluster service's identically-named enum. Rule A11 forbids one service from seei
 at all, and a shared copy in `libs/kernel` would be a wire vocabulary the two services could not
 evolve apart. The duplication is deliberate, and the mitigation — an exhaustive match in the
 adapter, checked by the compiler — is the same one `KafkaToDomain` records one service over.
+
+## The ports
+
+The topic service's use cases are written against three narrow interfaces, so that they can be
+tested without a broker and without an HTTP client, and so that an adapter can be replaced without
+touching a rule. All three live in the domain and none of them names a runtime type: no `IO`, no
+`fs2.Stream`, no Kafka class.
+
+| Port | What it provides |
+| --- | --- |
+| `TopicAdmin[F]` | `scrape`, `detail` and `config` against one cluster, in the domain's own vocabulary |
+| `ClusterProfiles[F]` | which clusters exist, and notification when that set changes |
+| `ClockPort[F]` | `now` |
+
+### `TopicAdmin` — two traits with one name, on purpose
+
+`libs/kafka` has a `TopicAdmin` too, and they are deliberately different traits. That one speaks
+Kafka's vocabulary — `TopicListing`, `TopicPartitionInfo`, `BatchResult`, `SkipReason`. This one
+speaks the topic domain's — `TopicSummary`, `TopicDetail`, `TopicError`.
+
+One trait would be simpler and is not available: rule A5 forbids `libs/kafka` from depending on a
+service, and rule A1 forbids this module from depending on `libs/kafka`, so neither of them can
+name the other's types. The bridge is one file in `infrastructure`, `KafkaToTopicDomain`, and every
+pair it bridges is joined by an exhaustive match that the compiler checks. The duplication is the
+cost; a compiler-checked translation of every shape a real cluster can produce is what it buys.
+
+`scrape` is one call and not "list the names, then describe each one" because the chunking, the
+parallelism, the order the admin calls must run in and the offset arithmetic are all the adapter's
+business (`research/kafka/admin-capabilities.md` DC-D4). A port that specified them would have
+specified a Kafka client.
+
+`scrape` always includes internal topics — see "what the domain deliberately does not decide".
+
+`config` answers `TopicConfigView`, which is `Entries` or `NotPermitted`, and never
+`TopicError.Forbidden`. A 403 there would take the whole topic page down, and the partitions the
+user is entitled to see would vanish along with the tab they are not.
+
+### `ClusterProfiles` — what it deliberately cannot tell you
+
+It carries no connection material: no bootstrap addresses, no security mechanism, no credentials.
+The adapter behind it holds all of that, because it is what builds the Kafka clients. A use case
+that could see a password is a use case that could log one, and the cheapest way to guarantee it
+never does is for the type it is written against not to have the field.
+
+`onChange` takes a callback returning its own deregistration, rather than answering with an
+`fs2.Stream`, per ADR-041 Amendment 3: a domain that imports a concrete runtime type can no longer
+be read, tested or moved without that runtime. The handler is given the whole new set rather than a
+delta, because its consumer's job — retaining exactly the snapshots whose clusters still exist — is
+stated over a set, and reconstructing a set from deltas is how a removal gets missed.
+
+### Every failure is a value
+
+`TopicError` has four cases because the caller renders four different things: "no such topic", "you
+may not see this", a greyed stale screen with a retry, and a red one. `Forbidden` is never
+`Unreachable`: per ADR-039 §6 an authorization failure is an `ApplicationError`, it is not a sign
+that anything is broken, and it must not dim a capability.
+
+The ports are **total**. There is no throwing path, and `PortContractSuite` asserts it: an adapter
+that let a `TimeoutException` escape would make every signature in the application layer a lie.
+
+### `PortContractSuite`
+
+The behaviours every `TopicAdmin` implementation must have, written in the module that declares the
+port and *before* either implementation, because a contract written after the second implementation
+is a description of the first one. Two things run it: the fake the application layer's suites are
+built on, and the live adapter in `services/topic/infrastructure` against a real broker in a
+container. A fake that drifts from the adapter fails there, instead of quietly making every
+use-case test agree with a bug.
+
+A subclass supplies the implementation and says what its cluster contains. Optional hooks — an
+unreadable-configuration topic, a leaderless partition, a partly readable cluster — return `None`
+for a fixture that cannot produce that state, and the case is skipped rather than passing
+vacuously.
