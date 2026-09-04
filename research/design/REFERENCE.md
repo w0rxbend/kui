@@ -18,6 +18,13 @@ The design tool exposes no revision number, so the content hash is the revision 
 the question the date cannot: whether the artboard has changed since it was read. Re-run the hash
 before trusting this document, and if it differs, the design moved and this reading is stale.
 
+**Where the source lives.** A local copy is kept at `.agent/design/kafka-ui-v2.dc.html`, outside the
+repository by way of `.git/info/exclude`. It is there because the artboard is the only thing that can
+settle a question this document paraphrases, and because a copy under `/tmp` was lost to a cleanup
+mid-review — which turned a comparison against the design into a comparison against ourselves. It is
+not committed: the rule that no design HTML, CSS or JavaScript enters the repository still holds. Re-fetch
+it from the design tool if it is missing.
+
 This document records what the design *is*. It is a reading of the source, not an interpretation:
 every value below was extracted from the artboard rather than judged by eye. Nothing from the design
 is copied into the product; it is reimplemented in Scala.js and Laminar with the project's own CSS.
