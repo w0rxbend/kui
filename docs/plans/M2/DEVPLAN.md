@@ -60,7 +60,7 @@ demonstrates it.
 2. **A virtualized table renders 10 000 rows with a scroll frame time under 16 ms**, measured in
    the Playwright run and recorded in `docs/benchmarks/m2-virtualized-table.md`. The harness page
    drives the kernel component with 10 000 rows directly; the product's own page size is capped at
-   500 by ADR-026, and §10 D8 explains why both numbers are correct. (TOP-026, TOP-037.)
+   500 by ADR-026, and §10 D7 explains why both numbers are correct. (TOP-026, TOP-037.)
 3. **Fault-isolation E2E.** With the Compose stack running, `docker stop kui-topic` leaves the
    brokers page and the dashboard working; the topic list shows its cached rows greyed with the
    time they were fetched; the action bar is disabled. `docker start` heals it with no page
@@ -88,6 +88,13 @@ ADRs Accepted; CEO acceptance recorded in `STATUS.md`.
 
 Feature-matrix rows closed by M2: TP-001, TP-003, TP-004, PA-001, SF-001, SF-003, CL-010, and
 KU-013 (the `FeaturePanel` slot gains its first real host screen; its first *guest* panel is M4).
+
+**Five of M2's deliverables are consumed by M3 and M4, which are groomed to start in parallel.**
+They are named here because a change to any of them is a cross-milestone change, not a local one:
+`services/cluster/client` (ADR-046), `libs/contracts-core`'s `PageDto` (TOP-019), `libs/kernel`'s
+`NameIndex` (TOP-001), `frontend/ui-kernel`'s `FeatureSlots` plus the `topic.tabs` guest host in
+`ui-topics` (TOP-027, TOP-030), and `checkArchitecture` rule A11 (TOP-010). M3's §3a and M4's §3
+record the same list from the consuming side, each with a check and a fallback.
 
 ## 3. Non-goals
 
@@ -210,7 +217,7 @@ allowed to depend on — which is what rule A11 in §5.3 makes explicit rather t
 | `services.cluster.contract.{jvm,js}` | `ClusterProfileDto` carries the connection credentials on the internal channel; the public cluster DTOs are unchanged and still redacted | TOP-008 |
 | `services.cluster.api` | serves the credential-carrying profile, and asserts by test that no public endpoint can | TOP-008 |
 | `services.gateway.{contract,api,application}` | `ServiceContracts` gains the topic entry; the topic-overview aggregation; the topic service's capability entry | TOP-023, TOP-024 |
-| `frontend.uiKernel` | gains `VirtualizedTable` (SF-003), `SearchBox` (SF-001), `Pagination`, and the `Favourites` store (CL-010) | TOP-026, TOP-027 |
+| `frontend.uiKernel` | gains `VirtualizedTable` (SF-003), `SearchBox` (SF-001), `Pagination`, the `Favourites` store (CL-010), and `FeatureSlots` — the one declaration of every cross-feature slot id, `topic.tabs` first (KU-013) | TOP-026, TOP-027 |
 | `frontend.uiShell` | `FeatureId.Topics`, the registry thunk, the static routes and the nav entry | TOP-028 |
 | `apps.allinone` | the topic service in the composition root, with an in-process profile client | TOP-033 |
 | `deployment.{docker,compose}` | the `kui-topic` image and container | TOP-033 |
@@ -238,11 +245,16 @@ sees the topic service only through its `contract` (A4).
 
 | Rule | What it forbids | Why |
 | --- | --- | --- |
-| A11 | `services.<a>.*` → any module of `services.<b>` other than `services.<b>.contract.*` and `services.<b>.client` | A4 says this for the gateway. Nothing said it for service-to-service calls, because until M2 there were none. The first one is the moment to write the rule: a topic service that could see `services.cluster.application` would call a use case in process in the all-in-one build and over HTTP in the distributed one, and the two shapes would diverge without either being wrong at its own call site |
+| A11 (allocated by ADR-041 Amendment 4) | `services.<a>.*` → any module of `services.<b>` other than `services.<b>.contract.*` and `services.<b>.client` | A4 says this for the gateway. Nothing said it for service-to-service calls, because until M2 there were none. The first one is the moment to write the rule: a topic service that could see `services.cluster.application` would call a use case in process in the all-in-one build and over HTTP in the distributed one, and the two shapes would diverge without either being wrong at its own call site |
 
 A11's allow-list names `client` explicitly so that a second such module has to be argued in the
 commit that adds it, exactly as A10 names `libs/config`. TOP-010 owns the rule and its build test,
 and no other task edits the rule table.
+
+**Rule numbers are allocated in ADR-041 Amendment 4 and nowhere else.** M3 and M4 were groomed in
+parallel and each also proposed an "A11"; the gate review renumbered theirs to A12/A13 (M3) and A14
+(M4). A11 is M2's, and a milestone that wants a new rule takes the next free number from that
+amendment in the commit that adds the check.
 
 ## 6. Task graph
 
@@ -484,7 +496,7 @@ M2 is complete when all of the following are true and the evidence is committed:
    fiber and asserts the resource was released and nothing was left running.
 10. **Every rule this plan states is enforced by something.** §10 D2's ordering is a property
     test; A11 is a build rule with a build test; D3's internal-topic union is a Testcontainers
-    assertion; D7's "no mutation endpoints" is a contract test that enumerates the endpoint list;
+    assertion; §3's "no mutation endpoints" is a contract test that enumerates the endpoint list;
     D9's favourites rule is a frontend suite. A rule with no enforcer named here is a rule this
     milestone does not claim.
 11. ADR-036 carries the amendment recording that the profile channel carries credentials and where
@@ -505,7 +517,7 @@ from the research already gathered, not from opinion.
 
 | # | Gap | Decision | Evidence | Where it lives |
 | --- | --- | --- | --- | --- |
-| D1 | A Kafka-facing service that is not the cluster service has to build a Kafka client, and M1 shipped `GET /internal/v1/clusters/{id}/profile` with every credential stripped, with the note "M1 has no consumer that builds a Kafka client from this" | **The profile channel carries the credentials**, on `/internal/v1` only, and the shared consumer is a new JVM module `services/cluster/client` that every Kafka-facing service depends on. The topic service is **not** a metadata-store client and holds no `kui.clusters[]` slice of its own | ADR-036 says it in as many words: the section owners consume `__kui_config` directly "while every other Kafka-facing service keeps receiving the resolved `ClusterProfile` over the internal contract", and "keystore bytes travel inside the signed inter-service channel". The alternative — four services each holding the store's decryption key — multiplies the blast radius of that key by four and gives four processes write-capable credentials for a topic only one of them owns | TOP-008, TOP-009, TOP-018; **ADR-036 amendment** by TOP-038 |
+| D1 | A Kafka-facing service that is not the cluster service has to build a Kafka client, and M1 shipped `GET /internal/v1/clusters/{id}/profile` with every credential stripped, with the note "M1 has no consumer that builds a Kafka client from this" | **The profile channel carries the credentials**, on `/internal/v1` only, and the shared consumer is a new JVM module `services/cluster/client` that every Kafka-facing service depends on. The topic service is **not** a metadata-store client and holds no `kui.clusters[]` slice of its own | ADR-036 says it in as many words: the section owners consume `__kui_config` directly "while every other Kafka-facing service keeps receiving the resolved `ClusterProfile` over the internal contract", and "keystore bytes travel inside the signed inter-service channel". The alternative — four services each holding the store's decryption key — multiplies the blast radius of that key by four and gives four processes write-capable credentials for a topic only one of them owns | TOP-008, TOP-009, TOP-018; recorded as **ADR-046** (written at the M2/M3/M4 gate), which TOP-038 cross-references from ADR-036 and from `ARCHITECTURE.md` §14 |
 | D2 | The reference product computes `pageCount` before applying the internal-topic filter and overstates it. "Do not reproduce it" is a negative instruction, and negative instructions are not enforceable | The order is fixed and is the *only* order: **visibility filter → internal filter → search → sort → page**, expressed as one pure function in `services/topic/application`, cutting the page with `libs/kernel`'s `Page.of`, which counts what it is given. The `api` layer may `map` a `Page` and may not construct one. A ScalaCheck property asserts `totalItems` equals the filtered size for every generated combination of filters | `libs/kernel`'s `Page.of` already carries this reasoning in its own doc comment — "the implementation this project is modelled on counts before filtering … the only reliable fix is to make the arithmetic impossible to get wrong by doing it in one place". M2 is the first caller, and the fix is only real once something enforces it | TOP-014, TOP-021, TOP-036 |
 | D3 | "Internal topic" has two definitions that disagree: Kafka's own `isInternal` flag from `listTopics().listings()`, and the reference products' name prefix (`__` by default, a regex in Kouncil). `__kui_config` is internal by prefix and **not** by Kafka's flag | A topic is internal if **either** is true: the union, not the intersection. The prefix is configurable (`kui.topics.internalPrefix`, default `__`) and the flag is read from the listing | KUI's own metadata topics are the exact case that breaks the flag-only rule: `__kui_config` and `__kui_files` are ordinary topics to Kafka and are noise to every operator. Choosing the intersection would show them by default; choosing the flag alone would show them always. The union hides both and hides `__consumer_offsets` too, which is what both reference products do | TOP-014, TOP-032, TOP-035 |
 | D4 | Kafbat's search is a boolean `fts` flag whose default comes from two cluster-level settings; `research/kafbat/api-analysis.md` §2 records the three-way precedence | `mode = plain \| fts`, defaulting to `plain`, replacing the boolean, exactly as `research/kafbat/api-analysis.md`'s proposed `/api/v1` mapping already says. `plain` is a case-insensitive substring match; `fts` is `NameIndex`'s trigram score. Relevance ordering applies **only** when no `sort` is given; an explicit sort always wins | A tri-state flag whose meaning depends on two server settings is a parameter a client cannot reason about, and the reference exposes both settings in its cluster document precisely so the UI can reconstruct the meaning. An explicit two-value mode removes the reconstruction | TOP-001, TOP-014, TOP-020 |
@@ -517,7 +529,7 @@ from the research already gathered, not from opinion.
 | D10 | The roadmap says the topic overview returns "`Unavailable` placeholders for the sections whose services do not exist yet". `Unavailable` means "configured and down"; these services are not configured and are not down — they have not been built | **A section whose service is absent from this deployment is `Section.NotConfigured`**, and the browser hides that panel rather than showing an error. `Unavailable` is reserved for a service the deployment has and cannot reach. In M2 that means `consumerGroups`, `connectors`, `acls` and `schemas` are all `NotConfigured` | ADR-032 draws exactly this line — `NotConfigured` means "this deployment has no such thing" and is hidden, `Unavailable` means "down" and is shown with its reason — and the M1 dashboard already renders it that way. Rendering four red "unavailable" panels on every topic page would train operators to ignore the colour that matters | TOP-024, TOP-030 |
 | D11 | Which of the two `Section` levels does a Kafka cluster the topic service cannot reach land in? | The same answer M1 gave for the dashboard, restated because a second service now makes it a pattern: **an unreachable Kafka cluster is a `Section` inside a 200**, and the `topic` capability is `Unavailable` only when the topic *service* is down | ADR-039 §6: only transport failures of the upstream service feed the registry. A bad broker address in one cluster's configuration must not dim the Topics entry for every other cluster | TOP-021, TOP-023, TOP-029 |
 | D12 | `libs/cache` gains `SnapshotRegistry`, and `services/cluster` already has `ClusterSnapshots`, which is the same idea with a different shape | The topic service is `SnapshotRegistry`'s only caller in M2. `ClusterSnapshots` is **not** refactored onto it | The two differ where it matters: the cluster service holds two cells per key on two refresh schedules, driven by a registry stream; the topic service holds one cell per key, created on demand and released when a cluster disappears. Unifying them would be a refactor of a shipped Core service whose only benefit is code shape, in the milestone that is already introducing a service, a microfrontend and a service-to-service seam. Recorded in `TECH_DEBT.md` with the condition that M4's consumer service — the third caller — is the milestone that decides whether one abstraction fits three | TOP-006; `TECH_DEBT.md` by TOP-038 |
-| D13 | The topic detail page has tabs for Messages, Consumers, ACLs and Connectors in the reference, and none of those services exist | The tab strip renders only the tabs M2 has — Overview and Settings — plus the `FeaturePanel` slots of D10, which render nothing when their feature is not configured. No tab is rendered disabled and no tab promises a milestone | The same reasoning as D8, and it is the shape KU-013 asks for: the slot is keyed by feature id and never by import, so M4 adds a registration and touches no file in `ui-topics` | TOP-030 |
+| D13 | The topic detail page has tabs for Messages, Consumers, ACLs and Connectors in the reference, and none of those services exist | The tab strip renders only the tabs M2 has — Overview and Settings — plus a **generic `topic.tabs` guest host**: `TopicDetail` renders `FeaturePanel` for every guest registered against the `topic.tabs` slot id, and registers none itself. The slot ids are declared once in `frontend/ui-kernel`'s `FeatureSlots` (TOP-027). A guest that is not configured renders nothing. **This host is a cross-milestone deliverable**: M3's Messages tab and M4's Consumers tab are registrations against it and edit no file in `ui-topics` (M3 §3, M4 D13). No tab is rendered disabled and no tab promises a milestone | The same reasoning as D8, and it is the shape KU-013 asks for: the slot is keyed by feature id and never by import, so M4 adds a registration and touches no file in `ui-topics` | TOP-030 |
 
 **Standing rule, restated from the M0 and M1 plans.** A blocker owned outside the execution loop
 is not a reason to stop: propose the decision from the evidence available, take it, record it in

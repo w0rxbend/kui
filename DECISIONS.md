@@ -49,6 +49,9 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR (PLAN §39
 | [ADR-042](docs/adr/ADR-042-kafka-backed-metadata-store.md) | KUI metadata lives in Kafka, in internal compacted topics | Accepted | 2026-09-03 |
 | [ADR-043](docs/adr/ADR-043-internal-service-to-service-calls.md) | Direct service→service calls are permitted on the callee's published `/internal/v1` contract, under four conditions (settles PLAN §16.6) | Accepted | 2026-09-03 |
 | [ADR-044](docs/adr/ADR-044-store-record-envelope-and-field-encryption.md) | The metadata-store record envelope is versioned; secrets are marked by JSON convention and each ciphertext is bound to its record and field | Accepted | 2026-09-03 |
+| [ADR-045](docs/adr/ADR-045-plan-token-confirmation-for-mutations.md) | A destructive operation is confirmed against a server-computed plan carried by an HMAC'd plan token, not against a form | Accepted | 2026-09-04 |
+| [ADR-046](docs/adr/ADR-046-cluster-profile-seam.md) | Cluster credentials travel on `/internal/v1` and exactly one shared module, `services/cluster/client`, consumes them | Accepted | 2026-09-04 |
+| [ADR-047](docs/adr/ADR-047-mutation-marker-readonly-and-audit-sink.md) | Every mutation ships with a `Mutation` marker, a per-cluster read-only refusal and an audit record, from the first one | Accepted | 2026-09-04 |
 
 ADR-039 … ADR-043 were written at and after the G6 grooming gate (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded

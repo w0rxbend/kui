@@ -92,8 +92,12 @@ it and the task that owns it.
 13. **Nothing unmasked leaves the service.** `MaskingBoundarySuite` browses a topic whose payload
     contains a distinctive token matched by a masking rule and asserts the token appears in no
     response body, including the table endpoint's `originalValue` field. (MSG-016, MSG-029)
-14. **Purge, produce and resend are refused on a read-only cluster** with `KUI-READ-ONLY`, and filter
-    registration and testing are allowed. (MSG-022, MSG-024, MSG-029)
+14. **Purge, produce and resend are refused on a read-only cluster** with `KUI-READ-ONLY` before any
+    Kafka client is touched, each carries a `Mutation` marker that a contract test enumerating
+    `MessageEndpoints.all` asserts is present on every mutating endpoint and absent from every read,
+    and each attempt — successful or failed — writes exactly one `MutationRecord` carrying no
+    credential. Filter registration and testing are allowed. (ADR-047; MSG-016, MSG-022, MSG-024,
+    MSG-029)
 
 Inherited from PLAN §46 for every milestone: compiles with `-Werror`; all unit / property /
 integration / contract tests pass; fault-isolation tests pass for every service introduced;
@@ -119,8 +123,16 @@ Restating the roadmap, and adding the boundaries workers most often cross by acc
   `libs/serde-kafbat-bridge`.
 - **No UI-managed masking policies.** DM-001 is file-configured masking only; DM-002 needs identity
   and is M6. No `subjects[]` on a rule, no policy editor.
-- **No audit records.** MP-001, MP-003, MS-008 are audited from M5. M3 writes no `__kui_audit`
-  record and creates no audit topic.
+- **No audit *viewer*, no `__kui_audit` topic, no global read-only mode.** Those are M5 and M6.
+  M3 does, however, ship the three parts **ADR-047** requires of any milestone that ships a
+  mutation, because produce (MP-001), resend (MP-003) and purge (MS-008) are mutations and M3 is
+  the first milestone to ship one: the `Mutation` marker on the endpoint, the per-cluster
+  `readOnly` refusal before any Kafka client is touched, and one `MutationRecord` per attempt
+  written through `AuditSink[F]` with a structured-log sink. `MutationKind`, `MutationRecord` and
+  `AuditSink[F]` are declared once, in `libs/security-core` (ADR-023's home for the audit model),
+  by lane C alongside the masking engine. M5 adds the Kafka sink behind the same port and the
+  global policy over the same marker. This closes the contradiction between criterion 14 and this
+  section that the gate review found.
 - **No RBAC evaluation.** KU-016 fixes the *shape* of the permission check on the filter-test
   endpoint; enforcement arrives in M6. `kui.auth.type` stays `disabled`.
 - **No correlation-key grouping beyond a single field.** ET's `correlationKey` adds a `group` string
@@ -132,6 +144,22 @@ Restating the roadmap, and adding the boundaries workers most often cross by acc
 - **No new streaming primitives in `libs/http`.** `kui.http.sse.Sse` shipped in M0 and is used as it
   is. If it turns out to be missing something, that is a finding recorded in `TECH_DEBT.md`, not a
   rewrite inside this milestone.
+
+## 3a. Entry preconditions — what M3 consumes from M2
+
+M3 and M2 were groomed in parallel and M3's plan did not record what it takes from M2. It takes
+four things. Each has a one-command check and a named fallback, so a missing prerequisite is a
+scoped extra task rather than a blocked milestone.
+
+| # | Precondition | Check | If absent |
+| --- | --- | --- | --- |
+| P1 | `services/cluster/client`, the shared credential-bearing profile consumer (ADR-046, M2 TOP-008/TOP-009) | `test -d services/cluster/client` | MSG-026 builds it **in that module, not in `services/message/infrastructure`**, and its size rises from L to XL. Under no circumstance does M3 write a second profile protocol |
+| P2 | `frontend/ui-kernel`'s `FeatureSlots` and the `topic.tabs` guest host rendered by `ui-topics` (M2 TOP-027/TOP-030, KU-013) | `grep -rn "topic.tabs" frontend --include='*.scala'` | MSG-034 adds `FeatureSlots` to `ui-kernel` only. It still edits no file in `ui-topics`; the Messages tab is then reachable by URL and from the topic list's row action until M2 lands the host, recorded in `TECH_DEBT.md` |
+| P3 | `libs/contracts-core`'s `PageDto` (M2 TOP-019) | `grep -rn "PageDto" libs/contracts-core --include='*.scala'` | MSG-027 declares it in `libs/contracts-core` with the same shape M2's TOP-019 specifies, and the two milestones must not both create it |
+| P4 | `checkArchitecture` rule A11 (M2 TOP-010) | `grep -n "A11" build.mill` | MSG-047 adds A11 alongside A12 and A13, from ADR-041 Amendment 4's text |
+
+M3 depends on M2 for **nothing else**. It does not use `TopicAdmin`, `NameIndex`,
+`SnapshotRegistry` or any `services/topic` module, and §10 D2 forbids the service-to-service call.
 
 ## 4. Architecture references
 
@@ -188,7 +216,7 @@ M3 creates **twelve** Mill modules and changes **eleven**. A cross-compiled modu
 | `libs/filter` | `libs.filter` | JVM | `libs.kernel.jvm`, `libs.cache`, cel 0.14.0 | `MessageFilterPort[F]` over cel-java, the compiled-program cache, the string-contains filter |
 | `services/message/domain` | `services.message.domain` | JVM | `libs.kernel.jvm`, cats-core | `BrowseRequest`, `SeekPlan`, `TrackQuery`, `ResendRequest`, `MaskingPolicy` reference, and the ports |
 | `services/message/application` | `services.message.application` | JVM | `domain`, `libs.serde`, `libs.filter`, `libs.securityCore.jvm`, `libs.cache` | the browse / tail / page / produce / resend / track / purge use cases, the cursor codec, the envelope event stream |
-| `services/message/infrastructure` | `services.message.infrastructure` | JVM | `domain`, `libs.kafka`, `libs.serde`, `libs.serdeConfluent`, `libs.http`, `libs.cache` | the adapters: `MessageBrowsePort`, the serde registry, the cluster profile source over `/internal/v1` |
+| `services/message/infrastructure` | `services.message.infrastructure` | JVM | `domain`, `libs.kafka`, `libs.serde`, `libs.serdeConfluent`, `libs.http`, `libs.cache`, **`services.cluster.client`** | the adapters: `MessageBrowsePort`, the serde registry, and a thin `ClusterProfileSource` **over M2's shared `services/cluster/client`** — M3 writes no HTTP profile protocol of its own (ADR-046) |
 | `services/message/contract` | `services.message.contract.{jvm,js}` | JVM + JS | `libs.contractsCore.*`, `libs.securityCore.*` | the endpoints, the DTOs and the SSE event payload types the browser decodes |
 | `services/message/api` | `services.message.api` | JVM | `application`, `contract.jvm`, `libs.http`, `libs.observability` | server logic, the SSE wiring, `KuiError` → envelope |
 | `services/message/app` | `services.message.app` | JVM | `api`, `infrastructure`, `libs.config`, `libs.kafka`, `libs.http` | the composition root and `main` |
@@ -226,12 +254,16 @@ The gateway gains no Kafka, serde or CEL edge of any kind (A8, and the two new r
 
 ### 5.3 Two rules M3 adds to `checkArchitecture`
 
+Rule numbers are allocated in **ADR-041 Amendment 4** and nowhere else. M3's two rules were groomed
+as "A11" and "A12" while M2 was independently defining a different A11; the gate review renumbered
+M3's to **A12** and **A13**. A11 is M2's service-to-service rule, which M3 relies on (§10 D2).
+
 | Rule | What it forbids | Why |
 | --- | --- | --- |
-| A11 | `libs.serdeConfluent`, `io.confluent.*`, Jackson or Guava on the classpath of any module other than `libs/serde-confluent` itself, a service's `infrastructure`, `libs/testkit` or an `app` | ADR-014 makes the Confluent stack an *optional runtime* dependency. The moment an `application` module can see a Confluent class, the deployment that runs without a Schema Registry stops compiling in someone's head and starts failing at runtime |
-| A12 | `libs.filter`, `dev.cel.*` or `re2j` on the classpath of any module other than `libs/filter`, a service's `application`, `libs/testkit` or an `app` | CEL is user-supplied code. The set of modules that can evaluate it must be small enough to audit, and it must never include the gateway or a `contract` module |
+| A12 | `libs.serdeConfluent`, `io.confluent.*`, Jackson or Guava on the classpath of any module other than `libs/serde-confluent` itself, a service's `infrastructure`, `libs/testkit` or an `app` | ADR-014 makes the Confluent stack an *optional runtime* dependency. The moment an `application` module can see a Confluent class, the deployment that runs without a Schema Registry stops compiling in someone's head and starts failing at runtime |
+| A13 | `libs.filter`, `dev.cel.*` or `re2j` on the classpath of any module other than `libs/filter`, a service's `application`, `libs/testkit` or an `app` | CEL is user-supplied code. The set of modules that can evaluate it must be small enough to audit, and it must never include the gateway or a `contract` module |
 
-`services/message/application` is on A12's allow-list because `MessageFilterPort[F]` is a pure port
+`services/message/application` is on A13's allow-list because `MessageFilterPort[F]` is a pure port
 consumed by the browse use case. That is the one exception, it is deliberate, and MSG-047's build
 test names it, so a second exception has to be argued in the commit that changes the rule.
 
@@ -309,7 +341,7 @@ at MSG-031.
 | MSG-044 | The cancellation suite: browser disconnect to consumer close | M | MSG-029, MSG-030 | H |
 | MSG-045 | Benchmarks | M | MSG-030, MSG-042 | H |
 | MSG-046 | Fault-isolation E2E: the message service stopped, the registry stopped | L | MSG-030, MSG-037, MSG-041 | H |
-| MSG-047 | `checkArchitecture` rules A11 and A12, with their build tests | S | MSG-012, MSG-015 | H |
+| MSG-047 | `checkArchitecture` rules A12 and A13, with their build tests | S | MSG-012, MSG-015 | H |
 | MSG-048 | Milestone documentation, operator pages, feature matrix, ADR amendments | M | everything | H |
 
 **The table is grouped by lane, not topologically sorted.** Four edges point backwards in the
@@ -420,8 +452,8 @@ ADR that M3 implements, and the check that fails when it is broken.
 
 | Rule | Enforced by |
 | --- | --- |
-| No module outside the allow-list sees Confluent, Jackson or Guava | `./mill checkArchitecture` rule A11 (MSG-047) |
-| No module outside the allow-list sees CEL | rule A12 (MSG-047) |
+| No module outside the allow-list sees Confluent, Jackson or Guava | `./mill checkArchitecture` rule A12 (MSG-047) |
+| No module outside the allow-list sees CEL | rule A13 (MSG-047) |
 | A string that crosses a process boundary is declared once | `services/message/contract` is cross-compiled; the browser and the service compile against the same file. MSG-043's byte fixture fails if either side drifts |
 | Exactly one terminal event per stream | `libs/http`'s `Sse` enforces it at runtime; `SseWireSeamSuite` asserts it for each terminating path |
 | Deserialization failure never aborts a stream | `SerdeFallbackSuite` (MSG-019) and the `deserializeErrors` byte fixture (MSG-043) |
@@ -429,7 +461,7 @@ ADR that M3 implements, and the check that fails when it is broken.
 | Backward browsing never loads a whole partition | `MessageBackwardWindowSuite` counts fetched records (MSG-005, MSG-008) |
 | Every cancellable path has a cancellation test | §9 item 10, and the "Cancellation and shutdown" section that every lane A, D, E and F spec carries |
 | Payloads are never cached | `MessageCacheSuite` (MSG-026) asserts the only caches present are the serde, filter and schema caches named in ADR-016 |
-| No `services/message` → `services/topic` call | rule A4 already forbids a service seeing another service's non-`contract` module; MSG-047's build test additionally asserts `services.message.*` has no `services.topic.contract` edge |
+| No `services/message` → `services/topic` call | rule **A11** (M2, ADR-041 Amendment 4) forbids a service any edge to another service's modules but `contract` and `client`; MSG-047's build test additionally asserts `services.message.*` has no `services.topic.contract` edge either |
 
 ## 7. Test plan
 
@@ -501,7 +533,7 @@ M3 is complete when all of the following are true and the evidence is committed:
 2. All 48 tasks are merged, each with an Implementation Report (PLAN §39, one screen).
 3. `./mill __.compile` is clean with `-Werror -Wunused:all -source:future`; `./mill __.test` is green
    on the JVM and, in a separate invocation, on Scala.js; `./mill __.checkFormat` and
-   `./mill __.fix --check` are clean; `./mill checkArchitecture` passes with rules A11 and A12 active.
+   `./mill __.fix --check` are clean; `./mill checkArchitecture` passes with rules A12 and A13 active (A11 is M2's and must already be).
 4. `./mill e2e.test` is green against the Compose stack, including both M3 fault-isolation scenarios.
 5. `docs/benchmarks/M3-messages.md` records the four benchmark shapes of §2.7 with the machine they
    ran on and the commit that produced them.
@@ -546,7 +578,7 @@ already gathered, not from opinion.
 | D5 | `libs/kafka/PORT-INVARIANTS.md` §2 assigns `GroupAdmin.describeGroups` and its fabricated-dead-group rule to M3 | **M3 does not create `GroupAdmin`.** The browse consumer is assign-only with no `group.id`, so nothing here describes a group. The invariant's owner is **M4**; MSG-048 amends the file to say so and leaves the text otherwise untouched | `research/kafka/admin-capabilities.md` §4: all three reference products use manual assignment for browsing. Creating `GroupAdmin` here would be the empty-port mistake R-11 exists to prevent | MSG-048; §3 non-goals |
 | D6 | The roadmap's cancellation criterion says "asserted via consumer-group membership or a metric". D5 removes the group, so membership cannot be asserted | **The assertion is a metric plus a resource probe**: `kui.message.consumers.active` (an otel4s up-down counter incremented on consumer acquire and decremented on release) returns to zero, **and** the test's own `Resource` finaliser flag is set. Two independent signals, because a gauge that is never decremented and a gauge that is never incremented look identical at zero | A gauge alone can pass for the wrong reason. The finaliser flag proves the `Resource` released; the gauge proves the code path that owns the count ran | MSG-002, MSG-044; §2 criterion 3 |
 | D7 | The roadmap and ADR-035 name budgets but no numbers | **The defaults**: `limit` 100, max 500; `maxBytes` 50 MiB per request; `deadline` 60 s (300 s for track); tail throttle 20 events/s; poll timeout 1 s; heartbeat 15 s; `max.poll.records = limit`; cursor expiry 1 h; track cap 1 000 events. All live in `kui.message.*` and every one is overridable | `limit`, poll timeout and the tail throttle are Kafbat's measured values (`research/kafbat/api-analysis.md` Finding 5.2); the track cap is Kouncil's `EVENTS_SANITY_LIMIT`; `maxBytes` and `deadline` are KUI's own additions required by PLAN §22, sized so that the largest legal single page (500 × 1 MiB) is refused rather than buffered | MSG-041 |
-| D8 | Where does `services/message` get a `ClusterProfile`? | `GET /internal/v1/clusters/{id}/profile` with the ETag, plus the `clusters/stream` SSE for change notifications, exactly as ADR-043 and ADR-036 describe — with a **last-known-profile cache** that keeps browsing alive while the cluster service is down, and a `Degraded` capability while it is | This is the pattern M1 built and the first service to consume it. Failing browse because the *cluster* service restarted would make the two services one | MSG-026 |
+| D8 | Where does `services/message` get a `ClusterProfile`? | `GET /internal/v1/clusters/{id}/profile` with the ETag, plus the `clusters/stream` SSE for change notifications, exactly as ADR-043 and ADR-036 describe — with a **last-known-profile cache** that keeps browsing alive while the cluster service is down, and a `Degraded` capability while it is | This is the pattern M1 built and the first service to consume it. Failing browse because the *cluster* service restarted would make the two services one | MSG-026; **ADR-046** |
 | D9 | ADR-028 lists fourteen built-in serdes; the feature matrix splits them, putting seven in KU-023 (M5) | **M3 ships exactly the SD-001 set**: String, Int32/64, UInt32/64, UUID, Base64, Hex, JSON, and Schema-Registry Avro / Protobuf / JSON Schema, plus auto-detection by magic byte. Nothing else, and the SPI is designed so that adding one is a file, not a change | The feature matrix is the scheduling authority and it already made this split "so M3 stays bounded". ADR-028 lists the eventual set, not the M3 set | §3 non-goals; MSG-010 |
 | D10 | Kafbat's v2 API lost per-partition seek positions; the KUI mapping calls `seekTo[]` "worth keeping as an optional extension" | **`seekTo[]` ships in M3.** `SeekMode.Offset` takes either one offset for all partitions or a per-partition map, and the query parameter accepts `p::offset` pairs | Cursors already carry per-partition offsets (ADR-026), so the machinery exists; without the parameter a user cannot express what a cursor expresses, which is the gap Kafbat's own v1→v2 migration left | MSG-001, MSG-028 |
 | D11 | MS-008 (purge) has its UI entry point on the topic page in both reference products, and `frontend/ui-topics` belongs to M2 | **M3 ships the purge endpoint and the action on the messages screen only.** No `ui-topics` file is touched; the topic-page entry point arrives in M5 with audit and read-only mode, which is where every destructive action belongs anyway | ROADMAP ordering rationale §3: no destructive action ships before its safety net. Putting the button where the safety net will be is cheaper than moving it | MSG-024, MSG-038 |

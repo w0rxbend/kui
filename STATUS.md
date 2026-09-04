@@ -363,3 +363,70 @@ with their tests; (3) CFGOP-008 completes the four assigned documentation items;
 
 **Next action:** begin M1 with KAFKA-001, and start CFGOP-004, STORE-001 and CLUI-001 in
 parallel.
+
+---
+
+## Gate review — M2, M3 and M4 (2026-09-04)
+
+Full report: [`docs/plans/GATE-REVIEW-M2-M3-M4.md`](docs/plans/GATE-REVIEW-M2-M3-M4.md).
+
+**Verdict: APPROVED WITH CONDITIONS.** 4 blockers, 9 majors, 7 minors. All blockers and all
+majors fixed in the review. Implementation may start now, with M2's lane B.
+
+The first gate at which three plans were groomed in parallel by agents who could not see each
+other. Every blocker was a shared edge — a thing all three plans needed, each solved locally and
+correctly, in three incompatible ways:
+
+- **Three different rules called `A11`** (M2's service-to-service rule, M3's Confluent
+  confinement, M4's wire-vocabulary rule). `checkArchitecture` names the rule in its failure
+  message, so the second one to land would silently redefine the first.
+- **The cluster-profile client designed three times** — M2's shared `services/cluster/client`,
+  M3's `HttpClusterProfileSource`, M4's `ClusterProfileSource` — one distributed protocol, three
+  implementations. The M0 review's second process finding with a distributed-systems blast radius.
+- **M3 ships three mutations with no safety net**, and says so twice in opposite directions: its
+  criterion 14 requires `KUI-READ-ONLY` on produce, resend and purge; its non-goals say read-only
+  mode is M5. M4 independently invented the answer and believed it was the product's first
+  mutation. It is not; M3 lands first, and purge is irreversible.
+- **Both M2 and M4 claim `PORT-INVARIANTS.md` §1** and would each implement the
+  leaderless-partition filter, one deleting the section and one annotating it.
+
+**ADRs written at this gate**, all Accepted and indexed in `DECISIONS.md`:
+
+| ADR | What it settles |
+| --- | --- |
+| **ADR-045** (new) | A destructive operation is confirmed against a server-computed plan carried by an HMAC'd plan token, never against a form. M5's five other mutations reuse it. |
+| **ADR-046** (new) | The cluster profile seam: Kafka credentials travel on `/internal/v1` only, and exactly one shared module — `services/cluster/client` — consumes them. Closes `ARCHITECTURE.md` §14's open question and M1's CLAPI-003 debt. |
+| **ADR-047** (new) | Every mutation ships with a `Mutation` marker, a per-cluster read-only refusal and an audit record, from the first one. Resolves the contradiction in the roadmap's own ordering rationale. |
+| ADR-041 Amendment 4 | Rules A11–A14 allocated centrally: A11 service-to-service (M2), A12 Confluent confinement (M3), A13 CEL confinement (M3), A14 wire vocabulary (M4). Rule numbers are allocated there and nowhere else. |
+
+**Against the four M0 process findings:** seam testing is answered by all three plans and is M3's
+strongest area (one committed byte fixture per SSE event, decoded by a JVM suite and a Scala.js
+suite); rule enforcement is answered by M2's and M3's rule-and-enforcer tables; cancellation is
+answered — every plan makes a named cancellation test a condition of done, which M1's gate had to
+add by hand. **"The same string typed twice" recurred, and it produced every blocker**: the
+profile client, the leaderless filter, `FeatureSlots` and `MutationKind`. It recurred because of
+how the plans were produced, not who produced them, and the standing rule for the next parallel
+grooming is in the review's §4.
+
+**Parallelism verdict: not three ways. M2 partially first, then M3 ∥ M4.** M3 and M4 are
+genuinely independent of each other — different services, different microfrontends, different
+Kafka APIs, disjoint matrix rows, no call between them. M2 is not symmetric with them: five of its
+deliverables are inputs to both (`services/cluster/client`, rule A11, `PageDto`, `NameIndex`, and
+`ui-kernel`'s `FeatureSlots` with the `topic.tabs` guest host in `ui-topics`), and the profile
+client sits on all three critical paths. Land TOP-001, TOP-008, TOP-009, TOP-010, TOP-019, TOP-027
+and TOP-030's guest host first — seven tasks, six of which M2's own plan already says to start on
+day one — then run M3 and M4 in parallel with the rest of M2. M3 §3a and M4 §3 carry a
+one-command check and a named fallback for each, so a slip is a scoped extra task rather than a
+blocked milestone.
+
+**Conditions** (none gates the first commit): (1) GRP-013 states whether the consumer snapshot
+uses `SnapshotRegistry` or a bare `SnapshotCell`, closing M2 D12's debt; (2) TOP-007, MSG-042 and
+GRP-036 each extend M1's `KafkaFixture`/`KafkaTopology` and declare no container of their own;
+(3) the four files all three milestones touch — `ui-shell`'s route table, `build.mill`'s module
+list, the OpenAPI snapshot and the feature matrix — are appended to, never reformatted, and the
+snapshot is regenerated rather than merged; (4) before the next parallel grooming, build-rule
+numbers, ADR numbers, shared-file ownership and any protocol more than one milestone consumes are
+fixed in advance.
+
+**Next action:** begin M2 with TOP-008 and TOP-009 (the profile seam), alongside TOP-001, TOP-005,
+TOP-013 and TOP-026.

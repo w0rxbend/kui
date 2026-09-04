@@ -249,3 +249,51 @@ edge for one type — applies identically to a Kafka client and to an adapter ed
 
 **Tasks updated:** CFGOP-003 (rule table and its build tests), CLDOM-003, CLDOM-004, CLADP-003,
 CLADP-005; `DEVPLAN` §5.1 and §5.2.
+
+
+## Amendment 4 — 2026-09-04 (M2/M3/M4 gate review)
+
+**What changed.** Four rules are added, and their numbers are allocated centrally because three
+milestones groomed in parallel each proposed a different rule under the number A11.
+
+| Rule | Forbidden edge | Owning milestone |
+| --- | --- | --- |
+| A11 | `services.<a>.*` → any module of `services.<b>` other than `services.<b>.contract.*` and `services.<b>.client` | M2 (task TOP-010) |
+| A12 | `libs.serdeConfluent`, `io.confluent.*`, Jackson or Guava on the classpath of any module other than `libs/serde-confluent` itself, a service's `infrastructure`, `libs/testkit` or an `app` | M3 (task MSG-047) |
+| A13 | `libs.filter`, `dev.cel.*` or `re2j` on the classpath of any module other than `libs/filter`, a service's `application`, `libs/testkit` or an `app` | M3 (task MSG-047) |
+| A14 | declaring a **wire vocabulary** — an enum or set of string constants serialised across a process boundary — anywhere but `libs/kernel` or `libs/contracts-core` | M4 (task GRP-040) |
+
+**Why the numbers are allocated here.** M2's DEVPLAN §5.3, M3's §5.3 and M4's §6.3 each defined
+an "A11", and the three definitions are unrelated. Whichever milestone landed second would have
+either renamed the other's rule or silently redefined it, and a rule table whose numbers mean
+different things in different commits is worse than no table: `checkArchitecture`'s failure
+message names the rule, and the reason a developer reads is the reason attached to that number.
+Rule numbers are therefore allocated in this ADR and nowhere else. A milestone that wants a new
+rule takes the next free number here, in the commit that adds the check.
+
+**A11 is the load-bearing one.** M2 creates KUI's first service-to-service dependency
+(ADR-046). A4 said this for the gateway; nothing said it for services, because until M2 there
+were none. Without A11 a service could call another service's use case in process in the
+all-in-one build and over HTTP in the distributed one, and the two shapes would diverge without
+either being wrong at its own call site. `client` is named explicitly in the allow-list so that
+a second such module has to be argued in the commit that adds it, exactly as A10 names
+`libs/config`.
+
+**A12 and A13 are classpath confinement, not layering.** ADR-014 makes the Confluent stack an
+optional *runtime* dependency; the moment an `application` module can see a Confluent class, the
+deployment that runs without a Schema Registry stops compiling in someone's head and starts
+failing in production. CEL (ADR-017) is user-supplied code, and the set of modules that can
+evaluate it must be small enough to audit and must never include the gateway or a `contract`
+module. `services/*/application` is on A13's allow-list because the filter port is a pure port
+consumed by a use case; that is the one exception and MSG-047's build test names it.
+
+**A14 is the M0 review's second process finding, mechanised.** Six consumer-group state names
+appear in a Kafka enum, a domain enum, a DTO, a query parameter and a CSS class. A documented
+rule that nothing enforces gets violated.
+
+**Standing requirement.** Each of A11–A14 is proven by deliberately introducing a violating
+edge, observing the failure, and reverting, and the message is recorded in the owning task's
+Implementation Report.
+
+**Tasks updated:** TOP-010, MSG-047, GRP-040; `docs/plans/M2/DEVPLAN.md` §5.3,
+`docs/plans/M3/DEVPLAN.md` §5.3 and §6.7, `docs/plans/M4/DEVPLAN.md` §2.8 and §6.3.
