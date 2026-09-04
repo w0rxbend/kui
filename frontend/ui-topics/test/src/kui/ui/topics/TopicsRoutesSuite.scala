@@ -75,12 +75,29 @@ final class TopicsRoutesSuite extends ScalaCheckSuite {
     assertEquals(urlFor(overview), Some(s"$prefix/clusters/prod-eu/topics/orders"))
   }
 
-  test("anUnknownTabInAUrlFallsBackToOverview") {
-    // A bookmark can outlive a tab. Landing on the overview of the right topic is a far better answer than
-    // "not found".
+  test("aFifthSegmentThatIsNotATabIsNotClaimed") {
+    // This route used to decode *any* fifth segment to the Overview tab, on the grounds that a bookmark can
+    // outlive a tab. The cost was invisible until another feature wanted a URL of the same shape:
+    // `/clusters/c/topics/t/messages` is the message browser's address, this route is registered first, and
+    // it swallowed the URL and drew the topic's overview. The message browser was unreachable in the running
+    // product with every suite in the repository green. A segment that is not one of this page's own tabs
+    // belongs to whoever does recognise it, and to the shell's not-found page when nobody does.
+    assertEquals(pageAt(s"$prefix/clusters/prod-eu/topics/orders/messages"), None)
+    assertEquals(pageAt(s"$prefix/clusters/prod-eu/topics/orders/statistics"), None)
+    // The tab that does exist still decodes, from the same pattern.
     assertEquals(
-      pageAt(s"$prefix/clusters/prod-eu/topics/orders/statistics"),
-      Some(TopicsPageId.Detail("prod-eu", "orders", TopicTab.Overview))
+      pageAt(s"$prefix/clusters/prod-eu/topics/orders/settings"),
+      Some(TopicsPageId.Detail("prod-eu", "orders", TopicTab.Settings))
+    )
+  }
+
+  test("theNavEntryLandsOnTheChosenClustersTopicList") {
+    // `landing` carries a placeholder cluster id, and a placeholder that reaches the sidebar becomes an
+    // empty path segment, which collapses: `/ui/clusters//topics` is `/ui/clusters/topics` and matches no
+    // route. `landingFor` is what the shell asks instead once a cluster has been chosen.
+    assertEquals(
+      TopicsRoutes.landingFor(kui.kernel.ClusterId.unsafe("prod-eu")),
+      TopicsPageId.List("prod-eu")
     )
   }
 

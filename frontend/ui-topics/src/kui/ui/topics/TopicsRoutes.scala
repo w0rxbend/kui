@@ -90,6 +90,9 @@ object TopicsRoutes extends FeatureRoutes {
     */
   val landing: Page = TopicsPageId.List("")
 
+  /** The cluster's topic list. */
+  override def landingFor(cluster: kui.kernel.ClusterId): Page = TopicsPageId.List(cluster.value)
+
   val nav: NavEntry =
     NavEntry(
       featureId = id,
@@ -124,12 +127,21 @@ object TopicsRoutes extends FeatureRoutes {
         pattern = root / ClustersSegment / segment[String] / TopicsSegment / segment[String] / endOfSegments,
         basePath = uiPrefix
       ),
+      // The decode is a partial function over *known* tab segments only, and that is load-bearing rather
+      // than tidy. `/clusters/c/topics/t/messages` has the same shape as a tab URL, and this route is
+      // registered before the message browser's. Decoding any fifth segment — the lenient
+      // `TopicTab.fromSegment` behaviour — meant this route claimed that URL and drew the topic's Overview
+      // tab, so the message browser was unreachable in the running product with every suite green.
+      // Refusing an unknown segment hands the URL to the next feature that recognises it, and to the
+      // shell's not-found page when none does. `TopicTab.fromSegment` stays lenient where leniency is
+      // actually wanted: `decodePage`, which reads a stored history entry that may predate a tab.
       Route.applyPF[TopicsPageId, (String, String, String)](
         matchEncode = detailEncode(_.tab.segment.isDefined)(page =>
           (page.clusterId, page.topic, page.tab.segment.getOrElse(""))
         ),
-        decode = { case (clusterId, topic, tab) =>
-          TopicsPageId.Detail(clusterId, topic, TopicTab.fromSegment(Some(tab)))
+        decode = {
+          case (clusterId, topic, tab) if TopicTab.values.exists(_.segment.contains(tab)) =>
+            TopicsPageId.Detail(clusterId, topic, TopicTab.fromSegment(Some(tab)))
         },
         pattern = root / ClustersSegment / segment[String] / TopicsSegment / segment[String] /
           segment[String] / endOfSegments,
