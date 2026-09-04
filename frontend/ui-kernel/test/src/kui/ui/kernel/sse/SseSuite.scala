@@ -300,4 +300,27 @@ class SseSuite extends FunSuite {
       assertEquals(current(handle.connection), SseConnection.Closed("the server closed the stream"))
     }
   }
+
+  test("closeAbortsTheFetchRequest") {
+    // The first link of the cancellation chain M3's third exit criterion asserts: the browser aborts
+    // the request, the gateway's stream is cancelled, the service's fiber is cancelled and its Kafka
+    // consumer is closed. A `close()` that only stopped reading would leave every one of those alive,
+    // and nothing on the screen would look any different.
+    var aborted = false
+    val handle =
+      Sse.fetchStreamWith(
+        () => js.Promise.resolve[Sse.StreamResponse](new FakeStreamResponse(200, "")),
+        () => aborted = true,
+        () => aborted,
+        List("row")
+      )(decodeText)
+
+    assertEquals(aborted, false)
+    handle.close()
+    assertEquals(aborted, true)
+    assertEquals(current(handle.connection), SseConnection.Closed("closed by the client"))
+    // Idempotent: a component that unmounts after its own close must not throw.
+    handle.close()
+    assertEquals(current(handle.connection), SseConnection.Closed("closed by the client"))
+  }
 }
