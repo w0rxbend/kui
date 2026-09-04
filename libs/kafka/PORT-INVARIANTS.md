@@ -1,9 +1,13 @@
 # Port invariants Kafka forces on us, recorded before the ports exist
 
-Two behaviours are established by `research/kafka/admin-capabilities.md`, are **required** of ports
-KUI does not build in M1, and would otherwise be rediscovered as production bugs by whoever writes
-those ports in M2 and M3. Each is stated here with its evidence, its rule, and the consequence of
-getting it wrong.
+One behaviour is still recorded here. It is established by `research/kafka/admin-capabilities.md`, is
+**required** of a port KUI did not build in M1, and would otherwise be rediscovered as a production bug by
+whoever writes that port. It is stated with its evidence, its rule, and the consequence of getting it wrong.
+
+The second invariant this file used to carry — *describing a consumer group that does not exist returns a
+fabricated dead group rather than an error* — has moved, as the closing section instructs, into the scaladoc
+of `GroupAdmin.describeGroups` in `libs/kafka/src/kui/kafka/admin/GroupAdmin.scala` (M4, task GRP-002). It is
+no longer homeless, so it is no longer here.
 
 ---
 
@@ -39,52 +43,20 @@ that could still afford to think about it.
 
 ---
 
-## 2. Describing a consumer group that does not exist returns a fabricated dead group
-
-**Owner: M3, `GroupAdmin.describeGroups`.**
-
-**The behaviour.** Brokers disagree about what "that group does not exist" means. Older brokers
-answer `describeConsumerGroups` for an unknown group id with a perfectly ordinary description whose
-state is `DEAD` and whose member list is empty. Newer brokers throw `GroupIdNotFoundException`.
-
-**Why that matters.** A port that passes the difference through makes every caller branch on broker
-version — and ADR-030 is explicit that KUI gates on *capabilities*, never on version numbers. Two
-callers written six months apart will branch differently, and the one that forgot will show a stack
-trace on a cluster that is behaving correctly.
-
-**The evidence.** `research/kafka/admin-capabilities.md` §3, "Describe groups".
-
-**KUI's rule.** The port normalises to the *older* behaviour: an unknown group is a group
-description in state `Dead`, with no members and no assignment. `GroupIdNotFoundException` is caught
-inside the adapter and turned into that value.
-
-Normalising to the older behaviour rather than the newer one is deliberate. "Dead with no members"
-is a true statement about a group that does not exist, and it is what a screen wants to render — an
-empty group page rather than a 404 — whereas an error forces every caller to decide what to do about
-it. Where existence genuinely matters, the caller confirms it with a listing first, which is what
-the reference product does before an offset reset. Note that `KafkaErrorMapper` maps
-`GroupIdNotFoundException` to `ApplicationError.InvalidState` today (KAFKA-005's deviation, because
-`ErrorCode` has no group-not-found code yet); once M2 adds the code, this invariant is the reason
-the adapter must catch the exception *before* the mapper ever sees it.
-
----
-
 ## Why these are here and not in a trait
 
-The obvious place for these two rules is a doc comment on `TopicAdmin.listOffsets` and
-`GroupAdmin.describeGroups`. Neither trait exists, and neither may be created yet.
+The obvious place for this rule is a doc comment on `TopicAdmin.listOffsets`. That trait did not exist when
+this file was written, and could not be created yet.
 
 DEVPLAN §3 forbids declaring empty `TopicAdmin`, `GroupAdmin`, `SecurityAdmin` or
 `MessageBrowsePort` traits in M1, and risk R-11 says why: an empty trait is an invitation to fill
 it, and a port designed before its first caller exists is designed wrong. M1 implements
 `ClusterAdmin` and nothing else.
 
-But the *knowledge* must not be lost with the trait. Both of these were expensive to learn — one of
-them is a sixty-second timeout that looks like a network problem — and both would otherwise be
-rediscovered as bug reports. So they live in a file next to the module that will eventually
-implement them, and the M2 and M3 grooming steps pick this file up through the DEVPLAN's reference
-to it.
+But the *knowledge* must not be lost with the trait. This one was expensive to learn — it is a sixty-second
+timeout that looks like a network problem — and it would otherwise be rediscovered as a bug report. So it
+lives in a file next to the module that will eventually implement it, and each milestone's grooming step
+picks this file up through the DEVPLAN's reference to it.
 
-**If you are the person creating `TopicAdmin` or `GroupAdmin`:** move the relevant section into a
-doc comment on the method, delete it from here, and leave this file with only what is still
-homeless.
+**If you are the person creating `TopicAdmin`:** move the remaining section into a doc comment on
+`listOffsets`, delete it from here, and delete this file — it will hold nothing else.
