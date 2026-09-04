@@ -41,7 +41,8 @@ final class ShippedConfigurationSuite extends KuiSuite {
       UrlPolicy.Strict,
       signingKey ++ Map(
         "KUI_ANALYTICS_PASSWORD" -> "an-analytics-password",
-        "KUI_ANALYTICS_TRUSTSTORE_PASSWORD" -> "a-truststore-password"
+        "KUI_ANALYTICS_TRUSTSTORE_PASSWORD" -> "a-truststore-password",
+        "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted"
       )
     )
   )
@@ -68,6 +69,46 @@ final class ShippedConfigurationSuite extends KuiSuite {
     // entry stops naming that broker, the promise is broken and nothing else would say so.
     assertEquals(loaded.clusters.map(_.id.value), List("quickstart"))
     assertEquals(loaded.clusters.head.bootstrapServers.value, "kafka:9092")
+  }
+
+  test("the production example's secrets are all resolved and none is left as its own reference") {
+    // "It loads" was not enough, and this is the case that proves it. `deployment/examples/production.yaml`
+    // writes the truststore password as `env:KUI_ANALYTICS_TRUSTSTORE_PASSWORD`, and the loader used to
+    // accept that string *as the password* — no error, a file that loaded, and a secured cluster that then
+    // sat on the dashboard reading "unavailable" for ever, because `Admin.create` could not open the store
+    // with a password that was the name of an environment variable.
+    //
+    // So the assertion is over the resolved values: no secret in the file may still look like the reference
+    // that was written in it.
+    val environment = signingKey ++ Map(
+      "KUI_ANALYTICS_PASSWORD" -> "an-analytics-password",
+      "KUI_ANALYTICS_TRUSTSTORE_PASSWORD" -> "a-truststore-password",
+      "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted"
+    )
+
+    val loaded = KuiConfigSource
+      .loadFrom[IO](Nil, List(resolve("deployment/examples/production.yaml")), environment, UrlPolicy.Strict)
+      .unsafeRunSync()
+      .fold(errors => fail(errors.render), identity)
+
+    val analytics = loaded.clusters
+      .find(_.id.value == "analytics")
+      .getOrElse(fail(s"the example no longer has an `analytics` cluster: ${loaded.clusters.map(_.id.value)}"))
+
+    analytics.security match {
+      case kui.kernel.cluster.ClusterSecurity.Sasl(_, mechanism, Some(tls)) =>
+        assertEquals(
+          tls.truststore.flatMap(_.password).map(_.value),
+          Some("a-truststore-password"),
+          clue = "the truststore password was not resolved; the env: reference reached the Kafka client"
+        )
+        mechanism match {
+          case kui.kernel.cluster.SaslMechanism.ScramSha512(_, password) =>
+            assertEquals(password.value, "an-analytics-password")
+          case other => fail(s"the example no longer uses SCRAM-SHA-512: $other")
+        }
+      case other => fail(s"the example's analytics cluster is no longer SASL over TLS: $other")
+    }
   }
 
   /** The repository root, found by walking up to the directory holding `build.mill`.

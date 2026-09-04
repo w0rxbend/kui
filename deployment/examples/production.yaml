@@ -23,6 +23,15 @@
 #   KUI_ANALYTICS_PASSWORD   the SCRAM password for the `analytics` cluster. Required from M1,
 #                            when `kui.clusters` starts being read. Set it now anyway, so that
 #                            the upgrade is not the moment you discover it is missing.
+#   KUI_ANALYTICS_TRUSTSTORE_PASSWORD
+#                            the password of the PKCS12 truststore below. Required whenever the
+#                            `truststore` block is present, and easy to miss: leaving it unset
+#                            stops KUI at startup naming this variable, which is the point.
+#   KUI_CURSOR_KEY           the key that signs browse cursors and offset-reset plan tokens
+#                            (ADR-026, ADR-045). Optional for a single process; required the
+#                            moment you run more than one, because a cursor or a plan token
+#                            minted by one replica is rejected by its neighbour otherwise.
+#                            Same length rule as KUI_PRINCIPAL_KEY: at least 32 bytes.
 #
 # Deliver them however your platform delivers secrets. If yours mounts files rather than setting
 # variables -- which is what Kubernetes Secrets and Docker Compose secrets do -- use the `file:`
@@ -105,6 +114,30 @@ kui:
     cors:
       enabled: false
       origins: []
+
+  streaming:
+    # The signing key shared by the two things KUI hands a browser and later takes back as an
+    # instruction: the message browser's paging cursor, and the offset reset's plan token, which
+    # the apply endpoint accepts *instead of* a specification.
+    #
+    # Leave it out and each process generates its own at startup. That is correct for one process
+    # and wrong for two: a cursor minted by one replica is refused by the other, so "load more"
+    # works one press in two, and a reset wizard fails at its last step depending on which
+    # container answered. It is also what makes a wizard left open across a restart re-plannable
+    # rather than dead.
+    #
+    # Generate one with: openssl rand -base64 48
+    cursorKey: "env:KUI_CURSOR_KEY"
+
+  consumers:
+    # How often each cluster's consumer groups are described in the background. This is the most
+    # expensive read KUI makes -- it describes every group on the cluster -- and it is deliberately
+    # not the same knob as `kui.topics.refreshInterval`, because a topic scrape and a group scrape
+    # cost different amounts against different broker paths. Raise it on a cluster with thousands
+    # of groups; lower it if you are watching a lag figure move.
+    #
+    # There is no TTL: a snapshot older than this is shown and marked stale, never withheld.
+    refreshInterval: 30s
 
   auth:
     # The only value KUI accepts today. Real authentication arrives with the identity service in

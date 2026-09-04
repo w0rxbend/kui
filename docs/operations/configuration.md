@@ -275,7 +275,7 @@ refused, naming the gap, because it nearly always means a deleted entry or a mis
 | `kui.clusters.<n>.security.ssl.truststore.password` | `…_SECURITY_SSL_TRUSTSTORE_PASSWORD` | *(unset)* | A secret. |
 | `kui.clusters.<n>.security.ssl.truststore.type` | `…_SECURITY_SSL_TRUSTSTORE_TYPE` | `PKCS12` | `PKCS12`, `JKS` or `PEM`. |
 | `kui.clusters.<n>.security.ssl.keystore.*` | `…_SECURITY_SSL_KEYSTORE_*` | *(unset)* | The same four keys, for mutual TLS. |
-| `kui.clusters.<n>.security.ssl.keyPassword` | `…_SECURITY_SSL_KEYPASSWORD` | *(unset)* | A secret. Must be a literal here. |
+| `kui.clusters.<n>.security.ssl.keyPassword` | `…_SECURITY_SSL_KEYPASSWORD` | *(unset)* | A secret. Takes `env:` and `file:` like every other one. |
 | `kui.clusters.<n>.security.ssl.verifyHostname` | `…_SECURITY_SSL_VERIFYHOSTNAME` | `true` | Leave it on. `false` also removes the check that the broker is who it claims to be. |
 | `kui.clusters.<n>.security.ssl.enabledProtocols` / `.cipherSuites` | `…` | *(unset)* | Comma-separated lists. |
 | `kui.clusters.<n>.admin.requestTimeout` | `…_ADMIN_REQUESTTIMEOUT` | `30s` | How long one request to a broker may take. Becomes `request.timeout.ms`. |
@@ -394,6 +394,35 @@ the same interval is how two scrapes end up running at once. The admin-call chun
 parallelism are **not** here — they are `kui.clusters[].admin.*` on the cluster service, per cluster,
 and they arrive in the profile, because the right chunk size depends on the broker being scraped and
 not on which KUI process is scraping it.
+
+### `kui.consumers` — the consumer service's own dials
+
+Read by the **consumer service** only. It holds no cluster list either, for the same reason
+`kui.topics` does not.
+
+| Key | Type | Default | Required | What happens when it is wrong or missing |
+| --- | --- | --- | --- | --- |
+| `kui.consumers.refreshInterval` | duration | `30s` | no | How often each cluster's consumer groups are described in the background. 5s … 1h. **Not** the same dial as `kui.topics.refreshInterval`, deliberately: describing every group on a cluster and listing its topics are different costs against different broker paths, and one knob for both would mean tuning the cheap scrape by the expensive one. There is no TTL — a snapshot older than this is shown and marked stale, never withheld. Raise it on a cluster with thousands of groups; lower it while you are watching a lag figure move. |
+
+### `kui.streaming` — the key that signs what KUI hands the browser
+
+Read by the **message service** and the **consumer service**. One key, because there is one kind of
+thing it protects: an opaque string KUI mints, gives to a browser, and later accepts back as an
+instruction. Today there are two of them — the message browser's paging cursor (ADR-026) and the
+offset reset's plan token (ADR-045), which the apply endpoint accepts *instead of* a specification,
+so a token an attacker could mint would be a token that writes offsets nobody was shown.
+
+| Key | Type | Default | Required | What happens when it is wrong or missing |
+| --- | --- | --- | --- | --- |
+| `kui.streaming.cursorKey` | secret | *(generated per process)* | no, until you run two processes | The shared HMAC-SHA256 key. Written as a literal, `env:NAME` or `file:/path`, like every other secret. A resolved value shorter than **32 bytes** fails the load rather than weakening every token silently. Generate one with `openssl rand -base64 48`. |
+
+**When you can leave it out, and when you cannot.** Absent, each process generates its own key at
+startup and says so in one INFO line. That is honest for exactly one shape: a single all-in-one
+process on a laptop. Run two replicas and a cursor minted by one is refused by the other, so "load
+more" works one press in two; restart the one process and a reset wizard an operator left open can
+never be applied, because the plan it holds was signed with a key that no longer exists. Neither
+failure names itself — both look like an intermittent product — so the startup line is the only
+place the deployment shape is visible. Configure the key before the second replica, not after.
 
 ### `kui.clusterProfiles` — how a Kafka-facing service reaches the cluster service
 
