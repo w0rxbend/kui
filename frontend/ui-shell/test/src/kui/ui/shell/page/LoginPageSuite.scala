@@ -3,11 +3,18 @@ package kui.ui.shell.page
 import com.raquo.laminar.api.L.*
 import munit.FunSuite
 import org.scalajs.dom
+import sttp.tapir.{Endpoint, PublicEndpoint}
 
-import kui.identity.contract.dto.AuthSettingsDto
+import kui.contracts.ErrorEnvelope
+import kui.identity.contract.dto.{
+  AuthSettingsDto,
+  ChangePasswordRequest,
+  LoginRequest,
+  LoginResponse
+}
 import kui.kernel.{RoleName, UserName}
 import kui.security.{Principal, PrincipalKind}
-import kui.ui.kernel.api.ApiError
+import kui.ui.kernel.api.{ApiClient, ApiError}
 import kui.ui.shell.Shell
 
 /** The sign-in screen, and — more important than anything the screen does — the rule that decides whether it
@@ -42,6 +49,64 @@ class LoginPageSuite extends FunSuite {
 
   private def page(kind: String, label: Option[String] = None): HtmlElement =
     LoginPage(settings(kind, label), None, Observer[Unit](_ => ()))
+
+  /** An `ApiClient` that records what was asked and answers only when the test says so.
+    *
+    * Answering on demand rather than immediately is what makes these tests synchronous. The real client
+    * returns a stream that emits on a later turn of the event loop, so a test that asserted straight after a
+    * click would be asserting before the answer had arrived — and would pass or fail on timing. Here the
+    * click subscribes, [[answer]] emits inside the test's own call stack, and the assertion that follows sees
+    * a settled screen.
+    *
+    * The input is recorded rather than the endpoint, because the input is what distinguishes the two calls
+    * this screen makes: a `LoginRequest` is a sign-in and a `ChangePasswordRequest` is a change. That is also
+    * what lets a test assert the far more interesting negative — that no request was made at all.
+    */
+  private final class StubApi extends ApiClient {
+
+    private val bus: EventBus[Any] = new EventBus[Any]
+
+    /** Every input handed to [[call]], oldest first. */
+    var requests: List[Any] = List.empty
+
+    /** Delivers `value` as the answer to whatever is currently waiting. */
+    def answer(value: Any): Unit = bus.emit(value)
+
+    def call[I, O](
+        endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any],
+        input: I
+    ): EventStream[Either[ApiError, O]] = {
+      requests = requests :+ input
+      // The cast is the price of a stub for a method whose output type is fixed by its endpoint. The
+      // test supplies the value for the endpoint it is exercising, so the only way to reach a wrong
+      // type here is to write a test that asks for one.
+      bus.events.map(value => Right(value.asInstanceOf[O]))
+    }
+
+    def callSecure[A, I, O](
+        endpoint: Endpoint[A, I, ErrorEnvelope, O, Any],
+        security: A,
+        input: I
+    ): EventStream[Either[ApiError, O]] =
+      call(endpoint.asInstanceOf[PublicEndpoint[I, ErrorEnvelope, O, Any]], input)
+  }
+
+  /** Types into a `controlled` Laminar input the way a person does.
+    *
+    * Setting `value` alone is not enough and the reason is worth stating: the field is bound with
+    * `controlled`, so the element's value is written *from* a `Var` and the `Var` is only updated by the
+    * `input` event. Assigning `value` without dispatching one leaves the model empty, the screen then
+    * rewrites the field from that empty model, and the test would be asserting against a form nobody filled
+    * in.
+    */
+  private def typeInto(root: dom.Element, testId: String, text: String): Unit = {
+    val field = root.querySelector(s"[data-testid='$testId']").asInstanceOf[dom.html.Input]
+    field.value = text
+    field.dispatchEvent(new dom.Event("input", new dom.EventInit { bubbles = true })): Unit
+  }
+
+  private def click(root: dom.Element, testId: String): Unit =
+    root.querySelector(s"[data-testid='$testId']").asInstanceOf[dom.html.Element].click()
 
   // ---------------------------------------------------------------------------------------------
   // When the screen appears
@@ -122,6 +187,90 @@ class LoginPageSuite extends FunSuite {
     mounted(page("form")) { root =>
       assertEquals(root.getAttribute("role"), "alertdialog")
       assert(root.getAttribute("aria-labelledby") != null, "the dialog has no accessible name")
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The forced password change
+  // ---------------------------------------------------------------------------------------------
+
+  test("a required password change replaces the sign-in fields instead of letting anybody in") {
+    // The third outcome of `/auth/login`, and the one that is easiest to get wrong. The server grants no
+    // session here — it answers with a single-use challenge and nothing else — so the screen must stop
+    // asking for the old credentials and start asking for a new password. If it treated this as a
+    // success, the browser would carry on as though somebody were signed in when nobody is.
+    val api = new StubApi
+    mounted(LoginPage(settings("form"), Some(api), Observer[Unit](_ => ()))) { root =>
+      typeInto(root, "login-username", "ada")
+      typeInto(root, "login-password", "the-temporary-one")
+      click(root, "login-submit")
+
+      assertEquals(api.requests, List(LoginRequest("ada", "the-temporary-one")))
+
+      api.answer(LoginResponse.PasswordChangeRequired("challenge-token"))
+
+      assert(
+        root.querySelector("[data-testid='login-new-password']") != null,
+        "no field to type a new password into"
+      )
+      assert(
+        root.querySelector("[data-testid='login-confirm-password']") != null,
+        "a new password is asked for once, so a typo in it locks the account out"
+      )
+      // The old credentials must be gone, not merely ignored: a username field still on screen invites
+      // somebody to retype the temporary password and wonder why nothing happens.
+      assertEquals(root.querySelector("[data-testid='login-username']"), null)
+      assertEquals(root.querySelector("[data-testid='login-password']"), null)
+    }
+  }
+
+  test("the challenge the server issued is the one sent back with the new password") {
+    // The challenge *is* the proof that the current password was verified moments ago, which is why the
+    // change endpoint takes no username and no old password. Sending anything else — or sending it for
+    // the wrong account — would be a second login endpoint with none of the first one's protections.
+    val api = new StubApi
+    mounted(LoginPage(settings("form"), Some(api), Observer[Unit](_ => ()))) { root =>
+      typeInto(root, "login-username", "ada")
+      typeInto(root, "login-password", "the-temporary-one")
+      click(root, "login-submit")
+      api.answer(LoginResponse.PasswordChangeRequired("challenge-token"))
+
+      typeInto(root, "login-new-password", "a-much-better-one")
+      typeInto(root, "login-confirm-password", "a-much-better-one")
+      click(root, "login-change-submit")
+
+      assertEquals(
+        api.requests.last,
+        ChangePasswordRequest("challenge-token", "a-much-better-one")
+      )
+    }
+  }
+
+  test("two different new passwords are refused before the server is asked") {
+    // A mismatch is the one failure this screen can diagnose by itself, and it must: the server would
+    // accept the first spelling happily, and the user would be locked out by a typo they never saw. The
+    // assertion that matters is the negative one — that nothing was sent.
+    val api = new StubApi
+    mounted(LoginPage(settings("form"), Some(api), Observer[Unit](_ => ()))) { root =>
+      typeInto(root, "login-username", "ada")
+      typeInto(root, "login-password", "the-temporary-one")
+      click(root, "login-submit")
+      api.answer(LoginResponse.PasswordChangeRequired("challenge-token"))
+
+      typeInto(root, "login-new-password", "a-much-better-one")
+      typeInto(root, "login-confirm-password", "a-much-better-typo")
+      click(root, "login-change-submit")
+
+      assert(
+        !api.requests.exists(_.isInstanceOf[ChangePasswordRequest]),
+        "a mismatched confirmation was sent to the server anyway"
+      )
+      val error = root.querySelector("[data-testid='login-error']")
+      assert(error != null, "the mismatch was refused silently, which reads as a dead button")
+      assert(
+        root.querySelector("[data-testid='login-new-password']") != null,
+        "the screen left the change flow, so there is no way to correct the typo"
+      )
     }
   }
 
