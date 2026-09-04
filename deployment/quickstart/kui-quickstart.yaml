@@ -31,6 +31,15 @@ kui:
     # service in M6; anything else here fails the load with a message saying so.
     type: disabled
 
+  topics:
+    # A topic is internal when Kafka says so OR when its name starts with this prefix. The default is
+    # `__`, which catches Kafka's own `__consumer_offsets`. The quickstart lowers it to a single
+    # underscore because it seeds `_schemas` — the topic Confluent Schema Registry keeps its schemas
+    # in — and a single leading underscore is the convention infrastructure topics like that use. With
+    # this set, the topics screen shows the seven topics that are yours and hides `_schemas` and
+    # `__consumer_offsets` behind the "show internal topics" switch.
+    internalPrefix: "_"
+
   telemetry:
     # Overridden to `text` by the Compose file, because `docker compose logs` is read by a person.
     logFormat: json

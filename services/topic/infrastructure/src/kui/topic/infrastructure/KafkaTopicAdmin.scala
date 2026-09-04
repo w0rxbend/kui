@@ -18,6 +18,7 @@ import org.typelevel.log4cats.StructuredLogger
 import kui.kafka.{AdminClientPool, KafkaErrorMapper, KafkaFutures}
 import kui.kernel.cluster.ClusterConnection
 import kui.kernel.{BrokerId, ClusterId, PartitionId, TopicName}
+import kui.topic.application.InternalTopics
 import kui.topic.domain as dom
 import kui.topic.domain.{ScrapeResult, TopicAdmin as TopicAdminPort}
 
@@ -45,10 +46,18 @@ import kui.topic.domain.{ScrapeResult, TopicAdmin as TopicAdminPort}
   * @param connections
   *   turns a cluster id into connection material. `None` is `TopicError.ClusterNotFound`, which is a 404 at
   *   the edge and never an empty list.
+  * @param internalPrefix
+  *   `kui.topics.internalPrefix`. This adapter is the one place in the product that holds both halves of
+  *   "internal" at once — Kafka's `isInternal` flag comes back on the wire here, and the prefix is pure
+  *   configuration — so this is where [[InternalTopics.isInternal]] combines them, exactly once, for both the
+  *   list and the detail page. Before this parameter existed the flag was passed through alone and the
+  *   configured prefix did nothing at all: a cluster's `_schemas` or `__kui_config` sat in the operator's own
+  *   topic list with no way to hide it.
   */
 final class KafkaTopicAdmin[F[_]: Async](
     pool: AdminClientPool[F],
     connections: ClusterId => Option[ClusterConnection],
+    internalPrefix: String,
     logger: StructuredLogger[F]
 ) extends TopicAdminPort[F] {
 
@@ -69,7 +78,8 @@ final class KafkaTopicAdmin[F[_]: Async](
         rows = described.toList.map { case (name, description) =>
           dom.TopicSummary.of(
             name = name,
-            isInternal = listings.getOrElse(name, description.isInternal),
+            isInternal = InternalTopics
+              .isInternal(name, listings.getOrElse(name, description.isInternal), internalPrefix),
             partitions = description.partitions.asScala.toList.flatMap(partitionView(name, _, offsets))
           )
         }
@@ -91,7 +101,7 @@ final class KafkaTopicAdmin[F[_]: Async](
         policy <- cleanupPolicy(connection, topic)
       } yield dom.TopicDetail.of(
         name = topic,
-        isInternal = described.isInternal,
+        isInternal = InternalTopics.isInternal(topic, described.isInternal, internalPrefix),
         partitions = described.partitions.asScala.toList.flatMap(partitionView(topic, _, offsets)),
         cleanupPolicy = policy,
         // Segment counts come from `describeLogDirs`, which is a per-broker call over every partition

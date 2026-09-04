@@ -61,10 +61,14 @@ object TopicWiring {
     * @param scrapeInterval
     *   how often each cluster's topic list is refreshed in the background. There is no TTL: a snapshot older
     *   than this is shown and marked stale, never withheld.
+    * @param internalPrefix
+    *   `kui.topics.internalPrefix`, passed to the adapter, which is the only place that also holds Kafka's
+    *   own `isInternal` flag. A topic is internal when either says so.
     */
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
       scrapeInterval: FiniteDuration,
+      internalPrefix: String,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -76,7 +80,7 @@ object TopicWiring {
       profiles <- Resource.eval(ConfiguredClusterProfiles.of[F](clusters))
       adminMetrics <- Resource.eval(AdminMetrics.otel[F](telemetry))
       pool <- AdminClientPool.resource[F](adminMetrics, Some(logger))
-      admin = new KafkaTopicAdmin[F](pool, profiles.connectionFor, logger)
+      admin = new KafkaTopicAdmin[F](pool, profiles.connectionFor, internalPrefix, logger)
       cacheMetrics <- Resource.eval(CacheMetrics.otel4s[F](meter))
       snapshots <- LiveTopicSnapshots.resource[F](profiles.ids, admin, scrapeInterval, cacheMetrics, logger)
       detail = TopicDetailUseCase.make[F](admin, snapshots)

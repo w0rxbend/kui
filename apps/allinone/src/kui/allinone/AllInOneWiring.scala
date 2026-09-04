@@ -159,7 +159,8 @@ object AllInOneWiring {
       // asking the cluster service for it over HTTP (ADR-046's profile client). One process calling
       // itself over a socket to read a list it is holding in memory would add a listener, a timeout
       // and a failure mode to a lookup that cannot fail; see `ConfiguredClusterProfiles`.
-      topicService <- TopicWiring.make[F](clusters, topics.refreshInterval, telemetry, principals, logger)
+      topicService <- TopicWiring
+        .make[F](clusters, topics.refreshInterval, topics.internalPrefix, telemetry, principals, logger)
       // The consumer service reads the same `kui.clusters[]`, for the same reason the topic service
       // does: this process is already holding the list, and calling itself over a socket to read it
       // would add a listener, a timeout and a failure mode to a lookup that cannot fail.
