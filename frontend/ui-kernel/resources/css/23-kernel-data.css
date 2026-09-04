@@ -93,13 +93,16 @@
 
 /* --- Threshold value ------------------------------------------------------------------------- */
 
-/* Under the limit: the quiet treatment every other numeric cell gets. */
+/* Under the limit: exactly the treatment every other numeric cell gets, which means inheriting the
+ * cell's own colour rather than declaring one. It used to declare `--kui-color-text-muted`, which
+ * made a healthy "0" in the out-of-sync column a paler grey than the partition count beside it —
+ * three numeric columns in one row, two different greys, with nothing distinguishing them. Colour
+ * here is reserved for the two rules below, which is the whole point of a threshold. */
 .kui-threshold {
   display: inline-flex;
   align-items: center;
   gap: var(--kui-space-1);
   font-variant-numeric: tabular-nums;
-  color: var(--kui-color-text-muted);
 }
 
 /* Over it. The colour changes *and* a warning mark appears, because colour on its own excludes the
