@@ -1,8 +1,8 @@
 package kui.gateway.api.client
 
-import cats.data.NonEmptyList
 import scala.concurrent.duration.FiniteDuration
 
+import cats.data.NonEmptyList
 import cats.effect.kernel.{Async, Clock, Resource}
 import cats.syntax.all.*
 import fs2.Stream
