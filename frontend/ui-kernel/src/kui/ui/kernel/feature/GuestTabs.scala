@@ -15,59 +15,115 @@ import kui.ui.kernel.component.Tab
   *
   * So the arrangement is written here, once, and both the host and every guest use it. The host asks for the
   * merged tab list and renders it with [[kui.ui.kernel.component.Tabs]] as if it had written every tab
-  * itself; a guest registers a `PanelContribution` carrying a `tabLabel`, and appears.
+  * itself; a guest declares a [[GuestTab]] in its static registration, and appears.
+  *
+  * ## The strip does not depend on what has been downloaded
+  *
+  * The tabs come from the **static** registrations — the same data the sidebar is drawn from, available on
+  * first paint — and not from the features that happen to have loaded. That is a correction of how this
+  * worked before, and the reason for it is what the old behaviour did to a user: the Consumers tab existed on
+  * a topic page only if the consumers feature had already been downloaded for some other reason, so opening a
+  * topic in a fresh browser tab showed Overview and Settings, and opening the same topic after a detour
+  * through Consumers showed Overview, Settings and Consumers. Whether a screen exists is not something a
+  * product may decide from the user's browsing history.
+  *
+  * ## Opening a tab is still the only thing that downloads a feature
+  *
+  * The heading is data — a few words in `main.js` — and the panel behind it is not. Nothing is fetched while
+  * the strip is drawn; the guest's module is imported when its tab is first *opened*, and the tab shows a
+  * loading state and then the panel. So the promise ADR-012 actually makes — that a user who never looks at
+  * consumer groups never downloads the consumers feature — is kept, while a user who wants to look at them
+  * can find out that they are there.
   *
   * ## Ordering, and why it is not registration order
   *
   * The host's own tabs come first, then the guests in their features' sidebar order. Sidebar order is a
   * product decision; the order two modules happened to finish downloading in is not, and using it would make
   * the tab strip lay itself out differently on a slow connection than on a fast one.
-  *
-  * ## A guest never causes a download
-  *
-  * The tab list is derived from the *loaded* features and from nothing else. A feature that has not been
-  * downloaded contributes no tab and is not fetched — a host page is never a reason to load another feature.
-  * A guest's tab therefore appears once its feature has loaded for some other reason (the user visited it, or
-  * the shell preloaded it because its capability is available), and until then the strip is one tab shorter.
-  * That is the intended behaviour and not a limitation to work around; it is stated here because it is the
-  * first question anyone asks when a tab they registered is not on screen.
   */
 object GuestTabs {
 
-  /** The tabs registered by loaded features against one slot of one host's page.
+  /** How a guest's panel is produced once its tab is opened: the guest's id, the host and slot it is filling,
+    * and the context the host handed over. [[lazyBody]] is the one the application uses.
+    */
+  type Body = (FeatureId, FeatureId, String, PanelContext) => HtmlElement
+
+  /** The tabs registered against one slot of one host's page.
     *
-    * A contribution with no `tabLabel` is not a tab and is skipped: the same slot mechanism carries stacked
-    * panels elsewhere, and a nameless tab would render as a blank strip entry.
+    * @param statics
+    *   the static registrations, in sidebar order. A parameter so a suite can supply its own; the application
+    *   passes `FeatureRegistry.staticRoutes`, which is what the sidebar is drawn from.
+    * @param body
+    *   how a guest's panel is produced once its tab is opened. Also a parameter, because the kernel must not
+    *   decide on its own that opening a tab starts a download — [[lazyBody]] is that decision, and it is
+    *   named at the call site so it is visible there.
     */
   def of(
-      features: Signal[List[KuiFeature]],
+      statics: List[FeatureRoutes],
       host: FeatureId,
       slot: String,
+      body: GuestTabs.Body,
       context: PanelContext
-  ): Signal[List[Tab]] =
-    features.map(_.flatMap { feature =>
-      feature.panels.collect {
-        case panel if panel.host == host && panel.slot == slot && panel.tabLabel.isDefined =>
+  ): List[Tab] =
+    statics.flatMap(registration =>
+      registration.guestTabs.collect {
+        case guest if guest.host == host && guest.slot == slot =>
           Tab(
             // The contributing feature's id, so that a tab is addressable in a URL as `?tab=messages`
             // and stays addressable when the guest's rendering changes.
-            id = feature.id.value,
-            label = panel.tabLabel.getOrElse(feature.nav.label),
-            // A thunk, so the guest's panel is built when its tab is opened and not before. A
-            // Consumers tab issues requests when it is created; building every panel up front would
-            // fire four screens' worth of traffic for a user who looks at one.
-            body = () => panel.render(context)
+            id = registration.id.value,
+            label = guest.label,
+            // A thunk, so nothing happens until the tab is opened. That is what keeps the download on
+            // the user's click rather than on the host page's first paint.
+            body = () => body(registration.id, host, slot, context)
           )
       }
-    })
+    )
 
   /** A host's own tabs followed by its guests'. The one call a host page makes. */
   def merged(
       own: Signal[List[Tab]],
-      features: Signal[List[KuiFeature]],
       host: FeatureId,
       slot: String,
-      context: PanelContext
+      context: PanelContext,
+      statics: => List[FeatureRoutes] = FeatureRegistry.staticRoutes,
+      body: GuestTabs.Body = lazyBody
   ): Signal[List[Tab]] =
-    own.combineWith(of(features, host, slot, context)).map(_ ++ _)
+    own.map(_ ++ of(statics, host, slot, body, context))
+
+  /** One guest's panel, downloading the guest if this is the first time anybody has asked for it.
+    *
+    * The load is started when the element is *mounted*, not when this function is called, so a tab that is
+    * built and never shown fetches nothing. Every state the import can be in has a rendering: a failed
+    * download says so and offers a retry, because a dynamic import is an ordinary HTTP request made minutes
+    * after the page loaded and it does fail.
+    */
+  def lazyBody(guest: FeatureId, host: FeatureId, slot: String, context: PanelContext): HtmlElement = {
+    val feature = FeatureRegistry.lazyFeature(guest)
+
+    div(
+      dataAttr("kui-guest-tab") := guest.value,
+      onMountCallback(_ => feature.load()),
+      child <-- feature.state.map {
+        case LoadState.NotLoaded | LoadState.Loading =>
+          div(cls := "kui-guest-tab-loading", role := "status", "Loading…")
+
+        case LoadState.Loaded(loaded) =>
+          loaded.panels.find(panel => panel.host == host && panel.slot == slot) match {
+            case Some(panel) => panel.render(context)
+            // The feature loaded and contributes nothing here. That is a registration that has drifted —
+            // a static tab with no dynamic panel behind it — and saying so beats an empty tab.
+            case None =>
+              div(role := "status", s"The ${guest.value} feature has nothing to show on this page.")
+          }
+
+        case LoadState.Failed(cause) =>
+          div(
+            role := "alert",
+            p(s"This tab could not be loaded: $cause"),
+            button(tpe := "button", "Try again", onClick --> { _ => feature.retry() })
+          )
+      }
+    )
+  }
 }

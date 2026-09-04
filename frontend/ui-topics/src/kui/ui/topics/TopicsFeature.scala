@@ -118,10 +118,9 @@ final class TopicsFeature extends KuiFeature {
           queries = queries,
           onTab = chosen => goTo(TopicsPageId.Detail(clusterId.value, topicName.value, chosen)),
           zone = Timezone.choice.signal,
-          backHref = hrefOf(TopicsPageId.List(clusterId.value)),
-          // The features that are *loaded*. M4's Consumers tab appears here by registration, and a feature
-          // that has not been downloaded contributes no tab and is not fetched to find out.
-          features = FeatureRegistry.loaded
+          backHref = hrefOf(TopicsPageId.List(clusterId.value))
+          // The guest tabs are not passed in. They come from the static feature registrations, which the
+          // page reads through `GuestTabs`, so the strip is the same whatever has been downloaded so far.
         )
       case (Some(clusterId), None) => listing(Some(clusterId))
       case _ => listing(None)

@@ -29,6 +29,32 @@ import kui.kernel.ClusterId
   * feature's `KuiFeature` class — that is the dynamic half, named only inside a `js.dynamicImport`, and
   * `checkBundleShape` (BUILD-006) fails the build if it leaks.
   */
+/** A tab one feature will contribute to another feature's page, declared before either is downloaded.
+  *
+  * ## Why the *label* is static data
+  *
+  * The panel itself is dynamic: only the consumers feature knows how to draw a table of consumer groups, and
+  * downloading it in order to draw a topic page is exactly what ADR-012 forbids. But the strip of tab
+  * *headings* is not code — it is three words — and it has to be complete on first paint.
+  *
+  * Before this existed, the tab was derived from the loaded features, so whether the topic page had a
+  * Consumers tab depended on where the user had been: open a topic in a fresh tab and the strip was Overview
+  * and Settings; visit Consumers first and come back and it was Overview, Settings and Consumers. A tab whose
+  * existence depends on browsing history is not a tab, it is a coin toss, and no amount of documenting it as
+  * intended makes a user able to find the screen.
+  *
+  * So the heading is declared here, statically, and the panel behind it is still downloaded only when
+  * somebody opens the tab.
+  *
+  * @param host
+  *   whose page the tab appears on
+  * @param slot
+  *   which slot on that page, from `FeatureSlots`
+  * @param label
+  *   the word on the tab
+  */
+final case class GuestTab(host: FeatureId, slot: String, label: String)
+
 trait FeatureRoutes {
 
   def id: FeatureId
@@ -56,6 +82,16 @@ trait FeatureRoutes {
     * only the three cluster-scoped features override it.
     */
   def landingFor(@nowarn("msg=unused explicit parameter") cluster: ClusterId): Page = landing
+
+  /** The tabs this feature contributes to other features' pages.
+    *
+    * Data, like the sidebar entry beside it, and for the same reason: the strip has to be complete before
+    * anything is downloaded. The rendering behind each one stays in the dynamic half, as a
+    * `PanelContribution` on the `KuiFeature`, and is fetched when the tab is opened.
+    *
+    * Default `Nil`, because most features are guests on nobody's page.
+    */
+  def guestTabs: List[GuestTab] = Nil
 
   /** Every URL this feature owns, as patterns. Registered with the router at start-up.
     *

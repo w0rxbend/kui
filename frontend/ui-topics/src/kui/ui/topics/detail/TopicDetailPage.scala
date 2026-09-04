@@ -12,7 +12,7 @@ import kui.kernel.{ClusterId, TopicName}
 import kui.message.contract.BrowseAddress
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
-import kui.ui.kernel.feature.{FeatureId, FeatureSlots, GuestTabs, KuiFeature, PanelContext}
+import kui.ui.kernel.feature.{FeatureId, FeatureSlots, GuestTabs, PanelContext}
 import kui.ui.topics.{Messages, TopicTab, TopicsCss, TopicsQueries}
 
 /** One topic: what it is made of, how its partitions are laid out, and every setting it carries.
@@ -61,7 +61,6 @@ object TopicDetailPage {
       onTab: TopicTab => Unit,
       zone: Signal[String],
       backHref: String,
-      features: Signal[List[KuiFeature]] = Val(Nil),
       now: () => Instant = () => Instant.now(),
       partitionViewportHeight: Var[Int] = Var(0)
   ): HtmlElement = {
@@ -111,7 +110,9 @@ object TopicDetailPage {
     val guestContext = PanelContext(Some(cluster.value), Map(FeatureSlots.TopicParam -> topic.value))
 
     val tabs: Signal[List[Tab]] =
-      GuestTabs.merged(ownTabs, features, FeatureId.Topics, FeatureSlots.TopicTabs, guestContext)
+      // The strip is built from the *static* registrations, so it is the same on a fresh page load as it is
+      // after a detour through another feature. Opening a guest's tab is what downloads that guest.
+      GuestTabs.merged(ownTabs, FeatureId.Topics, FeatureSlots.TopicTabs, guestContext)
 
     div(
       cls := TopicsCss.Page,
@@ -258,7 +259,8 @@ object TopicDetailPage {
 
   private def staleReason(section: Section[TopicDetailDto]): Option[StaleReason] =
     section match {
-      case Section.Stale(_, _, reason) => Some(StaleReason(Messages.StaleState, Some(reason.wire)))
+      case Section.Stale(_, _, reason) =>
+        Some(StaleReason(Messages.StaleState, Some(reason.sentence), code = Some(reason.wire)))
       case _ => None
     }
 

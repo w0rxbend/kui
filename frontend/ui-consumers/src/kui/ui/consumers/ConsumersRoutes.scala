@@ -7,7 +7,7 @@ import io.circe.{HCursor, Json}
 
 import kui.consumer.contract.ConsumerEndpoints
 import kui.ui.kernel.component.Icon
-import kui.ui.kernel.feature.{FeatureId, FeatureRoutes, NavEntry, Page}
+import kui.ui.kernel.feature.{FeatureId, FeatureRoutes, FeatureSlots, GuestTab, NavEntry, Page}
 
 /** The pages this feature owns.
   *
@@ -76,6 +76,20 @@ object ConsumersRoutes extends FeatureRoutes {
       order = 300,
       // A consumer group belongs to a cluster; the entry means nothing until one has been chosen.
       requiresCluster = true
+    )
+
+  /** The Consumers tab on the topic page.
+    *
+    * Declared here, in the static half, rather than only as a `PanelContribution` on `ConsumersFeature`. The
+    * heading is three characters of data and the topic page has to be able to draw it before this feature has
+    * been downloaded — otherwise the tab exists only for users who have already been to the Consumers screen,
+    * and a user who has not been there has no way to discover that the tab is a thing at all.
+    *
+    * The panel behind it is still in the dynamic half, and opening the tab is what fetches this module.
+    */
+  override val guestTabs: scala.collection.immutable.List[GuestTab] =
+    scala.collection.immutable.List(
+      GuestTab(host = FeatureId.Topics, slot = FeatureSlots.TopicTabs, label = Messages.TopicTabLabel)
     )
 
   def routes(uiPrefix: String): scala.collection.immutable.List[Route[? <: Page, ?]] =
