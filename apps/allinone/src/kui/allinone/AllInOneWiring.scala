@@ -97,10 +97,11 @@ object AllInOneWiring {
     for {
       _ <- Resource.eval(warnAboutIgnoredKeys[F](logger, config))
       principals = PrincipalCodec.inProcess[F]
-      // The cluster service's own configuration. The all-in-one does not yet read `kui.clusters[]` or
-      // `kui.store.*` - CFGOP-006 adds them to `AllInOneConfig` - so it starts with no configured cluster
-      // and no metadata store, which is the shape the fault-isolation suites exercise.
-      clients <- services[F](ClusterServiceConfig.Default, telemetry, principals, logger)
+      // The cluster service's own configuration, taken from the same loaded file this process read.
+      // Until this line existed the all-in-one handed the service `ClusterServiceConfig.Default`, so
+      // `kui.clusters[]` and `kui.store.*` were silently dropped: the quickstart's configuration named a
+      // broker, the startup log said "resolved 0 configured cluster(s)", and the dashboard was empty.
+      clients <- services[F](config.clusterView, telemetry, principals, logger)
       gateway <- GatewayWiring.over[F](
         config.gatewayView,
         telemetry,

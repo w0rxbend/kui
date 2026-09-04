@@ -1,6 +1,7 @@
 package kui.allinone
 
-import kui.config.{GatewayConfig, KuiConfig, ServerConfig, TelemetryConfig}
+import kui.cluster.app.ClusterServiceConfig
+import kui.config.{ClusterConfig, GatewayConfig, KuiConfig, ServerConfig, StoreConfig, TelemetryConfig}
 import kui.gateway.app.GatewayServiceConfig
 
 /** Everything the all-in-one process reads out of the configuration, and nothing else.
@@ -29,11 +30,20 @@ import kui.gateway.app.GatewayServiceConfig
   *   two ignored keys above
   * @param telemetry
   *   the exporters and the log format, for the single otel4s provider this process starts
+  * @param clusters
+  *   the Kafka clusters this deployment was told about. The all-in-one runs the cluster service in this same
+  *   JVM, so a `kui.clusters[]` entry has to be carried here or the service starts with an empty registry —
+  *   which is what the quickstart hit: a configuration file naming one broker, and a dashboard showing none
+  * @param store
+  *   where KUI keeps its own state. Carried for the same reason as `clusters`: it is the cluster service's
+  *   configuration, and in this shape there is no separate process to read it
   */
 final case class AllInOneConfig(
     server: ServerConfig,
     gateway: GatewayConfig,
-    telemetry: TelemetryConfig
+    telemetry: TelemetryConfig,
+    clusters: List[ClusterConfig],
+    store: StoreConfig
 ) {
 
   /** The same settings in the shape `GatewayWiring` wants.
@@ -44,6 +54,15 @@ final case class AllInOneConfig(
     * cannot cause a connection.
     */
   def gatewayView: GatewayServiceConfig = GatewayServiceConfig(server, gateway, telemetry)
+
+  /** The same settings in the shape `ClusterWiring` wants.
+    *
+    * `principalKeys` is deliberately empty rather than passed through. In this shape nothing is signed,
+    * because nothing leaves the process — ADR-005 requires `PrincipalCodec.inProcess` here — and handing the
+    * service a key set it will never verify against would make the ignored-keys warning above a lie.
+    */
+  def clusterView: ClusterServiceConfig =
+    ClusterServiceConfig(server, telemetry, principalKeys = Nil, clusters, store)
 
   /** Whether this configuration describes upstreams that this shape will not dial. */
   def hasIgnoredServiceUrls: Boolean = gateway.services.nonEmpty
@@ -56,7 +75,7 @@ object AllInOneConfig {
 
   /** The all-in-one deployment's slice of a loaded configuration. */
   def from(config: KuiConfig): AllInOneConfig =
-    AllInOneConfig(config.server, config.gateway, config.telemetry)
+    AllInOneConfig(config.server, config.gateway, config.telemetry, config.clusters, config.store)
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry
     * exporter, and — correctly for this shape — no upstream addresses and no signing keys. Unlike a single
