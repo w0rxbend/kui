@@ -90,6 +90,53 @@ final class RecordTableSuite extends FunSuite {
     }
   }
 
+  test("the control that opens a record is visible and not only announced") {
+    // Found by using the product: the only thing that opened a row was the offset number. It was a
+    // properly labelled button, so a keyboard and a screen reader found it immediately -- and everybody
+    // looking at the screen did not, because a number does not look like a control. The best part of the
+    // message browser was the hardest part to find.
+    withTable(List(record)) { container =>
+      val toggle = find(container, "record-3-41284-toggle")
+
+      assert(
+        toggle.querySelector("svg") != null,
+        s"the toggle must carry a visible mark, not just a label: ${toggle.outerHTML}"
+      )
+      // Still the whole offset, so nothing was traded away for the chevron.
+      assert(toggle.textContent.contains("41284"), toggle.textContent)
+    }
+  }
+
+  test("clicking anywhere on a row opens the record") {
+    // The chevron says a row opens; the row itself has to honour that, because the reader aims at the row
+    // and not at a 16-pixel arrow.
+    withTable(List(record)) { container =>
+      val row = find(container, "record-3-41284").asInstanceOf[dom.html.Element]
+      val detailRow = find(container, "record-3-41284-detail-row")
+      assert(detailRow.hasAttribute("hidden"))
+
+      // A cell well away from the toggle: the value, at the far end of the row.
+      row.querySelectorAll("td")(3).asInstanceOf[dom.html.Element].click()
+
+      assert(!detailRow.hasAttribute("hidden"), "a click on the row must open the record")
+      assertEquals(find(container, "record-3-41284-toggle").getAttribute("aria-expanded"), "true")
+    }
+  }
+
+  test("clicking the toggle itself opens the record once, not twice") {
+    // The row handler and the button handler both see the same click, because it bubbles. Acting on both
+    // would open and immediately close the record, so pressing the one control that obviously opens a row
+    // would appear to do nothing at all.
+    withTable(List(record)) { container =>
+      find(container, "record-3-41284-toggle").asInstanceOf[dom.html.Element].click()
+
+      assert(
+        !find(container, "record-3-41284-detail-row").hasAttribute("hidden"),
+        "pressing the toggle must leave the record open"
+      )
+    }
+  }
+
   test("two records can be open at once") {
     // Comparing two records is the common act on this screen, and a table that closed one to open another
     // would make it impossible.

@@ -44,6 +44,14 @@ object MessagesCss {
   val Row = "kui-messages__row"
   val RowOpen = "kui-messages__row--open"
   val Toggle = "kui-messages__toggle"
+
+  /** The chevron inside the toggle: the mark that says a row opens.
+    *
+    * Without it the only thing that looked like a control on the row was the offset, and an offset does not
+    * look like a control -- it looks like a number. The row was reported as having no way to open it at all
+    * by somebody using it for the first time.
+    */
+  val ToggleIcon = "kui-messages__toggle-icon"
   val Key = "kui-messages__key"
   val Value = "kui-messages__value"
   val Tombstone = "kui-messages__tombstone"

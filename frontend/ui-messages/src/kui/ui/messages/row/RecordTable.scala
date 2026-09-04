@@ -1,10 +1,11 @@
 package kui.ui.messages.row
 
 import com.raquo.laminar.api.L.*
+import org.scalajs.dom
 
 import kui.contracts.message.DecodedPayloadDto
 import kui.message.contract.MessageDto
-import kui.ui.kernel.component.Components
+import kui.ui.kernel.component.{Components, Icon}
 import kui.ui.kernel.css.KernelCss
 import kui.ui.kernel.time.Timestamps
 import kui.ui.messages.{Messages, MessagesCss}
@@ -106,27 +107,44 @@ object RecordTable {
     val key = keyOf(record)
     val isOpen = open.signal.map(_.contains(key))
 
+    def toggle(): Unit =
+      open.update(current => if current.contains(key) then current - key else current + key)
+
     val summary =
       tr(
         cls := KernelCss.TableRow,
         cls := MessagesCss.Row,
         cls(MessagesCss.RowOpen) <-- isOpen,
         dataAttr("testid") := s"record-$key",
+        // The whole row opens the record, and that is the fix for a real complaint: in the browser the
+        // only thing that opened a row was the offset number, which does not look like a control, and a
+        // first-time reader could not find the best part of the screen at all. The accessible button
+        // below is untouched -- it is still the thing the keyboard tabs to and the thing a screen reader
+        // announces -- and this is a mouse convenience layered on top of it.
+        onClick --> { event => if opensTheRow(event) then toggle() },
         td(
           cls := KernelCss.TableCell,
           cls := KernelCss.TableCellNumeric,
           // The toggle is a real <button> carrying `aria-expanded`, so the keyboard reaches it and a screen
-          // reader says whether the record is open. A clickable row would be invisible to both.
+          // reader says whether the record is open. A clickable row alone would be invisible to both.
           button(
             tpe := "button",
             cls := MessagesCss.Toggle,
             dataAttr("testid") := s"record-$key-toggle",
             aria.expanded <-- isOpen,
             aria.label <-- isOpen.map(current => if current then Messages.Collapse else Messages.Expand),
-            record.offset.value.toString,
-            onClick --> { _ =>
-              open.update(current => if current.contains(key) then current - key else current + key)
-            }
+            // The chevron, and the reason the row was unopenable in practice: an offset is a number, and
+            // a number is not an affordance. It points down when the record is closed and up when it is
+            // open, which is the one convention every reader of a table already knows. `aria-hidden`
+            // because the button's own label already says what pressing it does; a screen reader
+            // announcing a decorative arrow as well would say the same thing twice.
+            span(
+              cls := MessagesCss.ToggleIcon,
+              aria.hidden := true,
+              child <-- isOpen.map(current => if current then Icon.chevronUp else Icon.chevronDown)
+            ),
+            span(record.offset.value.toString),
+            onClick --> { _ => toggle() }
           )
         ),
         td(cls := KernelCss.TableCell, cls := KernelCss.TableCellNumeric, record.partition.value.toString),
@@ -157,6 +175,29 @@ object RecordTable {
       )
 
     List(summary, detail)
+  }
+
+  /** Whether a click on the row should open it.
+    *
+    * No, in three cases, and each one is a way a row-wide handler otherwise makes the table worse.
+    *
+    *   - The click landed on the toggle button, or on any other control the row grows later. That control has
+    *     already done its own job, and letting the row act as well would toggle twice and appear to do
+    *     nothing at all.
+    *   - The reader is selecting text. Dragging across a key or a payload to copy it ends in a click, and a
+    *     row that collapsed under a half-made selection would make the summary impossible to copy from.
+    *   - The reader is holding a modifier key, which in every other table means "do something else with this"
+    *     rather than "activate it".
+    */
+  private def opensTheRow(event: dom.MouseEvent): Boolean = {
+    val onAControl = event.target match {
+      case element: dom.Element => element.closest("button, a, input, select, textarea, label") != null
+      case _ => false
+    }
+    val selecting = Option(dom.window.getSelection()).exists(_.toString.nonEmpty)
+    val modified = event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
+
+    !onAControl && !selecting && !modified
   }
 
   /** A record's identity: partition and offset, which is the only pair Kafka guarantees unique. */

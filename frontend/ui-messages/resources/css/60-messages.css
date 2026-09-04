@@ -77,7 +77,16 @@
 }
 
 /* The offset cell is a real button, so it needs to stop looking like one. */
+/* The whole summary row opens the record, so it has to say so before it is clicked. The pointer and the
+ * hover tint are the only two marks a table row has available for that. */
+.kui-messages__row {
+  cursor: pointer;
+}
+
 .kui-messages__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
   padding: 0;
   border: 0;
   background: none;
@@ -85,6 +94,20 @@
   font: inherit;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+}
+
+/* The chevron. Sized in `em` so it tracks the row's own type rather than the density switch having to
+ * know about it, and dimmed relative to the offset because the number is the information and the arrow is
+ * only the affordance. */
+.kui-messages__toggle-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-messages__toggle-icon svg {
+  width: 1em;
+  height: 1em;
 }
 
 .kui-messages__toggle:focus-visible {
