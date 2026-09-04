@@ -291,6 +291,15 @@ consumed by a use case; that is the one exception and MSG-047's build test names
 appear in a Kafka enum, a domain enum, a DTO, a query parameter and a CSS class. A documented
 rule that nothing enforces gets violated.
 
+**A4 becomes an allow-list when A11 lands.** A4 was written as a deny-list of the five layers a
+service had when it was written (`domain`, `application`, `infrastructure`, `api`, `app`). ADR-046
+creates a sixth, `client`, which that deny-list would therefore have admitted to the gateway
+silently, by a rule that was never asked about it — while A4's own failure message says "only
+through that service's published contract module". TOP-010 restates A4 as the allow-list its
+message already claimed: `contract`, and nothing else. This is a tightening, not a relaxation, and
+it is behaviourally identical for every layer that existed before. `client` remains available to
+the services that need it, under A11.
+
 **Standing requirement.** Each of A11–A14 is proven by deliberately introducing a violating
 edge, observing the failure, and reverting, and the message is recorded in the owning task's
 Implementation Report.

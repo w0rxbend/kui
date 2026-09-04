@@ -95,11 +95,25 @@ object ArchitectureRules {
 
   private val WireGroups: Set[String] = Set("com.softwaremill.sttp.tapir", "io.circe")
 
-  /** Layers that belong to a service and are private to it: the gateway may not reach past a service's
-    * published `contract` into any of these (rule A4).
+  /** The one layer of a service the gateway may see (rule A4).
+    *
+    * An allow-list, not a deny-list. It was a deny-list of the five layers that existed when A4 was written,
+    * which meant that `services/cluster/client` — a *sixth* layer, created by ADR-046 — was admitted to the
+    * gateway the moment it was invented, silently, by a rule that had never been asked about it. A4's own
+    * message says "only through that service's published contract module", and this is that sentence rather
+    * than an approximation of it. The gateway holds no Kafka client and has no cluster profile to resolve, so
+    * `client` is not on this list: rule A11 admits `client` for the services that do (ADR-041 Amendment 4,
+    * TOP-010).
     */
-  private val PrivateServiceLayers: Set[String] =
-    Set("domain", "application", "infrastructure", "api", "app")
+  private val GatewayVisibleServiceLayers: Set[String] = Set("contract")
+
+  /** What one service publishes to another: the wire shape both sides compile against, and the shared
+    * consumer of that wire shape.
+    *
+    * Two entries, and a third has to be argued in the commit that adds it — exactly as A10's Kafka allow-list
+    * names `libs/config` (ADR-041 Amendment 4).
+    */
+  private val PublishedServiceLayers: Set[String] = Set("contract", "client")
 
   private val SharedCoreModules: Set[String] =
     Set("libs.kernel", "libs.contractsCore", "libs.securityCore")
@@ -140,6 +154,15 @@ object ArchitectureRules {
 
   private def group(coordinate: String): String = coordinate.takeWhile(_ != ':')
 
+  /** How many rules this object enforces. Printed by `checkArchitecture`, so that a rule quietly dropped from
+    * [[check]] shows up in the build log as a number that went down rather than as a green build.
+    *
+    * Ten, not eleven, with A11 in place: ADR-041's **A7** — the shell holding no static reference to a
+    * feature class — cannot be seen in a module graph at all. It is enforced by `checkBundleShape`, against
+    * the linked JavaScript, and the ADR's own rule table says so.
+    */
+  val ruleCount: Int = 10
+
   /** Every violation in the graph, in rule order. An empty result means the graph is legal. */
   def check(modules: List[ModuleFacts]): List[Violation] = {
     val domainOwningServices: Set[String] =
@@ -156,7 +179,8 @@ object ArchitectureRules {
         a6(module) ++
         a8(module) ++
         a9(module) ++
-        a10(module)
+        a10(module) ++
+        a11(module)
     }
   }
 
@@ -223,7 +247,7 @@ object ArchitectureRules {
       module.moduleDeps.toList.sorted
         .filter { dep =>
           serviceLayer(dep).exists { (service, layer) =>
-            service != "gateway" && PrivateServiceLayers.contains(layer)
+            service != "gateway" && !GatewayVisibleServiceLayers.contains(layer)
           }
         }
         .map(dep => Violation("A4", module.id, dep, why))
@@ -319,6 +343,41 @@ object ArchitectureRules {
       val badModules = module.moduleDeps.filter(dep => KafkaModules.contains(coreModuleOf(dep)))
       val badLibs = module.mvnDeps.filter(KafkaArtifacts.contains)
       (badModules ++ badLibs).toList.sorted.map(dep => Violation("A10", module.id, dep, why))
+    }
+
+  /** A11 — a service may see another service's published surface and nothing else.
+    *
+    * `contract` is the wire shape both sides compile against; `client` is the shared consumer of that wire
+    * shape (`services/cluster/client`, ADR-046). Everything else — `domain`, `application`, `infrastructure`,
+    * `api`, `app` — is private to the service that owns it.
+    *
+    * Without this rule, a service could call another service's use case directly in the all-in-one build and
+    * over HTTP in the distributed one, and the two shapes would diverge without either being wrong at its own
+    * call site. That divergence is invisible in a unit test on either side, which is precisely the class of
+    * defect the M0 and M1 reviews found twice.
+    *
+    * **The gateway is deliberately outside this rule**, and that is not a loophole: A4 already says the same
+    * thing about the gateway, in the terms ADR-004 argues it in, and reporting one edge twice under two rules
+    * would have whoever tripped it fix it twice before discovering it was one problem. A4 is also *stricter*
+    * — it does not admit `client`, because the gateway holds no Kafka client and has no reason to resolve a
+    * profile — so widening A11 to cover the gateway would loosen it.
+    */
+  private def a11(module: ModuleFacts): List[Violation] =
+    serviceLayer(module.id) match {
+      case Some((service, _)) if service != "gateway" =>
+        val why =
+          "a service may depend only on another service's contract and client modules; its domain, " +
+            "application, infrastructure, api and app layers are private to it, and calling into them " +
+            "would work in process in the all-in-one build and over HTTP in the distributed one " +
+            "(ADR-041 A11, ADR-046)"
+        module.moduleDeps.toList.sorted
+          .filter { dep =>
+            serviceLayer(dep).exists { (owner, layer) =>
+              owner != service && !PublishedServiceLayers.contains(layer)
+            }
+          }
+          .map(dep => Violation("A11", module.id, dep, why))
+      case _ => Nil
     }
 
   private def isKafkaAllowed(id: String): Boolean = {

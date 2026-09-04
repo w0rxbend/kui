@@ -295,4 +295,88 @@ final class ArchitectureSuite extends FunSuite {
   test("A10: a module with no Kafka dependency at all is legal") {
     assertEquals(ArchitectureRules.check(List(module("services.topic.api", "libs.http"))), Nil)
   }
+
+  // -------------------------------------------------------------------------------------------
+  // A11 — a service sees another service's published surface and nothing else
+  // -------------------------------------------------------------------------------------------
+
+  test("a11AllowsAnotherServicesContract") {
+    expectNoViolations(module("services.topic.infrastructure", "services.cluster.contract.jvm"))
+  }
+
+  test("a11AllowsAnotherServicesClient") {
+    // The new shape ADR-046 creates: one shared consumer of the cluster profile, compiled against the
+    // cluster service's own contract, depended on by every Kafka-facing service.
+    expectNoViolations(module("services.topic.infrastructure", "services.cluster.client"))
+  }
+
+  test("a11ForbidsAnotherServicesApplication") {
+    expectOneViolation("A11", "services.topic.infrastructure", "services.cluster.application")(
+      module("services.topic.infrastructure", "services.cluster.application")
+    )
+  }
+
+  test("a11ForbidsAnotherServicesInfrastructure") {
+    expectOneViolation("A11", "services.topic.application", "services.cluster.infrastructure")(
+      module("services.topic.application", "services.cluster.infrastructure")
+    )
+  }
+
+  test("a11ForbidsAnotherServicesApi") {
+    expectOneViolation("A11", "services.message.app", "services.cluster.api")(
+      module("services.message.app", "services.cluster.api")
+    )
+  }
+
+  test("a11ForbidsAnotherServicesDomainFromATestModuleToo") {
+    // A11 is of A4's and A5's kind — about reaching somewhere nothing may reach — so it applies to
+    // suites as well. A test that needs another service's domain is telling you about production code
+    // that will need it next.
+    expectOneViolation("A11", "services.topic.application.test", "services.cluster.domain")(
+      module("services.topic.application.test", "services.cluster.domain")
+    )
+  }
+
+  test("a11DoesNotConstrainAServicesViewOfItself") {
+    // `services.topic.app -> services.topic.infrastructure` is A9's business, and A9 allows it.
+    expectNoViolations(
+      module("services.topic.app", "services.topic.infrastructure", "services.topic.api")
+    )
+  }
+
+  test("a11IsListedInTheRuleTableWithItsReason") {
+    // A rule that fails with only an id teaches nobody anything, so the sentence is asserted, not just
+    // the rule name.
+    val violations =
+      ArchitectureRules.check(List(module("services.topic.api", "services.cluster.application")))
+
+    assertEquals(violations.map(_.rule), List("A11"))
+    val why = violations.head.why
+    assert(why.contains("contract and client"), why)
+    assert(why.contains("ADR-041 A11"), why)
+    assertEquals(
+      violations.head.message,
+      "[A11] services.topic.api -> services.cluster.application: " + why
+    )
+  }
+
+  test("theGatewayIsStillLimitedToContract") {
+    // A4 is unchanged and is *stricter* than A11: it does not admit `client`, because the gateway holds
+    // no Kafka client and has no reason to resolve a cluster profile. Asserted here so that adding A11
+    // cannot widen A4 by accident, and so that one gateway edge is still reported once rather than twice.
+    expectOneViolation("A4", "services.gateway.api", "services.cluster.application")(
+      module("services.gateway.api", "services.cluster.application")
+    )
+    expectOneViolation("A4", "services.gateway.api", "services.cluster.client")(
+      module("services.gateway.api", "services.cluster.client")
+    )
+    expectNoViolations(module("services.gateway.api", "services.cluster.contract.jvm"))
+  }
+
+  test("the rule count is the number of rules check actually applies") {
+    // A rule silently dropped from `check` would otherwise be a green build. A7 is not in this number
+    // because it cannot be seen in a module graph: `checkBundleShape` enforces it against linked
+    // JavaScript, and ADR-041's rule table says so.
+    assertEquals(ArchitectureRules.ruleCount, 10)
+  }
 }

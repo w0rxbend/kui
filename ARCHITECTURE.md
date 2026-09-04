@@ -171,12 +171,13 @@ a forbidden edge, naming the rule, both modules and the reason the rule exists:
 | A1 | a service's `domain` depending on anything but `libs/kernel` and cats-core |
 | A2 | a service's `contract` depending on any `domain` or `application` module |
 | A3 | the `application` of a service **that owns a `domain`** depending on `libs/http`, `libs/contracts-core`, Tapir, Circe or an `infrastructure` module |
-| A4 | the gateway reaching into another service's `domain`, `application`, `infrastructure`, `api` or `app` — only `contract` is allowed |
+| A4 | the gateway reaching into any module of another service other than its `contract` |
 | A5 | anything under `libs/` depending on a service or on the frontend |
 | A6 | a cross-compiled core module (`kernel`, `contracts-core`, `security-core`) depending on a JVM-only library in its shared source set |
 | A8 | the gateway depending on `libs/kafka`, `libs/kafka-auth`, fs2-kafka or kafka-clients |
 | A9 | a service's `application`, `contract` or `api` depending on that service's own `infrastructure` module |
 | A10 | `libs/kafka`, `libs/kafka-auth`, fs2-kafka or kafka-clients on the classpath of any module that is not a service's `infrastructure` or `app`, `libs/kafka*` itself, `libs/config` or `libs/testkit` |
+| A11 | a service (other than the gateway, which A4 covers more strictly) depending on any module of another service other than its `contract` and its `client` |
 
 A3 is scoped to services that own a `domain`, and the scoping is mechanical: a service is
 domain-owning when a `services/<name>/domain` module is declared in the build. The gateway
@@ -184,6 +185,13 @@ declares none, so `services.gateway.application → libs/contracts-core` and `�
 legal — the wire is the gateway's subject matter (ADR-041 §1a). Its real constraints are A4 and
 A8 instead. For every other service the original rule stands: `application` owns the types it
 returns and the `api` layer maps them to wire DTOs.
+
+A11 arrived with M2's first service-to-service dependency (ADR-041 Amendment 4, ADR-046). Until
+M2 no service called another one, so nothing said what a service may see of its neighbour; A4 said
+it for the gateway alone. The allow-list names `client` explicitly — the shared cluster-profile
+consumer of ADR-046 — so a second such module has to be argued in the commit that adds it. A4 is
+not widened to match: the gateway holds no Kafka client and has no profile to resolve, so it stays
+at `contract` only, and one gateway edge is reported once, under A4, rather than twice.
 
 A9 and A10 arrived with M1's first adapter module (ADR-041 Amendment 3). A9 is the dependency rule
 pointing inward: a layer that can see an adapter will eventually call one, and the port becomes

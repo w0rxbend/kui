@@ -2360,7 +2360,10 @@ def checkArchitecture(): Task.Command[Unit] = Task.Command {
   val violations = ArchitectureRules.check(modules)
 
   if (violations.isEmpty) {
-    println(s"checkArchitecture: ${modules.size} modules, no layering violations")
+    println(
+      s"checkArchitecture: ${modules.size} modules, ${ArchitectureRules.ruleCount} rules, " +
+        "no layering violations"
+    )
   } else {
     val report = violations.map(v => s"  ${v.message}").mkString("\n")
     Task.fail(s"${violations.size} layering violation(s):\n$report")
