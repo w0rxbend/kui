@@ -51,6 +51,25 @@ final class RecordTableSuite extends FunSuite {
     Option(container.querySelector(s"[data-testid='$testId']"))
       .getOrElse(fail(s"no element with testid '$testId'"))
 
+  test("theEmptyStateIsACellSpanningEveryColumnAndNotStrandedInTheFirstOne") {
+    // Found by looking at the message browser in a browser: the empty state was attached straight to the
+    // `<table>` element, which HTML does not allow, and the browser's recovery left it laid out inside the
+    // width of the Offset column -- "No records yet" one word per line. The fix is structural, so the
+    // assertion is structural: it must be a `<td>` that spans the five columns the header declares.
+    withTable(Nil) { container =>
+      val cell = Option(container.querySelector("table td"))
+        .getOrElse(fail("the empty state must be in a table cell"))
+
+      assertEquals(cell.getAttribute("colspan"), "5", "the empty state must span every column")
+      assertEquals(cell.textContent, "nothing")
+      assertEquals(
+        cell.parentNode.parentNode.asInstanceOf[dom.Element].tagName.toLowerCase,
+        "tbody",
+        "a row belongs in a section of the table, not directly under it"
+      )
+    }
+  }
+
   test("a record's detail is hidden until its row is opened, and then appears in place") {
     withTable(List(record)) { container =>
       val detailRow = find(container, "record-3-41284-detail-row")

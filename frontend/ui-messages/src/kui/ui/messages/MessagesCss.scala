@@ -16,6 +16,9 @@ object MessagesCss {
   val StatusPhase = "kui-messages__status-phase"
 
   val Table = "kui-messages__table"
+
+  /** The cell the empty state sits in: one cell spanning every column of the table. */
+  val EmptyCell = "kui-messages__empty-cell"
   val Row = "kui-messages__row"
   val RowOpen = "kui-messages__row--open"
   val Toggle = "kui-messages__toggle"

@@ -242,3 +242,11 @@
   color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-sm);
 }
+
+/* The empty state occupies one cell spanning every column, so it is centred under the whole table
+   rather than squeezed into the width of the first one. Padding rather than a height, because the
+   state can be one line ("No records") or a paragraph explaining why nothing was fetched. */
+.kui-messages__empty-cell {
+  padding: var(--kui-space-6, 1.5rem) var(--kui-space-4, 1rem);
+  text-align: center;
+}

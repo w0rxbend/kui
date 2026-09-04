@@ -31,6 +31,11 @@ import kui.ui.messages.{Messages, MessagesCss}
   */
 object RecordTable {
 
+  /** How many columns the header declares. Named once, because two cells span the whole width and a number
+    * that disagrees with the header is a layout bug nobody sees until a browser has to guess.
+    */
+  private val ColumnCount = 5
+
   /** How much of a payload a summary cell shows before it is clipped. Long enough for a JSON object's first
     * few fields, which is what tells a reader whether this is the record they are looking for.
     */
@@ -74,7 +79,20 @@ object RecordTable {
       ),
       // The empty state lives under the table so that the header stays above it and the columns still say
       // what the table would have held.
-      child.maybe <-- records.combineWith(empty).map((rows, state) => Option.when(rows.isEmpty)(state))
+      //
+      // In its own `tbody`, and in a cell spanning every column. It used to be attached straight to the
+      // `<table>`, which is not somewhere HTML allows an element to be: the browser recovers by hoisting it
+      // out, and the result was the words "No records yet" stacked one per line inside the width of the
+      // Offset column -- the first thing anybody saw on the message browser.
+      tbody(
+        child.maybe <-- records
+          .combineWith(empty)
+          .map((rows, state) =>
+            Option.when(rows.isEmpty)(
+              tr(td(colSpan := ColumnCount, cls := MessagesCss.EmptyCell, state))
+            )
+          )
+      )
     )
   }
 
@@ -132,7 +150,7 @@ object RecordTable {
         // selection the reader had made in it.
         hidden <-- isOpen.map(!_),
         td(
-          colSpan := 5,
+          colSpan := ColumnCount,
           cls := KernelCss.TableCell,
           child <-- isOpen.map(current => if current then RecordDetail(record, actions) else emptyNode)
         )
