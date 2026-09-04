@@ -28,11 +28,44 @@ tested rather than asserted.
 | --- | --- | --- |
 | M0 Foundation | build, libraries, gateway, sample service, shell, single-process assembly, images, Compose | done |
 | M1 Cluster connectivity | real Kafka connections with production security, clusters and brokers, the metadata store | done |
-| M2 Topic explorer | topic list, search, detail, partitions, configuration | roadmapped |
-| M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | roadmapped |
-| M4 Consumer groups | groups, members, assignments, lag, offset reset | roadmapped |
+| M2 Topic explorer | topic list, search, detail, partitions, configuration | done |
+| M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | part built, nothing reachable |
+| M4 Consumer groups | groups, members, assignments, lag, offset reset | part built, nothing reachable |
 | Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | done |
 | Configuration examples | a plain example, a secured example, and the reference for every key | built |
+
+"Part built, nothing reachable" is a deliberate distinction and it is the honest state of M3 and M4
+after the milestone. Both have modules that compile, are tested and are green — M3 has the serde
+layer, the filter engine, the masking engine, the message domain, the cursor codec and the wire
+contract; M4 has the whole consumer-group service down to its Kafka adapter, plus its contract. What
+neither has is a path from a browser to any of it: no `api` module binds their endpoints, no
+composition root constructs them, the running process serves none of their routes, and the shell has
+no screen for them. The check that says so is one command against a running quickstart:
+
+```
+$ curl -s localhost:8080/api/v1/openapi.json | jq -r '.paths | keys[]'
+/api/v1/auth/logout
+/api/v1/auth/me
+/api/v1/capabilities
+/api/v1/capabilities/stream
+/api/v1/capabilities/{service}/probe
+/api/v1/clusters
+/api/v1/clusters/{clusterId}
+/api/v1/clusters/{clusterId}/brokers
+/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs
+/api/v1/clusters/{clusterId}/log-dirs
+/api/v1/clusters/{clusterId}/refresh
+/api/v1/clusters/{clusterId}/topics
+/api/v1/clusters/{clusterId}/topics/refresh
+/api/v1/clusters/{clusterId}/topics/{topicName}
+/api/v1/clusters/{clusterId}/topics/{topicName}/config
+/api/v1/clusters/{clusterId}/topics/{topicName}/overview
+/api/v1/clusters/{clusterId}/topics/{topicName}/partitions
+/api/v1/info
+```
+
+Nothing under `messages`, nothing under `consumer-groups`. Points 3 and 4 of "the bar" above are
+therefore not met, and no amount of green test output changes that.
 
 Stages M5 to M9 — cluster administration, authentication, the ecosystem plugins, metrics — are
 beyond this bar. They are real work and they are planned, but nobody needs them to use the product.

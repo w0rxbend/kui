@@ -32,6 +32,16 @@ dropped silently (PLAN §44).
   (grooming step G3). As of 2026-09-03 no ADR is Accepted, so every researched row is
   `RESEARCHING` even where the research report proposed a design.
 
+A row reaches `COMPLETE` only when a person can do the thing from a browser against a running KUI.
+Compiling, being unit-tested and being green is `IMPLEMENTING` or `TESTING`, not `COMPLETE`. This is
+worth stating because the M2/M3/M4 pass produced a great deal of exactly that: as of 2026-09-04 every
+M3 row (`MS-*`, `MP-*`, `SD-*`, `DM-*`, `ET-*`) and every M4 row (`CG-*`, `TP-015`) has substantial
+code behind it — serdes, the CEL filter, the masking engine, the message domain, the whole
+consumer-group service down to its Kafka adapter — and none of it is reachable: no `api` module
+binds their endpoints, no composition root constructs them, and the running process serves no route
+for either. Those rows stay `RESEARCHING` until that last hop exists, because a matrix that called
+them done would be the most misleading document in the repository.
+
 Behavior descriptions, edge cases and source citations are deliberately not repeated here; they
 live in the research reports (`research/kafbat/feature-matrix.md` row of the same number,
 `research/kafbat/ui-analysis.md`, `research/kouncil/ui-analysis.md`,
@@ -50,7 +60,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | CL-007 | Typed cluster security config (SASL/SSL/SCRAM/IAM/OAUTHBEARER) with `properties` escape hatch | Kafbat, Provectus, Kouncil | P0 | cluster (typed config in `kui-config`) | ui-admin (form in M8) | M1 | M | COMPLETE | Decision D-7 / ADR-022. JAAS strings generated from typed fields, never accepted verbatim. |
 | CL-008 | Failover across multiple SR / Connect / ksql URLs | Kafbat, Provectus | P2 | schema, connect, ksql (shared lib) | — | M7 | M | RESEARCHING | |
 | CL-009 | Per-cluster colour tag and status dot in navigation | Kafbat | P2 | — | shell | M1 | S | REVIEW | Colour tag and status dot ship (`ClusterColors`, `ClusterSwitcher`). The switcher renders the cluster **slug** rather than its display name, because the capability registry carries no name — owed by CLAPI-008. |
-| CL-010 | Favourites: pin topics and groups to the top of lists | Kouncil | P2 | — | kernel | M2 | S | RESEARCHING | localStorage, keyed by cluster + name. |
+| CL-010 | Favourites: pin topics and groups to the top of lists | Kouncil | P2 | — | kernel | M2 | S | COMPLETE | localStorage, keyed by cluster + name; the star column ships on the topic list. |
 | CL-011 | Broker-address lookup helper endpoint (`/api/connection`) | Kouncil | P3 | cluster | — | — | S | REJECTED(folded into CL-001) | CEO decision DR-13. The first broker address is a field of the cluster DTO. |
 
 ## Brokers (BR)
@@ -69,10 +79,10 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TP-001 | Topic list: paged, sorted, searched, internal-topic toggle | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M2 | M | RESEARCHING | Pagination after RBAC filtering; response carries `page.totalItems`. |
+| TP-001 | Topic list: paged, sorted, searched, internal-topic toggle | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M2 | M | COMPLETE | Served end to end since the topic service was wired into the running process. Verified against the quickstart: eight seeded topics with counts, `__consumer_offsets` only with `showInternal=true`. |
 | TP-002 | Full-text n-gram topic search (Lucene) | Kafbat | P2 | topic | ui-topics | M9 | L | DEFERRED(no evidence substring search is insufficient) | CEO decision DR-10. Revisit with a benchmark at 5k+ topics. |
-| TP-003 | Topic details (partitions, replicas, ISR, segments, cleanup policy, throughput) | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M2 | M | RESEARCHING | Audit-topic guard applies from M6 (AD-002). |
-| TP-004 | Topic config list | Kafbat, Provectus | P0 | topic | ui-topics | M2 | S | RESEARCHING | |
+| TP-003 | Topic details (partitions, replicas, ISR, segments, cleanup policy, throughput) | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M2 | M | COMPLETE | Partitions, replicas, ISR and cleanup policy render. Segments and throughput are always `—`: both need `describeLogDirs`, a per-broker call over every partition, which is not worth a topic page (BR-005). |
+| TP-004 | Topic config list | Kafbat, Provectus | P0 | topic | ui-topics | M2 | S | COMPLETE | Settings tab, read live. Each entry's default is derived from the broker's own synonyms rather than from a table KUI keeps. Kafka's documentation strings contain HTML and are shown escaped, so `<a href="#compaction">` appears as literal text. |
 | TP-005 | Create topic (name, partitions, RF, configs, retention quick buttons) | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M5 | M | RESEARCHING | |
 | TP-006 | Update topic configs (diff + incremental alter) | Kafbat, Provectus | P0 | topic | ui-topics | M5 | M | RESEARCHING | |
 | TP-007 | Delete topic (gated by broker `delete.topic.enable`) | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M5 | S | RESEARCHING | |
@@ -93,7 +103,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PA-001 | Partition table on the topic overview (leader, replicas, ISR, offsets, count, size) | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M2 | S | RESEARCHING | Size column needs BR-005 data. |
+| PA-001 | Partition table on the topic overview (leader, replicas, ISR, offsets, count, size) | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M2 | S | REVIEW | Leader, replicas, ISR, first and next offset and message count all render. The size column is always `—` until BR-005 supplies log-dir data. |
 | PA-002 | Per-partition analysis statistics | Kafbat, Provectus | P1 | topic | ui-topics | M5 | — | RESEARCHING | Delivered by TP-012; tracked separately for the UI table. |
 | PA-003 | Per-partition log-dir sizes | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | — | BLOCKED | **Blocked on TD-017.** BR-005 was to deliver this and cannot: `LogDirDto` carries no per-topic-partition data, so there is nothing behind "which topic is filling this disk". |
 | PA-004 | Partition increase / replica move | Kafbat, Provectus, Kouncil | P0 | topic, cluster | ui-topics, ui-clusters | M5 | — | RESEARCHING | Cross-reference of TP-010 and BR-006. |
@@ -265,9 +275,9 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SF-001 | Case-insensitive substring search on every list | Kafbat, Provectus, Kouncil | P0 | each service | kernel (search box) | M2 | S | RESEARCHING | `q` parameter; URL-synced. |
+| SF-001 | Case-insensitive substring search on every list | Kafbat, Provectus, Kouncil | P0 | each service | kernel (search box) | M2 | S | COMPLETE | `q` parameter, URL-synced, exact and fuzzy modes, on the topic list. |
 | SF-002 | Full-text n-gram index across topics, groups, schemas, connectors, ACLs | Kafbat | P2 | each service (shared index lib) | — | M9 | L | DEFERRED(follows TP-002) | CEO decision DR-10. |
-| SF-003 | Virtualized, sortable data table with favourites pinning | Kafbat, Kouncil | P0 | — | kernel | M2 | M | RESEARCHING | Kernel-native windowing (frontend research §5). A non-virtualized `DataTable` ships in M0 (NX-007). |
+| SF-003 | Virtualized, sortable data table with favourites pinning | Kafbat, Kouncil | P0 | — | kernel | M2 | M | REVIEW | Built and unit-tested (`VirtualizedTable`, `Window`); the topic list and the partition table both use it. M2's exit criterion also asks for a recorded 10 000-row scroll-frame measurement in `docs/benchmarks/`; that directory does not exist and no timing has been taken. |
 
 ## Event tracking (ET)
 
@@ -336,7 +346,7 @@ security research flagged.
 | KU-010 | Stale data stays on screen (greyed, timestamped, actions disabled) when a feature becomes Unavailable | KUI-new | P1 | — | kernel (`StaleDataOverlay`, `QueryCache`) | M1 | M | COMPLETE | DC-H3, decided before M1 because every feature state depends on it. |
 | KU-011 | Partial aggregation endpoints with per-section status: cluster dashboard (M1), topic overview (M2, sections added in M4/M7), consumer group page (M4), connects with stats (M7) | KUI-new | P0 | gateway | ui-clusters, ui-topics, ui-consumers | M1 | M | COMPLETE | PLAN §16.3. Milestone is when the first one ships. |
 | KU-012 | User settings page: theme, timezone, refresh rate, table density | KUI-new | P1 | — | shell | M1 | S | COMPLETE | Screen 32. Stored in `LocalPrefs`. |
-| KU-013 | Cross-feature `FeaturePanel` slot (topic → consumers tab, broker → metrics tab) keyed by feature id, never by import | KUI-new | P1 | — | kernel | M2 | M | RESEARCHING | DC-H6. First consumer of the slot is TP-015 in M4. |
+| KU-013 | Cross-feature `FeaturePanel` slot (topic → consumers tab, broker → metrics tab) keyed by feature id, never by import | KUI-new | P1 | — | kernel | M2 | M | COMPLETE | The slot exists and the topic overview renders it: `consumerGroups`, `connectors`, `acls` and `schemas` each come back `not_configured`, which is what the criterion asks for. |
 | KU-014 | SSE envelope with named events (`phase`, `message`, `consumed`, `done`, `error`, `heartbeat`) and `id:` for `Last-Event-ID` reconnect; kernel `SseStream` wrapper | KUI-new | P0 | message, gateway | kernel | M3 | M | RESEARCHING | Kernel wrapper is exercised by KU-001 in M0; the full envelope lands with MS-001. |
 | KU-015 | Self-describing signed browse cursor (survives gateway restarts and multiple replicas) | KUI-new | P0 | message | — | M3 | M | RESEARCHING | Replaces Kafbat's process-local cursor cache. |
 | KU-016 | Smart-filter test execution is cluster-scoped and requires `TOPIC:MESSAGES_READ` | KUI-new | P1 | gateway | ui-messages | M3 | S | RESEARCHING | RBAC gap: Kafbat lets any authenticated user execute arbitrary CEL. Enforced from M6 when RBAC exists; the endpoint shape is fixed in M3. |

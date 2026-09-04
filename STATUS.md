@@ -1,8 +1,9 @@
 # KUI status
 
 **Date:** 2026-09-04
-**Phase:** M1 implemented and integrated. M2 (topic explorer) is next.
-**Repository:** M0 and M1 on `main`; `./mill __.test` is green end to end.
+**Phase:** M2 implemented and integrated and usable. M3 and M4 are part built and not reachable
+from a browser.
+**Repository:** M0, M1 and M2 on `main`; `./mill __.test` is green end to end.
 
 ## Grooming progress
 
@@ -257,12 +258,143 @@ decodes. Both OpenAPI documents and the golden documents were regenerated.
 M2 grooming. Before it starts, the gate's own condition applies: re-examine the `libs/kafka`-versus-domain
 dual type definitions before `TopicAdmin` and `GroupAdmin` turn three pairs into ten.
 
+## M2, M3 and M4 integration — 2026-09-04
+
+Ten agents implemented M2, M3 and M4 in parallel. This section records what an integration pass
+found: what it fixed, what it verified by driving the product, and what is still not done.
+
+### Repository state after the pass
+
+```
+./mill __.compile          5577/5577, SUCCESS
+./mill __.checkFormat        171/171, SUCCESS
+./mill __.fix --check      3764/3764, SUCCESS
+./mill checkArchitecture   117 modules, 10 rules, no layering violations
+```
+
+### The defect that mattered: M2 compiled and did not run
+
+Four topic modules were landed, tested and green — `services/topic/{domain,application,api,contract}`
+— and nothing constructed any of them. There was no Kafka adapter, no composition root, and no entry
+in the all-in-one deployment's service list, so the running product had no topic routes at all:
+
+```
+$ curl http://localhost:8080/api/v1/clusters/quickstart/topics
+{"code":"KUI-ROUTE-NOT-FOUND","message":"No route for GET /api/v1/clusters/quickstart/topics"}
+```
+
+This is the same class of failure as M1's two worst — a configuration section parsed and discarded, a
+browser decoding a document nobody sends. Every unit test passed; the product did not work. It was
+visible in under a minute of using the quickstart and invisible from inside any module.
+
+Fixed in `65bf9ef`, which adds `services/topic/infrastructure` (a `TopicAdmin` over the raw Kafka
+`Admin` client through the shared `AdminClientPool`, a `ClusterProfiles` over the loaded
+configuration, and one background-scraping `SnapshotCell` per cluster), `services/topic/app`
+(`TopicWiring.make`, shaped like `ClusterWiring.make` and binding no port), and the all-in-one
+wiring that publishes it. The startup log now reads `services=cluster,topic`.
+
+### Two more defects found by looking at the screen
+
+1. **The partition table denied partitions it never had** (`3b04f28`). With the broker stopped, the
+   detail page correctly fell back to the topic-list snapshot and correctly showed a stale badge —
+   and then the empty partition table underneath announced "The broker reported no partitions for
+   this topic, which is unusual — a topic always has at least one." No broker had reported anything;
+   the snapshot holds counts, not partition assignments, by design. A confident false statement about
+   a six-partition topic, shown to an operator in the middle of an outage.
+2. **`_schemas` rendered as `schemas`** (`a1d2859`). A browser draws a link's underline exactly where
+   an underscore glyph sits. Two different topics, one of them conventionally infrastructure's.
+
+And one in the tests rather than the product: `CelFilterEngineSuite` built its engines from the
+production `FilterLimits.default`, whose evaluation deadline is 10 milliseconds. That is the right
+budget for a filter that runs once per Kafka record and the wrong one for a test whose first CEL
+evaluation pays for class loading and JIT warm-up. Under a full parallel `__.test` two of its tests
+observed `Left(Timeout)` instead of the answer they assert. Fixed in `061bc60`; the three tests that
+are actually about the limits pass their own and are untouched.
+
+### What the quickstart shows now
+
+Driven with Playwright 1.62.1 / Chromium against images built from this commit, screenshots read.
+
+| Question | Answer |
+| --- | --- |
+| Eight seeded topics with partition counts, internal hidden until asked for | **Yes.** The list shows the eight seeded topics; `__consumer_offsets` (50 partitions) appears only with "Show internal topics" ticked |
+| Open a topic, see partitions and configuration | **Yes.** Six partitions with leader, replicas, first/next offset and message count; the Settings tab shows every broker-reported setting with its default |
+| Browse messages, see the JSON, seek to an offset and a timestamp | **No.** There is no messages tab and no message endpoint. See M3 below |
+| The non-JSON topic renders as bytes rather than failing | **Not answerable.** `audit.log.raw` is listed and openable; there is no message browser to render its payloads |
+| Three consumer groups with states and lag, including the one left behind | **No.** `/ui/clusters/quickstart/consumer-groups` is the 404 page and no consumer-group endpoint is served |
+| A cluster that is down stays navigable, with the reason shown | **Yes.** With Kafka stopped the topic list still showed all eight rows under "Last updated 2 minutes ago — Stale: UPSTREAM_UNAVAILABLE", the cluster capability moved to `degraded`, and every screen stayed navigable |
+
+### M2 exit criteria, one by one
+
+| # | Criterion | Verdict |
+| --- | --- | --- |
+| 1 | Property tests on paging and sorting | **Confirmed.** `PagingLawsSuite` and `PagingSuite` in `libs/kernel`, `TopicOrderingSuite` in `services/topic/application`; all green |
+| 2 | Virtualized table renders 10 000 rows under 16 ms, recorded in `docs/benchmarks/` | **False.** `docs/benchmarks/` does not exist. The virtualized table is built and unit-tested; no timing was measured and none is recorded |
+| 3 | Fault-isolation E2E: stopping `kui-topic` leaves brokers and dashboard working, topic list greyed with timestamp | **Partly.** The *behaviour* is confirmed against a stopped broker, by screenshot. The *criterion as written* is not: there is no `kui-topic` image and no topic service in `deployment/compose`, so a separate topic container cannot be stopped |
+| 4 | `GET /topics/{topic}/overview` returns the `topic` section and `Unavailable` placeholders for absent services | **Confirmed.** Observed live: `topic: ok`, and `consumerGroups`, `connectors`, `acls`, `schemas` each `not_configured` |
+
+### M3 exit criteria
+
+**Not verifiable — none of the milestone is reachable.** `libs/serde` (nine serdes, autodetect,
+Spring DLT headers), `libs/filter` (CEL), `libs/security-core` (masking), `services/message/domain`,
+the cursor codec and `services/message/contract` are built, tested and green. There is no
+`services/message/{api,app,infrastructure}`, no route, and no messages screen, so every criterion —
+the seek modes against Testcontainers, the cancellation test, the tracking stream, the resend, the
+benchmarks, the fault-isolation E2E — is untested against anything a user can reach.
+
+### M4 exit criteria
+
+**Not verifiable — none of the milestone is reachable.** The consumer service is the most complete
+of the three: `libs/kafka`'s `GroupAdmin` with `listGroups`/`describeGroups`/`committedOffsets`/
+`OffsetLookup`/mutations, the domain with `LagMath` and the reset planner, the application layer with
+the snapshot, five reads and three mutations, `services/consumer/infrastructure` with a live Kafka
+adapter, and the whole contract. What is missing is the last hop: no `services/consumer/api`, no
+composition root, no gateway route, no `frontend/ui-consumers`. The offset-reset criterion, the lag
+poll's changed-groups token, the Unavailable consumers panel and the rebalance staleness are all
+untested end to end.
+
+### Known problems, plainly
+
+1. **M3 and M4 are not usable.** Everything above. This is the largest single fact about the
+   milestone and no amount of green test output changes it.
+2. **No `docs/benchmarks/`.** M2's timing criterion, M3's message benchmarks and M4's cost
+   documentation all name it. Nothing has ever been measured.
+3. **No topic service image and no topic service in the distributed Compose topology.** The
+   all-in-one deployment serves topics; the three-container one does not, so the two shapes now
+   disagree about what the product is. `deployment/docker` has `gateway` and `cluster` only.
+4. **Sizes and segment counts are always absent on the topic screens.** Both come from
+   `describeLogDirs`, a per-broker call over every partition on the cluster. Rendering `—` is honest;
+   it is still a column that never has a value.
+5. **Kafka's own configuration documentation is rendered with its HTML showing.** The Settings tab
+   prints `<a href="#compaction">log compaction</a>` as literal text, because the broker's doc
+   strings contain markup and KUI escapes them. Safe, and ugly.
+6. **The quickstart's seed and KUI disagree about what "internal" means.** `seed/topics.tsv` calls
+   `_schemas` "an internal topic … user interfaces hide these behind a switch"; KUI's
+   `kui.topics.internalPrefix` defaults to `__`, so `_schemas` is listed as a normal topic. Only
+   `__consumer_offsets` is hidden. The eight-topic list is the right answer for the criterion, and
+   the two files should still be made to agree.
+7. **Long topic names truncate in the list while most of the table's width is empty.** The
+   virtualized table uses `table-layout: fixed` with even columns, so `analytics.pageviews…` is
+   clipped with 500 px of unused space to its right.
+8. **`libs.config`'s `KafkaConfigStoreLiveSuite` is flaky under a full parallel `__.test`.** Its
+   two-replicas-one-winner test failed once in a whole-repository run and passes on its own. Not
+   touched by this milestone; recorded because it will happen again.
+
+### Next step
+
+Finish the last hop for M4 and then M3, in that order: the consumer service is one `api` module, one
+composition root, one gateway route entry and one microfrontend away from being usable, and the
+message service needs its `application` and `api` layers as well. Neither needs new domain work.
+
 ## Milestone acceptance log
 
 | Milestone | Accepted on | Evidence |
 | --- | --- | --- |
 | M0 Foundation | 2026-09-03 | the fault-isolation E2E recorded below |
 | M1 Cluster connectivity | 2026-09-04, **with two criteria unmet** | the exit-criteria table below |
+| M2 Topic explorer | 2026-09-04, **with two criteria unmet** | the M2 exit-criteria table above |
+| M3 Message explorer | **not accepted** | nothing is reachable from a browser |
+| M4 Consumer groups | **not accepted** | nothing is reachable from a browser |
 
 ## M0 exit criterion: fault-isolation E2E (E2E-002)
 
