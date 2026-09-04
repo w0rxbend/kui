@@ -183,4 +183,29 @@ object KernelCss {
   val ThresholdOver = "kui-threshold--over"
   val ThresholdCritical = "kui-threshold--critical"
   val ThresholdMark = "kui-threshold__mark"
+
+  /** The search field (`SearchBox`) and its optional plain/full-text toggle. */
+  val Search = "kui-search"
+  val SearchField = "kui-search__field"
+  val SearchIcon = "kui-search__icon"
+  val SearchInput = "kui-search__input"
+  val SearchClear = "kui-search__clear"
+  val SearchModes = "kui-search__modes"
+  val SearchMode = "kui-search__mode"
+  val SearchModeSelected = "kui-search__mode--selected"
+
+  /** The pagination bar. It renders nothing at all for a single page, so none of these classes appears in the
+    * document then — including the container, which is why the empty state needs no class of its own.
+    */
+  val Pagination = "kui-pagination"
+  val PaginationInner = "kui-pagination__inner"
+  val PaginationSteps = "kui-pagination__steps"
+  val PaginationButton = "kui-pagination__button"
+  val PaginationLabel = "kui-pagination__label"
+  val PaginationJump = "kui-pagination__jump"
+  val PaginationJumpInput = "kui-pagination__jump-input"
+  val PaginationGo = "kui-pagination__go"
+  val PaginationSize = "kui-pagination__size"
+  val PaginationSizeLabel = "kui-pagination__size-label"
+  val PaginationSizeSelect = "kui-pagination__size-select"
 }

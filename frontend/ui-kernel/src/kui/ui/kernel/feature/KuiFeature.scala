@@ -66,9 +66,22 @@ final case class PanelContext(cluster: Option[String], params: Map[String, Strin
   * @param host
   *   whose page this appears on.
   * @param slot
-  *   which position on that page, e.g. `"topic.tabs"`. The host defines the slot names it offers.
+  *   which position on that page, e.g. `FeatureSlots.TopicTabs`. Slot ids are declared once, in
+  *   `FeatureSlots`, because a host and a guest that cannot see each other must not each type the same string
+  *   literal.
+  * @param tabLabel
+  *   for a **tab-shaped** slot, the text on the guest's tab. `None` for the stacked slots, where the panel is
+  *   simply rendered in place. It is here rather than on the render function because the host has to draw the
+  *   tab strip *before* it draws any panel, and a strip built from panels it had already rendered would
+  *   defeat `Tabs`' lazy loading — the reason the Consumers tab does not issue its requests until somebody
+  *   opens it. `GuestTabs` is what reads it.
   */
-final case class PanelContribution(host: FeatureId, slot: String, render: PanelContext => HtmlElement)
+final case class PanelContribution(
+    host: FeatureId,
+    slot: String,
+    render: PanelContext => HtmlElement,
+    tabLabel: Option[String] = None
+)
 
 /** The interface every microfrontend implements.
   *

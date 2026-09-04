@@ -340,3 +340,84 @@ way back to the server's natural order, which for brokers is broker id and for m
 a spinner would collapse the table, jump the page, and jump it back. When there are no rows, the
 empty state replaces the body and the header stays, so the columns still say what the table would
 have held.
+
+## `SearchBox`
+
+```scala
+SearchBox(
+  value       = state.query,          // a Signal the caller owns
+  onQuery     = state.search,         // fired with the trimmed query, after the debounce
+  placeholder = "Search topics",
+  mode        = Some((state.mode, state.setMode))
+)
+```
+
+**The debounce is 300 ms and lives on the outgoing edge only.** What the field shows updates on every
+keystroke; what the caller is told waits until the typing stops. The reference product waits 500 ms,
+which is tuned for a backend that scans on each keystroke; KUI answers from an in-memory snapshot, so
+300 ms still collapses a burst of typing into one request while feeling immediate.
+
+**Clearing fires `onQuery("")`.** "No filter" is a request, not the absence of one. A clear button
+that fires nothing leaves the previous filter applied, and the user reads the button as broken.
+
+**The mode toggle is `plain` / `fts`** (`kui.kernel.search.SearchMode`, ADR-038). It is always shown,
+because KUI's index is always available; each half carries a one-sentence tooltip, because "fuzzy" is
+not self-explanatory.
+
+## `Pagination`
+
+```scala
+Pagination(page, pageCount, pageSize, onPage = …, onPageSize = …)
+```
+
+**It renders nothing at all when there is one page.** A disabled pagination bar under three rows is
+chrome that teaches nothing and occupies the space where the next thing should be.
+
+**"Go to page" refuses out-of-range input rather than clamping it.** Turning a typed 900 into 12
+shows a page the user did not ask for while letting them believe they got the one they typed.
+
+**Page size is a control, not a preference.** It lives in the URL like everything else, so a link to
+"page 3" shows its recipient the same rows the sender was looking at.
+
+## `Favourites`
+
+```scala
+private val favourites = new Favourites("kui.favourites.topics")
+favourites.pin(clusterId, rows)(_.name.value)
+```
+
+**Favourites never reach the server, and they pin within the page that is on screen.** The lists they
+decorate are server-paged; if a favourite changed which items were on which page, two tabs of the
+same user would disagree about what page 3 contains and a shared link would not reproduce.
+
+**Every read and write is wrapped.** In a browser with site data blocked, `window.localStorage`
+throws on property access — before any read or write. A preference that cannot be stored degrades to
+"nothing is starred", never to a broken page.
+
+## URL as state (`UrlParams`)
+
+A list screen's whole state — `q`, `mode`, `sort`, `page`, `pageSize`, `showInternal` — is in the
+query string. That is what makes "send me the link to what you are looking at" work, what makes Back
+undo a filter instead of leaving the application, and what makes a bookmark to page 3 still page 3
+tomorrow.
+
+**Every write is a read-modify-write.** Each control owns one parameter and knows nothing about the
+others, so `UrlParams.set` merges rather than replacing. A control that wrote the whole query string
+would erase whatever a control it has never heard of had put there — which is how a page-size
+selector silently clears a search box.
+
+## Feature slots (`FeatureSlots`, `GuestTabs`)
+
+A slot is a place on one feature's screen where another feature can put a panel. The ids are declared
+once, in `FeatureSlots`, and never as a literal on either side: a host and a guest that cannot see
+each other typing the same string in two files is a defect no test on either side can catch — the
+guest registers, the host renders, and the tab simply never appears.
+
+`GuestTabs.merged(own, FeatureRegistry.loaded, host, FeatureSlots.TopicTabs, context)` gives a host
+its own tabs followed by one tab per registered guest, ordered by the guests' sidebar order rather
+than by the order their modules finished downloading. A guest registers a `PanelContribution` with a
+`tabLabel` and appears; it never has to edit a file in the host's feature.
+
+**A host page never causes a download.** The list is derived from the *loaded* features only, so a
+guest's tab appears once its feature has loaded for some other reason and the strip is one tab
+shorter until then.

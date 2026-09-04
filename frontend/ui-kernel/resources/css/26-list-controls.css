@@ -1,0 +1,190 @@
+/* The controls that sit above and below a long list: the search field and the pagination bar.
+ *
+ * Every value here comes from a token (ADR-024). Nothing in this file is load-bearing: with the
+ * stylesheet missing, the search field is an `<input type="search">`, the clear button is a
+ * `<button>` and the pagination bar is a `<nav>` of buttons — all still usable, just unstyled.
+ */
+
+/* --- Search field ---------------------------------------------------------------------------- */
+
+.kui-search {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-search__field {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: 0 var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+}
+
+.kui-search__field:focus-within {
+  border-color: var(--kui-color-focus);
+}
+
+.kui-search__icon {
+  display: inline-flex;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-search__input {
+  /* The field's own border is drawn by the wrapper, so that the icon and the clear button sit
+   * inside it rather than beside it. */
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-md);
+  padding: var(--kui-space-2) 0;
+  min-width: 16rem;
+}
+
+/* A search input draws its own clear affordance in some browsers, which would sit next to ours. */
+.kui-search__input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.kui-search__clear {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+  padding: var(--kui-space-1);
+  border-radius: var(--kui-radius-pill);
+}
+
+.kui-search__clear:hover {
+  background: var(--kui-color-state-layer);
+}
+
+.kui-search__modes {
+  display: inline-flex;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-pill);
+  overflow: hidden;
+}
+
+.kui-search__mode {
+  border: none;
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  padding: var(--kui-space-2) var(--kui-space-3);
+  cursor: pointer;
+}
+
+.kui-search__mode:hover {
+  background: var(--kui-color-state-layer);
+}
+
+/* The selected half of the toggle names a container token and its contrast partner, which is the
+ * design's rule for every filled thing. */
+.kui-search__mode--selected {
+  background: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+}
+
+/* --- Pagination ------------------------------------------------------------------------------ */
+
+.kui-pagination__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-4);
+  flex-wrap: wrap;
+  padding: var(--kui-space-3) 0;
+}
+
+.kui-pagination__steps {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+}
+
+.kui-pagination__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+  padding: var(--kui-space-2);
+  cursor: pointer;
+}
+
+.kui-pagination__button:hover:not(:disabled) {
+  background: var(--kui-color-state-layer);
+}
+
+.kui-pagination__button:disabled {
+  color: var(--kui-color-text-muted);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.kui-pagination__label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  padding: 0 var(--kui-space-3);
+  white-space: nowrap;
+}
+
+.kui-pagination__jump {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-pagination__jump-input {
+  width: 5rem;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  padding: var(--kui-space-2);
+}
+
+.kui-pagination__go {
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  padding: var(--kui-space-2) var(--kui-space-3);
+  cursor: pointer;
+}
+
+.kui-pagination__size {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin-left: auto;
+}
+
+.kui-pagination__size-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-pagination__size-select {
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  padding: var(--kui-space-2);
+}
