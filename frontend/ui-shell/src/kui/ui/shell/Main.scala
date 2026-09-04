@@ -270,7 +270,12 @@ object Shell {
           )
         )
       ),
-      header = Header(buildVersion.signal, Theme.choice),
+      header = Header(
+        buildVersion.signal,
+        Theme.choice,
+        AuthState.principal.signal,
+        signOut(api)
+      ),
       content = content(router, buildVersion.signal, states, api, uiPrefix),
       fullScreen = ShellHealth.connectivity.map {
         case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
@@ -278,6 +283,37 @@ object Shell {
       }
     )
   }
+
+  /** Ending the session, from the account menu.
+    *
+    * Three steps, in this order and for a reason each. `POST /api/v1/auth/logout` deletes the session on the
+    * server, which is the only step that actually signs anybody out — everything else is housekeeping.
+    * `markExpired` then empties the principal, the CSRF token and every permission in the browser, so no
+    * write control survives the moment of signing out even for the length of a reload. Reloading last is what
+    * puts the user back at the start of whatever the deployment's sign-in flow is, without this file needing
+    * to know what that flow is.
+    *
+    * A failed request still clears the browser's state and still reloads. A person who has pressed "Sign out"
+    * on a shared machine must not be left signed in because a request did not arrive; the server-side session
+    * then expires on its own timeout, which is worse than an immediate deletion and much better than a screen
+    * that says nothing happened.
+    *
+    * With no `ApiClient` — which is how a suite mounts the frame — it clears the browser's state and stops
+    * there. Nothing reloads a page that is under test.
+    */
+  private[shell] def signOut(api: Option[ApiClient])(using Owner): Observer[Unit] =
+    Observer[Unit] { _ =>
+      api match {
+        case None => AuthState.current.markExpired()
+        case Some(client) =>
+          val _ = client
+            .call(AuthEndpoints.logout, ())
+            .foreach { _ =>
+              AuthState.current.markExpired()
+              dom.window.location.reload()
+            }
+      }
+    }
 
   /** The tag the clusters feature stores its brokers page under in `history.state`.
     *
@@ -355,7 +391,7 @@ object Shell {
     )
     lazy val gallery = ErrorReporting.renderSafely(() => GalleryPage())
 
-    val gates = featureGates(router, states, api)
+    val gates = featureGates(router, states, api, uiPrefix)
 
     SplitRender[Page, HtmlElement](router.currentPageSignal)
       .collectStatic(ShellPage.Home)(home)
@@ -386,7 +422,8 @@ object Shell {
   private def featureGates(
       router: Router[Page],
       states: List[(FeatureRoutes, Signal[FeatureState])],
-      api: Option[ApiClient]
+      api: Option[ApiClient],
+      uiPrefix: String
   )(using Owner): List[(FeatureRoutes, Signal[HtmlElement])] = {
     val probe = api.map(client => new CapabilityProbe(client))
 
@@ -395,7 +432,7 @@ object Shell {
         feature = FeatureRegistry.lazyFeature(registration.id),
         featureLabel = registration.nav.label,
         state = state,
-        page = router.currentPageSignal,
+        page = ownPagesOf(registration, router, uiPrefix),
         probe = probe.fold(Observer.empty[Unit])(_.observer(registration.id)),
         whatStillWorks = readyLabels(states, except = registration),
         retryInFlight = probe.fold(Val(false))(_.inFlight(registration.id)),
@@ -403,6 +440,37 @@ object Shell {
       )
     }
   }
+
+  /** The pages one feature is allowed to be asked to draw.
+    *
+    * Each gate used to be handed `router.currentPageSignal` directly — every page in the application,
+    * including pages belonging to other features. That is a loaded gun for two reasons.
+    *
+    * The first is that it asks a feature to render a page it has never heard of. What a feature does with one
+    * is undefined; the messages feature drawing a topics page is not a screen anybody designed, and it is
+    * exactly the shape of the fault seen in the browser — an address ending in `/topics` with a message
+    * browser on the screen.
+    *
+    * The second is timing. Both the signal that swaps which gate is on screen and the signal inside a gate
+    * are derived from the same page signal, so during a navigation between two features the outgoing gate can
+    * be handed the incoming page before it is taken off the screen. Keeping the wrong page out of it entirely
+    * removes the whole class of race rather than trying to order two subscriptions.
+    *
+    * So each gate sees only the pages its own routes can produce, and holds the last such page while some
+    * other feature is on screen. Holding rather than blanking is deliberate: the feature's element is built
+    * once and kept, and handing it an empty page on the way out would make it tear down its content a moment
+    * before it is unmounted anyway.
+    */
+  private[shell] def ownPagesOf(
+      registration: FeatureRoutes,
+      router: Router[Page],
+      uiPrefix: String
+  ): Signal[Page] =
+    router.currentPageSignal
+      .scanLeft(identity[Page])((previous, next) =>
+        if owns(registration, next, uiPrefix) then next else previous
+      )
+      .distinct
 
   /** Whether a page came from this feature's routes.
     *
