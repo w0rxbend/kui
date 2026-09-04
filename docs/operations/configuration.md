@@ -344,23 +344,63 @@ so rather than a setting that quietly does nothing. And a value whose key looks 
 `auth`) is redacted in every log line and diagnostic. A secret inside `properties` still uses
 `env:NAME`; the *value* travels through the environment, only the *key* cannot.
 
+### `kui.topics` — the topic service's own dials
+
+Read by the **topic service** only. Every key is optional and every default is a working one: an
+operator who never touches this section gets a snapshot of each cluster's topics rebuilt once a
+minute, with topics whose names begin `__` hidden by default.
+
+The `kui.clusters[]` list is deliberately **not** part of this section. The topic service holds no
+cluster list of its own; it gets every cluster, and the credentials to reach it, from the cluster
+service over `/internal/v1` (ADR-046, and `kui.clusterProfiles` below). Two lists of clusters in two
+processes are two lists that eventually disagree, and the disagreement would show up as "that
+cluster is on the dashboard but its topics 404".
+
+| Key | Type | Default | Required | What happens when it is wrong or missing |
+| --- | --- | --- | --- | --- |
+| `kui.topics.refreshInterval` | duration | `60s` | no | How often a cluster's topic snapshot is rebuilt in the background. 5s … 1h. Twice the cluster service's thirty seconds, because a topic scrape costs an order of magnitude more and its data changes an order of magnitude less often. **Raise this first** on a cluster with tens of thousands of topics: it is the dial that reduces load, and it costs only freshness. |
+| `kui.topics.scrapeTimeout` | duration | `45s` | no | The budget for one whole scrape. Past it the scrape is cancelled and the **previous snapshot is kept** — the list stays readable and is marked stale, rather than emptying. 1s … 1h, and it must be **shorter than `refreshInterval`**; setting it longer fails the load naming both keys and both values, because a scrape that outlives its interval overlaps the next one and doubles the load on a cluster that is already struggling. |
+| `kui.topics.internalPrefix` | string | `__` | no | A topic is treated as internal if Kafka's own `isInternal` flag says so **or** its name starts with this. 1 … 16 characters; an empty value fails the load, because `startsWith("")` is true of every name and the topic list would come back empty. Both conditions are needed: `__consumer_offsets` carries Kafka's flag, and `__kui_config` — KUI's own metadata topic — does not, but is noise to an operator all the same. |
+| `kui.topics.defaultSearchMode` | `plain` \| `fts` | `plain` | no | What `?mode=` means when a request omits it. `plain` is substring matching, which is the behaviour a person can predict; `fts` also matches transpositions and typos. Anything else fails the load (ADR-038). |
+| `kui.topics.defaultPageSize` | int | `25` | no | The page size a request that omits `pageSize` gets. Must be 1 … `maxPageSize`; exceeding it fails the load naming both. |
+| `kui.topics.maxPageSize` | int | `500` | no | The largest page a request may ask for. Must be 1 … 500. **The 500 is a hard ceiling** (ADR-026): these lists are assembled in memory, so a page of a million rows is not a big page, it is an outage. |
+
+**Tuning for a large cluster.** Raise `refreshInterval` before you raise `scrapeTimeout`: the first
+reduces how often the work happens, the second only allows it to take longer, and a longer scrape on
+the same interval is how two scrapes end up running at once. The admin-call chunk sizes and
+parallelism are **not** here — they are `kui.clusters[].admin.*` on the cluster service, per cluster,
+and they arrive in the profile, because the right chunk size depends on the broker being scraped and
+not on which KUI process is scraping it.
+
 ### `kui.clusterProfiles` — how a Kafka-facing service reaches the cluster service
 
 Every KUI service that opens a Kafka connection — topics, and later messages, consumer groups and
 security — gets the connection settings for a cluster from the **cluster service**, over
 `/internal/v1`, rather than reading `kui.clusters[]` itself. Only the cluster service reads the
-metadata store and only it holds `kui.store.encryptionKey` (ADR-036, ADR-046). These four keys are
-what such a service reads; none of them is required, and the defaults are what a normal deployment
-wants.
+metadata store and only it holds `kui.store.encryptionKey` (ADR-036, ADR-046). These six keys are
+what such a service reads. Only `url` is required, and it is required only of a process that has a
+profile client at all: the gateway, the cluster service and the store load the same file, have no
+profile client, and start perfectly well without this section.
 
 ```yaml
 kui:
   clusterProfiles:
-    pollInterval: 60s          # how often the cluster list is re-read even when the change stream is up
-    requestTimeout: 5s         # how long one profile fetch may take
-    reconnectBackoff: 1s       # the first delay after the change stream drops
-    maxReconnectBackoff: 30s   # the cap on that delay
+    url: http://kui-cluster:8081   # required by a Kafka-facing service; its base URL, no path
+    pollInterval: 60s              # how often the cluster list is re-read even when the change stream is up
+    requestTimeout: 5s             # how long one profile fetch may take
+    reconnectBackoff: 1s           # the first delay after the change stream drops
+    maxReconnectBackoff: 30s       # the cap on that delay
+    startupTimeout: 10s            # how long the first fetch may take before the service starts degraded
 ```
+
+| Key | Type | Default | Required | What happens when it is wrong or missing |
+| --- | --- | --- | --- | --- |
+| `kui.clusterProfiles.url` | url | *(unset)* | by a Kafka-facing service | The cluster service's base URL, e.g. `http://kui-cluster:8081`. **No path**: `/internal/v1/...` is appended by the client from the contract's own constants, so it cannot be spelled wrong here. Setting this key is what turns the profile client on. |
+| `kui.clusterProfiles.pollInterval` | duration | `60s` | no | 5s … 1h. See below: it is a fallback, not the primary mechanism. |
+| `kui.clusterProfiles.requestTimeout` | duration | `5s` | no | 1s … 60s. The far side answers from memory; a longer bound only makes a wedged connection take longer to notice. |
+| `kui.clusterProfiles.reconnectBackoff` | duration | `1s` | no | 100ms … 10m. The first delay after the change stream drops; it doubles from there. |
+| `kui.clusterProfiles.maxReconnectBackoff` | duration | `30s` | no | 100ms … 10m, and never shorter than `reconnectBackoff` — setting it shorter fails the load naming both, because a cap below the first delay makes the backoff shrink instead of grow. |
+| `kui.clusterProfiles.startupTimeout` | duration | `10s` | no | 1s … 60s. How long the first fetch may take before the service starts anyway, in a degraded state. It starts rather than exits on purpose: a service that crash-looped while the cluster service restarted would turn one outage into two. |
 
 `pollInterval` is a **fallback**, not the primary mechanism. With the change stream open, an edit to
 a cluster reaches every service in milliseconds; the poll is what bounds the damage when the stream

@@ -14,7 +14,8 @@ import ciris.{ConfigError, ConfigKey, ConfigValue}
 import io.circe.Json
 
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties}
-import kui.kernel.{ClusterId, Host, Port, PositiveInt, Secret, ServiceId}
+import kui.kernel.search.SearchMode
+import kui.kernel.{ClusterId, Host, PageSize, Port, PositiveInt, Secret, ServiceId}
 
 /** Loads [[KuiConfig]] from the command line, the environment and YAML files.
   *
@@ -476,13 +477,14 @@ object KuiConfigSource {
       gateway <- decodeGateway[F](layers, policy)
       telemetry <- decodeTelemetry[F](layers, policy)
       store <- decodeStore[F](layers)
+      topics <- decodeTopics[F](layers, policy)
       clusters <- decodeClusters[F](layers)
       auth <- read[F, String](
         field("kui.auth.type", "disabled", readAuthType, "disabled"),
         layers
       )
-    } yield (unknown, server, gateway, telemetry, store, clusters, auth)
-      .mapN((_, s, g, t, st, cs, _) => Draft(s, g, t, st, cs))
+    } yield (unknown, server, gateway, telemetry, store, topics, clusters, auth)
+      .mapN((_, s, g, t, st, tp, cs, _) => Draft(s, g, t, st, tp, cs))
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {
@@ -987,6 +989,244 @@ object KuiConfigSource {
     * rules — a gap in the index, two clusters that resolve to the same id, and a raw property set from the
     * environment — so that an operator fixes their file once rather than once per restart.
     */
+  // ---------------------------------------------------------------------------------------------
+  // The topic service
+  // ---------------------------------------------------------------------------------------------
+
+  /** The `kui.topics.*` and `kui.clusterProfiles.*` slices (TOP-032).
+    *
+    * `kui.clusterProfiles.url` being present is the on/off switch for the profile client: absent means the
+    * process has none, which is the right answer for the gateway, the cluster service and the store. The
+    * topic service's composition root is what refuses to start without it, because it is the only process
+    * that can say so truthfully.
+    */
+  private def decodeTopics[F[_]: Async](layers: Layers, policy: UrlPolicy): F[Problems[TopicsConfig]] =
+    for {
+      refreshInterval <- read[F, FiniteDuration](
+        field(
+          "kui.topics.refreshInterval",
+          s"a duration between ${TopicsConfig.MinRefreshInterval} and ${TopicsConfig.MaxRefreshInterval}",
+          readBoundedDuration(TopicsConfig.MinRefreshInterval, TopicsConfig.MaxRefreshInterval),
+          TopicsConfig.DefaultRefreshInterval
+        ),
+        layers
+      )
+      scrapeTimeout <- read[F, FiniteDuration](
+        field(
+          "kui.topics.scrapeTimeout",
+          s"a duration between ${TopicsConfig.MinScrapeTimeout} and ${TopicsConfig.MaxScrapeTimeout}",
+          readBoundedDuration(TopicsConfig.MinScrapeTimeout, TopicsConfig.MaxScrapeTimeout),
+          TopicsConfig.DefaultScrapeTimeout
+        ),
+        layers
+      )
+      internalPrefix <- read[F, String](
+        field(
+          "kui.topics.internalPrefix",
+          s"${TopicsConfig.MinInternalPrefixLength} to ${TopicsConfig.MaxInternalPrefixLength} characters",
+          readInternalPrefix,
+          TopicsConfig.DefaultInternalPrefix
+        ),
+        layers
+      )
+      searchMode <- read[F, SearchMode](
+        field("kui.topics.defaultSearchMode", "plain or fts", readSearchMode, SearchMode.Default),
+        layers
+      )
+      defaultPageSize <- read[F, PageSize](
+        field(
+          "kui.topics.defaultPageSize",
+          s"a page size between 1 and ${PageSize.Max.value}",
+          readPageSize,
+          PageSize.Default
+        ),
+        layers
+      )
+      maxPageSize <- read[F, PageSize](
+        field(
+          "kui.topics.maxPageSize",
+          s"a page size between 1 and ${PageSize.Max.value}",
+          readPageSize,
+          PageSize.Max
+        ),
+        layers
+      )
+      profiles <- decodeProfileClient[F](layers, policy)
+      rules = checkTopicRules(layers)
+    } yield (
+      refreshInterval,
+      scrapeTimeout,
+      internalPrefix,
+      searchMode,
+      defaultPageSize,
+      maxPageSize,
+      profiles,
+      rules
+    ).mapN((interval, timeout, prefix, mode, pageSize, maxSize, profileClient, _) =>
+      TopicsConfig(interval, timeout, prefix, mode, pageSize, maxSize, profileClient)
+    )
+
+  private def decodeProfileClient[F[_]: Async](
+      layers: Layers,
+      policy: UrlPolicy
+  ): F[Problems[Option[ProfileClientConfig]]] = {
+    val key = "kui.clusterProfiles.url"
+    if layers.first(key).isEmpty then Async[F].pure(none[ProfileClientConfig].validNel)
+    else
+      for {
+        url <- read[F, SafeUrl](
+          field(key, "the cluster service's base URL, such as http://kui-cluster:8081", readUrl(policy)),
+          layers
+        )
+        pollInterval <- read[F, FiniteDuration](
+          field(
+            "kui.clusterProfiles.pollInterval",
+            s"a duration between ${ProfileClientConfig.MinPollInterval} and " +
+              s"${ProfileClientConfig.MaxPollInterval}",
+            readBoundedDuration(ProfileClientConfig.MinPollInterval, ProfileClientConfig.MaxPollInterval),
+            ProfileClientConfig.DefaultPollInterval
+          ),
+          layers
+        )
+        requestTimeout <- read[F, FiniteDuration](
+          field(
+            "kui.clusterProfiles.requestTimeout",
+            s"a duration between ${ProfileClientConfig.MinRequestTimeout} and " +
+              s"${ProfileClientConfig.MaxRequestTimeout}",
+            readBoundedDuration(ProfileClientConfig.MinRequestTimeout, ProfileClientConfig.MaxRequestTimeout),
+            ProfileClientConfig.DefaultRequestTimeout
+          ),
+          layers
+        )
+        reconnectBackoff <- read[F, FiniteDuration](
+          field(
+            "kui.clusterProfiles.reconnectBackoff",
+            s"a duration between ${ProfileClientConfig.MinBackoff} and ${ProfileClientConfig.MaxBackoff}",
+            readBoundedDuration(ProfileClientConfig.MinBackoff, ProfileClientConfig.MaxBackoff),
+            ProfileClientConfig.DefaultReconnectBackoff
+          ),
+          layers
+        )
+        maxReconnectBackoff <- read[F, FiniteDuration](
+          field(
+            "kui.clusterProfiles.maxReconnectBackoff",
+            s"a duration between ${ProfileClientConfig.MinBackoff} and ${ProfileClientConfig.MaxBackoff}",
+            readBoundedDuration(ProfileClientConfig.MinBackoff, ProfileClientConfig.MaxBackoff),
+            ProfileClientConfig.DefaultMaxReconnectBackoff
+          ),
+          layers
+        )
+        startupTimeout <- read[F, FiniteDuration](
+          field(
+            "kui.clusterProfiles.startupTimeout",
+            s"a duration between ${ProfileClientConfig.MinStartupTimeout} and " +
+              s"${ProfileClientConfig.MaxStartupTimeout}",
+            readBoundedDuration(
+              ProfileClientConfig.MinStartupTimeout,
+              ProfileClientConfig.MaxStartupTimeout
+            ),
+            ProfileClientConfig.DefaultStartupTimeout
+          ),
+          layers
+        )
+      } yield (url, pollInterval, requestTimeout, reconnectBackoff, maxReconnectBackoff, startupTimeout)
+        .mapN(ProfileClientConfig.apply)
+        .map(_.some)
+  }
+
+  /** The cross-field rules of `kui.topics.*`.
+    *
+    * They read the layers rather than the decoded values, for the reason [[checkStoreRules]] gives: a rule
+    * expressed over a decoded value goes unreported whenever some unrelated field is also wrong, and an
+    * operator fixing one key per restart is exactly what accumulating every problem exists to prevent. A
+    * field that is itself out of bounds already carries its own problem, so the rule that would have used it
+    * stays quiet rather than saying the same thing twice.
+    */
+  private def checkTopicRules(layers: Layers): Problems[Unit] = {
+    def duration(key: String): Option[FiniteDuration] =
+      layers.first(key).flatMap(value => readDuration(value._2).toOption)
+
+    def pageSize(key: String): Option[Int] =
+      layers.first(key).flatMap(value => value._2.toIntOption)
+
+    val refreshInterval = duration("kui.topics.refreshInterval")
+    val scrapeTimeout = duration("kui.topics.scrapeTimeout")
+
+    val budgetRule =
+      (
+        refreshInterval.orElse(Some(TopicsConfig.DefaultRefreshInterval)),
+        scrapeTimeout.orElse(Some(TopicsConfig.DefaultScrapeTimeout))
+      ) match {
+        case (Some(interval), Some(timeout)) if timeout >= interval =>
+          ConfigProblem(
+            "kui.topics.scrapeTimeout",
+            s"($timeout) must be shorter than kui.topics.refreshInterval ($interval); a scrape that " +
+              "outlives its interval overlaps the next one and doubles the load on the cluster",
+            layers
+              .first("kui.topics.scrapeTimeout")
+              .map(_._1)
+              .getOrElse(ConfigSourceName.Default)
+          ).invalidNel
+        case _ => ().validNel
+      }
+
+    val pageRule =
+      (
+        pageSize("kui.topics.defaultPageSize").orElse(Some(PageSize.Default.value)),
+        pageSize("kui.topics.maxPageSize").orElse(Some(PageSize.Max.value))
+      ) match {
+        case (Some(default), Some(max)) if default > max =>
+          ConfigProblem(
+            "kui.topics.defaultPageSize",
+            s"($default) must not exceed kui.topics.maxPageSize ($max)",
+            layers
+              .first("kui.topics.defaultPageSize")
+              .map(_._1)
+              .getOrElse(ConfigSourceName.Default)
+          ).invalidNel
+        case _ => ().validNel
+      }
+
+    val backoffRule =
+      (
+        duration("kui.clusterProfiles.reconnectBackoff")
+          .orElse(Some(ProfileClientConfig.DefaultReconnectBackoff)),
+        duration("kui.clusterProfiles.maxReconnectBackoff")
+          .orElse(Some(ProfileClientConfig.DefaultMaxReconnectBackoff))
+      ) match {
+        case (Some(first), Some(cap)) if cap < first =>
+          ConfigProblem(
+            "kui.clusterProfiles.maxReconnectBackoff",
+            s"($cap) must not be shorter than kui.clusterProfiles.reconnectBackoff ($first); a cap below " +
+              "the first delay would make the backoff shrink instead of grow",
+            layers
+              .first("kui.clusterProfiles.maxReconnectBackoff")
+              .map(_._1)
+              .getOrElse(ConfigSourceName.Default)
+          ).invalidNel
+        case _ => ().validNel
+      }
+
+    (budgetRule, pageRule, backoffRule).mapN((_, _, _) => ())
+  }
+
+  private def readInternalPrefix(raw: String): Either[String, String] = {
+    val trimmed = raw.trim
+    if trimmed.isEmpty then
+      Left("must not be empty; an empty prefix would make every topic on the cluster internal")
+    else if trimmed.length > TopicsConfig.MaxInternalPrefixLength then
+      Left(s"is ${trimmed.length} characters long, and the limit is ${TopicsConfig.MaxInternalPrefixLength}")
+    else Right(trimmed)
+  }
+
+  private def readSearchMode(raw: String): Either[String, SearchMode] =
+    SearchMode.fromWire(raw.trim.toLowerCase).toRight(s"'$raw' is neither plain nor fts")
+
+  private def readPageSize(raw: String): Either[String, PageSize] =
+    raw.toIntOption
+      .toRight(s"'$raw' is not a whole number")
+      .flatMap(PageSize.from(_).leftMap(_.message))
+
   private def decodeClusters[F[_]: Async](layers: Layers): F[Problems[List[ClusterConfig]]] = {
     val indices = layers.indicesOf(ClustersPrefix)
     indices
@@ -1279,6 +1519,7 @@ object KuiConfigSource {
       gateway: GatewayDraft,
       telemetry: TelemetryConfig,
       store: StoreDraft,
+      topics: TopicsConfig,
       clusters: List[ClusterConfig]
   )
 
@@ -1316,6 +1557,7 @@ object KuiConfigSource {
             ),
             value.telemetry,
             storeConfig,
+            value.topics,
             value.clusters
           )
         )
@@ -1391,6 +1633,18 @@ object KuiConfigSource {
       // `properties` is deliberately open: its whole purpose is to carry Kafka client properties KUI
       // does not model, so it cannot have a list of legal names.
       List("kui", "store", "kafka", "properties", "**"),
+      List("kui", "topics", "refreshInterval"),
+      List("kui", "topics", "scrapeTimeout"),
+      List("kui", "topics", "internalPrefix"),
+      List("kui", "topics", "defaultSearchMode"),
+      List("kui", "topics", "defaultPageSize"),
+      List("kui", "topics", "maxPageSize"),
+      List("kui", "clusterProfiles", "url"),
+      List("kui", "clusterProfiles", "pollInterval"),
+      List("kui", "clusterProfiles", "requestTimeout"),
+      List("kui", "clusterProfiles", "reconnectBackoff"),
+      List("kui", "clusterProfiles", "maxReconnectBackoff"),
+      List("kui", "clusterProfiles", "startupTimeout"),
       List("kui", "clusters", "*", "name"),
       List("kui", "clusters", "*", "id"),
       List("kui", "clusters", "*", "bootstrapServers"),
