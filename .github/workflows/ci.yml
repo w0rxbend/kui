@@ -5,10 +5,10 @@
 # long job called "build" only says that something, somewhere, went wrong. The jobs are independent
 # and run in parallel; the sequence in PLAN §49 is a reading order, not a dependency chain.
 #
-# Stages PLAN §49 lists whose build tasks do not exist yet — integration tests, the OpenAPI diff,
-# the Docker build, E2E — are deliberately absent rather than stubbed. The task that creates each
-# one adds its own job (GW-007, INFRA-001, E2E-001). A job that always passes is worse than no job:
-# it looks like coverage.
+# Stages PLAN §49 lists whose build tasks do not exist yet are deliberately absent rather than
+# stubbed. A job that always passes is worse than no job: it looks like coverage. That principle is
+# also why the `test` job runs `./scripts/run-tests.sh` rather than a hand-maintained list of
+# modules — a list goes stale the first time somebody adds a suite, and it goes stale silently.
 name: CI
 
 on:
@@ -62,9 +62,29 @@ jobs:
       - name: Check the module layering rules (ADR-041)
         run: ./mill checkArchitecture
 
+  generated:
+    name: generated documents match their sources
+    runs-on: ubuntu-latest
+    # Two files in the repository are generated from code and committed alongside it: the OpenAPI
+    # documents (one per service plus the merged product-wide one) and the error-code table. A
+    # generated file that nobody regenerates is worse than no file — an integrator reads it,
+    # believes it, and builds against an API that changed three releases ago — so both checks run
+    # on every push. When one fails, the fix is to run the matching generator and commit the result:
+    # `./mill __.openApi` and `./mill docs.errorCodes`.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+      - name: Check the committed OpenAPI documents
+        run: ./mill __.openApiCheck
+      - name: Check the committed error-code table
+        run: ./mill docs.errorCodes --check
+
   test:
     name: unit + property + contract tests
     runs-on: ubuntu-latest
+    # Every suite in the repository runs here, so this job is now minutes rather than seconds. The
+    # backstop is against a hung Node process, not a budget.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
@@ -81,19 +101,22 @@ jobs:
       - name: Install jsdom for the DOM test suites
         run: npm install --no-save jsdom@30.0.1
 
-      # PLAN §49 asks for a single `./mill __.test`. That command is currently red for a reason
-      # that has nothing to do with KUI's code: when a Scala.js test module and any other test
-      # module run in one Mill invocation, the Scala.js side dies with
-      # `UnsupportedOperationException: <the other module>` (blocker B-003). Every module passes on
-      # its own. Until that is fixed the stage runs the JVM suites together and each Scala.js suite
-      # in an invocation of its own — the same coverage, three commands instead of one. A task that
-      # adds a Scala.js test module adds a line here; a task that adds a JVM one does not.
-      - name: Run the JVM test suites
-        run: ./mill libs.kernel.jvm.test build-tests.test
-      - name: Run the Scala.js test suite for libs/kernel
-        run: ./mill libs.kernel.js.test
-      - name: Run the Scala.js test suite for frontend/ui-kernel
-        run: ./mill frontend.uiKernel.test
+      # This step used to be three commands, and the first of them was
+      # `./mill libs.kernel.jvm.test build-tests.test`, which ran no tests at all. Mill's `.test` is
+      # a command that takes arguments, so `build-tests.test` was handed to MUnit as a test-name
+      # filter; it matched nothing, every suite was reported "ignored", and the step passed green.
+      # The script below names modules with Mill's selector syntax instead, which really does run
+      # them all, and it prints the number of test cases it executed rather than Mill's task count.
+      #
+      # Blocker B-003 — "a Scala.js test module and any other test module in one invocation kills
+      # the Scala.js side" — was the same argument-parsing confusion seen from the other end, and
+      # does not reproduce with the selector form. A run of all 58 modules in one invocation is what
+      # the script does.
+      #
+      # A task that adds a test module no longer has to remember to add a line here: the script asks
+      # Mill what exists.
+      - name: Run every test suite
+        run: ./scripts/run-tests.sh
 
       - name: Upload test reports
         if: failure()
@@ -155,6 +178,12 @@ jobs:
       # produces, and a pulled image would be somebody else's commit.
       - name: Build the container images the distributed stack runs
         run: ./mill deployment.docker.gateway.docker.build deployment.docker.cluster.docker.build
+
+      # The compose topology, checked before the browser suite runs. It is faster than the browser
+      # suite and it fails for a different reason — a broken compose file rather than a broken
+      # screen — so running it first means the log says which of the two is wrong.
+      - name: Run the Compose fault-isolation smoke test
+        run: ./deployment/compose/smoke.sh
 
       - name: Run the end-to-end suites
         run: ./mill e2e.test -v

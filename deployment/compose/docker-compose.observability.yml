@@ -14,7 +14,7 @@
 #     -f deployment/compose/docker-compose.observability.yml \
 #     up -d
 #
-#   curl -s 'localhost:8080/api/v1/ping?message=trace-me' > /dev/null
+#   curl -s localhost:8080/api/v1/clusters > /dev/null
 #   docker compose -f ... logs otel-collector | grep -A1 'Trace ID'
 #
 # What to look for: one trace id appearing under both `service.name: kui-gateway` and

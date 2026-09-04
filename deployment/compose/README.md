@@ -49,13 +49,16 @@ Check that the gateway can reach the service, and that a request really does tra
 ```
 $ curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
 available
-$ curl -s 'localhost:8080/api/v1/ping?message=hi' | jq -r .message
-hi
+$ curl -s localhost:8080/api/v1/clusters | jq -r .clusters.status
+ok
 ```
 
-The second one is the interesting one. `/api/v1/ping` is not a gateway endpoint: it is the cluster
-service's `/internal/v1/ping`, derived from the contract that service published, called over HTTP
-with a signed principal header that the service verified before answering.
+The second one is the interesting one. The gateway serves `/api/v1/clusters` itself, but it cannot
+answer it alone: the rows come from the cluster service's own list endpoint, derived from the
+contract that service published, called over HTTP with a signed principal header that the service
+verified before answering. `ok` means that call happened and came back fresh. If the cluster service
+were unreachable the status would read `stale` or `unavailable` instead, and the gateway would still
+answer — which is the whole point of the next section.
 
 ### 2. Stop one service — the fault-isolation demo
 
@@ -134,7 +137,7 @@ docker compose \
   -f deployment/compose/docker-compose.observability.yml \
   up -d
 
-curl -s 'localhost:8080/api/v1/ping?message=trace-me' > /dev/null
+curl -s localhost:8080/api/v1/clusters > /dev/null
 docker compose -f deployment/compose/docker-compose.yml -f deployment/compose/docker-compose.observability.yml \
   logs otel-collector
 ```

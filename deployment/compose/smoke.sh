@@ -7,9 +7,9 @@
 # still answering and now reports the service as unavailable, start it again, and check that it
 # recovers on its own without anyone pressing anything.
 #
-# CI runs this in the `docker build` stage so that a broken compose file is caught even when the
-# browser-level E2E job is skipped. A developer can run it too, and should: it takes about a minute
-# and it is the most convincing thing in the repository.
+# CI runs this in the end-to-end job, right after the images are built, so that a broken compose
+# file is caught by the same run that builds the artefacts it describes. A developer can run it too,
+# and should: it takes about a minute and it is the most convincing thing in the repository.
 #
 #   ./deployment/compose/smoke.sh
 #
@@ -63,8 +63,13 @@ log "starting the distributed stack"
 log "both processes are up and the gateway can reach the service"
 await "capability status" "available" \
   "curl -sf $base/api/v1/capabilities | jq -r '.entries[0].state.status'"
-await "proxied ping" "hi" \
-  "curl -sf '$base/api/v1/ping?message=hi' | jq -r .message"
+# A read that really crosses the process boundary. `/api/v1/clusters` is answered by the gateway,
+# but the answer is assembled from a call to the cluster service, and the section's status says
+# whether that call succeeded: "ok" means the gateway reached the service and got a fresh answer.
+# This replaces an earlier `GET /api/v1/ping`, which was an M0 scaffold endpoint and no longer
+# exists.
+await "proxied cluster list" "ok" \
+  "curl -sf $base/api/v1/clusters | jq -r .clusters.status"
 
 log "stopping kui-cluster: one real process dies"
 "${compose[@]}" stop kui-cluster >/dev/null
@@ -81,7 +86,7 @@ log "starting kui-cluster again: recovery needs no intervention"
 "${compose[@]}" start kui-cluster >/dev/null
 await "capability status" "available" \
   "curl -sf $base/api/v1/capabilities | jq -r '.entries[0].state.status'"
-await "proxied ping" "back" \
-  "curl -sf '$base/api/v1/ping?message=back' | jq -r .message"
+await "proxied cluster list" "ok" \
+  "curl -sf $base/api/v1/clusters | jq -r .clusters.status"
 
 log "PASSED: the gateway survived the service, reported it, and recovered on its own"

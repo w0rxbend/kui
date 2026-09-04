@@ -43,7 +43,7 @@ Then open <http://localhost:8080/ui/>, or check it from the shell:
 
 ```
 curl -s localhost:8080/api/v1/info | jq -r .build.gitCommit
-curl -s 'localhost:8080/api/v1/ping?message=hello' | jq -r .message
+curl -s localhost:8080/api/v1/clusters | jq -r .clusters.status
 curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
 ```
 
