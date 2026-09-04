@@ -1,9 +1,9 @@
 # KUI status
 
 **Date:** 2026-09-04
-**Phase:** M2 implemented and integrated and usable. M3 and M4 are part built and not reachable
-from a browser.
-**Repository:** M0, M1 and M2 on `main`; `./mill __.test` is green end to end.
+**Phase:** M2, M3 and M4 are implemented, integrated and usable from a browser. M3 reads and does
+not publish; M4 reads and its offset reset has no screen.
+**Repository:** M0 through M4 on `main`; every gate the CI runs is green, `./mill __.test` included.
 
 ## Grooming progress
 
@@ -257,6 +257,89 @@ decodes. Both OpenAPI documents and the golden documents were regenerated.
 
 M2 grooming. Before it starts, the gate's own condition applies: re-examine the `libs/kafka`-versus-domain
 dual type definitions before `TopicAdmin` and `GroupAdmin` turn three pairs into ten.
+
+## Second integration pass — 2026-09-04
+
+The pass below left M3 and M4 "part built, nothing reachable". Three further agents then landed the
+message service, the consumer API and both screens. This section records what a second integration
+pass found by driving the assembled product.
+
+### Repository state after the pass
+
+```
+./mill __.compile                        6166/6166, SUCCESS
+./mill __.checkFormat                      189/189, SUCCESS
+./mill __.fix --check                    4164/4164, SUCCESS
+./mill checkArchitecture                 129 modules, 10 rules, no layering violations
+./mill __.test                           8226/8226, SUCCESS  (243s)
+./mill __.openApiCheck                   1307/1307, SUCCESS
+./mill build-tests.test                    137/137, SUCCESS
+./mill frontend.uiShell.checkBundleShape   4 feature modules split out, main.js 929,950 B of 1,500,000 B
+./mill frontend.css                            7/7, SUCCESS
+```
+
+`__.checkFormat` and `__.fix --check` were both **red** when the pass began — three agents had
+committed unformatted sources, and both commands are CI gates, so `main` would have failed on a push
+while every test passed. Fixed in `81ea011`, which is formatter output and nothing else.
+
+### Seven defects found by using the product
+
+Full detail, with the reasoning behind each fix, is in `docs/DELIVERY.md` under "Where this stands,
+2026-09-04 (integration pass)". In brief, and worst first:
+
+1. **Browsing a nonexistent topic created it** (`4d4820b`). A Kafka consumer's
+   `allow.auto.create.topics` and a broker's `auto.create.topics.enable` both default to true, so
+   asking for a missing topic's metadata creates it. A mistyped name answered `KUI-TOPIC-NOT-FOUND`
+   and left an empty topic behind. Verified by `kafka-topics.sh --list` before and after.
+2. **The message browser was unreachable** (`97e63e9`). The topic page's tab route decoded any fifth
+   URL segment and is registered first, so it claimed `/clusters/c/topics/t/messages`.
+3. **Every cluster-scoped sidebar entry was a dead link** (`b24d293`). Topics, Messages and Consumers
+   all pointed at a URL with an empty cluster segment in it, which collapses to a path matching no
+   route. `NavEntry.requiresCluster` existed and was read by nothing.
+4. **The message browser crashed on mount** (`f9d109e`). A Laminar `controlled` input paired with the
+   `change` event, which Laminar rejects at run time. The screen rendered "Something went wrong".
+5. **`kui.topics.internalPrefix` did nothing** (`dc135cd`). Two functions implemented the rule and
+   neither was called from production code.
+6. **A browse that finished left its Stop button up for ever** (`631a641`).
+7. **A browse against an unreachable broker said "Internal error"** (`0e4b23d`) where every other
+   screen said `KUI-UPSTREAM-UNAVAILABLE`. The consumer's constructor was outside the error mapper.
+
+There was also no link anywhere into the message browser; the topic page now carries one
+(`c92b38f`).
+
+### What was verified in a browser
+
+Headless Chromium against a quickstart built from a clean `docker rmi`:
+
+- Seven topics by default, nine with "show internal topics" on.
+- `orders.v1` opens on six partitions with per-partition offsets, and its Settings tab lists the
+  Kafka configuration.
+- 16 records browse from `orders.v1` with their JSON readable; `audit.log.raw` renders its non-JSON
+  values as text.
+- `seekTo=offset::2` and `seekTo=timestamp::<ms>` both work from the URL.
+- Three consumer groups with their states, `order-fulfilment` showing a real lag of 9.
+- With the broker stopped: "Degraded: cluster too slow to answer" on the cluster row, "Stale:
+  UPSTREAM_UNAVAILABLE" over a topic list that keeps its rows, and a browse that ends with the
+  reason rather than a 500.
+
+### Still not done
+
+- **No publishing.** No produce endpoint, no resend. Bar point 3's second half is unmet.
+- **No offset-reset screen.** The plan/apply endpoints are served and were verified against a real
+  broker; nothing in the interface drives them.
+- **No serde picker and no "load more".** One browse reads up to its limit and stops.
+- **`services/consumer/{api,app}` ship with empty test modules.** The layers below are covered and
+  the surface is verified against a live broker, but there is no route-level suite pinning the
+  `lag`-before-`detail` ordering or the body-digest binding — the two things that broke there.
+- **The apply receipt reports `current: null`** for every partition, because the plan token's payload
+  carries only the proposed offsets.
+- **`ConsumerWiring` generates its plan-signing key per process**, so a wizard left open across a
+  restart must re-plan. ADR-026's cursor key does not exist in `libs/config` yet.
+- **ADR-020 has no answer for a proxied endpoint with a body.** `ConsumerApi.Securing.withBody` is a
+  local workaround; M3's publish endpoint will hit the same wall. This wants an ADR amendment before
+  a second service invents a second answer.
+- **Bar point 5 is unexercised.** The secured example configuration has never been run against a
+  SASL/TLS cluster.
 
 ## M2, M3 and M4 integration — 2026-09-04
 

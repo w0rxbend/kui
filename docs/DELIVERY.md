@@ -29,18 +29,23 @@ tested rather than asserted.
 | M0 Foundation | build, libraries, gateway, sample service, shell, single-process assembly, images, Compose | done |
 | M1 Cluster connectivity | real Kafka connections with production security, clusters and brokers, the metadata store | done |
 | M2 Topic explorer | topic list, search, detail, partitions, configuration | done |
-| M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | part built, nothing reachable |
-| M4 Consumer groups | groups, members, assignments, lag, offset reset | part built, nothing reachable |
+| M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | reading is done; publishing is not built |
+| M4 Consumer groups | groups, members, assignments, lag, offset reset | reading is done; offset reset is served but has no screen |
 | Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | done |
 | Configuration examples | a plain example, a secured example, and the reference for every key | built |
 
-"Part built, nothing reachable" is a deliberate distinction and it is the honest state of M3 and M4
-after the milestone. Both have modules that compile, are tested and are green — M3 has the serde
-layer, the filter engine, the masking engine, the message domain, the cursor codec and the wire
-contract; M4 has the whole consumer-group service down to its Kafka adapter, plus its contract. What
-neither has is a path from a browser to any of it: no `api` module binds their endpoints, no
-composition root constructs them, the running process serves none of their routes, and the shell has
-no screen for them. The check that says so is one command against a running quickstart:
+M3 and M4 were both recorded here on 2026-09-04 as "part built, nothing reachable": modules that
+compiled and were tested, with no path from a browser to any of them. That is no longer the state.
+Both services now have an `api` module, a composition root, routes served by the running process and
+a screen in the shell, and both have been used against the quickstart's own broker in a browser.
+
+What each still lacks is named rather than implied. **M3** reads and does not write: there is no
+publish endpoint, no resend, no serde picker and no "load more" past one browse's limit, so bar
+point 3's "and publish one" is not met. **M4** reads, and its offset-reset endpoints are served and
+verified against a real broker, but no screen drives them — the reset wizard is not built. Bar
+point 4, which asks only to see groups and their lag, is met.
+
+The check is one command against a running quickstart:
 
 ```
 $ curl -s localhost:8080/api/v1/openapi.json | jq -r '.paths | keys[]'
@@ -53,19 +58,26 @@ $ curl -s localhost:8080/api/v1/openapi.json | jq -r '.paths | keys[]'
 /api/v1/clusters/{clusterId}
 /api/v1/clusters/{clusterId}/brokers
 /api/v1/clusters/{clusterId}/brokers/{brokerId}/configs
+/api/v1/clusters/{clusterId}/consumer-groups
+/api/v1/clusters/{clusterId}/consumer-groups/lag
+/api/v1/clusters/{clusterId}/consumer-groups/{groupId}
+/api/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets
+/api/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets/plan
 /api/v1/clusters/{clusterId}/log-dirs
 /api/v1/clusters/{clusterId}/refresh
 /api/v1/clusters/{clusterId}/topics
 /api/v1/clusters/{clusterId}/topics/refresh
 /api/v1/clusters/{clusterId}/topics/{topicName}
 /api/v1/clusters/{clusterId}/topics/{topicName}/config
+/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream
 /api/v1/clusters/{clusterId}/topics/{topicName}/overview
 /api/v1/clusters/{clusterId}/topics/{topicName}/partitions
+/api/v1/clusters/{clusterId}/topics/{topic}/consumer-groups
 /api/v1/info
 ```
 
-Nothing under `messages`, nothing under `consumer-groups`. Points 3 and 4 of "the bar" above are
-therefore not met, and no amount of green test output changes that.
+Twenty-five paths where there were eighteen. `messages/stream` and the five `consumer-groups` paths
+are the new ones.
 
 Stages M5 to M9 — cluster administration, authentication, the ecosystem plugins, metrics — are
 beyond this bar. They are real work and they are planned, but nobody needs them to use the product.
@@ -99,7 +111,81 @@ Three, each one a file a person can copy:
 document holds only the delivery bar and the sequence above. When a stage completes, its row changes
 here and the detail lives in the milestone's own plan.
 
-## Where this stands, 2026-09-04
+## Where this stands, 2026-09-04 (integration pass)
+
+**Points 1, 2, 4 and 6 of the bar are met. Point 3 is met for reading and not for publishing. Point
+5 is met on paper and has not been exercised against a secured cluster.**
+
+One command from a clean machine — no image on disk, `docker rmi` first — builds the all-in-one
+image inside a container, starts a KRaft broker, seeds it, starts KUI and prints one URL. Everything
+below was then driven in a headless Chromium against that running quickstart, not in a test.
+
+- Seven topics list by default; `_schemas` and `__consumer_offsets` appear when "show internal
+  topics" is ticked, and the total changes from 7 to 9 with it.
+- A topic opens on its six partitions with first and next offsets per partition, and its Settings
+  tab shows the Kafka configuration with its sources.
+- A topic's page links to its records. `orders.v1` browses 16 records with the JSON readable in the
+  table; `audit.log.raw`, whose values are deliberately not JSON, renders as text with no error.
+- `?seekTo=offset::2` and `?seekTo=timestamp::<ms>` both return the expected records; per-partition
+  seeks (`seekTo=3::1&seekTo=5::6`) read only the partitions they name.
+- Three consumer groups list with their states — `analytics-indexer` Stable with one live member,
+  `order-fulfilment` and `payments-ledger-sync` Empty — and `order-fulfilment` shows a real total lag
+  of 9 broken down per partition.
+- With the broker container stopped, every screen stays navigable and says why: the cluster row reads
+  "Degraded: cluster too slow to answer", the topic list keeps its rows behind a "Stale:
+  UPSTREAM_UNAVAILABLE" badge, and a browse ends `KUI-UPSTREAM-UNAVAILABLE`, retryable.
+
+### Seven defects found by running it rather than by reading it
+
+Every one of them was invisible to `./mill __.test`, which was green before and after.
+
+**The message browser could not be opened.** The topic detail page's tab route
+(`/clusters/c/topics/t/{tab}`) decoded *any* fifth segment to its default tab, and it is registered
+before the message browser's `/clusters/c/topics/t/messages`. So it claimed that URL and drew the
+topic's Overview. The screen existed, was tested, and could not be reached.
+
+**And it had no link to it in any case.** A browse names a topic, the sidebar knows only a cluster,
+and no screen offered a way in. The topic page now carries the link.
+
+**Every cluster-scoped sidebar entry was a dead link.** Topics, Messages and Consumers each declared
+a landing page holding a placeholder cluster id of `""`, on the documented understanding that the
+shell would substitute the chosen cluster. It never did, and an empty path segment collapses —
+`/ui/clusters//topics` is `/ui/clusters/topics`, which matches no route. Three screens reachable
+only by typing an address, which is exactly how each had been checked.
+
+**The message browser crashed on mount.** A Laminar `controlled` input paired with the `change`
+event, which Laminar rejects at run time; the exception was thrown while the page was mounting, so
+the whole screen was replaced by "Something went wrong". Nothing in the module's five suites ever
+mounted the page.
+
+**Browsing a topic that does not exist created it.** A Kafka consumer's
+`allow.auto.create.topics` defaults to true and so does a broker's `auto.create.topics.enable`, so
+asking for a missing topic's metadata creates it. A mistyped topic name answered
+`KUI-TOPIC-NOT-FOUND` and left a new empty topic on the cluster. In a read-only product this is the
+worst of the seven.
+
+**`kui.topics.internalPrefix` did nothing.** Two functions implemented the rule, each with a
+scaladoc claiming the two halves of "internal" were combined "exactly once", and neither was called
+from production code. Only Kafka's own flag reached a screen.
+
+**The Read button never came back.** `running` was cleared only by Stop and by unmount, so a bounded
+browse that finished by itself left the button saying Stop for ever, beside a status line saying
+"Finished".
+
+Three of the seven were in code committed the same day; four had been in the repository longer.
+
+Each fix carries the test that would have caught it: `ConsumerFactorySuite`, `MessagesPageSuite` (the
+first suite that mounts the message browser at all), `BrowseSessionSuite`, and new cases in
+`NavigationSuite`, `TopicsRoutesSuite` and `TopicDetailPageSuite`.
+
+### What a newcomer still cannot do
+
+Publish a message. Resend one. Reset a consumer group's offsets from the interface — the endpoints
+are served and verified, the wizard is not built. Choose a serde. Load a second page of records past
+one browse's limit. Everything under M5 and later: creating or configuring a topic, editing ACLs,
+signing in.
+
+## Where this stood, 2026-09-04 (M1)
 
 **M1 is done, and the quickstart now shows a real cluster.** The packaging defect recorded below on
 2026-09-03 is fixed: `/ui/main.js` is served as `text/javascript`, 966 KB, and the interface renders.
@@ -141,7 +227,8 @@ their own broker, with a cluster that is down rendered as a row that says why an
 
 They do not see topics, messages or consumer groups: those are M2, M3 and M4, and the seeded data is
 waiting for them. The quickstart's own seed creates eight topics, 111 messages and three consumer
-groups that nothing in the interface can show yet.
+groups that nothing in the interface can show yet. *All three are shown as of the integration pass
+above.*
 
 ## Where this stood, 2026-09-03
 

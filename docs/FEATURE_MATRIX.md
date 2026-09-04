@@ -33,14 +33,24 @@ dropped silently (PLAN §44).
   `RESEARCHING` even where the research report proposed a design.
 
 A row reaches `COMPLETE` only when a person can do the thing from a browser against a running KUI.
-Compiling, being unit-tested and being green is `IMPLEMENTING` or `TESTING`, not `COMPLETE`. This is
-worth stating because the M2/M3/M4 pass produced a great deal of exactly that: as of 2026-09-04 every
-M3 row (`MS-*`, `MP-*`, `SD-*`, `DM-*`, `ET-*`) and every M4 row (`CG-*`, `TP-015`) has substantial
-code behind it — serdes, the CEL filter, the masking engine, the message domain, the whole
-consumer-group service down to its Kafka adapter — and none of it is reachable: no `api` module
-binds their endpoints, no composition root constructs them, and the running process serves no route
-for either. Those rows stay `RESEARCHING` until that last hop exists, because a matrix that called
-them done would be the most misleading document in the repository.
+Compiling, being unit-tested and being green is `IMPLEMENTING` or `TESTING`, not `COMPLETE`. That
+distinction earned its keep twice.
+
+The first time, as of the M2/M3/M4 pass on 2026-09-04, every M3 and M4 row had substantial code
+behind it — serdes, the CEL filter, the masking engine, the message domain, the whole consumer-group
+service down to its Kafka adapter — and none of it was reachable from a browser. Those rows stayed
+`RESEARCHING`.
+
+The second time, later the same day, the message service, the consumer API and both screens landed
+and every suite in the repository was green — while the message browser could not be opened at all
+(another feature's route claimed its URL, and it threw on mount when you did reach it) and every
+cluster-scoped link in the sidebar went nowhere. Green tests are not the evidence a row is
+`COMPLETE`. Somebody using the product is.
+
+So the rows now say three different things, and the difference is the point. `COMPLETE` means it was
+done in a browser against the quickstart's broker. `TESTING` means the service answers and was
+verified with `curl`, and no screen drives it — `CG-004`'s offset reset is the clearest example.
+`RESEARCHING` means it is not built; `MP-001`, publishing a message, is the largest of those.
 
 Behavior descriptions, edge cases and source citations are deliberately not repeated here; they
 live in the research reports (`research/kafbat/feature-matrix.md` row of the same number,
@@ -93,7 +103,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | TP-012 | Topic analysis (full scan: counts, sizes, percentiles, HLL uniques, hourly histogram) | Kafbat, Provectus | P1 | topic | ui-topics (Statistics tab) | M5 | L | RESEARCHING | Allowed in read-only mode. Progress over SSE is a later extension. |
 | TP-013 | Active producers (idempotent / transactional state per partition) | Kafbat, Provectus | P1 | topic | ui-topics | M5 | S | RESEARCHING | |
 | TP-014 | Topic → related connectors tab | Kafbat | P2 | connect (queried by gateway) | ui-topics (FeaturePanel) | M7 | S | RESEARCHING | Section of the topic overview aggregation (KU-011). |
-| TP-015 | Topic → related consumer groups tab | Kafbat, Provectus | P0 | consumer | ui-topics (FeaturePanel) | M4 | S | RESEARCHING | |
+| TP-015 | Topic → related consumer groups tab | Kafbat, Provectus | P0 | consumer | ui-topics (FeaturePanel) | M4 | S | RESEARCHING | The `/topics/{topic}/consumer-groups` endpoint is served and answers (`orders.v1` → topicLag 9, 6 partitions, dormant). No tab renders it: the topic page's guest-panel slot is there and the consumers feature contributes nothing to it. |
 | TP-016 | Topic → ACLs tab | Kafbat | P2 | security | ui-topics (FeaturePanel) | M7 | S | RESEARCHING | Needs Topic VIEW and ACL VIEW. |
 | TP-017 | Topics CSV export | Kafbat | P2 | topic | ui-topics | M5 | S | RESEARCHING | Content negotiation. |
 | TP-018 | Batch actions on the topic list (multi-select delete / purge / copy) | Kafbat, Provectus | P1 | — (client composition) | ui-topics | M5 | M | RESEARCHING | Partial failure reported per topic. |
@@ -112,17 +122,17 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MS-001 | Stream messages over SSE with polling modes (from/to offset, from/to timestamp, latest, earliest, tailing) | Kafbat (v2), Provectus (v1) | P0 | message | ui-messages | M3 | XL | RESEARCHING | KUI implements the Kafbat v2 shape plus per-partition `seekTo[]`; v1 shape rejected (DR-2). Highest-risk path, PLAN §22. |
-| MS-002 | Cursor-based next page over the stream | Kafbat | P0 | message | ui-messages | M3 | M | RESEARCHING | Cursor is self-describing and signed (KU-015), not a server cache id. |
-| MS-003 | Table-style browsing with per-partition, newest-first offset paging | Kouncil | P0 | message | ui-messages | M3 | L | RESEARCHING | Second, non-streaming read path (D-1). Kouncil-defining UX. |
-| MS-004 | JSON column flattening grid (headers / key / value columns, depth and row caps) | Kouncil | P0 | — (client-side) | ui-messages | M3 | L | RESEARCHING | Kouncil limits are the defaults (D-2, DC-H8). Same stream as the list view (DC-H4). |
-| MS-005 | Live / tailing mode with client throttle and play/pause | Kafbat, Provectus, Kouncil | P0 | message | ui-messages | M3 | M | RESEARCHING | Stops cleanly when the capability flips to Unavailable. |
-| MS-006 | Simple string-contains filter over key, value, headers | Kafbat, Provectus, Kouncil | P0 | message | ui-messages | M3 | S | RESEARCHING | |
+| MS-001 | Stream messages over SSE with polling modes (from/to offset, from/to timestamp, latest, earliest, tailing) | Kafbat (v2), Provectus (v1) | P0 | message | ui-messages | M3 | XL | COMPLETE | Browsing works from a browser against a real broker: forward and backward, `beginning`/`latest`/`offset::N`/`timestamp::ms` and the per-partition `seekTo[]`, with `live` tailing. Verified on the quickstart's `orders.v1`, `audit.log.raw` and `customers.profiles`. |
+| MS-002 | Cursor-based next page over the stream | Kafbat | P0 | message | ui-messages | M3 | M | TESTING | The stream ends with a signed cursor on its `done` event and the codec round-trips, but no screen sends one back: there is no "load more" control, so one browse reads to its limit and stops. |
+| MS-003 | Table-style browsing with per-partition, newest-first offset paging | Kouncil | P0 | message | ui-messages | M3 | L | RESEARCHING | Second, non-streaming read path (D-1). Kouncil-defining UX. Not started; the M3 screen is the streaming list only. |
+| MS-004 | JSON column flattening grid (headers / key / value columns, depth and row caps) | Kouncil | P0 | — (client-side) | ui-messages | M3 | L | TESTING | `JsonFlattener` and its path syntax are built and property-tested; no grid renders them yet, so the table shows the raw JSON value. |
+| MS-005 | Live / tailing mode with client throttle and play/pause | Kafbat, Provectus, Kouncil | P0 | message | ui-messages | M3 | M | COMPLETE | `Follow live` on the message screen. Stops cleanly when the capability flips to Unavailable. |
+| MS-006 | Simple string-contains filter over key, value, headers | Kafbat, Provectus, Kouncil | P0 | message | ui-messages | M3 | S | COMPLETE | The `Contains` box on the message screen; `q=OrderShipped` verified against the quickstart broker. |
 | MS-007 | Smart filters: CEL scripts, registration with TTL, dry-run test, saved filters | Kafbat (CEL), Provectus (Groovy) | P1 | message | ui-messages | M3 | L | RESEARCHING | CEL only; Groovy rejected (DR-1, D-3). Test endpoint RBAC closed by KU-016. |
 | MS-008 | Purge messages (delete records per partition) | Kafbat, Provectus | P1 | message | ui-messages, ui-topics | M3 | S | RESEARCHING | Audited from M5. |
-| MS-009 | Serde suggestions per topic for serialize / deserialize | Kafbat, Provectus | P0 | message | ui-messages | M3 | S | RESEARCHING | Lists only serdes that do not need SR when SR is Unavailable. |
-| MS-010 | Message detail view (key / content / headers, copy, pre-masking raw, resend entry point) | Kafbat, Provectus, Kouncil | P0 | — | ui-messages | M3 | M | RESEARCHING | Right-hand drawer (DC-H9). |
-| MS-011 | Export rendered messages to CSV / JSON | Kafbat | P2 | — | ui-messages | M3 | S | RESEARCHING | Client-side. |
+| MS-009 | Serde suggestions per topic for serialize / deserialize | Kafbat, Provectus | P0 | message | ui-messages | M3 | S | RESEARCHING | Audited from M5. Not built: no purge endpoint and no control. |
+| MS-010 | Message detail view (key / content / headers, copy, pre-masking raw, resend entry point) | Kafbat, Provectus, Kouncil | P0 | — | ui-messages | M3 | M | TESTING | The serde layer decodes and reports what it used; there is no picker, so a browse always takes the resolved default. |
+| MS-011 | Export rendered messages to CSV / JSON | Kafbat | P2 | — | ui-messages | M3 | S | TESTING | A record's row opens in place and shows key, value and headers. No copy button, no pre-masking raw view and no resend entry point. |
 | MS-012 | Decode Spring DLT / retry numeric headers | Kouncil | P2 | message | — | M3 | S | RESEARCHING | |
 | MS-013 | Polling throttle (bytes/s per cluster) with `consumed` stats event | Kafbat, Provectus | P1 | message | — | M3 | S | RESEARCHING | Protects brokers from UI load. |
 | MS-014 | Relative timestamps and user timezone in message tables | Kafbat | P3 | — | kernel | M3 | S | RESEARCHING | Timezone setting lives in KU-012. |
@@ -131,21 +141,21 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MP-001 | Produce a message (key, value, headers, partition, serde selection, keep-contents) | Kafbat, Provectus, Kouncil | P0 | message | ui-messages | M3 | M | RESEARCHING | Produce drawer. Audited from M5. |
-| MP-002 | Bulk send with `{{count}}`, `{{timestamp}}`, `{{uuid}}` placeholders | Kouncil | P1 | message | ui-messages | M3 | S | RESEARCHING | `count` parameter on MP-001. |
-| MP-003 | Resend (copy) an offset range between topics with header filtering | Kouncil | P1 | message | ui-messages | M3 | M | RESEARCHING | Raw byte copy; range validated against partition bounds. |
+| MP-001 | Produce a message (key, value, headers, partition, serde selection, keep-contents) | Kafbat, Provectus, Kouncil | P0 | message | ui-messages | M3 | M | RESEARCHING | Produce drawer. Audited from M5. **Not built: KUI cannot publish a message.** This is the unmet half of delivery-bar point 3. |
+| MP-002 | Bulk send with `{{count}}`, `{{timestamp}}`, `{{uuid}}` placeholders | Kouncil | P1 | message | ui-messages | M3 | S | RESEARCHING | `count` parameter on MP-001, which does not exist yet. |
+| MP-003 | Resend (copy) an offset range between topics with header filtering | Kouncil | P1 | message | ui-messages | M3 | M | RESEARCHING | Raw byte copy; range validated against partition bounds. Not built. |
 | MP-004 | Produce with per-serde parameters and schema validation before send | Kafbat | P1 | message | ui-messages | M3 | M | RESEARCHING | Uses SD-004. |
 
 ## Consumer groups (CG)
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| CG-001 | List consumer groups: paged, sorted, searched, state filter | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | M | RESEARCHING | Describe batched with bounded concurrency (OT-001). |
-| CG-002 | Group details: members, assignments, offsets, lag, pace | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | M | RESEARCHING | Kouncil pace column and last-seen assignment cache kept (DC-H10). |
-| CG-003 | Delete group | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | S | RESEARCHING | |
-| CG-004 | Reset offsets wizard (earliest / latest / timestamp / per-partition offset) | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | M | RESEARCHING | Refused for active groups. |
-| CG-005 | Delete committed offsets for one topic | Kafbat | P1 | consumer | ui-consumers | M4 | S | RESEARCHING | |
-| CG-006 | Incremental lag polling and lag trend sparkline | Kafbat | P1 | consumer | ui-consumers | M4 | M | RESEARCHING | Poll interval driven by the Degraded reason payload (KU-003). |
+| CG-001 | List consumer groups: paged, sorted, searched, state filter | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | M | COMPLETE | Paged, searched and state-filtered from a browser. Verified against the quickstart's three seeded groups. |
+| CG-002 | Group details: members, assignments, offsets, lag, pace | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | M | COMPLETE | Members, assignments, per-partition committed/end/lag and total lag all render. `pace` is served as `null`: nothing measures it yet. |
+| CG-003 | Delete group | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | S | TESTING | The endpoint is served and refuses a read-only cluster before touching Kafka; no control in the interface calls it. |
+| CG-004 | Reset offsets wizard (earliest / latest / timestamp / per-partition offset) | Kafbat, Provectus, Kouncil | P0 | consumer | ui-consumers | M4 | M | TESTING | Plan and apply are both served and were verified against a real broker — six resolved offsets, two `NO_CHANGE` warnings, a signed token, and live lag moving 9 → 16 on apply. **No wizard drives them**, and the apply receipt reports `current: null` for every partition because the token payload carries only the proposed offsets. |
+| CG-005 | Delete committed offsets for one topic | Kafbat | P1 | consumer | ui-consumers | M4 | S | TESTING | Served; no control calls it. |
+| CG-006 | Incremental lag polling and lag trend sparkline | Kafbat | P1 | consumer | ui-consumers | M4 | M | TESTING | The endpoint answers incrementally — full payload with a token, then `changed: []` on the same token — and `ConsumersApi.lag` is written and tested. Nothing calls it: the list does not poll and there is no sparkline. |
 | CG-007 | Consumer groups CSV export | Kafbat | P2 | consumer | ui-consumers | M5 | S | RESEARCHING | |
 | CG-008 | Consumer group full-text n-gram search | Kafbat | P2 | consumer | — | M9 | S | DEFERRED(follows TP-002) | CEO decision DR-10. |
 | CG-009 | `__consumer_offsets` decoding serde | Kafbat, Provectus | P2 | message | — | M5 | M | RESEARCHING | Part of the extended serde set (KU-023). |
@@ -427,6 +437,18 @@ States at seed time: 172 `RESEARCHING`, 7 `DEFERRED`, 4 `REJECTED`, 0 `DESIGNED`
 
 **After M1's integration pass (2026-09-04):** 154 `RESEARCHING`, 17 `COMPLETE`, 4 `REVIEW`,
 1 `BLOCKED`, 7 `DEFERRED`, 4 `REJECTED`.
+
+**After the second integration pass (2026-09-04), which made M3 and M4 reachable:** 133
+`RESEARCHING`, 28 `COMPLETE`, 8 `TESTING`, 6 `REVIEW`, 1 `BLOCKED`, 7 `DEFERRED`, 4 `REJECTED`.
+
+The eight `TESTING` rows are the honest middle of this pass and worth reading as a group. Every one
+of them is a service that answers, verified against a real broker, with no screen driving it:
+`MS-002` (the cursor is signed and round-trips; no "load more" control sends one back), `MS-004`
+(the JSON flattener is property-tested; no grid renders it), `MS-009` (serdes decode; no picker),
+`MS-010` (a record opens in place; no copy, no raw view, no resend), `CG-003`, `CG-004`, `CG-005`
+(delete, offset reset and offset deletion are all served and all refuse a read-only cluster before
+touching Kafka; nothing in the interface calls them) and `CG-006` (incremental lag polling answers
+and its client is written and tested; nothing calls it).
 
 `REVIEW` here means the feature ships and works, with a specific gap recorded in the row's own
 notes rather than in somebody's memory: CL-002's per-cluster capability, CL-009's switcher label,
