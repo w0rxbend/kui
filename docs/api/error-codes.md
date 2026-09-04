@@ -24,6 +24,7 @@ one is a breaking change. `Retryable` means the same request, unchanged, could s
 | `KUI-READ-ONLY` | 405 | no | READ | The cluster is configured read-only, so no operation that changes it is accepted. |
 | `KUI-ROUTE-NOT-FOUND` | 404 | no | ROUTE | No endpoint matches this method and path. |
 | `KUI-SCHEMA-NOT-FOUND` | 404 | no | SCHEMA | The subject or schema version does not exist in the schema registry. |
+| `KUI-SERDE-UNAVAILABLE` | 503 | yes | SERDE | The requested serde exists but cannot work right now, usually because its schema registry is unreachable. |
 | `KUI-STORE-CRYPTO` | 500 | no | STORE | An encrypted field in the metadata store could not be decrypted with any configured key. |
 | `KUI-STORE-ENVELOPE` | 500 | no | STORE | A record in the metadata store is not a readable envelope for this version of KUI. |
 | `KUI-STORE-NOT-CONFIGURED` | 501 | no | STORE | No metadata store is configured, so this change cannot be persisted; configure kui.store.kafka.* to enable it. |

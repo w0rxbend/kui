@@ -94,6 +94,7 @@ final class ErrorCodeSuite extends ScalaCheckSuite {
       (ErrorCode.StoreEnvelope, "KUI-STORE-ENVELOPE", 500, false),
       (ErrorCode.StoreCrypto, "KUI-STORE-CRYPTO", 500, false),
       (ErrorCode.StoreNotConfigured, "KUI-STORE-NOT-CONFIGURED", 501, false),
+      (ErrorCode.SerdeUnavailable, "KUI-SERDE-UNAVAILABLE", 503, true),
       (ErrorCode.RouteNotFound, "KUI-ROUTE-NOT-FOUND", 404, false),
       (ErrorCode.Internal, "KUI-INTERNAL", 500, false)
     )

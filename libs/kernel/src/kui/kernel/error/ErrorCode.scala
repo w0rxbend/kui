@@ -250,6 +250,14 @@ enum ErrorCode(
         "No metadata store is configured, so this change cannot be persisted; configure kui.store.kafka.* to enable it."
       )
 
+  case SerdeUnavailable
+      extends ErrorCode(
+        "KUI-SERDE-UNAVAILABLE",
+        503,
+        true,
+        "The requested serde exists but cannot work right now, usually because its schema registry is unreachable."
+      )
+
   case RouteNotFound
       extends ErrorCode(
         "KUI-ROUTE-NOT-FOUND",

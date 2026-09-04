@@ -208,6 +208,22 @@ object InfrastructureError {
     val message: String = s"calls to $upstream are suspended while it recovers"
   }
 
+  /** A configured serde exists and cannot work right now — almost always a Schema Registry that is not
+    * answering (ADR-014, ADR-028).
+    *
+    * An infrastructure failure and not an application one, and that classification is load-bearing. ADR-039
+    * §6 reports only infrastructure failures to the capability registry, so this is what dims the message
+    * capability to `Degraded` for everyone; a user asking for a serde that was never configured is a bad
+    * request and must not dim anything for anybody.
+    *
+    * It is distinct from `Unreachable` because the user-facing sentence is different: they picked a serde,
+    * and what they need to be told is that *that serde* is unusable, not that some host is down.
+    */
+  final case class SerdeUnavailable(serde: String, reason: String) extends InfrastructureError {
+    val code: ErrorCode = ErrorCode.SerdeUnavailable
+    val message: String = s"the serde '$serde' cannot be used right now: $reason"
+  }
+
   /** The infrastructure half of `ApplicationError.Remote`: a transport-level failure another KUI process
     * reported, carried across the boundary with its code and message intact.
     */
@@ -243,7 +259,11 @@ object KuiError {
       // action dim a feature for everybody else, which is exactly what this classification exists to
       // prevent (ADR-039 §6).
       ErrorCode.StoreUnavailable,
-      ErrorCode.StoreReplayTimeout
+      ErrorCode.StoreReplayTimeout,
+      // A Schema Registry that is not answering is an upstream that is not answering: the serde picker
+      // genuinely cannot offer Avro, and the capability should say so rather than let every user
+      // rediscover it one topic at a time.
+      ErrorCode.SerdeUnavailable
     )
 
   /** Rebuilds the error another KUI process reported, on the correct side of the application / infrastructure
