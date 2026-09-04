@@ -41,6 +41,27 @@ object ClusterSecurityConfig {
       assemble: Map[String, Secret[String]] => ClusterSecurity
   )
 
+  /** A TLS block with its three passwords still unresolved.
+    *
+    * Same shape and same reason as [[ClusterSecurityDraft]]: the pure phase collects `SecretRef`s keyed by
+    * the dotted key they were written at, and [[resolve]] turns that map into secrets before `assemble` runs.
+    */
+  final case class TlsDraft(
+      secretRefs: Map[String, SecretRef],
+      assemble: Map[String, Secret[String]] => TlsConfig
+  )
+
+  /** Looks up the secret that was resolved for one dotted key.
+    *
+    * `Option` rather than a lookup that throws. Every key an `assemble` function asks for was put into the
+    * same draft's `secretRefs` and [[resolve]] resolves exactly those, so the `None` case is unreachable
+    * today; making it a value means a future draft that forgets to register a reference produces a connection
+    * without that password — which Kafka reports — rather than an exception out of a pure decoder.
+    */
+  private def resolved(
+      secrets: Map[String, Secret[String]]
+  )(ref: (String, SecretRef)): Option[Secret[String]] = secrets.get(ref._1)
+
   /** Everything the decoder reads, so a caller can register the keys with an unknown-key check.
     *
     * Returned rather than written down twice: a key that is decoded but not registered becomes an "unknown
@@ -94,7 +115,7 @@ object ClusterSecurityConfig {
           .mapN((_, plaintext) => plaintext)
       case "SSL" =>
         (rejectMechanism(reader, "SSL"), reader.tls)
-          .mapN((_, tls) => draft(Map.empty, _ => ClusterSecurity.Ssl(tls)))
+          .mapN((_, tls) => draft(tls.secretRefs, secrets => ClusterSecurity.Ssl(tls.assemble(secrets))))
       case "SASL_PLAINTEXT" => sasl(reader, SaslProtocol.SaslPlaintext, withTls = false)
       case "SASL_SSL" => sasl(reader, SaslProtocol.SaslSsl, withTls = true)
       case other =>
@@ -168,11 +189,14 @@ object ClusterSecurityConfig {
       protocol: SaslProtocol,
       withTls: Boolean
   ): Problems[ClusterSecurityDraft] = {
-    val tls: Problems[Option[TlsConfig]] =
+    val tls: Problems[Option[TlsDraft]] =
       if withTls then reader.tls.map(Some(_)) else None.validNel
-    (reader.required("mechanism", Mechanisms), tls).tupled.andThen { (mechanism, tlsConfig) =>
+    (reader.required("mechanism", Mechanisms), tls).tupled.andThen { (mechanism, tlsDraft) =>
       mechanismDraft(reader, mechanism).map { (refs, build) =>
-        draft(refs, secrets => ClusterSecurity.Sasl(protocol, build(secrets), tlsConfig))
+        draft(
+          refs ++ tlsDraft.fold(Map.empty[String, SecretRef])(_.secretRefs),
+          secrets => ClusterSecurity.Sasl(protocol, build(secrets), tlsDraft.map(_.assemble(secrets)))
+        )
       }
     }
   }
@@ -289,6 +313,10 @@ object ClusterSecurityConfig {
           ).invalidNel
       }
 
+    /** The same, for a leaf that may simply be absent. */
+    def optionalSecret(leaf: String): Option[(String, SecretRef)] =
+      raw(leaf).filter(_.nonEmpty).map(value => key(leaf) -> SecretRef.parse(value))
+
     def boolean(leaf: String, default: Boolean): Problems[Boolean] =
       raw(leaf).map(_.trim.toLowerCase) match {
         case None => default.validNel
@@ -319,40 +347,46 @@ object ClusterSecurityConfig {
 
     /** The TLS block. Every field is optional: a cluster with a certificate from a public CA needs none of
       * them, and that is by far the most common case.
+      *
+      * It answers with a [[TlsDraft]] rather than a `TlsConfig` for the same reason the SASL mechanisms do:
+      * the three passwords in here — the truststore's, the keystore's and the private key's — are secrets,
+      * and a secret in KUI may be written as a literal, as `env:NAME` or as `file:/path`. Resolving those
+      * needs an effect, so this phase collects the references and the second phase follows them.
       */
-    def tls: Problems[TlsConfig] =
+    def tls: Problems[TlsDraft] =
       (
         store("truststore"),
         store("keystore"),
         boolean("ssl.verifyHostname", default = true),
         list("ssl.enabledProtocols"),
         list("ssl.cipherSuites"),
-        keyPassword
+        optionalSecret("ssl.keyPassword").validNel
       ).mapN { (trust, keys, verify, protocols, ciphers, keyPass) =>
-        TlsConfig(
-          truststore = trust.map((src, pwd, kind) => TrustStoreRef(src, pwd, kind)),
-          keystore = keys.map((src, pwd, kind) => KeyStoreRef(src, pwd, keyPass, kind)),
-          verifyHostname = verify,
-          enabledProtocols = protocols,
-          cipherSuites = ciphers
+        val refs =
+          (trust.flatMap(_._2).toList ++ keys.flatMap(_._2).toList ++ keyPass.toList).toMap
+
+        TlsDraft(
+          refs,
+          secrets =>
+            TlsConfig(
+              truststore =
+                trust.map((src, pwd, kind) => TrustStoreRef(src, pwd.flatMap(resolved(secrets)), kind)),
+              keystore = keys.map((src, pwd, kind) =>
+                KeyStoreRef(src, pwd.flatMap(resolved(secrets)), keyPass.flatMap(resolved(secrets)), kind)
+              ),
+              verifyHostname = verify,
+              enabledProtocols = protocols,
+              cipherSuites = ciphers
+            )
         )
       }
 
-    private def keyPassword: Problems[Option[Secret[String]]] =
-      raw("ssl.keyPassword").filter(_.nonEmpty).map(SecretRef.parse) match {
-        case Some(SecretRef.Literal(value)) => Some(Secret(value)).validNel
-        case Some(_) =>
-          problem(
-            "ssl.keyPassword",
-            "must be a literal value here; env: and file: references are resolved for SASL credentials only"
-          ).invalidNel
-        case None => None.validNel
-      }
-
-    private def store(which: String): Problems[Option[(StoreSource, Option[Secret[String]], StoreType)]] = {
+    private def store(
+        which: String
+    ): Problems[Option[(StoreSource, Option[(String, SecretRef)], StoreType)]] = {
       val location = raw(s"ssl.$which.location").map(_.trim).filter(_.nonEmpty)
       val inline = raw(s"ssl.$which.inline").map(_.trim).filter(_.nonEmpty)
-      val password = raw(s"ssl.$which.password").filter(_.nonEmpty).map(Secret.apply)
+      val password = optionalSecret(s"ssl.$which.password")
       (location, inline) match {
         case (Some(_), Some(_)) =>
           problem(

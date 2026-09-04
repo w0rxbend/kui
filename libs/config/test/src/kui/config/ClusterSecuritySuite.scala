@@ -284,4 +284,101 @@ final class ClusterSecuritySuite extends KuiSuite {
       }
     }
   }
+
+  // -------------------------------------------------------------------------------------------
+  // The TLS passwords are secrets too
+  // -------------------------------------------------------------------------------------------
+
+  /** The failure these three cases pin, in full, because it cost a day to find.
+    *
+    * `deployment/examples/production.yaml` — the file a new operator copies first — writes the truststore
+    * password as `password: "env:KUI_ANALYTICS_TRUSTSTORE_PASSWORD"`. The decoder used to wrap whatever it
+    * found there in `Secret` verbatim, without parsing the `env:` prefix, so the password Kafka was given was
+    * the fourteen-character string "env:KUI_ANALY…" rather than the value of that variable.
+    *
+    * Nothing said so. The configuration loaded, KUI started, and `Admin.create` then threw while opening the
+    * PKCS12 store — which the cluster service reports as `KUI-UPSTREAM-UNAVAILABLE`, the same code a broker
+    * that is simply switched off produces. The secured cluster sat on the dashboard saying "unavailable"
+    * for ever, and the one place the real cause could have been read was the exception class name that
+    * nothing logged.
+    */
+  private def tlsOf(security: ClusterSecurity): kui.kernel.cluster.TlsConfig =
+    security match {
+      case ClusterSecurity.Sasl(_, _, Some(tls)) => tls
+      case ClusterSecurity.Ssl(tls) => tls
+      case other => fail(s"expected a security model carrying TLS, got $other")
+    }
+
+  private def securedCluster(extra: String): String =
+    cluster(
+      s"""        protocol: SASL_SSL
+         |        mechanism: SCRAM-SHA-512
+         |        username: kui
+         |        password: env:KUI_PW
+         |        ssl:
+         |$extra""".stripMargin
+    )
+
+  test("aTruststorePasswordIsReadFromTheEnvironmentLikeEveryOtherSecret") {
+    val security = securityOf(
+      securedCluster("""          truststore:
+                       |            location: /etc/kui/certs/kafka-ca.p12
+                       |            password: env:KUI_TRUSTSTORE_PW
+                       |            type: PKCS12""".stripMargin),
+      env = Map("KUI_PW" -> "scram", "KUI_TRUSTSTORE_PW" -> "the-real-store-password")
+    )
+
+    assertEquals(
+      tlsOf(security).truststore.flatMap(_.password).map(_.value),
+      Some("the-real-store-password")
+    )
+  }
+
+  test("aKeystorePasswordComesFromTheEnvironmentAndAKeyPasswordFromAMountedFile") {
+    // `file:` is how Kubernetes and Docker Compose deliver a secret, so it is checked with a real file
+    // rather than asserted to be "the same code path" as `env:`.
+    val keyFile = java.nio.file.Files.createTempFile("kui-key-password", ".txt")
+    val _ = java.nio.file.Files.writeString(keyFile, "the-real-key-password\n")
+
+    try {
+      val security = securityOf(
+        securedCluster(s"""          keystore:
+                          |            location: /etc/kui/certs/client.p12
+                          |            password: env:KUI_KEYSTORE_PW
+                          |            type: PKCS12
+                          |          keyPassword: file:$keyFile""".stripMargin),
+        env = Map("KUI_PW" -> "scram", "KUI_KEYSTORE_PW" -> "the-real-keystore-password")
+      )
+
+      assertEquals(
+        tlsOf(security).keystore.flatMap(_.password).map(_.value),
+        Some("the-real-keystore-password")
+      )
+      assertEquals(
+        tlsOf(security).keystore.flatMap(_.keyPassword).map(_.value),
+        Some("the-real-key-password")
+      )
+    } finally {
+      val _ = java.nio.file.Files.deleteIfExists(keyFile)
+    }
+  }
+
+  test("aTlsPasswordThatNamesAnUnsetVariableIsAStartupFailureAndNotAWrongPassword") {
+    val problems = load(
+      securedCluster("""          truststore:
+                       |            location: /etc/kui/certs/kafka-ca.p12
+                       |            password: env:KUI_TRUSTSTORE_PW
+                       |            type: PKCS12""".stripMargin),
+      env = Map("KUI_PW" -> "scram")
+    ) match {
+      case Left(errors) => errors.problems.toList
+      case Right(_) => fail("expected the load to fail because KUI_TRUSTSTORE_PW is not set")
+    }
+
+    assertEquals(problems.map(_.key), List("kui.clusters.0.security.ssl.truststore.password"))
+    assert(
+      problems.head.problem.contains("KUI_TRUSTSTORE_PW"),
+      clue = s"the problem should name the variable: ${problems.head.problem}"
+    )
+  }
 }
