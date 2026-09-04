@@ -9,6 +9,7 @@ import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServer, ClusterServiceConfig, ClusterWiring}
 import kui.config.ServerConfig
+import kui.config.UpstreamServiceConfig
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.KuiServer
@@ -91,7 +92,10 @@ object AllInOneFixture {
       ClusterApi.Id,
       s"http://localhost:${binding.port}",
       codec,
-      backend
+      backend,
+      // The same bound the all-in-one gives its in-process client, so this half of the comparison is
+      // configured like the half it is being compared against.
+      UpstreamServiceConfig.DefaultTimeout
     )
 
   /** Both clients over one service, ready to be asked the same question. */

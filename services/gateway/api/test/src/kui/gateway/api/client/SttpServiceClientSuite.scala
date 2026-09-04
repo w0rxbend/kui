@@ -280,6 +280,34 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
     } yield assert(outcome.isRight, s"the fast call should have succeeded, got $outcome")
   }
 
+  test("theInProcessClientBoundsACallSoNettyIsNeverTheOneThatAnswers") {
+    // The all-in-one deployment builds its client with `over` rather than `resource`, because the service on
+    // the far side is an object in this JVM and there is no connection to refuse. What that argument missed
+    // is that the object then talks to Kafka, and a `AdminClient` whose broker has vanished takes its own
+    // thirty-second budget to give up — while the HTTP server in front gives up after twenty and answers with
+    // a bare 503: no body, no error code, no correlation id. Against the running quickstart with the broker
+    // stopped, `GET /api/v1/clusters/quickstart/consumer-groups/order-fulfilment` did exactly that, and the
+    // screen reported "The server sent something KUI could not read" for a switched-off broker.
+    //
+    // So `over` takes a call timeout, and a call that overruns it becomes the same `InfrastructureError`
+    // the networked shape produces — which is what makes the two deployments answer alike (ADR-005).
+    for {
+      stub <- Fixture.stub(ServiceBehaviour.Slow(30.seconds, ServiceBehaviour.Ok(clusterBody)))
+      client = SttpServiceClient.over[IO](
+        Fixture.Cluster,
+        "http://cluster.in-process",
+        PrincipalCodec.inProcess[IO],
+        stub.backend,
+        callTimeout = 200.millis
+      )
+      result <- client.call(getCluster, cluster)(Fixture.context())
+    } yield assertEquals(
+      result.left.map(_.code),
+      Left(ErrorCode.Timeout),
+      s"expected a timeout error, got $result"
+    )
+  }
+
   test("returnsTheDecodedOutputOnSuccess") {
     for {
       stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))

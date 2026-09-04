@@ -1,5 +1,7 @@
 package kui.allinone
 
+import scala.concurrent.duration.FiniteDuration
+
 import cats.effect.kernel.Async
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.client4.impl.cats.implicits.*
@@ -8,6 +10,7 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
+import kui.config.UpstreamServiceConfig
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.application.client.ServiceClient
 import kui.kernel.ServiceId
@@ -52,6 +55,12 @@ import kui.security.PrincipalCodec
   * this shape is at the code level and not at the process level — a use case that fails is still reported as
   * `Unavailable` and the UI still degrades, but a JVM that dies takes everything with it. ADR-005 says so and
   * so does `README.md`; nobody should read this file and conclude otherwise.
+  *
+  * There *is* a call timeout, and there has to be. See `SttpServiceClient.over`: the service on the far side
+  * of this call is in this JVM, but the Kafka broker it talks to may not exist any more, and a `AdminClient`
+  * takes thirty seconds to admit that. Without a bound the HTTP server in front gives up first, at twenty,
+  * with a bare `503` carrying no error code and no correlation id — a failure shape KUI otherwise never
+  * produces, and one the browser can only report as its own inability to read the answer.
   */
 object InProcessServiceClient {
 
@@ -85,7 +94,8 @@ object InProcessServiceClient {
       service: ServiceId,
       serverEndpoints: List[ServerEndpoint[Fs2Streams[F], F]],
       interceptors: List[Interceptor[F]],
-      principals: PrincipalCodec[F]
+      principals: PrincipalCodec[F],
+      callTimeout: FiniteDuration = UpstreamServiceConfig.DefaultTimeout
   ): ServiceClient[F] =
     SttpServiceClient.over[F](
       service,
@@ -94,6 +104,7 @@ object InProcessServiceClient {
       TapirStreamStubInterpreter[F, Fs2Streams[F]](
         interceptors,
         StreamBackendStub[F, Fs2Streams[F]](summon)
-      ).whenServerEndpointsRunLogic(serverEndpoints).backend()
+      ).whenServerEndpointsRunLogic(serverEndpoints).backend(),
+      callTimeout
     )
 }

@@ -1,6 +1,8 @@
 package kui.gateway.api.client
 
 import cats.data.NonEmptyList
+import scala.concurrent.duration.FiniteDuration
+
 import cats.effect.kernel.{Async, Clock, Resource}
 import cats.syntax.all.*
 import fs2.Stream
@@ -80,7 +82,10 @@ object SttpServiceClient {
           principals,
           calls = upstream.backend,
           streaming = underlying,
-          circuits = upstream.circuitStates
+          circuits = upstream.circuitStates,
+          // `UpstreamClient` already bounds the call, retries inside that bound and trips a breaker on it.
+          // A second timeout here would only be a slower copy of the first.
+          callTimeout = None
         )
       )
 
@@ -101,17 +106,43 @@ object SttpServiceClient {
     * @param baseUrl
     *   the address requests are built against. In the in-process shape nothing dials it, but the path it
     *   produces is what gets hashed into the request digest, so it still has to be a well-formed URL.
+    * ==One protection this shape still needs, and why==
+    *
+    * A bulkhead and a circuit breaker guard against another *process*; a timeout does not. The object on the
+    * far side of this call is in this JVM, but what it does is talk to Kafka, and a Kafka `AdminClient` whose
+    * broker has vanished takes its own `apiTimeout` — thirty seconds by default — to give up. The HTTP server
+    * in front of all of this gives up after twenty, and when Netty is the one that gives up first the client
+    * gets a bare `503` with no body, no error code and no correlation id, and the browser reports "the server
+    * sent something KUI could not read" for what is only a broker being switched off.
+    *
+    * So this shape keeps the call timeout and drops the rest, which is a smaller claim than the one this
+    * method used to make. Nothing about resilience is being simulated: the point is that KUI, and not Netty,
+    * is what answers.
+    *
     * @param backend
     *   where a built request is sent. For the all-in-one that is Tapir's stub interpreter over the service's
     *   own routes and interceptors; for a suite it can be any stub at all.
+    * @param callTimeout
+    *   how long one request/response call may take before it becomes `KUI-UPSTREAM-TIMEOUT`. It must be
+    *   shorter than the HTTP server's own response timeout, or the server answers first and the answer is not
+    *   KUI's. Streaming is not bounded by it, for the reason `stream` records.
     */
   def over[F[_]: Async](
       service: ServiceId,
       baseUrl: String,
       principals: PrincipalCodec[F],
-      backend: StreamBackend[F, Fs2Streams[F]]
+      backend: StreamBackend[F, Fs2Streams[F]],
+      callTimeout: FiniteDuration
   ): ServiceClient[F] =
-    new Impl[F](service, baseUrl, principals, calls = backend, streaming = backend, circuits = Stream.empty)
+    new Impl[F](
+      service,
+      baseUrl,
+      principals,
+      calls = backend,
+      streaming = backend,
+      circuits = Stream.empty,
+      callTimeout = Some(callTimeout)
+    )
 
   /** The gateway's per-service upstream policy, derived from the two knobs an operator sets.
     *
@@ -153,7 +184,8 @@ object SttpServiceClient {
       principals: PrincipalCodec[F],
       calls: Backend[F],
       streaming: StreamBackend[F, Fs2Streams[F]],
-      circuits: Stream[F, CircuitEvent]
+      circuits: Stream[F, CircuitEvent],
+      callTimeout: Option[FiniteDuration]
   ) extends ServiceClient[F] {
 
     private val baseUri: Option[sttp.model.Uri] = uri"$baseUrl".some
@@ -285,11 +317,29 @@ object SttpServiceClient {
       Header(Correlation.HeaderName, ctx.correlationId.value) ::
         ctx.cluster.map(cluster => Header(ClusterHeader, cluster.value)).toList
 
-    private def send[O](request: Request[O]): F[Either[KuiError, Response[O]]] =
-      request
-        .send(calls)
+    /** Sends, and gives up.
+      *
+      * `callTimeout` is `None` for the networked shape, where [[UpstreamClient]] has already applied one
+      * further out, and is set for the in-process shape, where nothing else does. Either way a request that
+      * does not finish becomes `InfrastructureError.Timeout` — the same error, the same envelope, the same
+      * `503` and the same capability signal — which is what ADR-005 requires of the two deployments.
+      */
+    private def send[O](request: Request[O]): F[Either[KuiError, Response[O]]] = {
+      val sent = request.send(calls)
+
+      callTimeout
+        .fold(sent)(bound =>
+          Async[F].timeoutTo(
+            sent,
+            bound,
+            Async[F].raiseError[Response[O]](
+              kui.http.upstream.UpstreamFailure(InfrastructureError.Timeout(service.value, bound.toMillis))
+            )
+          )
+        )
         .attempt
         .map(_.leftMap(transportError))
+    }
   }
 
   /** The token used only to shape the request that is about to be signed. It never leaves the process: the
