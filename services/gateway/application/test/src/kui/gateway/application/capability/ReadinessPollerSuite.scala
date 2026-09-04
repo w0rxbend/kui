@@ -16,9 +16,8 @@ import kui.testkit.fakes.FakeStructuredLogger
 /** That the gateway notices, by itself, within one interval, when a service dies or comes back.
   *
   * All of it on `TestControl`'s virtual clock. These are assertions about a ten-second poll interval, a
-  * five-second poll budget and a one-minute log rate limit; running them in real time would make the
-  * suite take minutes and would make it flaky on a loaded machine, which is the last place flakiness
-  * belongs.
+  * five-second poll budget and a one-minute log rate limit; running them in real time would make the suite
+  * take minutes and would make it flaky on a loaded machine, which is the last place flakiness belongs.
   */
 final class ReadinessPollerSuite extends CatsEffectSuite {
 
@@ -266,8 +265,8 @@ final class ReadinessPollerSuite extends CatsEffectSuite {
 
   /** A `StubServiceClient` that also records how many of its calls were in flight at the same time.
     *
-    * It wraps rather than replaces the stub, so the answers, the health `Ref` and the counts stay exactly
-    * the ones every other test in this suite reasons about; the only thing added is the peak.
+    * It wraps rather than replaces the stub, so the answers, the health `Ref` and the counts stay exactly the
+    * ones every other test in this suite reasons about; the only thing added is the peak.
     */
   private object Concurrency {
 

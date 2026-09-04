@@ -27,9 +27,9 @@ import kui.security.{
   * is a plain function of its arguments and can be tested without a server.
   *
   * @param digest
-  *   the method and path the token must have been minted for (ADR-020). A token for `GET /internal/v1/clusters`
-  *   is refused on `DELETE /internal/v1/topics/orders`, which is what stops an intercepted header from being
-  *   replayed against a more destructive call.
+  *   the method and path the token must have been minted for (ADR-020). A token for
+  *   `GET /internal/v1/clusters` is refused on `DELETE /internal/v1/topics/orders`, which is what stops an
+  *   intercepted header from being replayed against a more destructive call.
   * @param correlationId
   *   the id the caller supplied, when it supplied a usable one. `None` means one has to be generated, which
   *   is the caller's job because generating it is an effect.

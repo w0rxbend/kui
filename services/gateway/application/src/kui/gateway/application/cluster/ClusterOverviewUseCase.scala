@@ -13,8 +13,8 @@ import kui.contracts.cluster.ClusterRowDto
 import kui.gateway.application.capability.{CapabilityRegistry, CapabilitySignals, ReadinessSignal}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.gateway.contract.dto.{ClusterOverviewDto, ClusterOverviewRow}
-import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.CorrelationId
+import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.security.Principal
 
 /** The dashboard's answer, assembled from one upstream call and the gateway's own knowledge.

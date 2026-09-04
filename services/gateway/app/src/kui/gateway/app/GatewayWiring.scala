@@ -17,11 +17,8 @@ import kui.config.PrincipalKeyConfig
 import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.api.openapi.DocsRoutes
-import kui.kernel.ServiceId
-import kui.gateway.api.ClusterOverviewRoutes
-import kui.gateway.application.cluster.ClusterOverviewUseCase
 import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
-import kui.gateway.api.{CapabilityRoutes, EdgeHeaders, GatewayApi, InfoRoutes}
+import kui.gateway.api.{CapabilityRoutes, ClusterOverviewRoutes, EdgeHeaders, GatewayApi, InfoRoutes}
 import kui.gateway.application.capability.{
   CapabilityRegistry,
   CapabilitySignals,
@@ -30,9 +27,11 @@ import kui.gateway.application.capability.{
   RegistryConfig
 }
 import kui.gateway.application.client.ServiceClients
+import kui.gateway.application.cluster.ClusterOverviewUseCase
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
 import kui.http.health.ReadinessCheck
 import kui.http.{BasePath, Cors, ErrorInterceptor}
+import kui.kernel.ServiceId
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
 

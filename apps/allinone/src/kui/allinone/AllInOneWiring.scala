@@ -5,11 +5,10 @@ import java.time.Instant
 import cats.Parallel
 import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
+import fs2.io.file.Files
 import org.typelevel.log4cats.StructuredLogger
 
 import kui.cluster.api.ClusterApi
-import fs2.io.file.Files
-
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
 import kui.gateway.api.InfoRoutes
 import kui.gateway.app.{GatewayServer, GatewayWiring}

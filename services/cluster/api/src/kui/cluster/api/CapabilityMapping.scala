@@ -5,9 +5,9 @@ import io.scalaland.chimney.dsl.*
 
 import kui.cluster.application.{
   CapabilityReport,
+  CapabilityState as ApplicationCapabilityState,
   ClusterCapabilityReport,
-  ClusterService,
-  CapabilityState as ApplicationCapabilityState
+  ClusterService
 }
 import kui.contracts.capability.{
   CapabilityState,
