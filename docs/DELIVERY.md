@@ -33,6 +33,7 @@ tested rather than asserted.
 | M4 Consumer groups | groups, members, assignments, lag, offset reset | done, wizard included |
 | Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | done |
 | Configuration examples | a plain example, a secured example, and the reference for every key | built |
+| Demonstration environment | three unlike clusters, one KUI, and a switch to fail one of them | done, verified from a cold machine |
 
 M3 and M4 were both recorded here earlier on 2026-09-04 as "part built, nothing reachable": modules
 that compiled and were tested, with no path from a browser to any of them, and then as "reading
@@ -649,3 +650,132 @@ caching header that white-screens every upgrade, a receipt destroyed by the refr
 dashboard advertising that the product was not installed. The suite is good at what it was pointed
 at. It was not pointed at the seams — deploying over a running browser, a screen outliving the data
 under it — and that is where the remaining risk is.
+
+## Point 6, proved rather than asserted, 2026-09-04 (the demonstration environment)
+
+Point 6 of the bar — *"have any part of it fail without the rest becoming unusable"* — was until now
+demonstrated only at the level of KUI's own services: `deployment/compose/` kills `kui-cluster` and
+the gateway keeps answering. That is half the claim. The other half is a *cluster* failing, which a
+single-broker quickstart physically cannot show. `deployment/demo/` is that other half, and this
+section records what it actually did rather than what it was built to do.
+
+### The newcomer path, timed from nothing
+
+Starting from a machine with no `kui-allinone` image, no `deployment/secured/certs/`, and no
+containers, networks or volumes — one command, no second attempt, no undocumented step:
+
+```
+$ deployment/demo/demo.sh
+The KUI image kui-allinone:0.1.0-SNAPSHOT is not on this machine, so it has to be built.
+  EXPECT SEVERAL MINUTES the first time. It happens once: the image is kept, and later runs
+  start immediately.
+...
+#9 DONE 213.3s                  <- compiling KUI from source, in a container
+#11 DONE 16.7s                  <- exporting the image
+Generating the secured cluster's demonstration certificate authority (once, about ten seconds).
+Certificate stored in file <ca.pem>
+...
+  KUI is running:  http://localhost:18080/ui/
+
+./demo.sh up  0.75s user 0.43s system 0% cpu 4:41.15 total
+```
+
+**4 min 41 s cold**, of which 3 min 50 s is the one-time compile and about 10 s the certificate
+authority. A second `up` after a full `down`: **44 s**, with all three clusters seeded and `ok`.
+
+### Three clusters that are genuinely unalike
+
+Read back through KUI's own API, not the seed's logs:
+
+```
+development  ok    brokers=1 PLAINTEXT              4 topics   2 groups
+production   ok    brokers=3 PLAINTEXT             15 topics   7 groups
+secured      ok    brokers=1 SASL_SSL SCRAM-SHA-512 4 topics   3 groups
+```
+
+Production carries the shapes a one-broker cluster cannot have: `analytics.pageviews` at 24
+partitions / replication factor 3 / 8 000 messages, `clickstream.raw` at replication factor 2, and
+lag that varies by three orders of magnitude across groups (`analytics-rollup` 8 000,
+`order-fulfilment` 9, `payments-ledger-sync` 0). Each cluster has exactly one genuinely **live**
+group — `order-notifier` (1 member), `search-indexer` (3 members), `secure-audit-stream` (1 member)
+— reported `STABLE` next to the `EMPTY` ones, so the difference between "nobody is reading this" and
+"somebody is reading this and is behind" is visible rather than described.
+
+The secured cluster needs nothing from the reader. Its records come back deserialized over
+`SASL_SSL`, JSON parsed and headers intact, against a certificate authority the script generated
+during the same `up`:
+
+```
+event: message
+data: {"partition":2,"offset":7,...,"value":{"text":"{\"orderId\":\"ORD-10249\",...}","kind":"json",
+       "serde":"Json"},"headers":{"trace-id":"6ab4c2e70d15","event-type":"OrderPlaced",...}}
+```
+
+### The claim itself
+
+**Stopping a whole cluster.** With Production stopped, Development and Secured answered in **10 ms
+and 11 ms** — no slowdown, no shared timeout, no error borrowed from a neighbour. Production did not
+vanish and did not lie:
+
+```
+summary: {"status": "stale", "fetchedAt": "2026-09-04T13:04:58Z", "reason": "UPSTREAM_UNAVAILABLE"}
+topics:  {"status": "stale", "fetchedAt": "2026-09-04T13:04:28Z", "reason": "UPSTREAM_UNAVAILABLE"}
+         topics still listed: 15
+```
+
+It stayed navigable, kept the 15 topics it had last read, and said when it read them. `start prod`
+restored it with no intervention: by the time the command returned, both the summary and the topic
+list were `ok` again.
+
+**Stopping one broker of three** is the subtler case, and the one that separates "the cluster is
+gone" from "the cluster is degraded". Production stayed `ok` and kept serving; `brokerCount` fell
+from 3 to 2; and after Kafka's ISR shrink interval the topic table showed the cost:
+
+```
+analytics.pageviews    p=24  rf=3 outOfSync=24
+orders.v1              p=12  rf=3 outOfSync=12
+clickstream.raw        p=12  rf=2 outOfSync=8
+...                                 TOTAL outOfSyncReplicas: 96
+```
+
+Kafka's own `--under-replicated-partitions` reported **147** for the same moment. The two agree
+exactly: KUI's 96 covers the 15 topics it shows, and the missing 51 are `__consumer_offsets` (50)
+and `_schemas` (1), both hidden behind the "show internal topics" switch by this deployment's
+`kui.topics.internalPrefix: "_"`.
+
+**Stopping the secured cluster** produced `stale` with reason `UPSTREAM_TIMEOUT` — a different
+reason from the stopped Production cluster's `UPSTREAM_UNAVAILABLE`, which is the distinction that
+stops an operator reading a TLS or credential problem as an unplugged broker.
+
+**Teardown.** `demo.sh down` left zero containers, zero networks and zero volumes; the Compose file
+declares no volumes at all, so broker data lives in the container layer and goes with it.
+
+### What this pass found
+
+One documentation defect, fixed: `deployment/demo/kui-demo.yaml` explained its
+`internalPrefix: "_"` setting by claiming the topics screen would then "show the seven topics that
+are yours". No cluster in the demonstration has seven topics — Production has 15, the other two have
+4 each. The comment predates the per-cluster seed profiles.
+
+One product defect, **found and not fixed**, because fixing it is a breaking contract change that
+does not belong in a demonstration-environment pass:
+`services/cluster/api/src/kui/cluster/api/ClusterMapping.scala:95` populates the broker DTO field
+`inSyncReplicaCount` from `row.replicas` — the broker's *total* replica count, not its in-sync one.
+The two are equal on a healthy cluster, which is why nothing caught it, and they diverge exactly
+when an operator needs the number: with one broker of three stopped, both surviving brokers still
+reported `inSyncReplicaCount: 147`, unchanged from before the failure. The consequence on screen is
+currently muted rather than wrong — the brokers page renders this as a ratio against
+`partitionCount`, which `ClusterMapping` hard-codes to `None`, so the "In-sync" figure shows `—`
+instead of a wrong number — but the API field is untrue as it stands, and any consumer of
+`/api/v1/clusters/{id}/brokers` reading it will be misled during precisely the incident it exists
+for. The honest fix is to rename the field to `replicaCount`, which touches the contract, its golden
+documents, the OpenAPI document and the frontend column.
+
+### What was not checked
+
+The browser was not driven in this pass: no Chrome extension was connected in this environment, so
+every claim above is from KUI's own HTTP API and from Kafka's command-line tools, not from
+screenshots. The cluster switcher, the topic and group tables, the message viewer and the stale-data
+overlay were each verified through the endpoint that backs them and through the served
+`/ui/` bundle returning 200 — but nobody looked at the rendered pixels. That is the one part of the
+demonstration this pass asserts rather than proves.

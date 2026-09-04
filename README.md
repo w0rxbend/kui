@@ -40,8 +40,8 @@ into separate containers for production. No code changes between the two.
 
 ## Quick start
 
-Three ways in. The first needs only Docker; the other two need a JDK 21 and this repository, and the
-third also needs Docker.
+Four ways in. The first two need only Docker; the other two need a JDK 21 and this repository, and
+the last also needs Docker.
 
 ### Just show me it running, with a Kafka behind it
 
@@ -65,6 +65,45 @@ explains what runs, why the broker's readiness check is what it is, and how to r
 One caveat if you have run KUI before: the quickstart reuses whatever `kui-allinone` image is
 already on the machine and only builds one when none is there, so after changing code run
 `./mill deployment.docker.allinone.docker.build` first or you will start the previous build.
+
+### Show me three clusters at once, and one of them failing
+
+```
+deployment/demo/demo.sh
+```
+
+Also Docker-only, and the demonstration to run if you only run one. It starts **three genuinely
+different Kafka clusters** and one KUI that already knows all three, so the cluster switcher has
+something real in it:
+
+| Cluster | Shape | Seeded with |
+| --- | --- | --- |
+| Development | one broker, `PLAINTEXT` | 4 topics, replication factor 1, a leftover `scratch.jm-test` nobody cleaned up |
+| Production | three brokers, `PLAINTEXT` | 15 topics at replication factor 3 with `min.insync.replicas=2`, 20 000+ messages, 7 consumer groups |
+| Secured | one broker, `SASL_SSL` + `SCRAM-SHA-512` | 4 topics behind a password and a private certificate authority the script generates for you |
+
+Nothing has to be installed but Docker, and nothing has to be configured — if the KUI image is
+missing the script builds it in a container, and if the demonstration certificate authority is
+missing it generates that in a container too. Measured on a 16-core laptop from a machine with no
+KUI image, no certificates and no containers, `demo.sh` printed its URL after **4 min 41 s**, of
+which 3 min 50 s was the one-time compile. Every run after that is **about 45 seconds**.
+
+Then switch one cluster off and watch the other two carry on:
+
+```
+deployment/demo/demo.sh stop prod          # or: dev, secured, prod-broker
+deployment/demo/demo.sh start prod
+deployment/demo/demo.sh down
+```
+
+With Production stopped, Development and Secured kept answering in **10–11 ms**, and Production
+itself did not disappear: it went `stale` with the reason `UPSTREAM_UNAVAILABLE`, kept serving the
+15 topics it had last read, and said when it read them. `start prod` brought it back with nothing
+pressed. `stop prod-broker` is the subtler one — it stops a single broker of three, and the cluster
+keeps serving while KUI's topic table shows 96 replicas fallen out of sync, which is exactly what
+Kafka itself reports for the same moment.
+
+[`deployment/demo/README.md`](deployment/demo/README.md) has the seven-step walkthrough.
 
 ### See the interface, and change it
 

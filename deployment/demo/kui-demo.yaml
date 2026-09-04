@@ -38,8 +38,9 @@ kui:
     # is `__`, which catches Kafka's own `__consumer_offsets`. This lowers it to a single underscore
     # because the seed data includes `_schemas` -- the topic Confluent Schema Registry keeps its
     # schemas in -- and a single leading underscore is the convention infrastructure topics use.
-    # With this set, the topics screen shows the seven topics that are yours and hides the rest
-    # behind the "show internal topics" switch.
+    # With this set, the topics screen shows the topics that are yours -- 15 on Production, 4 each
+    # on Development and Secured -- and hides `_schemas` and `__consumer_offsets` behind the
+    # "show internal topics" switch.
     internalPrefix: "_"
 
   telemetry:
