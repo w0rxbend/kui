@@ -46,6 +46,43 @@ final case class OffsetRange private (from: Offset, until: Offset) {
   /** Whether one offset falls in the range. */
   def contains(offset: Offset): Boolean =
     offset.value >= from.value && offset.value < until.value
+
+  /** The last `n` offsets of this range, clamped at `from`.
+    *
+    * This is the backward window walker's one primitive (M3, MSG-005). Browsing backwards means reading the
+    * records immediately before a position, and Kafka can only read forwards, so the walker repeatedly takes
+    * the tail of what is left and reads that window forwards. Asking for more than the range holds gives the
+    * whole range rather than a `from` below the log start, which is what stops a walk near the beginning of a
+    * partition from seeking to a negative offset.
+    */
+  def tail(n: Long): OffsetRange =
+    if n <= 0L then OffsetRange(until, until)
+    else if n >= size then this
+    else OffsetRange(Offset.unsafe(until.value - n), until)
+
+  /** Everything before [[tail]] `n`.
+    *
+    * `tail(n)` and `dropTail(n)` tile this range exactly: they are adjacent, their sizes sum to `size`, and
+    * neither escapes the bounds. The walker's termination argument rests on that, which is why it is a
+    * property test and not a comment.
+    */
+  def dropTail(n: Long): OffsetRange =
+    if n <= 0L then this
+    else if n >= size then OffsetRange(from, from)
+    else OffsetRange(from, Offset.unsafe(until.value - n))
+
+  /** This range narrowed to `bounds`, and empty when the two do not overlap.
+    *
+    * Every explicit offset a user sends goes through this, so a seek to offset 5 on a partition whose log
+    * starts at 900 reads from 900 rather than failing — the reference behaviour, and the one an operator
+    * expects after retention has moved underneath their bookmark.
+    */
+  def clampTo(bounds: OffsetRange): OffsetRange = {
+    val begin = math.max(from.value, bounds.from.value)
+    val end = math.min(until.value, bounds.until.value)
+    if begin >= end then OffsetRange(Offset.unsafe(begin), Offset.unsafe(begin))
+    else OffsetRange(Offset.unsafe(begin), Offset.unsafe(end))
+  }
 }
 
 object OffsetRange {
