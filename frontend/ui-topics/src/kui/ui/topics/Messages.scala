@@ -134,6 +134,18 @@ object Messages {
   /** The chip standing in for the replicas that did not fit on the row. Its tooltip names them all. */
   def moreReplicas(count: Int): String = s"+$count"
 
+  /** The table before the first read has come back.
+    *
+    * The alternative — and what this screen did until it was caught in a browser — is to show "No partitions:
+    * the broker reported no partitions for this topic, which is unusual" for the second or two the request is
+    * in flight, on a topic that has twenty-four of them. That is not a slow screen, it is a screen that
+    * states something false and then quietly replaces it, and a user who looks away at the wrong moment
+    * carries the false version away with them.
+    */
+  val PartitionsLoadingTitle: String = "Reading partitions"
+
+  val PartitionsLoading: String = "Asking the cluster which partitions this topic has."
+
   val NoPartitionsTitle: String = "No partitions"
 
   val NoPartitions: String =

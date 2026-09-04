@@ -85,6 +85,14 @@ object TopicDetailPage {
 
     val detail: Signal[Option[TopicDetailDto]] = topicSection.map(_.flatMap(_.toOption))
 
+    /** Whether the very first read of this topic is still in flight.
+      *
+      * `pending` on its own is not this: a background refresh of a topic already on screen is also pending,
+      * and a table that emptied itself into a loading state every thirty seconds would be worse than the
+      * defect this distinguishes. It is pending *and* nothing good has arrived yet.
+      */
+    val firstRead: Signal[Boolean] = overviewState.map(state => state.pending && state.lastGood.isEmpty)
+
     val notFound: Signal[Boolean] =
       overviewState.map(_.outcome.exists(_.left.exists(isNotFound)))
 
@@ -128,7 +136,12 @@ object TopicDetailPage {
       // E4's worked example. Every other write control in the product — create, alter, produce, resend,
       // purge, offset reset, group delete — gates the same way: one call to the store, one `Action`, and
       // the wrapper merges the answer with the capability state.
-      deletePermitted = permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicDelete)
+      deletePermitted = permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicDelete),
+      // Three permissions, not one "may administer". Kafka's model, and Kafbat's, distinguishes changing a
+      // topic from emptying it from removing it, and an operator is routinely trusted with one and not the
+      // next — purging a queue that has backed up is a normal day; deleting the topic is not.
+      editPermitted = permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicEdit),
+      purgePermitted = permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicMessagesDelete)
     )
 
     val ownTabs: Signal[List[Tab]] =
@@ -139,7 +152,7 @@ object TopicDetailPage {
           Tab(
             TopicTab.Overview.id,
             Messages.TabOverview,
-            () => overviewTab(detail, topicSection, partitionViewportHeight)
+            () => overviewTab(detail, topicSection, partitionViewportHeight, firstRead)
           ),
           Tab(
             TopicTab.Settings.id,
@@ -275,14 +288,16 @@ object TopicDetailPage {
   private def overviewTab(
       detail: Signal[Option[TopicDetailDto]],
       section: Signal[Option[Section[TopicDetailDto]]],
-      partitionViewportHeight: Var[Int]
+      partitionViewportHeight: Var[Int],
+      firstRead: Signal[Boolean]
   ): HtmlElement =
     PartitionTable(
       detail.map(_.map(_.partitions).getOrElse(Nil)),
       partitionViewportHeight,
       // Staleness is read from the same section the badge above the table is drawn from, so the two
       // can never disagree about whether this page is showing live data.
-      section.map(_.exists(staleReason(_).isDefined))
+      section.map(_.exists(staleReason(_).isDefined)),
+      firstRead
     )
 
   /** A topic that is not there is a different fact from a service that could not answer, and it gets a

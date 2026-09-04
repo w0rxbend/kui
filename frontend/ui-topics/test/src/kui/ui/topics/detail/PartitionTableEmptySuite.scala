@@ -19,12 +19,12 @@ import kui.ui.topics.Messages
   */
 final class PartitionTableEmptySuite extends FunSuite {
 
-  private def textOf(stale: Boolean): String = {
+  private def textOf(stale: Boolean, loading: Boolean = false): String = {
     val container = dom.document.createElement("div")
     dom.document.body.appendChild(container): Unit
     val root = render(
       container,
-      PartitionTable(Val(List.empty[PartitionDto]), Var(600), Val(stale))
+      PartitionTable(Val(List.empty[PartitionDto]), Var(600), Val(stale), Val(loading))
     )
 
     try container.textContent
@@ -50,5 +50,27 @@ final class PartitionTableEmptySuite extends FunSuite {
       !text.contains(Messages.NoPartitions),
       s"the stale table repeated the live read's sentence, which is false here: $text"
     )
+  }
+
+  /** Found in a browser against the demonstration environment: opening a topic with twenty-four partitions
+    * showed "No partitions - the broker reported no partitions for this topic, which is unusual" for the
+    * second the first request was in flight, and then replaced it with the twenty-four rows. The screen was
+    * not slow; it was wrong, and then it was right.
+    */
+  test("a table whose first read has not come back yet does not claim there are no partitions") {
+    val text = textOf(stale = false, loading = true)
+
+    assert(text.contains(Messages.PartitionsLoadingTitle), text)
+    assert(
+      !text.contains(Messages.NoPartitions),
+      s"a table that is still reading announced that the broker reported no partitions: $text"
+    )
+  }
+
+  test("loading wins over staleness, because nothing has been read yet to be stale") {
+    val text = textOf(stale = true, loading = true)
+
+    assert(text.contains(Messages.PartitionsLoadingTitle), text)
+    assert(!text.contains(Messages.NoPartitionsStale), text)
   }
 }

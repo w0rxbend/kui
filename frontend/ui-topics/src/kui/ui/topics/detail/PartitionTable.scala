@@ -31,7 +31,8 @@ object PartitionTable {
   def apply(
       partitions: Signal[List[PartitionDto]],
       viewportHeight: Var[Int] = Var(0),
-      stale: Signal[Boolean] = Val(false)
+      stale: Signal[Boolean] = Val(false),
+      loading: Signal[Boolean] = Val(false)
   ): HtmlElement = {
     val ordered: Signal[List[PartitionDto]] = partitions.map(_.sortBy(_.partition.value))
 
@@ -52,8 +53,10 @@ object PartitionTable {
       rowKey = _.partition.value.toString,
       emptyState = () =>
         div(
-          child <-- stale.map { degraded =>
-            if degraded then
+          child <-- loading.combineWith(stale).map { (pending, degraded) =>
+            if pending then
+              EmptyState(Messages.PartitionsLoadingTitle, description = Some(Messages.PartitionsLoading))
+            else if degraded then
               EmptyState(Messages.NoPartitionsStaleTitle, description = Some(Messages.NoPartitionsStale))
             else EmptyState(Messages.NoPartitionsTitle, description = Some(Messages.NoPartitions))
           }
