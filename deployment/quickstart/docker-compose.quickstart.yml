@@ -232,7 +232,14 @@ services:
   # halves of SD-001 worked.
   # ---------------------------------------------------------------------------------------------
   avro-seed:
-    image: apache/kafka:4.3.1
+    # The registry's own image, and not `apache/kafka` like the other two seed containers, for one
+    # blunt reason: this script talks to KUI and to the registry over HTTP and nothing else, so it
+    # needs `curl`, and the Apache Kafka image does not carry `curl` at all. It was written against
+    # `apache/kafka:4.3.1` on the assumption that a Linux image has `curl`; that image is Alpine
+    # with busybox `wget` and no `curl`, so every run of the quickstart failed here with
+    # `curl: command not found` and no Avro records were ever produced. The registry image is
+    # already being pulled by this same file, has bash, curl and sed, and adds no download.
+    image: apicurio/apicurio-registry:3.0.6
     container_name: kui-quickstart-avro-seed
     depends_on:
       schema-registry:

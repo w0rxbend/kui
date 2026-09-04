@@ -22,8 +22,10 @@
 # THE CONTRACT WITH WHOEVER RUNS THIS
 # ---------------------------------------------------------------------------------------------
 #
-#   Image        anything with bash and curl. The Compose file uses apache/kafka:4.3.1 because it
-#                is already pulled; nothing here needs Kafka's tools.
+#   Image        anything with bash, curl and sed. The Compose file uses the registry's own image,
+#                apicurio/apicurio-registry:3.0.6, because it is already being pulled and carries
+#                all three. NOT apache/kafka: nothing here needs Kafka's tools, and that image is
+#                Alpine with busybox wget and no curl at all.
 #   Entrypoint   /bin/bash, with this script's path as the argument.
 #   Environment  KUI_BASE_URL      — required, e.g. http://kui:8080
 #                KUI_CLUSTER_ID    — required, the cluster id in KUI's configuration
