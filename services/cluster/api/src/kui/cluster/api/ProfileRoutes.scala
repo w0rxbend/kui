@@ -78,19 +78,20 @@ object ProfileRoutes {
       logger: StructuredLogger[F],
       config: SseConfig
   ): ServerEndpoint[Fs2Streams[F], F] =
-    ClusterApi.SecuringStream[F](principals, rejections, logger)(ClusterStreamEndpoint.endpoint[F]) { _ => _ =>
-      Sse
-        .encode(
-          Sse.stream(
-            changes[F](registry),
-            config,
-            ClusterStreamEndpoint.EventName,
-            telemetry,
-            logger
+    ClusterApi.Securing[F](principals, rejections, logger).stream(ClusterStreamEndpoint.endpoint[F]) {
+      _ => _ => _ =>
+        Sse
+          .encode(
+            Sse.stream(
+              changes[F](registry),
+              config,
+              ClusterStreamEndpoint.EventName,
+              telemetry,
+              logger
+            )
           )
-        )
-        .asRight[KuiError]
-        .pure[F]
+          .asRight[KuiError]
+          .pure[F]
     }
 
   /** The registry's snapshots, as the differences between them.

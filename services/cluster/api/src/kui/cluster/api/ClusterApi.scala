@@ -3,17 +3,16 @@ package kui.cluster.api
 import java.time.Instant
 
 import cats.Parallel
-import cats.effect.kernel.{Async, Clock, Sync}
+import cats.effect.kernel.{Async, Sync}
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Counter
 import sttp.apispec.openapi.OpenAPI
 import sttp.capabilities.fs2.Fs2Streams
-import sttp.model.StatusCode
 import sttp.tapir.docs.openapi.OpenAPIDocsInterpreter
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
-import sttp.tapir.{extractFromRequest, statusCode, AnyEndpoint, Endpoint, EndpointInput}
+import sttp.tapir.AnyEndpoint
 
 import kui.cluster.application.{
   BrokerDetailUseCase,
@@ -24,14 +23,13 @@ import kui.cluster.application.{
   ClusterWriteUseCase
 }
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEndpoints}
-import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
-import kui.http.principal.{PrincipalInterceptor, PrincipalVerification, RequestContext}
+import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.error.KuiError
-import kui.observability.{Correlation, KuiInterceptors, Telemetry}
-import kui.security.{Principal, PrincipalCodec, RequestDigest, SignedPrincipal}
+import kui.observability.{KuiInterceptors, Telemetry}
+import kui.security.PrincipalCodec
 
 /** Everything `kui-cluster-service` serves, and the one place a typed failure becomes an HTTP response.
   *
@@ -131,97 +129,30 @@ object ClusterApi {
 
   /** Everything a route needs in order to be verified and to fail correctly, bundled once.
     *
-    * Two things are added to every published endpoint here and neither changes what the contract says:
+    * The mechanism itself is `kui.http.principal.SecuredRoutes`, shared by every service. It used to be five
+    * copies of the same eight lines, one per `api` module, which is a poor place for five copies: those eight
+    * lines are where a route could accidentally be served unverified, and a route that forgot them would look
+    * exactly like one that did not. It became untenable rather than merely untidy when ADR-020 Amendment 1
+    * added a second, different binding for endpoints that carry a request body — a rule five modules would
+    * each have had to discover for themselves, which is what the amendment was written to stop.
     *
-    *   - a [[RequestContext]] security input, which reads the method, the path and the correlation id off the
-    *     request. It is a server-side extractor: it consumes nothing from the wire and appears in no
-    *     generated document or client.
-    *   - a status code on the error output. The contract fixes the error *body* for every KUI endpoint, and
-    *     the status is decided from the failure itself by `ErrorEnvelope.statusOf` — the single
-    *     code-to-status table in the system — at the one point where the `KuiError` is still in hand.
-    *
-    * It is a class rather than six copies of the same eight lines because those eight lines are where a route
-    * could accidentally be served unverified, and a route that forgot them would look exactly like one that
-    * did not.
+    * The name stays so that this service's routes read as they always have. A streaming route uses the same
+    * value's `stream` method rather than a second class: Tapir's `ServerEndpoint` is invariant in its
+    * capability parameter, so the two bindings cannot be one *method*, but they are one *object*.
     */
-  final class Securing[F[_]: Async](
+  type Securing[F[_]] = SecuredRoutes[F]
+
+  def Securing[F[_]: Async](
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       logger: StructuredLogger[F]
-  ) {
-
-    def apply[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any])(
-        logic: Principal => I => F[Either[KuiError, O]]
-    ): ServerEndpoint[Any, F] =
-      endpoint
-        .securityIn(requestContext)
-        .errorOut(statusCode)
-        .serverSecurityLogic[(Principal, RequestContext), F] { case (token, ctx) =>
-          PrincipalVerification
-            .secured[F, Failure](principals, Id, logger, rejections)(failure[F])(token, ctx)
-        }
-        .serverLogic { case (principal, ctx) =>
-          input =>
-            logic(principal)(input).flatMap {
-              case Right(value) => value.asRight[Failure].pure[F]
-              case Left(error) => failure[F](error, ctx).map(_.asLeft[O])
-            }
-        }
-  }
-
-  /** The same, for a route whose output is a stream. Tapir's `ServerEndpoint` is invariant in its capability
-    * parameter once a streaming body is involved, so the two cannot be one method.
-    */
-  final class SecuringStream[F[_]: Async](
-      principals: PrincipalCodec[F],
-      rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
-  ) {
-
-    def apply[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Fs2Streams[F]])(
-        logic: Principal => I => F[Either[KuiError, O]]
-    ): ServerEndpoint[Fs2Streams[F], F] =
-      endpoint
-        .securityIn(requestContext)
-        .errorOut(statusCode)
-        .serverSecurityLogic[(Principal, RequestContext), F] { case (token, ctx) =>
-          PrincipalVerification
-            .secured[F, Failure](principals, Id, logger, rejections)(failure[F])(token, ctx)
-        }
-        .serverLogic { case (principal, ctx) =>
-          input =>
-            logic(principal)(input).flatMap {
-              case Right(value) => value.asRight[Failure].pure[F]
-              case Left(error) => failure[F](error, ctx).map(_.asLeft[O])
-            }
-        }
-  }
-
-  /** Reads what verification and error reporting need off the request, once.
-    *
-    * The digest is built from the request *line* only. Every `/internal/v1` endpoint in M0 is a `GET` with no
-    * body, and ADR-020 binds such a call — and every streaming one — to the method and path alone. The first
-    * endpoint that carries a body has to hash it, and this is the function that will say so.
-    */
-  private[api] val requestContext: EndpointInput[RequestContext] =
-    extractFromRequest[RequestContext](request =>
-      RequestContext(
-        RequestDigest.ofRequestLine(request.method.method, request.uri.path.mkString("/", "/", "")),
-        request.header(Correlation.HeaderName).flatMap(Correlation.accept)
-      )
-    )
+  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger)
 
   /** The two halves of an error response: the body the contract fixes and the status the code decides. */
-  private[api] type Failure = (ErrorEnvelope, StatusCode)
+  private[api] type Failure = SecuredRoutes.Failure
 
   private[api] def failure[F[_]: Sync](error: KuiError, ctx: RequestContext): F[Failure] =
-    for {
-      correlationId <- ctx.correlationId.fold(Correlation.newRandom[F])(_.pure[F])
-      now <- Clock[F].realTimeInstant
-    } yield (
-      ErrorEnvelope.of(error, correlationId, now),
-      StatusCode(ErrorEnvelope.statusOf(error))
-    )
+    SecuredRoutes.failure[F](error, ctx)
 
   // -----------------------------------------------------------------------------------------------
   // Capabilities

@@ -1,5 +1,7 @@
 package kui.cluster.api
 
+import java.nio.charset.StandardCharsets
+
 import scala.concurrent.duration.*
 
 import cats.effect.IO
@@ -119,7 +121,10 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
             issuedAt = now,
             expiresAt = now.plusSeconds(60L),
             audience = kui.cluster.application.ClusterService.Id,
-            requestDigest = RequestDigest.ofRequestLine("PUT", at)
+            // The body, hashed, because this endpoint carries one (ADR-020 Amendment 1). Signing the
+            // request line alone is what the gateway used to do and what the route used to check, and
+            // both were wrong: a token so bound is replayable with any body at all against this path.
+            requestDigest = RequestDigests.of("PUT", at, body.noSpaces.getBytes(StandardCharsets.UTF_8))
           )
         )
         .flatMap { token =>

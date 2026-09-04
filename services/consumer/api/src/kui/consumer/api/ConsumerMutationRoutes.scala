@@ -1,20 +1,18 @@
 package kui.consumer.api
 
-import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 import scala.concurrent.duration.FiniteDuration
 
 import cats.effect.kernel.{Async, Clock}
 import cats.syntax.all.*
-import io.circe.Printer
-import io.circe.syntax.*
 import sttp.tapir.server.ServerEndpoint
 
 import kui.consumer.application.*
 import kui.consumer.contract.ConsumerMutationEndpoints
 import kui.consumer.contract.dto.*
 import kui.consumer.domain.{ResetScope, ResetSpec}
+import kui.http.principal.SecuredRoutes
 import kui.kernel.error.{ApplicationError, KuiError}
 import kui.kernel.{Offset, PartitionId, TopicName, TopicPartition}
 
@@ -70,15 +68,16 @@ object ConsumerMutationRoutes {
       snapshots: GroupSnapshots[F],
       secured: ConsumerApi.Securing[F]
   ): ServerEndpoint[Any, F] =
-    secured.withBody(ConsumerMutationEndpoints.planReset)((_, _, _, request) => bytesOf(request)) {
-      _ => (_, cluster, group, request) =>
-        specOf(request) match {
-          case Left(error) => error.asLeft[ResetPlanDto].pure[F]
-          case Right(spec) =>
-            scopeOf(snapshots, cluster, group, request).flatMap(scope =>
-              reset.plan(cluster, group, scope, spec).map(_.map(ConsumerMapping.plan))
-            )
-        }
+    secured.withBody(ConsumerMutationEndpoints.planReset)((_, _, _, request) =>
+      SecuredRoutes.bodyBytes(request)
+    ) { _ => (_, cluster, group, request) =>
+      specOf(request) match {
+        case Left(error) => error.asLeft[ResetPlanDto].pure[F]
+        case Right(spec) =>
+          scopeOf(snapshots, cluster, group, request).flatMap(scope =>
+            reset.plan(cluster, group, scope, spec).map(_.map(ConsumerMapping.plan))
+          )
+      }
     }
 
   /** Apply exactly the plan the token names.
@@ -92,12 +91,13 @@ object ConsumerMutationRoutes {
       reset: OffsetResetUseCase[F],
       secured: ConsumerApi.Securing[F]
   ): ServerEndpoint[Any, F] =
-    secured.withBody(ConsumerMutationEndpoints.applyReset)((_, _, _, request) => bytesOf(request)) {
-      _ => (_, cluster, group, request) =>
-        for {
-          answer <- reset.apply(cluster, group, request.token)
-          now <- Clock[F].realTimeInstant
-        } yield answer.map(plan => ConsumerMapping.appliedPlan(plan, request.token, expiryOf(now)))
+    secured.withBody(ConsumerMutationEndpoints.applyReset)((_, _, _, request) =>
+      SecuredRoutes.bodyBytes(request)
+    ) { _ => (_, cluster, group, request) =>
+      for {
+        answer <- reset.apply(cluster, group, request.token)
+        now <- Clock[F].realTimeInstant
+      } yield answer.map(plan => ConsumerMapping.appliedPlan(plan, request.token, expiryOf(now)))
     }
 
   /** Delete a group outright. Refused with `KUI-GROUP-NOT-EMPTY` while it still has members. */
@@ -123,15 +123,6 @@ object ConsumerMutationRoutes {
     }
 
   // -----------------------------------------------------------------------------------------------
-
-  /** The request body as the exact bytes the gateway sent, for the ADR-020 digest.
-    *
-    * `Printer.noSpaces` and the contract's own encoder, which is what `jsonBody` uses on both sides. A
-    * different printer here — pretty-printing, dropping nulls — would produce a different hash and refuse
-    * every call with a 401 that names nothing, so this must not be "tidied".
-    */
-  private def bytesOf[A: io.circe.Encoder](value: A): Array[Byte] =
-    Printer.noSpaces.print(value.asJson).getBytes(StandardCharsets.UTF_8)
 
   /** How long an applied plan's receipt claims to be valid for. Zero: it is already spent. */
   private val AppliedTokenTtl: FiniteDuration = scala.concurrent.duration.Duration.Zero

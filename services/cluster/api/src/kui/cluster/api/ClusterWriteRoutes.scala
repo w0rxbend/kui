@@ -8,6 +8,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.cluster.application.ClusterWriteUseCase
 import kui.cluster.contract.ClusterWriteEndpoints
+import kui.http.principal.SecuredRoutes
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.security.{Principal, PrincipalCodec}
 
@@ -47,30 +48,36 @@ object ClusterWriteRoutes {
     val secured = ClusterApi.Securing[F](principals, rejections, logger)
 
     List(
-      secured(ClusterWriteEndpoints.put) { principal =>
-        { case (id, ifMatch, request) =>
-          if !permitted(principal) then
-            Async[F].pure(
-              Left(
-                ApplicationError.Forbidden(
-                  s"changing a cluster requires $RequiredPermission"
-                ): KuiError
+      // `withBody`, not `secured`: this endpoint carries a request body, and ADR-020 Amendment 1 binds
+      // the token to it by hashing the bytes the gateway signed — reconstructed by re-encoding the
+      // decoded request through this very contract's codec. Bound to the request line alone, every call
+      // to it would be refused as `request_mismatch`. It has no UI and is not proxied, so nothing had
+      // ever noticed.
+      secured.withBody(ClusterWriteEndpoints.put)((_, _, request) => SecuredRoutes.bodyBytes(request)) {
+        principal =>
+          { case (id, ifMatch, request) =>
+            if !permitted(principal) then
+              Async[F].pure(
+                Left(
+                  ApplicationError.Forbidden(
+                    s"changing a cluster requires $RequiredPermission"
+                  ): KuiError
+                )
               )
-            )
-          else
-            ClusterWriteMapping.versionOf(ifMatch) match {
-              case Left(error) => Async[F].pure(Left(error))
-              case Right(expected) =>
-                ClusterWriteMapping.profileOf(id, expected, request) match {
-                  case Left(error) => Async[F].pure(Left(error))
-                  case Right(profile) =>
-                    for {
-                      written <- write.put(profile, expected)
-                      now <- Clock[F].realTimeInstant
-                    } yield written.map(ClusterMapping.profile(_, now))
-                }
-            }
-        }
+            else
+              ClusterWriteMapping.versionOf(ifMatch) match {
+                case Left(error) => Async[F].pure(Left(error))
+                case Right(expected) =>
+                  ClusterWriteMapping.profileOf(id, expected, request) match {
+                    case Left(error) => Async[F].pure(Left(error))
+                    case Right(profile) =>
+                      for {
+                        written <- write.put(profile, expected)
+                        now <- Clock[F].realTimeInstant
+                      } yield written.map(ClusterMapping.profile(_, now))
+                  }
+              }
+          }
       }
     )
   }

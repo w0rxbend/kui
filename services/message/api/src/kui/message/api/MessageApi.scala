@@ -1,26 +1,22 @@
 package kui.message.api
 
 import cats.Parallel
-import cats.effect.kernel.{Async, Clock, Sync}
+import cats.effect.kernel.{Async, Sync}
 import cats.syntax.all.*
-import fs2.Stream
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Counter
 import sttp.capabilities.fs2.Fs2Streams
-import sttp.model.StatusCode
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
-import sttp.tapir.{extractFromRequest, statusCode, Endpoint, EndpointInput}
 
-import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.{CapabilityState, ClusterCapability, ServiceCapabilities}
 import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
-import kui.http.principal.{PrincipalInterceptor, PrincipalVerification, RequestContext}
+import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.{ClusterId, ServiceId}
 import kui.message.application.BrowseUseCase
-import kui.observability.{Correlation, KuiInterceptors, Telemetry}
-import kui.security.{Principal, PrincipalCodec, RequestDigest, SignedPrincipal}
+import kui.observability.{KuiInterceptors, Telemetry}
+import kui.security.PrincipalCodec
 
 /** Everything `kui-message-service` serves, and the one place a typed failure becomes an HTTP response.
   *
@@ -81,62 +77,31 @@ object MessageApi {
           instrumentation ++ ErrorInterceptor.interceptors[F](logger)
       )
 
-  /** Verification and failure handling, added to every route in one place. */
-  final class Securing[F[_]: Async](
+  /** Verification and failure handling, added to every route in one place.
+    *
+    * The mechanism is `kui.http.principal.SecuredRoutes`, shared by every service, and this service is the
+    * reason it is shared. Two of its routes carry a request body — publishing a record and resending a range
+    * — and ADR-020 Amendment 1 says how a token is bound to those: by hashing the body the gateway signed,
+    * reconstructed from the decoded input through the same contract codec. The consumer service met that wall
+    * first and answered it locally; a second local answer here would have been the second half of exactly the
+    * drift this project keeps paying for, so the answer moved into `libs/http` and both services call it.
+    *
+    * `stream` on that class is what this service's browse endpoint uses: a streaming endpoint carries no
+    * body, so its digest is the request line, and its logic is handed the request context because a failure
+    * after the status line has gone is rendered into the stream rather than into a response (ADR-035).
+    */
+  type Securing[F[_]] = SecuredRoutes[F]
+
+  def Securing[F[_]: Async](
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       logger: StructuredLogger[F]
-  ) {
+  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger)
 
-    /** Binds a streaming endpoint.
-      *
-      * The logic returns `Either` because a browse has two kinds of failure and they must not look alike. A
-      * request that could never have worked — a live browse anchored to an offset, a partition subset that
-      * names none — fails *before* the stream opens, as an ordinary 400 the browser can show beside the field
-      * that caused it. Everything that goes wrong once records are flowing becomes the stream's terminal
-      * `error` event instead, because by then the status line has already been sent (ADR-035).
-      */
-    def stream[I](
-        endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, Stream[F, Byte], Fs2Streams[F]]
-    )(
-        logic: Principal => RequestContext => I => F[Either[kui.kernel.error.KuiError, Stream[F, Byte]]]
-    ): ServerEndpoint[Fs2Streams[F], F] =
-      endpoint
-        .securityIn(requestContext)
-        .errorOut(statusCode)
-        .serverSecurityLogic[(Principal, RequestContext), F] { case (token, ctx) =>
-          PrincipalVerification
-            .secured[F, Failure](principals, Id, logger, rejections)(failure[F])(token, ctx)
-        }
-        .serverLogic { case (principal, ctx) =>
-          input =>
-            logic(principal)(ctx)(input).flatMap {
-              case Right(stream) => stream.asRight[Failure].pure[F]
-              case Left(error) => failure[F](error, ctx).map(_.asLeft[Stream[F, Byte]])
-            }
-        }
-  }
-
-  /** Reads what verification and error reporting need off the request, once.
-    *
-    * The digest covers the request line only. Every endpoint this service serves today is a `GET` with no
-    * body; the first one that carries a body has to hash it, and this is the function that will say so.
-    */
-  private[api] val requestContext: EndpointInput[RequestContext] =
-    extractFromRequest[RequestContext](request =>
-      RequestContext(
-        RequestDigest.ofRequestLine(request.method.method, request.uri.path.mkString("/", "/", "")),
-        request.header(Correlation.HeaderName).flatMap(Correlation.accept)
-      )
-    )
-
-  private[api] type Failure = (ErrorEnvelope, StatusCode)
+  private[api] type Failure = SecuredRoutes.Failure
 
   private[api] def failure[F[_]: Sync](error: kui.kernel.error.KuiError, ctx: RequestContext): F[Failure] =
-    for {
-      correlationId <- ctx.correlationId.fold(Correlation.newRandom[F])(_.pure[F])
-      now <- Clock[F].realTimeInstant
-    } yield (ErrorEnvelope.of(error, correlationId, now), StatusCode(ErrorEnvelope.statusOf(error)))
+    SecuredRoutes.failure[F](error, ctx)
 
   /** What `GET /capabilities` answers.
     *

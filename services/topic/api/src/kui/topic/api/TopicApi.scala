@@ -3,26 +3,24 @@ package kui.topic.api
 import java.time.Instant
 
 import cats.Parallel
-import cats.effect.kernel.{Async, Clock, Sync}
+import cats.effect.kernel.{Async, Sync}
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Counter
 import sttp.apispec.openapi.OpenAPI
-import sttp.model.StatusCode
 import sttp.tapir.docs.openapi.OpenAPIDocsInterpreter
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
-import sttp.tapir.{extractFromRequest, statusCode, AnyEndpoint, Endpoint, EndpointInput}
+import sttp.tapir.AnyEndpoint
 
-import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
-import kui.http.principal.{PrincipalInterceptor, PrincipalVerification, RequestContext}
+import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.ServiceId
 import kui.kernel.error.KuiError
-import kui.observability.{Correlation, KuiInterceptors, Telemetry}
-import kui.security.{Principal, PrincipalCodec, RequestDigest, SignedPrincipal}
+import kui.observability.{KuiInterceptors, Telemetry}
+import kui.security.PrincipalCodec
 import kui.topic.application.{TopicCapabilityUseCase, TopicConfigUseCase, TopicDetailUseCase, TopicSnapshots}
 import kui.topic.contract.TopicEndpoints
 
@@ -124,65 +122,24 @@ object TopicApi {
 
   /** Everything a route needs in order to be verified and to fail correctly, bundled once.
     *
-    * Two things are added to every published endpoint and neither changes what the contract says: a
-    * [[RequestContext]] security input, which is a server-side extractor that consumes nothing from the wire
-    * and appears in no generated document; and a status code on the error output, decided from the failure
-    * itself by `ErrorEnvelope.statusOf` at the one point where the `KuiError` is still in hand.
-    *
-    * It is a class rather than five copies of the same eight lines because those eight lines are where a
-    * route could accidentally be served unverified, and a route that forgot them would look exactly like one
-    * that did not.
+    * The mechanism is `kui.http.principal.SecuredRoutes`, shared by every service so that there is one answer
+    * to "how is a call from the gateway checked" rather than one per `api` module — see that class for why
+    * ADR-020 Amendment 1 made sharing it necessary rather than merely tidy. The name stays so that this
+    * service's routes read as they always have.
     */
-  final class Securing[F[_]: Async](
+  type Securing[F[_]] = SecuredRoutes[F]
+
+  def Securing[F[_]: Async](
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       logger: StructuredLogger[F]
-  ) {
-
-    def apply[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any])(
-        logic: Principal => I => F[Either[KuiError, O]]
-    ): ServerEndpoint[Any, F] =
-      endpoint
-        .securityIn(requestContext)
-        .errorOut(statusCode)
-        .serverSecurityLogic[(Principal, RequestContext), F] { case (token, ctx) =>
-          PrincipalVerification
-            .secured[F, Failure](principals, Id, logger, rejections)(failure[F])(token, ctx)
-        }
-        .serverLogic { case (principal, ctx) =>
-          input =>
-            logic(principal)(input).flatMap {
-              case Right(value) => value.asRight[Failure].pure[F]
-              case Left(error) => failure[F](error, ctx).map(_.asLeft[O])
-            }
-        }
-  }
-
-  /** Reads what verification and error reporting need off the request, once.
-    *
-    * The digest is built from the request *line* only. Every endpoint this service serves is a `GET` with no
-    * body, or the one `POST` that carries none, and ADR-020 binds such a call to the method and path alone.
-    * The first endpoint that carries a body has to hash it, and this is the function that will say so.
-    */
-  private[api] val requestContext: EndpointInput[RequestContext] =
-    extractFromRequest[RequestContext](request =>
-      RequestContext(
-        RequestDigest.ofRequestLine(request.method.method, request.uri.path.mkString("/", "/", "")),
-        request.header(Correlation.HeaderName).flatMap(Correlation.accept)
-      )
-    )
+  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger)
 
   /** The two halves of an error response: the body the contract fixes and the status the code decides. */
-  private[api] type Failure = (ErrorEnvelope, StatusCode)
+  private[api] type Failure = SecuredRoutes.Failure
 
   private[api] def failure[F[_]: Sync](error: KuiError, ctx: RequestContext): F[Failure] =
-    for {
-      correlationId <- ctx.correlationId.fold(Correlation.newRandom[F])(_.pure[F])
-      now <- Clock[F].realTimeInstant
-    } yield (
-      ErrorEnvelope.of(error, correlationId, now),
-      StatusCode(ErrorEnvelope.statusOf(error))
-    )
+    SecuredRoutes.failure[F](error, ctx)
 
   // -----------------------------------------------------------------------------------------------
   // Capabilities
