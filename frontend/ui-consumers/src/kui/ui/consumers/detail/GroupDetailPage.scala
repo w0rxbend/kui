@@ -96,7 +96,7 @@ object GroupDetailPage {
       child.maybe <-- detail.map(
         _.map(current =>
           StaleDataOverlay(
-            content = body(current, zone, now, wizard(cluster, group, queries, current, zone, now)),
+            content = body(current, zone, now),
             stale = stale,
             fetchedAt = observedAt,
             zone = zone,
@@ -104,13 +104,22 @@ object GroupDetailPage {
             testId = Some("group-region")
           )
         )
-      )
+      ),
+      // A sibling of the snapshot-driven region rather than a child of it, so that a new snapshot redraws
+      // the tables without taking the wizard — and the operator's place in it — down with them.
+      wizard(cluster, group, queries, detail, zone, now)
     )
   }
 
-  /** The offset-reset wizard, or nothing at all.
+  /** The offset-reset wizard, built once for the life of this screen.
     *
-    * Nothing at all while the group holds no offsets on any topic: there is nothing to reset, and a form
+    * Once, and not once per snapshot, because the wizard holds the operator's place in it — which step they
+    * are on, and after an apply the receipt of what was written. Building it inside the redraw that each new
+    * group snapshot triggers destroyed that state at the worst possible moment: applying a reset is exactly
+    * what makes the next snapshot differ, so the receipt was discarded in the same instant it arrived and
+    * the drawer shut itself. Hence a `Signal` of the topics rather than a list.
+    *
+    * It renders nothing while the group holds no offsets on any topic: there is nothing to reset, and a form
     * whose topic list is empty is a control that can only refuse.
     *
     * There is no second confirmation around it and no disabled state for a group that has members. The
@@ -122,26 +131,34 @@ object GroupDetailPage {
       cluster: ClusterId,
       group: GroupId,
       queries: ConsumersQueries,
-      detail: GroupDetailDto,
+      detail: Signal[Option[GroupDetailDto]],
       zone: Signal[String],
       now: () => Instant
-  ): Option[HtmlElement] =
-    Option.when(detail.topics.nonEmpty)(
+  ): HtmlElement = {
+    val topics = detail.map(_.toList.flatMap(_.topics))
+
+    div(
+      // The wizard itself is never rebuilt; only whether it is shown depends on the snapshot. `display`
+      // rather than `child.maybe` for the same reason the element is hoisted: taking it out of the DOM
+      // would take its state with it.
+      display <-- topics.map(current => if current.isEmpty then "none" else ""),
       ResetWizard(
-        topics = detail.topics,
+        topics = topics,
         plan = request => queries.planReset(cluster, group, request),
         applyPlan = token => queries.applyReset(cluster, group, token),
         zone = zone,
         now = now
       )
     )
+  }
 
-  /** The summary strip, the members, the per-topic assignment tables, and the reset wizard under them. */
+  /** The summary strip, the members, and the per-topic assignment tables. The reset wizard is deliberately
+    * not here: see [[wizard]] for why it is a sibling of this region instead of part of it.
+    */
   private def body(
       group: GroupDetailDto,
       zone: Signal[String],
-      now: () => Instant,
-      reset: Option[HtmlElement]
+      now: () => Instant
   ): HtmlElement =
     div(
       summary(group, zone, now),
@@ -163,10 +180,7 @@ object GroupDetailPage {
             testId = Some("group-assignments-empty")
           )
         else div(group.topics.map(LagTable.apply))
-      ),
-      // Last on the page, under the numbers it changes. An operator should have read where the group is
-      // before being offered a control that moves it.
-      reset
+      )
     )
 
   /** State, total lag, protocol, assignor, coordinator and "as of", on one strip.

@@ -64,17 +64,33 @@ object ResetStep {
   * Apply button, because a confirmation dialogue for an operation that changes nothing teaches operators to
   * click through confirmation dialogues.
   *
+  * ## Why the topic list arrives as a `Signal`
+  *
+  * The wizard holds the only copy of where the operator has got to — which step they are on, and, after an
+  * apply, the receipt saying what was written. That state lives in this element, so the element has to
+  * outlive every redraw of the page around it.
+  *
+  * It did not. The group detail page rebuilt its whole body from each new snapshot of the group, and an
+  * apply *causes* a new snapshot: the committed offsets it just wrote are what changed. So the receipt was
+  * set on an element that was replaced in the same breath, and the wizard blinked back to its closed state
+  * the instant the write succeeded. The reset itself was correct — the offsets moved, the lag on screen
+  * changed — but the operator never saw the confirmation of what had been written, which is the one record
+  * they have of a destructive action.
+  *
+  * Taking the topic list as a `Signal` is what lets the page build this element once and let the data flow
+  * through it, instead of rebuilding it whenever the data changes.
+  *
   * @param topics
-  *   the topics this group holds offsets on, with their partitions. The topic list is the group's own rather
-  *   than the cluster's: resetting a group on a topic it does not consume writes offsets for a subscription
-  *   that does not exist.
+  *   the topics this group holds offsets on, with their partitions, as they currently stand. The topic list
+  *   is the group's own rather than the cluster's: resetting a group on a topic it does not consume writes
+  *   offsets for a subscription that does not exist.
   * @param plan
   *   and `apply`, passed in, so the whole flow can be driven by a suite with no server.
   */
 object ResetWizard {
 
   def apply(
-      topics: List[TopicSubscriptionDto],
+      topics: Signal[List[TopicSubscriptionDto]],
       plan: ResetPlanRequest => EventStream[Either[ApiError, ResetPlanDto]],
       applyPlan: String => EventStream[Either[ApiError, ResetPlanDto]],
       zone: Signal[String],
@@ -82,7 +98,15 @@ object ResetWizard {
   ): HtmlElement = {
     val open: Var[Boolean] = Var(false)
     val step: Var[ResetStep] = Var(ResetStep.Composing)
-    val form: Var[ResetForm] = Var(ResetForm.Empty.copy(topic = topics.headOption.fold("")(_.topic.value)))
+    /** The latest topic list, held so that the click handlers below can read it synchronously.
+      *
+      * A `Signal` cannot be sampled without an owner, and the "preview" handler needs the partitions of the
+      * chosen topic at the moment of the click. This `Var` is fed from the incoming signal and is the one
+      * place that conversion happens.
+      */
+    val known: Var[List[TopicSubscriptionDto]] = Var(Nil)
+
+    val form: Var[ResetForm] = Var(ResetForm.Empty)
 
     /** The last thing that went wrong, whether it was the form's own refusal or the server's.
       *
@@ -92,9 +116,7 @@ object ResetWizard {
     val problem: Var[Option[String]] = Var(None)
 
     val partitions: Signal[List[Int]] =
-      form.signal.map(_.topic).map { chosen =>
-        topics.find(_.topic.value == chosen).toList.flatMap(_.partitions.map(_.partition)).sorted
-      }
+      form.signal.map(_.topic).combineWith(known.signal).map(partitionsOf)
 
     val requests: EventBus[ResetPlanRequest] = new EventBus[ResetPlanRequest]
     val applications: EventBus[String] = new EventBus[String]
@@ -116,6 +138,15 @@ object ResetWizard {
     div(
       cls := ConsumersCss.Section,
       dataAttr("testid") := "group-reset",
+
+      // The incoming list, kept where the handlers can read it, and used once to seed the topic the form
+      // starts on. Seeded rather than bound: after the operator has chosen a topic, a later snapshot of the
+      // group must not move them off it.
+      topics --> Observer[List[TopicSubscriptionDto]] { current =>
+        known.set(current)
+        if form.now().topic.isEmpty then
+          current.headOption.foreach(first => form.update(_.copy(topic = first.topic.value)))
+      },
       h2(cls := ConsumersCss.SectionHeading, Messages.ResetHeading),
 
       // --- The two requests, and where their answers go ------------------------------------------
@@ -175,15 +206,15 @@ object ResetWizard {
             current match {
               case ResetStep.Composing =>
                 composer(
-                  topics,
+                  known.signal,
                   form,
                   partitions,
                   busy = false,
-                  onPreview = () => askForAPlan(form.now(), partitionsOf(topics, form.now().topic))
+                  onPreview = () => askForAPlan(form.now(), partitionsOf(form.now().topic, known.now()))
                 )
 
               case ResetStep.Planning =>
-                composer(topics, form, partitions, busy = true, onPreview = () => ())
+                composer(known.signal, form, partitions, busy = true, onPreview = () => ())
 
               case ResetStep.Planned(planned) =>
                 preview(
@@ -208,12 +239,12 @@ object ResetWizard {
     )
   }
 
-  private def partitionsOf(topics: List[TopicSubscriptionDto], topic: String): List[Int] =
+  private def partitionsOf(topic: String, topics: List[TopicSubscriptionDto]): List[Int] =
     topics.find(_.topic.value == topic).toList.flatMap(_.partitions.map(_.partition)).sorted
 
   /** Step one: what the operator is asking for. */
   private def composer(
-      topics: List[TopicSubscriptionDto],
+      topics: Signal[List[TopicSubscriptionDto]],
       form: Var[ResetForm],
       partitions: Signal[List[Int]],
       busy: Boolean,
@@ -246,7 +277,7 @@ object ResetWizard {
       duration.signal --> Observer[String](raw => form.update(_.copy(durationMinutes = raw))),
 
       Select[String](
-        options = Val(topics.map(one => one.topic.value -> one.topic.value)),
+        options = topics.map(_.map(one => one.topic.value -> one.topic.value)),
         selected = topic,
         label = Messages.ResetTopicLabel,
         disabled = Val(busy),

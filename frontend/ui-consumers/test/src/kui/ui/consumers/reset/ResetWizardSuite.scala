@@ -128,6 +128,9 @@ class ResetWizardSuite extends FunSuite {
       plans: List[Either[ApiError, ResetPlanDto]],
       applies: List[Either[ApiError, ResetPlanDto]] = Nil
   ) {
+    /** The topic list as a live value, so a test can push a new one the way a new group snapshot does. */
+    val liveTopics: Var[List[TopicSubscriptionDto]] = Var(topics)
+
     val planned: mutable.ListBuffer[ResetPlanRequest] = mutable.ListBuffer.empty
     val applied: mutable.ListBuffer[String] = mutable.ListBuffer.empty
 
@@ -135,7 +138,7 @@ class ResetWizardSuite extends FunSuite {
     private var remainingApplies = applies
 
     val element: HtmlElement = ResetWizard(
-      topics = topics,
+      topics = liveTopics.signal,
       plan = request => {
         planned.append(request)
         remainingPlans match {
@@ -228,6 +231,26 @@ class ResetWizardSuite extends FunSuite {
       val receipt = byTestId(root, "group-reset-receipt-table").textContent
       assert(receipt.contains("16"), receipt)
       assert(receipt.contains("+7"), receipt)
+    }
+  }
+
+  test("theReceiptSurvivesANewSnapshotOfTheGroup") {
+    // The regression this test exists for. Applying a reset changes the group's committed offsets, so the
+    // page that shows the group refetches it and a new topic list arrives here — *caused by* the very
+    // action whose receipt is on screen. When the page rebuilt this element for each snapshot, that
+    // sequence threw the receipt away in the instant it appeared: the offsets moved correctly and the
+    // operator was shown nothing at all. The wizard has to be indifferent to its data changing underneath
+    // it, and this asserts exactly that and nothing else.
+    val rig = new Rig(plans = List(Right(planDto(proposed))), applies = List(Right(planDto(proposed))))
+    mounted(rig.element) { root =>
+      click(byTestId(root, "group-reset-open"))
+      click(byTestId(root, "group-reset-preview"))
+      click(byTestId(root, "group-reset-apply"))
+      byTestId(root, "group-reset-receipt"): Unit
+
+      rig.liveTopics.set(topics)
+
+      byTestId(root, "group-reset-receipt"): Unit
     }
   }
 
