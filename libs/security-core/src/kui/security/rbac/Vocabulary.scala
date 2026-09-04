@@ -1,5 +1,6 @@
 package kui.security.rbac
 
+import scala.annotation.nowarn
 import scala.util.matching.Regex
 
 /** What a permission can be granted over.
@@ -275,8 +276,17 @@ final class ResourcePattern private (val raw: String, private val compiled: Rege
   /** Two patterns are the same pattern when they were written the same way. A compiled `Regex` has no useful
     * equality of its own, so the source text is what stands in for it.
     */
+  // `equals` is handed an `Any` by `AnyRef`, and Scala 3 warns when an `Any` is the selector of a match:
+  // a value that is not `Matchable` may be an opaque type whose runtime shape is not its static one. There
+  // is nowhere else to do the narrowing, and the alternative the compiler leaves — `asInstanceOf` — is what
+  // `DisableSyntax` forbids and what this code used to do. Suppressed once, here, with the same message
+  // filter `TopicsRoutes` uses for the same reason.
+  @nowarn("msg=unmatchable type Any")
   override def equals(other: Any): Boolean =
-    other.isInstanceOf[ResourcePattern] && other.asInstanceOf[ResourcePattern].raw == raw
+    other match {
+      case that: ResourcePattern => that.raw == raw
+      case _ => false
+    }
 
   override def hashCode: Int = raw.hashCode
 }
