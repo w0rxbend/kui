@@ -1,5 +1,6 @@
 package kui.consumer.app
 
+import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 
 import scala.concurrent.duration.*
@@ -13,7 +14,7 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
 import kui.cache.CacheMetrics
-import kui.config.ClusterConfig
+import kui.config.{ClusterConfig, ConsumersConfig}
 import kui.consumer.api.{ConsumerApi, ConsumerCapabilities}
 import kui.consumer.application.*
 import kui.consumer.domain.{ConsumerGroup, GroupAdminPort, GroupListingPage, OffsetWindow, ResetScope}
@@ -56,13 +57,13 @@ object ConsumerWiring {
   /** The instrumentation scope this service's tracer and meter are named after. */
   val Instrumentation: String = "kui.consumer"
 
-  /** How often each cluster's consumer groups are described in the background.
+  /** How often each cluster's consumer groups are described in the background, when nothing says otherwise.
     *
-    * Thirty seconds, because describing every group on a cluster is the most expensive read this service
-    * makes and the numbers it produces — lag, pace — are only meaningful over an interval. There is no TTL: a
-    * snapshot older than this is shown and marked stale, never withheld.
+    * The value and the reasoning now live in `kui.config.ConsumersConfig`, which is where an operator can
+    * turn it; this alias exists so that a caller with no configuration in hand — a test, a tool — still gets
+    * the product's answer rather than inventing one.
     */
-  val DefaultRefreshInterval: FiniteDuration = 30.seconds
+  val DefaultRefreshInterval: FiniteDuration = ConsumersConfig.DefaultRefreshInterval
 
   /** How many groups' last-known assignments are kept per process, and for how long.
     *
@@ -80,11 +81,16 @@ object ConsumerWiring {
     *   cluster service was given, read once from the same file — see [[ConfiguredProfileSource]] for why this
     *   shape does not go through the HTTP profile client.
     * @param refreshInterval
-    *   how often each cluster's group snapshot is refreshed in the background.
+    *   how often each cluster's group snapshot is refreshed in the background, from
+    *   `kui.consumers.refreshInterval`.
+    * @param cursorKey
+    *   the shared key plan tokens are signed with, from `kui.streaming.cursorKey`. `None` means this
+    *   deployment configured none, and a fresh one is generated for this process.
     */
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
       refreshInterval: FiniteDuration,
+      cursorKey: Option[Secret[String]],
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -106,11 +112,15 @@ object ConsumerWiring {
       lastSeen <- LastSeenAssignments
         .resource[F](AssignmentCacheScope, AssignmentCacheSize, AssignmentCacheTtl, cacheMetrics)
 
-      // The plan-signing key (ADR-045). It is generated per process rather than configured, because a
-      // plan token is not a credential: it authorises applying one already-rendered plan to one group
-      // for five minutes, and nothing else. The consequence of a restart is that a wizard left open
-      // across one has to re-plan, which is the correct outcome anyway — the cluster has moved.
-      key <- Resource.eval(Async[F].delay(Secret(randomKey())))
+      // The plan-signing key (ADR-045), which is ADR-026's streaming cursor key: one secret, one
+      // rotation procedure, and the two uses kept apart by the payload's own version prefix.
+      //
+      // Configured, because a plan token that only the replica that minted it can verify is a wizard
+      // that fails at the last step behind a load balancer, and a key regenerated on restart is a
+      // wizard an operator has to compose twice. It falls back to a fresh random rather than refusing
+      // to start: one process with no replicas — the quickstart, a laptop — needs no shared secret,
+      // and demanding one there would be a worse first five minutes for nothing gained.
+      key <- Resource.eval(signingKey[F](cursorKey, logger))
       tokens = PlanToken.make[F](key)
 
       audit = LoggingAuditSink.make[F](logger)
@@ -211,6 +221,33 @@ object ConsumerWiring {
       def deleteGroup(id: GroupId): F[Either[KuiError, Unit]] = refuse
     }
   }
+
+  /** The configured key, or a fresh one, saying out loud which of the two happened.
+    *
+    * The log line is not noise. "Your reset wizard stopped working after a deploy" and "your reset wizard
+    * stops working every time it lands on the other replica" are both this line's absence, and an operator
+    * reading a startup log is the only person positioned to notice before a user does.
+    */
+  private def signingKey[F[_]: Async](
+      configured: Option[Secret[String]],
+      logger: StructuredLogger[F]
+  ): F[Secret[Array[Byte]]] =
+    configured match {
+      case Some(secret) =>
+        Async[F]
+          .pure(Secret(secret.value.getBytes(StandardCharsets.UTF_8)))
+          .flatTap(_ => logger.info("plan tokens are signed with the configured kui.streaming.cursorKey"))
+      case None =>
+        Async[F]
+          .delay(Secret(randomKey()))
+          .flatTap(_ =>
+            logger.info(
+              "no kui.streaming.cursorKey is configured; plan tokens are signed with a key generated for " +
+                "this process. A restart invalidates an open reset wizard, and a second replica rejects " +
+                "this one's tokens. Configure the key before running more than one."
+            )
+          )
+    }
 
   /** 256 bits from the platform's secure source. */
   private def randomKey(): Array[Byte] = {

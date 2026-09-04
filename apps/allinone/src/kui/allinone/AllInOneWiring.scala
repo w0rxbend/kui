@@ -10,7 +10,7 @@ import org.typelevel.log4cats.StructuredLogger
 
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
-import kui.config.{ClusterConfig, TopicsConfig}
+import kui.config.{ClusterConfig, ConsumersConfig, StreamingConfig, TopicsConfig}
 import kui.consumer.api.ConsumerApi
 import kui.consumer.app.ConsumerWiring
 import kui.gateway.api.InfoRoutes
@@ -112,6 +112,8 @@ object AllInOneWiring {
         config.clusterView,
         config.clusters,
         config.topics,
+        config.consumers,
+        config.streaming,
         telemetry,
         principals,
         logger
@@ -149,6 +151,8 @@ object AllInOneWiring {
       cluster: ClusterServiceConfig,
       clusters: List[ClusterConfig],
       topics: TopicsConfig,
+      consumers: ConsumersConfig,
+      streaming: StreamingConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -165,14 +169,14 @@ object AllInOneWiring {
       // does: this process is already holding the list, and calling itself over a socket to read it
       // would add a listener, a timeout and a failure mode to a lookup that cannot fail.
       //
-      // Its refresh interval is its own constant rather than `kui.topics.refreshInterval`. Describing
-      // every consumer group on a cluster and describing its topics are different costs against
-      // different broker paths, and one knob for both would mean tuning the cheaper one by the
-      // expensive one. A `kui.consumers` section is what replaces the constant when an operator needs
-      // to turn it.
+      // Its refresh interval comes from `kui.consumers.refreshInterval` and not from
+      // `kui.topics.refreshInterval`. Describing every consumer group on a cluster and describing its
+      // topics are different costs against different broker paths, and one knob for both would mean
+      // tuning the cheaper one by the expensive one.
       consumerService <- ConsumerWiring.make[F](
         clusters,
-        ConsumerWiring.DefaultRefreshInterval,
+        consumers.refreshInterval,
+        streaming.cursorKey,
         telemetry,
         principals,
         logger
@@ -181,7 +185,7 @@ object AllInOneWiring {
       // topic and consumer services it keeps no snapshot and runs no background scrape: it opens a
       // Kafka consumer when somebody browses, streams what was asked for, and closes it again. So
       // there is no interval to configure here and nothing for a broker outage to make stale.
-      messageService <- MessageWiring.make[F](clusters, telemetry, principals, logger)
+      messageService <- MessageWiring.make[F](clusters, streaming.cursorKey, telemetry, principals, logger)
     } yield ServiceClients.of[F](
       List[ServiceClient[F]](
         InProcessServiceClient.make[F](

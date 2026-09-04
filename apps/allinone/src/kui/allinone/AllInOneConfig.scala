@@ -3,10 +3,12 @@ package kui.allinone
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
   ClusterConfig,
+  ConsumersConfig,
   GatewayConfig,
   KuiConfig,
   ServerConfig,
   StoreConfig,
+  StreamingConfig,
   TelemetryConfig,
   TopicsConfig
 }
@@ -45,6 +47,11 @@ import kui.gateway.app.GatewayServiceConfig
   * @param store
   *   where KUI keeps its own state. Carried for the same reason as `clusters`: it is the cluster service's
   *   configuration, and in this shape there is no separate process to read it
+  * @param consumers
+  *   the consumer service's dials. Carried for the same reason as `topics`: the service runs in this JVM
+  * @param streaming
+  *   the key browse cursors and reset plan tokens are signed with. One process signs both, and both are
+  *   handed to a browser and taken back, so it is carried here rather than left to each service to invent
   */
 final case class AllInOneConfig(
     server: ServerConfig,
@@ -52,7 +59,9 @@ final case class AllInOneConfig(
     telemetry: TelemetryConfig,
     clusters: List[ClusterConfig],
     store: StoreConfig,
-    topics: TopicsConfig
+    topics: TopicsConfig,
+    consumers: ConsumersConfig,
+    streaming: StreamingConfig
 ) {
 
   /** The same settings in the shape `GatewayWiring` wants.
@@ -90,7 +99,9 @@ object AllInOneConfig {
       config.telemetry,
       config.clusters,
       config.store,
-      config.topics
+      config.topics,
+      config.consumers,
+      config.streaming
     )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry

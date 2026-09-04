@@ -14,18 +14,22 @@ import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
 import kui.kernel.{ClusterId, Secret}
-import kui.message.api.MessageApi
+import kui.message.api.{MessageApi, MessageRoutes}
 import kui.message.application.BrowseUseCase
+import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
 import kui.message.application.cursor.CursorCodec
 import kui.message.infrastructure.{
   BrowseTuning,
   ClusterSerdeSource,
   ConfiguredClusterProfiles,
   KafkaBrowseConsumer,
-  KafkaRecordSource
+  KafkaRecordProducer,
+  KafkaRecordSource,
+  LoggingAuditSink
 }
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
+import kui.security.audit.MutationRecord
 import kui.serde.{ClusterSerdes, SerdeProfile}
 
 /** Everything the message service needs in order to be served, with no listener started.
@@ -80,6 +84,7 @@ object MessageWiring {
     */
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
+      cursorKey: Option[Secret[String]],
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F],
@@ -91,17 +96,38 @@ object MessageWiring {
       interceptors <- Resource.eval(MessageApi.interceptors[F](telemetry, rejections, logger))
       profiles = ConfiguredClusterProfiles.of[F](clusters)
       serdes <- serdesFor[F](clusters)
-      cursorKey <- Resource.eval(newCursorKey[F])
+      signingKey <- Resource.eval(cursorKeyFor[F](cursorKey, logger))
       source = new KafkaRecordSource[F](
         KafkaBrowseConsumer.resource[F](profiles.connectionFor, logger),
         tuning
       )
+      serdeSource = new ClusterSerdeSource[F](serdes)
       browse = BrowseUseCase.make[F](
         profiles,
-        new ClusterSerdeSource[F](serdes),
+        serdeSource,
         source,
-        CursorCodec.hmacSha256[F](cursorKey)
+        CursorCodec.hmacSha256[F](signingKey)
       )
+      // ADR-047's three parts, wired once and shared by both writes. The guard is the only way this
+      // service changes a cluster: it holds the read-only refusal and the audit record, and it is what
+      // returns the result, so a use case cannot be added that writes without going through them.
+      //
+      // The principal is `system` until M6 gives this service an identity to record. It is an effect
+      // rather than a constant because that is the shape it takes when it comes from the verified
+      // principal of the request in flight, and a field added later would leave every record written
+      // before then indistinguishable from every record written after.
+      guard = MutationGuard.make[F](
+        profiles,
+        LoggingAuditSink.make[F](logger),
+        logger,
+        MutationRecord.SystemPrincipal.pure[F]
+      )
+      producers = KafkaRecordProducer.resource[F](profiles.connectionFor, logger)
+      produce = ProduceUseCase.make[F](producers, serdeSource, guard)
+      // A resend reads through the same record source a browse does, so the seek arithmetic has one
+      // implementation, and it is bounded by the same budget a browse is — a copy of ten million
+      // records is refused by a ceiling rather than attempted.
+      resend = ResendUseCase.make[F](producers, source, guard, MessageRoutes.DefaultBudget)
       // Readiness is deliberately empty, and for a stronger reason than the topic service's. "Can this
       // service answer" is true as soon as it is wired: it holds no snapshot, so there is nothing to be
       // waiting for. A readiness check that dialled a broker would take the message service out of
@@ -109,12 +135,46 @@ object MessageWiring {
       // cluster at the same time.
       readiness = List.empty[ReadinessCheck[F]]
     } yield MessageServer(
-      routes =
-        MessageApi.routes[F](browse, profiles.ids, readiness, principals, rejections, logger, telemetry),
+      routes = MessageApi.routes[F](
+        browse,
+        produce,
+        resend,
+        profiles.ids,
+        readiness,
+        principals,
+        rejections,
+        logger,
+        telemetry
+      ),
       interceptors = interceptors,
       readiness = readiness,
       capabilities = MessageApi.capabilityDocument[F](profiles.ids)
     )
+
+  /** The configured key, or a fresh one, saying out loud which of the two happened.
+    *
+    * A cursor minted by one replica and rejected by its neighbour is the exact failure the signed cursor
+    * exists to remove, and it looks to a user like a "load more" button that works one press in two. The one
+    * deployment where a generated key is right is the one this log line lets an operator confirm they are in.
+    */
+  private def cursorKeyFor[F[_]: Async](
+      configured: Option[Secret[String]],
+      logger: StructuredLogger[F]
+  ): F[Secret[Array[Byte]]] =
+    configured match {
+      case Some(secret) =>
+        Async[F]
+          .pure(Secret(secret.value.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+          .flatTap(_ => logger.info("browse cursors are signed with the configured kui.streaming.cursorKey"))
+      case None =>
+        newCursorKey[F].flatTap(_ =>
+          logger.info(
+            "no kui.streaming.cursorKey is configured; browse cursors are signed with a key generated " +
+              "for this process. A second replica rejects this one's cursors. Configure the key before " +
+              "running more than one."
+          )
+        )
+    }
 
   /** A fresh signing key for this process's cursors.
     *

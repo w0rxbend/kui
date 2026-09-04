@@ -10,10 +10,12 @@ import cats.syntax.all.*
 
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
+  ConsumersConfig,
   GatewayConfig,
   PrincipalKeyConfig,
   SafeUrl,
   ServerConfig,
+  StreamingConfig,
   TopicsConfig,
   UpstreamServiceConfig
 }
@@ -91,6 +93,8 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           ClusterServiceConfig.Default,
           clusters = Nil,
           topics = TopicsConfig.Default,
+          consumers = ConsumersConfig.Default,
+          streaming = StreamingConfig.Default,
           Telemetry.noop[IO],
           AllInOneFixture.principals,
           logger

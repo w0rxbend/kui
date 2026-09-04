@@ -478,13 +478,15 @@ object KuiConfigSource {
       telemetry <- decodeTelemetry[F](layers, policy)
       store <- decodeStore[F](layers)
       topics <- decodeTopics[F](layers, policy)
+      consumers <- decodeConsumers[F](layers)
+      streaming <- decodeStreaming[F](layers)
       clusters <- decodeClusters[F](layers)
       auth <- read[F, String](
         field("kui.auth.type", "disabled", readAuthType, "disabled"),
         layers
       )
-    } yield (unknown, server, gateway, telemetry, store, topics, clusters, auth)
-      .mapN((_, s, g, t, st, tp, cs, _) => Draft(s, g, t, st, tp, cs))
+    } yield (unknown, server, gateway, telemetry, store, topics, consumers, streaming, clusters, auth)
+      .mapN((_, s, g, t, st, tp, cn, sr, cs, _) => Draft(s, g, t, st, tp, cn, sr, cs))
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {
@@ -1066,6 +1068,45 @@ object KuiConfigSource {
       TopicsConfig(interval, timeout, prefix, mode, pageSize, maxSize, profileClient)
     )
 
+  // ---------------------------------------------------------------------------------------------
+  // The consumer service, and the signing key both browser-facing tokens share
+  // ---------------------------------------------------------------------------------------------
+
+  /** The `kui.consumers.*` slice. One key, bounded the way every other interval is. */
+  private def decodeConsumers[F[_]: Async](layers: Layers): F[Problems[ConsumersConfig]] =
+    read[F, FiniteDuration](
+      field(
+        "kui.consumers.refreshInterval",
+        s"a duration between ${ConsumersConfig.MinRefreshInterval} and " +
+          s"${ConsumersConfig.MaxRefreshInterval}",
+        readBoundedDuration(ConsumersConfig.MinRefreshInterval, ConsumersConfig.MaxRefreshInterval),
+        ConsumersConfig.DefaultRefreshInterval
+      ),
+      layers
+    ).map(_.map(ConsumersConfig.apply))
+
+  /** The `kui.streaming.*` slice.
+    *
+    * Absent is legal and means "generate one per process", which is what every composition root did before
+    * this key existed; see [[StreamingConfig]] for why that is still the right default and wrong the moment
+    * there are two replicas.
+    */
+  private def decodeStreaming[F[_]: Async](layers: Layers): F[Problems[StreamingDraft]] = {
+    val key = "kui.streaming.cursorKey"
+    if layers.first(key).isEmpty then Async[F].pure(StreamingDraft(None).validNel)
+    else
+      read[F, SecretRef](
+        Field(
+          key,
+          "a literal value, env:NAME or file:/path",
+          raw => Right(SecretRef.parse(raw)),
+          None,
+          secret = true
+        ),
+        layers
+      ).map(_.map(ref => StreamingDraft(Some(ref))))
+  }
+
   private def decodeProfileClient[F[_]: Async](
       layers: Layers,
       policy: UrlPolicy
@@ -1520,8 +1561,13 @@ object KuiConfigSource {
       telemetry: TelemetryConfig,
       store: StoreDraft,
       topics: TopicsConfig,
+      consumers: ConsumersConfig,
+      streaming: StreamingDraft,
       clusters: List[ClusterConfig]
   )
+
+  /** `kui.streaming` before its `env:` / `file:` reference has been followed. */
+  final private case class StreamingDraft(cursorKey: Option[SecretRef])
 
   final private case class GatewayDraft(
       services: Map[ServiceId, UpstreamServiceConfig],
@@ -1545,7 +1591,8 @@ object KuiConfigSource {
             .traverse { case (key, index) => resolveKey[F](key, index, env) }
             .map(_.sequence)
           store <- resolveStore[F](value.store, env)
-        } yield (keys, store).mapN((principalKeys, storeConfig) =>
+          streaming <- resolveStreaming[F](value.streaming, env)
+        } yield (keys, store, streaming).mapN((principalKeys, storeConfig, streamingConfig) =>
           KuiConfig(
             value.server,
             GatewayConfig(
@@ -1558,10 +1605,43 @@ object KuiConfigSource {
             value.telemetry,
             storeConfig,
             value.topics,
+            value.consumers,
+            streamingConfig,
             value.clusters
           )
         )
     }
+
+  /** Follows `kui.streaming.cursorKey` and checks it is long enough to be an HMAC-SHA256 key.
+    *
+    * The length check is here rather than in the composition root because a key that is too short weakens
+    * every cursor and every plan token without anything looking wrong, and the moment to say so is before the
+    * process listens — the same rule, and the same 32 bytes, that `kui.gateway.principalKeys` applies.
+    */
+  private def resolveStreaming[F[_]: Async](
+      draft: StreamingDraft,
+      env: Map[String, String]
+  ): F[Problems[StreamingConfig]] = {
+    val key = "kui.streaming.cursorKey"
+
+    draft.cursorKey match {
+      case None => Async[F].pure(StreamingConfig(None).validNel)
+      case Some(ref) =>
+        SecretRef.resolve[F](ref, env).map {
+          case Left(problem) => ConfigProblem(key, problem, ConfigSourceName.Default).invalidNel
+          case Right(secret) =>
+            val bytes = secret.value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+            if bytes >= StreamingConfig.MinCursorKeyBytes then StreamingConfig(Some(secret)).validNel
+            else
+              ConfigProblem(
+                key,
+                s"resolves to $bytes bytes, and HMAC-SHA256 needs at least " +
+                  s"${StreamingConfig.MinCursorKeyBytes}; generate one with: openssl rand -base64 48",
+                ConfigSourceName.Default
+              ).invalidNel
+        }
+    }
+  }
 
   private def resolveKey[F[_]: Async](
       draft: KeyDraft,
@@ -1639,6 +1719,8 @@ object KuiConfigSource {
       List("kui", "topics", "defaultSearchMode"),
       List("kui", "topics", "defaultPageSize"),
       List("kui", "topics", "maxPageSize"),
+      List("kui", "consumers", "refreshInterval"),
+      List("kui", "streaming", "cursorKey"),
       List("kui", "clusterProfiles", "url"),
       List("kui", "clusterProfiles", "pollInterval"),
       List("kui", "clusterProfiles", "requestTimeout"),

@@ -89,6 +89,8 @@ final case class KuiConfig(
     telemetry: TelemetryConfig,
     store: StoreConfig,
     topics: TopicsConfig,
+    consumers: ConsumersConfig,
+    streaming: StreamingConfig,
     clusters: List[ClusterConfig]
 )
 
@@ -104,6 +106,8 @@ object KuiConfig {
       TelemetryConfig.Default,
       StoreConfig.Default,
       TopicsConfig.Default,
+      ConsumersConfig.Default,
+      StreamingConfig.Default,
       clusters = Nil
     )
 
