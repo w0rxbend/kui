@@ -108,6 +108,15 @@ object Icon {
 
   def moon: SvgElement = icon(draw("M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"))
 
+  /** "Follow the system": a disc with one half filled, the standard contrast mark.
+    *
+    * It exists because the theme control's third state had no picture. A bare dot was announced correctly and
+    * said nothing to anyone looking at it, and "follows the system" is the state a first-time visitor is in,
+    * so it was the one state that had to be legible.
+    */
+  def themeAuto: SvgElement =
+    icon(circle("12", "12", "9"), s.path(s.d := "M12 3a9 9 0 0 1 0 18z", s.fill := "currentColor"))
+
   def copy: SvgElement =
     icon(
       draw("M9 9h13v13H9z"),

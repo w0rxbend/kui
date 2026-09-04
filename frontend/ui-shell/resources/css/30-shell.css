@@ -63,12 +63,6 @@
   background: var(--kui-color-surface);
 }
 
-/* Holds the space the cluster switcher takes in M1, so that adding it does not move the theme
- * button to a different place on screen. */
-.kui-shell__cluster-slot {
-  min-width: 0;
-}
-
 .kui-shell__header-spacer {
   flex: 1 1 auto;
 }
@@ -77,6 +71,69 @@
   display: flex;
   align-items: center;
   gap: var(--kui-space-1);
+}
+
+.kui-shell__user-anchor {
+  position: relative;
+}
+
+.kui-shell__user-name {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-shell__user-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--kui-space-1));
+  /* From the token list, never a literal: a hard-coded 20 sits below `--kui-z-dropdown` and puts
+   * this menu underneath any dropdown that later shares its containing block. */
+  z-index: var(--kui-z-dropdown);
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  padding: var(--kui-space-1);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  /* The highest surface in the ramp. The design puts menus and popovers there, one step above the
+   * card surface, so a menu opened over a card still reads as floating above it. */
+  background: var(--kui-color-surface-overlay);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-shell__user-identity {
+  padding: var(--kui-space-2);
+  border-bottom: 1px solid var(--kui-color-border);
+}
+
+.kui-shell__user-identity-name {
+  font-weight: 600;
+}
+
+.kui-shell__user-roles {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-shell__user-item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
+  cursor: pointer;
+}
+
+.kui-shell__user-item:hover,
+.kui-shell__user-item:focus-visible {
+  /* The state layer, not the next surface step up. Hover is an overlay over whatever surface the
+   * thing already sits on; a different surface colour would say "this item is somewhere else". */
+  background: var(--kui-color-state-layer);
 }
 
 .kui-shell__version {
@@ -359,4 +416,101 @@
  * underline for an anchor has to be turned off, or the control reads as a link inside a button. */
 a.kui-button {
   text-decoration: none;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * The sign-in screen
+ *
+ * The same full-page shape as the unreachable screen above, and for the same reasons: it covers
+ * everything, nothing behind it is usable, and it is drawn entirely from what is compiled in. It is
+ * NOT shown to a deployment with `kui.auth.type: disabled`, which is the default — see
+ * `page/LoginPage.scala` for the two conditions that gate it.
+ * --------------------------------------------------------------------------------------------- */
+.kui-shell__login {
+  position: fixed;
+  inset: 0;
+  z-index: var(--kui-z-dialog);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface);
+}
+
+.kui-shell__login-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  width: 100%;
+  max-width: 24rem;
+  padding: var(--kui-space-6);
+  border-radius: var(--kui-radius-xl);
+  background: var(--kui-color-surface-elevated);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-shell__login-title {
+  margin: 0;
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text);
+}
+
+.kui-shell__login-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-shell__login-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-shell__login-label {
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-shell__login-input {
+  width: 100%;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+  font: inherit;
+}
+
+.kui-shell__login-input:focus-visible {
+  outline: 2px solid var(--kui-color-accent);
+  outline-offset: 1px;
+}
+
+/* A refusal is an error and is coloured as one. It is deliberately the same sentence for every kind
+ * of refusal — see LoginPage's note on why two sentences would be an account oracle. */
+.kui-shell__login-error {
+  margin: 0;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-shell__login-notice {
+  margin: 0;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  border: 1px solid var(--kui-color-border);
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-shell__login-hint {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
 }

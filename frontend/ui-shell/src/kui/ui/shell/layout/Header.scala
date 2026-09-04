@@ -2,17 +2,21 @@ package kui.ui.shell.layout
 
 import com.raquo.laminar.api.L.*
 
+import kui.security.Principal
 import kui.ui.kernel.component.{Icon, Tooltip}
 import kui.ui.kernel.css.KernelCss
 import kui.ui.kernel.theme.ThemeChoice
 import kui.ui.shell.ShellCss
 
-/** The bar across the top of the content: a place for the cluster switcher, the theme switch and the build
-  * version.
+/** The bar across the top of the content: the theme switch, the account menu and the build version.
   *
   * The product name is not here. In the design the wordmark belongs to the navigation drawer, which runs the
   * full height of the window, and the top bar belongs to the content beside it — so `Sidebar` carries the
   * brand and this bar carries only the controls that act on what is on screen.
+  *
+  * The cluster switcher is not here either. It scopes every destination in the drawer, and a control that
+  * scopes the things under it sits above them, so `Sidebar` mounts it. This bar used to hold an empty
+  * placeholder reserving space for it; the placeholder outlived the decision and was removed.
   *
   * @param buildVersion
   *   which build the browser is running. A `Signal` because it is filled in from `GET /api/v1/info` once that
@@ -22,16 +26,27 @@ import kui.ui.shell.ShellCss
   */
 object Header {
 
-  def apply(buildVersion: Signal[String], theme: Var[ThemeChoice]): HtmlElement =
+  /** @param principal
+    *   who is signed in, for the account menu. It is a `Signal` and not a value because it arrives after the
+    *   page does — `/auth/me` answers a moment into start-up — and because it goes away again when a session
+    *   expires, which must take the sign-out control with it
+    * @param signOut
+    *   what ending the session does. The header does not know: it owns no API client and decides nothing
+    *   about what happens after
+    */
+  def apply(
+      buildVersion: Signal[String],
+      theme: Var[ThemeChoice],
+      principal: Signal[Option[Principal]] = Val(None),
+      signOut: Observer[Unit] = Observer.empty
+  ): HtmlElement =
     headerTag(
       cls := ShellCss.Header,
-      // The cluster switcher lands here in M1. The empty element is deliberate: it holds the space,
-      // so adding the switcher does not move the theme button to a different place on screen.
-      div(cls := ShellCss.ClusterSlot, dataAttr("testid") := "cluster-slot"),
       div(cls := ShellCss.HeaderSpacer),
       div(
         cls := ShellCss.HeaderActions,
         themeSwitch(theme),
+        UserMenu(principal, signOut),
         span(cls := ShellCss.HeaderVersion, dataAttr("testid") := "build-version", text <-- buildVersion)
       )
     )
@@ -71,7 +86,7 @@ object Header {
 
   private def icon(current: ThemeChoice): SvgElement =
     current match {
-      case ThemeChoice.Auto => Icon.dot
+      case ThemeChoice.Auto => Icon.themeAuto
       case ThemeChoice.Light => Icon.sun
       case ThemeChoice.Dark => Icon.moon
     }

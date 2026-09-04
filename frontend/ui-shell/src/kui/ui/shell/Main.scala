@@ -7,6 +7,7 @@ import org.scalajs.dom
 
 import kui.gateway.contract.dto.{AuthMeResponse, PermissionDto}
 import kui.gateway.contract.{AuthEndpoints, CapabilityEndpoints}
+import kui.identity.contract.dto.AuthSettingsDto
 import kui.kernel.{ClusterId, RoleName, UserName}
 import kui.security.rbac.{Action, ClusterPermission, ClusterScope, RbacPolicy, Resource, ResourcePattern}
 import kui.security.{Principal, PrincipalKind}
@@ -24,6 +25,7 @@ import kui.ui.shell.page.{
   GalleryPage,
   GatewayUnreachable,
   HomePage,
+  LoginPage,
   NotFoundPage,
   SettingsPage
 }
@@ -257,6 +259,21 @@ object Shell {
         registration -> CapabilityStore.featureState(registration.id, None, Val(true))
       )
 
+    // Which sign-in this deployment uses. Asked once, at start-up, from the gateway's own configuration
+    // rather than from the identity service, so that a login screen can still be drawn during exactly the
+    // outage an operator needs to see. `None` until the answer arrives, and `Disabled` if it never does:
+    // a deployment that has configured no authentication must never be shown a locked door because one
+    // request was slow, and that is the direction this failure has to fall.
+    val authSettings: Var[Option[AuthSettingsDto]] = Var(None)
+    api.foreach { client =>
+      val _ = client
+        .call(AuthEndpoints.settings, ())
+        .foreach {
+          case Right(settings) => authSettings.set(Some(settings))
+          case Left(_) => authSettings.set(Some(AuthSettingsDto(AuthDisabled, None, rbacEnabled = false)))
+        }
+    }
+
     Layout(
       sidebar = Sidebar(
         router = router,
@@ -277,12 +294,61 @@ object Shell {
         signOut(api)
       ),
       content = content(router, buildVersion.signal, states, api, uiPrefix),
-      fullScreen = ShellHealth.connectivity.map {
-        case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
-        case ShellConnectivity.Connected(_) => None
-      }
+      // Two full-screen states now, and their order is the whole of the rule. A gateway that is not
+      // answering wins, because a sign-in form that cannot reach a server is a form that can only fail,
+      // and the unreachable screen is the one that says why and retries. Only when KUI *is* reachable is
+      // the sign-in question asked at all.
+      fullScreen = ShellHealth.connectivity
+        .combineWith(authSettings.signal, AuthState.principal.signal)
+        .map((connectivity, settings, principal) =>
+          connectivity match {
+            case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
+            case ShellConnectivity.Connected(_) =>
+              Option.when(mustSignIn(settings, principal))(
+                LoginPage(settings.getOrElse(AuthSettingsDto(AuthDisabled, None, false)), api, signedIn)
+              )
+          }
+        )
     )
   }
+
+  /** The wire value `AuthType.Disabled` serialises to, and therefore the one string that means "this
+    * deployment asks nobody to sign in". It is spelled out here rather than imported from
+    * `libs/config`, which is a JVM module the browser cannot see.
+    */
+  private[shell] val AuthDisabled: String = "disabled"
+
+  /** Whether to put the sign-in screen in front of everything.
+    *
+    * Both halves have to be true, and each guards against a different, serious failure.
+    *
+    *   - The **settings must have arrived and must not say `disabled`.** While the answer is still in
+    *     flight, or if it never comes, this is `false`: a deployment with no authentication configured —
+    *     the default, and what every demonstration environment runs — must never meet a login screen,
+    *     because that is the product's front door and a locked door there is worse than any other bug on
+    *     this screen.
+    *   - The **principal must be anonymous.** A signed-in user reloading the page has a session cookie
+    *     and gets their identity back from `/auth/me`; asking them to sign in again would be a loop.
+    *
+    * `None` for the principal means `/auth/me` has not answered yet, which is also not a reason to
+    * demand a sign-in.
+    */
+  private[shell] def mustSignIn(
+      settings: Option[AuthSettingsDto],
+      principal: Option[Principal]
+  ): Boolean =
+    settings.exists(_.authType != AuthDisabled) &&
+      principal.exists(_.kind == PrincipalKind.Anonymous)
+
+  /** What happens the moment the server has issued a session.
+    *
+    * A reload, and not a re-fetch of `/auth/me`. Everything the shell had built up to that point — the
+    * capability picture, the cluster list, every feature's own state — was fetched as the anonymous
+    * principal, and a reload is the one way to be certain none of it survives into a session that may be
+    * allowed to see less, or more.
+    */
+  private[shell] def signedIn: Observer[Unit] =
+    Observer[Unit](_ => dom.window.location.reload())
 
   /** Ending the session, from the account menu.
     *

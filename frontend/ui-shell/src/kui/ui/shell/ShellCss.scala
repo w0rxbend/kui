@@ -17,7 +17,16 @@ object ShellCss {
   val HeaderSpacer = "kui-shell__header-spacer"
   val HeaderActions = "kui-shell__header-actions"
   val HeaderVersion = "kui-shell__version"
-  val ClusterSlot = "kui-shell__cluster-slot"
+
+  /** The account control in the header, and the menu it opens. */
+  val UserMenu = "kui-shell__user"
+  val UserMenuAnchor = "kui-shell__user-anchor"
+  val UserMenuName = "kui-shell__user-name"
+  val UserMenuPanel = "kui-shell__user-panel"
+  val UserMenuIdentity = "kui-shell__user-identity"
+  val UserMenuIdentityName = "kui-shell__user-identity-name"
+  val UserMenuRoles = "kui-shell__user-roles"
+  val UserMenuItem = "kui-shell__user-item"
   val Sidebar = "kui-shell__sidebar"
   val SidebarList = "kui-shell__sidebar-list"
   val SidebarLink = "kui-shell__sidebar-link"
@@ -107,6 +116,20 @@ object ShellCss {
   val FeatureLoading = "kui-shell__feature-loading"
   val FeatureLoadingIcon = "kui-shell__feature-loading-icon"
   val FeatureLoadingLabel = "kui-shell__feature-loading-label"
+
+  /** The sign-in screen (see `page/LoginPage.scala`). It shares the unreachable screen's full-page shape
+    * because it is the same kind of thing: one card, nothing behind it usable, no data fetched to draw it.
+    */
+  val Login = "kui-shell__login"
+  val LoginCard = "kui-shell__login-card"
+  val LoginTitle = "kui-shell__login-title"
+  val LoginFields = "kui-shell__login-fields"
+  val LoginField = "kui-shell__login-field"
+  val LoginLabel = "kui-shell__login-label"
+  val LoginInput = "kui-shell__login-input"
+  val LoginError = "kui-shell__login-error"
+  val LoginNotice = "kui-shell__login-notice"
+  val LoginHint = "kui-shell__login-hint"
 
   val Unreachable = "kui-shell__unreachable"
   val UnreachableCard = "kui-shell__unreachable-card"
