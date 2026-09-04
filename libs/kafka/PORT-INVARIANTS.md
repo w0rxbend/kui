@@ -41,6 +41,13 @@ That is why `SkipReason.NoLeader` exists in `SkipReason.scala` (KAFKA-005) befor
 it. It is not dead code; it is the vocabulary this invariant needs, put in place by the milestone
 that could still afford to think about it.
 
+**This rule now has an implementation.** M4's `OffsetLookup`
+(`libs/kafka/src/kui/kafka/admin/OffsetLookup.scala`, task GRP-006) filters leaderless partitions before it
+sends a `listOffsets`, returns them as `SkipReason.NoLeader`, and makes no Kafka call at all when every
+partition is offline. The section stays here because `TopicAdmin.listOffsets` is its other owner and does not
+exist yet: **that method must call `OffsetLookup` rather than write the filter a second time.** Two
+implementations of a sixty-second-timeout guard is one more than can be kept correct.
+
 ---
 
 ## Why these are here and not in a trait
