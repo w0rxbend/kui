@@ -1,0 +1,117 @@
+/* The windowed table — the surface the product is judged on.
+ *
+ * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ *
+ * ## Why there is a second table stylesheet at all
+ *
+ * There is not, really. Everything that makes a KUI table look like a KUI table — the elevated
+ * panel, the small upper-case header, the faint internal rules, the tabular figures in a numeric
+ * column — is in 22-kernel-table.css and this component reuses those classes unchanged. What is
+ * here is only the handful of rules that exist *because* the rows are windowed: something has to
+ * own the scroll position, the rows outside the window have to be stood in for, and every row has
+ * to be exactly as tall as the arithmetic in `Window.slice` believes it is.
+ *
+ * ## The row height is a contract, not a style
+ *
+ * `--kui-vtable-row-height` is written onto the root element by `VirtualizedTable` in Scala, from
+ * the same integer it does its window arithmetic with. It is deliberately *not* declared in
+ * 10-tokens.css: a token here would be a second place the number lives, and the failure that
+ * follows is not a visual one. If the CSS made rows shorter than the arithmetic thought they were,
+ * the component would render a screenful of rows for a viewport that now holds more of them, and
+ * the bottom of the list would be blank until the user scrolled — with nothing wrong on either
+ * side taken alone. The fallback in `var()` is only a safety net for a row rendered before the
+ * inline property lands; the Scala value is always the real one.
+ *
+ * ## Density
+ *
+ * The design treats density as a switch that moves one thing: the vertical space around a row's
+ * text, from 15px to 9px. In this table that shows up as the row height changing from 48px to
+ * 36px, because the cell's own padding is zero and the space around the text is what is left of
+ * the row after its 18px line box. Same design decision, same two numbers, applied where a
+ * virtualized table can act on it.
+ */
+
+.kui-vtable {
+  display: flex;
+  flex-direction: column;
+  /* A flex child will not shrink below its content unless it is told it may, and a scroller that
+   * cannot shrink is a scroller that never scrolls: the container simply grows to the full ten
+   * thousand rows and the page scrolls instead. */
+  min-height: 0;
+}
+
+/* The element that owns the scroll position, and the only one that does. Two owners of one scroll
+ * position is how a table jitters.
+ *
+ * The height comes from the caller's layout. `--kui-vtable-height` is the escape hatch for a screen
+ * that has no flex parent to hand it one; the default keeps a table on a plain page from running
+ * past the bottom of the window, which would put its scrollbar out of reach. */
+.kui-vtable__scroller {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: var(--kui-vtable-height, 70vh);
+  overflow: auto;
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-surface-elevated);
+}
+
+/* Fixed, and the same number the window arithmetic uses. `table-layout: fixed` keeps the columns
+ * from being re-measured as rows enter and leave the window: with automatic layout, scrolling into
+ * a region of longer topic names would silently re-flow every column mid-scroll. */
+.kui-vtable__scroller > .kui-table {
+  table-layout: fixed;
+}
+
+.kui-vtable__row {
+  height: var(--kui-vtable-row-height, 48px);
+}
+
+/* The vertical padding is zero here and the row's height carries the rhythm instead, because a
+ * padded cell inside a fixed-height row is two claims about how tall the row is and the taller one
+ * wins. The horizontal gutter is unchanged from the plain table: a narrower gutter would not fit
+ * more columns on screen, only crowd the ones already there. */
+.kui-vtable__row > .kui-table__cell {
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: var(--kui-font-line-height-tight);
+  /* A long topic name truncates rather than wrapping. Wrapping would make one row taller than the
+   * arithmetic expects, and every row below it would then be drawn in the wrong place. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Compact: the design's other density. One value moves. */
+.kui-vtable--compact .kui-vtable__row > .kui-table__cell {
+  font-size: var(--kui-font-size-md);
+}
+
+/* The two spacers stand in for every row outside the window. They are `role="presentation"` and
+ * `aria-hidden` in the markup, so nothing announces them; here they only have to take up space and
+ * draw nothing at all — a spacer that inherited the cell's bottom rule would paint a stray line
+ * above and below the window at every scroll position. */
+.kui-vtable__spacer > td {
+  padding: 0;
+  border: 0;
+}
+
+/* The focused row, for a keyboard user. The state layer rather than an outline on the row itself:
+ * an outline drawn on a `tr` is clipped by the cells in several browsers and comes out as four
+ * disconnected corners. */
+.kui-vtable__row:focus {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+}
+
+.kui-vtable__row:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+}
+
+/* The empty state fills the panel rather than sitting in a padded cell; the cell is only a
+ * container for it. */
+.kui-vtable__empty {
+  padding: 0;
+  border-bottom: 0;
+}

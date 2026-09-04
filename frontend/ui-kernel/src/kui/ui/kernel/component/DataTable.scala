@@ -94,47 +94,7 @@ object DataTable {
       testId: Option[String] = None
   ): HtmlElement = {
 
-    /** Clicking a header cycles ascending, descending, then back to unsorted.
-      *
-      * The third state matters: without it there is no way back to the server's natural order, which for a
-      * list of brokers is broker id and for a list of messages is offset.
-      */
-    def nextSort(current: Option[Sort[String]], columnId: String): Option[Sort[String]] =
-      current match {
-        case Some(Sort(`columnId`, SortOrder.Asc)) => Some(Sort(columnId, SortOrder.Desc))
-        case Some(Sort(`columnId`, SortOrder.Desc)) => None
-        case _ => Some(Sort(columnId, SortOrder.Asc))
-      }
-
-    def ariaSort(current: Option[Sort[String]], columnId: String): String =
-      current match {
-        case Some(Sort(`columnId`, SortOrder.Asc)) => "ascending"
-        case Some(Sort(`columnId`, SortOrder.Desc)) => "descending"
-        case _ => "none"
-      }
-
-    def headerCell(column: Column[A]): HtmlElement =
-      th(
-        columnScope := "col",
-        cls := KernelCss.TableHeaderCell,
-        Option.when(column.align == ColumnAlign.Numeric)(cls := KernelCss.TableHeaderCellNumeric),
-        column.width.map(value => styleAttr := s"width: $value"),
-        aria.sort <-- sort.signal.map(current => ariaSort(current, column.id)),
-        if column.sortable then
-          button(
-            tpe := "button",
-            cls := KernelCss.TableSortButton,
-            column.header,
-            child <-- sort.signal.map {
-              case Some(Sort(column.id, SortOrder.Asc)) => Icon.chevronUp
-              case Some(Sort(column.id, SortOrder.Desc)) => Icon.chevronDown
-              // A placeholder of the same size, so a column does not shift when it becomes sorted.
-              case _ => span(cls := KernelCss.TableSortPlaceholder, aria.hidden := true)
-            },
-            onClick.compose(_.sample(sort.signal)) --> { current => sort.set(nextSort(current, column.id)) }
-          )
-        else column.header
-      )
+    def headerCell(column: Column[A]): HtmlElement = DataTable.headerCell(column, sort)
 
     table(
       cls := KernelCss.Table,
@@ -166,6 +126,55 @@ object DataTable {
       )
     )
   }
+
+  /** Clicking a header cycles ascending, descending, then back to unsorted.
+    *
+    * The third state matters: without it there is no way back to the server's natural order, which for a list
+    * of brokers is broker id and for a list of messages is offset.
+    */
+  private[component] def nextSort(current: Option[Sort[String]], columnId: String): Option[Sort[String]] =
+    current match {
+      case Some(Sort(`columnId`, SortOrder.Asc)) => Some(Sort(columnId, SortOrder.Desc))
+      case Some(Sort(`columnId`, SortOrder.Desc)) => None
+      case _ => Some(Sort(columnId, SortOrder.Asc))
+    }
+
+  private def ariaSort(current: Option[Sort[String]], columnId: String): String =
+    current match {
+      case Some(Sort(`columnId`, SortOrder.Asc)) => "ascending"
+      case Some(Sort(`columnId`, SortOrder.Desc)) => "descending"
+      case _ => "none"
+    }
+
+  /** One `<th>`, sortable or not.
+    *
+    * Shared with `VirtualizedTable` rather than written twice. The two tables differ in how their *rows* are
+    * put on screen and in nothing else; a second copy of this would be two places for the sort cycle to be
+    * decided, and the first time they disagreed the symptom would be one table on one screen that could not
+    * be returned to its natural order.
+    */
+  private[component] def headerCell[A](column: Column[A], sort: Var[Option[Sort[String]]]): HtmlElement =
+    th(
+      columnScope := "col",
+      cls := KernelCss.TableHeaderCell,
+      Option.when(column.align == ColumnAlign.Numeric)(cls := KernelCss.TableHeaderCellNumeric),
+      column.width.map(value => styleAttr := s"width: $value"),
+      aria.sort <-- sort.signal.map(current => ariaSort(current, column.id)),
+      if column.sortable then
+        button(
+          tpe := "button",
+          cls := KernelCss.TableSortButton,
+          column.header,
+          child <-- sort.signal.map {
+            case Some(Sort(column.id, SortOrder.Asc)) => Icon.chevronUp
+            case Some(Sort(column.id, SortOrder.Desc)) => Icon.chevronDown
+            // A placeholder of the same size, so a column does not shift when it becomes sorted.
+            case _ => span(cls := KernelCss.TableSortPlaceholder, aria.hidden := true)
+          },
+          onClick.compose(_.sample(sort.signal)) --> { current => sort.set(nextSort(current, column.id)) }
+        )
+      else column.header
+    )
 
   /** `<th scope="col">`. Laminar has no built-in key for it, so it is spelled out. Without it a screen reader
     * has to guess whether a header describes its column or its row.

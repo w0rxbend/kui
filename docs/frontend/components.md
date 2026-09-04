@@ -322,8 +322,9 @@ DataTable(
 ```
 
 Plain and non-virtualized: every row is in the DOM. That suits lists of tens or a few hundred —
-brokers, consumer groups, schema versions, connectors. `VirtualizedTable` arrives in M2 for message
-browsing, where the row count is unbounded.
+brokers, consumer groups, schema versions, connectors. For thousands of rows use `VirtualizedTable`
+below; `DataTable` keeps its callers and is not going away, because a list of thirty brokers does not
+need a window and paying for one buys nothing.
 
 **Rows are keyed.** Laminar's `split` matches each item to its existing element by `rowKey`, so a
 list that arrives reordered moves the elements instead of rebuilding them. That is not only faster: a
@@ -340,6 +341,66 @@ way back to the server's natural order, which for brokers is broker id and for m
 a spinner would collapse the table, jump the page, and jump it back. When there are no rows, the
 empty state replaces the body and the header stays, so the columns still say what the table would
 have held.
+
+## VirtualizedTable
+
+```scala
+VirtualizedTable(
+  rows    = state.topics,          // Signal[List[TopicRow]]
+  columns = TopicColumns.all,      // the same List[Column[A]] DataTable takes
+  rowKey  = _.name,
+  compact = prefs.compact,
+  sort    = state.sort             // written, never read back to reorder
+)
+```
+
+The same table as `DataTable`, except that only the rows the viewport can show — plus a few either
+side — are in the document. Everything else is stood in for by two empty spacer rows whose heights
+add up to the space the missing rows would have taken, so the scrollbar is the length of the whole
+list while the document stays about twenty rows long. Ten thousand topics scroll at the same cost as
+twenty.
+
+**It is not a grid, and that is a decision rather than a gap.** No column resizing, no reordering, no
+grouping, no pinned columns, no cell editing, no expandable rows, and no variable row heights. When a
+screen genuinely needs a grid, the answer is to decide that a grid is a product feature and build
+one — not to grow this component until it is a bad one. It also does no fetching and no paging: it
+draws the rows it is handed, and paging is `Pagination`, a sibling.
+
+**The row height is given, not measured.** Measuring would allow rows of different heights and would
+make every scroll event read layout back out of the browser, so the cost would depend on what is in
+the rows — fast in a test, slow on the one cluster that matters. A fixed height makes the window pure
+arithmetic, which lives in `Window.slice` and is tested without a DOM at all. That is where every
+off-by-one in a virtualizer is, and every one of them shows on screen as a flickering row, a blank
+strip or a lying scrollbar rather than as an exception.
+
+**One number, one place.** The row height is written onto the root element as the
+`--kui-vtable-row-height` custom property, from the same integer the arithmetic uses, and
+`25-virtualized-table.css` reads it back. A stylesheet that disagreed with the arithmetic would leave
+a blank strip under the last row with nothing wrong on either side taken alone.
+
+**Density.** `compact` is the design's density switch applied per table: the row goes from 48px to
+36px, which is the design's 15px of padding around an 18px line box becoming 9px. It moves nothing
+else — not the type size, not the control heights — because shrinking those makes an interface harder
+to hit, not denser.
+
+**Sorting belongs to the caller.** The `sort` `Var` is written and never read back to reorder the
+rows. The screens that use this sort on the server: the topic list sorts ten thousand rows it has
+never seen, of which it holds five hundred, and a table that quietly re-sorted its own page would
+show the right rows in an order no page boundary matches.
+
+**Accessibility.** `aria-rowcount` is the length of the whole list and each row's `aria-rowindex` is
+its position in that list, not in the window — without that a screen reader on ten thousand topics
+announces "row 3 of 12", which is the most misleading thing a virtualized table can say. Arrow keys
+move a row, Page Up and Page Down a viewport's worth, Home and End the ends; the focus is remembered
+as an *index* rather than as an element, because the element is destroyed when its row leaves the
+window, and it is reapplied when the row comes back. The spacer rows are `role="presentation"` and
+`aria-hidden`: they are layout.
+
+**Testing it outside a browser.** jsdom performs no layout and reports every element as zero pixels
+tall, so a component that could only measure itself would render an empty window in every test and
+the tests would pass while asserting nothing. The `viewportHeight` parameter is the `Var` the
+component normally fills in from the real element; a suite (and the benchmark harness) sets it
+directly.
 
 ## `SearchBox`
 

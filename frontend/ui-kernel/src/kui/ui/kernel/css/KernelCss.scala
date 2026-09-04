@@ -149,6 +149,23 @@ object KernelCss {
   val TableCellNumeric = "kui-table__cell--numeric"
   val TableHeaderCellNumeric = "kui-table__header-cell--numeric"
 
+  /** The windowed table (`VirtualizedTable`). It borrows every `kui-table__*` class for the parts that are
+    * identical to the plain table — header cells, sort buttons, body cells — and adds only the classes that
+    * exist because the rows are windowed: the scroller that owns the scroll position, the two spacers that
+    * stand in for the rows outside the window, and the fixed-height row.
+    */
+  val VirtualTable = "kui-vtable"
+
+  /** Per-table compact density. The global `:root[data-density="compact"]` switch is a preference; this is
+    * one table asking for the same nine-pixel row on a screen that is a list of ten thousand things. Both set
+    * the same custom property and nothing else, exactly as the design says density works.
+    */
+  val VirtualTableCompact = "kui-vtable--compact"
+  val VirtualTableScroller = "kui-vtable__scroller"
+  val VirtualTableRow = "kui-vtable__row"
+  val VirtualTableSpacer = "kui-vtable__spacer"
+  val VirtualTableEmpty = "kui-vtable__empty"
+
   val Magnitude = "kui-magnitude"
   val MagnitudeAccent = "kui-magnitude--accent"
   val MagnitudeInline = "kui-magnitude--inline"
