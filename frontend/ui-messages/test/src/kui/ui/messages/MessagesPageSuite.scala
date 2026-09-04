@@ -145,4 +145,15 @@ final class MessagesPageSuite extends FunSuite {
       assertEquals(find(container, "messages-publish").getAttribute("disabled"), null)
     }
   }
+
+  test("theViewSwitchSaysWhichViewIsOnWithoutUsingColour") {
+    // The defect this pins: List and Table were two plain buttons, and the only difference between the one
+    // showing and the one not was the button's fill. A screen reader announces both as "button", so
+    // somebody using one could not tell which view they were looking at, and neither could a reader who
+    // does not distinguish the two blues. `aria-pressed` is the state, stated rather than coloured.
+    mounted { container =>
+      assertEquals(find(container, "messages-view-list").getAttribute("aria-pressed"), "true")
+      assertEquals(find(container, "messages-view-table").getAttribute("aria-pressed"), "false")
+    }
+  }
 }

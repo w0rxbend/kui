@@ -555,6 +555,11 @@ object MessagesPage {
           // which neither is emphasised is a pair whose state has to be worked out from the screen.
           variant = if current == value then ButtonVariant.Primary else ButtonVariant.Secondary,
           testId = Some(testId)
+        ).amend(
+          // And the colour is the only thing that says so, which is no answer at all to somebody using a
+          // screen reader: both buttons announce as plain buttons and neither says it is the one showing.
+          // `aria-pressed` is what the search box's Exact/Fuzzy pair and the favourite star already use.
+          aria.pressed := (current == value).toString
         )
       )
     )
