@@ -5,6 +5,7 @@ import scala.concurrent.duration.*
 import com.raquo.laminar.api.L.*
 
 import kui.cluster.contract.dto.*
+import kui.gateway.contract.dto.ClusterOverviewDto
 import kui.kernel.{BrokerId, ClusterId}
 import kui.ui.kernel.api.{ApiClient, ApiError}
 import kui.ui.kernel.query.QueryCache
@@ -37,7 +38,7 @@ import kui.ui.kernel.state.{CallScope, HealthReporting}
 final class ClustersQueries(api: ApiClient) {
 
   /** Every configured cluster. One key, so the bound is nominal. */
-  val clusters: QueryCache[Unit, ClustersResponse] =
+  val clusters: QueryCache[Unit, ClusterOverviewDto] =
     QueryCache.make(_ => call(ClustersApi.clusters, ()), staleAfter = ClustersQueries.Cadence, maxEntries = 4)
 
   /** One cluster's brokers, one entry per cluster visited in this session. */

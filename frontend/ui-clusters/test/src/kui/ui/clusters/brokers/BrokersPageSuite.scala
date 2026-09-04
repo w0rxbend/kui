@@ -9,7 +9,8 @@ import munit.FunSuite
 import org.scalajs.dom
 import sttp.tapir.PublicEndpoint
 
-import kui.cluster.contract.dto.{BrokersResponse, ClustersResponse}
+import kui.cluster.contract.dto.BrokersResponse
+import kui.gateway.contract.dto.ClusterOverviewDto
 import kui.contracts.capability.ReasonCode
 import kui.contracts.cluster.BrokerDto
 import kui.contracts.{ErrorEnvelope, Section}
@@ -52,7 +53,7 @@ class BrokersPageSuite extends FunSuite {
     */
   final private class FakeApi extends ApiClient {
     private val brokersBus = new EventBus[Either[ApiError, BrokersResponse]]
-    private val clustersBus = new EventBus[Either[ApiError, ClustersResponse]]
+    private val clustersBus = new EventBus[Either[ApiError, ClusterOverviewDto]]
 
     def call[I, O](endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any], input: I): EventStream[Either[ApiError, O]] =
       endpoint.info.name match {
@@ -70,7 +71,7 @@ class BrokersPageSuite extends FunSuite {
     def brokers(section: Section[List[BrokerDto]]): Unit =
       brokersBus.writer.onNext(Right(BrokersResponse(section)))
 
-    def clusters(response: ClustersResponse): Unit = clustersBus.writer.onNext(Right(response))
+    def clusters(response: ClusterOverviewDto): Unit = clustersBus.writer.onNext(Right(response))
   }
 
   final private class Fixture {

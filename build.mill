@@ -946,7 +946,13 @@ object frontend extends Module {
     // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
     def moduleDir = super.moduleDir / os.up / "ui-clusters"
 
-    def moduleDeps = Seq(uiKernel, services.cluster.contract.js)
+    // `services.gateway.contract.js` alongside the cluster service's own: five of the six endpoints
+    // this module calls are proxied through the gateway unchanged and so keep the service's DTOs,
+    // but `GET /api/v1/clusters` is *aggregated* by the gateway (CLAPI-007) and answers with
+    // `ClusterOverviewDto`, which is the gateway's type. Decoding it against the service's
+    // `ClustersResponse` is what made the dashboard render "No clusters yet" against a working
+    // broker; see `ClustersApi.clusters`.
+    def moduleDeps = Seq(uiKernel, services.cluster.contract.js, services.gateway.contract.js)
 
     /** jsdom, since M1's dashboard.
       *

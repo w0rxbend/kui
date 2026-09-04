@@ -49,7 +49,14 @@ object BrokersPage {
     val clusterSummary: Signal[Option[ClusterSummaryDto]] =
       queries.clusters
         .state(())
-        .map(_.lastGood.flatMap(_.items.find(_.id == cluster).flatMap(_.summary.toOption)))
+        .map(
+          _.lastGood.flatMap(
+            _.clusters.toOption.toList.flatten
+              .map(_.cluster)
+              .find(_.id == cluster)
+              .flatMap(_.summary.toOption)
+          )
+        )
 
     val brokers: Signal[List[BrokerDto]] = section.map(_.flatMap(_.toOption).getOrElse(Nil))
 

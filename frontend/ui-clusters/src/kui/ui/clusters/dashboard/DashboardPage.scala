@@ -5,7 +5,7 @@ import java.time.Instant
 import com.raquo.laminar.api.L
 import com.raquo.laminar.api.L.*
 
-import kui.cluster.contract.dto.ClustersResponse
+import kui.gateway.contract.dto.ClusterOverviewDto
 import kui.kernel.{ClusterId, Sort, SortOrder}
 import kui.ui.clusters.component.{Bytes, SectionChip}
 import kui.ui.clusters.{ClustersCss, ClustersQueries, Messages}
@@ -65,7 +65,7 @@ object DashboardPage {
     val unavailableOnly = Var(false)
     val sort: Var[Option[Sort[String]]] = Var(None)
 
-    val state: Signal[QueryState[ClustersResponse]] = queries.clusters.state(())
+    val state: Signal[QueryState[ClusterOverviewDto]] = queries.clusters.state(())
 
     /** The rows the table draws: the last good response, filtered by the toggle.
       *
@@ -121,7 +121,7 @@ object DashboardPage {
   /** How many clusters are online, how many are not, and when the list was read. */
   private def summaryStrip(
       rows: Signal[List[DashboardRow]],
-      state: Signal[QueryState[ClustersResponse]],
+      state: Signal[QueryState[ClusterOverviewDto]],
       zone: Signal[String],
       now: () => Instant
   ): HtmlElement =
@@ -180,7 +180,7 @@ object DashboardPage {
     * `isStale` and not "the last call failed": a key that has only ever failed has nothing to dim, and
     * putting a stale badge over an empty table would say the data is old when there is no data.
     */
-  private def staleReason(state: QueryState[ClustersResponse]): Option[StaleReason] =
+  private def staleReason(state: QueryState[ClusterOverviewDto]): Option[StaleReason] =
     Option.when(state.isStale)(
       StaleReason.lastRequestFailed(
         state.outcome.flatMap(_.left.toOption).map(describe).getOrElse(Messages.UnknownFailure)

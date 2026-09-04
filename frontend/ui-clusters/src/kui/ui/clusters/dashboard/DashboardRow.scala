@@ -2,10 +2,10 @@ package kui.ui.clusters.dashboard
 
 import java.time.Instant
 
-import kui.cluster.contract.dto.ClustersResponse
 import kui.contracts.Section
 import kui.contracts.capability.ReasonCode
 import kui.contracts.cluster.ClusterRowDto
+import kui.gateway.contract.dto.ClusterOverviewDto
 import kui.kernel.{BrokerId, ClusterId}
 
 /** What one dashboard row is in, which decides its chip, its dimming and where it sorts.
@@ -78,8 +78,11 @@ object DashboardRow {
     * never work. Every other state stays visible, because a user has to be able to tell "misconfigured" from
     * "down".
     */
-  def of(response: ClustersResponse): List[DashboardRow] =
-    response.items.flatMap(row)
+  def of(response: ClusterOverviewDto): List[DashboardRow] =
+    // `toOption.toList.flatten`: the *outer* section says whether the cluster service answered at all.
+    // When it did not, there are no rows — the overlay above the table is what tells the user why, and
+    // inventing rows here would put made-up clusters on a screen.
+    response.clusters.toOption.toList.flatten.map(_.cluster).flatMap(row)
 
   private def row(dto: ClusterRowDto): Option[DashboardRow] =
     dto.summary match {

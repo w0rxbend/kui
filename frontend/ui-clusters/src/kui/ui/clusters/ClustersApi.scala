@@ -7,6 +7,7 @@ import kui.cluster.contract.ClusterEndpoints
 import kui.cluster.contract.dto.*
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
+import kui.gateway.contract.dto.ClusterOverviewDto
 import kui.kernel.{BrokerId, ClusterId}
 
 /** The cluster service's endpoints as the *browser* calls them.
@@ -39,11 +40,25 @@ object ClustersApi {
 
   private val brokerIdPath: EndpointInput[BrokerId] = path[BrokerId](ClusterEndpoints.BrokerIdParam)
 
-  /** `GET /api/v1/clusters` — every configured cluster, each with its own section status. */
-  val clusters: PublicEndpoint[Unit, ErrorEnvelope, ClustersResponse, Any] =
+  /** `GET /api/v1/clusters` — every configured cluster, each with its own section status.
+    *
+    * The one endpoint in this file whose response type is the *gateway's* and not the cluster service's. The
+    * other five are proxied through untouched, so the service's DTO is what arrives; this one the gateway
+    * assembles itself (CLAPI-007), wrapping the list in an outer `Section` that says whether the cluster
+    * *service* answered and attaching each row's capability. Those are two different questions from "did this
+    * Kafka cluster answer", and the dashboard needs both.
+    *
+    * It was previously declared as the service's `ClustersResponse`, whose decoder defaults a missing `items`
+    * field to `Nil`. The gateway sends `clusters`, never `items`, so every response decoded successfully into
+    * an empty list: against a healthy broker the dashboard drew "No clusters yet" under a "last updated just
+    * now" timestamp, and nothing anywhere reported an error. Two modules were each self-consistent and the
+    * seam between them was untested — which is why `ClustersApiSuite` now checks this endpoint against a
+    * recorded gateway response.
+    */
+  val clusters: PublicEndpoint[Unit, ErrorEnvelope, ClusterOverviewDto, Any] =
     KuiEndpoint.base.get
       .in(clustersBase)
-      .out(jsonBody[ClustersResponse])
+      .out(jsonBody[ClusterOverviewDto])
       .name("clusters.list")
 
   /** `GET /api/v1/clusters/{clusterId}` — one cluster, so a deep link does not fetch the other thirty-nine.

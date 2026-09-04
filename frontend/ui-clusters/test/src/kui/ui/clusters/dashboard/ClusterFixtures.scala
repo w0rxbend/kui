@@ -2,7 +2,8 @@ package kui.ui.clusters.dashboard
 
 import java.time.Instant
 
-import kui.cluster.contract.dto.ClustersResponse
+import kui.contracts.capability.CapabilityState
+import kui.gateway.contract.dto.{ClusterOverviewDto, ClusterOverviewRow}
 import kui.contracts.Section
 import kui.contracts.capability.ReasonCode
 import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
@@ -67,6 +68,15 @@ object ClusterFixtures {
   def stale(reason: ReasonCode = ReasonCode.UpstreamTimeout): Section[ClusterSummaryDto] =
     Section.Stale(summary(), scrapedAt, reason)
 
-  def response(rows: ClusterRowDto*): ClustersResponse =
-    ClustersResponse(rows.toList, generatedAt = scrapedAt)
+  /** A gateway dashboard response wrapping the given rows, with the outer section healthy.
+    *
+    * The outer `Section` answers "did the *cluster service* answer"; each row's own section answers "did
+    * that Kafka cluster answer". Every row here is reported as an available capability, which is the
+    * normal case; a suite that needs the other one builds it explicitly.
+    */
+  def response(rows: ClusterRowDto*): ClusterOverviewDto =
+    ClusterOverviewDto(
+      clusters = Section.Ok(rows.toList.map(row => ClusterOverviewRow(row, CapabilityState.Available)), scrapedAt),
+      generatedAt = scrapedAt
+    )
 }

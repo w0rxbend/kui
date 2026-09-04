@@ -9,7 +9,7 @@ import munit.FunSuite
 import org.scalajs.dom
 import sttp.tapir.PublicEndpoint
 
-import kui.cluster.contract.dto.ClustersResponse
+import kui.gateway.contract.dto.ClusterOverviewDto
 import kui.contracts.{ErrorEnvelope, Section}
 import kui.kernel.ClusterId
 import kui.ui.clusters.dashboard.ClusterFixtures.*
@@ -28,7 +28,7 @@ class DashboardPageSuite extends FunSuite {
 
   /** An `ApiClient` that answers whichever call the page makes, when the test says so. */
   final private class FakeApi extends ApiClient {
-    private val bus = new EventBus[Either[ApiError, ClustersResponse]]
+    private val bus = new EventBus[Either[ApiError, ClusterOverviewDto]]
     val calls: mutable.ListBuffer[String] = mutable.ListBuffer.empty
 
     def call[I, O](endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any], input: I): EventStream[Either[ApiError, O]] = {
@@ -43,7 +43,7 @@ class DashboardPageSuite extends FunSuite {
         input: I
     ): EventStream[Either[ApiError, O]] = EventStream.empty
 
-    def respond(response: ClustersResponse): Unit = bus.writer.onNext(Right(response))
+    def respond(response: ClusterOverviewDto): Unit = bus.writer.onNext(Right(response))
     def fail(failure: ApiError): Unit = bus.writer.onNext(Left(failure))
   }
 
