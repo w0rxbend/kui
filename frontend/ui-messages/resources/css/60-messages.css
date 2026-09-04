@@ -281,7 +281,7 @@
    rather than squeezed into the width of the first one. Padding rather than a height, because the
    state can be one line ("No records") or a paragraph explaining why nothing was fetched. */
 .kui-messages__empty-cell {
-  padding: var(--kui-space-6, 1.5rem) var(--kui-space-4, 1rem);
+  padding: var(--kui-space-6) var(--kui-space-4);
   text-align: center;
 }
 
@@ -292,7 +292,7 @@
 .kui-messages__grid {
   display: flex;
   flex-direction: column;
-  gap: var(--kui-space-2, 0.5rem);
+  gap: var(--kui-space-2);
 }
 
 /* The table scrolls inside this box. Without it the page itself scrolls sideways, which takes the
@@ -300,7 +300,7 @@
 .kui-messages__grid-scroll {
   overflow-x: auto;
   border: 1px solid var(--kui-color-border);
-  border-radius: var(--kui-radius-md, 8px);
+  border-radius: var(--kui-radius-md);
 }
 
 /* `auto` rather than the list view's `fixed`: there, one long value must not widen its column, and
@@ -360,10 +360,10 @@
 .kui-messages__grid-picker-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
-  gap: var(--kui-space-1, 0.25rem) var(--kui-space-4, 1rem);
+  gap: var(--kui-space-1) var(--kui-space-4);
   max-height: 16rem;
   overflow-y: auto;
-  padding: var(--kui-space-2, 0.5rem) 0;
+  padding: var(--kui-space-2) 0;
 }
 
 .kui-messages__grid-note {
@@ -375,7 +375,7 @@
    adjacent, so that which one is on is legible at a glance. */
 .kui-messages__view-switch {
   display: inline-flex;
-  gap: var(--kui-space-1, 0.25rem);
+  gap: var(--kui-space-1);
 }
 
 /* --- The smart filter (MS-007) --------------------------------------------------------------
@@ -390,17 +390,17 @@
 .kui-messages__filter-body {
   display: flex;
   flex-direction: column;
-  gap: var(--kui-space-2, 0.5rem);
-  padding: var(--kui-space-2, 0.5rem) 0;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-2) 0;
 }
 
 /* Monospace, because what is typed here is a program: alignment and the difference between a dot
    and a comma both matter, and a proportional font hides them. */
 .kui-messages__filter-input {
   width: 100%;
-  padding: var(--kui-space-2, 0.5rem);
+  padding: var(--kui-space-2);
   border: 1px solid var(--kui-color-border);
-  border-radius: var(--kui-radius-md, 8px);
+  border-radius: var(--kui-radius-md);
   background: var(--kui-color-surface);
   color: var(--kui-color-text);
   font-family: var(--kui-font-family-mono);
@@ -410,7 +410,7 @@
 
 .kui-messages__filter-input:focus-visible {
   outline: 2px solid var(--kui-color-focus);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 .kui-messages__filter-hint {
@@ -421,7 +421,7 @@
 
 .kui-messages__filter-actions {
   display: flex;
-  gap: var(--kui-space-2, 0.5rem);
+  gap: var(--kui-space-2);
 }
 
 /* The compile failure, with its line and column. It sits directly under the box it is about, which
@@ -437,7 +437,7 @@
    because "track" is a word only its own users know; the browse page does not, because a table of
    records explains itself. */
 .kui-messages__lead {
-  margin: 0 0 var(--kui-space-3, 0.75rem);
+  margin: 0 0 var(--kui-space-3);
   max-width: 68ch;
   color: var(--kui-color-text-muted);
 }
@@ -449,6 +449,6 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--kui-space-4, 1rem);
+  gap: var(--kui-space-4);
   flex-wrap: wrap;
 }

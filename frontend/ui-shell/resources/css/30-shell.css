@@ -109,7 +109,7 @@
 }
 
 .kui-shell__user-identity-name {
-  font-weight: 600;
+  font-weight: var(--kui-font-weight-bold);
 }
 
 .kui-shell__user-roles {
@@ -144,8 +144,23 @@
 
 /* --- The drawer --------------------------------------------------------------------------- */
 
+/* The drawer is pinned: it stays where it is while the page scrolls under it.
+ *
+ * Without this it was an ordinary grid item one viewport tall, so on any page longer than one
+ * screen -- a topic list, a broker's configuration -- its raised panel stopped at the fold with a
+ * hard horizontal edge and the page's own ground showed below it, and the navigation itself
+ * scrolled away out of reach. `position: sticky` with `align-self: start` keeps it in its grid
+ * column rather than lifting it out of the layout the way `fixed` would, which is what preserves
+ * the column's width without repeating the measurement. `height: 100vh` plus its own scrollbar is
+ * for the case the drawer's contents are themselves taller than the window: the list scrolls
+ * inside the drawer instead of being cut off. */
 .kui-shell__sidebar {
   grid-area: sidebar;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: var(--kui-space-5) var(--kui-space-3) var(--kui-space-4);
@@ -317,7 +332,12 @@
       "content";
   }
 
+  /* Stacked above the content rather than beside it, so there is nothing to pin it against and a
+   * viewport-tall strip would fill the screen before the page began. */
   .kui-shell__sidebar {
+    position: static;
+    height: auto;
+    overflow-y: visible;
     padding-bottom: var(--kui-space-3);
   }
 
@@ -485,8 +505,11 @@ a.kui-button {
 }
 
 .kui-shell__login-input:focus-visible {
-  outline: 2px solid var(--kui-color-accent);
-  outline-offset: 1px;
+  /* The product's focus ring: the focus token at the reset's offset. It used to be the accent at a
+   * 1px offset, which made the sign-in box the one control in KUI whose keyboard ring was a
+   * different colour and a different distance from every other. */
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
 }
 
 /* A refusal is an error and is coloured as one. It is deliberately the same sentence for every kind

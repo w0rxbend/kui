@@ -101,14 +101,17 @@
   border: 0;
 }
 
-/* The focused row, for a keyboard user. The state layer rather than an outline on the row itself:
- * an outline drawn on a `tr` is clipped by the cells in several browsers and comes out as four
+/* The focused row, for a keyboard user.
+ *
+ * `:focus-visible` only, which is the rule everywhere else in the product: the browser's own
+ * judgement of when somebody is navigating by keyboard. The `:focus` half that used to sit beside
+ * this -- with an identical body -- meant that a plain mouse click on a row drew a keyboard ring,
+ * which is exactly what the reset chose `:focus-visible` to avoid, and it was the only `:focus`
+ * ring in KUI.
+ *
+ * The offset is negative, drawing the ring just inside the row rather than just outside it. An
+ * outline drawn outside a `tr` is clipped by the cells in several browsers and comes out as four
  * disconnected corners. */
-.kui-vtable__row:focus {
-  outline: 2px solid var(--kui-color-focus);
-  outline-offset: -2px;
-}
-
 .kui-vtable__row:focus-visible {
   outline: 2px solid var(--kui-color-focus);
   outline-offset: -2px;
