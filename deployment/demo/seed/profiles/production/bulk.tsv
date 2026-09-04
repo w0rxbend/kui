@@ -1,0 +1,53 @@
+# Generated messages for the PRODUCTION-SHAPED cluster.
+#
+#   topic <TAB> generator <TAB> count <TAB> layout
+#
+# `generator` names one of the awk programs in the generate() function in seed.sh; `layout` is the
+# same vocabulary the hand-written data files use in their `#mode:` line — value-only, key-value,
+# or headers-key-value — and has to match what that generator emits.
+#
+# =============================================================================================
+# WHY THESE ARE GENERATED AND NOT WRITTEN DOWN
+# =============================================================================================
+#
+# The hand-written files under data/ exist to be read. Every line in them was written by a person
+# for a person to look at: an order that was cancelled, a dead letter whose headers point at a real
+# offset in another topic, a log line that is deliberately not JSON. There are only ever a few
+# dozen, and that is right — nobody wants to scroll past ten thousand records to find the
+# interesting one.
+#
+# But a virtualised table, an offset-range seek, a partition filter over twenty-four partitions,
+# and a consumer group that is eight thousand messages behind are not exercised by forty records.
+# They need volume, and volume must not live in git: twenty thousand JSON documents would be
+# roughly six megabytes of repository that nobody will ever read a line of.
+#
+# So these are produced at seed time from a fixed random seed derived from the topic name. The
+# same topic gets the same messages on every run, on every machine — so a screenshot taken today
+# still matches the data next month — and the repository stays small.
+#
+# =============================================================================================
+# THE COST
+# =============================================================================================
+#
+# Twenty thousand records is the number where the message browser has real work to do and the seed
+# still finishes in seconds. All four topics are produced concurrently, one JVM each, with large
+# batches and lz4 compression, so the wall-clock cost is roughly one producer's, not four.
+
+# The firehose. No key, so records land round-robin across all twenty-four partitions and no
+# partition is more interesting than another. About one event in five carries an experiment block
+# the others do not, because that is what an event stream looks like after a year of shipping.
+analytics.pageviews	pageviews	8000	value-only
+
+# Keyed by session, so a partition filter returns one coherent set of visitors rather than a
+# shuffle. Twelve partitions and five thousand records: enough that paging matters.
+clickstream.raw	clickstream	5000	key-value
+
+# The compacted topic at volume. Four thousand records over about nine hundred keys, so keys
+# repeat many times and the log cleaner has genuine work to do, and six per cent of them are
+# tombstones — a key with a null value, which is how a delete is written in Kafka. A message
+# browser has to draw that as absence, not as an empty string.
+search.index-updates	index-updates	4000	headers-key-value
+
+# Per-minute service metrics over the last day. One value in forty is a latency in the seconds
+# rather than the milliseconds, so there is something findable when you type a filter.
+platform.metrics	metrics	3000	value-only

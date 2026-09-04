@@ -1,0 +1,72 @@
+# The PRODUCTION-SHAPED cluster's STOPPED consumer groups.
+#
+#   group <TAB> topic <TAB> position
+#
+# `position` is passed to `kafka-consumer-groups.sh --reset-offsets` as it stands, so it is any of
+# that tool's specifications: --to-earliest, --to-latest, --to-offset N, --shift-by -N.
+#
+# Not --to-datetime. Kafka stamps every record with the moment it was produced, and this whole
+# cluster is produced within a few seconds of the seed running, so every time-based reset resolves
+# to offset 0. seed.sh's comment on this file's format explains it at length.
+#
+# =============================================================================================
+# WHY THESE ARE ALL "EMPTY", AND WHERE THE LIVE ONES ARE
+# =============================================================================================
+#
+# A consumer group, from the outside, is nothing but a set of committed offsets. Writing those
+# offsets directly creates the group without running a consumer, which is one command instead of a
+# consumer session per partition, and gives an exact lag rather than an approximate one. But a
+# group has MEMBERS only while some process is holding a session open with the broker, and seed.sh
+# exits — so every group in this file is reported by Kafka as `Empty`: it exists, it has committed
+# offsets, nobody is reading.
+#
+# That is a real and common state — it is what a stopped service looks like — and it is half of
+# what the consumer-groups screen has to distinguish. The other half is the live groups, which are
+# containers running consume.sh and are listed in the Compose stack, not here:
+#
+#   search-indexer        3 members, Stable, on search.index-updates — a multi-member assignment,
+#                         which is what the members table exists to draw.
+#   clickstream-archiver  1 member, deliberately throttled, on clickstream.raw — its lag falls
+#                         while you watch it, instead of being a number that is zero for ever.
+#   fraud-scoring         2 members across two topics, restarting one member on a timer, so the
+#                         group passes through PreparingRebalance every minute or so. Nobody sees
+#                         a rebalancing group otherwise: a healthy group rebalances once at
+#                         startup and then never again.
+#
+# =============================================================================================
+# THE LAGS, AND WHY THEY DIFFER
+# =============================================================================================
+#
+# Lag that is the same everywhere is a colour, not a signal. These five are spread across three
+# orders of magnitude on purpose, so that whatever KUI does to draw "behind" — a number, a bar, a
+# colour — has something to distinguish.
+
+# BADLY BEHIND. Committed at the very beginning of a topic holding eight thousand records, so the
+# lag is the whole topic. This is the group an operator is looking at when something has gone
+# wrong, and the one the offset-reset wizard exists for.
+analytics-rollup	analytics.pageviews	--to-earliest
+
+# HALF BEHIND. platform.metrics holds three thousand generated records spread evenly over six
+# partitions — five hundred each — so committing at offset 250 leaves this group exactly half way
+# through every partition. It is the middle of the three lag sizes on this cluster: not the whole
+# topic like analytics-rollup, not four records like dlq-triage.
+metrics-exporter	platform.metrics	--to-offset 250
+
+# A LITTLE BEHIND, UNEVENLY. Offset 1 in each of twelve partitions of a topic holding sixteen
+# hand-written records, so some partitions are behind by two and some by none. Small, uneven,
+# per-partition lag is the case a lag table gets wrong if it only ever shows a topic-level total.
+order-fulfilment	orders.v1	--to-offset 1
+
+# BEHIND ON THE THING THAT MATTERS MOST. Four dead letters nobody has looked at. The number is
+# tiny and it is the most important number on the screen, which is the point: lag is not
+# interesting in proportion to its size.
+dlq-triage	orders.v1.DLQ	--to-earliest
+
+# CAUGHT UP. Committed at the end of every partition, so its lag is zero. Without a group like
+# this, "lag" looks like something every group has rather than a state one group is in.
+payments-ledger-sync	payments.transactions	--to-latest
+
+# A group subscribed to TWO topics, caught up on one and behind on the other. A group's lag is not
+# one number, and a screen that adds them together loses the only fact worth knowing.
+billing-reconciler	billing.invoices	--to-earliest
+billing-reconciler	payments.transactions	--to-latest

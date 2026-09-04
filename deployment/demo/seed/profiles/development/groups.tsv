@@ -1,0 +1,21 @@
+# The DEVELOPMENT cluster's stopped consumer groups.
+#
+#   group <TAB> topic <TAB> position
+#
+# `position` is passed to `kafka-consumer-groups.sh --reset-offsets` as it stands, so it is any of
+# that tool's specifications: --to-earliest, --to-latest, --to-offset N, --shift-by -N,
+# --to-datetime %DT-n% (n seconds ago).
+#
+# Every group here is created by writing its committed offsets directly, without running a
+# consumer, so it exists but has no members: Kafka reports it as `Empty`. Groups that are alive
+# are containers running consume.sh, and the Compose stack starts them; there are none on this
+# cluster, because a laptop with one developer's service on it does not have a fleet of consumers.
+#
+# ONE group, a little behind. That is the whole point of this cluster: it is what a small,
+# uncomplicated deployment looks like, and the contrast with the production cluster's eight groups
+# is doing the work.
+
+# The developer's service, stopped at offset 1 in each of the three partitions while the topic
+# holds sixteen records. Small, genuine, uneven lag — the sort of number you get when you stop a
+# service with your debugger and go to lunch.
+order-fulfilment	orders.v1	--to-offset 1

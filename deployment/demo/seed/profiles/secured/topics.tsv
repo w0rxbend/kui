@@ -1,0 +1,36 @@
+# The SECURED cluster's topics.
+#
+#   name <TAB> partitions <TAB> replication <TAB> configs
+#
+# WHAT THIS CLUSTER IS FOR, AND WHY IT IS SMALL.
+#
+# The other two clusters exist to be explored. This one exists to prove one thing: that the
+# secured path carries real data. A broker speaking SASL_SSL with SCRAM-SHA-512 behind a private
+# certificate authority, KUI authenticating to it, and topics, messages and consumer-group lag
+# arriving on screen exactly as they do over plaintext.
+#
+# That claim is either true or false, and four topics test it as thoroughly as forty would. What
+# it would cost to seed forty is a slower start for every reader, on the cluster that is least
+# likely to be the one they open first — so this profile stays deliberately thin.
+#
+# The four are chosen to cover the four things that can serialise differently: keyed JSON with
+# headers, keyed JSON without them, a value that is not JSON at all, and a compacted topic with a
+# tombstone in it. If all four read correctly over TLS then the transport is not doing anything to
+# the payload, which is the whole question.
+#
+# One broker, so everything asks for replication 1.
+
+# Keyed JSON with headers, the ordinary case.
+orders.v1	3	1	retention.ms=604800000;compression.type=producer
+
+# Keyed JSON with no headers at all: the header list must render as empty rather than as broken.
+payments.transactions	2	1	retention.ms=2592000000
+
+# NOT JSON. If TLS or SASL were mangling anything, plain text is where you would see it first,
+# because there is no parser in the way to blame.
+audit.log.raw	1	1	retention.ms=7776000000;cleanup.policy=delete
+
+# Compacted, with a tombstone: a record with a key and a null value. A null is the one payload
+# that a transport layer can turn into an empty string without anybody noticing, so it is worth
+# checking on this cluster specifically.
+customers.profiles	1	1	cleanup.policy=compact;min.cleanable.dirty.ratio=0.1;segment.ms=60000

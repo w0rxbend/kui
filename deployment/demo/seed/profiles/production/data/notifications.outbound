@@ -1,0 +1,25 @@
+# Messages for notifications.outbound: email, push and SMS waiting to be sent.
+#
+# What this topic is here for: it is the one that is read by a LIVE consumer group in the demo
+# (`fraud-scoring` subscribes to it as well as to fraud.scores), so it is where you look to see a
+# group's assignment spanning two topics. A group's lag is not one number, and a screen that adds
+# the two topics together loses the only fact worth knowing.
+#
+# Its retention is six hours, the shortest on the cluster, because a notification nobody sent
+# within the hour is not worth sending. That makes it the topic to open when you want to see a
+# short retention window stated in the configuration tab next to a topic that keeps 180 days.
+#
+# The headers carry the routing decision — channel, template, priority — which is what an operator
+# reads first when somebody says "the password reset emails have stopped".
+#mode: headers-key-value
+
+channel:email,template:order-confirmation,priority:normal\tNOTIF-901221\t{"notificationId":"NOTIF-901221","channel":"email","to":"marta.zielinska@example.invalid","template":"order-confirmation","locale":"pl-PL","queuedAt":"%TS-5350%","variables":{"orderId":"ORD-10241","total":"149,90 EUR","itemCount":3},"status":"SENT","sentAt":"%TS-5340%"}
+channel:email,template:order-confirmation,priority:normal\tNOTIF-901222\t{"notificationId":"NOTIF-901222","channel":"email","to":"owen.pritchard@example.invalid","template":"order-confirmation","locale":"en-GB","queuedAt":"%TS-5190%","variables":{"orderId":"ORD-10242","total":"24.00 GBP","itemCount":2},"status":"SENT","sentAt":"%TS-5185%"}
+channel:sms,template:dispatch-notice,priority:normal\tNOTIF-901223\t{"notificationId":"NOTIF-901223","channel":"sms","to":"+44700900123","template":"dispatch-notice","locale":"en-GB","queuedAt":"%TS-1745%","variables":{"tracking":"DPD-4471203881","carrier":"DPD"},"status":"SENT","sentAt":"%TS-1740%","costMicros":41000}
+channel:email,template:order-cancelled,priority:high\tNOTIF-901224\t{"notificationId":"NOTIF-901224","channel":"email","to":"marta.zielinska@example.invalid","template":"order-cancelled","locale":"pl-PL","queuedAt":"%TS-3290%","variables":{"orderId":"ORD-10243","refund":"1899,00 EUR"},"status":"SENT","sentAt":"%TS-3285%"}
+channel:push,template:delivery-today,priority:low\tNOTIF-901225\t{"notificationId":"NOTIF-901225","channel":"push","deviceToken":"fcm:dQw4w9WgXcQ...","template":"delivery-today","locale":"en-US","queuedAt":"%TS-2400%","variables":{"tracking":"1Z999AA10123456784"},"status":"FAILED","failedAt":"%TS-2390%","error":{"code":"UNREGISTERED","retryable":false,"detail":"device token no longer valid"}}
+channel:email,template:payment-declined,priority:high\tNOTIF-901226\t{"notificationId":"NOTIF-901226","channel":"email","to":"marta.zielinska@example.invalid","template":"payment-declined","locale":"pl-PL","queuedAt":"%TS-2395%","variables":{"paymentId":"PAY-77125","reason":"insufficient_funds"},"status":"SENT","sentAt":"%TS-2380%"}
+channel:email,template:invoice-overdue,priority:normal\tNOTIF-901227\t{"notificationId":"NOTIF-901227","channel":"email","to":"ksiegowosc@example.invalid","template":"invoice-overdue","locale":"pl-PL","queuedAt":"%TS-86300%","variables":{"invoiceNumber":"INV-2026-004185","gross":"564,57 PLN","daysOverdue":1},"status":"SENT","sentAt":"%TS-86290%","reminderNumber":2}
+channel:sms,template:address-incomplete,priority:high\tNOTIF-901228\t{"notificationId":"NOTIF-901228","channel":"sms","to":"+15125550188","template":"address-incomplete","locale":"en-US","queuedAt":"%TS-2095%","variables":{"tracking":"1Z999AA10123456784","carrier":"UPS"},"status":"RETRYING","attempts":3,"lastError":"gateway timeout","nextAttemptAt":"%TS+300%"}
+channel:email,template:dispatch-notice,priority:normal\tNOTIF-901229\t{"notificationId":"NOTIF-901229","channel":"email","to":"kontakt@example.invalid","template":"dispatch-notice","locale":"de-DE","queuedAt":"%TS-290%","variables":{"tracking":"DPD-4471204902","carrier":"DPD"},"status":"QUEUED"}
+channel:push,template:subscription-renewed,priority:low\tNOTIF-901230\t{"notificationId":"NOTIF-901230","channel":"push","deviceToken":"apns:8f0231ab...","template":"subscription-renewed","locale":"en-US","queuedAt":"%TS-860%","variables":{"plan":"pro-monthly","nextChargeAt":"%TS+2592000%"},"status":"QUEUED"}

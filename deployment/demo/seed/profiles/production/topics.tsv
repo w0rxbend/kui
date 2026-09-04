@@ -1,0 +1,134 @@
+# The PRODUCTION-SHAPED cluster's topics.
+#
+# One row per topic, tab-separated, in this order:
+#
+#   name <TAB> partitions <TAB> replication <TAB> configs
+#
+# "configs" is a SEMICOLON-separated list of Kafka topic-level configuration keys, passed straight
+# through to `kafka-topics.sh --config`. Use `-` for "no configuration, take the broker defaults".
+# Semicolons rather than commas because a Kafka config VALUE can itself contain a comma:
+# `cleanup.policy=compact,delete` is one setting, not two. Every key here is a real Kafka topic
+# config; a typo makes topic creation fail loudly rather than quietly producing a topic that
+# behaves differently from what this file claims.
+#
+# Retention is written in milliseconds because that is the unit `retention.ms` takes. The comment
+# beside each row says what it is in human units.
+#
+# =============================================================================================
+# WHAT THIS CLUSTER IS FOR
+# =============================================================================================
+#
+# This is the one that has to look like a system somebody is actually running. Sixteen topics with
+# names that read like a business rather than like a test fixture, partition counts from 1 to 24
+# because real clusters are never uniform, and a replication factor of three throughout — which is
+# the point of running three brokers, because in-sync replicas, leaders and preferred-leader
+# imbalance are things a single-broker cluster simply cannot show.
+#
+# REPLICATION AND min.insync.replicas. `replication` is how many copies of each partition exist;
+# `min.insync.replicas` is how many of them must acknowledge a write before the producer is told
+# it succeeded. Almost every topic here is 3 and 2: three copies, and writes keep working when one
+# broker is down. `shipping.dispatches` is the deliberate exception at 3 and 3, so that losing a
+# single broker makes that one topic — and only that one — start rejecting writes with
+# NOT_ENOUGH_REPLICAS while the rest of the cluster carries on. That is the failure the demo wants
+# to show, and it is the honest way to show it: an under-replicated partition is a fact about a
+# cluster with a missing broker, not something a seed script can write in from outside.
+#
+# `clickstream.raw` and `platform.metrics` are at replication 2, not 3, because that is what
+# people really do with high-volume data they can afford to lose — and because a topic list where
+# every row says "3" teaches you nothing about the column.
+
+# --- The core business streams ---------------------------------------------------------------
+
+# The busiest keyed stream: the shape most systems' most important topic has. Twelve partitions
+# because it has been scaled up at least once, which is why the number is not a power of anything
+# meaningful.
+orders.v1	12	3	retention.ms=604800000;min.insync.replicas=2;compression.type=producer;segment.bytes=268435456
+# 7 days.
+
+# Money moves less and is kept longer.
+payments.transactions	6	3	retention.ms=2592000000;min.insync.replicas=2;compression.type=zstd
+# 30 days.
+
+# THE DELIBERATELY FRAGILE ONE. min.insync.replicas equals the replication factor, so all three
+# copies must acknowledge every write. Stop any one broker and this topic goes read-only while
+# everything else keeps working. See the section above.
+shipping.dispatches	3	3	retention.ms=1209600000;min.insync.replicas=3
+# 14 days.
+
+# Invoices: few partitions, very long retention, and a hard message-size ceiling because an
+# invoice with two thousand line items is a bug rather than a large invoice.
+billing.invoices	4	3	retention.ms=15552000000;min.insync.replicas=2;max.message.bytes=1048576
+# 180 days.
+
+# Outbound notifications: email, push, SMS. Short retention — a notification nobody sent within
+# the hour is not worth sending — and the delete policy stated explicitly rather than inherited.
+notifications.outbound	6	3	retention.ms=21600000;cleanup.policy=delete;min.insync.replicas=2
+# 6 hours.
+
+# Fraud scores, one per order. Small, keyed, and read by a service that must never fall behind.
+fraud.scores	3	3	retention.ms=259200000;min.insync.replicas=2
+# 3 days.
+
+# --- The high-volume streams -------------------------------------------------------------------
+
+# The firehose: twenty-four partitions, no keys, one day of retention or a gigabyte per partition,
+# whichever runs out first. This is the topic that makes the message browser's virtualised table
+# and its offset seek do real work, and the one whose partition list does not fit on a screen.
+analytics.pageviews	24	3	retention.ms=86400000;retention.bytes=1073741824;compression.type=lz4;min.insync.replicas=2
+# 1 day, or 1 GiB per partition.
+
+# Raw clickstream, keyed by session so one visitor's clicks stay on one partition and a
+# partition-filtered browse returns a coherent story rather than a shuffled one. Replication 2:
+# this is the data you can afford to lose some of.
+clickstream.raw	12	2	retention.ms=43200000;compression.type=lz4;min.insync.replicas=1
+# 12 hours.
+
+# Per-minute service metrics. Replication 2 for the same reason as above.
+platform.metrics	6	2	retention.ms=172800000;compression.type=lz4;min.insync.replicas=1
+# 2 days.
+
+# --- Compacted topics ---------------------------------------------------------------------------
+# A compacted topic is a keyed table, not a log: Kafka keeps the newest value for each key for ever
+# and throws older ones away. KUI draws these differently, which is why there are three.
+
+# The customer table.
+customers.profiles	6	3	cleanup.policy=compact;min.cleanable.dirty.ratio=0.1;segment.ms=60000;delete.retention.ms=86400000;min.insync.replicas=2
+
+# The search index, at volume: thousands of records over a few hundred keys, six per cent of them
+# tombstones. This is where you go to see what compaction and deletion look like on a topic too
+# big to read by eye.
+search.index-updates	8	3	cleanup.policy=compact;min.cleanable.dirty.ratio=0.2;segment.ms=60000;min.insync.replicas=2
+
+# compact AND delete together: keep the latest value per key, but also drop anything older than
+# the retention window. Stock levels for a product nobody sells any more should eventually go.
+inventory.stock-levels	4	3	cleanup.policy=compact,delete;retention.ms=1209600000;segment.ms=60000;min.insync.replicas=2
+# 14 days.
+
+# --- Not JSON -----------------------------------------------------------------------------------
+
+# Plain-text log lines. The message browser has to show a value it cannot parse as JSON without
+# pretending it failed, so every cluster in this demo has one.
+audit.log.raw	2	3	retention.ms=7776000000;cleanup.policy=delete;max.message.bytes=2097152;min.insync.replicas=2
+# 90 days.
+
+# --- The failure path ---------------------------------------------------------------------------
+
+# The dead-letter queue for orders.v1: where a message goes when a consumer cannot process it.
+# Small, and interesting precisely because it is not empty. Its headers name real partitions and
+# offsets in orders.v1, so opening one dead letter tells you where to look next.
+orders.v1.DLQ	3	3	retention.ms=1209600000;min.insync.replicas=2
+# 14 days.
+
+# --- Things that exist but hold nothing ----------------------------------------------------------
+
+# A topic created for a service that has not shipped yet. No data file, so it is created and left
+# EMPTY. An empty topic is a real state and a topic list where every row has records never shows
+# you what zero looks like.
+loyalty.points	3	3	retention.ms=2592000000;min.insync.replicas=2
+# 30 days.
+
+# --- An internal topic ---------------------------------------------------------------------------
+
+# A leading underscore is the convention for "this belongs to a piece of infrastructure, not to
+# you", and user interfaces hide these behind a "show internal topics" switch.
+_schemas	1	3	cleanup.policy=compact;min.insync.replicas=2

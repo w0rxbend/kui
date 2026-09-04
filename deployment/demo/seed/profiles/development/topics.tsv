@@ -1,0 +1,51 @@
+# The DEVELOPMENT cluster's topics: somebody's laptop.
+#
+# One row per topic, tab-separated, in this order:
+#
+#   name <TAB> partitions <TAB> replication <TAB> configs
+#
+# "replication" is what we would LIKE. Kafka refuses to create a topic whose replication factor is
+# higher than the number of brokers it has, and this cluster is a single broker, so seed.sh counts
+# the brokers first and lowers any number above that count. Everything here asks for 1 anyway,
+# because a laptop has one broker and pretending otherwise would be the wrong picture.
+#
+# "configs" is a SEMICOLON-separated list of Kafka topic-level configuration keys, passed straight
+# through to `kafka-topics.sh --config`. Use `-` for "no configuration, take the broker defaults".
+# Semicolons rather than commas because a Kafka config VALUE can itself contain a comma:
+# `cleanup.policy=compact,delete` is one setting, not two.
+#
+# WHAT THIS CLUSTER IS FOR. It is the small, scruffy one. Five topics, a couple of partitions
+# each, short retention, one leftover test topic nobody cleaned up, and a single consumer group
+# that is a little behind. Its job in the demo is to be the thing you switch AWAY from: put it
+# beside the production cluster in the cluster switcher and the difference in scale is immediately
+# legible, which is the argument for managing several clusters in one place.
+#
+# Three of these topics have the same names as topics on the production cluster, on purpose. It is
+# the same application deployed twice, which is what a development cluster actually is, and it
+# means switching clusters shows you the same topic at two different sizes rather than two
+# unrelated lists.
+
+# The application's main stream. Three partitions because that is what somebody types when they
+# are not thinking about it, and it is plenty on a laptop.
+orders.v1	3	1	retention.ms=86400000
+# 1 day. Nobody keeps a week of test data on their own machine.
+
+# The compacted table of customers. One partition: this is a laptop.
+customers.profiles	1	1	cleanup.policy=compact;min.cleanable.dirty.ratio=0.1;segment.ms=60000
+
+# Plain text, not JSON. The message browser has to show a value it cannot parse without pretending
+# it failed, and this is the topic that proves it does.
+audit.log.raw	1	1	retention.ms=604800000
+# 7 days.
+
+# The topic somebody made while debugging on a Tuesday and never deleted. It has no data file, so
+# it is created and left EMPTY — which is itself worth having on screen. An empty topic is a real
+# state, and a topic list where every row has messages never shows you what zero looks like.
+scratch.jm-test	1	1	retention.ms=3600000
+# 1 hour.
+
+# An internal topic. A leading underscore is the convention for "this belongs to a piece of
+# infrastructure, not to you", and user interfaces hide these behind a "show internal topics"
+# switch. This is where Confluent Schema Registry keeps its schemas, with the configuration it
+# insists on.
+_schemas	1	1	cleanup.policy=compact

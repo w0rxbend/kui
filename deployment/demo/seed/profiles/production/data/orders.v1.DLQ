@@ -1,0 +1,14 @@
+# Copied unchanged from deployment/quickstart/seed/data/orders.v1.DLQ. The two seeds share a line
+# format on purpose, so a data file can move between them without editing.
+#
+# Messages for orders.v1.DLQ, the dead-letter queue for orders.v1.
+#
+# A dead-letter message is the original message plus headers describing why it could not be
+# processed. The headers are the interesting part here: they are what an operator reads first, and
+# they reference real offsets in orders.v1, so the two topics tell one story.
+#mode: headers-key-value
+
+dlq-reason:DeserialisationException,dlq-origin-topic:orders.v1,dlq-origin-partition:2,dlq-origin-offset:14,dlq-attempts:4,dlq-first-failed-at:%TS-2700%\tORD-10251\t{"orderId":"ORD-10251","customerId":"CUST-3310","placedAt":"%TS-2760%","currency":"EUR","total":"seventy-four","items":[{"sku":"HDD-2TB","qty":1}]}
+dlq-reason:NullPointerException,dlq-origin-topic:orders.v1,dlq-origin-partition:0,dlq-origin-offset:9,dlq-attempts:4,dlq-first-failed-at:%TS-2200%\tORD-10252\t{"orderId":"ORD-10252","customerId":null,"placedAt":"%TS-2260%","currency":"PLN","total":12.00,"items":[{"sku":"MUG-KUI","qty":1,"unitPrice":12.00}]}
+dlq-reason:UnknownSkuException,dlq-origin-topic:orders.v1,dlq-origin-partition:5,dlq-origin-offset:3,dlq-attempts:4,dlq-first-failed-at:%TS-1600%\tORD-10253\t{"orderId":"ORD-10253","customerId":"CUST-7761","placedAt":"%TS-1650%","currency":"USD","total":5400.00,"items":[{"sku":"XX-DISCONTINUED-01","qty":3,"unitPrice":1800.00}]}
+dlq-reason:SchemaVersionUnsupported,dlq-origin-topic:orders.v1,dlq-origin-partition:1,dlq-origin-offset:21,dlq-attempts:1,dlq-first-failed-at:%TS-500%\tORD-10254\t{"orderId":"ORD-10254","schemaVersion":9,"payload":{"encoding":"unknown","bytes":"0x8f0231ab"}}

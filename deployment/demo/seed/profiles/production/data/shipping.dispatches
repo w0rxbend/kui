@@ -1,0 +1,26 @@
+# Messages for shipping.dispatches, the topic that is deliberately fragile.
+#
+# Its `min.insync.replicas` equals its replication factor, so all three copies of a partition must
+# acknowledge every write. Stop one broker of the production cluster and this topic — and only
+# this topic — starts refusing writes with NOT_ENOUGH_REPLICAS, while everything else carries on
+# with two in-sync replicas out of three. That is the failure the demo exists to show, and it is
+# a real Kafka behaviour rather than something staged.
+#
+# The records themselves continue the story the other topics tell: ORD-10246 was placed, paid and
+# then shipped, and its tracking number here is the same one that appears in orders.v1.
+#
+# Every line is: headers \t key \t value. The literal two characters \t are the field separator,
+# not a real tab, so this file survives being opened in any editor. seed.sh converts them.
+# %TS-n% becomes an ISO-8601 UTC timestamp n seconds before the seed runs; %TS+n% one n seconds
+# after it, which is how an "estimated delivery" stays in the future.
+#mode: headers-key-value
+
+carrier:DPD,event-type:DispatchCreated,warehouse:EU-1\tDSP-55010\t{"dispatchId":"DSP-55010","orderId":"ORD-10246","carrier":"DPD","tracking":"DPD-4471203881","dispatchedAt":"%TS-1750%","from":{"warehouse":"EU-1","country":"PL"},"to":{"country":"GB","city":"Bristol","postcode":"BS1 4DJ"},"parcels":1,"weightKg":6.4,"estimatedDelivery":"%TS+86400%"}
+carrier:DHL,event-type:DispatchCreated,warehouse:EU-1\tDSP-55011\t{"dispatchId":"DSP-55011","orderId":"ORD-10241","carrier":"DHL","tracking":"DHL-JJD0002291884","dispatchedAt":"%TS-4900%","from":{"warehouse":"EU-1","country":"PL"},"to":{"country":"PL","city":"Wroclaw","postcode":"50-001"},"parcels":1,"weightKg":1.2,"estimatedDelivery":"%TS+43200%"}
+carrier:DHL,event-type:DispatchScanned,warehouse:EU-1\tDSP-55011\t{"dispatchId":"DSP-55011","scannedAt":"%TS-4100%","location":"WROCLAW HUB","status":"IN_TRANSIT"}
+carrier:DHL,event-type:DispatchDelivered\tDSP-55011\t{"dispatchId":"DSP-55011","deliveredAt":"%TS-900%","signedBy":"M. ZIELINSKA","status":"DELIVERED","proofOfDelivery":"https://example.invalid/pod/JJD0002291884"}
+carrier:UPS,event-type:DispatchCreated,warehouse:US-1\tDSP-55012\t{"dispatchId":"DSP-55012","orderId":"ORD-10244","carrier":"UPS","tracking":"1Z999AA10123456784","dispatchedAt":"%TS-3900%","from":{"warehouse":"US-1","country":"US"},"to":{"country":"US","city":"Austin","postcode":"78701"},"parcels":2,"weightKg":0.9,"estimatedDelivery":"%TS+172800%"}
+carrier:UPS,event-type:DispatchException,warehouse:US-1\tDSP-55012\t{"dispatchId":"DSP-55012","at":"%TS-2100%","status":"EXCEPTION","reason":"address_incomplete","action":"awaiting_customer_response","retryAfter":"%TS+7200%"}
+carrier:POCZTA,event-type:DispatchCreated,warehouse:EU-2\tDSP-55013\t{"dispatchId":"DSP-55013","orderId":"ORD-10247","carrier":"POCZTA","tracking":"PL0091223318","dispatchedAt":"%TS-1200%","from":{"warehouse":"EU-2","country":"PL"},"to":{"country":"PL","city":"Gdansk","postcode":"80-180"},"parcels":1,"weightKg":18.7,"palletised":true,"estimatedDelivery":"%TS+259200%"}
+carrier:DPD,event-type:DispatchCreated,warehouse:EU-1\tDSP-55014\t{"dispatchId":"DSP-55014","orderId":"ORD-10249","carrier":"DPD","tracking":"DPD-4471204902","dispatchedAt":"%TS-300%","from":{"warehouse":"EU-1","country":"PL"},"to":{"country":"DE","city":"Leipzig","postcode":"04109"},"parcels":1,"weightKg":2.8,"estimatedDelivery":"%TS+129600%"}
+carrier:DPD,event-type:DispatchCancelled,warehouse:EU-1\tDSP-55009\t{"dispatchId":"DSP-55009","orderId":"ORD-10243","cancelledAt":"%TS-3300%","reason":"order-cancelled-before-collection","carrierNotified":true}

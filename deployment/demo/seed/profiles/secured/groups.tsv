@@ -1,0 +1,18 @@
+# The SECURED cluster's stopped consumer groups.
+#
+#   group <TAB> topic <TAB> position
+#
+# Two groups, which is the fewest that proves anything. Consumer-group lag is computed by
+# comparing a group's committed offsets against a topic's end offsets — two separate calls to the
+# broker, either of which could be the one that fails over a secured connection. A single group
+# whose lag happened to be zero would not tell you whether the numbers were being read at all or
+# whether both were coming back empty.
+#
+# So: one behind and one caught up. If the screen shows 8 and 0 rather than 0 and 0, both calls
+# are working over SASL_SSL.
+
+# Behind, unevenly, across three partitions.
+secure-order-export	orders.v1	--to-offset 1
+
+# Caught up: committed at the end of every partition, lag zero.
+secure-ledger-sync	payments.transactions	--to-latest

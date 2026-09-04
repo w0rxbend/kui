@@ -1,0 +1,28 @@
+# Copied unchanged from deployment/quickstart/seed/data/customers.profiles. The two seeds share a line
+# format on purpose, so a data file can move between them without editing.
+#
+# Messages for customers.profiles, a COMPACTED topic.
+#
+# Compaction means Kafka keeps only the newest value for each key. Several keys below appear more
+# than once on purpose, so the topic is a small history that Kafka is entitled to collapse at any
+# moment: browse it and you may see every version, or only the last one per key, depending on
+# whether the log cleaner has run. That is exactly what a compacted topic looks like in production
+# and it is worth a newcomer seeing it.
+#
+# The last line is a TOMBSTONE: a key with an empty value. In a compacted topic that means "this
+# key is deleted". A message browser has to render it as absence, not as an empty string, so the
+# quickstart contains one.
+#mode: key-value
+
+CUST-8812\t{"customerId":"CUST-8812","name":"Marta Zielinska","email":"marta.zielinska@example.com","tier":"gold","country":"PL","createdAt":"%TS-31536000%","marketingOptIn":true}
+CUST-2049\t{"customerId":"CUST-2049","name":"Owen Pritchard","email":"owen.pritchard@example.co.uk","tier":"silver","country":"GB","createdAt":"%TS-15768000%","marketingOptIn":false}
+CUST-5501\t{"customerId":"CUST-5501","name":"Dana Whitfield","email":"dana.whitfield@example.com","tier":"bronze","country":"US","createdAt":"%TS-7884000%","marketingOptIn":true}
+CUST-3310\t{"customerId":"CUST-3310","name":"Jonas Brandt","email":"jonas.brandt@example.de","tier":"bronze","country":"DE","createdAt":"%TS-5256000%","marketingOptIn":false}
+CUST-9007\t{"customerId":"CUST-9007","name":"Aneta Kowal","email":"aneta.kowal@example.pl","tier":"silver","country":"PL","createdAt":"%TS-2628000%","marketingOptIn":true}
+CUST-8812\t{"customerId":"CUST-8812","name":"Marta Zielinska","email":"marta.zielinska@example.com","tier":"platinum","country":"PL","createdAt":"%TS-31536000%","marketingOptIn":true,"tierChangedAt":"%TS-1209600%","lifetimeValue":8421.55}
+CUST-4402\t{"customerId":"CUST-4402","name":"Ravi Menon","email":"ravi.menon@example.in","tier":"bronze","country":"IN","createdAt":"%TS-1209600%","marketingOptIn":true,"referredBy":"CUST-5501"}
+CUST-5501\t{"customerId":"CUST-5501","name":"Dana Whitfield","email":"dana.w@example.com","tier":"silver","country":"US","createdAt":"%TS-7884000%","marketingOptIn":true,"tierChangedAt":"%TS-604800%","lifetimeValue":1204.10}
+CUST-7761\t{"customerId":"CUST-7761","name":"Sofia Marchetti","email":"sofia.marchetti@example.it","tier":"gold","country":"IT","createdAt":"%TS-604800%","marketingOptIn":false,"addresses":[{"type":"billing","city":"Bologna"},{"type":"shipping","city":"Modena"}]}
+CUST-2049\t{"customerId":"CUST-2049","name":"Owen Pritchard","email":"owen.pritchard@example.co.uk","tier":"silver","country":"GB","createdAt":"%TS-15768000%","marketingOptIn":true,"marketingOptInChangedAt":"%TS-86400%"}
+CUST-9007\t{"customerId":"CUST-9007","name":"Aneta Kowal-Nowak","email":"aneta.kowal@example.pl","tier":"gold","country":"PL","createdAt":"%TS-2628000%","marketingOptIn":true,"tierChangedAt":"%TS-3600%","lifetimeValue":3990.00}
+CUST-1188\t<NULL>

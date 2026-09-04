@@ -1,0 +1,28 @@
+# Messages for fraud.scores: one score per order, keyed by order id.
+#
+# Small records with a flat shape and a number in them that means something. This is the topic to
+# open when you want to try a message filter and see it match a handful of records out of a few:
+# "score above 0.8" is three of these, and they are the three an analyst would actually want.
+#
+# It is also read by a LIVE consumer group in the demo — `fraud-scoring`, which restarts one of
+# its two members on a timer so the group passes through a real rebalance every minute or so. That
+# is the only way to see a rebalancing group at all: a healthy group rebalances once when it
+# starts and then never again.
+#
+# The keys are order ids that exist in orders.v1, so a score can be followed back to the order it
+# is about, and one order (ORD-10251) is scored twice because the model was re-run after the
+# payment was declined.
+#mode: key-value
+
+ORD-10241\t{"orderId":"ORD-10241","scoredAt":"%TS-5390%","score":0.04,"decision":"ALLOW","model":"fraud-v7","features":{"customerAgeDays":812,"ordersLast24h":1,"billingShippingMatch":true,"newDevice":false}}
+ORD-10242\t{"orderId":"ORD-10242","scoredAt":"%TS-5200%","score":0.11,"decision":"ALLOW","model":"fraud-v7","features":{"customerAgeDays":401,"ordersLast24h":1,"billingShippingMatch":true,"newDevice":false}}
+ORD-10243\t{"orderId":"ORD-10243","scoredAt":"%TS-4710%","score":0.62,"decision":"REVIEW","model":"fraud-v7","features":{"customerAgeDays":812,"ordersLast24h":2,"billingShippingMatch":true,"newDevice":true,"amountPercentileForCustomer":0.99},"reviewedBy":"analyst:jkowalczyk","reviewOutcome":"ALLOW"}
+ORD-10244\t{"orderId":"ORD-10244","scoredAt":"%TS-4090%","score":0.08,"decision":"ALLOW","model":"fraud-v7","features":{"customerAgeDays":94,"ordersLast24h":1,"billingShippingMatch":true,"newDevice":false}}
+ORD-10245\t{"orderId":"ORD-10245","scoredAt":"%TS-3590%","score":null,"decision":"SKIPPED","model":"fraud-v7","reason":"zero-value order, replacement shipment"}
+ORD-10246\t{"orderId":"ORD-10246","scoredAt":"%TS-2940%","score":0.17,"decision":"ALLOW","model":"fraud-v7","features":{"customerAgeDays":401,"ordersLast24h":2,"billingShippingMatch":true,"newDevice":false}}
+ORD-10247\t{"orderId":"ORD-10247","scoredAt":"%TS-1490%","score":0.33,"decision":"ALLOW","model":"fraud-v8-canary","features":{"customerAgeDays":21,"ordersLast24h":1,"billingShippingMatch":false,"newDevice":true},"note":"scored by the canary model; v7 said 0.51"}
+ORD-10251\t{"orderId":"ORD-10251","scoredAt":"%TS-2770%","score":0.88,"decision":"BLOCK","model":"fraud-v7","features":{"customerAgeDays":3,"ordersLast24h":6,"billingShippingMatch":false,"newDevice":true,"velocityFlag":"card-testing"}}
+ORD-10251\t{"orderId":"ORD-10251","scoredAt":"%TS-2270%","score":0.91,"decision":"BLOCK","model":"fraud-v7","features":{"customerAgeDays":3,"ordersLast24h":7,"billingShippingMatch":false,"newDevice":true,"velocityFlag":"card-testing"},"rescoreOf":"%TS-2770%","trigger":"payment-declined"}
+ORD-10253\t{"orderId":"ORD-10253","scoredAt":"%TS-1640%","score":0.95,"decision":"BLOCK","model":"fraud-v7","features":{"customerAgeDays":0,"ordersLast24h":11,"billingShippingMatch":false,"newDevice":true,"amountPercentileForCustomer":1.0,"velocityFlag":"high-value-burst"}}
+ORD-10249\t{"orderId":"ORD-10249","scoredAt":"%TS-410%","score":0.06,"decision":"ALLOW","model":"fraud-v8-canary","features":{"customerAgeDays":230,"ordersLast24h":1,"billingShippingMatch":true,"newDevice":false}}
+ORD-10250\t{"orderId":"ORD-10250","scoredAt":"%TS-110%","score":0.02,"decision":"ALLOW","model":"fraud-v8-canary","features":{"customerAgeDays":812,"ordersLast24h":3,"billingShippingMatch":true,"newDevice":false}}
