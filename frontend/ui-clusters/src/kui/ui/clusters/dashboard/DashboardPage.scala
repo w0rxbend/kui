@@ -297,7 +297,23 @@ object DashboardPage {
         header = Messages.ColumnUnderReplicated,
         sortable = true,
         align = ColumnAlign.Numeric,
-        render = _ => DataTable.missing
+        // The figure the row already carries. It was drawn as `—` on every row while the header still
+        // offered to sort by it, which is worse than an absent column twice over: a permanently empty
+        // column teaches the reader to stop looking at columns, and a sort control that reorders nothing
+        // visible teaches them to stop trusting controls.
+        //
+        // Coloured only once it is above zero. A healthy cluster has no out-of-sync replicas, so a column
+        // drawn in the warning colour on every row would be a column nobody reads; `ThresholdValue` also
+        // adds a mark and a spoken phrase, so the exception is not carried by colour alone.
+        render = row =>
+          row.underReplicatedPartitions.fold[Modifier[HtmlElement]](DataTable.missing)(count =>
+            ThresholdValue(
+              Val(count.toString),
+              Val(ThresholdLevel.above(count.toDouble, warnAbove = 0)),
+              announcement = _ => Messages.UnderReplicatedAnnouncement,
+              testId = Some(s"cluster-row-${row.clusterId.value}-urp")
+            )
+          )
       ),
       Column(
         id = "disk",

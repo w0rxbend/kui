@@ -39,6 +39,11 @@ object Messages {
 
   val ColumnUnderReplicated: String = "Under-replicated"
 
+  /** What a screen reader hears beside an out-of-sync count that is not zero. The number on its own says
+    * nothing about whether the number is a problem.
+    */
+  val UnderReplicatedAnnouncement: String = "partitions are under-replicated"
+
   val ColumnDisk: String = "Disk"
 
   val ColumnConsumerGroups: String = "Consumer groups"
