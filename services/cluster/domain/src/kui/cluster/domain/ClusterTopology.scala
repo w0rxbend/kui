@@ -23,7 +23,16 @@ final case class BrokerLoad(
 
   def usableBytes: Option[Long] = sumOf(_.usableBytes)
 
-  def usedByKafkaBytes: Long = logDirs.map(_.usedByKafkaBytes).sum
+  /** What Kafka's own data actually occupies on this broker: the sum of the replica sizes its log directories
+    * reported. `None` when the broker reported no log directories at all, which is what a broker older than
+    * Kafka 3.3 looks like and is different from a broker holding nothing.
+    *
+    * Deliberately not `totalBytes - usableBytes`. That subtraction is the *filesystem's* used space, which on
+    * a shared disk is mostly other people's files: on a laptop running the quickstart it reads about 184 GiB
+    * for a broker holding a hundred records.
+    */
+  def usedByKafkaBytes: Option[Long] =
+    if logDirs.isEmpty then None else Some(logDirs.map(_.usedByKafkaBytes).sum)
 
   def offlineDirs: List[LogDir] = logDirs.filterNot(_.isHealthy)
 
@@ -93,6 +102,11 @@ final case class ClusterTopology(
   def totalDiskBytes: Option[Long] = sumOf(_.totalBytes)
 
   def usableDiskBytes: Option[Long] = sumOf(_.usableBytes)
+
+  /** What Kafka's data occupies across every broker, summed from each broker's log directories. `None` when
+    * no broker reported one. See [[BrokerLoad.usedByKafkaBytes]] for why this is not the filesystem's number.
+    */
+  def usedByKafkaBytes: Option[Long] = sumOf(_.usedByKafkaBytes)
 
   def offlineLogDirCount: Int = load.values.map(_.offlineDirs.size).sum
 

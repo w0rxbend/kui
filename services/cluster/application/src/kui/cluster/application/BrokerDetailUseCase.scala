@@ -187,6 +187,7 @@ object BrokerDetailUseCase {
               skewPercent = load.flatMap(_.skewPercent),
               totalBytes = load.flatMap(_.totalBytes),
               usableBytes = load.flatMap(_.usableBytes),
+              usedByKafkaBytes = load.flatMap(_.usedByKafkaBytes),
               offlineDirCount = load.map(_.offlineDirs.size).getOrElse(0)
             )
           }

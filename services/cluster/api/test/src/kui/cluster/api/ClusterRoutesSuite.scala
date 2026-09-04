@@ -205,6 +205,7 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
           skewPercent = Some(0.0d),
           totalBytes = Some(100L),
           usableBytes = Some(40L),
+          usedByKafkaBytes = Some(60L),
           offlineDirCount = 0
         )
       ),
@@ -340,7 +341,7 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
     val list = BrokerList(
       profile.ref,
       List(
-        BrokerListRow(ClusterFixtures.broker(1), true, Some(3), None, Some(0.0d), Some(1L), Some(0L), 0)
+        BrokerListRow(ClusterFixtures.broker(1), true, Some(3), None, Some(0.0d), Some(1L), Some(0L), Some(1L), 0)
       ),
       SnapshotFreshness.Fresh(ClusterFixtures.At)
     )

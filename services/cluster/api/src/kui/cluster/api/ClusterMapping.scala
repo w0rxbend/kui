@@ -63,7 +63,12 @@ object ClusterMapping {
       onlinePartitionCount = topology.partitions.map(_.online),
       offlinePartitionCount = topology.partitions.map(_.offline),
       underReplicatedPartitionCount = topology.partitions.map(_.underReplicated),
-      totalDiskUsageBytes = topology.totalDiskBytes,
+      // The field is named for *usage*, so it carries what Kafka's data occupies, summed over every broker's
+      // log directories. It used to carry `totalDiskBytes`, the size of the filesystem the log directories sit
+      // on, so the cluster list reported the quickstart's broker - which holds about a hundred records - as
+      // using 468.8 GiB of disk. How full the underlying filesystem is remains worth showing and is not shown
+      // anywhere; that is a column somebody has to add, not a reason to keep answering the wrong question.
+      totalDiskUsageBytes = topology.usedByKafkaBytes,
       features = topology.features.tokens.toList.sorted,
       scrapedAt = scrapedAt
     )
@@ -95,11 +100,13 @@ object ClusterMapping {
       inSyncReplicaCount = row.replicas,
       replicaSkewPercent = row.skewPercent,
       leaderSkewPercent = None,
-      // What the filesystem reports as used, which is total minus usable. It is not "bytes Kafka wrote":
-      // a shared disk holds other things too, and the honest label for a number a broker reports about a
-      // whole filesystem is the filesystem's. `None` whenever either half is missing - a broker older than
-      // Kafka 3.3 reports no sizes at all, which is different from a disk that is empty.
-      diskUsageBytes = row.totalBytes.flatMap(total => row.usableBytes.map(total - _)),
+      // What Kafka's own data occupies on this broker: the sum of the replica sizes its log directories
+      // report. It used to be `totalBytes - usableBytes`, the filesystem's used space, which on any shared
+      // disk is mostly other people's files - the quickstart's broker holds about a hundred records and that
+      // subtraction read 184 GiB. The column is labelled "Disk" on a Kafka broker list, so it has to be the
+      // Kafka number. `None` when the broker reported no log directories, which is what a broker older than
+      // Kafka 3.3 looks like and is different from a broker holding nothing.
+      diskUsageBytes = row.usedByKafkaBytes,
       segmentCount = None
     )
 

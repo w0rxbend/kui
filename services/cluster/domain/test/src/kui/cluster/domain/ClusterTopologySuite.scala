@@ -78,6 +78,35 @@ final class ClusterTopologySuite extends KuiSuite {
     assertEquals(built.usableDiskBytes, Some(80L))
   }
 
+  test("kafkaDiskUsageIsTheReplicasAndNotTheFilesystemsUsedSpace") {
+    // The defect this pins: the cluster and broker screens both label a number "Disk", and both used to
+    // answer with the filesystem's - `totalBytes` on the cluster list and `totalBytes - usableBytes` on the
+    // broker list. On the quickstart, whose broker holds about a hundred records, those read 468.8 GiB and
+    // 184.2 GiB. What an operator means by a Kafka broker's disk is what Kafka's data occupies, which is the
+    // sum of the replica sizes the broker reports for its log directories - 300 bytes here, not 999,400.
+    val dirs = List(
+      logDir(
+        "/data",
+        replicas = List(replica("orders", 0, 200L), replica("orders", 1, 100L)),
+        totalBytes = Some(1_000_000L),
+        usableBytes = Some(600L)
+      )
+    )
+    val built = topology(ref, load = Map(BrokerId.unsafe(1) -> load(2, dirs)))
+
+    assertEquals(built.usedByKafkaBytes, Some(300L))
+    assertEquals(built.totalDiskBytes, Some(1_000_000L))
+  }
+
+  test("kafkaDiskUsageIsNoneWhenTheBrokerReportedNoLogDirectories") {
+    // Zero would be a claim - "this broker is holding nothing" - and a broker older than Kafka 3.3 reports
+    // no directories at all. The screens render `None` as an em dash and zero as "0 B"; only one of those is
+    // honest about a broker that was never asked.
+    val built = topology(ref, load = Map(BrokerId.unsafe(1) -> load(0, Nil).copy(logDirs = Nil)))
+
+    assertEquals(built.usedByKafkaBytes, None)
+  }
+
   test("offlineLogDirCountCountsAcrossBrokers") {
     val offline = List(logDir("/data", error = Some(LogDirError.Offline)), logDir("/data2"))
     val built = topology(

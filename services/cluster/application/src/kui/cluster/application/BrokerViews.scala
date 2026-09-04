@@ -16,6 +16,10 @@ final case class BrokerListRow(
     skewPercent: Option[Double],
     totalBytes: Option[Long],
     usableBytes: Option[Long],
+    /** What Kafka's own data occupies on this broker. Distinct from `totalBytes - usableBytes`, which is the
+      * whole filesystem's used space and is mostly not Kafka. See [[kui.cluster.domain.BrokerLoad]].
+      */
+    usedByKafkaBytes: Option[Long],
     offlineDirCount: Int
 )
 
