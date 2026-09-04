@@ -15,7 +15,8 @@ import kui.config.{
   KuiConfigSource,
   PrincipalKeyConfig,
   ServerConfig,
-  TelemetryConfig
+  TelemetryConfig,
+  UrlPolicy
 }
 import kui.http.principal.ProcessPrincipalCodec
 import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
@@ -128,9 +129,17 @@ object ServiceMain {
     *   the process's command line, so `--kui.server.port=9090` works the same way in every service.
     */
   def run(serviceName: String, args: List[String], wiring: Wiring): IO[ExitCode] =
-    KuiConfigSource.load[IO](args, files = Nil).flatMap {
-      case Left(errors) => refuseToStart(configProblems(serviceName, errors))
-      case Right(loaded) => start(serviceName, loaded, wiring)
+    IO.delay(sys.env).flatMap { environment =>
+      // The same address rule the gateway's `Main` applies, and for the same reason. Loading with the
+      // default policy refuses every loopback and private-network URL, which in a service process means a
+      // schema registry at `http://schema-registry:8081` — the ordinary arrangement inside a Compose
+      // network or a Kubernetes namespace — cannot be configured at all, however the operator sets
+      // `KUI_ALLOW_PRIVATE_UPSTREAMS`. The relaxation stays an environment variable so that it is visible
+      // in one place to anyone auditing the process (ADR-019, `ARCHITECTURE.md` §14).
+      KuiConfigSource.loadFrom[IO](args, files = Nil, environment, UrlPolicy.fromEnv(environment)).flatMap {
+        case Left(errors) => refuseToStart(configProblems(serviceName, errors))
+        case Right(loaded) => start(serviceName, loaded, wiring)
+      }
     }
 
   private def start(serviceName: String, loaded: KuiConfig, wiring: Wiring): IO[ExitCode] = {
