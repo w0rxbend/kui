@@ -43,6 +43,31 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     assertMatchesGolden("group-page", ConsumerSamples.page, GoldenDocuments.groupPage)
   }
 
+  test("theGroupListResponseMatchesItsGoldenFile") {
+    assertMatchesGolden("groups-response", ConsumerSamples.groupsResponse, GoldenDocuments.groupsResponse)
+  }
+
+  test("theStaleGroupListResponseMatchesItsGoldenFile") {
+    // The document the freshness envelope exists for. Its rows are byte-for-byte the fresh document's, so
+    // if `status` and `reason` were ever dropped from the encoding this assertion is the only thing that
+    // would notice — the rows themselves cannot tell anyone the cluster has gone away.
+    assertMatchesGolden(
+      "groups-response-stale",
+      ConsumerSamples.groupsResponseStale,
+      GoldenDocuments.groupsResponseStale
+    )
+  }
+
+  test("aStaleGroupListStillCarriesEveryRow") {
+    // Stated as its own assertion because the alternative failure is silent: a stale section that dropped
+    // its data would render as an empty table, which claims the cluster has no consumer groups.
+    val decoded = decode[GroupsResponse](GoldenDocuments.groupsResponseStale)
+      .getOrElse(fail("the stale list document did not decode"))
+
+    assertEquals(decoded.groups.status, "stale")
+    assertEquals(decoded.groups.toOption.map(_.items.size), Some(2))
+  }
+
   test("theGroupDetailMatchesItsGoldenFile") {
     assertMatchesGolden("group-detail", ConsumerSamples.detail, GoldenDocuments.groupDetail)
   }
@@ -84,6 +109,8 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     // The reverse direction. Without it a golden file that is not actually valid — a trailing comma, a
     // renamed field — sits there passing every encode test, because an encode test never reads it back.
     assert(decode[PageDto[GroupSummaryDto]](GoldenDocuments.groupPage).isRight)
+    assert(decode[GroupsResponse](GoldenDocuments.groupsResponse).isRight)
+    assert(decode[GroupsResponse](GoldenDocuments.groupsResponseStale).isRight)
     assert(decode[GroupDetailDto](GoldenDocuments.groupDetail).isRight)
     assert(decode[LagDeltaDto](GoldenDocuments.lagDelta).isRight)
     assert(decode[TopicConsumersDto](GoldenDocuments.topicConsumers).isRight)

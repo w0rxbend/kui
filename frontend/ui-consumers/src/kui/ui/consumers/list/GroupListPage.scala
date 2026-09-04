@@ -4,9 +4,11 @@ import java.time.Instant
 
 import com.raquo.laminar.api.L.*
 
-import kui.consumer.contract.dto.GroupPageDto
+import kui.consumer.contract.dto.{GroupPageDto, GroupsResponse}
 import kui.consumer.contract.{ConsumerEndpoints, GroupListParams}
+import kui.contracts.Section
 import kui.contracts.consumer.{GroupSortField, GroupSummaryDto}
+import kui.kernel.error.ErrorCode
 import kui.kernel.group.GroupState
 import kui.kernel.{ClusterId, GroupId, Sort, SortOrder}
 import kui.ui.consumers.{ConsumersCss, ConsumersQueries, GroupStateChip, Messages}
@@ -130,10 +132,20 @@ object GroupListPage {
 
     // --- The response, and the renderings it can produce -------------------------------------------
 
-    val state: Signal[QueryState[GroupPageDto]] =
+    val state: Signal[QueryState[GroupsResponse]] =
       params.flatMapSwitch(current => queries.groups.state((cluster, current)))
 
-    val answer: Signal[Option[GroupPageDto]] = state.map(_.lastGood)
+    /** The freshness envelope the server sent, which is what says whether these numbers are still true.
+      *
+      * It is not the same question as "did the last request fail". A request can succeed perfectly and still
+      * answer with rows from before the cluster went away — that is exactly what the snapshot is for — and
+      * until this section existed the screen had no way to tell the two apart. Lag is the field that made
+      * that unacceptable: a dead broker makes it freeze rather than climb, so a frozen lag column reads as
+      * consumers that have caught up.
+      */
+    val section: Signal[Option[Section[GroupPageDto]]] = state.map(_.lastGood.map(_.groups))
+
+    val answer: Signal[Option[GroupPageDto]] = section.map(_.flatMap(_.toOption))
 
     val fetched: Signal[List[GroupSummaryDto]] = answer.map(_.map(_.items).getOrElse(Nil))
 
@@ -169,21 +181,36 @@ object GroupListPage {
     /** Scaled against the largest lag among the rows *currently displayed*, per the design. */
     val largestLag: Signal[Long] = rows.map(_.flatMap(_.totalLag).maxOption.getOrElse(0L))
 
-    /** The last request failed but an earlier answer is still held: the rows on screen are old, and the
-      * overlay is what says so. Without this, a service that went down would leave the last good rows looking
-      * perfectly current.
+    /** Why the rows on screen are not being refreshed, from either of the two things that can say so.
+      *
+      * The server's own section comes first, because it is the stronger statement: the server *knows* the
+      * scrape behind these rows failed, whereas a failed request only tells the browser that this one call
+      * did not get through. A section marked stale therefore wins over a request that happened to succeed,
+      * and a failed request still marks the table when the last good answer was itself fine.
       */
     val stale: Signal[Option[StaleReason]] =
-      state.map(current =>
-        Option.when(current.isStale)(
-          StaleReason.lastRequestFailed(
-            current.outcome.flatMap(_.left.toOption).map(_.userMessage).getOrElse(Messages.StaleState)
+      state.map { current =>
+        val fromServer = current.lastGood.map(_.groups).flatMap(staleReason)
+        val fromRequest =
+          Option.when(current.isStale)(
+            StaleReason.lastRequestFailed(
+              current.outcome.flatMap(_.left.toOption).map(_.userMessage).getOrElse(Messages.NotRefreshed)
+            )
           )
-        )
-      )
+        fromServer.orElse(fromRequest)
+      }
 
+    /** When the rows were fetched *from Kafka*, which is the server's `fetchedAt` and not the moment this
+      * browser's request returned. A cached snapshot answered in a millisecond is not fresh data, and
+      * stamping the badge with the request time would say it was.
+      */
     val fetchedAt: Signal[Option[Instant]] =
-      state.map(_.lastGoodAt.map(Timestamps.instantOf))
+      state.map(current =>
+        current.lastGood
+          .map(_.groups)
+          .flatMap(fetchedAtOf)
+          .orElse(current.lastGoodAt.map(Timestamps.instantOf))
+      )
 
     /** Nothing held and the request failed: the whole screen is the explanation, and there is no table.
       *
@@ -192,7 +219,9 @@ object GroupListPage {
       */
     val refusal: Signal[Option[ApiError]] =
       state.map(current =>
-        if current.lastGood.isEmpty then current.outcome.flatMap(_.left.toOption) else None
+        if current.lastGood.flatMap(_.groups.toOption).isEmpty then
+          current.outcome.flatMap(_.left.toOption).orElse(current.lastGood.map(_.groups).flatMap(refusalOf))
+        else None
       )
 
     // --- Writing the state back --------------------------------------------------------------------
@@ -363,4 +392,41 @@ object GroupListPage {
         testId = Some("groups-retry")
       )
     )
+
+  /** When the rows in a section were fetched. `Unavailable` has no rows and therefore no time. */
+  private def fetchedAtOf(section: Section[GroupPageDto]): Option[Instant] = section match {
+    case Section.Ok(_, at) => Some(at)
+    case Section.Stale(_, at, _) => Some(at)
+    case Section.Unavailable(_, _, _) | Section.Forbidden | Section.NotConfigured => None
+  }
+
+  /** The badge's words, from a section that carries rows.
+    *
+    * The reason is rendered as a sentence and the wire code goes in the badge's tooltip. A user reading
+    * `Stale: UPSTREAM_UNAVAILABLE` learns nothing they can act on; the code still belongs in a support
+    * conversation, so it stays reachable rather than being thrown away.
+    *
+    * A section with no rows produces nothing here, because there is no table to mark — that case is the
+    * refusal panel's.
+    */
+  private def staleReason(section: Section[GroupPageDto]): Option[StaleReason] = section match {
+    case Section.Stale(_, _, reason) =>
+      Some(StaleReason(Messages.StaleState, Some(reason.sentence), code = Some(reason.wire)))
+    case Section.Ok(_, _) | Section.Unavailable(_, _, _) | Section.Forbidden | Section.NotConfigured => None
+  }
+
+  /** A section that carries no rows at all, as the failure the screen explains.
+    *
+    * A table with no rows in it is a claim that the cluster has no consumer groups, which is what a section
+    * with nothing in it must never be allowed to say.
+    */
+  private def refusalOf(section: Section[GroupPageDto]): Option[ApiError] = section match {
+    case Section.Unavailable(reason, _, _) =>
+      Some(ApiError.Envelope(reason.wire, reason.sentence, Nil, "", retryable = true))
+    case Section.Forbidden =>
+      Some(ApiError.Envelope(ErrorCode.Forbidden.wire, Messages.Forbidden, Nil, "", retryable = false))
+    case Section.NotConfigured =>
+      Some(ApiError.Envelope(ErrorCode.Unsupported.wire, Messages.NotConfigured, Nil, "", retryable = false))
+    case Section.Ok(_, _) | Section.Stale(_, _, _) => None
+  }
 }

@@ -6,7 +6,7 @@ import sttp.tapir.json.circe.jsonBody
 import kui.consumer.contract.dto.ConsumerCodecs.given
 import kui.consumer.contract.dto.{
   GroupDetailDto,
-  GroupPageDto,
+  GroupsResponse,
   LagDeltaDto,
   ResetApplyRequest,
   ResetPlanDto,
@@ -60,11 +60,11 @@ object ConsumersApi {
     * stops this compiling. That matters here in particular: the server *refuses* an unknown `sort` rather
     * than substituting a default, so a drifted parameter name is a 400 on the screen, not a quiet reorder.
     */
-  val list: PublicEndpoint[(ClusterId, GroupListParams), ErrorEnvelope, GroupPageDto, Any] =
+  val list: PublicEndpoint[(ClusterId, GroupListParams), ErrorEnvelope, GroupsResponse, Any] =
     KuiEndpoint.base.get
       .in(groupsBase)
       .in(ConsumerEndpoints.listParams)
-      .out(jsonBody[GroupPageDto])
+      .out(jsonBody[GroupsResponse])
       .name("consumer.list")
 
   /** `GET /api/v1/clusters/{clusterId}/consumer-groups/{groupId}` — one group, whole.

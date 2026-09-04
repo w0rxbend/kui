@@ -4,6 +4,7 @@ import java.time.Instant
 
 import kui.consumer.contract.dto.*
 import kui.contracts.capability.ReasonCode
+import kui.contracts.Section
 import kui.contracts.consumer.*
 import kui.contracts.paging.{PageDto, PageInfo}
 import kui.kernel.group.{GroupProtocol, GroupState, LagAnomaly, ResetTarget}
@@ -69,6 +70,24 @@ object ConsumerSamples {
     items = List(healthySummary, unknownLagSummary),
     page = PageInfo(page = 1, pageSize = 25, totalItems = Some(2L), nextPageToken = None)
   )
+
+  val listedAt: Instant = Instant.parse("2026-09-04T09:00:00Z")
+
+  /** The list as the browser receives it from a cluster that is answering. */
+  val groupsResponse: GroupsResponse =
+    GroupsResponse(Section.Ok(page, listedAt), incompleteCoordinators = 0)
+
+  /** The same rows, from a cluster that has stopped answering.
+    *
+    * The rows are deliberately identical to the ones above. That is the whole reason this envelope exists:
+    * the lag figures are from before the broker died, they will not move again, and nothing inside them says
+    * so — only `status` and `reason` do.
+    */
+  val groupsResponseStale: GroupsResponse =
+    GroupsResponse(
+      Section.Stale(page, listedAt, ReasonCode.UpstreamUnavailable),
+      incompleteCoordinators = 0
+    )
 
   val partitions: List[PartitionDto] = List(
     PartitionDto(

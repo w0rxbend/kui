@@ -284,9 +284,126 @@ object GoldenDocuments {
       |  "note" : "3 of 12 partitions have no leader, so their end offsets could not be read"
       |}""".stripMargin
 
+
+  /** The list as it goes out when the cluster is answering. */
+  val groupsResponse: String =
+    """{
+      |  "groups" : {
+      |    "status" : "ok",
+      |    "data" : {
+      |      "items" : [
+      |        {
+      |          "groupId" : "orders-indexer",
+      |          "state" : "STABLE",
+      |          "protocol" : "CONSUMER",
+      |          "isSimple" : false,
+      |          "members" : 3,
+      |          "topics" : 1,
+      |          "partitions" : 12,
+      |          "coordinatorId" : 2,
+      |          "totalLag" : 1240,
+      |          "pace" : 415.5,
+      |          "excludedPartitions" : 0,
+      |          "incomplete" : null
+      |        },
+      |        {
+      |          "groupId" : "billing-replay",
+      |          "state" : "EMPTY",
+      |          "protocol" : "CLASSIC",
+      |          "isSimple" : false,
+      |          "members" : 0,
+      |          "topics" : 1,
+      |          "partitions" : 12,
+      |          "coordinatorId" : 2,
+      |          "totalLag" : null,
+      |          "pace" : null,
+      |          "excludedPartitions" : 3,
+      |          "incomplete" : {
+      |            "membersKnown" : true,
+      |            "offsetsKnown" : true,
+      |            "endOffsetsKnown" : false,
+      |            "note" : "3 of 12 partitions have no leader, so their end offsets could not be read"
+      |          }
+      |        }
+      |      ],
+      |      "page" : {
+      |        "page" : 1,
+      |        "pageSize" : 25,
+      |        "totalItems" : 2,
+      |        "pageCount" : 1,
+      |        "nextPageToken" : null
+      |      }
+      |    },
+      |    "fetchedAt" : "2026-09-04T09:00:00.000Z"
+      |  },
+      |  "incompleteCoordinators" : 0
+      |}""".stripMargin
+
+  /** The same rows, from a cluster that has stopped answering.
+    *
+    * This is the document the whole freshness envelope exists for. The rows are identical to the ones above
+    * — that is the point: without `status` and `reason` a browser cannot tell this answer from that one, and
+    * the lag figures in it are from before the broker died.
+    */
+  val groupsResponseStale: String =
+    """{
+      |  "groups" : {
+      |    "status" : "stale",
+      |    "data" : {
+      |      "items" : [
+      |        {
+      |          "groupId" : "orders-indexer",
+      |          "state" : "STABLE",
+      |          "protocol" : "CONSUMER",
+      |          "isSimple" : false,
+      |          "members" : 3,
+      |          "topics" : 1,
+      |          "partitions" : 12,
+      |          "coordinatorId" : 2,
+      |          "totalLag" : 1240,
+      |          "pace" : 415.5,
+      |          "excludedPartitions" : 0,
+      |          "incomplete" : null
+      |        },
+      |        {
+      |          "groupId" : "billing-replay",
+      |          "state" : "EMPTY",
+      |          "protocol" : "CLASSIC",
+      |          "isSimple" : false,
+      |          "members" : 0,
+      |          "topics" : 1,
+      |          "partitions" : 12,
+      |          "coordinatorId" : 2,
+      |          "totalLag" : null,
+      |          "pace" : null,
+      |          "excludedPartitions" : 3,
+      |          "incomplete" : {
+      |            "membersKnown" : true,
+      |            "offsetsKnown" : true,
+      |            "endOffsetsKnown" : false,
+      |            "note" : "3 of 12 partitions have no leader, so their end offsets could not be read"
+      |          }
+      |        }
+      |      ],
+      |      "page" : {
+      |        "page" : 1,
+      |        "pageSize" : 25,
+      |        "totalItems" : 2,
+      |        "pageCount" : 1,
+      |        "nextPageToken" : null
+      |      }
+      |    },
+      |    "fetchedAt" : "2026-09-04T09:00:00.000Z",
+      |    "reason" : "UPSTREAM_UNAVAILABLE"
+      |  },
+      |  "incompleteCoordinators" : 0
+      |}""".stripMargin
+
   /** Every sample, by file name, for the JVM suite to walk. */
   val all: Map[String, String] = Map(
     "group-page.json" -> groupPage,
+    "groups-response.json" -> groupsResponse,
+    "groups-response-stale.json" -> groupsResponseStale,
     "group-detail.json" -> groupDetail,
     "lag-delta.json" -> lagDelta,
     "topic-consumers.json" -> topicConsumers,

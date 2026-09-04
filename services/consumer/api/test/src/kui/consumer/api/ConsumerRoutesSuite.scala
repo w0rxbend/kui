@@ -5,8 +5,9 @@ import io.circe.parser.parse
 import sttp.client4.*
 import sttp.model.StatusCode
 
-import kui.consumer.application.LagUpdate
+import kui.consumer.application.{LagUpdate, SnapshotFreshness}
 import kui.kernel.GroupId
+import kui.kernel.error.InfrastructureError
 import kui.kernel.group.GroupState
 import kui.testkit.KuiIOSuite
 
@@ -115,6 +116,53 @@ final class ConsumerRoutesSuite extends KuiIOSuite {
           clue = s"expected the cluster-not-found envelope, got ${response.body}"
         )
       }
+    }
+  }
+
+  test("aListReadFromADeadClusterIsMarkedStaleOnTheWire") {
+    // The defect this replaces: the list answered a bare 200 carrying the rows of the last successful
+    // scrape, so a browser had no way to know that the lag figures in front of an operator had stopped
+    // moving because the broker was gone rather than because the consumers had caught up. Lag is the
+    // worst field in the product to freeze silently — a number that stops changing reads as health.
+    val broker = InfrastructureError.Unreachable("kafka", "connection refused")
+
+    resource(
+      groups = List(summary(Group, lag = Some(9L))),
+      freshness = SnapshotFreshness.Stale(At, broker)
+    ).use { (server, _) =>
+      for {
+        response <- get(server, path("/consumer-groups"))
+        body = response.body.getOrElse(fail(s"the list failed: ${response.body}"))
+        json = parse(body).getOrElse(fail(s"the list did not answer JSON: $body"))
+        groups = json.hcursor.downField("groups")
+      } yield {
+        assertEquals(response.code, StatusCode.Ok)
+        assertEquals(
+          groups.get[String]("status").toOption,
+          Some("stale"),
+          clue = s"the rows are from before the broker died and must say so, got $body"
+        )
+        assertEquals(groups.get[String]("reason").toOption, Some("UPSTREAM_UNAVAILABLE"))
+        assertEquals(groups.get[String]("fetchedAt").toOption, Some("2026-09-04T09:00:00.000Z"))
+
+        // The rows are still there. A stale section that dropped its data would be a blank table,
+        // which is a different lie from the one being fixed.
+        assertEquals(
+          groups.downField("data").downField("items").downArray.get[String]("groupId").toOption,
+          Some(Group.value)
+        )
+      }
+    }
+  }
+
+  test("aListReadFromAHealthyClusterIsMarkedFreshOnTheWire") {
+    // The control. Without it, "always stale" would pass the assertion above.
+    resource(groups = List(summary(Group, lag = Some(9L)))).use { (server, _) =>
+      for {
+        response <- get(server, path("/consumer-groups"))
+        body = response.body.getOrElse(fail(s"the list failed: ${response.body}"))
+        json = parse(body).getOrElse(fail(s"the list did not answer JSON: $body"))
+      } yield assertEquals(json.hcursor.downField("groups").get[String]("status").toOption, Some("ok"))
     }
   }
 

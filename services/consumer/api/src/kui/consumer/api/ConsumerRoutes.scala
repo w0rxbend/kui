@@ -60,7 +60,17 @@ object ConsumerRoutes {
       secured: ConsumerApi.Securing[F]
   ): ServerEndpoint[Any, F] =
     secured(ConsumerEndpoints.list) { _ => (cluster, params) =>
-      list.list(cluster, queryOf(params)).map(_.map(view => ConsumerMapping.page(view.page)))
+      list
+        .list(cluster, queryOf(params))
+        .map(_.map { view =>
+          // The freshness travels with the rows rather than being dropped here. Before it did, a cluster
+          // that had stopped answering was a bare 200 carrying the lag figures of the last successful
+          // scrape, and the browser had no way to tell that from a caught-up cluster.
+          GroupsResponse(
+            groups = ConsumerSections.of(view.freshness, ConsumerMapping.page(view.page)),
+            incompleteCoordinators = view.incompleteCoordinators
+          )
+        })
     }
 
   /** One group, whole. A deep link has to work without fetching the list first. */

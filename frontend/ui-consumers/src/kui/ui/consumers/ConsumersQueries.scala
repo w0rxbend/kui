@@ -7,7 +7,7 @@ import com.raquo.laminar.api.L.*
 import kui.consumer.contract.GroupListParams
 import kui.consumer.contract.dto.{
   GroupDetailDto,
-  GroupPageDto,
+  GroupsResponse,
   LagDeltaDto,
   ResetApplyRequest,
   ResetPlanDto,
@@ -51,7 +51,7 @@ final class ConsumersQueries(api: ApiClient) {
     * the page are all applied by the server before the page is cut, so two different parameter sets are two
     * different answers and must not share an entry.
     */
-  val groups: QueryCache[(ClusterId, GroupListParams), GroupPageDto] =
+  val groups: QueryCache[(ClusterId, GroupListParams), GroupsResponse] =
     QueryCache.make(
       key => call(ConsumersApi.list, key),
       staleAfter = ConsumersQueries.Cadence,

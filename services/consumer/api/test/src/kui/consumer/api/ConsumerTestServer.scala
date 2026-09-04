@@ -279,7 +279,8 @@ object ConsumerTestServer {
 
   def resource(
       groups: List[GroupSummary] = Nil,
-      lag: List[LagUpdate] = Nil
+      lag: List[LagUpdate] = Nil,
+      freshness: SnapshotFreshness = Fresh
   ): Resource[IO, (ConsumerTestServer, Stubs)] =
     OtelJavaTestkit.inMemory[IO]().evalMap { testkit =>
       for {
@@ -296,7 +297,7 @@ object ConsumerTestServer {
         val reset = new StubReset(planned, applied)
 
         val routes = ConsumerApi.routes[IO](
-          new StubList(listView(groups)),
+          new StubList(listView(groups).copy(freshness = freshness)),
           detail,
           new StubLag(lagView(lag)),
           new StubForTopic(TopicConsumersView(Topic, Nil, Fresh, At)),

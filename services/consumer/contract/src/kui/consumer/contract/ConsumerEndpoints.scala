@@ -6,7 +6,6 @@ import sttp.tapir.json.circe.jsonBody
 import kui.consumer.contract.dto.*
 import kui.consumer.contract.dto.ConsumerCodecs.given
 import kui.contracts.consumer.{GroupSortField, TopicConsumersDto}
-import kui.contracts.paging.PageDto
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.group.GroupState
 import kui.kernel.{ClusterId, GroupId, SortOrder, TopicName}
@@ -144,19 +143,19 @@ object ConsumerEndpoints {
     * Served entirely from the 30-second snapshot: describing four thousand groups on the request path would
     * make this the slowest screen in KUI and would hammer the coordinators once per page view.
     */
-  val list: Endpoint[SignedPrincipal, (ClusterId, GroupListParams), ErrorEnvelope, PageDto[
-    kui.contracts.consumer.GroupSummaryDto
-  ], Any] =
+  val list: Endpoint[SignedPrincipal, (ClusterId, GroupListParams), ErrorEnvelope, GroupsResponse, Any] =
     KuiEndpoint.internal.get
       .in(clustersBase / clusterIdPath / GroupsSegment)
       .in(listParams)
-      .out(jsonBody[GroupPageDto])
+      .out(jsonBody[GroupsResponse])
       .name("consumer.list")
       .summary("The cluster's consumer groups, with lag and pace")
       .description(
         "Read from the group snapshot rather than from a live describe, so the lag and the end offsets it " +
           "was computed against come from the same pass. A group whose lag could not be computed reports " +
-          "null, never zero, and says how many partitions were excluded."
+          "null, never zero, and says how many partitions were excluded. The page is wrapped in a " +
+          "freshness section: a cluster that has stopped answering is a 200 whose section is stale, never " +
+          "a bare page of figures that have quietly stopped moving."
       )
       .tag("consumer")
 

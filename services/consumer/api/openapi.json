@@ -11,7 +11,7 @@
           "consumer"
         ],
         "summary" : "The cluster's consumer groups, with lag and pace",
-        "description" : "Read from the group snapshot rather than from a live describe, so the lag and the end offsets it was computed against come from the same pass. A group whose lag could not be computed reports null, never zero, and says how many partitions were excluded.",
+        "description" : "Read from the group snapshot rather than from a live describe, so the lag and the end offsets it was computed against come from the same pass. A group whose lag could not be computed reports null, never zero, and says how many partitions were excluded. The page is wrapped in a freshness section: a cluster that has stopped answering is a 200 whose section is stale, never a bare page of figures that have quietly stopped moving.",
         "operationId" : "consumer.list",
         "parameters" : [
           {
@@ -101,7 +101,7 @@
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/PageDto_A"
+                  "$ref" : "#/components/schemas/GroupsResponse"
                 }
               }
             }
@@ -1048,6 +1048,24 @@
           }
         }
       },
+      "GroupsResponse" : {
+        "title" : "GroupsResponse",
+        "description" : "One page of the consumer-group list, plus how many coordinators did not answer",
+        "type" : "object",
+        "required" : [
+          "groups",
+          "incompleteCoordinators"
+        ],
+        "properties" : {
+          "groups" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "incompleteCoordinators" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "IncompleteDto" : {
         "title" : "IncompleteDto",
         "description" : "Which parts of this group's row could not be read, and why",
@@ -1204,52 +1222,6 @@
           },
           "rebalancing" : {
             "type" : "boolean"
-          }
-        }
-      },
-      "PageDto_A" : {
-        "title" : "PageDto_A",
-        "description" : "One page of a list: the items, and where the page sits in the whole",
-        "type" : "object",
-        "required" : [
-          "page"
-        ],
-        "properties" : {
-          "items" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/GroupSummaryDto"
-            }
-          },
-          "page" : {
-            "$ref" : "#/components/schemas/PageInfo"
-          }
-        }
-      },
-      "PageInfo" : {
-        "title" : "PageInfo",
-        "description" : "Where this page sits in the list; pageCount is derived from totalItems and pageSize",
-        "type" : "object",
-        "required" : [
-          "page",
-          "pageSize"
-        ],
-        "properties" : {
-          "page" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "pageSize" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "totalItems" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "nextPageToken" : {
-            "description" : "An opaque continuation token",
-            "type" : "string"
           }
         }
       },

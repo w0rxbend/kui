@@ -46,6 +46,15 @@ object Messages {
 
   val StaleState: String = "Stale"
 
+  /** What the badge says when the browser's own request failed and the server never got to have an opinion.
+    * Distinct from [[StaleState]], which is the server telling us its scrape of the cluster failed.
+    */
+  val NotRefreshed: String = "KUI could not refresh this list."
+
+  val Forbidden: String = ForbiddenDescription
+
+  val NotConfigured: String = "This deployment does not serve consumer groups for this cluster."
+
   // --- Columns and the state filter ------------------------------------------------------------
 
   val ColumnGroup: String = "Group"
