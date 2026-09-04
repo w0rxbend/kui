@@ -1,6 +1,5 @@
 package kui.kafka.admin
 
-import scala.annotation.unused
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
@@ -13,6 +12,7 @@ import org.apache.kafka.clients.admin.{
   ListConsumerGroupOffsetsSpec,
   ListGroupsOptions
 }
+import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.GroupState as KafkaGroupState
 import org.apache.kafka.common.errors.{
   GroupIdNotFoundException,
@@ -23,7 +23,7 @@ import org.typelevel.log4cats.Logger
 
 import kui.kafka.{AdminBatch, AdminClientPool, BatchResult, KafkaErrorMapper, KafkaFutures, SkipReason}
 import kui.kernel.cluster.ClusterConnection
-import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
+import kui.kernel.error.{ErrorCode, KuiError}
 import kui.kernel.group.GroupState
 import kui.kernel.{GroupId, Offset, TopicPartition}
 
@@ -40,16 +40,11 @@ object KafkaGroupAdmin {
       log: Option[Logger[F]] = None
   ): GroupAdmin[F] = new Impl[F](pool, log)
 
-  /** Every method not yet implemented answers `ApplicationError.Unsupported`, a typed value — never a `???`
-    * and never a silently empty result. That is permitted only because GRP-003 … GRP-007 land inside this
-    * same milestone: a method still stubbed after GRP-007 is a bug, and `GroupTypesSuite` is what notices a
-    * signature added with no body.
+  /** Every method of the port has a body here; `GroupTypesSuite` asserts reflectively that none is missing,
+    * so a signature added to the trait cannot arrive without one.
     */
-  final private class Impl[F[_]: Async](@unused pool: AdminClientPool[F], @unused log: Option[Logger[F]])
+  final private class Impl[F[_]: Async](pool: AdminClientPool[F], log: Option[Logger[F]])
       extends GroupAdmin[F] {
-
-    private def notYet[A](method: String): F[Either[KuiError, A]] =
-      Async[F].pure(Left(ApplicationError.Unsupported(s"GroupAdmin.$method")))
 
     // ---------------------------------------------------------------- listGroups
 
@@ -307,22 +302,116 @@ object KafkaGroupAdmin {
     private def kafkaPartition(partition: TopicPartition): org.apache.kafka.common.TopicPartition =
       new org.apache.kafka.common.TopicPartition(partition.topic.value, partition.partition.value)
 
+    // ---------------------------------------------------------------- mutations
+
     def alterOffsets(
-        @unused conn: ClusterConnection,
-        @unused group: GroupId,
-        @unused offsets: Map[TopicPartition, Offset]
-    ): F[Either[KuiError, Unit]] = notYet("alterOffsets")
+        conn: ClusterConnection,
+        group: GroupId,
+        offsets: Map[TopicPartition, Offset]
+    ): F[Either[KuiError, Unit]] =
+      // Nothing to write is not a call. A mutation that reaches the broker with an empty map is a
+      // request that can still fail, and failing to do nothing is not a failure worth reporting.
+      if offsets.isEmpty then Async[F].pure(Right(()))
+      else
+        announced(conn, group, GroupAdmin.Operation.AlterOffsets, offsets.size) {
+          pool.run(conn, GroupAdmin.Operation.AlterOffsets) { admin =>
+            val request = offsets.map { (partition, offset) =>
+              kafkaPartition(partition) -> new OffsetAndMetadata(offset.value)
+            }.asJava
+
+            KafkaFutures
+              .fromFuture(Async[F].delay(admin.alterConsumerGroupOffsets(group.value, request).all()))
+              .void
+          }
+        }
 
     def deleteOffsets(
-        @unused conn: ClusterConnection,
-        @unused group: GroupId,
-        @unused partitions: Set[TopicPartition]
-    ): F[Either[KuiError, Unit]] = notYet("deleteOffsets")
+        conn: ClusterConnection,
+        group: GroupId,
+        partitions: Set[TopicPartition]
+    ): F[Either[KuiError, Unit]] =
+      if partitions.isEmpty then Async[F].pure(Right(()))
+      else
+        announced(conn, group, GroupAdmin.Operation.DeleteOffsets, partitions.size) {
+          pool.run(conn, GroupAdmin.Operation.DeleteOffsets) { admin =>
+            KafkaFutures
+              .fromFuture(
+                Async[F].delay(
+                  admin
+                    .deleteConsumerGroupOffsets(group.value, partitions.map(kafkaPartition).asJava)
+                    .all()
+                )
+              )
+              .void
+          }
+        }
 
+    /** Deleting several groups reports what it did.
+      *
+      * One group that still has members costs that group its row and nothing else: a bulk delete that rolls
+      * nothing back and reports nothing is worse than one that says "two deleted, one refused because it
+      * still has members".
+      */
     def deleteGroups(
-        @unused conn: ClusterConnection,
-        @unused ids: List[GroupId]
-    ): F[Either[KuiError, BatchResult[GroupId, Unit]]] = notYet("deleteGroups")
+        conn: ClusterConnection,
+        ids: List[GroupId]
+    ): F[Either[KuiError, BatchResult[GroupId, Unit]]] =
+      if ids.isEmpty then Async[F].pure(Right(BatchResult.empty[GroupId, Unit]))
+      else
+        pool
+          .run(conn, GroupAdmin.Operation.Delete) { admin =>
+            Async[F].delay(admin.deleteConsumerGroups(ids.distinct.map(_.value).asJava)).flatMap { result =>
+              val perGroup = ids.distinct.map { id =>
+                id -> Option(result.deletedGroups.get(id.value))
+                  .fold(Async[F].raiseError[Unit](new IllegalStateException(s"no result for ${id.value}")))(
+                    future => KafkaFutures.fromFuture(Async[F].delay(future)).void
+                  )
+              }.toMap
+
+              AdminBatch.perKey(perGroup, bounded(conn.admin.parallelism), GroupAdmin.Operation.Delete)
+            }
+          }
+          .attempt
+          .map {
+            case Right(result) => Right(result)
+            case Left(failure) => Left(mutationError(GroupAdmin.Operation.Delete, failure, conn))
+          }
+
+    /** An INFO line before the call and one after it, and the mapping the three mutations share.
+      *
+      * Before, because a mutation that is attempted and then times out must leave a trace that it was
+      * attempted: an operator reading the log after an incident needs to know KUI tried. The offsets
+      * themselves are not logged — that is the audit record's job, and it has a place to put them.
+      */
+    private def announced(
+        conn: ClusterConnection,
+        group: GroupId,
+        operation: String,
+        partitions: Int
+    )(call: F[Unit]): F[Either[KuiError, Unit]] =
+      logged(
+        _.info(
+          s"cluster ${conn.id.value}: $operation on group ${group.value} over $partitions partition(s)"
+        )
+      ) >> call.attempt.flatMap {
+        case Right(()) =>
+          logged(_.info(s"cluster ${conn.id.value}: $operation on group ${group.value} succeeded"))
+            .as(Right(()))
+        case Left(failure) =>
+          val error = mutationError(operation, failure, conn)
+          logged(
+            _.info(
+              s"cluster ${conn.id.value}: $operation on group ${group.value} was refused " +
+                s"(${error.code.wire})"
+            )
+          ).as(Left(error))
+      }
+
+    /** The group-specific refusals first, the general mapping second. */
+    private def mutationError(operation: String, failure: Throwable, conn: ClusterConnection): KuiError =
+      KafkaErrorMapper
+        .mapGroupError(failure)
+        .getOrElse(KafkaErrorMapper.map(operation, failure, apiTimeout(conn)))
 
     // ---------------------------------------------------------------- helpers
 

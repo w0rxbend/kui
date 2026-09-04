@@ -9,7 +9,6 @@ import org.apache.kafka.clients.admin.Admin
 import kui.kafka.AdminClientPool
 import kui.kernel.ClusterId
 import kui.kernel.cluster.ClusterConnection
-import kui.kernel.error.ErrorCode
 import kui.kernel.group.{GroupProtocol, GroupState}
 import kui.kernel.{GroupId, PartitionId, TopicName, TopicPartition}
 
@@ -79,7 +78,7 @@ final class GroupTypesSuite extends FunSuite {
     assert(!GroupState.permitsOffsetChange(listing.state))
   }
 
-  test("every GroupAdmin method has a body in KafkaGroupAdmin, stubbed or implemented") {
+  test("every GroupAdmin method has a body in KafkaGroupAdmin") {
     val port = KafkaGroupAdmin[IO](unusablePool)
     val declared = classOf[GroupAdmin[?]].getDeclaredMethods
       .filter(m => java.lang.reflect.Modifier.isAbstract(m.getModifiers))
@@ -88,8 +87,8 @@ final class GroupTypesSuite extends FunSuite {
     val implemented = port.getClass.getMethods.map(_.getName).toSet
     assertEquals(declared.diff(implemented), Set.empty[String])
 
-    // A stub answers with a typed value, never an exception and never an empty success.
+    // And a method asked to do nothing does nothing, rather than opening a client to find that out.
     val answer = port.deleteGroups(null, Nil).unsafeRunSync()
-    assertEquals(answer.left.map(_.code), Left(ErrorCode.Unsupported))
+    assertEquals(answer.map(_.isEmpty), Right(true))
   }
 }

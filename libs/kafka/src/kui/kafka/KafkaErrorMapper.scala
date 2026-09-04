@@ -3,7 +3,7 @@ package kui.kafka
 import org.apache.kafka.common.config.ConfigException
 import org.apache.kafka.common.errors.*
 
-import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
+import kui.kernel.error.{ApplicationError, ErrorCode, FieldError, InfrastructureError, KuiError}
 
 /** Everything a Kafka client can throw, turned into an error KUI can act on.
   *
@@ -149,6 +149,69 @@ object KafkaErrorMapper {
       case api: ApiException =>
         ApplicationError.InvalidState(s"$operation was refused by the cluster (${simpleName(api)})")
       case _ => InfrastructureError.Upstream("kafka", 502)
+    }
+
+  /** The group-operation refusals, each mapped to a code an operator can act on.
+    *
+    * `map` above answers every one of these with `KUI-INVALID-STATE`, which is true and useless: it tells an
+    * operator that something is wrong with the state of something. These three operations — altering a
+    * group's offsets, deleting them, deleting the group — are the ones where the refusal has a remedy, and
+    * naming the remedy is the whole value of the code.
+    *
+    * `GroupNotEmpty` is separate from `InvalidState` because its remedy is "stop the consumers, wait for the
+    * group to become empty, and try again", and a UI that can switch on the code can say exactly that.
+    * `GroupIdNotFound` is reachable here and **only** here: on the describe path it is normalised into a
+    * fabricated dead group before this mapper ever sees it (`GroupAdmin.describeGroups`).
+    *
+    * `None` for anything not listed, so the caller falls through to `map` and this stays a narrowing of the
+    * general mapping rather than a second one beside it.
+    */
+  private[kafka] def mapGroupError(t: Throwable): Option[KuiError] =
+    KafkaFutures.unwrap(t) match {
+      case _: GroupNotEmptyException | _: UnknownMemberIdException | _: IllegalGenerationException =>
+        Some(
+          ApplicationError.Refused(
+            ErrorCode.GroupNotEmpty,
+            "the consumer group still has active members; stop its consumers, wait for the group to " +
+              "become empty, and try again"
+          )
+        )
+
+      case _: GroupIdNotFoundException =>
+        Some(
+          ApplicationError.NotFound("consumer group", "", ErrorCode.GroupNotFound)
+        )
+
+      case _: GroupSubscribedToTopicException =>
+        Some(
+          ApplicationError.InvalidState(
+            "a member of this group is still subscribed to that topic, so its committed offsets " +
+              "cannot be deleted"
+          )
+        )
+
+      case _: GroupAuthorizationException =>
+        Some(ApplicationError.Forbidden("KUI is not permitted to change this consumer group"))
+
+      case _: TopicAuthorizationException =>
+        Some(
+          ApplicationError.Forbidden("KUI is not permitted to read one of the topics this group consumes")
+        )
+
+      case _: UnknownTopicOrPartitionException =>
+        Some(
+          ApplicationError.NotFound("topic or partition", "", ErrorCode.TopicNotFound)
+        )
+
+      case _: OffsetOutOfRangeException | _: InvalidOffsetException =>
+        Some(
+          ApplicationError.Invalid(
+            "the offset is outside the range this partition holds",
+            List(FieldError.of("offset", "must be within the partition's retained range"))
+          )
+        )
+
+      case _ => None
     }
 
   /** How a caller should handle the failure. */
