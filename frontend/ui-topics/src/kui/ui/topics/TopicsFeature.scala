@@ -4,11 +4,12 @@ import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.Route
 import org.scalajs.dom
 
-import kui.kernel.ClusterId
+import kui.kernel.{ClusterId, TopicName}
 import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
 import kui.ui.kernel.prefs.{Favourites, Timezone}
 import kui.ui.kernel.state.AuthState
+import kui.ui.topics.detail.TopicDetailPage
 import kui.ui.topics.list.TopicListPage
 
 /** The topics microfrontend.
@@ -98,14 +99,33 @@ final class TopicsFeature extends KuiFeature {
       case None => div(cls := TopicsCss.Page, dataAttr("testid") := "page-topics-list")
     }
 
-  /** One topic. The screen is TOP-030; see `listing` for why this is empty rather than a placeholder. */
+  /** One topic.
+    *
+    * A cluster id or a topic name the URL held but that will not parse falls back to the list, which is where
+    * the user can see what does exist — rather than to a blank page, which tells them nothing.
+    */
   private def detail(cluster: Option[ClusterId], topic: String): HtmlElement =
-    div(
-      cls := TopicsCss.Page,
-      dataAttr("testid") := "page-topic-detail",
-      cluster.map(_ => emptyMod),
-      Option.when(topic.isEmpty)(emptyMod)
-    )
+    (cluster, TopicName.from(topic).toOption) match {
+      case (Some(clusterId), Some(topicName)) =>
+        TopicDetailPage(
+          cluster = clusterId,
+          topic = topicName,
+          // Read from the route, so the URL is the one source of truth for which tab is open.
+          tab = current.signal.map {
+            case TopicsPageId.Detail(_, _, chosen) => chosen
+            case _ => TopicTab.Default
+          },
+          queries = queries,
+          onTab = chosen => goTo(TopicsPageId.Detail(clusterId.value, topicName.value, chosen)),
+          zone = Timezone.choice.signal,
+          backHref = hrefOf(TopicsPageId.List(clusterId.value)),
+          // The features that are *loaded*. M4's Consumers tab appears here by registration, and a feature
+          // that has not been downloaded contributes no tab and is not fetched to find out.
+          features = FeatureRegistry.loaded
+        )
+      case (Some(clusterId), None) => listing(Some(clusterId))
+      case _ => listing(None)
+    }
 
   /** Moves to a topic without reloading the application.
     *

@@ -19,4 +19,23 @@ object TopicsCss {
   val NameCell = "kui-topics__name"
   val NameLink = "kui-topics__name-link"
   val MessagesCell = "kui-topics__messages"
+
+  val Indicators = "kui-topics__indicators"
+  val Indicator = "kui-topics__indicator"
+  val IndicatorLabel = "kui-topics__indicator-label"
+  val IndicatorValue = "kui-topics__indicator-value"
+  val IndicatorWarning = "kui-topics__indicator-value--warning"
+  val IndicatorDanger = "kui-topics__indicator-value--danger"
+
+  val Replicas = "kui-topics__replicas"
+
+  val Settings = "kui-topics__settings"
+  val SettingName = "kui-topics__setting-name"
+  val SettingOverridden = "kui-topics__setting-name--overridden"
+  val SettingDoc = "kui-topics__setting-doc"
+  val SettingMasked = "kui-topics__setting-masked"
+  val SettingHint = "kui-topics__setting-hint"
+
+  val Panels = "kui-topics__panels"
+  val Panel = "kui-topics__panel"
 }

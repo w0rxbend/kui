@@ -89,4 +89,71 @@ object Messages {
     * the string they can search for or paste into a message, not a friendlier paraphrase of it.
     */
   def unavailable(reason: String, message: String): String = s"Topics are unavailable ($reason): $message"
+
+  // --- The detail screen -----------------------------------------------------------------------
+
+  val TabOverview: String = "Overview"
+  val TabSettings: String = "Settings"
+
+  val IndicatorPartitions: String = "Partitions"
+  val IndicatorReplicationFactor: String = "Replication factor"
+  val IndicatorOutOfSync: String = "Out of sync replicas"
+  val IndicatorOfflinePartitions: String = "Offline partitions"
+  val IndicatorInSyncReplicas: String = "In sync replicas"
+  val IndicatorType: String = "Type"
+  val IndicatorSize: String = "Size"
+  val IndicatorSegments: String = "Segments"
+  val IndicatorCleanupPolicy: String = "Cleanup policy"
+  val IndicatorMessages: String = "Messages"
+
+  val TypeInternal: String = "Internal"
+  val TypeNormal: String = "Normal"
+
+  /** "82 of 84". Two numbers, because the interesting thing is the gap between them. */
+  def nOfM(part: Int, whole: Int): String = s"$part of $whole"
+
+  val ColumnPartition: String = "Partition"
+  val ColumnLeader: String = "Leader"
+  val ColumnReplicas: String = "Replicas"
+  val ColumnFirstOffset: String = "First offset"
+  val ColumnNextOffset: String = "Next offset"
+
+  /** What a partition with no leader says. Never Kafka's node id `-1`, which reads as a broker. */
+  val Offline: String = "offline"
+
+  def replicaLeader(broker: Int): String = s"$broker leader"
+
+  /** The word as well as the colour: a chip that carried "out of sync" in its colour alone would be invisible
+    * to about one man in twelve, and spotting the odd one out is what this column is for.
+    */
+  def replicaOutOfSync(broker: Int): String = s"$broker out of sync"
+
+  val NoPartitionsTitle: String = "No partitions"
+
+  val NoPartitions: String =
+    "The broker reported no partitions for this topic, which is unusual — a topic always has at least one."
+
+  val ColumnSetting: String = "Setting"
+  val ColumnValue: String = "Value"
+  val ColumnDefault: String = "Default"
+
+  val NoOverridesTitle: String = "No settings reported"
+
+  val NoOverrides: String = "The broker reported no configuration keys for this topic."
+
+  val ConfigNotPermittedTitle: String = "You may not view this topic's settings"
+
+  /** The server's own sentence, unedited (ADR-032). An operator needs the string they can search for. */
+  def configNotPermitted(detail: String): String =
+    s"The cluster refused to describe this topic's configuration: $detail"
+
+  val NoSuchTopicTitle: String = "No such topic"
+
+  def noSuchTopic(topic: String): String =
+    s"There is no topic called '$topic' on this cluster. It may have been deleted, or the name may be a typo."
+
+  val TopicForbiddenTitle: String = "You may not view this topic"
+
+  val TopicForbiddenDescription: String =
+    "Your account can see the cluster but not this topic. An administrator can grant TOPIC:VIEW."
 }

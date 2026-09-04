@@ -6,6 +6,8 @@ import sttp.client4.UriContext
 import sttp.tapir.client.sttp4.SttpClientInterpreter
 
 import kui.contracts.capability.ReasonCode
+import kui.gateway.contract.TopicOverviewEndpoints
+import kui.gateway.contract.dto.TopicOverviewDto
 import kui.contracts.{PublicApi, Section}
 import kui.kernel.search.SearchMode
 import kui.kernel.{ClusterId, PageRequest, PageSize, PositiveInt, Sort, SortOrder, TopicName}
@@ -51,6 +53,7 @@ final class TopicsApiSuite extends FunSuite {
   private val calls: List[(String, String)] = List(
     "list" -> pathOf(TopicsApi.list, (cluster, defaultParams)),
     "topic" -> pathOf(TopicsApi.topic, (cluster, topic)),
+    "overview" -> pathOf(TopicsApi.overview, (cluster, topic)),
     "config" -> pathOf(TopicsApi.config, (cluster, topic)),
     "partitions" -> pathOf(TopicsApi.partitions, (cluster, topic)),
     "refresh" -> pathOf(TopicsApi.refresh, cluster)
@@ -73,6 +76,13 @@ final class TopicsApiSuite extends FunSuite {
     assertEquals(pathOf(TopicsApi.config, (cluster, topic)), s"$one/${TopicEndpoints.ConfigSegment}")
     assertEquals(pathOf(TopicsApi.partitions, (cluster, topic)), s"$one/${TopicEndpoints.PartitionsSegment}")
     assertEquals(pathOf(TopicsApi.refresh, cluster), s"$topics/${TopicEndpoints.RefreshSegment}")
+    // The overview is the gateway's own path and its constants are the gateway contract's, spelled out
+    // there rather than imported from the topic contract — so this is the browser-side half of the check
+    // that the two agree. The JVM-side half is `TopicOverviewSuite` in services/gateway/api.
+    assertEquals(
+      pathOf(TopicsApi.overview, (cluster, topic)),
+      s"$one/${TopicOverviewEndpoints.OverviewSegment}"
+    )
     assert(pathOf(TopicsApi.list, (cluster, defaultParams)).startsWith(topics))
   }
 
@@ -230,6 +240,27 @@ final class TopicsApiSuite extends FunSuite {
     // And the inconsistency the leniency admits, stated out loud: no rows, and a total that says there are
     // two. The screen renders "2 topics" over an empty table.
     assertEquals(page.page.totalItems, Some(2L))
+  }
+
+  test("theOverviewDecodesToItsFiveSectionsWithFourOfThemHidden") {
+    // The gateway's *own* type, not the topic service's. Decoding an aggregation against the owning
+    // service's type is what made the M1 dashboard render "No clusters yet" against a working broker, so
+    // this document is asserted here even though nothing else in this suite is the gateway's.
+    val recorded =
+      """{"topic":{"status":"ok","data":{"row":{"name":"orders","internal":false,"partitionCount":2,""" +
+        """"replicationFactor":3,"outOfSyncReplicas":0,"offlinePartitions":0,"messageCount":10,""" +
+        """"sizeBytes":2048},"partitions":[],"cleanupPolicy":"delete","segmentCount":4},""" +
+        """"fetchedAt":"2026-09-03T10:11:12.000Z"},"consumerGroups":{"status":"not_configured"},""" +
+        """"connectors":{"status":"not_configured"},"acls":{"status":"not_configured"},""" +
+        """"schemas":{"status":"not_configured"},"generatedAt":"2026-09-03T10:11:12.000Z"}"""
+    val decoded = decode[TopicOverviewDto](recorded)
+      .fold(error => fail(s"the gateway's overview document did not decode: $error"), identity)
+    assertEquals(decoded.topic.toOption.map(_.row.name.value), Some("orders"))
+    // Four `not_configured` sections, which the screen hides rather than drawing as four red panels.
+    assertEquals(
+      TopicOverviewDto.statuses(decoded).filterNot(_._1 == TopicOverviewDto.TopicSection).values.toSet,
+      Set("not_configured")
+    )
   }
 
   test("aMissingTopicsSectionIsAFailureNotAnEmptySection") {

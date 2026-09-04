@@ -5,6 +5,7 @@ import scala.concurrent.duration.*
 import com.raquo.laminar.api.L.*
 
 import kui.contracts.ErrorEnvelope
+import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{ClusterId, TopicName}
 import kui.topic.contract.TopicListParams
 import kui.topic.contract.dto.*
@@ -54,6 +55,12 @@ final class TopicsQueries(api: ApiClient) {
   val topic: QueryCache[(ClusterId, TopicName), TopicDetailResponse] =
     QueryCache.make(key => call(TopicsApi.topic, key), staleAfter = TopicsQueries.Cadence, maxEntries = 16)
 
+  /** Everything the topic page shows, in one document: the topic and four sections whose services do not
+    * exist yet. What the detail screen reads.
+    */
+  val overview: QueryCache[(ClusterId, TopicName), TopicOverviewDto] =
+    QueryCache.make(key => call(TopicsApi.overview, key), staleAfter = TopicsQueries.Cadence, maxEntries = 16)
+
   /** One topic's settings.
     *
     * A cache of its own rather than a field of the detail answer, because the Settings tab is in the URL and
@@ -87,6 +94,7 @@ final class TopicsQueries(api: ApiClient) {
   def invalidateCluster(cluster: ClusterId): Unit = {
     topics.invalidateWhere((id, _) => id == cluster)
     topic.invalidateWhere((id, _) => id == cluster)
+    overview.invalidateWhere((id, _) => id == cluster)
     config.invalidateWhere((id, _) => id == cluster)
     partitions.invalidateWhere((id, _) => id == cluster)
   }

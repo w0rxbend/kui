@@ -116,3 +116,100 @@
 .kui-topics__error p {
   margin: 0;
 }
+
+/* --- The detail screen's indicator strip ------------------------------------------------------ */
+
+/* Nine labelled figures that wrap onto as many lines as the width allows. A grid with a fixed
+ * column count would leave a ragged gap on a wide screen and would clip on a narrow one; auto-fit
+ * with a minimum lets the same strip be three columns on a laptop and nine on a monitor. */
+.kui-topics__indicators {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: var(--kui-space-5);
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-surface-elevated);
+}
+
+.kui-topics__indicator-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kui-topics__indicator-value {
+  margin: 0;
+  font-size: var(--kui-font-size-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Colour only where something is wrong. A strip in which every figure is coloured is a strip in
+ * which no figure is coloured, because the eye stops reading the colour at all. */
+.kui-topics__indicator-value--warning {
+  color: var(--kui-color-warning);
+}
+
+.kui-topics__indicator-value--danger {
+  color: var(--kui-color-danger);
+}
+
+/* --- The partition table ---------------------------------------------------------------------- */
+
+.kui-topics__replicas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+}
+
+/* --- The settings tab ------------------------------------------------------------------------- */
+
+.kui-topics__settings {
+  display: block;
+}
+
+.kui-topics__setting-name {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+/* Weight, not colour: "somebody changed this" is the one distinction this table exists to draw, and
+ * it has to survive a monochrome print-out and a colour-blind reader alike. */
+.kui-topics__setting-name--overridden {
+  font-weight: var(--kui-font-weight-display);
+}
+
+.kui-topics__setting-doc {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-body);
+}
+
+/* The mask is a fixed six bullets and is never sized from the value, which the server did not send
+ * anyway. Letter-spacing only, so the bullets do not run together into a smear. */
+.kui-topics__setting-masked {
+  letter-spacing: 0.2em;
+}
+
+/* "(7 days)" beside `604800000`, never instead of it: an operator comparing this against a setting
+ * they are about to type needs the number they will type. */
+.kui-topics__setting-hint {
+  margin-left: var(--kui-space-2);
+  color: var(--kui-color-text-muted);
+}
+
+/* --- The feature slots ------------------------------------------------------------------------ */
+
+/* Empty in M2, and empty is the rendering: four permanent "unavailable" panels on every topic page
+ * would train an operator to ignore the colour that matters. The containers exist so that M4's
+ * registration is visible in a test the moment it lands, and an empty one takes no space. */
+.kui-topics__panels {
+  display: contents;
+}
+
+.kui-topics__panel:empty {
+  display: none;
+}

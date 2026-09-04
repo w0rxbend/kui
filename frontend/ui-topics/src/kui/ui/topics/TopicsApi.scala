@@ -5,6 +5,8 @@ import sttp.tapir.json.circe.jsonBody
 
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
+import kui.gateway.contract.TopicOverviewEndpoints
+import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{ClusterId, TopicName}
 import kui.topic.contract.dto.*
 import kui.topic.contract.{TopicEndpoints, TopicListParams, TopicQueryCodecs}
@@ -67,6 +69,25 @@ object TopicsApi {
       .out(jsonBody[TopicDetailResponse])
       .name("topics.get")
 
+  /** `GET /api/v1/clusters/{clusterId}/topics/{topicName}/overview` — everything the topic page shows.
+    *
+    * The one endpoint in this file whose response type is the **gateway's** and not the topic service's. The
+    * other four are proxied through untouched, so the service's DTO is what arrives; this one the gateway
+    * assembles itself, wrapping the topic in a section beside four more for the consumer, connect, security
+    * and schema services. Decoding an aggregation against the owning service's type is what made the M1
+    * dashboard render "No clusters yet" against a working broker, which is why this is spelled out rather
+    * than assumed.
+    *
+    * The detail screen reads this rather than `topic` above, so one request fills the page including the tabs
+    * M4 and M7 add — and the proxied `topic` endpoint stays available for a script or an MCP tool.
+    *
+    * It is built from `TopicOverviewEndpoints`' own path constants, and it is a *public* endpoint already —
+    * the gateway answers it rather than proxying it, so unlike the four above there is no `/internal/v1` to
+    * rewrite.
+    */
+  val overview: PublicEndpoint[(ClusterId, TopicName), ErrorEnvelope, TopicOverviewDto, Any] =
+    TopicOverviewEndpoints.overview
+
   /** `GET /api/v1/clusters/{clusterId}/topics/{topicName}/config` — the Settings tab. */
   val config: PublicEndpoint[(ClusterId, TopicName), ErrorEnvelope, TopicConfigResponse, Any] =
     KuiEndpoint.base.get
@@ -91,5 +112,5 @@ object TopicsApi {
       .name("topics.refresh")
 
   /** Every client this module has. The suite walks it, so a sixth endpoint cannot be added untested. */
-  val all: List[AnyEndpoint] = List(list, topic, config, partitions, refresh)
+  val all: List[AnyEndpoint] = List(list, topic, overview, config, partitions, refresh)
 }
