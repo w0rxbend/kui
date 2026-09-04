@@ -2,7 +2,7 @@ package kui.ui.clusters.brokers
 
 import munit.FunSuite
 
-import kui.contracts.cluster.LogDirDto
+import kui.contracts.cluster.{LogDirDto, LogDirReplicaDto}
 import kui.ui.clusters.dashboard.ClusterFixtures
 
 class LogDirViewSuite extends FunSuite {
@@ -14,9 +14,10 @@ class LogDirViewSuite extends FunSuite {
       total: Option[Long] = Some(1000L),
       usable: Option[Long] = Some(400L),
       topics: Int = 3,
-      partitions: Int = 12
+      partitions: Int = 12,
+      replicas: List[LogDirReplicaDto] = Nil
   ): LogDirDto =
-    LogDirDto(ClusterFixtures.brokerId(broker), path, error, total, usable, topics, partitions)
+    LogDirDto(ClusterFixtures.brokerId(broker), path, error, total, usable, topics, partitions, replicas)
 
   test("usedIsWhatTheDiskHoldsRatherThanWhatTheBrokerReported") {
     // Kafka reports the disk's size and what is free; what is *on* it is the difference, and that is the

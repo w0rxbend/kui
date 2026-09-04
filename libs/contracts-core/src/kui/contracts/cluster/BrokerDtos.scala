@@ -148,6 +148,58 @@ object BrokerConfigEntryDto {
   given CanEqual[BrokerConfigEntryDto, BrokerConfigEntryDto] = CanEqual.derived
 }
 
+/** One partition replica living in one log directory, as `describeLogDirs` reports it.
+  *
+  * This is a *disk* fact rather than a topic fact, which is why it carries a size and a lag and nothing else:
+  * it says how much of this disk one partition of one topic is using, which is the only way to answer "which
+  * topic is filling this broker". The topic service's partition view answers a different question — where the
+  * leader is and which replicas are in sync — and the two are deliberately not merged.
+  *
+  * @param offsetLag
+  *   how far this copy is behind the partition's log end offset. Non-zero on a replica that is catching up,
+  *   and on a `isFuture` replica it is how much of a reassignment is still to be copied.
+  * @param isFuture
+  *   true while this is the *incoming* copy of a partition being moved onto this disk. Both copies are
+  *   reported during the move, so a consumer that sums every entry without checking this flag double-counts
+  *   the partition.
+  */
+final case class LogDirReplicaDto(
+    topic: String,
+    partition: Int,
+    sizeBytes: Long,
+    offsetLag: Long,
+    isFuture: Boolean
+)
+
+object LogDirReplicaDto {
+
+  given Codec[LogDirReplicaDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        topic <- cursor.get[String]("topic")
+        partition <- cursor.get[Int]("partition")
+        sizeBytes <- cursor.get[Long]("sizeBytes")
+        offsetLag <- cursor.getOrElse[Long]("offsetLag")(0L)
+        isFuture <- cursor.getOrElse[Boolean]("isFuture")(false)
+      } yield LogDirReplicaDto(topic, partition, sizeBytes, offsetLag, isFuture),
+    (dto: LogDirReplicaDto) =>
+      Json.obj(
+        "topic" -> dto.topic.asJson,
+        "partition" -> dto.partition.asJson,
+        "sizeBytes" -> dto.sizeBytes.asJson,
+        "offsetLag" -> dto.offsetLag.asJson,
+        "isFuture" -> dto.isFuture.asJson
+      )
+  )
+
+  given Schema[LogDirReplicaDto] =
+    Schema
+      .derived[LogDirReplicaDto]
+      .description("One partition replica in one log directory, with the space it occupies there")
+
+  given CanEqual[LogDirReplicaDto, LogDirReplicaDto] = CanEqual.derived
+}
+
 /** One log directory of one broker.
   *
   * `error` is per directory, not per request: `describeLogDirs` reports a failed disk by attaching an error
@@ -165,7 +217,8 @@ final case class LogDirDto(
     totalBytes: Option[Long],
     usableBytes: Option[Long],
     topicCount: Int,
-    partitionCount: Int
+    partitionCount: Int,
+    replicas: List[LogDirReplicaDto]
 )
 
 object LogDirDto {
@@ -180,7 +233,10 @@ object LogDirDto {
         usableBytes <- cursor.get[Option[Long]]("usableBytes")
         topicCount <- cursor.getOrElse[Int]("topicCount")(0)
         partitionCount <- cursor.getOrElse[Int]("partitionCount")(0)
-      } yield LogDirDto(brokerId, path, error, totalBytes, usableBytes, topicCount, partitionCount),
+        // Defaulted rather than required, so a client reading a response from a KUI that predates this field
+        // decodes it as "no breakdown reported" instead of failing the whole broker page.
+        replicas <- cursor.getOrElse[List[LogDirReplicaDto]]("replicas")(Nil)
+      } yield LogDirDto(brokerId, path, error, totalBytes, usableBytes, topicCount, partitionCount, replicas),
     (dto: LogDirDto) =>
       Json.obj(
         "brokerId" -> dto.brokerId.asJson,
@@ -189,7 +245,8 @@ object LogDirDto {
         "totalBytes" -> dto.totalBytes.asJson,
         "usableBytes" -> dto.usableBytes.asJson,
         "topicCount" -> dto.topicCount.asJson,
-        "partitionCount" -> dto.partitionCount.asJson
+        "partitionCount" -> dto.partitionCount.asJson,
+        "replicas" -> dto.replicas.asJson
       )
   )
 

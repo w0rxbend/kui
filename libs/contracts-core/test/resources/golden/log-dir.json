@@ -5,5 +5,28 @@
   "totalBytes" : 549755813888,
   "usableBytes" : 366503875925,
   "topicCount" : 12,
-  "partitionCount" : 48
+  "partitionCount" : 48,
+  "replicas" : [
+    {
+      "topic" : "orders",
+      "partition" : 0,
+      "sizeBytes" : 128849018880,
+      "offsetLag" : 0,
+      "isFuture" : false
+    },
+    {
+      "topic" : "orders",
+      "partition" : 1,
+      "sizeBytes" : 64424509440,
+      "offsetLag" : 512,
+      "isFuture" : false
+    },
+    {
+      "topic" : "payments",
+      "partition" : 3,
+      "sizeBytes" : 1073741824,
+      "offsetLag" : 0,
+      "isFuture" : true
+    }
+  ]
 }

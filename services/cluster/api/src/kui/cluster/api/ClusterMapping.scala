@@ -138,7 +138,22 @@ object ClusterMapping {
       totalBytes = dir.totalBytes,
       usableBytes = dir.usableBytes,
       topicCount = dir.replicas.map(_.partition.topic).distinct.size,
-      partitionCount = dir.replicas.size
+      partitionCount = dir.replicas.size,
+      // The breakdown behind the two counts above, biggest first. Sorting here rather than in the browser is
+      // deliberate: every client that renders this list wants the same order, and a broker with thousands of
+      // topic-partitions is a list the screen will want to truncate — truncating an unsorted list would drop
+      // exactly the large partitions the operator opened the page to find.
+      replicas = dir.replicas
+        .map(replica =>
+          LogDirReplicaDto(
+            topic = replica.partition.topic.value,
+            partition = replica.partition.partition.value,
+            sizeBytes = replica.sizeBytes,
+            offsetLag = replica.offsetLag,
+            isFuture = replica.isFuture
+          )
+        )
+        .sortBy(replica => (-replica.sizeBytes, replica.topic, replica.partition))
     )
 
   /** A connection's *shape*: which protocol, which mechanism, whether stores were configured.

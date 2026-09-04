@@ -84,7 +84,12 @@ final class ClusterDtosSuite extends ScalaCheckSuite {
     totalBytes = Some(549755813888L),
     usableBytes = Some(366503875925L),
     topicCount = 12,
-    partitionCount = 48
+    partitionCount = 48,
+    replicas = List(
+      LogDirReplicaDto("orders", 0, 128849018880L, 0L, isFuture = false),
+      LogDirReplicaDto("orders", 1, 64424509440L, 512L, isFuture = false),
+      LogDirReplicaDto("payments", 3, 1073741824L, 0L, isFuture = true)
+    )
   )
 
   private def normalised(raw: String): String =
@@ -231,7 +236,16 @@ final class ClusterDtosSuite extends ScalaCheckSuite {
     usable <- Gen.option(Gen.choose(0L, 1L << 46))
     topics <- Gen.choose(0, 10000)
     partitions <- Gen.choose(0, 100000)
-  } yield LogDirDto(BrokerId.unsafe(brokerId), path, error, total, usable, topics, partitions)
+    replicas <- Gen.listOf(replicaEntries)
+  } yield LogDirDto(BrokerId.unsafe(brokerId), path, error, total, usable, topics, partitions, replicas)
+
+  private val replicaEntries: Gen[LogDirReplicaDto] = for {
+    topic <- Gen.oneOf("orders", "payments", "__consumer_offsets")
+    partition <- Gen.choose(0, 999)
+    size <- Gen.choose(0L, 1L << 42)
+    lag <- Gen.choose(0L, 1L << 20)
+    isFuture <- Gen.oneOf(true, false)
+  } yield LogDirReplicaDto(topic, partition, size, lag, isFuture)
 
   property("everyDtoRoundTrips: a security shape survives the wire") {
     forAll(securities)(dto => assertEquals(dto.asJson.as[ClusterSecurityDto], Right(dto)))
@@ -255,6 +269,19 @@ final class ClusterDtosSuite extends ScalaCheckSuite {
 
   property("everyDtoRoundTrips: a log directory survives the wire") {
     forAll(logDirs)(dto => assertEquals(dto.asJson.as[LogDirDto], Right(dto)))
+  }
+
+  property("everyDtoRoundTrips: a log directory's per-partition entry survives the wire") {
+    forAll(replicaEntries)(dto => assertEquals(dto.asJson.as[LogDirReplicaDto], Right(dto)))
+  }
+
+  test("aLogDirDecodesWithoutTheReplicaBreakdown") {
+    // `replicas` arrived after the field it sits beside, so a document written by an older KUI has no such
+    // key at all. Decoding that as an empty breakdown rather than as a failure is what stops one added field
+    // turning every stored or cached broker response into an error.
+    val withoutReplicas = logDir.asJson.mapObject(_.remove("replicas"))
+
+    assertEquals(withoutReplicas.as[LogDirDto], Right(logDir.copy(replicas = Nil)))
   }
 
   test("anUnknownControllerKindDecodesRatherThanFailing") {

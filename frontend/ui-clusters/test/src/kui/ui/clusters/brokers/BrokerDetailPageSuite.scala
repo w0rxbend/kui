@@ -112,7 +112,7 @@ class BrokerDetailPageSuite extends FunSuite {
     element.dispatchEvent(new dom.MouseEvent("click", new dom.MouseEventInit { bubbles = true; cancelable = true })): Unit
 
   private val oneDir =
-    Section.Ok(List(LogDirDto(broker, "/var/lib/kafka/data", None, Some(1000L), Some(400L), 3, 12)), ClusterFixtures.scrapedAt)
+    Section.Ok(List(LogDirDto(broker, "/var/lib/kafka/data", None, Some(1000L), Some(400L), 3, 12, Nil)), ClusterFixtures.scrapedAt)
 
   private val configs = Section.Ok(
     List(
@@ -206,9 +206,9 @@ class BrokerDetailPageSuite extends FunSuite {
       fixture.api.answerLogDirs(
         Section.Ok(
           List(
-            LogDirDto(broker, "/data/one", None, Some(1000L), Some(400L), 3, 12),
-            LogDirDto(broker, "/data/broken", Some("KafkaStorageException"), None, None, 0, 0),
-            LogDirDto(broker, "/data/three", None, Some(1000L), Some(900L), 1, 2)
+            LogDirDto(broker, "/data/one", None, Some(1000L), Some(400L), 3, 12, Nil),
+            LogDirDto(broker, "/data/broken", Some("KafkaStorageException"), None, None, 0, 0, Nil),
+            LogDirDto(broker, "/data/three", None, Some(1000L), Some(900L), 1, 2, Nil)
           ),
           ClusterFixtures.scrapedAt
         )
@@ -241,7 +241,7 @@ class BrokerDetailPageSuite extends FunSuite {
     mounted(fixture) { root =>
       fixture.api.answerLogDirs(
         Section.Stale(
-          List(LogDirDto(broker, "/var/lib/kafka/data", None, Some(1000L), Some(400L), 3, 12)),
+          List(LogDirDto(broker, "/var/lib/kafka/data", None, Some(1000L), Some(400L), 3, 12, Nil)),
           ClusterFixtures.scrapedAt,
           ReasonCode.UpstreamTimeout
         )
