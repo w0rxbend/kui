@@ -1556,6 +1556,17 @@ either data or a marker.
 by Docker about seven minutes later on this machine, with the container's `unless-stopped` policy;
 `docker update --restart=no` first made it stick. Anyone demonstrating a failure needs to know that.
 
+**7. `./mill __.openApiCheck` fails about one cold run in seven, with no diagnostic.** The gate forks
+a JVM per service to regenerate and compare each document. On a cold tree one of those forks
+sometimes dies: `services.<name>.api.runMain Subprocess failed`, a different service each time, no
+stack trace, no stderr, nothing in `out/**/runMain.dest`. It never failed on a warm run — sixteen in
+a row were green — and it failed serially (`--jobs 1`) as well as in parallel, which rules out the
+four generators colliding with each other. Every measurement here was taken on a machine that was
+simultaneously compiling and running another agent's build, so the likeliest explanation is
+resource exhaustion rather than anything in the repository; it has not been reproduced on an idle
+machine or in CI, and it is recorded because an intermittently red gate is a red gate. If it fires,
+re-run it; if it keeps firing, that is a real defect and this note is where to start.
+
 ### Missing features, stated plainly
 
 - **No authentication of any kind.** `authType` is `disabled` and it is the only accepted value.
