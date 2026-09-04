@@ -3,6 +3,7 @@ package kui.ui.kernel.file
 import scala.scalajs.js
 
 import com.raquo.laminar.api.L.*
+import com.raquo.laminar.codecs.StringAsIsCodec
 import org.scalajs.dom
 
 /** Handing the user a file the page made itself.
@@ -53,11 +54,26 @@ object Download {
     offer(name, dom.URL.createObjectURL(blob))
   }
 
-  private def offer(name: String, url: String): Unit = {
+  /** The attribute that turns a link into a save.
+    *
+    * Spelled out rather than reached for through `dataAttr`, which was the defect this replaced: `dataAttr`
+    * builds a **`data-`** prefixed attribute, so `dataAttr("download")` set `data-download` and the anchor
+    * had no `download` attribute at all. An anchor to a `blob:` URL without one is not a save — the browser
+    * either opens the blob in place or writes a file with a generated name — so Export CSV built the right
+    * document, handed it to the browser, and gave the user nothing they could find afterwards.
+    */
+  private val downloadAttr = htmlAttr("download", StringAsIsCodec)
+
+  /** The anchor one export is made of. Separated from [[offer]] so that a test can assert the attribute that
+    * carries the filename, which is the whole of what went wrong before.
+    */
+  private[file] def anchorFor(name: String, url: String): dom.html.Anchor =
     // Hidden, because it exists for one click and is gone again; a visible link appearing at the bottom of
     // the page for one frame is the sort of flicker nobody can explain afterwards.
-    val anchor = a(href := url, dataAttr("download") := name, display := "none")
-    val element = anchor.ref
+    a(href := url, downloadAttr := name, display := "none").ref
+
+  private def offer(name: String, url: String): Unit = {
+    val element = anchorFor(name, url)
 
     dom.document.body.appendChild(element): Unit
     element.click()
