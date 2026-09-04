@@ -38,7 +38,7 @@
  * which matters more here than it did before, now that the highlight is a filled capsule and the
  * text on it is a colour paired with that fill rather than with the drawer. */
 .kui-shell__sidebar-link--dimmed .kui-shell__sidebar-link-label {
-  opacity: 0.6;
+  opacity: var(--kui-opacity-disabled);
 }
 
 /* `Forbidden`: shown, inert, in the outline colour — the design's treatment for the destination
@@ -66,7 +66,9 @@
   border-radius: var(--kui-radius-pill);
   background: var(--kui-color-warning-container);
   color: var(--kui-color-warning);
-  font-size: 0.5rem;
+  /* The smallest step on the type scale. It used to be 0.5rem, which is smaller than any step the
+   * token file defines and therefore a size no token change could ever reach. */
+  font-size: var(--kui-font-size-xs);
 }
 
 /* The banner above the content when the capability picture is stale or something is limping. The
@@ -276,7 +278,13 @@
 
 .kui-shell__cluster-switcher-colour {
   border: 0;
-  background: none;
+  /* `background-color`, not the `background` shorthand, which would erase the chevron the reset
+   * draws for every select and leave this one looking like a caption rather than a menu. It is the
+   * smallest select in the product, so the chevron is drawn smaller and tighter than the default. */
+  background-color: transparent;
+  background-size: 0.75rem 0.75rem;
+  background-position: right 0 center;
+  padding-right: var(--kui-space-4);
   color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-xs);
 }

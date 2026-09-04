@@ -129,7 +129,7 @@
 .kui-pagination__button:disabled {
   color: var(--kui-color-text-muted);
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--kui-opacity-disabled);
 }
 
 .kui-pagination__label {
@@ -182,9 +182,12 @@
 .kui-pagination__size-select {
   border: 1px solid var(--kui-color-border);
   border-radius: var(--kui-radius-md);
-  background: var(--kui-color-surface);
+  /* `background-color`, not the `background` shorthand: the shorthand would erase the chevron the
+   * reset draws into this control's background image, leaving it with no drop-down affordance at
+   * all. The trailing padding is the room that chevron needs. */
+  background-color: var(--kui-color-surface);
   color: var(--kui-color-text);
   font-family: var(--kui-font-family-sans);
   font-size: var(--kui-font-size-sm);
-  padding: var(--kui-space-2);
+  padding: var(--kui-space-2) var(--kui-space-6) var(--kui-space-2) var(--kui-space-2);
 }

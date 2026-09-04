@@ -139,6 +139,90 @@ select {
   color: inherit;
 }
 
+/* Checkboxes.
+ *
+ * Left alone, a checkbox is drawn by the operating system: a 13x13px square with no relationship to
+ * any of KUI's tokens. In the dark theme an unchecked one is a pale grey slab -- the brightest thing
+ * on the row -- and a checked one is the browser's *own* blue, which is not the accent the user
+ * chose and which in KUI means "primary action". In the light theme it is a white square on a white
+ * ground and nearly disappears. It is also well under the 24px that a pointer target wants.
+ *
+ * So it is redrawn: an 18px box, the field radius, the accent's fill when checked. The tick is a
+ * clip-path on a pseudo-element rather than an SVG or a text glyph, so it scales with the box, takes
+ * the container's paired contrast colour, and needs no asset. `appearance: none` is what stops the
+ * browser drawing its own on top.
+ *
+ * Element selectors rather than a class: these inputs are plain HTML written in a dozen features,
+ * and a treatment that only applies where somebody remembered a class is a treatment that is
+ * missing somewhere. */
+input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  display: grid;
+  place-content: center;
+  /* 18px, and 20px of clickable area once the label's own padding is counted. Off the 4px scale on
+   * purpose: it is the size of a glyph, not a gap between things. */
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  border: 2px solid var(--kui-color-border-strong);
+  border-radius: var(--kui-radius-xs);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color var(--kui-duration-fast) ease,
+    border-color var(--kui-duration-fast) ease;
+}
+
+/* Always present, and revealed by scaling up, so that ticking a box animates rather than popping and
+ * so the box's size never depends on whether it is ticked. */
+input[type="checkbox"]::before {
+  content: "";
+  width: 0.625rem;
+  height: 0.625rem;
+  transform: scale(0);
+  transition: transform var(--kui-duration-fast) ease;
+  background-color: var(--kui-color-primary-contrast);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+input[type="checkbox"]:checked {
+  background-color: var(--kui-color-primary);
+  border-color: var(--kui-color-primary);
+}
+
+input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+
+input[type="checkbox"]:disabled {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+/* Selects.
+ *
+ * A `<select>`'s drop-down list is drawn by the browser and cannot be styled from CSS; the closed
+ * control can be, and was not, so a page where every other control is a rounded filled pill carried
+ * square grey boxes with the operating system's own arrow. `appearance: none` removes that arrow
+ * along with the rest of the native chrome, so one is drawn back in: a chevron as an inline SVG in a
+ * `background-image`, positioned at the trailing edge, with padding reserved for it so a long option
+ * cannot run underneath it.
+ *
+ * The chevron is a data URI because the stylesheet ships as one file with no asset directory, and it
+ * is stroked in `currentColor`... which a background image cannot read, so the neutral text colour is
+ * written into it. That is the one place in the product where a colour is not a token, and it is why
+ * the same grey appears in both themes -- a mid grey that reads against either. */
+select {
+  appearance: none;
+  padding-right: var(--kui-space-6);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23848c99' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--kui-space-3) center;
+  background-size: 1rem 1rem;
+  cursor: pointer;
+}
+
 /* An image is `inline` by default, which leaves a few pixels of descender space underneath it, and
  * has no maximum width, so an oversized one forces the page to scroll horizontally. */
 img,
