@@ -71,6 +71,25 @@ enum ErrorCode(
         "The Kafka Connect cluster is rebalancing and cannot answer yet; retry shortly."
       )
 
+  case GroupNotFound
+      extends ErrorCode(
+        "KUI-GROUP-NOT-FOUND",
+        404,
+        false,
+        "No consumer group with this id exists on this cluster."
+      )
+
+  /** Distinct from [[InvalidState]] because it is the one refusal an operator can act on directly — stop the
+    * consumers — and a message that says so is worth a code the UI can switch on.
+    */
+  case GroupNotEmpty
+      extends ErrorCode(
+        "KUI-GROUP-NOT-EMPTY",
+        409,
+        false,
+        "The consumer group still has members, so its offsets cannot be changed or deleted."
+      )
+
   case InvalidState
       extends ErrorCode(
         "KUI-INVALID-STATE",

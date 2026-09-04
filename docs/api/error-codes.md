@@ -17,6 +17,8 @@ one is a breaking change. `Retryable` means the same request, unchanged, could s
 | `KUI-CURSOR-TOO-LARGE` | 400 | no | CURSOR | The paging cursor exceeds the size limit; narrow the request to fewer partitions. |
 | `KUI-FILTER-COMPILE` | 400 | no | FILTER | The smart filter expression could not be compiled. |
 | `KUI-FORBIDDEN` | 403 | no | FORBIDDEN | The authenticated principal does not hold a role that permits this operation. |
+| `KUI-GROUP-NOT-EMPTY` | 409 | no | GROUP | The consumer group still has members, so its offsets cannot be changed or deleted. |
+| `KUI-GROUP-NOT-FOUND` | 404 | no | GROUP | No consumer group with this id exists on this cluster. |
 | `KUI-INTERNAL` | 500 | no | INTERNAL | KUI failed unexpectedly; the correlation id ties this response to the server-side log. |
 | `KUI-INVALID-STATE` | 409 | no | INVALID | The target is not in a state where this operation is allowed. |
 | `KUI-READ-ONLY` | 405 | no | READ | The cluster is configured read-only, so no operation that changes it is accepted. |

@@ -72,6 +72,8 @@ final class ErrorCodeSuite extends ScalaCheckSuite {
       (ErrorCode.Validation, "KUI-VALIDATION", 400, false),
       (ErrorCode.ReadOnly, "KUI-READ-ONLY", 405, false),
       (ErrorCode.ConnectRebalancing, "KUI-CONNECT-REBALANCING", 409, true),
+      (ErrorCode.GroupNotFound, "KUI-GROUP-NOT-FOUND", 404, false),
+      (ErrorCode.GroupNotEmpty, "KUI-GROUP-NOT-EMPTY", 409, false),
       (ErrorCode.InvalidState, "KUI-INVALID-STATE", 409, false),
       (ErrorCode.Timeout, "KUI-TIMEOUT", 408, true),
       (ErrorCode.FilterCompile, "KUI-FILTER-COMPILE", 400, false),
