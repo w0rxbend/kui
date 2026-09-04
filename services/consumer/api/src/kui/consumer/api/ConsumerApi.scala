@@ -8,10 +8,10 @@ import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Counter
 import sttp.apispec.openapi.OpenAPI
+import sttp.tapir.AnyEndpoint
 import sttp.tapir.docs.openapi.OpenAPIDocsInterpreter
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
-import sttp.tapir.AnyEndpoint
 
 import kui.consumer.application.*
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}

@@ -16,8 +16,8 @@ import kui.http.principal.PrincipalVerification
 import kui.kernel.{ClusterId, Secret}
 import kui.message.api.{MessageApi, MessageRoutes}
 import kui.message.application.BrowseUseCase
-import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
 import kui.message.application.cursor.CursorCodec
+import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
 import kui.message.infrastructure.{
   BrowseTuning,
   ClusterSerdeSource,
