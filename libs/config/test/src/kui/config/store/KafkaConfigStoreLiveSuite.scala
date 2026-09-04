@@ -252,9 +252,17 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
           b.put(key, clusterWith("from-b", name = "B"), Some(base), "replica-b")
         ).parTupled
         (fromA, fromB) = outcomes
-        // Both replicas' view of the key, after the dust settles.
-        settledA <- a.get(key)
-        settledB <- b.get(key)
+        winnerVersion = List(fromA, fromB).collect { case Right(record) => record.version }.headOption
+        // Both replicas' view of the key, once the dust has actually settled.
+        //
+        // Waited for, not read once. A replica rejects a stale write from its own log tail, and it can do
+        // that the instant it sees the winner's record — before it has finished applying it. Reading
+        // immediately therefore caught the loser mid-catch-up perhaps one run in twenty, and the failure
+        // was `settledA.map(_.version)` still holding the seed version. That is not the store being wrong;
+        // it is this test asserting "has converged" where the contract says "converges". The bound is what
+        // keeps it a test: a replica that has not caught up within five seconds is a real defect.
+        settledA <- converged(a, key, winnerVersion)
+        settledB <- converged(b, key, winnerVersion)
       } yield {
         val winners = List(fromA, fromB).collect { case Right(record) => record }
         val losers = List(fromA, fromB).collect { case Left(error) => error }
@@ -280,6 +288,29 @@ final class KafkaConfigStoreLiveSuite extends KuiIOSuite {
         )
       }
     }
+  }
+
+  /** One replica's view of a key, once it reports the version given, or after five seconds either way.
+    *
+    * Returning the last value read rather than failing here, so the assertion that follows says which
+    * version was actually found instead of this helper saying only that something timed out.
+    */
+  private def converged(
+      replica: ConfigStore[IO],
+      key: StoreKey,
+      version: Option[Long]
+  ): IO[Option[StoreRecord]] = {
+    val deadlineMs = 5000L
+    val stepMs = 50L
+
+    def attempt(waitedMs: Long): IO[Option[StoreRecord]] =
+      replica.get(key).flatMap {
+        case found if found.map(_.version) == version => IO.pure(found)
+        case found if waitedMs >= deadlineMs => IO.pure(found)
+        case _ => IO.sleep(scala.concurrent.duration.Duration(stepMs, java.util.concurrent.TimeUnit.MILLISECONDS)) *> attempt(waitedMs + stepMs)
+      }
+
+    attempt(0L)
   }
 
   test("aSuccessfulWriteHasAlreadyBeenReadBackFromTheLog") {
