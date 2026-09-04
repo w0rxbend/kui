@@ -41,8 +41,17 @@ import kui.kernel.PositiveInt
   * defect as well as the flake — an upstream that is already down when KUI starts trips its circuit during
   * start-up, and that transition used to be logged to nobody.
   *
-  * With the race gone, the sleep and the raised timeout are both gone too, and the case asserts on
-  * synchronisation rather than on elapsed time.
+  * That closed the lost-event half of the problem and the raised timeout went with it. It did **not** close
+  * all of it, and a whole-repository run on 2026-09-04 failed the second of the two cases again:
+  * `expected 1, obtained 0`. The residual race is a different one. Nothing is lost any more, but the log
+  * line is *written* by the background fiber that drains the subscription, and a test that calls
+  * `logger.entries` in the same breath as the last failing request is asking what the log said before the
+  * writer has had a turn. Whether it had one is up to the scheduler.
+  *
+  * So both cases now put an `IO.sleep(1.second)` between the requests and the read. That is not the old
+  * "order by hope" sleep: every case here runs under `TestControl`, where time is simulated, so the second
+  * costs no wall clock, and `TestControl` only advances the clock once every runnable fiber has gone idle —
+  * which means the drain fiber is *guaranteed* to have run before the read, rather than likely to have.
   */
 final class UpstreamClientSuite extends CatsEffectSuite {
 
@@ -384,9 +393,13 @@ final class UpstreamClientSuite extends CatsEffectSuite {
 
     val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
       UpstreamFixture.clientAndLog(config, stub.backend).use { (client, logger) =>
-        // No sleep. The subscription is in place before `use` runs, so every transition published here
-        // has somewhere to go, and reading the log immediately is a fact rather than a bet.
-        request(Method.POST).send(client.backend).attempt.replicateA_(20) *> logger.entries
+        // The subscription is in place before `use` runs, so every transition published here has
+        // somewhere to go — nothing can be lost. The line is still *written* by a background fiber,
+        // so the read has to let that fiber run: `IO.sleep` under `TestControl` is simulated time,
+        // which costs no wall clock and, unlike a bare read, cannot come out differently depending
+        // on which fiber the scheduler happened to pick first.
+        request(Method.POST).send(client.backend).attempt.replicateA_(20) *>
+          IO.sleep(1.second) *> logger.entries
       }
     }
 
@@ -408,7 +421,8 @@ final class UpstreamClientSuite extends CatsEffectSuite {
 
     val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
       UpstreamFixture.clientAndLog(config, stub.backend).use { (client, logger) =>
-        request(Method.POST).send(client.backend).attempt.replicateA_(3) *> logger.entries
+        request(Method.POST).send(client.backend).attempt.replicateA_(3) *>
+          IO.sleep(1.second) *> logger.entries
       }
     }
 
