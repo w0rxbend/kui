@@ -1,0 +1,9 @@
+{
+  "topics" : {
+    "status" : "unavailable",
+    "reason" : "UPSTREAM_UNAVAILABLE",
+    "message" : "no snapshot of prod-eu has been taken yet",
+    "since" : "2026-09-03T10:10:00.000Z"
+  },
+  "incompleteTopics" : 0
+}

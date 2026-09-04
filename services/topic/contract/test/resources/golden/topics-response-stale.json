@@ -1,0 +1,29 @@
+{
+  "topics" : {
+    "status" : "stale",
+    "data" : {
+      "items" : [
+        {
+          "name" : "orders",
+          "internal" : false,
+          "partitionCount" : 12,
+          "replicationFactor" : 3,
+          "outOfSyncReplicas" : 0,
+          "offlinePartitions" : 0,
+          "messageCount" : 1234567,
+          "sizeBytes" : 9483264
+        }
+      ],
+      "page" : {
+        "page" : 1,
+        "pageSize" : 25,
+        "totalItems" : 1,
+        "pageCount" : 1,
+        "nextPageToken" : null
+      }
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z",
+    "reason" : "UPSTREAM_TIMEOUT"
+  },
+  "incompleteTopics" : 0
+}

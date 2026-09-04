@@ -1,0 +1,58 @@
+{
+  "topic" : {
+    "status" : "ok",
+    "data" : {
+      "row" : {
+        "name" : "orders",
+        "internal" : false,
+        "partitionCount" : 2,
+        "replicationFactor" : 3,
+        "outOfSyncReplicas" : 1,
+        "offlinePartitions" : 1,
+        "messageCount" : null,
+        "sizeBytes" : 9483264
+      },
+      "partitions" : [
+        {
+          "partition" : 0,
+          "leader" : 1,
+          "replicas" : [
+            {
+              "broker" : 1,
+              "leader" : true,
+              "inSync" : true
+            },
+            {
+              "broker" : 2,
+              "leader" : false,
+              "inSync" : true
+            }
+          ],
+          "earliestOffset" : 0,
+          "latestOffset" : 617283,
+          "messageCount" : 617283,
+          "sizeBytes" : 4741632
+        },
+        {
+          "partition" : 1,
+          "leader" : null,
+          "replicas" : [
+            {
+              "broker" : 3,
+              "leader" : false,
+              "inSync" : false
+            }
+          ],
+          "earliestOffset" : null,
+          "latestOffset" : null,
+          "messageCount" : null,
+          "sizeBytes" : 4741632
+        }
+      ],
+      "cleanupPolicy" : "delete",
+      "segmentCount" : 24
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  },
+  "partitionsTruncated" : false
+}

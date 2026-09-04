@@ -1,0 +1,29 @@
+{
+  "config" : {
+    "status" : "ok",
+    "data" : {
+      "status" : "entries",
+      "values" : [
+        {
+          "name" : "cleanup.policy",
+          "value" : "delete",
+          "defaultValue" : "delete",
+          "source" : "default_config",
+          "sensitive" : false,
+          "readOnly" : false,
+          "documentation" : null
+        },
+        {
+          "name" : "retention.ms",
+          "value" : "604800000",
+          "defaultValue" : "-1",
+          "source" : "dynamic_topic_config",
+          "sensitive" : false,
+          "readOnly" : false,
+          "documentation" : "How long a log segment is kept before being discarded"
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}
