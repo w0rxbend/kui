@@ -1564,8 +1564,23 @@ a row were green — and it failed serially (`--jobs 1`) as well as in parallel,
 four generators colliding with each other. Every measurement here was taken on a machine that was
 simultaneously compiling and running another agent's build, so the likeliest explanation is
 resource exhaustion rather than anything in the repository; it has not been reproduced on an idle
-machine or in CI, and it is recorded because an intermittently red gate is a red gate. If it fires,
-re-run it; if it keeps firing, that is a real defect and this note is where to start.
+machine or in CI, and it is recorded because an intermittently red gate is a red gate.
+
+What makes resource exhaustion rather than a repository defect the likeliest reading is that the same
+shape appeared in a different gate, on a different tool, on the same machine:
+
+```
+$ ./mill docs.errorCodes --check
+/home/worxbend/Projects/kui/docs/api/error-codes.md is up to date (31 codes)
+131/132, 1 FAILED] ./mill docs.errorCodes --check
+131] [error] tools.errorCodes.run Subprocess failed
+```
+
+The generator printed its success line, did its work, and was then reported as having failed. Both
+`OpenApiDocument` and the error-code tool are plain `main` methods with no threads, no effect runtime
+and no shutdown hooks, so there is nothing in either program that can exit non-zero after printing
+that. The immediate re-run was green. If it fires, re-run it; if it keeps firing on a quiet machine,
+that is a real defect and this note is where to start.
 
 ### Missing features, stated plainly
 
