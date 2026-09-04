@@ -140,8 +140,12 @@
   text-transform: uppercase;
 }
 
+/* The display face, because these are the strip's large figures and the design gives large figures
+ * to the display family — the same declaration the dashboard's equivalent figures already carry.
+ * Without it the one screen and the other set the same kind of value in two different families. */
 .kui-topics__indicator-value {
   margin: 0;
+  font-family: var(--kui-font-family-display);
   font-size: var(--kui-font-size-lg);
   font-variant-numeric: tabular-nums;
 }
@@ -182,10 +186,15 @@
   font-weight: var(--kui-font-weight-display);
 }
 
+/* The weight is stated rather than inherited, and `regular` is the token that exists: this used to
+ * name `--kui-font-weight-body`, which is declared nowhere, so the declaration was dropped and the
+ * sentence inherited its parent. On an overridden row that parent is at weight 700, so the
+ * explanatory line went bold on exactly the rows where bold is supposed to mean "somebody changed
+ * this" — the one distinction this table draws, cancelled by a typo in a token name. */
 .kui-topics__setting-doc {
   color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-xs);
-  font-weight: var(--kui-font-weight-body);
+  font-weight: var(--kui-font-weight-regular);
 }
 
 /* The mask is a fixed six bullets and is never sized from the value, which the server did not send
