@@ -109,6 +109,40 @@ services:
     restart: "no"
 
   # ---------------------------------------------------------------------------------------------
+  # A Schema Registry, so that the quickstart has a topic KUI has to decode rather than read.
+  #
+  # Why this image. Apicurio Registry implements the same REST API Confluent's registry publishes —
+  # KUI talks to it at `/apis/ccompat/v7`, which is the compatibility endpoint — and it is
+  # Apache-2.0 throughout, which Confluent's own image is not (ADR-014 Amendment 1 records why that
+  # distinction is worth keeping even for a demo). Anything that speaks the same API works here;
+  # KUI has no dependency on which one an operator runs.
+  #
+  # Its storage is in memory, which is right for a throwaway: restarting this container loses the
+  # registered schema, and `avro-seed` below re-registers it. Nothing a person clicks in KUI is
+  # kept in the registry, so nothing they did is lost with it.
+  # ---------------------------------------------------------------------------------------------
+  schema-registry:
+    image: apicurio/apicurio-registry:3.0.6
+    container_name: kui-quickstart-schema-registry
+    environment:
+      QUARKUS_PROFILE: prod
+    ports:
+      # Published so you can look at the same registry KUI is reading, with curl or a browser.
+      - "${KUI_QUICKSTART_REGISTRY_PORT:-8081}:8080"
+    healthcheck:
+      # A real call to the API KUI uses, not a port check: the process accepts connections well
+      # before Quarkus has finished publishing its routes, and a port check passes in that window.
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8080/apis/ccompat/v7/subjects >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    networks:
+      - kui-quickstart
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------------------------
   # The one consumer group that is actually alive.
   #
   # seed.sh can write the committed offsets of a group that has STOPPED, because a stopped group is
@@ -149,6 +183,12 @@ services:
       # Human-readable log lines. The images default to one JSON object per line, which is right
       # for a log collector and unreadable for the person who just ran the quickstart.
       KUI_TELEMETRY_LOGFORMAT: text
+
+      # The schema registry below lives on this Compose network, which is a private address, and
+      # KUI refuses to call a private or loopback address unless this is set (ARCHITECTURE.md §14:
+      # the address rule exists to stop KUI being pointed at a cloud metadata service). A
+      # quickstart is exactly the deployment the relaxation was written for.
+      KUI_ALLOW_PRIVATE_UPSTREAMS: "true"
     volumes:
       - ./kui-quickstart.yaml:/etc/kui/kui-quickstart.yaml:ro
     read_only: true
@@ -157,6 +197,12 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      schema-registry:
+        # KUI probes the registry once per cluster while it builds its serdes, and reports the
+        # result in the serde picker. Waiting here means the first look at the picker shows the
+        # registry working rather than the outage it was in for the first two seconds.
+        condition: service_healthy
+        required: false
       seed:
         # Wait for the data to be there, so the first screen is never a half-seeded cluster.
         condition: service_completed_successfully
@@ -174,6 +220,35 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+
+  # ---------------------------------------------------------------------------------------------
+  # The Avro half of the demonstration, which runs last because it needs everything else.
+  #
+  # It registers a schema in the registry and then writes records through KUI's own produce API.
+  # That is deliberate and it is worth saying why: a record in this format is a magic byte, a
+  # schema id and an Avro-encoded body, and the only Apache-licensed writer of it in this
+  # repository is KUI itself. Producing through the product also means the seed proves the write
+  # path as well as the read path — if the records show up decoded on the messages screen, both
+  # halves of SD-001 worked.
+  # ---------------------------------------------------------------------------------------------
+  avro-seed:
+    image: apache/kafka:4.3.1
+    container_name: kui-quickstart-avro-seed
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+      kui:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/seed/avro-seed.sh"]
+    environment:
+      KUI_BASE_URL: http://kui:8080
+      KUI_CLUSTER_ID: quickstart
+      KUI_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+    volumes:
+      - ./seed:/seed:ro
+    networks:
+      - kui-quickstart
+    restart: "no"
 
 networks:
   kui-quickstart:

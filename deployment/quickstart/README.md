@@ -46,6 +46,8 @@ here waiting for it.
 | `kui-quickstart-kafka` | `apache/kafka:4.3.1` | one Kafka node in KRaft mode: it is its own controller and there is no ZooKeeper |
 | `kui-quickstart-seed`  | `apache/kafka:4.3.1` | a one-shot container that creates topics, publishes messages and sets consumer-group offsets, then exits |
 | `kui-quickstart-consumer` | `apache/kafka:4.3.1` | a long-lived consumer, so one consumer group is genuinely live rather than merely a set of committed offsets |
+| `kui-quickstart-schema-registry` | `apicurio/apicurio-registry:3.0.6` | a Schema Registry, so one topic holds Avro that KUI has to decode rather than read. Apicurio speaks the same REST API Confluent's registry does, at `/apis/ccompat/v7`, and is Apache-2.0 throughout |
+| `kui-quickstart-avro-seed` | `apache/kafka:4.3.1` | a one-shot container that registers the Avro schema and writes the Avro records **through KUI's own produce API**, because a console producer cannot write a record that begins with a zero byte |
 | `kui-quickstart-kui`   | `kui-allinone:0.1.0-SNAPSHOT` | KUI, gateway and every service in one process (ADR-005) |
 
 ### Why Kafka 4.3.1 and not `apache/kafka:latest`
@@ -78,6 +80,7 @@ are listed in [`seed/topics.tsv`](seed/topics.tsv) and the messages in `seed/dat
 | `inventory.stock-levels` | 4 | `cleanup.policy=compact,delete` — compaction and a retention window together |
 | `audit.log.raw` | 1 | deliberately **not** JSON: logfmt and plain log lines, so the message viewer has something it cannot parse |
 | `orders.v1.DLQ` | 3 | dead letters whose headers point at real offsets in `orders.v1` |
+| `orders.avro` | 3 | **Avro**, written in the Schema Registry wire format: a magic byte, a schema id, then the encoded body. There is no way to read it without the registry, which is the point — KUI fetches the schema by the id inside each record and shows the decoded JSON, with the schema's type, id and subject beside it |
 | `_schemas` | 1 | an internal topic, the kind a UI hides behind "show internal topics" |
 
 Three consumer groups, in the three states an operator actually has to tell apart:

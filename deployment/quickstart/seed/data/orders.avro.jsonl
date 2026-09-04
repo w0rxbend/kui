@@ -1,0 +1,5 @@
+{"id":"o-1001","customer":"ada","quantity":2,"total":41.5,"status":"PLACED","note":{"string":"gift wrap"},"address":{"city":"Krakow","postcode":"30-001"}}
+{"id":"o-1002","customer":"grace","quantity":1,"total":12.0,"status":"SHIPPED","note":null,"address":{"city":"Gdansk","postcode":"80-001"}}
+{"id":"o-1003","customer":"alan","quantity":7,"total":210.25,"status":"PLACED","note":{"string":"leave at reception"},"address":{"city":"Warszawa","postcode":"00-001"}}
+{"id":"o-1004","customer":"edsger","quantity":3,"total":99.99,"status":"CANCELLED","note":null,"address":{"city":"Wroclaw","postcode":"50-001"}}
+{"id":"o-1005","customer":"barbara","quantity":5,"total":150.0,"status":"SHIPPED","note":{"string":"fragile"},"address":{"city":"Poznan","postcode":"60-001"}}

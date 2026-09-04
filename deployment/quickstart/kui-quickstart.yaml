@@ -64,4 +64,30 @@ kui:
       bootstrapServers:
         - "kafka:9092"
 
+      # The Schema Registry this quickstart starts beside the broker.
+      #
+      # Setting this is the whole on/off switch for schema-aware decoding on this cluster: with it,
+      # KUI fetches each record's schema by the id inside the record and shows the decoded value;
+      # without it, an Avro payload has no valid text reading at all and renders as bytes. The
+      # address is the Confluent-compatible endpoint of Apicurio Registry — any registry speaking
+      # that API works, and `url` may list several addresses for a registry cluster.
+      schemaRegistry:
+        url:
+          - "http://schema-registry:8080/apis/ccompat/v7"
+
+      # Which serde reads which topic.
+      #
+      # `defaultValue` is deliberately NOT set to SchemaRegistry here. Only one topic in this
+      # quickstart is Avro, and the other seven are JSON or plain text; a per-topic pattern says
+      # exactly that, and it is also the setting an operator is most likely to need on a real
+      # cluster where one team's topics are Avro and another's are not. A cluster that is Avro
+      # throughout writes `defaultValue: SchemaRegistry` instead and no patterns at all.
+      #
+      # The pattern matches a whole topic name. `orders\.avro` matches the topic of that name and
+      # not `orders.avro.retry`, because the dot is escaped and the match is anchored at both ends.
+      serde:
+        patterns:
+          - serde: SchemaRegistry
+            topicValuesPattern: "orders\\.avro"
+
   rbac: {}

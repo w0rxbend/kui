@@ -43,6 +43,12 @@ customers.profiles	3	3	cleanup.policy=compact;min.cleanable.dirty.ratio=0.1;segm
 inventory.stock-levels	4	2	cleanup.policy=compact,delete;retention.ms=1209600000;segment.ms=60000
 # 14 days.
 
+# --- Avro -------------------------------------------------------------------------------------
+# The topic whose values are Avro, written in the Schema Registry wire format. seed.sh creates it
+# and leaves it empty; avro-seed.sh registers the schema and produces the records through KUI,
+# because a console producer cannot write a record that starts with a zero byte.
+orders.avro	3	1	retention.ms=604800000
+
 # --- Not JSON ---------------------------------------------------------------------------------
 # Plain-text log lines. The message browser has to show a value it cannot parse as JSON without
 # pretending it failed, so the quickstart must contain one.

@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "OrderPlaced",
+  "namespace": "shop.orders",
+  "fields": [
+    {"name": "id", "type": "string"},
+    {"name": "customer", "type": "string"},
+    {"name": "quantity", "type": "int"},
+    {"name": "total", "type": "double"},
+    {"name": "status", "type": {"type": "enum", "name": "Status", "symbols": ["PLACED", "SHIPPED", "CANCELLED"]}},
+    {"name": "note", "type": ["null", "string"], "default": null},
+    {"name": "address", "type": {"type": "record", "name": "Address", "fields": [
+      {"name": "city", "type": "string"},
+      {"name": "postcode", "type": "string"}
+    ]}}
+  ]
+}
