@@ -27,7 +27,9 @@ final class MetricNamesSuite extends FunSuite {
     "kui.stream.active",
     "kui.cursor.rejected",
     "kui.principal.rejected",
-    "kui.config.version"
+    "kui.config.version",
+    "kui.cluster.profile.fetch",
+    "kui.cluster.profile.subscribed"
   )
 
   test("the list matches PLAN §30 and ARCHITECTURE.md §13, exactly and in order") {

@@ -15,7 +15,7 @@ import sttp.tapir.{DecodeResult, Endpoint, PublicEndpoint}
 import kui.config.UpstreamServiceConfig
 import kui.contracts.ErrorEnvelope
 import kui.gateway.application.client.{CallContext, ServiceClient}
-import kui.http.sse.SseEvent
+import kui.http.sse.{SseEvent, SseWire}
 import kui.http.upstream.{CircuitEvent, UpstreamClient, UpstreamConfig}
 import kui.kernel.ServiceId
 import kui.kernel.error.{FieldError, InfrastructureError, KuiError}

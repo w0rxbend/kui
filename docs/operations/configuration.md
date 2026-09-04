@@ -344,6 +344,46 @@ so rather than a setting that quietly does nothing. And a value whose key looks 
 `auth`) is redacted in every log line and diagnostic. A secret inside `properties` still uses
 `env:NAME`; the *value* travels through the environment, only the *key* cannot.
 
+### `kui.clusterProfiles` — how a Kafka-facing service reaches the cluster service
+
+Every KUI service that opens a Kafka connection — topics, and later messages, consumer groups and
+security — gets the connection settings for a cluster from the **cluster service**, over
+`/internal/v1`, rather than reading `kui.clusters[]` itself. Only the cluster service reads the
+metadata store and only it holds `kui.store.encryptionKey` (ADR-036, ADR-046). These four keys are
+what such a service reads; none of them is required, and the defaults are what a normal deployment
+wants.
+
+```yaml
+kui:
+  clusterProfiles:
+    pollInterval: 60s          # how often the cluster list is re-read even when the change stream is up
+    requestTimeout: 5s         # how long one profile fetch may take
+    reconnectBackoff: 1s       # the first delay after the change stream drops
+    maxReconnectBackoff: 30s   # the cap on that delay
+```
+
+`pollInterval` is a **fallback**, not the primary mechanism. With the change stream open, an edit to
+a cluster reaches every service in milliseconds; the poll is what bounds the damage when the stream
+has died without either end noticing, which is what a middlebox dropping an idle socket looks like —
+exactly like a quiet cluster. Lowering it makes a broken stream less visible in its effects and does
+not make a working one faster.
+
+`maxReconnectBackoff` is capped at thirty seconds on purpose. A client that had backed off to ten
+minutes would take ten minutes to notice a recovery that happened one second after its last attempt.
+
+**What an operator must not do.** `/internal/v1` carries the clusters' credentials on this channel
+and must not be reachable from outside the deployment network — not through an ingress, a load
+balancer, or a service mesh gateway that terminates external traffic. `/api/v1` is the
+browser-facing surface and carries no credential on any endpoint of any service. See
+`docs/operations/metadata-store.md` §4.3 for the full statement and for the two mechanisms that
+enforce it.
+
+**When the cluster service is down.** A consuming service keeps working from the last profile it
+saw, and reports its capability as `Degraded` with the reason and how long it has been failing. It
+does not fail requests and it does not refuse to start: a service that crash-looped because the
+cluster service was briefly restarting would turn one outage into two, and would make container boot
+order a correctness requirement.
+
 ### `kui.rbac` — the authorization model (**M6**)
 
 **Accepted and ignored.** Any key under `kui.rbac` loads today and is read by nothing, so a file

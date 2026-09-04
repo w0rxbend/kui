@@ -41,6 +41,15 @@ object MetricNames {
   val PrincipalRejected: String = "kui.principal.rejected" // {reason}
   val ConfigVersion: String = "kui.config.version" // {section}                                  (M1)
 
+  /** Cluster-profile fetches by a Kafka-facing service, by how they ended (ADR-046). */
+  val ClusterProfileFetch: String = "kui.cluster.profile.fetch" // {outcome}                      (M2)
+
+  /** Whether that service's change subscription is open. Together with the counter above, these answer the
+    * question an operator asks when a cluster edit does not take effect: is this service being *told* about
+    * changes, or is it polling because the stream is broken? Those look identical in a latency graph.
+    */
+  val ClusterProfileSubscribed: String = "kui.cluster.profile.subscribed" //                       (M2)
+
   /** Every name, in the order PLAN §30 lists them followed by the `ARCHITECTURE.md` §13 additions.
     */
   val all: List[String] = List(
@@ -57,7 +66,9 @@ object MetricNames {
     StreamActive,
     CursorRejected,
     PrincipalRejected,
-    ConfigVersion
+    ConfigVersion,
+    ClusterProfileFetch,
+    ClusterProfileSubscribed
   )
 
   /** The attribute keys, for the same reason the metric names are here: a label that drifts from `upstream`

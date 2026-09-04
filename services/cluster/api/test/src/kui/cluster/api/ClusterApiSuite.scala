@@ -19,6 +19,18 @@ import kui.observability.KuiInterceptors
   */
 final class ClusterApiSuite extends CatsEffectSuite {
 
+  test("theAudienceTheContractPublishesIsTheOneThisServiceVerifies") {
+    // The two spellings of "cluster". `ClusterService.Id` is what this service checks a token's `aud`
+    // against; `ProfileEndpoints.Audience` is what `services/cluster/client` signs one for, and rule A11
+    // keeps that module out of the `application` layer where the first constant lives. This module is the
+    // only one in the build that can see both, so this is the only place the two can be held together —
+    // and if they ever drift, every internal call from every Kafka-facing service becomes a 401.
+    assertEquals(
+      kui.cluster.contract.ProfileEndpoints.Audience,
+      kui.cluster.application.ClusterService.Id
+    )
+  }
+
   test("theClusterListIsServedToAVerifiedCaller") {
     // An empty registry answers with an empty list rather than a failure: a KUI nobody has configured a
     // cluster in genuinely has none, and that is not an error state.

@@ -7,7 +7,7 @@ import sttp.tapir.json.circe.jsonBody
 import kui.cluster.contract.dto.{ClusterProfileDto, ProfileResult}
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
-import kui.kernel.ClusterId
+import kui.kernel.{ClusterId, ServiceId}
 import kui.security.SignedPrincipal
 
 /** How another KUI service learns a cluster's connection settings, and how it is told they changed.
@@ -23,6 +23,15 @@ import kui.security.SignedPrincipal
   * module that must link for the browser.
   */
 object ProfileEndpoints {
+
+  /** The audience a caller signs its principal for (ADR-020).
+    *
+    * It lives in the contract rather than in the service's `application` layer because both sides need it and
+    * only one of them may see that layer: `services/cluster/client` signs tokens for this audience and rule
+    * A11 keeps it out of `services.cluster.application`, where the same string is `ClusterService.Id`.
+    * `ClusterApiSuite` asserts the two are equal, which is the only place in the build that can see both.
+    */
+  val Audience: ServiceId = ServiceId.unsafe("cluster")
 
   val ProfileSegment: String = "profile"
   val StreamSegment: String = "stream"

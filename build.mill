@@ -1152,6 +1152,48 @@ object services extends Module {
       }
     }
 
+    /** The shared consumer of this service's profile contract (ADR-046).
+      *
+      * It exists because four Kafka-facing services will need to turn a cluster id into a live
+      * connection, and a protocol implemented four times — a conditional fetch, a change
+      * subscription, a fallback poll, a last-known cache and a cancellation path — is a protocol
+      * implemented four different ways, with the differences invisible from inside any one of them.
+      *
+      * Rule A11 admits `contract` and `client` across a service boundary and nothing else, and it
+      * names `client` explicitly so that a second module of this kind has to be argued in the commit
+      * that adds it. It holds no Kafka client (A10 forbids it one) and no domain: it maps a DTO to a
+      * `libs/kernel` value and stops.
+      */
+    object client extends KuiJvmModule {
+      def moduleDeps = Seq(contract.jvm, libs.http, libs.kernel.jvm, libs.securityCore.jvm, libs.observability)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-sttp-client4::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // Virtual time. Everything this module's contract is about happens after a delay — the
+          // fallback poll, the reconnect backoff, the sticky failure instant — and a suite that
+          // waited for those would be slow and flaky at the same time.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
+          mvn"io.circe::circe-parser::${Versions.circe}"
+        )
+      }
+    }
+
     /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification and
       * the OpenAPI document (`ARCHITECTURE.md` §3).
       *

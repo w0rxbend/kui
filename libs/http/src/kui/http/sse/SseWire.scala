@@ -1,10 +1,8 @@
-package kui.gateway.api.client
+package kui.http.sse
 
 import fs2.{Pipe, Stream}
 import io.circe.Json
 import io.circe.parser.parse as parseJson
-
-import kui.http.sse.SseEvent
 
 /** The inverse of `kui.http.sse.SseEvent.render`: raw `text/event-stream` bytes back into events.
   *
@@ -14,11 +12,13 @@ import kui.http.sse.SseEvent
   * copying bytes through is what lets `Sse.stream` apply the heartbeat and the terminal-event rule (ADR-035)
   * to a proxied stream exactly as it does to a locally produced one.
   *
-  * ==Why it lives here and not in `libs/http`==
+  * ==Why it lives here==
   *
-  * `libs/http` renders. Nothing else in KUI reads SSE on the JVM — services produce streams, browsers consume
-  * them — so putting the parser in the shared library would be adding a public API for one caller. If a
-  * second JVM consumer ever appears, moving this file into `kui.http.sse` is the whole change.
+  * It began in `services/gateway/api`, with a note saying that `libs/http` renders and that nothing else in
+  * KUI reads SSE on the JVM, so a shared parser would be a public API for one caller — and that if a second
+  * JVM consumer ever appeared, moving the file here was the whole change. `services/cluster/client` is that
+  * second consumer (ADR-046): it subscribes to the cluster service's change stream, and a second parser
+  * written beside it would be the same wire format understood in two places. So the file moved, unchanged.
   *
   * ==What it deliberately does not implement==
   *
