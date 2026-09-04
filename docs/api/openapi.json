@@ -59,6 +59,143 @@
             }
           }
         }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Register or replace one cluster",
+        "description" : "Part of the cluster.write flow. This call changes nothing. Answers only after the write has been read back from the store, so a 200 means every replica that has caught up can already see it. A version that does not match answers 409 KUI-CONFIG-VERSION-CONFLICT; a deployment with no metadata store answers 501. The response is the redacted profile and never an echo of the request.",
+        "operationId" : "cluster.put",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "If-Match",
+            "in" : "header",
+            "description" : "The version being replaced, quoted; \"0\" to create",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ClusterWriteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClusterProfileDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Remove one cluster from the metadata store",
+        "description" : "Mutation (cluster.delete). This call changes the cluster and cannot be undone. Removes the stored profile and its credentials. A cluster this deployment also declares in its configuration file answers 409: the store record would go and the file would put it straight back, so the refusal names the file instead of pretending to succeed. A deployment with no metadata store answers 501.",
+        "operationId" : "cluster.delete",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "If-Match",
+            "in" : "header",
+            "description" : "The version being replaced, quoted; \"0\" to create",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/clusters/{clusterId}/brokers" : {
@@ -278,6 +415,67 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RefreshAcceptedDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/connection-test" : {
+      "post" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Can KUI reach this cluster with these settings?",
+        "description" : "Part of the cluster.write flow. This call changes nothing. Opens one bounded connection and describes the cluster, which exercises DNS, TCP, TLS and SASL in one call. It stores nothing. The answer distinguishes 'could not reach it' from 'reached it and it refused our credentials', because those send an operator to two different forms.",
+        "operationId" : "cluster.probe",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ClusterWriteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectivityDto"
                 }
               }
             }
@@ -959,6 +1157,218 @@
         }
       }
     },
+    "/api/v1/auth/settings" : {
+      "get" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Which kind of sign-in this deployment uses",
+        "operationId" : "gateway.auth.settings",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AuthSettingsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Sign in with a username and a password",
+        "operationId" : "gateway.auth.login",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "headers" : {
+              "Set-Cookie" : {
+                "required" : false,
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            },
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Set a new password, completing a required change",
+        "operationId" : "gateway.auth.password",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/start" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Begin a sign-in with the configured identity provider",
+        "operationId" : "gateway.auth.oidc.start",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OidcStartResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/callback" : {
+      "get" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Complete a sign-in with the configured identity provider",
+        "operationId" : "gateway.auth.oidc.callback",
+        "parameters" : [
+          {
+            "name" : "code",
+            "in" : "query",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "state",
+            "in" : "query",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "302" : {
+            "description" : "the browser is sent back to the interface",
+            "headers" : {
+              "Location" : {
+                "required" : true,
+                "schema" : {
+                  "type" : "string"
+                }
+              },
+              "Set-Cookie" : {
+                "required" : false,
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/logout" : {
       "post" : {
         "tags" : [
@@ -1297,6 +1707,24 @@
             }
           },
           {
+            "name" : "filterId",
+            "in" : "query",
+            "description" : "A registered smart filter (MS-007). Only records it matches are delivered",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "filterSource",
+            "in" : "query",
+            "description" : "The expression that id was minted from. Sent alongside the id so that a replica which has never seen it can compile it rather than refusing a filter the caller registered a moment ago on another replica",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
             "name" : "cursor",
             "in" : "query",
             "description" : "The signed cursor a finished browse ended with. Carry on from where that one stopped. Refused together with seekTo, because a cursor is itself a start position",
@@ -1619,6 +2047,745 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PurgeReceiptDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/messages/filters" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Register a smart filter expression",
+        "description" : "Compiles the expression and answers with its id. The id is sha256(source) truncated, so registering the same expression twice is free and gives the same answer on every replica. A expression that does not compile is refused with KUI-FILTER-COMPILE naming the line and column, which is how the editor knows what to underline. Changes nothing on the cluster.",
+        "operationId" : "message.filter.register",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FilterRegistrationDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FilterIdDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/messages/filters/test" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Try a filter against one record",
+        "description" : "Evaluates the expression against the record in the request and answers whether it matched. No Kafka client is opened: the record is the caller's own, which is what makes this cheap enough to run from an editor as somebody types. An expression that is legal but throws on this particular record answers matched=false with the failure in `error`, which is a different sentence from 'your expression is wrong' and needs to read as one.",
+        "operationId" : "message.filter.test",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FilterTestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FilterTestResultDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/messages/track" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Find a value across several topics inside a time window",
+        "description" : "Reads each named topic forwards from the start of the window and answers with the records that matched, each carrying the topic it came from. Every bound is mandatory: the window is closed and ordered, its width has a ceiling, and the number of hits has a cap — an unbounded scan of a production cluster is not a search. `scanned` is what was read, which is what tells a user whether 'no hits' means the value is absent or the window was empty; `truncated` says the scan stopped at its cap, which a caller cannot work out by counting. Changes nothing.",
+        "operationId" : "message.track",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TrackQueryDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TrackResultDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/compatibility" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The compatibility level every subject without its own follows",
+        "description" : "A registry that has never had a global level set reports its own default, BACKWARD, because that is what it will actually apply to the next registration.",
+        "operationId" : "schema.compatibility.global",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Set the registry-wide compatibility level",
+        "description" : "Part of the schema.compatibility.global.set flow. This call changes nothing. It applies to every subject that has no level of its own, so lowering it to NONE removes the compatibility check for all of them at once. Refused on a read-only cluster, and audited either way with the level that was in force before the change.",
+        "operationId" : "schema.compatibility.global.set",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCompatibilityRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The subjects registered on this cluster's Schema Registry",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.",
+        "operationId" : "schema.subjects",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "Case-insensitive substring match over the subject name. Not a regular expression",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "direction",
+            "in" : "query",
+            "description" : "Which way to sort by name",
+            "required" : false,
+            "schema" : {
+              "default" : "asc",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "page",
+            "in" : "query",
+            "description" : "Which page, numbered from one",
+            "required" : false,
+            "schema" : {
+              "default" : 1,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "pageSize",
+            "in" : "query",
+            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "required" : false,
+            "schema" : {
+              "default" : 25,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageDto_A"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/compatibility" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The compatibility level in force for one subject",
+        "description" : "Reports inheritedFromGlobal when the subject has no level of its own. Without that flag a client cannot tell a subject that is governed globally from one that has been pinned, and 'confirming' the value it displays would silently create an override.",
+        "operationId" : "schema.compatibility.subject",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Set one subject's compatibility level",
+        "description" : "Part of the schema.compatibility.subject.set flow. This call changes nothing. The subject stops following the global level from this point on, which the answer reports as inheritedFromGlobal: false. Refused on a read-only cluster.",
+        "operationId" : "schema.compatibility.subject.set",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCompatibilityRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The version numbers of one subject",
+        "description" : "A subject the registry does not hold answers 404 KUI-SCHEMA-NOT-FOUND, so a stale link says so rather than showing an empty version list that reads as a subject with no schemas.",
+        "operationId" : "schema.versions",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SubjectVersionsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The schema behind one version of a subject",
+        "description" : "The schema text is returned exactly as the registry stores it, so that it can be compared and diffed against the registry's own screen.",
+        "operationId" : "schema.version",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "version",
+            "in" : "path",
+            "description" : "A version number, or 'latest' for whichever version is current",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SchemaDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}/compatibility" : {
+      "post" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Whether a proposed schema would be accepted for this subject",
+        "description" : "Registers nothing. The check runs inside the registry, because the verdict that matters is the one the registry will give when the schema is really registered; KUI does not reimplement the compatibility rules of three schema languages. Answered on a read-only cluster like any other read.",
+        "operationId" : "schema.compatibility.check",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "version",
+            "in" : "path",
+            "description" : "The version to check against: a number, or 'latest' for the current one",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CompatibilityCheckRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityCheckDto"
                 }
               }
             }
@@ -2427,6 +3594,79 @@
   },
   "components" : {
     "schemas" : {
+      "AdminTuningDocument" : {
+        "title" : "AdminTuningDocument",
+        "description" : "Admin client timeouts, chunk sizes and refresh intervals, in whole milliseconds",
+        "type" : "object",
+        "required" : [
+          "requestTimeoutMs",
+          "apiTimeoutMs",
+          "topicChunkSize",
+          "partitionChunkSize",
+          "groupChunkSize",
+          "parallelism",
+          "metadataRefreshMs",
+          "capabilityRefreshMs"
+        ],
+        "properties" : {
+          "requestTimeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "apiTimeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "topicChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitionChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "groupChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "parallelism" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "metadataRefreshMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "capabilityRefreshMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "AdminTuningWrite" : {
+        "title" : "AdminTuningWrite",
+        "description" : "Admin client timeouts, batching and concurrency",
+        "type" : "object",
+        "required" : [
+          "timeoutMs",
+          "batchSize",
+          "parallelism"
+        ],
+        "properties" : {
+          "timeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "batchSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "parallelism" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "AppInfo" : {
         "title" : "AppInfo",
         "description" : "Which build of KUI is running, and what this deployment enables",
@@ -2502,9 +3742,58 @@
           }
         }
       },
+      "AuthSettingsDto" : {
+        "title" : "AuthSettingsDto",
+        "type" : "object",
+        "required" : [
+          "authType",
+          "rbacEnabled"
+        ],
+        "properties" : {
+          "authType" : {
+            "type" : "string"
+          },
+          "providerLabel" : {
+            "type" : "string"
+          },
+          "rbacEnabled" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "Available" : {
         "title" : "Available",
         "type" : "object"
+      },
+      "AwsMskIam" : {
+        "title" : "AwsMskIam",
+        "type" : "object",
+        "properties" : {
+          "profile" : {
+            "type" : "string"
+          },
+          "roleArn" : {
+            "type" : "string"
+          },
+          "stsRegion" : {
+            "type" : "string"
+          }
+        }
+      },
+      "AzureEntra" : {
+        "title" : "AzureEntra",
+        "type" : "object",
+        "required" : [
+          "namespace"
+        ],
+        "properties" : {
+          "namespace" : {
+            "type" : "string"
+          },
+          "tokenEndpoint" : {
+            "type" : "string"
+          }
+        }
       },
       "BrokerConfigsResponse" : {
         "title" : "BrokerConfigsResponse",
@@ -2529,6 +3818,9 @@
         "properties" : {
           "brokers" : {
             "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "quorum" : {
+            "$ref" : "#/components/schemas/QuorumDto"
           }
         }
       },
@@ -2647,6 +3939,22 @@
           }
         ]
       },
+      "ChangePasswordRequest" : {
+        "title" : "ChangePasswordRequest",
+        "type" : "object",
+        "required" : [
+          "challenge",
+          "newPassword"
+        ],
+        "properties" : {
+          "challenge" : {
+            "type" : "string"
+          },
+          "newPassword" : {
+            "type" : "string"
+          }
+        }
+      },
       "ClusterDetailResponse" : {
         "title" : "ClusterDetailResponse",
         "description" : "One configured cluster and its last known state",
@@ -2678,6 +3986,55 @@
           }
         }
       },
+      "ClusterProfileDto" : {
+        "title" : "ClusterProfileDto",
+        "description" : "A cluster's resolved connection settings, credentials included. Internal channel only",
+        "type" : "object",
+        "required" : [
+          "id",
+          "name",
+          "version",
+          "readOnly",
+          "bootstrapServers",
+          "security",
+          "properties",
+          "admin",
+          "updatedAt"
+        ],
+        "properties" : {
+          "id" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "bootstrapServers" : {
+            "description" : "host:port[,host:port] as Kafka's bootstrap.servers wants it",
+            "type" : "string"
+          },
+          "security" : {
+            "$ref" : "#/components/schemas/ClusterSecurity"
+          },
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_PropertyValue"
+          },
+          "admin" : {
+            "$ref" : "#/components/schemas/AdminTuningDocument"
+          },
+          "updatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
       "ClusterRowDto" : {
         "title" : "ClusterRowDto",
         "description" : "One configured cluster: identity always, live data only when a scrape succeeded",
@@ -2688,7 +4045,8 @@
           "readOnly",
           "bootstrapServers",
           "security",
-          "summary"
+          "summary",
+          "origin"
         ],
         "properties" : {
           "id" : {
@@ -2709,8 +4067,29 @@
           },
           "summary" : {
             "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "origin" : {
+            "type" : "string"
           }
         }
+      },
+      "ClusterSecurity" : {
+        "title" : "ClusterSecurity",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Plaintext"
+          },
+          {
+            "$ref" : "#/components/schemas/Sasl"
+          },
+          {
+            "$ref" : "#/components/schemas/Ssl"
+          }
+        ]
       },
       "ClusterSecurityDto" : {
         "title" : "ClusterSecurityDto",
@@ -2736,6 +4115,131 @@
           }
         }
       },
+      "ClusterSecurityWrite" : {
+        "title" : "ClusterSecurityWrite",
+        "description" : "How KUI should authenticate to this cluster",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "verifyHostname"
+        ],
+        "properties" : {
+          "protocol" : {
+            "type" : "string"
+          },
+          "mechanism" : {
+            "type" : "string"
+          },
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          },
+          "truststore" : {
+            "$ref" : "#/components/schemas/StoreMaterialWrite"
+          },
+          "keystore" : {
+            "$ref" : "#/components/schemas/StoreMaterialWrite"
+          },
+          "verifyHostname" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ClusterWriteRequest" : {
+        "title" : "ClusterWriteRequest",
+        "description" : "A cluster to register or replace. Carries credentials; the response does not",
+        "type" : "object",
+        "required" : [
+          "name",
+          "readOnly",
+          "bootstrapServers",
+          "security",
+          "properties",
+          "admin"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "bootstrapServers" : {
+            "type" : "string"
+          },
+          "security" : {
+            "$ref" : "#/components/schemas/ClusterSecurityWrite"
+          },
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_String"
+          },
+          "admin" : {
+            "$ref" : "#/components/schemas/AdminTuningWrite"
+          }
+        }
+      },
+      "CompatibilityCheckDto" : {
+        "title" : "CompatibilityCheckDto",
+        "description" : "Whether the registry would accept the proposed schema, and why not when it would not",
+        "type" : "object",
+        "required" : [
+          "compatible"
+        ],
+        "properties" : {
+          "compatible" : {
+            "type" : "boolean"
+          },
+          "messages" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "CompatibilityCheckRequest" : {
+        "title" : "CompatibilityCheckRequest",
+        "description" : "A proposed schema to check against a subject. Nothing is registered",
+        "type" : "object",
+        "required" : [
+          "schemaType",
+          "definition"
+        ],
+        "properties" : {
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "CompatibilityDto" : {
+        "title" : "CompatibilityDto",
+        "description" : "The compatibility level in force, and whether the subject inherits it from the global one",
+        "type" : "object",
+        "required" : [
+          "level",
+          "inheritedFromGlobal"
+        ],
+        "properties" : {
+          "level" : {
+            "type" : "string"
+          },
+          "inheritedFromGlobal" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "ConfirmRequest" : {
         "title" : "ConfirmRequest",
         "description" : "The plan token to apply. Nothing else: the plan already fixed what will happen",
@@ -2745,6 +4249,26 @@
         ],
         "properties" : {
           "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ConnectivityDto" : {
+        "title" : "ConnectivityDto",
+        "description" : "Whether KUI can currently talk to a cluster, and if not why",
+        "type" : "object",
+        "required" : [
+          "status",
+          "reachable"
+        ],
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "reachable" : {
+            "type" : "boolean"
+          },
+          "detail" : {
             "type" : "string"
           }
         }
@@ -2799,6 +4323,52 @@
           "replicationFactor" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "DecodeErrorDto" : {
+        "title" : "DecodeErrorDto",
+        "description" : "A serde that failed on this record; the record was delivered by the fallback serde anyway",
+        "type" : "object",
+        "required" : [
+          "target",
+          "serde",
+          "cause"
+        ],
+        "properties" : {
+          "target" : {
+            "type" : "string"
+          },
+          "serde" : {
+            "type" : "string"
+          },
+          "cause" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DecodedPayloadDto" : {
+        "title" : "DecodedPayloadDto",
+        "description" : "One decoded key or value: the text, what it is, and which serde produced it",
+        "type" : "object",
+        "required" : [
+          "text",
+          "kind",
+          "serde",
+          "properties"
+        ],
+        "properties" : {
+          "text" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "serde" : {
+            "type" : "string"
+          },
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_String"
           }
         }
       },
@@ -2961,6 +4531,84 @@
           }
         }
       },
+      "FilterIdDto" : {
+        "title" : "FilterIdDto",
+        "description" : "An opaque handle for a registered filter expression",
+        "type" : "object",
+        "required" : [
+          "id"
+        ],
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FilterRegistrationDto" : {
+        "title" : "FilterRegistrationDto",
+        "description" : "A filter expression to register for reuse",
+        "type" : "object",
+        "required" : [
+          "source"
+        ],
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FilterTestDto" : {
+        "title" : "FilterTestDto",
+        "description" : "Evaluate a filter expression against one supplied record",
+        "type" : "object",
+        "required" : [
+          "source",
+          "record"
+        ],
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "record" : {
+            "$ref" : "#/components/schemas/MessageDto"
+          }
+        }
+      },
+      "FilterTestResultDto" : {
+        "title" : "FilterTestResultDto",
+        "description" : "Whether the filter matched, or the failure that means it answered neither way",
+        "type" : "object",
+        "required" : [
+          "matched"
+        ],
+        "properties" : {
+          "matched" : {
+            "type" : "boolean"
+          },
+          "error" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FromPath" : {
+        "title" : "FromPath",
+        "type" : "object",
+        "required" : [
+          "path"
+        ],
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          }
+        }
+      },
+      "GcpManagedKafka" : {
+        "title" : "GcpManagedKafka",
+        "type" : "object"
+      },
       "GroupDetailDto" : {
         "title" : "GroupDetailDto",
         "description" : "One consumer group: its members, their assignments, and its lag per partition",
@@ -3111,6 +4759,33 @@
           }
         }
       },
+      "Gssapi" : {
+        "title" : "Gssapi",
+        "type" : "object",
+        "required" : [
+          "serviceName",
+          "principal",
+          "useTicketCache",
+          "storeKey"
+        ],
+        "properties" : {
+          "serviceName" : {
+            "type" : "string"
+          },
+          "principal" : {
+            "type" : "string"
+          },
+          "keyTab" : {
+            "type" : "string"
+          },
+          "useTicketCache" : {
+            "type" : "boolean"
+          },
+          "storeKey" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "HeaderDto" : {
         "title" : "HeaderDto",
         "description" : "One header to write: a name, and a value that may be explicitly null",
@@ -3123,6 +4798,28 @@
             "type" : "string"
           },
           "value" : {
+            "type" : "string"
+          }
+        }
+      },
+      "IdentityPrincipalDto" : {
+        "title" : "IdentityPrincipalDto",
+        "type" : "object",
+        "required" : [
+          "name",
+          "kind"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "roles" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "kind" : {
             "type" : "string"
           }
         }
@@ -3148,6 +4845,44 @@
             "type" : "boolean"
           },
           "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Inline" : {
+        "title" : "Inline",
+        "type" : "object",
+        "required" : [
+          "base64"
+        ],
+        "properties" : {
+          "base64" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "KeyStoreRef" : {
+        "title" : "KeyStoreRef",
+        "type" : "object",
+        "required" : [
+          "source",
+          "storeType"
+        ],
+        "properties" : {
+          "source" : {
+            "$ref" : "#/components/schemas/StoreSource"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "keyPassword" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "storeType" : {
+            "description" : "JKS, PKCS12 or PEM",
             "type" : "string"
           }
         }
@@ -3232,6 +4967,33 @@
           }
         }
       },
+      "LoginRequest" : {
+        "title" : "LoginRequest",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "type" : "string"
+          }
+        }
+      },
+      "LoginResponse" : {
+        "title" : "LoginResponse",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/PasswordChangeRequired"
+          },
+          {
+            "$ref" : "#/components/schemas/SignedIn"
+          }
+        ]
+      },
       "Map_Boolean" : {
         "title" : "Map_Boolean",
         "type" : "object",
@@ -3245,6 +5007,14 @@
         "additionalProperties" : {
           "type" : "integer",
           "format" : "int64"
+        }
+      },
+      "Map_PropertyValue" : {
+        "title" : "Map_PropertyValue",
+        "description" : "Raw Kafka client property overrides",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/PropertyValue"
         }
       },
       "Map_String" : {
@@ -3288,9 +5058,96 @@
           }
         }
       },
+      "MessageDto" : {
+        "title" : "MessageDto",
+        "description" : "One Kafka record, decoded, with every serde failure that happened while decoding it",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "offset",
+          "timestamp",
+          "timestampType",
+          "key",
+          "value",
+          "headers",
+          "keySize",
+          "valueSize",
+          "headersSize"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "timestampType" : {
+            "type" : "string"
+          },
+          "key" : {
+            "$ref" : "#/components/schemas/DecodedPayloadDto"
+          },
+          "value" : {
+            "$ref" : "#/components/schemas/DecodedPayloadDto"
+          },
+          "headers" : {
+            "$ref" : "#/components/schemas/Map_String"
+          },
+          "keySize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "valueSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "headersSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "deserializeErrors" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DecodeErrorDto"
+            }
+          }
+        }
+      },
       "NotConfigured" : {
         "title" : "NotConfigured",
         "type" : "object"
+      },
+      "OAuthBearer" : {
+        "title" : "OAuthBearer",
+        "type" : "object",
+        "required" : [
+          "tokenEndpoint",
+          "clientId",
+          "clientSecret"
+        ],
+        "properties" : {
+          "tokenEndpoint" : {
+            "type" : "string"
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "clientSecret" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "scope" : {
+            "type" : "string"
+          }
+        }
       },
       "OffsetRangeDto" : {
         "title" : "OffsetRangeDto",
@@ -3316,6 +5173,69 @@
             "description" : "a record's position in a partition, from 0",
             "type" : "integer",
             "format" : "int64"
+          }
+        }
+      },
+      "OidcStartResponse" : {
+        "title" : "OidcStartResponse",
+        "type" : "object",
+        "required" : [
+          "authorizationUrl",
+          "state"
+        ],
+        "properties" : {
+          "authorizationUrl" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PageDto_A" : {
+        "title" : "PageDto_A",
+        "description" : "One page of a list: the items, and where the page sits in the whole",
+        "type" : "object",
+        "required" : [
+          "page"
+        ],
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a schema registry subject",
+              "type" : "string"
+            }
+          },
+          "page" : {
+            "$ref" : "#/components/schemas/PageInfo"
+          }
+        }
+      },
+      "PageInfo" : {
+        "title" : "PageInfo",
+        "description" : "Where this page sits in the list; pageCount is derived from totalItems and pageSize",
+        "type" : "object",
+        "required" : [
+          "page",
+          "pageSize"
+        ],
+        "properties" : {
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalItems" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "nextPageToken" : {
+            "description" : "An opaque continuation token",
+            "type" : "string"
           }
         }
       },
@@ -3431,6 +5351,18 @@
           }
         }
       },
+      "PasswordChangeRequired" : {
+        "title" : "PasswordChangeRequired",
+        "type" : "object",
+        "required" : [
+          "challenge"
+        ],
+        "properties" : {
+          "challenge" : {
+            "type" : "string"
+          }
+        }
+      },
       "PermissionDto" : {
         "title" : "PermissionDto",
         "type" : "object",
@@ -3457,6 +5389,39 @@
             }
           }
         }
+      },
+      "Plain" : {
+        "title" : "Plain",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "Plain1" : {
+        "title" : "Plain",
+        "type" : "object",
+        "required" : [
+          "value"
+        ],
+        "properties" : {
+          "value" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Plaintext" : {
+        "title" : "Plaintext",
+        "type" : "object"
       },
       "PlanWarningDto" : {
         "title" : "PlanWarningDto",
@@ -3599,6 +5564,17 @@
             "type" : "string"
           }
         }
+      },
+      "PropertyValue" : {
+        "title" : "PropertyValue",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Plain1"
+          },
+          {
+            "$ref" : "#/components/schemas/Sensitive"
+          }
+        ]
       },
       "PurgeConfirmRequest" : {
         "title" : "PurgeConfirmRequest",
@@ -3768,6 +5744,84 @@
             "description" : "a record's position in a partition, from 0",
             "type" : "integer",
             "format" : "int64"
+          }
+        }
+      },
+      "QuorumDto" : {
+        "title" : "QuorumDto",
+        "description" : "The KRaft metadata quorum, as the leader last reported it",
+        "type" : "object",
+        "required" : [
+          "leaderId",
+          "leaderEpoch",
+          "highWatermark"
+        ],
+        "properties" : {
+          "leaderId" : {
+            "description" : "a broker node id, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "leaderEpoch" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "highWatermark" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "voters" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/QuorumMemberDto"
+            }
+          },
+          "observers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/QuorumMemberDto"
+            }
+          }
+        }
+      },
+      "QuorumMemberDto" : {
+        "title" : "QuorumMemberDto",
+        "description" : "One voter or observer of the KRaft metadata quorum",
+        "type" : "object",
+        "required" : [
+          "replicaId",
+          "logEndOffset",
+          "lag",
+          "isLeader",
+          "isVoter"
+        ],
+        "properties" : {
+          "replicaId" : {
+            "description" : "a broker node id, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "logEndOffset" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "lag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "isLeader" : {
+            "type" : "boolean"
+          },
+          "isVoter" : {
+            "type" : "boolean"
+          },
+          "lastFetch" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastCaughtUp" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },
@@ -3977,6 +6031,200 @@
           }
         }
       },
+      "Sasl" : {
+        "title" : "Sasl",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "mechanism"
+        ],
+        "properties" : {
+          "protocol" : {
+            "description" : "SASL_PLAINTEXT or SASL_SSL",
+            "type" : "string"
+          },
+          "mechanism" : {
+            "$ref" : "#/components/schemas/SaslMechanism"
+          },
+          "tls" : {
+            "$ref" : "#/components/schemas/TlsConfig"
+          }
+        }
+      },
+      "SaslMechanism" : {
+        "title" : "SaslMechanism",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/AwsMskIam"
+          },
+          {
+            "$ref" : "#/components/schemas/AzureEntra"
+          },
+          {
+            "$ref" : "#/components/schemas/GcpManagedKafka"
+          },
+          {
+            "$ref" : "#/components/schemas/Gssapi"
+          },
+          {
+            "$ref" : "#/components/schemas/OAuthBearer"
+          },
+          {
+            "$ref" : "#/components/schemas/Plain"
+          },
+          {
+            "$ref" : "#/components/schemas/ScramSha256"
+          },
+          {
+            "$ref" : "#/components/schemas/ScramSha512"
+          }
+        ]
+      },
+      "SchemaDto" : {
+        "title" : "SchemaDto",
+        "description" : "One registered version of a subject, with its schema text",
+        "type" : "object",
+        "required" : [
+          "subject",
+          "version",
+          "id",
+          "schemaType",
+          "definition"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "SchemaReferenceDto" : {
+        "title" : "SchemaReferenceDto",
+        "description" : "A schema this schema refers to, by the name it uses for it and the version it pins",
+        "type" : "object",
+        "required" : [
+          "name",
+          "subject",
+          "version"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ScramSha256" : {
+        "title" : "ScramSha256",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "ScramSha512" : {
+        "title" : "ScramSha512",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "Sensitive" : {
+        "title" : "Sensitive",
+        "type" : "object",
+        "required" : [
+          "value"
+        ],
+        "properties" : {
+          "value" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "SetCompatibilityRequest" : {
+        "title" : "SetCompatibilityRequest",
+        "description" : "The level to set: BACKWARD, BACKWARD_TRANSITIVE, FORWARD, FORWARD_TRANSITIVE, FULL, FULL_TRANSITIVE or NONE",
+        "type" : "object",
+        "required" : [
+          "level"
+        ],
+        "properties" : {
+          "level" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SignedIn" : {
+        "title" : "SignedIn",
+        "type" : "object",
+        "required" : [
+          "principal"
+        ],
+        "properties" : {
+          "principal" : {
+            "$ref" : "#/components/schemas/IdentityPrincipalDto"
+          }
+        }
+      },
+      "Ssl" : {
+        "title" : "Ssl",
+        "type" : "object",
+        "required" : [
+          "tls"
+        ],
+        "properties" : {
+          "tls" : {
+            "$ref" : "#/components/schemas/TlsConfig"
+          }
+        }
+      },
       "StaleDto" : {
         "title" : "StaleDto",
         "description" : "This is the last good answer, fetched at this time, for this reason",
@@ -3993,6 +6241,86 @@
           "reason" : {
             "description" : "Why a capability is not available",
             "type" : "string"
+          }
+        }
+      },
+      "StoreMaterialWrite" : {
+        "title" : "StoreMaterialWrite",
+        "description" : "A keystore or truststore, base64 encoded, with its password",
+        "type" : "object",
+        "required" : [
+          "base64"
+        ],
+        "properties" : {
+          "base64" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          }
+        }
+      },
+      "StoreSource" : {
+        "title" : "StoreSource",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/FromPath"
+          },
+          {
+            "$ref" : "#/components/schemas/Inline"
+          }
+        ]
+      },
+      "SubjectVersionsDto" : {
+        "title" : "SubjectVersionsDto",
+        "description" : "A subject's version numbers, ascending",
+        "type" : "object",
+        "required" : [
+          "subject"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "versions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        }
+      },
+      "TlsConfig" : {
+        "title" : "TlsConfig",
+        "type" : "object",
+        "required" : [
+          "verifyHostname"
+        ],
+        "properties" : {
+          "truststore" : {
+            "$ref" : "#/components/schemas/TrustStoreRef"
+          },
+          "keystore" : {
+            "$ref" : "#/components/schemas/KeyStoreRef"
+          },
+          "verifyHostname" : {
+            "type" : "boolean"
+          },
+          "enabledProtocols" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "cipherSuites" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
           }
         }
       },
@@ -4143,6 +6471,132 @@
           "incompleteTopics" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "TrackHitDto" : {
+        "title" : "TrackHitDto",
+        "description" : "One record a track found, and which topic it was in",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "record"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "record" : {
+            "$ref" : "#/components/schemas/MessageDto"
+          }
+        }
+      },
+      "TrackMatchDto" : {
+        "title" : "TrackMatchDto",
+        "description" : "What to look for and where: value, key or a named header, compared three ways",
+        "type" : "object",
+        "required" : [
+          "source",
+          "operator",
+          "value"
+        ],
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "header" : {
+            "type" : "string"
+          },
+          "operator" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TrackQueryDto" : {
+        "title" : "TrackQueryDto",
+        "description" : "Find one value across several topics inside a closed time window",
+        "type" : "object",
+        "required" : [
+          "match",
+          "from",
+          "to"
+        ],
+        "properties" : {
+          "topics" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+              "type" : "string"
+            }
+          },
+          "match" : {
+            "$ref" : "#/components/schemas/TrackMatchDto"
+          },
+          "from" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "to" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "TrackResultDto" : {
+        "title" : "TrackResultDto",
+        "description" : "What a track found, how much it read, and whether it stopped early",
+        "type" : "object",
+        "required" : [
+          "scanned",
+          "matched",
+          "truncated"
+        ],
+        "properties" : {
+          "hits" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TrackHitDto"
+            }
+          },
+          "scanned" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "matched" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "truncated" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "TrustStoreRef" : {
+        "title" : "TrustStoreRef",
+        "type" : "object",
+        "required" : [
+          "source",
+          "storeType"
+        ],
+        "properties" : {
+          "source" : {
+            "$ref" : "#/components/schemas/StoreSource"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "storeType" : {
+            "description" : "JKS, PKCS12 or PEM",
+            "type" : "string"
           }
         }
       },
