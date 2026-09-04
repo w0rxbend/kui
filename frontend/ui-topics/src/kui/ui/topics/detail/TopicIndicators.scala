@@ -3,7 +3,7 @@ package kui.ui.topics.detail
 import com.raquo.laminar.api.L.*
 
 import kui.contracts.topic.TopicDetailDto
-import kui.ui.kernel.component.{Bytes, DataTable, Tone}
+import kui.ui.kernel.component.{Bytes, DataTable, Tag, Tone}
 import kui.ui.topics.{Messages, TopicsCss}
 
 /** The strip above the tabs: what the topic is made of, as nine figures.
@@ -21,8 +21,21 @@ import kui.ui.topics.{Messages, TopicsCss}
   */
 object TopicIndicators {
 
-  /** One figure, its label, and whether it is saying something is wrong. */
-  final case class Indicator(label: String, value: String, tone: Tone = Tone.Neutral)
+  /** One figure, its label, and whether it is saying something is wrong.
+    *
+    * @param categorical
+    *   whether the value is a category rather than a quantity, in which case it is drawn as a filled chip.
+    *   The design reserves the tertiary container for exactly this — `research/design/REFERENCE.md` names it
+    *   "the compact-policy chip" — and the reason is that the strip is otherwise ten numbers in a row: a word
+    *   set in the same size and weight as the counts beside it reads as one of them at a glance, and the one
+    *   value that is not a measurement is the one an operator is scanning for.
+    */
+  final case class Indicator(
+      label: String,
+      value: String,
+      tone: Tone = Tone.Neutral,
+      categorical: Boolean = false
+  )
 
   object Indicator {
     given CanEqual[Indicator, Indicator] = CanEqual.derived
@@ -68,7 +81,14 @@ object TopicIndicators {
       Indicator(Messages.IndicatorType, if row.internal then Messages.TypeInternal else Messages.TypeNormal),
       Indicator(Messages.IndicatorSize, Bytes.format(row.sizeBytes)),
       Indicator(Messages.IndicatorSegments, detail.segmentCount.fold(DataTable.missing)(_.toString)),
-      Indicator(Messages.IndicatorCleanupPolicy, detail.cleanupPolicy.getOrElse(DataTable.missing)),
+      // `delete`, `compact` or `compact,delete`: the one categorical value in the strip, so the one that
+      // gets the chip. An unknown policy stays an em dash — a chip saying "—" would be a chip saying
+      // nothing, drawn with all the emphasis of a chip that says something.
+      Indicator(
+        Messages.IndicatorCleanupPolicy,
+        detail.cleanupPolicy.getOrElse(DataTable.missing),
+        categorical = detail.cleanupPolicy.isDefined
+      ),
       Indicator(Messages.IndicatorMessages, row.messageCount.fold(DataTable.missing)(_.toString))
     )
   }
@@ -87,7 +107,13 @@ object TopicIndicators {
             cls(TopicsCss.IndicatorWarning) <-- indicator.map(_.tone == Tone.Warning),
             cls(TopicsCss.IndicatorDanger) <-- indicator.map(_.tone == Tone.Danger),
             dataAttr("testid") <-- indicator.map(current => s"topic-indicator-${slug(current.label)}"),
-            text <-- indicator.map(_.value)
+            // The chip replaces the text rather than wrapping it, so the `dd` holds either a figure or a
+            // chip and never both. The `data-testid` and the value are the same either way, which is what
+            // keeps the existing assertions reading the value out of one place.
+            child <-- indicator.map(current =>
+              if current.categorical then Tag(label = Val(current.value), tone = Tone.Info)
+              else span(current.value)
+            )
           )
         )
       )
