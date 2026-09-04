@@ -582,6 +582,29 @@ reached. `GET /clusters/{id}/dashboard` is deliberately **not** built in M1: wit
 topic counts out of scope, what remains of it is exactly `GET /clusters/{id}`, which the cluster
 service already serves.
 
+`GET /clusters/{clusterId}/topics/{topicName}/overview` is **implemented as of M2** by
+`services/gateway/application/.../topic/TopicOverviewUseCase.scala`, served by
+`TopicOverviewRoutes`. It is the second aggregation, and with two of them the pattern is now a
+pattern rather than a one-off, so it is worth stating what the two share and where they differ.
+
+Both never fail because an upstream did not answer: every path returns a document, a transport
+failure is still reported to the capability signals, and the failing part is a section rather
+than a status code. The topic overview adds the rule for a section whose service **does not
+exist in this build at all**: it is `not_configured`, which a screen hides, and not
+`unavailable`, which a screen shows with a reason so somebody can go and fix it (ADR-032). In M2
+that applies to four of its five sections — consumer groups, connectors, ACLs and schemas — and
+`unavailable` there would put four permanent red panels on every topic page of every
+installation, which trains operators to ignore the colour that matters.
+
+It also draws the line the cluster overview did not have to: a topic that does not exist is a
+**404**, not a document with an empty topic section. "No such topic" and "the topic service could
+not answer" have different remedies, and a page that renders an empty topic for one that was
+deleted an hour ago looks like an answer.
+
+Adding a section is a registration — a `SectionSource` under the section's name, plus the client
+it calls — and `TopicOverviewSuite.addingASectionIsAMapEntry` proves it by registering one in a
+test. That is how M4's consumer-groups section arrives without this file changing.
+
 ## 7. Streaming (SSE) envelope
 
 Applies to message browsing, event tracking, KSQL responses, capability changes, live

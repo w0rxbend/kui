@@ -6,7 +6,7 @@ import munit.FunSuite
 import sttp.apispec.openapi.circe.*
 
 import kui.gateway.api.routing.ServiceContracts
-import kui.gateway.contract.ClusterOverviewEndpoints
+import kui.gateway.contract.{ClusterOverviewEndpoints, TopicOverviewEndpoints}
 import kui.kernel.ServiceId
 
 /** That the published description of KUI's API describes the API a browser can actually call.
@@ -19,9 +19,10 @@ import kui.kernel.ServiceId
 final class MergedDocumentShapeSuite extends FunSuite {
 
   private val cluster = ServiceId.unsafe("cluster")
+  private val topic = ServiceId.unsafe("topic")
 
   private val merged = DocsRoutes
-    .document[IO](List(cluster), List("/"))
+    .document[IO](List(cluster, topic), List("/"))
     .fold(problems => fail(problems), identity)
 
   private val paths: List[String] = OpenApiMerge.paths(merged)
@@ -81,13 +82,14 @@ final class MergedDocumentShapeSuite extends FunSuite {
   }
 
   test("thePublicClusterPathsEqualTheDerivedSet") {
-    // Derived from the proxied list plus the gateway's own, so a seventh endpoint needs no edit here: add
-    // one and forget to regenerate the document, and this fails.
-    val derived = ServiceContracts
-      .proxied(cluster)
+    // Derived from the proxied lists plus the gateway's own two aggregations, so a new endpoint needs no
+    // edit here: add one and forget to regenerate the document, and this fails.
+    val derived = List(cluster, topic)
+      .flatMap(ServiceContracts.proxied)
       .map(endpoint => endpoint.showPathTemplate().takeWhile(_ != '?').replace("/internal/v1", "/api/v1"))
 
-    val own = ClusterOverviewEndpoints.all.map(_ => "/api/v1/clusters")
+    val own = ClusterOverviewEndpoints.all.map(_ => "/api/v1/clusters") ++
+      TopicOverviewEndpoints.all.map(_.showPathTemplate().takeWhile(_ != '?'))
     val documented = paths.filter(_.startsWith("/api/v1/clusters"))
 
     assertEquals(documented.sorted, (derived ++ own).sorted)

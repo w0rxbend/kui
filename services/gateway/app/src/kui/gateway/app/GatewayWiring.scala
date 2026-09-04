@@ -18,7 +18,14 @@ import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.api.openapi.DocsRoutes
 import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
-import kui.gateway.api.{CapabilityRoutes, ClusterOverviewRoutes, EdgeHeaders, GatewayApi, InfoRoutes}
+import kui.gateway.api.{
+  CapabilityRoutes,
+  ClusterOverviewRoutes,
+  EdgeHeaders,
+  GatewayApi,
+  InfoRoutes,
+  TopicOverviewRoutes
+}
 import kui.gateway.application.capability.{
   CapabilityRegistry,
   CapabilitySignals,
@@ -29,6 +36,7 @@ import kui.gateway.application.capability.{
 import kui.gateway.application.client.ServiceClients
 import kui.gateway.application.cluster.ClusterOverviewUseCase
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
+import kui.gateway.application.topic.TopicOverviewUseCase
 import kui.http.health.ReadinessCheck
 import kui.http.{BasePath, Cors, ErrorInterceptor}
 import kui.kernel.ServiceId
@@ -163,6 +171,12 @@ object GatewayWiring {
       overview <- clients.all
         .find(_.service == ClusterServiceId)
         .traverse(ClusterOverviewUseCase.resource[F](_, registry, signals, logger))
+      // The topic page's aggregation, on the same terms: a deployment with no topic service configured has
+      // no client and therefore no route, so `/overview` 404s rather than answering a document whose topic
+      // section is permanently unavailable for a service nobody deployed.
+      topicOverview <- clients.all
+        .find(_.service == TopicServiceId)
+        .traverse(TopicOverviewUseCase.resource[F](_, signals, telemetry))
       instrumentation <- Resource.eval(
         KuiInterceptors.serverInterceptors[F](telemetry, GatewayApi.ServiceName)
       )
@@ -173,6 +187,7 @@ object GatewayWiring {
         sessions,
         CapabilityRoutes[F](registry, trigger, telemetry, logger) ++
           overview.toList.flatMap(ClusterOverviewRoutes[F](_)) ++
+          topicOverview.toList.flatMap(TopicOverviewRoutes[F](_)) ++
           proxied ++
           DocsRoutes[F](docs, BasePath.normalize(config.server.basePath))
       ),
@@ -295,6 +310,9 @@ object GatewayWiring {
 
   /** The service whose list endpoint the gateway aggregates rather than proxies. */
   val ClusterServiceId: ServiceId = ServiceId.unsafe("cluster")
+
+  /** The service the topic-page aggregation calls. Its other five endpoints are proxied untouched. */
+  val TopicServiceId: ServiceId = ServiceId.unsafe("topic")
 
   /** The proxied routes: every configured service the gateway holds a contract for, minus the endpoints the
     * gateway answers itself.

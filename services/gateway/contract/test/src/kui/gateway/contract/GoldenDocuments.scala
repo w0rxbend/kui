@@ -116,7 +116,70 @@ object GoldenDocuments {
       |  "generatedAt" : "2026-09-03T10:11:13.000Z"
       |}""".stripMargin
 
+  /** The topic page's document, as an M2 deployment really answers it: one filled section and four saying
+    * this deployment has no such service.
+    *
+    * `not_configured` and not `unavailable`, for all four. `unavailable` would put four permanent red panels
+    * on every topic page of every installation, and an operator shown four errors that never change stops
+    * reading errors (DEVPLAN §10 D10, ADR-032).
+    */
+  val topicOverview: String =
+    """{
+      |  "topic" : {
+      |    "status" : "ok",
+      |    "data" : {
+      |      "row" : {
+      |        "name" : "orders",
+      |        "internal" : false,
+      |        "partitionCount" : 1,
+      |        "replicationFactor" : 3,
+      |        "outOfSyncReplicas" : 0,
+      |        "offlinePartitions" : 0,
+      |        "messageCount" : 617283,
+      |        "sizeBytes" : 4741632
+      |      },
+      |      "partitions" : [
+      |        {
+      |          "partition" : 0,
+      |          "leader" : 1,
+      |          "replicas" : [
+      |            {
+      |              "broker" : 1,
+      |              "leader" : true,
+      |              "inSync" : true
+      |            }
+      |          ],
+      |          "earliestOffset" : 0,
+      |          "latestOffset" : 617283,
+      |          "messageCount" : 617283,
+      |          "sizeBytes" : 4741632
+      |        }
+      |      ],
+      |      "cleanupPolicy" : "delete",
+      |      "segmentCount" : 24
+      |    },
+      |    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+      |  },
+      |  "consumerGroups" : {
+      |    "status" : "not_configured"
+      |  },
+      |  "connectors" : {
+      |    "status" : "not_configured"
+      |  },
+      |  "acls" : {
+      |    "status" : "not_configured"
+      |  },
+      |  "schemas" : {
+      |    "status" : "not_configured"
+      |  },
+      |  "generatedAt" : "2026-09-03T10:11:13.000Z"
+      |}""".stripMargin
+
   /** Every sample, by file name, for the JVM suite to walk. */
   val all: Map[String, String] =
-    Map("app-info.json" -> appInfo, "cluster-overview.json" -> clusterOverview)
+    Map(
+      "app-info.json" -> appInfo,
+      "cluster-overview.json" -> clusterOverview,
+      "topic-overview.json" -> topicOverview
+    )
 }

@@ -35,7 +35,10 @@ object DocsRoutes {
       // The dashboard: a public path the gateway answers itself rather than proxying, so it is documented
       // from the gateway's own list. Taking it from the cluster service's list instead would publish that
       // service's response shape for a path that answers with a different one.
-      kui.gateway.contract.ClusterOverviewEndpoints.all
+      kui.gateway.contract.ClusterOverviewEndpoints.all ++
+      // The topic page's aggregation, for the same reason: a public path the gateway answers itself, whose
+      // response shape is the gateway's own and not the topic service's.
+      kui.gateway.contract.TopicOverviewEndpoints.all
 
   /** Everything the gateway documents: its own endpoints plus every configured service it can route. */
   def documentation[F[_]](services: List[ServiceId]): List[ServiceDoc] =

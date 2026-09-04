@@ -29,6 +29,7 @@ final class OpenApiMergeSuite extends FunSuite {
 
   private val gatewayDoc = ServiceDoc(gateway, DocsRoutes.gatewayEndpoints[IO])
   private val clusterDoc = ServiceDoc(cluster, ClusterEndpoints.all)
+  private val topicDoc = ServiceDoc(ServiceId.unsafe("topic"), kui.topic.contract.TopicEndpoints.all)
 
   test("mergesGatewayAndServiceEndpoints") {
     assertEquals(
@@ -45,9 +46,35 @@ final class OpenApiMergeSuite extends FunSuite {
         "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs",
         "/api/v1/clusters/{clusterId}/log-dirs",
         "/api/v1/clusters/{clusterId}/refresh",
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview",
         "/api/v1/info"
       )
     )
+  }
+
+  test("theTopicServicesPathsAreMerged") {
+    // Five proxied paths, at their public prefix, alongside the gateway's own topic-overview path. A
+    // service's endpoints reaching the published document is what makes an integrator able to find them.
+    assertEquals(
+      OpenApiMerge.paths(merged(List(gatewayDoc, clusterDoc, topicDoc))).filter(_.contains("/topics")),
+      List(
+        "/api/v1/clusters/{clusterId}/topics",
+        "/api/v1/clusters/{clusterId}/topics/refresh",
+        "/api/v1/clusters/{clusterId}/topics/{topicName}",
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/config",
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview",
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/partitions"
+      )
+    )
+  }
+
+  test("noPathIsDeclaredByTwoServices") {
+    // Two services claiming one public path would merge into one document entry with whichever operation
+    // won, and an integrator would generate a client for an endpoint that does not exist. The gateway's own
+    // topic-overview path is in this comparison too, because it is the one most likely to collide.
+    val all = OpenApiMerge.paths(merged(List(gatewayDoc, clusterDoc, topicDoc)))
+
+    assertEquals(all.distinct, all)
   }
 
   test("usesPublicApiV1Paths") {

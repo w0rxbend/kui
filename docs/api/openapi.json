@@ -527,6 +527,59 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/overview" : {
+      "get" : {
+        "tags" : [
+          "topics",
+          "gateway"
+        ],
+        "summary" : "Everything the topic page shows, in one document",
+        "description" : "Answers 200 whenever the topic exists, however many of its five sections could be filled: a section whose service this deployment does not have is not_configured and is hidden, one whose service could not be reached is unavailable and is shown with its reason. A topic that does not exist is a 404, because that is a different fact from a service that could not answer.",
+        "operationId" : "gateway.topic.overview",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicOverviewDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}/topics" : {
       "get" : {
         "tags" : [
@@ -1370,6 +1423,40 @@
           },
           "partitionsTruncated" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "TopicOverviewDto" : {
+        "title" : "TopicOverviewDto",
+        "description" : "Everything the topic page shows, with each part able to be missing on its own",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "consumerGroups",
+          "connectors",
+          "acls",
+          "schemas",
+          "generatedAt"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "consumerGroups" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "connectors" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "acls" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "schemas" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "generatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
           }
         }
       },

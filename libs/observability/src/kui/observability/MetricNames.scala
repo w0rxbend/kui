@@ -32,6 +32,15 @@ object MetricNames {
   /** What the UI is allowed to show, per service and cluster (ADR-039). */
   val CapabilityState: String = "kui.capability.state" // {service, cluster, state}
 
+  /** How often each section of an aggregated response is served in each state.
+    *
+    * Labelled `{aggregation, section, status}`. It is the number that answers "how often do operators see a
+    * degraded topic page, and which part of it is degrading" — which no per-endpoint metric can, because an
+    * aggregation that answers 200 with four missing sections looks perfectly healthy to a status-code
+    * histogram.
+    */
+  val AggregationSection: String = "kui.gateway.aggregation.section" // {aggregation, section, status} (M2)
+
   val StreamEvents: String = "kui.stream.events" // {service, stream, event}
 
   /** Open streams. A gauge that never returns to zero is a leak, which is exactly what it is for. */
