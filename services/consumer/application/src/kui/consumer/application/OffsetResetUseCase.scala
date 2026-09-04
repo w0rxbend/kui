@@ -138,7 +138,11 @@ object OffsetResetUseCase {
               MutationRecord.offsetsOf(plan.offsets)
             )(port.applyOffsets(group, plan.offsets))
           )
-        } yield plan).value
+          // The receipt says what each partition's offset *was*, and this is the only place that
+          // knows: the token carries the proposed offsets and nothing else, so a plan read back out
+          // of one has no `current` in it. Without this the wizard's receipt renders an em dash in
+          // every "from" cell, on the one screen whose entire job is to say what moved where.
+        } yield plan.withCurrent(before)).value
       }
 
       /** Existence is confirmed by listing, never by describing.

@@ -148,6 +148,26 @@ final class MutationSuite extends KuiIOSuite {
     }
   }
 
+  test("the apply receipt says what each partition's offset was, not a dash") {
+    // The plan token carries the offsets that will be *written* and nothing else, so a plan read back
+    // out of one has no `current` in it. The receipt is the document the wizard renders after the
+    // write, and its whole job is to say "partition 0 moved from 40 to 0" — which it cannot do from
+    // the token alone. The offsets the apply step already reads for the audit record are what fill it.
+    for {
+      rigged <- rig(emptyGroup)
+      (port, _, guard, _) = rigged
+      reset <- resetUseCase(port, guard, readOnly = false)
+      planned <- reset.plan(ConsumerRig.Cluster, group, scope, ResetSpec.ToEarliest)
+      token = planned.map(_.token).getOrElse(fail("no plan"))
+      applied <- reset.apply(ConsumerRig.Cluster, group, token)
+    } yield {
+      val partitions = applied.map(_.partitions).getOrElse(fail(s"apply failed: $applied"))
+      assertEquals(partitions.map(_.current.map(_.value)), List(Some(40L)))
+      assertEquals(partitions.map(_.proposed.value), List(0L))
+      assertEquals(partitions.map(_.delta), List(Some(-40L)))
+    }
+  }
+
   test("a group that gained a member between planning and applying is refused before the write") {
     for {
       rigged <- rig(emptyGroup)
