@@ -46,10 +46,16 @@ object KuiServer {
     * Kafka broker that has gone away. Raise a service's timeout above this number and the server starts
     * answering first.
     *
+    * Thirty rather than Tapir's own twenty, so that the ten-second call bound has room to be exceeded and
+    * still lose the race. Two browser requests for the same unreachable cluster queue behind one Kafka
+    * client: the second waits for the first to give up and then times out itself, and one measured against
+    * the quickstart with its broker stopped took 20.008 seconds end to end. At Tapir's default that is a coin
+    * toss between KUI's answer and Netty's.
+    *
     * It does not bound a Server-Sent Events stream: the response begins immediately and the timeout is on
     * beginning it, not on finishing it.
     */
-  val DefaultResponseTimeout: FiniteDuration = 20.seconds
+  val DefaultResponseTimeout: FiniteDuration = 30.seconds
 
   /** Where the server actually ended up listening.
     *
