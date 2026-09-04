@@ -10,12 +10,15 @@ import org.typelevel.log4cats.StructuredLogger
 
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
+import kui.config.{ClusterConfig, TopicsConfig}
 import kui.gateway.api.InfoRoutes
 import kui.gateway.app.{GatewayServer, GatewayWiring}
 import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.kernel.ServiceId
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
+import kui.topic.api.TopicApi
+import kui.topic.app.TopicWiring
 
 /** The all-in-one deployment's composition root (ADR-005, ADR-010).
   *
@@ -101,7 +104,14 @@ object AllInOneWiring {
       // Until this line existed the all-in-one handed the service `ClusterServiceConfig.Default`, so
       // `kui.clusters[]` and `kui.store.*` were silently dropped: the quickstart's configuration named a
       // broker, the startup log said "resolved 0 configured cluster(s)", and the dashboard was empty.
-      clients <- services[F](config.clusterView, telemetry, principals, logger)
+      clients <- services[F](
+        config.clusterView,
+        config.clusters,
+        config.topics,
+        telemetry,
+        principals,
+        logger
+      )
       gateway <- GatewayWiring.over[F](
         config.gatewayView,
         telemetry,
@@ -117,7 +127,7 @@ object AllInOneWiring {
     * which milestone's services are actually in this binary. [[services]] must agree with it, and
     * `AllInOneWiringSuite` asserts that it does rather than leaving the two to drift.
     */
-  val Services: List[ServiceId] = List(ClusterApi.Id)
+  val Services: List[ServiceId] = List(ClusterApi.Id, TopicApi.Id)
 
   /** Every KUI service, wired in this process and reachable in memory.
     *
@@ -128,24 +138,35 @@ object AllInOneWiring {
     */
   def services[F[_]: {Async, Parallel, Files}](
       cluster: ClusterServiceConfig,
+      clusters: List[ClusterConfig],
+      topics: TopicsConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
   ): Resource[F, ServiceClients[F]] =
-    ClusterWiring
-      .make[F](cluster, telemetry, principals, logger)
-      .map(cluster =>
-        ServiceClients.of[F](
-          List[ServiceClient[F]](
-            InProcessServiceClient.make[F](
-              ClusterApi.Id,
-              cluster.routes,
-              cluster.interceptors,
-              principals
-            )
-          )
+    for {
+      clusterService <- ClusterWiring.make[F](cluster, telemetry, principals, logger)
+      // The topic service reads the same `kui.clusters[]` this process already loaded rather than
+      // asking the cluster service for it over HTTP (ADR-046's profile client). One process calling
+      // itself over a socket to read a list it is holding in memory would add a listener, a timeout
+      // and a failure mode to a lookup that cannot fail; see `ConfiguredClusterProfiles`.
+      topicService <- TopicWiring.make[F](clusters, topics.refreshInterval, telemetry, principals, logger)
+    } yield ServiceClients.of[F](
+      List[ServiceClient[F]](
+        InProcessServiceClient.make[F](
+          ClusterApi.Id,
+          clusterService.routes,
+          clusterService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          TopicApi.Id,
+          topicService.routes,
+          topicService.interceptors,
+          principals
         )
       )
+    )
 
   /** Says out loud which configured keys this deployment shape is not going to act on.
     *

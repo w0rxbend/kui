@@ -1,7 +1,15 @@
 package kui.allinone
 
 import kui.cluster.app.ClusterServiceConfig
-import kui.config.{ClusterConfig, GatewayConfig, KuiConfig, ServerConfig, StoreConfig, TelemetryConfig}
+import kui.config.{
+  ClusterConfig,
+  GatewayConfig,
+  KuiConfig,
+  ServerConfig,
+  StoreConfig,
+  TelemetryConfig,
+  TopicsConfig
+}
 import kui.gateway.app.GatewayServiceConfig
 
 /** Everything the all-in-one process reads out of the configuration, and nothing else.
@@ -43,7 +51,8 @@ final case class AllInOneConfig(
     gateway: GatewayConfig,
     telemetry: TelemetryConfig,
     clusters: List[ClusterConfig],
-    store: StoreConfig
+    store: StoreConfig,
+    topics: TopicsConfig
 ) {
 
   /** The same settings in the shape `GatewayWiring` wants.
@@ -75,7 +84,14 @@ object AllInOneConfig {
 
   /** The all-in-one deployment's slice of a loaded configuration. */
   def from(config: KuiConfig): AllInOneConfig =
-    AllInOneConfig(config.server, config.gateway, config.telemetry, config.clusters, config.store)
+    AllInOneConfig(
+      config.server,
+      config.gateway,
+      config.telemetry,
+      config.clusters,
+      config.store,
+      config.topics
+    )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry
     * exporter, and — correctly for this shape — no upstream addresses and no signing keys. Unlike a single

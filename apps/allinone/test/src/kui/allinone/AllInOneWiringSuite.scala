@@ -9,7 +9,14 @@ import cats.effect.kernel.Resource
 import cats.syntax.all.*
 
 import kui.cluster.app.ClusterServiceConfig
-import kui.config.{GatewayConfig, PrincipalKeyConfig, SafeUrl, ServerConfig, UpstreamServiceConfig}
+import kui.config.{
+  GatewayConfig,
+  PrincipalKeyConfig,
+  SafeUrl,
+  ServerConfig,
+  TopicsConfig,
+  UpstreamServiceConfig
+}
 import kui.gateway.api.routing.ContractRouting
 import kui.gateway.app.GatewayServer
 import kui.http.KuiServer
@@ -80,7 +87,14 @@ final class AllInOneWiringSuite extends KuiIOSuite {
     // Nothing forces it to agree with `services`, so this is what forces it.
     FakeStructuredLogger[IO].flatMap { logger =>
       AllInOneWiring
-        .services[IO](ClusterServiceConfig.Default, Telemetry.noop[IO], AllInOneFixture.principals, logger)
+        .services[IO](
+          ClusterServiceConfig.Default,
+          clusters = Nil,
+          topics = TopicsConfig.Default,
+          Telemetry.noop[IO],
+          AllInOneFixture.principals,
+          logger
+        )
         .use(clients => IO(assertEquals(clients.all.map(_.service), AllInOneWiring.Services)))
     }
   }
@@ -167,7 +181,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         .map { entries =>
           val context = entries.headOption.map(_.context).getOrElse(Map.empty)
           assertEquals(context.get("deployment"), Some("all-in-one"))
-          assertEquals(context.get("services"), Some("cluster"))
+          assertEquals(context.get("services"), Some("cluster,topic"))
         }
     }
   }
