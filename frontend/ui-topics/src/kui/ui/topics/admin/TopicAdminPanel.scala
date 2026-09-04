@@ -7,6 +7,7 @@ import kui.message.contract.{PurgePlanDto, PurgeReceiptDto}
 import kui.topic.contract.dto.{DeletionPlanDto, PartitionPlanDto, PlanWarningDto}
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
+import kui.ui.kernel.state.FeatureState
 import kui.ui.topics.{Messages, TopicsCss}
 
 /** Where a plan-confirmed change has got to. One value, so the panel cannot be in two of these at once.
@@ -67,7 +68,21 @@ object TopicAdminPanel {
       applyDeletion: String => EventStream[Either[ApiError, DeletionPlanDto]],
       planPurge: () => EventStream[Either[ApiError, PurgePlanDto]],
       applyPurge: String => EventStream[Either[ApiError, PurgeReceiptDto]],
-      onDeleted: () => Unit
+      onDeleted: () => Unit,
+      /** Whether this user may delete this topic — E4's worked example of RBAC gating, and the shape every
+        * other write control in the product should copy.
+        *
+        * The decision is made by `Rbac.decide` in `libs/security-core`, from the permission list `/auth/me`
+        * returned, which means the interface's answer and the server's come from one function rather than
+        * from two implementations that can disagree. `Val(true)` by default so that a caller which has not
+        * been converted yet behaves exactly as it did before; the topic detail page passes the real signal.
+        */
+      deletePermitted: Signal[Boolean] = Val(true),
+      /** Whether the topic service can act at all. Merged with `deletePermitted` into one tooltip by
+        * `ActionPermissionWrapper`, so a user who both lacks permission and has a service down is told both,
+        * rather than fixing one and discovering the other.
+        */
+      deleteCapability: Signal[FeatureState] = Val(FeatureState.Ready)
   ): HtmlElement = {
 
     /** Whether the topic has been deleted from under this panel.
@@ -97,7 +112,9 @@ object TopicAdminPanel {
         () => {
           gone.set(true)
           onDeleted()
-        }
+        },
+        deletePermitted,
+        deleteCapability
       )
     )
   }
@@ -328,7 +345,9 @@ object TopicAdminPanel {
       topic: TopicName,
       plan: () => EventStream[Either[ApiError, DeletionPlanDto]],
       applyPlan: String => EventStream[Either[ApiError, DeletionPlanDto]],
-      onDeleted: () => Unit
+      onDeleted: () => Unit,
+      permitted: Signal[Boolean],
+      capability: Signal[FeatureState]
   ): HtmlElement = {
     val step: Var[ChangeStep[DeletionPlanDto]] = Var(ChangeStep.Idle)
     val problem: Var[Option[String]] = Var(None)
@@ -341,15 +360,23 @@ object TopicAdminPanel {
       dataAttr("testid") := "topic-delete-section",
       h3(cls := TopicsCss.DangerSectionTitle, Messages.DeleteTitle),
       p(cls := TopicsCss.FormHint, Messages.DeleteHint),
-      Button(
-        label = Val(Messages.Preview),
-        onClick = Observer[Unit] { _ =>
-          problem.set(None)
-          step.set(ChangeStep.Planning)
-          planning.set(true)
-        },
-        disabled = step.signal.map(isBusy),
-        testId = Some("topic-delete-plan")
+      // Both halves of the delete are gated, not just the last one. Planning a delete the user may not
+      // perform renders a page of counts and warnings that ends in a refusal, which is a worse experience
+      // than a disabled button that says why.
+      ActionPermissionWrapper(
+        action = Button(
+          label = Val(Messages.Preview),
+          onClick = Observer[Unit] { _ =>
+            problem.set(None)
+            step.set(ChangeStep.Planning)
+            planning.set(true)
+          },
+          disabled = step.signal.map(isBusy),
+          testId = Some("topic-delete-plan")
+        ),
+        capability = capability,
+        permitted = permitted,
+        testId = Some("topic-delete-plan-gate")
       ).amend(cls(TopicsCss.Hidden) <-- step.signal.map(isApplied)),
       child.maybe <-- step.signal.map {
         case ChangeStep.Planned(plan) =>
@@ -362,11 +389,16 @@ object TopicAdminPanel {
                 Messages.deletionPlan(topic.value, plan.partitions, plan.records)
               ),
               warnings(plan.warnings),
-              Button(
-                label = Val(Messages.DeleteConfirm),
-                onClick = Observer[Unit](_ => confirming.set(true)),
-                variant = ButtonVariant.Danger,
-                testId = Some("topic-delete-apply")
+              ActionPermissionWrapper(
+                action = Button(
+                  label = Val(Messages.DeleteConfirm),
+                  onClick = Observer[Unit](_ => confirming.set(true)),
+                  variant = ButtonVariant.Danger,
+                  testId = Some("topic-delete-apply")
+                ),
+                capability = capability,
+                permitted = permitted,
+                testId = Some("topic-delete-apply-gate")
               )
             )
           )

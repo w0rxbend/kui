@@ -126,7 +126,9 @@ object SettingsTab {
           cls(TopicsCss.SettingOverridden) := entry.overridden,
           dataAttr("testid") := s"topic-setting-${entry.name}",
           entry.name,
-          entry.documentation.map(doc => span(cls := TopicsCss.SettingDoc, doc))
+          entry.documentation
+            .flatMap(SettingDocumentation.plainText)
+            .map(doc => span(cls := TopicsCss.SettingDoc, doc))
         )
     ),
     Column[TopicConfigEntryDto](

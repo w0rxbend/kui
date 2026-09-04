@@ -124,8 +124,26 @@ port_in_use() {
   fi
 }
 
+# Whether any container of *this* stack already exists, running or stopped.
+#
+# `compose ps -q --all` lists the ids Compose knows about for this project, so it answers about our
+# own containers and nobody else's.
+stack_exists() {
+  [ -n "$(compose ps -q --all 2>/dev/null)" ]
+}
+
 check_ports() {
   local blocked=()
+
+  # Running `demo.sh` again while the demonstration is up is a normal thing to do -- it is how you
+  # bring back a cluster you stopped, and how you pick up a rebuilt KUI image. In that situation the
+  # only thing listening on these ports is this stack itself, and telling the user to "choose free
+  # ports" would be advice that breaks what is already working. Compose is perfectly capable of
+  # re-converging containers it owns, so hand the job to it.
+  if stack_exists; then
+    return
+  fi
+
   port_in_use "${KUI_PORT}"     && blocked+=("${KUI_PORT} (KUI, override with KUI_PORT)")
   port_in_use "${DEV_PORT}"     && blocked+=("${DEV_PORT} (development broker, override with KUI_DEMO_DEV_PORT)")
   port_in_use "${PROD_PORT_1}"  && blocked+=("${PROD_PORT_1} (production broker 1, override with KUI_DEMO_PROD_PORT_1)")

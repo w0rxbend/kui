@@ -10,9 +10,11 @@ import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.error.ErrorCode
 import kui.kernel.{ClusterId, TopicName}
 import kui.message.contract.BrowseAddress
+import kui.security.rbac.{Action, Resource}
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
 import kui.ui.kernel.feature.{FeatureId, FeatureSlots, GuestTabs, PanelContext}
+import kui.ui.kernel.state.{PermissionStore, Permissions}
 import kui.ui.topics.admin.{EditSettingDialog, TopicAdminPanel}
 import kui.ui.topics.{Messages, TopicTab, TopicsCss, TopicsQueries}
 
@@ -63,7 +65,11 @@ object TopicDetailPage {
       zone: Signal[String],
       backHref: String,
       now: () => Instant = () => Instant.now(),
-      partitionViewportHeight: Var[Int] = Var(0)
+      partitionViewportHeight: Var[Int] = Var(0),
+      /** What this session is allowed to do. The application's one store by default; a suite passes its own,
+        * so a test can build a user who may delete and a user who may not without touching global state.
+        */
+      permissions: Permissions = PermissionStore.current
   ): HtmlElement = {
 
     val key = (cluster, topic)
@@ -118,7 +124,11 @@ object TopicDetailPage {
       applyDeletion = token => queries.deleteTopic(cluster, topic, token),
       planPurge = () => queries.planPurge(cluster, topic),
       applyPurge = token => queries.purge(cluster, topic, token),
-      onDeleted = () => deleted.set(true)
+      onDeleted = () => deleted.set(true),
+      // E4's worked example. Every other write control in the product — create, alter, produce, resend,
+      // purge, offset reset, group delete — gates the same way: one call to the store, one `Action`, and
+      // the wrapper merges the answer with the capability state.
+      deletePermitted = permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicDelete)
     )
 
     val ownTabs: Signal[List[Tab]] =
