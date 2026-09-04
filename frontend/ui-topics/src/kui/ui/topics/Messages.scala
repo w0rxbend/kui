@@ -133,6 +133,22 @@ object Messages {
   val NoPartitions: String =
     "The broker reported no partitions for this topic, which is unusual — a topic always has at least one."
 
+  /** The same table with no rows, when the data on screen came from the topic *list* snapshot because the
+    * cluster could not be reached.
+    *
+    * It has to be a different sentence, because the fact is different and the other sentence is false here.
+    * The snapshot behind the list holds counts, not partition assignments — half a million objects for ten
+    * thousand topics of fifty partitions is why — so an empty table under a stale badge means "KUI has not
+    * got this", not "the broker says there are none". Telling an operator during an outage that their topic
+    * has no partitions is the worst moment to be wrong about it.
+    */
+  val NoPartitionsStaleTitle: String = "Partitions not available"
+
+  val NoPartitionsStale: String =
+    "KUI could not reach the cluster, and the partition assignment is not part of what it keeps between " +
+      "scrapes. The counts above are from the last successful scrape; the table fills in as soon as the " +
+      "cluster answers again."
+
   val ColumnSetting: String = "Setting"
   val ColumnValue: String = "Value"
   val ColumnDefault: String = "Default"

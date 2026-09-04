@@ -23,9 +23,15 @@ import kui.ui.topics.{Messages, TopicsCss}
   */
 object PartitionTable {
 
+  /** @param stale
+    *   whether what is on screen came from the topic-list snapshot rather than from a live read. It changes
+    *   only what an *empty* table says, and it has to: the live read's "the broker reported no partitions" is
+    *   a false statement about a topic whose partitions KUI simply never had.
+    */
   def apply(
       partitions: Signal[List[PartitionDto]],
-      viewportHeight: Var[Int] = Var(0)
+      viewportHeight: Var[Int] = Var(0),
+      stale: Signal[Boolean] = Val(false)
   ): HtmlElement =
     VirtualizedTable[PartitionDto](
       // Ordered by id, always. A partition table is read by looking for a number, and a table that arrived
@@ -33,7 +39,14 @@ object PartitionTable {
       rows = partitions.map(_.sortBy(_.partition.value)),
       columns = columns,
       rowKey = _.partition.value.toString,
-      emptyState = () => EmptyState(Messages.NoPartitionsTitle, description = Some(Messages.NoPartitions)),
+      emptyState = () =>
+        div(
+          child <-- stale.map { degraded =>
+            if degraded then
+              EmptyState(Messages.NoPartitionsStaleTitle, description = Some(Messages.NoPartitionsStale))
+            else EmptyState(Messages.NoPartitionsTitle, description = Some(Messages.NoPartitions))
+          }
+        ),
       viewportHeight = viewportHeight,
       testId = Some("partition-table")
     )

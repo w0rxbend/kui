@@ -135,3 +135,18 @@ th {
   white-space: nowrap;
   border: 0;
 }
+
+/* A link's underline is drawn far enough below the text that an underscore in the text is still
+ * visible.
+ *
+ * This is not a matter of taste. Browsers draw the default underline on the baseline, which is
+ * exactly where an underscore glyph is, so `_schemas` renders indistinguishably from `schemas` —
+ * and on a Kafka cluster those are two different topics, one of which is conventionally
+ * infrastructure's and one of which is yours. It was found by looking at the quickstart's topic
+ * list, where `_schemas` is the first row.
+ *
+ * `from-font` where the font says where its underline belongs, and a small offset otherwise. */
+a {
+  text-underline-position: from-font;
+  text-underline-offset: 0.18em;
+}

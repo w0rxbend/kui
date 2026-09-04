@@ -97,7 +97,7 @@ object TopicDetailPage {
           Tab(
             TopicTab.Overview.toString,
             Messages.TabOverview,
-            () => overviewTab(detail, partitionViewportHeight)
+            () => overviewTab(detail, topicSection, partitionViewportHeight)
           ),
           Tab(
             TopicTab.Settings.toString,
@@ -176,9 +176,16 @@ object TopicDetailPage {
 
   private def overviewTab(
       detail: Signal[Option[TopicDetailDto]],
+      section: Signal[Option[Section[TopicDetailDto]]],
       partitionViewportHeight: Var[Int]
   ): HtmlElement =
-    PartitionTable(detail.map(_.map(_.partitions).getOrElse(Nil)), partitionViewportHeight)
+    PartitionTable(
+      detail.map(_.map(_.partitions).getOrElse(Nil)),
+      partitionViewportHeight,
+      // Staleness is read from the same section the badge above the table is drawn from, so the two
+      // can never disagree about whether this page is showing live data.
+      section.map(_.exists(staleReason(_).isDefined))
+    )
 
   /** A topic that is not there is a different fact from a service that could not answer, and it gets a
     * different screen: a sentence naming the topic, and no retry, because trying again will not create it.
