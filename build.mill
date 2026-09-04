@@ -1855,6 +1855,74 @@ object services extends Module {
       }
     }
 
+    /** Server logic: contract to application, `TopicError` to the HTTP envelope, principal verification
+      * and the OpenAPI document.
+      *
+      * The only layer allowed to see both an application type and a wire type, which is what makes the
+      * mapping between them (ADR-033) possible without rule A3 failing the build. It starts nothing:
+      * there is no port, no thread and no `IO` here.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.cache,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"io.scalaland::chimney::${Versions.chimney}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** Where the generated document is committed: beside the module, because the gateway merges the
+        * services' documents by walking the module tree.
+        */
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.topic.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.topic.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        // The domain's test module carries the topic fixtures the route suites build snapshots from.
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // Virtual time. "The refresh endpoint answers without waiting for the scrape" is asserted as a
+          // fact rather than as a stopwatch reading that would be flaky on a loaded machine.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}",
+          // The stub interpreter runs the real interceptor chain and the real routes without a socket.
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          // A real meter, in memory: `kui.principal.rejected` is only proven emitted by reading it back.
+          mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}"
+        )
+      }
+    }
+
     /** The published wire shape of `kui-topic-service`.
       *
       * Cross-compiled for the same reason the cluster service's is: the browser decodes exactly what
