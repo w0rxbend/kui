@@ -5,7 +5,8 @@ import scala.jdk.CollectionConverters.*
 import org.apache.kafka.clients.admin.{ConfigEntry, KuiTopicTestSynonyms}
 import org.apache.kafka.common.{Node, TopicPartition, TopicPartitionInfo}
 
-import kui.kernel.{BrokerId, TopicName}
+import kui.kafka.admin.{LogDir, ReplicaInfo}
+import kui.kernel.{BrokerId, PartitionId, TopicName}
 import kui.testkit.KuiSuite
 import kui.topic.domain.ConfigSource
 
@@ -86,6 +87,66 @@ final class KafkaTopicAdminSuite extends KuiSuite {
       KafkaTopicAdmin.leadPartitions(description),
       List(new TopicPartition(topic.value, 0))
     )
+  }
+
+  // ---------------------------------------------------------------------------- size on disk
+
+  private def replica(partition: Int, sizeBytes: Long, isFuture: Boolean = false): ReplicaInfo =
+    ReplicaInfo(topic, PartitionId.unsafe(partition), sizeBytes, offsetLag = 0L, isFuture = isFuture)
+
+  private def dir(path: String, replicas: ReplicaInfo*): LogDir =
+    LogDir(path, error = None, totalBytes = None, usableBytes = None, replicas = replicas.toList)
+
+  test("a partition's size is the disk every copy of it occupies, across brokers and directories") {
+    // Each broker lists the same partition once per copy it stores. Summing is what turns "1 MB on each of
+    // three brokers" into the 3 MB the topic actually costs the cluster.
+    val sizes = KafkaTopicAdmin.sizesOf(
+      List(dir("/data/1", replica(0, 1000L), replica(1, 40L)), dir("/data/2", replica(0, 2000L)))
+    )
+
+    assertEquals(sizes.get(new TopicPartition(topic.value, 0)), Some(3000L))
+    assertEquals(sizes.get(new TopicPartition(topic.value, 1)), Some(40L))
+  }
+
+  test("a replica being moved between directories is not counted twice") {
+    // `alterReplicaLogDirs` writes a second copy, flagged `isFuture`, until the move finishes. Counting it
+    // would double a partition's reported size for the whole duration of a rebalance.
+    val sizes =
+      KafkaTopicAdmin.sizesOf(List(dir("/data/1", replica(0, 1000L), replica(0, 900L, isFuture = true))))
+
+    assertEquals(sizes.get(new TopicPartition(topic.value, 0)), Some(1000L))
+  }
+
+  test("a partition with a replica on a broker that did not answer reports no size at all") {
+    // The sum of the copies that answered is a real number that is too small, and a number that is too
+    // small is worse than no number: it is indistinguishable from a topic that is genuinely that size.
+    val key = new TopicPartition(topic.value, 0)
+    val sizes = KafkaTopicAdmin.ReplicaSizes(
+      bytes = Map(key -> 1000L),
+      unreadableBrokers = Set(BrokerId.unsafe(2))
+    )
+
+    assertEquals(sizes.sizeOf(key, List(BrokerId.unsafe(1))), Some(1000L))
+    assertEquals(sizes.sizeOf(key, List(BrokerId.unsafe(1), BrokerId.unsafe(2))), None)
+  }
+
+  test("a partition carries the size the log directories reported for it") {
+    val key = new TopicPartition(topic.value, 3)
+    val bounds = KafkaTopicAdmin.OffsetBounds(Map(key -> 0L), Map(key -> 1L))
+    val sizes = KafkaTopicAdmin.ReplicaSizes(Map(key -> 4096L), Set.empty)
+    val view =
+      KafkaTopicAdmin.partitionView(topic, info(3, broker1, List(broker1), List(broker1)), bounds, sizes)
+
+    assertEquals(view.flatMap(_.sizeBytes), Some(4096L))
+  }
+
+  test("a cluster that reported no log directories leaves every size absent") {
+    val key = new TopicPartition(topic.value, 3)
+    val bounds = KafkaTopicAdmin.OffsetBounds(Map(key -> 0L), Map(key -> 1L))
+    val view = KafkaTopicAdmin
+      .partitionView(topic, info(3, broker1, List(broker1), List(broker1)), bounds)
+
+    assertEquals(view.flatMap(_.sizeBytes), None)
   }
 
   // ---------------------------------------------------------------------------- configuration

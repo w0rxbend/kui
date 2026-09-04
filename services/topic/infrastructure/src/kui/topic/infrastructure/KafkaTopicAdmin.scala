@@ -7,6 +7,7 @@ import cats.syntax.all.*
 import org.apache.kafka.clients.admin.{
   Admin,
   DescribeConfigsOptions,
+  DescribeLogDirsOptions,
   ListTopicsOptions,
   OffsetSpec,
   TopicDescription
@@ -15,7 +16,8 @@ import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.{Node, TopicCollection, TopicPartition, TopicPartitionInfo}
 import org.typelevel.log4cats.StructuredLogger
 
-import kui.kafka.{AdminClientPool, KafkaErrorMapper, KafkaFutures}
+import kui.kafka.admin.{AdminConversions, LogDir}
+import kui.kafka.{AdminBatch, AdminClientPool, KafkaErrorMapper, KafkaFutures}
 import kui.kernel.cluster.ClusterConnection
 import kui.kernel.{BrokerId, ClusterId, PartitionId, TopicName}
 import kui.topic.application.InternalTopics
@@ -75,12 +77,16 @@ final class KafkaTopicAdmin[F[_]: Async](
         // carries offsets anyway — an invariant that exists precisely so that a number nobody could
         // have measured never reaches a screen.
         offsets <- listOffsets(connection, described.values.toList.flatMap(leadPartitions))
+        // The one call that can answer "how much disk is this topic using". It is a per-broker call and
+        // it is made once per scrape, not once per page view, which is what makes it affordable here and
+        // not on the topic detail page.
+        sizes <- replicaSizes(connection, described.values.toList)
         rows = described.toList.map { case (name, description) =>
           dom.TopicSummary.of(
             name = name,
             isInternal = InternalTopics
               .isInternal(name, listings.getOrElse(name, description.isInternal), internalPrefix),
-            partitions = description.partitions.asScala.toList.flatMap(partitionView(name, _, offsets))
+            partitions = description.partitions.asScala.toList.flatMap(partitionView(name, _, offsets, sizes))
           )
         }
         incomplete = listings.keySet.diff(described.keySet).map(_ -> UnreadableTopic).toMap
@@ -222,6 +228,74 @@ final class KafkaTopicAdmin[F[_]: Async](
       }
       .map(_.toMap)
 
+  /** How many bytes each topic-partition occupies on disk, read from the brokers' log directories.
+    *
+    * `describeLogDirs` is the only Kafka call that reports a size, and it reports it per replica: the same
+    * partition is listed once by every broker that stores a copy. The sizes are summed, so a topic with three
+    * replicas reports the disk all three copies occupy together — the figure an operator sizing a cluster
+    * needs, and the one the reference products show.
+    *
+    * One call per broker, bounded by the cluster's own `admin.parallelism`, because a single call covering
+    * every broker is stalled by one slow disk and its timeout then loses every broker's figures
+    * (`research/kafka/admin-capabilities.md` §1, "Log dirs"). A broker that does not answer is not silently
+    * dropped: it comes back in `unreadableBrokers`, and every partition with a replica there reports no size
+    * at all rather than the sum of the copies that did answer, which would be a real number that is too
+    * small.
+    *
+    * The brokers to ask are taken from the replica assignments already in hand, so this adds no
+    * `describeCluster` round trip and asks only brokers that actually store something.
+    */
+  private def replicaSizes(
+      connection: ClusterConnection,
+      descriptions: List[TopicDescription]
+  ): F[ReplicaSizes] = {
+    val brokers = descriptions
+      .flatMap(_.partitions.asScala.toList.flatMap(_.replicas.asScala.toList))
+      .map(_.id)
+      .filter(_ >= 0)
+      .distinct
+      .sorted
+      .map(BrokerId.unsafe)
+
+    if brokers.isEmpty then ReplicaSizes.unavailable.pure[F]
+    else
+      AdminBatch
+        .perBroker[F, BrokerId, List[LogDir]](
+          brokers,
+          connection.admin.parallelism,
+          "describeLogDirs"
+        )(broker => logDirsOf(connection, broker))
+        .flatMap { result =>
+          val unreadable = result.skipped.keySet
+
+          val warn =
+            if unreadable.isEmpty then Async[F].unit
+            else
+              logger.warn(
+                s"cluster ${connection.id.value} did not report log directories for brokers " +
+                  s"${unreadable.toList.map(_.value).sorted.mkString(", ")}; the topics stored there " +
+                  "will report no size"
+              )
+
+          warn.as(ReplicaSizes(sizesOf(result.values.values.toList.flatten), unreadable))
+        }
+  }
+
+  /** One broker's log directories. `descriptions()` and not `allDescriptions()`, so that a broker answering
+    * for itself is not lost to another broker's failure.
+    */
+  private def logDirsOf(connection: ClusterConnection, broker: BrokerId): F[List[LogDir]] =
+    pool.run(connection, "describeLogDirs") { admin =>
+      val result =
+        admin.describeLogDirs(List(Integer.valueOf(broker.value)).asJava, new DescribeLogDirsOptions())
+
+      Option(result.descriptions.get(Integer.valueOf(broker.value))) match {
+        case Some(future) =>
+          KafkaFutures.fromFuture(Async[F].delay(future)).map(AdminConversions.logDirs)
+        case None => Async[F].pure(List.empty[LogDir])
+      }
+    }
+
   private def describeConfigs(
       connection: ClusterConnection,
       topic: TopicName
@@ -313,6 +387,49 @@ object KafkaTopicAdmin {
     val empty: OffsetBounds = OffsetBounds(Map.empty, Map.empty)
   }
 
+  /** What the brokers said about disk, and which brokers said nothing.
+    *
+    * The second field is why this is a type and not a `Map`. A partition's size is the sum over its replicas,
+    * and a sum is only correct when every replica was counted; without the set of brokers that failed there
+    * is no way to tell "this partition holds 40 MB" from "this partition holds 40 MB on the one broker of
+    * three that answered". The first is a fact and the second is an understatement that looks like a fact.
+    */
+  final case class ReplicaSizes(bytes: Map[TopicPartition, Long], unreadableBrokers: Set[BrokerId]) {
+
+    /** The partition's size, or `None` when nobody could have measured it.
+      *
+      * `None` in three situations, all of them honest: a replica sits on a broker that did not answer, the
+      * whole call was never made or failed everywhere, or the partition appeared in no directory listing at
+      * all — which is what a replica on an offline disk looks like, since the directory carrying it reports
+      * an error instead of its contents.
+      */
+    def sizeOf(partition: TopicPartition, replicas: List[BrokerId]): Option[Long] =
+      if replicas.exists(unreadableBrokers.contains) then None else bytes.get(partition)
+  }
+
+  object ReplicaSizes {
+
+    /** No sizes and no named failure: what a scrape uses before it has asked, and what the pure conversions
+      * are tested against.
+      */
+    val unavailable: ReplicaSizes = ReplicaSizes(Map.empty, Set.empty)
+  }
+
+  /** Sums the replica entries of every directory by topic-partition.
+    *
+    * Future replicas are excluded. A `isFuture` entry is a second copy being written by an in-progress
+    * `alterReplicaLogDirs` move, and counting it would report a partition as twice its size for as long as
+    * the move runs.
+    */
+  private[infrastructure] def sizesOf(dirs: List[LogDir]): Map[TopicPartition, Long] =
+    dirs
+      .flatMap(_.replicas)
+      .filterNot(_.isFuture)
+      .foldLeft(Map.empty[TopicPartition, Long]) { (totals, replica) =>
+        val key = new TopicPartition(replica.topic.value, replica.partition.value)
+        totals.updated(key, totals.getOrElse(key, 0L) + replica.sizeBytes)
+      }
+
   /** The partitions of a topic that have a leader, as Kafka's own key type. */
   private[infrastructure] def leadPartitions(description: TopicDescription): List[TopicPartition] =
     description.partitions.asScala.toList
@@ -342,23 +459,25 @@ object KafkaTopicAdmin {
   private[infrastructure] def partitionView(
       topic: TopicName,
       info: TopicPartitionInfo,
-      offsets: OffsetBounds
+      offsets: OffsetBounds,
+      sizes: ReplicaSizes = ReplicaSizes.unavailable
   ): Option[dom.PartitionView] = {
     val key = new TopicPartition(topic.value, info.partition)
     val leader = leaderOf(info).map(node => BrokerId.unsafe(node.id))
+    val replicas = info.replicas.asScala.toList.map(node => BrokerId.unsafe(node.id))
 
     dom.PartitionView
       .from(
         partition = PartitionId.unsafe(info.partition),
         leader = leader,
-        replicas = info.replicas.asScala.toList.map(node => BrokerId.unsafe(node.id)),
+        replicas = replicas,
         inSync = info.isr.asScala.toList.map(node => BrokerId.unsafe(node.id)),
         // Offsets only where there is a leader. A leaderless partition cannot answer a `listOffsets`,
         // and the invariant rejects one that carries offsets anyway — which is how a number nobody
         // could have measured is kept off a screen.
         earliestOffset = leader.flatMap(_ => offsets.earliest.get(key)),
         latestOffset = leader.flatMap(_ => offsets.latest.get(key)),
-        sizeBytes = None
+        sizeBytes = sizes.sizeOf(key, replicas)
       )
       .toOption
   }
