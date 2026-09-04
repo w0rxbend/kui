@@ -185,6 +185,19 @@ object Density {
   /** What the user asked for. Writing to it persists the choice and re-lays the tables. */
   def choice: Var[DensityChoice] = browser.choice
 
+  /** The same preference as a plain boolean, for the components that cannot be driven by the attribute.
+    *
+    * Most of the density switch is a stylesheet matter: `data-density="compact"` on `<html>` redefines
+    * `--kui-density-row-padding-y` and every ordinary table row gets shorter without any Scala involved. A
+    * *windowed* table cannot work that way, because it computes which rows are in view from the row height,
+    * so the height has to be a value the component holds rather than one the stylesheet applies behind its
+    * back. `VirtualizedTable` therefore reads this signal, and reads it by default, so that a new windowed
+    * table honours the preference without its author remembering to wire it up — which is exactly what went
+    * wrong before: the topic list and the partition table, the two screens the switch was designed for, were
+    * the two that ignored it.
+    */
+  def isCompact: Signal[Boolean] = choice.signal.map(_ == DensityChoice.Compact)
+
   /** Binds `data-density` on `<html>`. Called once by the shell. */
   def install(): Unit = browser.install()
 

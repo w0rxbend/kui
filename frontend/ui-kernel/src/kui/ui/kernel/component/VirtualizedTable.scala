@@ -6,6 +6,7 @@ import org.scalajs.dom
 
 import kui.kernel.Sort
 import kui.ui.kernel.css.KernelCss
+import kui.ui.kernel.theme.Density
 
 /** A table that keeps only the visible rows in the document.
   *
@@ -66,9 +67,11 @@ import kui.ui.kernel.css.KernelCss
   *   rows rendered above and below the viewport. Three is enough to hide a fast scroll's repaint and small
   *   enough that the document stays short.
   * @param compact
-  *   the design's density switch, per table. It changes the row's vertical padding and nothing else — not the
-  *   type size, not the control heights — because shrinking those makes an interface harder to hit, not
-  *   denser.
+  *   the design's density switch. It changes the row's vertical padding and nothing else — not the type size,
+  *   not the control heights — because shrinking those makes an interface harder to hit, not denser. It
+  *   defaults to the user's own preference (`Density.isCompact`) rather than to `false`, because the switch
+  *   in Settings is a statement about every table in the product and not about one of them; a caller passes
+  *   its own signal only where a table is deliberately exempt, and a test passes `Val(false)` to pin it.
   * @param viewportHeight
   *   the scroller's height in pixels. Supplied by the component itself from the real element in a browser;
   *   the parameter exists so a caller can both observe it and set it, which is what a jsdom suite and the
@@ -102,7 +105,7 @@ object VirtualizedTable {
       rowKey: A => String,
       rowHeight: Int = DefaultRowHeight,
       overscan: Int = 3,
-      compact: Signal[Boolean] = Val(false),
+      compact: Signal[Boolean] = Density.isCompact,
       sort: Var[Option[Sort[String]]] = Var(None),
       emptyState: () => HtmlElement = () => EmptyState.default,
       testId: Option[String] = None,

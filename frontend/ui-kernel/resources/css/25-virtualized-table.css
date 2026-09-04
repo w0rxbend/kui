@@ -82,10 +82,15 @@
   text-overflow: ellipsis;
 }
 
-/* Compact: the design's other density. One value moves. */
-.kui-vtable--compact .kui-vtable__row > .kui-table__cell {
-  font-size: var(--kui-font-size-md);
-}
+/* Compact has no rule of its own here, and that is deliberate.
+ *
+ * The row height *is* the density in a windowed table, and it arrives through the
+ * `--kui-vtable-row-height` custom property that `VirtualizedTable` writes from the same integer
+ * it does its window arithmetic with. There used to be a rule on `.kui-vtable--compact` setting
+ * `font-size` to the value `.kui-table` already sets, which changed nothing — and had it ever taken
+ * effect it would have changed the one thing the design says compact must not change. The class is
+ * still put on the root element, because it is how a test and a reader can see which density a
+ * table is in. */
 
 /* The two spacers stand in for every row outside the window. They are `role="presentation"` and
  * `aria-hidden` in the markup, so nothing announces them; here they only have to take up space and
