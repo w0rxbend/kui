@@ -74,6 +74,37 @@ final class ClusterSerdesSuite extends KuiIOSuite {
     }
   }
 
+  test("a configured serde that could not be built is named, with its reason") {
+    // The fact resolution throws away. Without it a browse of `orders-v2` renders the registry's payloads
+    // through the fallback and reports "the payload is not valid UTF-8", which is a description of the
+    // fallback's own attempt and points the reader at their data instead of at their registry.
+    serdes(List(factory(Left("the registry could not be reached"))), rules).use { cs =>
+      IO {
+        assertEquals(
+          cs.unavailableChoice(topic, Target.Value),
+          Some((SerdeName.SchemaRegistry, "the registry could not be reached"))
+        )
+      }
+    }
+  }
+
+  test("a configured serde that built fine is not reported as unavailable") {
+    serdes(List(factory(Right(()))), rules).use { cs =>
+      IO(assertEquals(cs.unavailableChoice(topic, Target.Value), None))
+    }
+  }
+
+  test("nothing configured for the topic is not a degradation and is not reported") {
+    // `String` is the floor of resolution, not a fall-back from something the operator asked for, so
+    // there is nothing here to tell anybody about.
+    serdes(List(factory(Left("the registry could not be reached"))), rules).use { cs =>
+      IO {
+        assertEquals(cs.unavailableChoice(TopicName.unsafe("audit-log"), Target.Value), None)
+        assertEquals(cs.unavailableChoice(topic, Target.Key), None)
+      }
+    }
+  }
+
   test("resolve follows the configured pattern") {
     serdes(List(factory(Right(()))), rules).use { cs =>
       cs.resolve(topic, Target.Value, None).map(r => assertEquals(r.map(_.name), Right(SerdeName.SchemaRegistry)))

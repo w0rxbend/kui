@@ -64,7 +64,18 @@ final class ClusterSerdeSource[F[_]: Sync](serdes: Map[ClusterId, ClusterSerdes[
       target: Target,
       requested: Option[SerdeName],
       bytes: Option[Array[Byte]]
-  ): F[(Decoded, Option[String])] =
+  ): F[(Decoded, Option[String])] = {
+    val skipped: Option[String] =
+      // Only when the caller did not name a serde. An explicit choice that cannot be honoured is already
+      // refused by `resolve` with its own message, and reporting both would say the same thing twice.
+      if requested.isDefined then None
+      else
+        serdes
+          .unavailableChoice(topic, target)
+          .map((name, reason) =>
+            s"the ${name.value} serde is configured for this topic and could not be used: ${reason}"
+          )
+
     chosen(serdes, topic, target, requested, bytes).flatMap {
       case Left(refusal) =>
         // The caller named a serde this cluster cannot use. The record is still shown — through the
@@ -78,14 +89,20 @@ final class ClusterSerdeSource[F[_]: Sync](serdes: Map[ClusterId, ClusterSerdes[
           fallback <- serdes.fallback.deserializer(topic, target)
           outcome <- Deserializers.withFallback(primary, fallback, Nil, bytes.map(identity))
         } yield outcome match {
-          case (result, None) => (rendered(result, serde.name), None)
+          case (result, None) => (rendered(result, serde.name), skipped)
           // The text on the record is the fallback's, so the serde named on it is the fallback's too:
           // `serde` answers "what produced this text?", and the failure beside it answers "what did I
           // configure wrongly?".
+          //
+          // `skipped` wins over the fallback's own complaint when both are present, and that ordering is
+          // the whole point of it: "the SchemaRegistry serde is configured for this topic and could not be
+          // used - the registry could not be reached" names the thing an operator can fix, while "the
+          // payload is not valid UTF-8" describes the consequence and points at the data.
           case (result, Some(failure)) =>
-            (rendered(result, serdes.fallback.name), Some(failure.cause))
+            (rendered(result, serdes.fallback.name), skipped.orElse(Some(failure.cause)))
         }
     }
+  }
 
   private def fallbackOnly(
       serdes: ClusterSerdes[F],

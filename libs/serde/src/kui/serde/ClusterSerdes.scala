@@ -23,6 +23,20 @@ trait ClusterSerdes[F[_]] {
   /** The picker's rows (MS-009), ordered, with exactly one marked preferred. */
   def suggest(topic: TopicName, target: Target, use: SerdeUse): F[List[SerdeSuggestion]]
 
+  /** The serde this cluster's configuration selects for a topic, when that serde cannot work right now.
+    *
+    * `Some((name, reason))` means: the operator configured `name` for this topic, `name` failed to build — a
+    * schema registry that could not be reached, most often — and [[resolve]] has therefore quietly answered
+    * with something else. `None` means resolution's answer is the configured one, or that nothing was
+    * configured for this topic at all.
+    *
+    * It exists because the fall-through is silent by design and the silence is what misleads. Without this, a
+    * record written against a registry that is now down renders through the fallback with the note "the
+    * payload is not valid UTF-8" — a true statement about a decode nobody asked for, which sends the reader
+    * to look at their data instead of at their registry.
+    */
+  def unavailableChoice(topic: TopicName, target: Target): Option[(SerdeName, String)]
+
   /** The terminal case. Always present, and the reason no browse can fail on a decode. */
   def fallback: Serde[F]
 }
@@ -137,6 +151,11 @@ object ClusterSerdes {
             }
         }
       }
+
+    def unavailableChoice(topic: TopicName, target: Target): Option[(SerdeName, String)] =
+      SerdeResolution
+        .configuredFor(profile.rules, topic, target)
+        .flatMap(name => unavailable.get(name).map(name -> _))
 
     def suggest(topic: TopicName, target: Target, use: SerdeUse): F[List[SerdeSuggestion]] =
       for {

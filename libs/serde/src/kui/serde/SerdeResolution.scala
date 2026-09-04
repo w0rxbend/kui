@@ -78,6 +78,21 @@ object SerdeResolution {
         )
     }
 
+  /** What the *configuration* selects for this topic and target, ignoring whether it can work now.
+    *
+    * [[resolve]] deliberately filters each step by availability, so a Schema-Registry serde whose registry is
+    * down disappears from its answer and the browse falls through to `String`. That is the right behaviour
+    * and it destroys the one fact the reader of a mojibake row needs: that a serde *was* configured for this
+    * topic and could not be used. This function recovers that fact, so the caller can put the reason on the
+    * record instead of leaving the row to say "the payload is not valid UTF-8" — true of the fallback's
+    * attempt, and a description of the wrong problem.
+    *
+    * `None` when the operator configured nothing for this topic, in which case falling through to `String` is
+    * not a degradation and there is nothing to report.
+    */
+  def configuredFor(rules: Rules, topic: TopicName, target: Target): Option[SerdeName] =
+    firstMatchingPattern(rules, topic, target).orElse(defaultFor(rules, target))
+
   /** The first pattern that matches, in the order the operator wrote them. */
   private def firstMatchingPattern(rules: Rules, topic: TopicName, target: Target): Option[SerdeName] =
     rules.patterns
