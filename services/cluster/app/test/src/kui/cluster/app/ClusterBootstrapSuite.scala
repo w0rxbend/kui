@@ -35,7 +35,7 @@ final class ClusterBootstrapSuite extends CatsEffectSuite {
 
   private def bootstrapped(clusters: List[ClusterConfig], store: StoreConfig = StoreConfig.Default) =
     FakeStructuredLogger[IO].toResource.flatMap { logger =>
-      given org.typelevel.log4cats.LoggerFactory[IO] = AppLoggerFactory.of(logger)
+      given org.typelevel.log4cats.LoggerFactory[IO] = kui.http.ProcessLoggerFactory.of(logger)
 
       ClusterBootstrap.resource[IO](clusters, store, Telemetry.noop[IO], logger)
     }

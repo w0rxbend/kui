@@ -1,4 +1,4 @@
-package kui.cluster.app
+package kui.http
 
 import org.typelevel.log4cats.{LoggerFactory, SelfAwareStructuredLogger, StructuredLogger}
 
@@ -9,7 +9,7 @@ import org.typelevel.log4cats.{LoggerFactory, SelfAwareStructuredLogger, Structu
   * what keeps both halves writing the same format: two logging paths in one process is how half the lines end
   * up looking different from the other half, usually discovered while grepping during an incident.
   */
-object AppLoggerFactory {
+object ProcessLoggerFactory {
 
   def of[F[_]: cats.Applicative](logger: StructuredLogger[F]): LoggerFactory[F] =
     new SingleLoggerFactory[F](SelfAware.of(logger))

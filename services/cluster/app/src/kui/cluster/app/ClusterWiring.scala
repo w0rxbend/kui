@@ -13,6 +13,7 @@ import sttp.tapir.server.interceptor.Interceptor
 import kui.cluster.api.ClusterApi
 import kui.cluster.domain.ClockPort
 import kui.contracts.capability.ServiceCapabilities
+import kui.http.ProcessLoggerFactory
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
 import kui.observability.Telemetry
@@ -74,8 +75,8 @@ object ClusterWiring {
     *   `kui.store.*` decides whether there is a metadata store at all
     * @param principals
     *   built by the caller rather than here, because whether this deployment is allowed to run without
-    *   signing keys is a decision about the *process* (see [[PrincipalCodecs]]), and the all-in-one hands in
-    *   a different codec entirely.
+    *   signing keys is a decision about the *process* (see [[kui.http.principal.ProcessPrincipalCodec]]), and
+    *   the all-in-one hands in a different codec entirely.
     */
   def make[F[_]: {Async, Parallel, Files}](
       config: ClusterServiceConfig,
@@ -86,7 +87,7 @@ object ClusterWiring {
     // The store's own components ask for a logger through log4cats' factory rather than taking one as a
     // parameter, so the process's single logger is published as that factory here. Two logging paths in one
     // process is how half the lines end up in a different format from the other half.
-    given LoggerFactory[F] = AppLoggerFactory.of(logger)
+    given LoggerFactory[F] = ProcessLoggerFactory.of(logger)
 
     for {
       meter <- Resource.eval(telemetry.meter(Instrumentation))

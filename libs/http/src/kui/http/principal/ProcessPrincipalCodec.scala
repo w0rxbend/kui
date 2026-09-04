@@ -1,4 +1,4 @@
-package kui.cluster.app
+package kui.http.principal
 
 import java.nio.charset.StandardCharsets
 
@@ -13,7 +13,12 @@ import org.typelevel.log4cats.StructuredLogger
 import kui.config.PrincipalKeyConfig
 import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
 
-/** Deciding what this process will believe about who is calling it.
+/** Deciding what a KUI service process will believe about who is calling it.
+  *
+  * Every service that runs as its own process makes exactly this decision at startup, so it is made once here
+  * rather than once per service. It lives in `libs/http` because that is where the other half of the
+  * arrangement already lives: `PrincipalVerification` is what checks the header this codec's keys were
+  * configured for.
   *
   * There are exactly two acceptable answers and one refusal, and the refusal is the important part.
   *
@@ -27,7 +32,7 @@ import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
   *     cluster — and would do it silently. KERN-006's degraded-behaviour rule is that a missing security
   *     configuration is a startup failure and never a default.
   */
-object PrincipalCodecs {
+object ProcessPrincipalCodec {
 
   /** The variable that turns the unsigned codec on. Spelled as an environment variable and not as a
     * configuration key on purpose: it is not a setting a deployment should be able to inherit from a file

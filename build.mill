@@ -1792,6 +1792,19 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code — Logback is configured by the XML in
+        * `libs/observability`'s resources and the exporters by OpenTelemetry's autoconfigure mechanism — so
+        * they stay off the compile classpath. Present because this module has a `main` and is packaged as
+        * its own image; without them the process starts and logs nothing.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
       object test extends ScalaTests with KuiTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
@@ -2269,6 +2282,19 @@ object services extends Module {
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code — Logback is configured by the XML in
+        * `libs/observability`'s resources and the exporters by OpenTelemetry's autoconfigure mechanism — so
+        * they stay off the compile classpath. Present because this module has a `main` and is packaged as
+        * its own image; without them the process starts and logs nothing.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
       object test extends ScalaTests with KuiTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
@@ -2453,6 +2479,19 @@ object services extends Module {
         mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
         mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code — Logback is configured by the XML in
+        * `libs/observability`'s resources and the exporters by OpenTelemetry's autoconfigure mechanism — so
+        * they stay off the compile classpath. Present because this module has a `main` and is packaged as
+        * its own image; without them the process starts and logs nothing.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
       )
 
       object test extends ScalaTests with KuiTests {
@@ -2995,6 +3034,33 @@ object deployment extends Module {
       def entryClass       = "kui.cluster.app.Main"
       def livenessPath     = "/health/live"
       def imageDescription = "KUI cluster registry and topology service"
+    }
+
+    /** The Topic service: browsing topics, their partitions and their settings, and administering them. */
+    object topic extends KuiImage {
+      def deployable       = services.topic.app
+      def imageName        = "kui-topic"
+      def entryClass       = "kui.topic.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI topic service"
+    }
+
+    /** The Message service: browsing records, producing, resending and purging. */
+    object message extends KuiImage {
+      def deployable       = services.message.app
+      def imageName        = "kui-message"
+      def entryClass       = "kui.message.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI message browse and produce service"
+    }
+
+    /** The Consumer service: consumer groups, their lag and the offset reset. */
+    object consumer extends KuiImage {
+      def deployable       = services.consumer.app
+      def imageName        = "kui-consumer"
+      def entryClass       = "kui.consumer.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI consumer group and offset service"
     }
 
     /** The whole product in one process (ADR-005). */

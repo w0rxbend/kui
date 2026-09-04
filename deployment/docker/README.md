@@ -1,6 +1,6 @@
 # KUI container images
 
-Three images, built by the repository's own build tool. You do not need a Scala toolchain to run
+Six images, built by the repository's own build tool. You do not need a Scala toolchain to run
 them; you do need one to build them.
 
 | Image          | What it is                                            | Listens on | Liveness path          |
@@ -8,6 +8,9 @@ them; you do need one to build them.
 | `kui-allinone` | The gateway and every service in one process (ADR-005) | 8080       | `/api/v1/health/live`  |
 | `kui-gateway`  | The one process a browser talks to                    | 8080       | `/api/v1/health/live`  |
 | `kui-cluster`  | The cluster registry and topology service             | 8080       | `/health/live`         |
+| `kui-topic`    | Topics, their partitions, their settings and their administration | 8080 | `/health/live` |
+| `kui-message`  | Browsing records, producing, resending and purging    | 8080       | `/health/live`         |
+| `kui-consumer` | Consumer groups, their lag and the offset reset       | 8080       | `/health/live`         |
 
 The gateway serves its health probes under the public `/api/v1` prefix and a service serves them at
 the root. That is not an inconsistency: everything a browser can reach lives under `/api/v1`, and a

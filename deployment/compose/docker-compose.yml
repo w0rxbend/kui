@@ -1,4 +1,4 @@
-# KUI in its distributed shape: the gateway and the cluster service as separate containers.
+# KUI in its distributed shape: the gateway and all four services as separate containers.
 #
 # THIS IS A DEVELOPMENT AND TEST ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. The signing key comes
 # from an environment variable with a default in this file, there is no TLS, and the session cookie
@@ -8,11 +8,14 @@
 # What it is for is the thing the all-in-one shape cannot demonstrate: real process isolation.
 # `docker compose stop kui-cluster` kills an actual process, and the gateway has to keep serving the
 # UI and report the cluster service as unavailable rather than falling over with it. That is KUI's
-# central promise, and this file is where it stops being a claim.
+# central promise, and this file is where it stops being a claim. The same is true one service at a
+# time for the other three: stopping `kui-topic` must leave the messages and consumer-group screens
+# working, which is a stronger statement than "the gateway survives" and is only checkable here.
 #
 #   docker compose -f deployment/compose/docker-compose.yml up -d
 #   docker compose -f deployment/compose/docker-compose.yml stop kui-cluster
 #   docker compose -f deployment/compose/docker-compose.yml start kui-cluster
+#   docker compose -f deployment/compose/docker-compose.yml stop kui-topic
 #   docker compose -f deployment/compose/docker-compose.yml down -v
 #
 # Add `-f deployment/compose/docker-compose.observability.yml` to any of those to send both
@@ -59,6 +62,17 @@ services:
       retries: 5
       start_period: 20s
     depends_on:
+      # Every service is listed with the same condition and the same `required: false`, for the
+      # reason spelled out under the first of them.
+      kui-topic:
+        condition: service_healthy
+        required: false
+      kui-message:
+        condition: service_healthy
+        required: false
+      kui-consumer:
+        condition: service_healthy
+        required: false
       kui-cluster:
         # Ordered, not gated. `required: false` means Compose starts the cluster service first and
         # waits for it, but does not refuse to start the gateway when it never becomes healthy.
@@ -92,6 +106,94 @@ services:
     # container and then assert that the UI degrades. A restart policy would race them: the
     # container would come back before the assertion ran, and the test would fail intermittently
     # for a reason nobody would find quickly.
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # The topic service: browsing topics, their partitions and their settings, and administering them.
+  #
+  # This and the two below follow the cluster service's conventions exactly -- no published port, a
+  # mounted read-only configuration, a read-only root filesystem with a tmpfs at /tmp, and no restart
+  # policy so that a test which stops one of them can assert what happens next without racing Docker.
+  # The one difference from `kui-cluster` is the configuration file: these three share
+  # `kui-service.yaml`, because they read the same settings, while the cluster service has its own
+  # for the metadata-store section nobody else reads.
+  kui-topic:
+    image: kui-topic:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-topic
+    command: ["--config", "/etc/kui/kui-service.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Signs streaming cursors and plan tokens (ADR-026, ADR-045). Every replica of a service must
+      # have the same value or a cursor minted by one is refused by another; the three services here
+      # share it because the gateway may route two calls of one user's session to two of them.
+      KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-service.yaml:/etc/kui/kui-service.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # The message service: browsing records, producing, resending and purging.
+  kui-message:
+    image: kui-message:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-message
+    command: ["--config", "/etc/kui/kui-service.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Signs streaming cursors and plan tokens (ADR-026, ADR-045). Every replica of a service must
+      # have the same value or a cursor minted by one is refused by another; the three services here
+      # share it because the gateway may route two calls of one user's session to two of them.
+      KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-service.yaml:/etc/kui/kui-service.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # The consumer service: consumer groups, their lag and the offset reset.
+  kui-consumer:
+    image: kui-consumer:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-consumer
+    command: ["--config", "/etc/kui/kui-service.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Signs streaming cursors and plan tokens (ADR-026, ADR-045). Every replica of a service must
+      # have the same value or a cursor minted by one is refused by another; the three services here
+      # share it because the gateway may route two calls of one user's session to two of them.
+      KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-service.yaml:/etc/kui/kui-service.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
     restart: "no"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]

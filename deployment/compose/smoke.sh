@@ -2,10 +2,10 @@
 #
 # The fault-isolation demo, as a script that fails loudly.
 #
-# It runs the exact sequence INFRA-002 specifies: bring the distributed stack up, check that the
-# cluster service is reachable through the gateway, stop that container, check that the gateway is
-# still answering and now reports the service as unavailable, start it again, and check that it
-# recovers on its own without anyone pressing anything.
+# It runs the exact sequence INFRA-002 specifies: bring the distributed stack up, check that every
+# service is reachable through the gateway, stop one container, check that the gateway is still
+# answering and now reports that one service as unavailable while the other three are untouched,
+# start it again, and check that it recovers on its own without anyone pressing anything.
 #
 # CI runs this in the end-to-end job, right after the images are built, so that a broken compose
 # file is caught by the same run that builds the artefacts it describes. A developer can run it too,
@@ -57,12 +57,23 @@ await() {
   fail "$what was '$actual' after ${SETTLE_TIMEOUT}s, expected '$expected'"
 }
 
+# The command that reads one service's capability status.
+#
+# Selected by service id and never by position in the array. The list grew from one service to four
+# and an index that used to name the cluster service silently started naming a different one, which
+# is the kind of test that keeps passing while checking nothing.
+status_of() {
+  printf "curl -sf %s/api/v1/capabilities | jq -r '.entries[] | select(.key.service == \"%s\") | .state.status'" \
+    "$base" "$1"
+}
+
 log "starting the distributed stack"
 "${compose[@]}" up -d --wait --wait-timeout 90 || fail "the stack did not become healthy"
 
-log "both processes are up and the gateway can reach the service"
-await "capability status" "available" \
-  "curl -sf $base/api/v1/capabilities | jq -r '.entries[0].state.status'"
+log "all five processes are up and the gateway can reach every service"
+for service in cluster topic message consumer; do
+  await "$service capability" "available" "$(status_of "$service")"
+done
 # A read that really crosses the process boundary. `/api/v1/clusters` is answered by the gateway,
 # but the answer is assembled from a call to the cluster service, and the section's status says
 # whether that call succeeded: "ok" means the gateway reached the service and got a fresh answer.
@@ -75,8 +86,13 @@ log "stopping kui-cluster: one real process dies"
 "${compose[@]}" stop kui-cluster >/dev/null
 
 log "the gateway survives it and says what is wrong"
-await "capability status" "unavailable" \
-  "curl -sf $base/api/v1/capabilities | jq -r '.entries[0].state.status'"
+await "cluster capability" "unavailable" "$(status_of cluster)"
+# The other three are a separate process each and must be completely unaffected. This is the
+# assertion the single-container all-in-one shape cannot make at all, and it is why these three
+# services grew `main`s and images of their own.
+for service in topic message consumer; do
+  await "$service capability" "available" "$(status_of "$service")"
+done
 # The gateway's own endpoints are the point of the whole exercise: the UI stays usable and can show
 # an operator what happened, rather than going blank because one service went away.
 await "the gateway's own endpoint" "disabled" \
@@ -84,8 +100,7 @@ await "the gateway's own endpoint" "disabled" \
 
 log "starting kui-cluster again: recovery needs no intervention"
 "${compose[@]}" start kui-cluster >/dev/null
-await "capability status" "available" \
-  "curl -sf $base/api/v1/capabilities | jq -r '.entries[0].state.status'"
+await "cluster capability" "available" "$(status_of cluster)"
 await "proxied cluster list" "ok" \
   "curl -sf $base/api/v1/clusters | jq -r .clusters.status"
 

@@ -62,7 +62,8 @@ object ClusterServiceConfig {
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry
     * exporter and — deliberately — no signing keys, which is a configuration that refuses to start in a
-    * distributed deployment. See [[PrincipalCodecs.make]] for why that refusal is the right default.
+    * distributed deployment. See [[kui.http.principal.ProcessPrincipalCodec.make]] for why that refusal is
+    * the right default.
     */
   val Default: ClusterServiceConfig = from(KuiConfig.Default)
 

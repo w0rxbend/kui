@@ -16,7 +16,7 @@ Build the images first:
 | File                            | What runs                                | What it demonstrates                            |
 | ------------------------------- | ---------------------------------------- | ----------------------------------------------- |
 | `docker-compose.allinone.yml`   | One container, everything inside it       | The fastest possible start                      |
-| `docker-compose.yml`            | The gateway and the cluster service, apart | Fault isolation between real processes          |
+| `docker-compose.yml`            | The gateway and all four services, apart  | Fault isolation between real processes          |
 
 They run the same code. That is ADR-005's whole argument, and it is why the distributed environment
 is worth having even though the all-in-one one starts faster: the all-in-one process is a single
@@ -40,15 +40,19 @@ All four commands assume you are in the repository root.
 docker compose -f deployment/compose/docker-compose.yml up -d
 ```
 
-Two containers. Only `kui-gateway` publishes a port; `kui-cluster` is reachable only from inside the
-compose network, which is the same rule `ARCHITECTURE.md` §14 states for a real deployment — a
-service must not be exposed outside the cluster network.
+Five containers: the gateway plus `kui-cluster`, `kui-topic`, `kui-message` and `kui-consumer`. Only
+`kui-gateway` publishes a port; the four services are reachable only from inside the compose network,
+which is the same rule `ARCHITECTURE.md` §14 states for a real deployment — a service must not be
+exposed outside the cluster network.
 
-Check that the gateway can reach the service, and that a request really does travel through it:
+Check that the gateway can reach every service, and that a request really does travel through one:
 
 ```
-$ curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
-available
+$ curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[] | "\(.key.service) \(.state.status)"'
+cluster available
+consumer available
+message available
+topic available
 $ curl -s localhost:8080/api/v1/clusters | jq -r .clusters.status
 ok
 ```
@@ -69,11 +73,20 @@ docker compose -f deployment/compose/docker-compose.yml stop kui-cluster
 Wait about ten seconds, which is one readiness poll interval, and ask again:
 
 ```
-$ curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[0].state.status'
-unavailable
+$ curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[] | "\(.key.service) \(.state.status)"'
+cluster unavailable
+consumer available
+message available
+topic available
 $ curl -s localhost:8080/api/v1/info | jq -r .authType
 disabled
 ```
+
+Note what did *not* change: the other three services are untouched, because they are three other
+processes. The topics screen, the message browser and the consumer-group screens all keep working
+while the cluster list degrades. That is the statement the all-in-one shape cannot make at all, and
+it is why these services have `main`s and images of their own rather than only running inside the
+assembly.
 
 That is the demo, and it is the most convincing thing in this repository. A process died. The
 gateway noticed by itself, without anybody reporting it, and it is still serving: the UI still
@@ -107,7 +120,8 @@ docker compose -f deployment/compose/docker-compose.yml down -v
 ```
 
 Runs the whole sequence and exits non-zero if any step does not produce what it should. CI runs it
-so that a broken compose file is caught even when the browser-level E2E job is skipped.
+in the end-to-end job, right after the five images are built, so that a broken compose file is caught
+by the same run that builds the artefacts it describes.
 
 ## The gateway starts even when nothing else does
 
@@ -121,7 +135,7 @@ You can check that claim directly by starting the stack with no service at all:
 $ docker compose -f deployment/compose/docker-compose.yml up -d --scale kui-cluster=0
 $ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ui/
 200
-$ curl -s localhost:8080/api/v1/capabilities | jq -c '.entries[0] | {service:.key.service, status:.state.status, reason:.state.reason}'
+$ curl -s localhost:8080/api/v1/capabilities | jq -c '.entries[] | select(.key.service == "cluster") | {service:.key.service, status:.state.status, reason:.state.reason}'
 {"service":"cluster","status":"unavailable","reason":"UPSTREAM_UNAVAILABLE"}
 ```
 

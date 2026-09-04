@@ -32,6 +32,21 @@ kui:
         # The bulkhead: how many calls to this service may be in flight at once. It is what stops
         # one slow service from consuming every thread and taking the others down with it.
         maxConcurrent: 32
+      topic:
+        url: "http://kui-topic:8080"
+        timeout: "10s"
+        maxConcurrent: 32
+      message:
+        # A longer budget than the others, and deliberately so: a browse holds the connection open
+        # while it polls a Kafka topic for records that may not have arrived yet, so ten seconds
+        # would turn an empty topic into a timeout rather than an empty page.
+        url: "http://kui-message:8080"
+        timeout: "60s"
+        maxConcurrent: 32
+      consumer:
+        url: "http://kui-consumer:8080"
+        timeout: "10s"
+        maxConcurrent: 32
 
     # How often the gateway asks each service whether it is ready, to keep the capability registry
     # (and therefore the greyed-out parts of the UI) current.
