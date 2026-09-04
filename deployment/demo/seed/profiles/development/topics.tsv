@@ -44,6 +44,15 @@ audit.log.raw	1	1	retention.ms=604800000
 scratch.jm-test	1	1	retention.ms=3600000
 # 1 hour.
 
+# The Avro topic. Its records are not text: each one is a five-byte Confluent Schema Registry
+# header -- a zero byte and the four-byte id of a schema -- followed by Avro's binary encoding, and
+# nothing can read it without asking `schema-registry-dev` for schema number four. It is created
+# here, with the rest of this cluster's topics, and FILLED by seed-avro.sh in a different container,
+# because the image that has Kafka's admin tools has no Avro producer and the image that has an
+# Avro producer has no admin tools.
+orders.avro.v1	1	1	retention.ms=604800000
+# 7 days.
+
 # An internal topic. A leading underscore is the convention for "this belongs to a piece of
 # infrastructure, not to you", and user interfaces hide these behind a "show internal topics"
 # switch. This is where Confluent Schema Registry keeps its schemas, with the configuration it

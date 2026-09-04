@@ -1,0 +1,8 @@
+{"orderId":"ORD-90001","customerId":"CUST-8812","currency":"EUR","total":149.9,"status":"PLACED","note":{"string":"gift wrap"}}
+{"orderId":"ORD-90002","customerId":"CUST-2049","currency":"GBP","total":24.0,"status":"PAID","note":null}
+{"orderId":"ORD-90003","customerId":"CUST-3311","currency":"USD","total":1899.0,"status":"SHIPPED","note":{"string":"expedited"}}
+{"orderId":"ORD-90004","customerId":"CUST-8812","currency":"EUR","total":89.5,"status":"CANCELLED","note":{"string":"customer changed their mind"}}
+{"orderId":"ORD-90005","customerId":"CUST-5170","currency":"PLN","total":420.0,"status":"PAID","note":null}
+{"orderId":"ORD-90006","customerId":"CUST-2049","currency":"GBP","total":12.0,"status":"PLACED","note":null}
+{"orderId":"ORD-90007","customerId":"CUST-3311","currency":"USD","total":75.25,"status":"SHIPPED","note":{"string":"leave with neighbour"}}
+{"orderId":"ORD-90008","customerId":"CUST-9004","currency":"EUR","total":2340.0,"status":"PAID","note":null}

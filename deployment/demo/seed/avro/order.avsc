@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "Order",
+  "namespace": "kui.demo.avro",
+  "doc": "One order, written in Avro binary with a Confluent Schema Registry header.",
+  "fields": [
+    { "name": "orderId", "type": "string" },
+    { "name": "customerId", "type": "string" },
+    { "name": "currency", "type": "string", "doc": "ISO 4217, three letters" },
+    { "name": "total", "type": "double" },
+    {
+      "name": "status",
+      "type": { "type": "enum", "name": "Status", "symbols": ["PLACED", "PAID", "SHIPPED", "CANCELLED"] }
+    },
+    { "name": "note", "type": ["null", "string"], "default": null }
+  ]
+}

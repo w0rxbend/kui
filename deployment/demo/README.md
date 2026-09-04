@@ -92,6 +92,27 @@ shows you what zero looks like.
 [`../quickstart/seed/README.md`](../quickstart/seed/README.md) documents the seed data and the
 scripts that write it.
 
+
+### Avro, against a real Schema Registry
+
+The Development cluster runs a Confluent Schema Registry, and one of its topics — `orders.avro.v1`
+— holds Avro records rather than text. That distinction matters more than it sounds. An Avro record
+on the wire is five bytes of header (one zero byte, then the four-byte id of a schema) followed by
+Avro's binary encoding; without asking the registry for that schema, nothing can turn those bytes
+back into fields, and a message browser can only show mangled text or Base64. A very large share of
+production Kafka is written this way, so a KUI that could not read it would be a KUI most teams
+could not use.
+
+Open `orders.avro.v1` in the message browser and the records read as JSON, with the serde reported
+as `SchemaRegistry` and the subject named. The schema screen lists the subject and its versions.
+
+Production and Secured have no registry on purpose. "This cluster has one and that one does not" is
+a real difference between clusters, and KUI has to render it as *not configured* rather than as a
+failure — which is what those two clusters show.
+
+The registry is also published on your own machine, at `http://localhost:18081` (override with
+`KUI_DEMO_REGISTRY_PORT`), so `curl http://localhost:18081/subjects` works from your shell.
+
 ## What to look at first
 
 Roughly ten minutes, in this order. Each step shows something the previous one could not.

@@ -77,6 +77,31 @@ kui:
       bootstrapServers:
         - "kafka-dev:9092"
 
+      # The one cluster in this demonstration with a Schema Registry, and the reason it has one is
+      # that Avro is unreadable without it. An Avro record on the wire is five bytes of header -- a
+      # zero byte, then the four-byte id of a schema -- followed by Avro's binary encoding. Without
+      # the registry that holds schema number 4, those bytes are not text and KUI can only show them
+      # as the mangled string they are. With it, `orders.avro.v1` reads as JSON.
+      #
+      # `schemaRegistry` is what KUI needs in order to CALL the registry. It is the whole of what is
+      # required for the schema screen; the `serde` block below is a separate question.
+      schemaRegistry:
+        url:
+          - "http://schema-registry-dev:8081"
+
+      # Which decoder reads which topic. `schemaRegistry` above says where the registry is; this
+      # says which records to take there.
+      #
+      # A pattern rather than `defaultValue: SchemaRegistry`, because the other topics on this
+      # cluster are plain JSON and plain text written with no registry at all, and pointing every
+      # topic at the registry would send eight topics' worth of records to a service that has never
+      # heard of them. `orders\.avro\..*` is anchored -- it matches `orders.avro.v1` and does not
+      # match `orders.v1` -- which is the same anchoring Kafbat applies to the same setting.
+      serde:
+        patterns:
+          - serde: "SchemaRegistry"
+            topicValuesPattern: "orders\\.avro\\..*"
+
     # ---------------------------------------------------------------------------------------------
     # 2. Production-shaped: three brokers.
     #

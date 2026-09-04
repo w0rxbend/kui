@@ -137,6 +137,69 @@ services:
     networks: [kui-demo]
     restart: unless-stopped
 
+  # A REAL Confluent Schema Registry, on the development cluster.
+  #
+  # WHY. A very large share of production Kafka carries Avro, and an Avro record is unreadable
+  # without the registry that holds its schema: the payload is five bytes of header -- a zero byte
+  # and the four-byte id of a schema -- followed by binary Avro. A message browser with no registry
+  # shows that as mangled text or as Base64, which is the single thing that decides whether KUI is
+  # usable against a real cluster. Nothing in this demonstration exercised that path before: the
+  # `_schemas` topic in the seed profiles contains records that LOOK like a registry's, but no
+  # registry wrote them and no producer used them.
+  #
+  # It keeps its state in `_schemas` on kafka-dev -- the topic the seed already creates, compacted,
+  # single-partition, exactly as a registry requires -- so the three seeded subjects are picked up
+  # as its own and appear beside the Avro subject that seed-avro-dev registers.
+  #
+  # Only the development cluster has one, deliberately. "This cluster has a registry and that one
+  # does not" is a real difference between clusters, and it is the difference KUI has to render:
+  # the schema screen says `not_configured` for Production and Secured rather than showing an error.
+  schema-registry-dev:
+    image: confluentinc/cp-schema-registry:7.7.1
+    container_name: kui-demo-schema-registry-dev
+    depends_on:
+      seed-dev:
+        condition: service_completed_successfully
+        # As everywhere else in this file: wait for the seed, but start even if it failed.
+        required: false
+    ports:
+      # For YOUR tools -- `curl http://localhost:18081/subjects`. KUI does not use this route; it
+      # reaches the registry across the private network below, by container name.
+      - "${KUI_DEMO_REGISTRY_PORT:-18081}:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry-dev
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-dev:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC: _schemas
+      SCHEMA_REGISTRY_HEAP_OPTS: "-Xms128m -Xmx256m"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [kui-demo]
+    restart: unless-stopped
+
+  # The Avro data. It runs in the registry's own image because that image is the only one in this
+  # stack that contains `kafka-avro-console-producer` -- the tool that registers a schema, learns
+  # the id the registry gave it, and writes that id into the header of every record it encodes.
+  seed-avro-dev:
+    image: confluentinc/cp-schema-registry:7.7.1
+    container_name: kui-demo-seed-avro-dev
+    depends_on:
+      schema-registry-dev:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/seed/seed-avro.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-dev:9092
+      KUI_SCHEMA_REGISTRY_URL: http://schema-registry-dev:8081
+      KUI_AVRO_TOPIC: orders.avro.v1
+    volumes:
+      - ./seed:/seed:ro
+    networks: [kui-demo]
+    restart: "no"
+
   # ===============================================================================================
   # CLUSTER 2 -- production-shaped. Three brokers, each one also a controller, forming a quorum of
   # three. This is the cluster that has something to show:
@@ -441,6 +504,10 @@ services:
         condition: service_completed_successfully
         required: false
       seed-secured:
+        condition: service_completed_successfully
+        required: false
+      # And on the Avro data, so the first look at orders.avro.v1 is never an empty topic.
+      seed-avro-dev:
         condition: service_completed_successfully
         required: false
     networks: [kui-demo]
