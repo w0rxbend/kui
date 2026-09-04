@@ -1768,7 +1768,10 @@ object services extends Module {
           // same generic client every proxied route uses. Rule A11 admits another service's `contract` and
           // nothing else, which is exactly what is wanted here: the gateway names an endpoint value and a
           // DTO, and knows nothing about how the topic service produces either.
-          services.topic.contract.jvm
+          services.topic.contract.jvm,
+          // And the consumer service's, for the same reason and on the same terms: the dashboard's
+          // per-cluster consumer-group totals are one call to that service's published `list` endpoint.
+          services.consumer.contract.jvm
         )
 
       def mvnDeps = Seq(
@@ -2014,7 +2017,11 @@ object services extends Module {
     object application extends KuiJvmModule {
       // `libs.cache` carries the `SnapshotCell` the topic snapshot is held in. It has no Kafka
       // dependency, so rule A10 is unaffected, and it is not a wire module, so rule A3 is too.
-      def moduleDeps = Seq(domain, libs.cache)
+      //
+      // `libs.securityCore.jvm` is here for `AuditSink`, `MutationKind` and `MutationRecord`, which
+      // ADR-047 declares once for every service that writes an audit record rather than once per
+      // service. It is not a wire module either.
+      def moduleDeps = Seq(domain, libs.cache, libs.securityCore.jvm)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",

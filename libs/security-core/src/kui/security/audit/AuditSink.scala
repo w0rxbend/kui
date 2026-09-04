@@ -30,6 +30,21 @@ enum MutationKind(val operation: String) {
     * are gone, and no amount of KUI can bring them back. It is the operation ADR-047 exists for.
     */
   case Purge extends MutationKind("purge")
+
+  /** A topic created, with its partitions, replication factor and configuration (`MT-001`). */
+  case CreateTopic extends MutationKind("topic.create")
+
+  /** A topic's dynamic configuration set or reset (`MT-002`). */
+  case AlterTopicConfig extends MutationKind("topic.config.alter")
+
+  /** A topic's partition count raised (`MT-003`). **Irreversible**: Kafka has no way to remove a partition,
+    * and every future record with an existing key may land somewhere other than the records already written
+    * under that key.
+    */
+  case IncreasePartitions extends MutationKind("topic.partitions.increase")
+
+  /** A topic and every record in it (`MT-004`). **Irreversible.** */
+  case DeleteTopic extends MutationKind("topic.delete")
 }
 
 object MutationKind {

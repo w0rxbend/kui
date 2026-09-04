@@ -7,7 +7,7 @@ import kui.cluster.contract.ClusterEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.message.contract.MessageMutationEndpoints
-import kui.topic.contract.TopicEndpoints
+import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
 /** That the one map naming the gateway's downstream services says what the rest of the gateway assumes.
   *
@@ -36,7 +36,11 @@ final class ServiceContractsSuite extends FunSuite {
   test("everyConfiguredServiceHasItsContract") {
     assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message))
     assertEquals(ServiceContracts.of(cluster), ClusterEndpoints.all)
-    assertEquals(ServiceContracts.of(topic), TopicEndpoints.all)
+    // Both of the topic service's lists. Its administration endpoints are published from a second
+    // object because they carry a marker, a CSRF header and — for the two that cannot be undone — a plan
+    // phase the reads do not; forgetting the second list here would leave create, configure, grow and
+    // delete unroutable while every one of their own tests stayed green.
+    assertEquals(ServiceContracts.of(topic), TopicEndpoints.all ++ TopicAdminEndpoints.all)
     // Both of the consumer service's lists. Its mutations are published from a second object because
     // they carry a marker and a CSRF header the reads do not; forgetting the second list here would
     // leave the offset reset unroutable while every one of its own tests stayed green.
@@ -62,7 +66,7 @@ final class ServiceContractsSuite extends FunSuite {
     // row. The dashboard's cluster list is aggregated because the gateway decorates each row with
     // capability state it alone holds; an aggregation with nothing to add is a second copy of a response
     // shape to keep in step, which is the shape of M1's second integration defect.
-    assertEquals(ServiceContracts.proxied(topic), TopicEndpoints.all)
+    assertEquals(ServiceContracts.proxied(topic), TopicEndpoints.all ++ TopicAdminEndpoints.all)
     assert(
       !TopicEndpoints.all.flatMap(_.info.name).exists(ServiceContracts.aggregated.contains),
       ServiceContracts.aggregated.toString

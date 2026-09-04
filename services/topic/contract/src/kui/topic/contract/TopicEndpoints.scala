@@ -19,14 +19,17 @@ import kui.topic.contract.dto.*
   * gateway (`ARCHITECTURE.md` §5). A service is only ever called by the gateway, over the internal prefix,
   * with a signed principal header.
   *
-  * ==Nothing here changes a Kafka cluster==
+  * ==Nothing in *this file* changes a Kafka cluster==
   *
-  * There is no create, no edit, no delete, no partition increase and no replication-factor change, and there
-  * is deliberately not an unimplemented declaration of one either. Those arrive in M5, together with
-  * read-only mode and the audit trail, because `docs/ROADMAP.md` §3 orders no destructive action before its
-  * safety net — and an endpoint that is declared is an endpoint somebody implements. `TopicEndpointsSuite`'s
-  * `noEndpointMutates` is what makes that a fact rather than an intention: the one `POST` here asks this
+  * There is no create, no edit, no delete and no partition increase here, and `TopicEndpointsSuite`'s
+  * `noEndpointMutates` is what makes that a fact rather than an intention: the one `POST` below asks this
   * service to re-read a cluster, and touches nothing on the cluster itself.
+  *
+  * Those operations exist, and they live next door in `TopicAdminEndpoints`. The split is kept because it is
+  * worth being able to answer "which of this service's endpoints can change a cluster" by naming a file: the
+  * administration endpoints carry the ADR-047 marker, the CSRF header and — for the two that cannot be undone
+  * — the ADR-045 plan phase, and holding them apart is what keeps a read from quietly acquiring a verb.
+  * `TopicApi.documented` serves both lists, and the gateway proxies both.
   */
 object TopicEndpoints {
 

@@ -21,8 +21,14 @@ import kui.kernel.ServiceId
 import kui.kernel.error.KuiError
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
-import kui.topic.application.{TopicCapabilityUseCase, TopicConfigUseCase, TopicDetailUseCase, TopicSnapshots}
-import kui.topic.contract.TopicEndpoints
+import kui.topic.application.{
+  TopicAdminUseCase,
+  TopicCapabilityUseCase,
+  TopicConfigUseCase,
+  TopicDetailUseCase,
+  TopicSnapshots
+}
+import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
 /** Everything `kui-topic-service` serves, and the one place a typed failure becomes an HTTP response.
   *
@@ -83,6 +89,7 @@ object TopicApi {
       snapshots: TopicSnapshots[F],
       detail: TopicDetailUseCase[F],
       config: TopicConfigUseCase[F],
+      admin: TopicAdminUseCase[F],
       capabilities: TopicCapabilityUseCase[F],
       readiness: List[ReadinessCheck[F]],
       principals: PrincipalCodec[F],
@@ -92,7 +99,8 @@ object TopicApi {
     // The health endpoints come first because nothing else can match their paths and a probe should travel
     // the shortest route through the router.
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
-      TopicRoutes[F](snapshots, detail, config, principals, rejections, logger)
+      TopicRoutes[F](snapshots, detail, config, principals, rejections, logger) ++
+      TopicAdminRoutes[F](admin, Securing[F](principals, rejections, logger))
 
   /** The cross-cutting chain, outermost first, exactly as `libs/http`'s server wants it.
     *
@@ -175,7 +183,7 @@ object TopicApi {
     * gateway merges this document rather than the contract file (ADR-003).
     */
   def documented[F[_]]: List[AnyEndpoint] =
-    TopicEndpoints.all ++
+    TopicEndpoints.all ++ TopicAdminEndpoints.all ++
       List(HealthEndpoints.live, HealthEndpoints.ready, HealthEndpoints.capabilities)
 
   def openApi[F[_]]: OpenAPI = OpenAPIDocsInterpreter().toOpenAPI(documented[F], Title, Version)

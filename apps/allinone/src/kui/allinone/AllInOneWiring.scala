@@ -163,8 +163,21 @@ object AllInOneWiring {
       // asking the cluster service for it over HTTP (ADR-046's profile client). One process calling
       // itself over a socket to read a list it is holding in memory would add a listener, a timeout
       // and a failure mode to a lookup that cannot fail; see `ConfiguredClusterProfiles`.
+      //
+      // It takes `kui.streaming.cursorKey` for the same reason the consumer service does: M5's topic
+      // deletion and partition increase are confirmed against a signed plan (ADR-045), and the key
+      // that signs one is the key ADR-026 already made an operator configure. One secret, one
+      // rotation procedure.
       topicService <- TopicWiring
-        .make[F](clusters, topics.refreshInterval, topics.internalPrefix, telemetry, principals, logger)
+        .make[F](
+          clusters,
+          topics.refreshInterval,
+          topics.internalPrefix,
+          streaming.cursorKey,
+          telemetry,
+          principals,
+          logger
+        )
       // The consumer service reads the same `kui.clusters[]`, for the same reason the topic service
       // does: this process is already holding the list, and calling itself over a socket to read it
       // would add a listener, a timeout and a failure mode to a lookup that cannot fail.

@@ -6,7 +6,7 @@ import kui.cluster.contract.ClusterEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.message.contract.MessageMutationEndpoints
-import kui.topic.contract.TopicEndpoints
+import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
 /** Which published contract belongs to which service id.
   *
@@ -24,7 +24,12 @@ object ServiceContracts {
   val byService: Map[ServiceId, List[AnyEndpoint]] =
     Map(
       ServiceId.unsafe("cluster") -> ClusterEndpoints.all,
-      ServiceId.unsafe("topic") -> TopicEndpoints.all,
+      // Both lists, because the topic service publishes its reads and its administration from two
+      // objects: `TopicEndpoints` states that nothing in it changes a cluster, and `TopicAdminEndpoints`
+      // carries create, configure, grow and delete with the marker, the plan phases and the CSRF header
+      // ADR-045 and ADR-047 require. Leaving the second list out would be a set of endpoints no browser
+      // could reach, which is a failure this project has already shipped once as a sidebar of dead links.
+      ServiceId.unsafe("topic") -> (TopicEndpoints.all ++ TopicAdminEndpoints.all),
       // Both lists, because the consumer service publishes its reads and its mutations from two
       // objects: the reads are ordinary contract endpoints and the four mutation endpoints carry the
       // marker and the CSRF header ADR-047 requires. The gateway proxies them all the same way — it

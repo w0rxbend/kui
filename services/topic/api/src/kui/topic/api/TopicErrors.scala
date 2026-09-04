@@ -12,6 +12,8 @@ import kui.topic.domain.TopicError
   * | `Forbidden(detail)`          | `KUI-FORBIDDEN`            | 403    |
   * | `Unreachable(detail, true)`  | `KUI-TIMEOUT`              | 408    |
   * | `Unreachable(detail, false)` | `KUI-UPSTREAM-UNAVAILABLE` | 503    |
+  * | `AlreadyExists(topic)`       | `KUI-INVALID-STATE`        | 409    |
+  * | `Rejected(detail)`           | `KUI-VALIDATION`           | 400    |
   *
   * Both 404s exist because the remedies differ: "check the topic name" and "check which cluster you are on".
   * A single code would make the browser's message a guess.
@@ -49,6 +51,17 @@ object TopicErrors {
     case TopicError.Unreachable(detail, retryable) =>
       if retryable then InfrastructureError.Timeout(s"$Upstream: $detail", RetryableAfterMs)
       else InfrastructureError.Unreachable(Upstream, detail)
+
+    case TopicError.AlreadyExists(_) =>
+      // `Conflict`, which is `KUI-INVALID-STATE` and a 409. A 400 would say the request was malformed,
+      // which it was not: the same request would have succeeded a minute earlier.
+      ApplicationError.Conflict(error.message)
+
+    case TopicError.Rejected(_) =>
+      // A refusal by the cluster is an `ApplicationError` and never an infrastructure one, for the reason
+      // `Forbidden` above gives: nothing is broken, and per ADR-039 §6 it must not dim a capability. The
+      // code is `KUI-VALIDATION` because the remedy is always to change what was asked for.
+      ApplicationError.Invalid(error.message, Nil)
   }
 
   /** The duration reported on a retryable failure.

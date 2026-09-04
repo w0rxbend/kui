@@ -22,7 +22,17 @@ import kui.observability.Telemetry
 import kui.security.*
 import kui.testkit.fakes.FakeStructuredLogger
 import kui.topic.application.*
-import kui.topic.domain.{TopicConfigView, TopicDetail, TopicError, TopicSnapshot}
+import kui.topic.domain.{
+  CreatedTopic,
+  DeletionPlan,
+  NewTopicSpec,
+  PartitionPlan,
+  TopicConfigChange,
+  TopicConfigView,
+  TopicDetail,
+  TopicError,
+  TopicSnapshot
+}
 
 /** The topic service, assembled the way `services/topic/app` will assemble it, with no socket.
   *
@@ -157,6 +167,58 @@ object TopicTestServer {
     def report: IO[List[(ClusterId, TopicCapability)]] = IO.pure(report0)
   }
 
+  /** Every administration route, answering whatever the fixture was built with.
+    *
+    * One stub for all six because they share a use case, and because what these suites assert about them is
+    * routing, decoding and the error envelope — not the Kafka behaviour, which is the application layer's
+    * own suites' subject.
+    */
+  final class StubAdmin(
+      created: Either[KuiError, CreatedTopic],
+      configured: Either[KuiError, TopicConfigView],
+      partitionPlan: Either[KuiError, Planned[PartitionPlan]],
+      partitionsApplied: Either[KuiError, PartitionPlan],
+      deletionPlan: Either[KuiError, Planned[DeletionPlan]],
+      deleted: Either[KuiError, DeletionPlan]
+  ) extends TopicAdminUseCase[IO] {
+
+    def create(cluster: ClusterId, spec: NewTopicSpec): IO[Either[KuiError, CreatedTopic]] =
+      IO.pure(created)
+
+    def alterConfig(
+        cluster: ClusterId,
+        topic: TopicName,
+        change: TopicConfigChange
+    ): IO[Either[KuiError, TopicConfigView]] = IO.pure(configured)
+
+    def planPartitions(
+        cluster: ClusterId,
+        topic: TopicName,
+        target: Int
+    ): IO[Either[KuiError, Planned[PartitionPlan]]] = IO.pure(partitionPlan)
+
+    def applyPartitions(
+        cluster: ClusterId,
+        topic: TopicName,
+        token: String
+    ): IO[Either[KuiError, PartitionPlan]] = IO.pure(partitionsApplied)
+
+    def planDelete(cluster: ClusterId, topic: TopicName): IO[Either[KuiError, Planned[DeletionPlan]]] =
+      IO.pure(deletionPlan)
+
+    def applyDelete(
+        cluster: ClusterId,
+        topic: TopicName,
+        token: String
+    ): IO[Either[KuiError, DeletionPlan]] = IO.pure(deleted)
+  }
+
+  /** The answer every administration route gives unless a suite says otherwise: a refusal that names the
+    * fixture, so a suite that reaches one of these routes by accident sees why rather than a 500.
+    */
+  val NotConfigured: KuiError =
+    kui.kernel.error.ApplicationError.InvalidState("no administration answer is configured in this fixture")
+
   /** The whole service, ready to be spoken to. */
   def resource(
       snapshot: Snapshot[TopicSnapshot],
@@ -164,7 +226,13 @@ object TopicTestServer {
         Left(TopicError.Unreachable("no detail configured in this fixture", retryable = false)),
       config: Either[TopicError, TopicConfigView] = Right(TopicConfigView.of(Nil)),
       capabilities: List[(ClusterId, TopicCapability)] = Nil,
-      refreshBlocks: Option[Deferred[IO, Unit]] = None
+      refreshBlocks: Option[Deferred[IO, Unit]] = None,
+      created: Either[KuiError, CreatedTopic] = Left(NotConfigured),
+      configured: Either[KuiError, TopicConfigView] = Left(NotConfigured),
+      partitionPlan: Either[KuiError, Planned[PartitionPlan]] = Left(NotConfigured),
+      partitionsApplied: Either[KuiError, PartitionPlan] = Left(NotConfigured),
+      deletionPlan: Either[KuiError, Planned[DeletionPlan]] = Left(NotConfigured),
+      deleted: Either[KuiError, DeletionPlan] = Left(NotConfigured)
   ): Resource[IO, TopicTestServer] =
     OtelJavaTestkit.inMemory[IO]().evalMap { testkit =>
       for {
@@ -179,6 +247,7 @@ object TopicTestServer {
           new StubSnapshots(snapshot, refreshes, refreshBlocks),
           new StubDetail(detail),
           new StubConfig(config),
+          new StubAdmin(created, configured, partitionPlan, partitionsApplied, deletionPlan, deleted),
           new StubCapabilities(capabilities),
           Nil,
           codec,

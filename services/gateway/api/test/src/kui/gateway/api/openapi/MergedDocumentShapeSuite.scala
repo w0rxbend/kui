@@ -97,7 +97,11 @@ final class MergedDocumentShapeSuite extends FunSuite {
         .map(_.showPathTemplate().takeWhile(_ != '?'))
     val documented = paths.filter(_.startsWith("/api/v1/clusters"))
 
-    assertEquals(documented.sorted, (derived ++ own).sorted)
+    // Compared as sets of *paths*, because since M5 several paths carry more than one method: a topic's
+    // collection is a GET and a POST, a topic is a GET and a DELETE, its config is a GET and a PATCH, and
+    // its partitions are a GET and a POST. An OpenAPI document has one entry per path with the methods
+    // inside it, so a list comparison would fail on the repetition rather than on anything being missing.
+    assertEquals(documented.distinct.sorted, (derived ++ own).distinct.sorted)
   }
 
   test("theSseEndpointIsDocumentedAsAnEventStream") {

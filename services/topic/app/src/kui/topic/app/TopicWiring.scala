@@ -1,11 +1,14 @@
 package kui.topic.app
 
+import java.nio.charset.StandardCharsets
+import java.security.SecureRandom
 import java.time.Instant
 
 import scala.concurrent.duration.FiniteDuration
 
 import cats.Parallel
 import cats.effect.kernel.{Async, Clock, Resource}
+import cats.syntax.all.*
 import fs2.io.file.Files
 import org.typelevel.log4cats.StructuredLogger
 import sttp.tapir.server.ServerEndpoint
@@ -17,12 +20,27 @@ import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
 import kui.kafka.{AdminClientPool, AdminMetrics}
+import kui.kernel.Secret
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
-import kui.topic.api.TopicApi
-import kui.topic.application.{TopicCapabilityUseCase, TopicConfigUseCase, TopicDetailUseCase}
+import kui.security.audit.MutationRecord
+import kui.topic.api.{TopicApi, TopicErrors}
+import kui.topic.application.{
+  MutationGuard,
+  TopicAdminUseCase,
+  TopicCapabilityUseCase,
+  TopicConfigUseCase,
+  TopicDetailUseCase,
+  TopicPlanToken
+}
 import kui.topic.domain.ClockPort
-import kui.topic.infrastructure.{ConfiguredClusterProfiles, KafkaTopicAdmin, LiveTopicSnapshots}
+import kui.topic.infrastructure.{
+  ConfiguredClusterProfiles,
+  KafkaTopicAdmin,
+  KafkaTopicWriter,
+  LiveTopicSnapshots,
+  LoggingAuditSink
+}
 
 /** Everything the topic service needs in order to be served, with no listener started.
   *
@@ -69,6 +87,7 @@ object TopicWiring {
       clusters: List[ClusterConfig],
       scrapeInterval: FiniteDuration,
       internalPrefix: String,
+      cursorKey: Option[Secret[String]],
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -81,10 +100,34 @@ object TopicWiring {
       adminMetrics <- Resource.eval(AdminMetrics.otel[F](telemetry))
       pool <- AdminClientPool.resource[F](adminMetrics, Some(logger))
       admin = new KafkaTopicAdmin[F](pool, profiles.connectionFor, internalPrefix, logger)
+      writer = new KafkaTopicWriter[F](pool, profiles.connectionFor, logger)
       cacheMetrics <- Resource.eval(CacheMetrics.otel4s[F](meter))
       snapshots <- LiveTopicSnapshots.resource[F](profiles.ids, admin, scrapeInterval, cacheMetrics, logger)
       detail = TopicDetailUseCase.make[F](admin, snapshots)
       config = TopicConfigUseCase.make[F](admin)
+
+      // The plan-signing key (ADR-045), which is ADR-026's streaming cursor key: one secret, one
+      // rotation procedure, and this service's use kept apart from the consumer service's by the
+      // operation name inside the payload.
+      //
+      // Configured, because a plan token that only the replica that minted it can verify is a
+      // confirmation dialog that fails at the last step behind a load balancer, and a key regenerated
+      // on restart is a plan an operator has to compose twice. It falls back to a fresh random rather
+      // than refusing to start: one process with no replicas — the quickstart, a laptop — needs no
+      // shared secret, and demanding one there would be a worse first five minutes for nothing gained.
+      key <- Resource.eval(signingKey[F](cursorKey, logger))
+      tokens = TopicPlanToken.make[F](key)
+      audit = LoggingAuditSink.make[F](logger)
+      guard = MutationGuard.make[F](
+        profiles,
+        snapshots,
+        audit,
+        logger,
+        Async[F].pure(AuditPrincipal),
+        TopicErrors.toKui
+      )
+      topicAdmin = TopicAdminUseCase
+        .make[F](admin, writer, profiles, guard, tokens, logger, TopicErrors.toKui)
       capabilities = TopicCapabilityUseCase.make[F](profiles, snapshots)
       // Readiness is deliberately empty. "Can this service answer" is true as soon as it is wired: it
       // serves snapshots, and a snapshot that has not been taken yet is a state the screen renders
@@ -94,11 +137,64 @@ object TopicWiring {
       readiness = List.empty[ReadinessCheck[F]]
     } yield TopicServer(
       routes = TopicApi
-        .routes[F](snapshots, detail, config, capabilities, readiness, principals, rejections, logger),
+        .routes[F](
+          snapshots,
+          detail,
+          config,
+          topicAdmin,
+          capabilities,
+          readiness,
+          principals,
+          rejections,
+          logger
+        ),
       interceptors = interceptors,
       readiness = readiness,
       capabilities = TopicApi.capabilityDocument[F](capabilities, logger)
     )
+
+  /** Who an audit record names while KUI has no authentication.
+    *
+    * A literal rather than a blank, because a record whose actor field is empty reads as a bug in the audit
+    * trail rather than as a fact about the deployment. Authentication is M6; when it arrives, this is the
+    * value the route's verified `Principal` replaces. It is `MutationRecord.SystemPrincipal`'s neighbour and
+    * says the same thing in a sentence an operator reading an audit line can act on.
+    */
+  val AuditPrincipal: String = s"${MutationRecord.SystemPrincipal} (authentication is not enabled)"
+
+  /** The key plan tokens are signed with: the configured one, or a fresh one for this process.
+    *
+    * The fallback is logged loudly rather than being silent, because its consequence is invisible until a
+    * second replica exists: a plan minted by one process is refused by the other, and the operator sees a
+    * confirmation that will not confirm.
+    */
+  private def signingKey[F[_]: Async](
+      configured: Option[Secret[String]],
+      logger: StructuredLogger[F]
+  ): F[Secret[Array[Byte]]] =
+    configured match {
+      case Some(secret) =>
+        Async[F]
+          .pure(Secret(secret.value.getBytes(StandardCharsets.UTF_8)))
+          .flatTap(_ => logger.info("plan tokens are signed with the configured kui.streaming.cursorKey"))
+      case None =>
+        Async[F]
+          .delay(Secret(randomKey()))
+          .flatTap(_ =>
+            logger.info(
+              "no kui.streaming.cursorKey is configured; plan tokens are signed with a key generated for " +
+                "this process. A restart invalidates an open confirmation, and a second replica rejects " +
+                "this one's tokens. Configure the key before running more than one."
+            )
+          )
+    }
+
+  /** 256 bits from the platform's secure source. */
+  private def randomKey(): Array[Byte] = {
+    val bytes = new Array[Byte](32)
+    SecureRandom.getInstanceStrong.nextBytes(bytes)
+    bytes
+  }
 
   /** The domain's clock port, over the effect's own clock. */
   def clock[F[_]: Clock]: ClockPort[F] = new ClockPort[F] {

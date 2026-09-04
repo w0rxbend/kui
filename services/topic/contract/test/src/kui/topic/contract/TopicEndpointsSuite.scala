@@ -110,11 +110,12 @@ final class TopicEndpointsSuite extends FunSuite {
     )
 
     // Named separately, because the list above could be edited to admit one of these without the diff
-    // looking like it added a mutation.
+    // looking like it added a mutation. The administration endpoints are a separate object with a
+    // separate suite; what this asserts is that this file stays the read half.
     List(Method.PUT, Method.PATCH, Method.DELETE).foreach { method =>
       assert(
         !TopicEndpoints.all.exists(_.method.contains(method)),
-        s"$method must not be declared before M5's read-only mode and audit trail exist"
+        s"$method belongs in TopicAdminEndpoints, which carries the marker, the CSRF header and the plan phase"
       )
     }
   }
@@ -125,7 +126,7 @@ final class TopicEndpointsSuite extends FunSuite {
     val paths = TopicEndpoints.all.map(pathTemplate)
 
     List("replication-factor", "partitions/increase", "clone", "purge", "recreate").foreach { forbidden =>
-      assert(!paths.exists(_.contains(forbidden)), s"$forbidden is M5's, with its safety net")
+      assert(!paths.exists(_.contains(forbidden)), s"$forbidden is an administration path and belongs in TopicAdminEndpoints")
     }
   }
 
