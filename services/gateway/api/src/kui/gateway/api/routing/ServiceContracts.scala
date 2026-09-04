@@ -4,6 +4,7 @@ import sttp.tapir.AnyEndpoint
 
 import kui.cluster.contract.ClusterEndpoints
 import kui.kernel.ServiceId
+import kui.topic.contract.TopicEndpoints
 
 /** Which published contract belongs to which service id.
   *
@@ -19,7 +20,10 @@ import kui.kernel.ServiceId
 object ServiceContracts {
 
   val byService: Map[ServiceId, List[AnyEndpoint]] =
-    Map(ServiceId.unsafe("cluster") -> ClusterEndpoints.all)
+    Map(
+      ServiceId.unsafe("cluster") -> ClusterEndpoints.all,
+      ServiceId.unsafe("topic") -> TopicEndpoints.all
+    )
 
   def of(service: ServiceId): List[AnyEndpoint] = byService.getOrElse(service, Nil)
 

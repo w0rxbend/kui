@@ -121,6 +121,29 @@ note under that table.
 | `kui.gateway.cors.enabled` | boolean | `false` | no | Whether pages from other origins may call this API. Off, because the gateway serves the interface from the same origin. |
 | `kui.gateway.cors.origins` | list of string | *(empty)* | no | The explicit allow-list; comma-separated in the environment. `*` is refused at load: combined with credentials it would let any website read a signed-in user's Kafka data. |
 
+**Which `<id>`s mean something.** `<id>` is a KUI service id, and the gateway derives proxy routes for
+the ones it holds a published contract for: `cluster` (M1) and `topic` (M2). A service listed here that
+the gateway has no contract for is *not* an error — it is configured, polled and reported in
+`GET /api/v1/capabilities` — it simply has no proxied routes yet, which is what lets a service be
+deployed before the gateway build that routes it. A service that is **not** listed at all is
+`NotConfigured`: its sidebar entry is hidden rather than greyed, because "this deployment has no such
+thing" and "this deployment cannot reach it" are different statements and only the second is a problem
+somebody should go and fix.
+
+```yaml
+kui:
+  gateway:
+    services:
+      cluster:
+        url: http://kui-cluster:8081
+      topic:
+        url: http://kui-topic:8082
+        # The topic service reads whole snapshots of large clusters; the default 10s budget is fine
+        # for the list, and this is where you would raise it for a cluster with tens of thousands of
+        # topics.
+        timeout: 10s
+```
+
 **`principalKeys` is not a gateway setting despite its name.** It is the shared key set of one
 deployment. The gateway signs the internal `X-Kui-Principal` header with the newest key whose
 `notBefore` has passed, and every service accepts any key in the list (ADR-020). Give every process
