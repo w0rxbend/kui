@@ -29,7 +29,9 @@ final case class ClusterConfig(
     security: ClusterSecurity,
     properties: ClientProperties,
     readOnly: Boolean,
-    admin: AdminTuning
+    admin: AdminTuning,
+    serde: ClusterSerdeConfig = ClusterSerdeConfig.empty,
+    schemaRegistry: Option[SchemaRegistrySettings] = None
 ) {
 
   /** The four things a client needs, as the one value every port takes.
@@ -49,8 +51,9 @@ final case class ClusterConfig(
   override def toString: String = {
     val mechanism = security.saslMechanism.fold("")(m => s", mechanism=${m.wireName}")
     val extra = if properties.isEmpty then "" else s", properties=[${properties.render}]"
+    val registry = schemaRegistry.fold("")(settings => s", schemaRegistry=$settings")
     s"ClusterConfig(${id.value}, '$name', ${bootstrapServers.value}, " +
-      s"${security.securityProtocol}$mechanism, readOnly=$readOnly$extra)"
+      s"${security.securityProtocol}$mechanism, readOnly=$readOnly$extra$registry)"
   }
 }
 
