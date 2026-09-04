@@ -23,9 +23,11 @@ import kui.security.Principal
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.group.{GroupProtocol, GroupState}
 import kui.kernel.Page
-import kui.kernel.{ClusterId, GroupId, Secret, ServiceId, TopicName, UserName}
+import kui.kernel.{ClusterId, GroupId, RoleName, Secret, ServiceId, TopicName, UserName}
 import kui.observability.Telemetry
+import kui.http.principal.RbacGuard
 import kui.security.*
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The consumer service, assembled the way `services/consumer/app` assembles it, with no socket.
@@ -75,13 +77,14 @@ object ConsumerTestServer {
       method: String = "GET",
       body: Array[Byte] = Array.emptyByteArray,
       audience: ServiceId = ConsumerApi.Id,
-      validFor: FiniteDuration = 60.seconds
+      validFor: FiniteDuration = 60.seconds,
+      roles: Set[RoleName] = Set.empty
   ): IO[SignedPrincipal] =
     IO.realTimeInstant.flatMap(now =>
       codec.sign(
         PrincipalClaims(
           subject = UserName.unsafe("alice"),
-          roles = Set.empty,
+          roles = roles,
           kind = PrincipalKind.Session,
           sessionRef = None,
           issuedAt = now,
@@ -288,7 +291,12 @@ object ConsumerTestServer {
   def resource(
       groups: List[GroupSummary] = Nil,
       lag: List[LagUpdate] = Nil,
-      freshness: SnapshotFreshness = Fresh
+      freshness: SnapshotFreshness = Fresh,
+      // What this service allows on its own account, independently of whatever the gateway decided. It
+      // defaults to allowing everything so that a suite about consumer groups is about consumer groups;
+      // the suite that is about the guard passes a real policy.
+      rbac: RbacPolicy = RbacPolicy.Disabled,
+      clusterFlags: Map[ClusterId, ClusterFlags] = Map.empty
   ): Resource[IO, (ConsumerTestServer, Stubs)] =
     OtelJavaTestkit.inMemory[IO]().evalMap { testkit =>
       for {
@@ -317,7 +325,12 @@ object ConsumerTestServer {
           new StubCapabilities,
           codec,
           rejections,
-          logger
+          logger,
+          RbacGuard.fromPolicy[IO](
+            rbac,
+            cluster => clusterFlags.getOrElse(cluster, ClusterFlags.Writable),
+            logger
+          )
         )
 
         (

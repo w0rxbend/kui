@@ -18,10 +18,11 @@ import sttp.client4.StreamBackend
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
 import kui.cluster.application.{CapabilityReportUseCase, ClusterService}
-import kui.http.principal.PrincipalVerification
-import kui.kernel.{ClusterId, Secret, ServiceId, UserName}
+import kui.http.principal.{PrincipalVerification, RbacGuard}
+import kui.kernel.{ClusterId, RoleName, Secret, ServiceId, UserName}
 import kui.observability.Telemetry
 import kui.security.*
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The cluster service, assembled the way `services/cluster/app` assembles it, with no socket.
@@ -85,13 +86,14 @@ object ClusterTestServer {
       audience: ServiceId = ClusterService.Id,
       validFor: FiniteDuration = 60.seconds,
       digest: RequestDigest = RequestDigest.ofRequestLine("GET", ClustersPath),
-      subject: String = "alice"
+      subject: String = "alice",
+      roles: Set[RoleName] = Set.empty
   ): IO[SignedPrincipal] =
     IO.realTimeInstant.flatMap(now =>
       codec.sign(
         PrincipalClaims(
           subject = UserName.unsafe(subject),
-          roles = Set.empty,
+          roles = roles,
           kind = PrincipalKind.Session,
           sessionRef = None,
           issuedAt = now,
@@ -111,7 +113,15 @@ object ClusterTestServer {
     *   whether the configured cluster can be reached. `false` is the degraded case `/capabilities` exists
     *   for.
     */
-  def resource(configured: Boolean = true, available: Boolean = true): Resource[IO, ClusterTestServer] =
+  def resource(
+      configured: Boolean = true,
+      available: Boolean = true,
+      // What this service allows on its own account, independently of whatever the gateway decided. It
+      // defaults to allowing everything so that a suite about clusters is about clusters; the suite that
+      // is about the guard passes a real policy.
+      rbac: RbacPolicy = RbacPolicy.Disabled,
+      clusterFlags: Map[ClusterId, ClusterFlags] = Map.empty
+  ): Resource[IO, ClusterTestServer] =
     OtelJavaTestkit.inMemory[IO]().evalMap { testkit =>
       for {
         logger <- FakeStructuredLogger[IO]
@@ -133,7 +143,13 @@ object ClusterTestServer {
           codec,
           rejections,
           Telemetry.fromProviders(testkit.tracerProvider, testkit.meterProvider),
-          logger
+          logger,
+          RbacGuard.fromPolicy[IO](
+            rbac,
+            cluster => clusterFlags.getOrElse(cluster, ClusterFlags.Writable),
+            logger
+          ),
+          rbac
         )
 
         ClusterTestServer(

@@ -96,7 +96,8 @@ final class FaultIsolationSuite extends KuiIOSuite {
         principals,
         rejections,
         telemetry,
-        logger
+        logger,
+        kui.http.principal.RbacGuard.allowAll[IO]
       ),
       interceptors,
       principals

@@ -10,7 +10,7 @@ import kui.cluster.application.{ClusterProbeUseCase, ClusterWriteUseCase}
 import kui.cluster.contract.ClusterWriteEndpoints
 import kui.cluster.contract.dto.{ClusterWriteRequest, ConnectivityDto}
 import kui.cluster.domain.{Connectivity, ProfileVersion}
-import kui.http.principal.SecuredRoutes
+import kui.http.principal.{RbacGuard, SecuredRoutes}
 import kui.kernel.ClusterId
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.security.rbac.{AccessRequest, Action, ClusterFlags, Decision, Rbac, RbacPolicy, Resource}
@@ -57,9 +57,10 @@ object ClusterWriteRoutes {
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       logger: StructuredLogger[F],
+      guard: RbacGuard[F],
       permitted: Principal => Boolean = defaultPermission
   ): List[ServerEndpoint[Any, F]] = {
-    val secured = ClusterApi.Securing[F](principals, rejections, logger)
+    val secured = ClusterApi.Securing[F](principals, rejections, logger, guard)
 
     /** The permission gate, as one value, so that three routes cannot check it three slightly different ways
       * — or, as has happened elsewhere in this project, so that the third route cannot forget.

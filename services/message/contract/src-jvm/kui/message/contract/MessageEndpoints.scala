@@ -8,11 +8,13 @@ import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.*
 
 import kui.contracts.KernelSchemas.given
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.browse.{Direction, IsolationLevel, SeekMode}
 import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, PartitionId, TopicName}
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, Resource}
 
 /** Everything one browse asks for, as one value.
   *
@@ -207,6 +209,18 @@ object MessageEndpoints {
       .out(sseBody[F])
       .mapIn(intoParams)(fromParams)
       .name("message.browse.stream")
+      // Reading a topic's records needs permission to read that topic's records, and this is where that
+      // is written down. It matters more here than on the mutations: the browse stream is the one KUI
+      // endpoint the gateway does *not* proxy through `ContractRouting` — a stream needs its own
+      // cancellation and heartbeat handling, so `MessageStreamRoutes` carries it — and until this
+      // declaration existed, the message service was the only enforcement point it had.
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "message.browse.stream",
+          ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicMessagesRead)
+        )
+      )
       .summary("Browse a topic's records as a stream")
       .description(
         "Records arrive as they are read; nothing is buffered into a page first. A record no serde " +

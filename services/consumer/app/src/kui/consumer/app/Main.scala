@@ -29,6 +29,7 @@ object Main extends IOApp {
         ConsumerWiring
           .make[IO](
             config.clusters,
+            config.rbac,
             config.consumers.refreshInterval,
             config.streaming.cursorKey,
             telemetry,

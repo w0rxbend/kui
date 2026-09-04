@@ -21,7 +21,7 @@ import kui.consumer.domain.{ConsumerGroup, GroupAdminPort, GroupListingPage, Off
 import kui.consumer.infrastructure.{ConfiguredProfileSource, KafkaGroupAdminPort}
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
-import kui.http.principal.PrincipalVerification
+import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.kafka.admin.{KafkaGroupAdmin, OffsetLookup}
 import kui.kafka.{AdminClientPool, AdminMetrics}
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
@@ -30,6 +30,7 @@ import kui.kernel.{ClusterId, GroupId, Offset, Secret, TopicPartition}
 import kui.observability.Telemetry
 import kui.observability.audit.LoggingAuditSink
 import kui.security.PrincipalCodec
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 
 /** Everything the consumer service needs in order to be served, with no listener started.
   *
@@ -90,6 +91,7 @@ object ConsumerWiring {
     */
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
+      rbac: RbacPolicy,
       refreshInterval: FiniteDuration,
       cursorKey: Option[Secret[String]],
       telemetry: Telemetry[F],
@@ -147,6 +149,15 @@ object ConsumerWiring {
       // consumer service out of rotation whenever a coordinator was slow, which is exactly the coupling
       // the snapshot exists to break.
       readiness = List.empty[ReadinessCheck[F]]
+
+      // The permission check this service runs for itself, over the same declaration on the same
+      // endpoints the gateway read (ADR-021). Read-only comes from this process's own `kui.clusters[]`,
+      // so an offset reset on a read-only cluster is refused here whether or not the gateway was asked.
+      permissions = RbacGuard.fromPolicy[F](
+        rbac,
+        cluster => ClusterFlags(clusters.find(_.id == cluster).exists(_.readOnly)),
+        logger
+      )
     } yield ConsumerServer(
       routes = ConsumerApi.routes[F](
         list,
@@ -161,7 +172,8 @@ object ConsumerWiring {
         capabilities,
         principals,
         rejections,
-        logger
+        logger,
+        permissions
       ),
       interceptors = interceptors,
       readiness = readiness,

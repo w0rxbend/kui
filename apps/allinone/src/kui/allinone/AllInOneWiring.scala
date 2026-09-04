@@ -209,6 +209,7 @@ object AllInOneWiring {
       // tuning the cheaper one by the expensive one.
       consumerService <- ConsumerWiring.make[F](
         clusters,
+        rbac,
         consumers.refreshInterval,
         streaming.cursorKey,
         telemetry,
@@ -219,7 +220,8 @@ object AllInOneWiring {
       // topic and consumer services it keeps no snapshot and runs no background scrape: it opens a
       // Kafka consumer when somebody browses, streams what was asked for, and closes it again. So
       // there is no interval to configure here and nothing for a broker outage to make stale.
-      messageService <- MessageWiring.make[F](clusters, streaming.cursorKey, telemetry, principals, logger)
+      messageService <- MessageWiring
+        .make[F](clusters, rbac, streaming.cursorKey, telemetry, principals, logger)
       // The schema service, which is the first one that may have nothing to do. A deployment where no
       // cluster configures `schemaRegistry` still wires it, still serves its routes and still reports
       // every cluster as not_configured — because "this deployment has no registry" is an answer the

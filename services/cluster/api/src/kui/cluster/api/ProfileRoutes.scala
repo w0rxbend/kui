@@ -14,6 +14,7 @@ import sttp.tapir.server.ServerEndpoint
 import kui.cluster.application.{ClusterRegistry, RegistrySnapshot}
 import kui.cluster.contract.ProfileEndpoints
 import kui.cluster.contract.dto.{ClusterChangeDto, ProfileResult}
+import kui.http.principal.RbacGuard
 import kui.http.sse.{Sse, SseConfig, SseEvent}
 import kui.kernel.error.KuiError
 import kui.observability.Telemetry
@@ -34,11 +35,12 @@ object ProfileRoutes {
       rejections: Counter[F, Long],
       telemetry: Telemetry[F],
       logger: StructuredLogger[F],
+      guard: RbacGuard[F],
       sse: SseConfig = SseConfig.default
   ): List[ServerEndpoint[Fs2Streams[F], F]] =
     List(
-      profileRoute[F](registry, principals, rejections, logger),
-      streamRoute[F](registry, principals, rejections, telemetry, logger, sse)
+      profileRoute[F](registry, principals, rejections, logger, guard),
+      streamRoute[F](registry, principals, rejections, telemetry, logger, guard, sse)
     )
 
   /** `GET /internal/v1/clusters/{clusterId}/profile`.
@@ -51,9 +53,10 @@ object ProfileRoutes {
       registry: ClusterRegistry[F],
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
+      logger: StructuredLogger[F],
+      guard: RbacGuard[F]
   ): ServerEndpoint[Any, F] =
-    ClusterApi.Securing[F](principals, rejections, logger)(ProfileEndpoints.profile) { _ =>
+    ClusterApi.Securing[F](principals, rejections, logger, guard)(ProfileEndpoints.profile) { _ =>
       { case (id, ifNoneMatch) =>
         registry.resolve(id).flatMap {
           case Left(error) => error.asLeft[ProfileResult].pure[F]
@@ -76,9 +79,10 @@ object ProfileRoutes {
       rejections: Counter[F, Long],
       telemetry: Telemetry[F],
       logger: StructuredLogger[F],
+      guard: RbacGuard[F],
       config: SseConfig
   ): ServerEndpoint[Fs2Streams[F], F] =
-    ClusterApi.Securing[F](principals, rejections, logger).stream(ClusterStreamEndpoint.endpoint[F]) {
+    ClusterApi.Securing[F](principals, rejections, logger, guard).stream(ClusterStreamEndpoint.endpoint[F]) {
       _ => _ => _ =>
         Sse
           .encode(

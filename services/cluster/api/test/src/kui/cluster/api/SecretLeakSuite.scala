@@ -23,6 +23,7 @@ import kui.cluster.application.{
 }
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEndpoints}
 import kui.contracts.KuiEndpoint
+import kui.http.principal.RbacGuard
 import kui.observability.Telemetry
 import kui.kernel.BrokerId
 import kui.security.{PrincipalClaims, PrincipalKind, RequestDigest}
@@ -101,8 +102,9 @@ final class SecretLeakSuite extends CatsEffectSuite {
               brokers,
               codec,
               rejections,
-              logger
-            ) ++ ProfileRoutes[IO](registry, codec, rejections, telemetry, logger)
+              logger,
+              RbacGuard.allowAll[IO]
+            ) ++ ProfileRoutes[IO](registry, codec, rejections, telemetry, logger, RbacGuard.allowAll[IO])
           )
           .backend(),
         logger,

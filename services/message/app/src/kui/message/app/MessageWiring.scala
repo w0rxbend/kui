@@ -16,7 +16,7 @@ import kui.config.{ClusterConfig, UrlPolicy}
 import kui.contracts.capability.ServiceCapabilities
 import kui.filter.{CelFilterEngine, FilterLimits, FilterMetrics, MessageFilterPort}
 import kui.http.health.ReadinessCheck
-import kui.http.principal.PrincipalVerification
+import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.kafka.{AdminClientPool, AdminMetrics}
 import kui.kernel.{ClusterId, Secret}
 import kui.message.api.{MessageApi, MessageRoutes}
@@ -37,6 +37,7 @@ import kui.message.infrastructure.{
 import kui.observability.Telemetry
 import kui.observability.audit.LoggingAuditSink
 import kui.security.PrincipalCodec
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 import kui.serde.{ClusterSerdes, SerdeFactory, SerdeProfile}
 
 /** Everything the message service needs in order to be served, with no listener started.
@@ -92,6 +93,7 @@ object MessageWiring {
     */
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
+      rbac: RbacPolicy,
       cursorKey: Option[Secret[String]],
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
@@ -167,6 +169,15 @@ object MessageWiring {
       // rotation whenever *one* cluster was slow, which would take browsing away from every other
       // cluster at the same time.
       readiness = List.empty[ReadinessCheck[F]]
+
+      // The permission check this service runs for itself, over the same declaration on the same
+      // endpoints the gateway read (ADR-021). Read-only comes from this process's own `kui.clusters[]`,
+      // so a produce against a read-only cluster is refused here whether or not the gateway was asked.
+      permissions = RbacGuard.fromPolicy[F](
+        rbac,
+        cluster => ClusterFlags(clusters.find(_.id == cluster).exists(_.readOnly)),
+        logger
+      )
     } yield MessageServer(
       routes = MessageApi.routes[F](
         browse,
@@ -180,7 +191,8 @@ object MessageWiring {
         principals,
         rejections,
         logger,
-        telemetry
+        telemetry,
+        permissions
       ),
       interceptors = interceptors,
       readiness = readiness,

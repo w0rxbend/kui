@@ -40,6 +40,7 @@ final class ConsumerWiringSuite extends CatsEffectSuite {
       ConsumerWiring
         .make[IO](
           clusters,
+          kui.security.rbac.RbacPolicy.Disabled,
           refreshInterval,
           cursorKey,
           Telemetry.noop[IO],

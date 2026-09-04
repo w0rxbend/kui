@@ -17,6 +17,7 @@ import kui.cluster.application.{ClusterRegistry, RegistrySnapshot, RegistryVersi
 import kui.cluster.contract.ProfileEndpoints
 import kui.cluster.domain.{ClusterProfile, StoreHealth}
 import kui.contracts.KuiEndpoint
+import kui.http.principal.RbacGuard
 import kui.observability.Telemetry
 import kui.security.*
 import kui.testkit.fakes.FakeStructuredLogger
@@ -43,7 +44,7 @@ final class ProfileRoutesSuite extends CatsEffectSuite {
       } yield ClusterTestServer(
         TapirStreamStubInterpreter(interceptors, StreamBackendStub[IO, Fs2Streams[IO]](summon))
           .whenServerEndpointsRunLogic(
-            ProfileRoutes[IO](registry, codec, rejections, telemetry, logger)
+            ProfileRoutes[IO](registry, codec, rejections, telemetry, logger, RbacGuard.allowAll[IO])
           )
           .backend(),
         logger,

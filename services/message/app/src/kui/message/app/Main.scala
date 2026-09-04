@@ -27,7 +27,7 @@ object Main extends IOApp {
       args,
       (config, telemetry, principals, logger) =>
         MessageWiring
-          .make[IO](config.clusters, config.streaming.cursorKey, telemetry, principals, logger)
+          .make[IO](config.clusters, config.rbac, config.streaming.cursorKey, telemetry, principals, logger)
           .map(service => ServiceMain.Serving(service.routes, service.interceptors))
     )
 }

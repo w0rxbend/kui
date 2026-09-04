@@ -18,7 +18,7 @@ import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
-import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
+import kui.http.principal.{PrincipalInterceptor, RbacGuard, RequestContext, SecuredRoutes}
 import kui.kernel.ServiceId
 import kui.kernel.error.KuiError
 import kui.observability.{KuiInterceptors, Telemetry}
@@ -72,9 +72,10 @@ object ConsumerApi {
       capabilities: ConsumerCapabilities[F],
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
+      logger: StructuredLogger[F],
+      guard: RbacGuard[F]
   ): List[ServerEndpoint[Any, F]] = {
-    val secured = Securing[F](principals, rejections, logger)
+    val secured = Securing[F](principals, rejections, logger, guard)
 
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
       ConsumerRoutes[F](list, detail, lag, forTopic, snapshots, secured) ++
@@ -115,8 +116,9 @@ object ConsumerApi {
   def Securing[F[_]: Async](
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
-  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger)
+      logger: StructuredLogger[F],
+      guard: RbacGuard[F]
+  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger, guard)
 
   /** The two halves of an error response: the body the contract fixes and the status the code decides. */
   private[api] type Failure = SecuredRoutes.Failure

@@ -15,9 +15,10 @@ import kui.cluster.domain.ClockPort
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ProcessLoggerFactory
 import kui.http.health.ReadinessCheck
-import kui.http.principal.PrincipalVerification
+import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
+import kui.security.rbac.ClusterFlags
 
 /** Everything the cluster service needs in order to be served, with no listener started.
   *
@@ -95,6 +96,15 @@ object ClusterWiring {
       interceptors <- Resource.eval(ClusterApi.interceptors[F](telemetry, rejections, logger))
       bootstrapped <- ClusterBootstrap.resource[F](config.clusters, config.store, telemetry, logger)
       readiness = ClusterBootstrap.readiness[F](bootstrapped)
+
+      // The permission check this service runs for itself, over the same declaration on the same
+      // endpoints the gateway read (ADR-021). Read-only comes from this process's own `kui.clusters[]`,
+      // so a cluster marked read-only is refused a write here whether or not the gateway was asked.
+      permissions = RbacGuard.fromPolicy[F](
+        config.rbac,
+        cluster => ClusterFlags(config.clusters.find(_.id == cluster).exists(_.readOnly)),
+        logger
+      )
     } yield ClusterServer(
       routes = ClusterApi.routes[F](
         bootstrapped.registry,
@@ -108,6 +118,7 @@ object ClusterWiring {
         rejections,
         telemetry,
         logger,
+        permissions,
         config.rbac
       ),
       interceptors = interceptors,

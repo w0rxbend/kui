@@ -8,6 +8,7 @@ import org.typelevel.otel4s.metrics.Counter
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.server.ServerEndpoint
 
+import kui.http.principal.RbacGuard
 import kui.http.sse.{Sse, SseConfig, SseEvent}
 import kui.kernel.browse.PollBudget
 import kui.kernel.error.{DomainError, FieldError, KuiError}
@@ -59,11 +60,12 @@ object MessageRoutes {
       rejections: Counter[F, Long],
       logger: StructuredLogger[F],
       telemetry: Telemetry[F],
+      guard: RbacGuard[F],
       limits: BrowseLimits = BrowseLimits.Default,
       budget: PollBudget = DefaultBudget,
       sse: SseConfig = SseConfig.default
   ): List[ServerEndpoint[Fs2Streams[F], F]] = {
-    val secured = MessageApi.Securing[F](principals, rejections, logger)
+    val secured = MessageApi.Securing[F](principals, rejections, logger, guard)
 
     List(
       secured.stream(MessageEndpoints.browseStream[F]) { _ => ctx => params =>

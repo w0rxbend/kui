@@ -20,6 +20,7 @@ import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 import kui.cluster.application.*
 import kui.cluster.domain.LogDirError
 import kui.contracts.KuiEndpoint
+import kui.http.principal.RbacGuard
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.kernel.{BrokerId, ClusterId, UserName}
 import kui.observability.Telemetry
@@ -74,7 +75,8 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
           brokers,
           codec,
           rejections,
-          logger
+          logger,
+          RbacGuard.allowAll[IO]
         )
 
         ClusterTestServer(

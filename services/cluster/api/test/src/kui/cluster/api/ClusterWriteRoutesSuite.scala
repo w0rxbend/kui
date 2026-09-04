@@ -24,6 +24,7 @@ import kui.cluster.contract.ClusterWriteEndpoints
 import kui.cluster.contract.dto.*
 import kui.cluster.domain.{ClusterProfile, Connectivity, ProfileVersion}
 import kui.contracts.KuiEndpoint
+import kui.http.principal.RbacGuard
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, RoleName, Secret, UserName}
 import kui.observability.Telemetry
@@ -114,7 +115,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
       } yield ClusterTestServer(
         TapirStreamStubInterpreter(interceptors, StreamBackendStub[IO, Fs2Streams[IO]](summon))
           .whenServerEndpointsRunLogic(
-            ClusterWriteRoutes[IO](writes, probe, codec, rejections, logger, permitted)
+            ClusterWriteRoutes[IO](writes, probe, codec, rejections, logger, RbacGuard.allowAll[IO], permitted)
           )
           .backend(),
         logger,

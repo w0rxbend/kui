@@ -12,7 +12,7 @@ import sttp.tapir.server.interceptor.Interceptor
 import kui.contracts.capability.{CapabilityState, ClusterCapability, ServiceCapabilities}
 import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
-import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
+import kui.http.principal.{PrincipalInterceptor, RbacGuard, RequestContext, SecuredRoutes}
 import kui.kernel.{ClusterId, ServiceId}
 import kui.message.application.produce.{ProduceUseCase, ResendUseCase}
 import kui.message.application.purge.PurgeUseCase
@@ -58,12 +58,13 @@ object MessageApi {
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       logger: StructuredLogger[F],
-      telemetry: Telemetry[F]
+      telemetry: Telemetry[F],
+      guard: RbacGuard[F]
   ): List[ServerEndpoint[Fs2Streams[F], F]] = {
-    val secured = Securing[F](principals, rejections, logger)
+    val secured = Securing[F](principals, rejections, logger, guard)
 
     HealthEndpoints.make[F](readiness, capabilityDocument[F](clusters)) ++
-      MessageRoutes[F](browse, principals, rejections, logger, telemetry) ++
+      MessageRoutes[F](browse, principals, rejections, logger, telemetry, guard) ++
       // The writes, and the purge plan that precedes the one destructive one. They are
       // `ServerEndpoint[Any, F]` — no stream capability — and widen into this list because Tapir's
       // capability parameter is contravariant: a route that needs nothing of the interpreter runs on
@@ -111,8 +112,9 @@ object MessageApi {
   def Securing[F[_]: Async](
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
-  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger)
+      logger: StructuredLogger[F],
+      guard: RbacGuard[F]
+  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger, guard)
 
   private[api] type Failure = SecuredRoutes.Failure
 

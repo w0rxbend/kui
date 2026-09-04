@@ -27,7 +27,7 @@ import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints, ProfileEnd
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
-import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
+import kui.http.principal.{PrincipalInterceptor, RbacGuard, RequestContext, SecuredRoutes}
 import kui.kernel.error.KuiError
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
@@ -101,6 +101,12 @@ object ClusterApi {
       // (ADR-021) instead of inventing a rule of its own. Defaulted to `Disabled` -- RBAC switched off, every
       // decision allowed -- because that is what a deployment with no roles configured means everywhere else
       // in KUI, and a different default here would be a second, quieter rule.
+      // This service's own permission check, run on every route it serves — the same decision the gateway
+      // already took, over the same declaration, so the two cannot disagree (ADR-021). It is built by the
+      // wiring rather than here because deciding it needs to know which clusters are read-only, which is
+      // configuration this module does not hold, and it has no default so that a composition root cannot
+      // leave the gateway as the only enforcement point by saying nothing.
+      guard: RbacGuard[F],
       rbac: RbacPolicy = RbacPolicy.Disabled
   ): List[ServerEndpoint[Fs2Streams[F], F]] =
     // The health endpoints come first because nothing else can match their paths and a probe should
@@ -108,16 +114,17 @@ object ClusterApi {
     // capability from the server" — and `ServerEndpoint` is contravariant in that parameter, so they
     // fit into a list typed on `Fs2Streams` that the streaming endpoints need.
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
-      ClusterRoutes[F](registry, topology, brokers, principals, rejections, logger) ++
+      ClusterRoutes[F](registry, topology, brokers, principals, rejections, logger, guard) ++
       ClusterWriteRoutes[F](
         write,
         probe,
         principals,
         rejections,
         logger,
+        guard,
         ClusterWriteRoutes.permissionFrom(rbac)
       ) ++
-      ProfileRoutes[F](registry, principals, rejections, telemetry, logger)
+      ProfileRoutes[F](registry, principals, rejections, telemetry, logger, guard)
 
   /** The cross-cutting chain, outermost first, exactly as `libs/http`'s server wants it.
     *
@@ -163,8 +170,9 @@ object ClusterApi {
   def Securing[F[_]: Async](
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
-  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger)
+      logger: StructuredLogger[F],
+      guard: RbacGuard[F]
+  ): SecuredRoutes[F] = new SecuredRoutes[F](principals, Id, rejections, logger, guard)
 
   /** The two halves of an error response: the body the contract fixes and the status the code decides. */
   private[api] type Failure = SecuredRoutes.Failure

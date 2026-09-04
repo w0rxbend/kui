@@ -13,6 +13,7 @@ import kui.cluster.contract.ClusterEndpoints
 import kui.cluster.contract.dto.*
 import kui.cluster.domain.{ClusterProfile, ClusterTopology}
 import kui.contracts.Section
+import kui.http.principal.RbacGuard
 import kui.contracts.cluster.{ClusterRowDto, LogDirDto}
 import kui.kernel.ClusterId
 import kui.kernel.error.{ErrorCode, KuiError}
@@ -43,9 +44,10 @@ object ClusterRoutes {
       brokers: BrokerDetailUseCase[F],
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
+      logger: StructuredLogger[F],
+      guard: RbacGuard[F]
   ): List[ServerEndpoint[Any, F]] = {
-    val secured = ClusterApi.Securing[F](principals, rejections, logger)
+    val secured = ClusterApi.Securing[F](principals, rejections, logger, guard)
 
     List(
       listClusters(registry, topology, secured),
