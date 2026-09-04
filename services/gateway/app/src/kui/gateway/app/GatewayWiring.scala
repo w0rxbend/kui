@@ -169,15 +169,23 @@ object GatewayWiring {
       // The dashboard, which the gateway answers itself over the cluster service's client. A deployment
       // with no cluster service configured has no such client and therefore no route: the path 404s,
       // rather than answering an empty list that would read as "no clusters are configured".
+      //
+      // The topic and consumer clients are *optional* extras to it, and each one's absence is a section
+      // the document reports as `NotConfigured` rather than a route that disappears. That asymmetry is
+      // deliberate: without a cluster service there is no dashboard to draw, while without a consumer
+      // service there is a dashboard with one panel that says this deployment has no such thing.
+      topicClient = clients.all.find(_.service == TopicServiceId)
+      consumerClient = clients.all.find(_.service == ConsumerServiceId)
       overview <- clients.all
         .find(_.service == ClusterServiceId)
-        .traverse(ClusterOverviewUseCase.resource[F](_, registry, signals, logger))
+        .traverse(
+          ClusterOverviewUseCase
+            .resource[F](_, registry, signals, logger, topics = topicClient, groups = consumerClient)
+        )
       // The topic page's aggregation, on the same terms: a deployment with no topic service configured has
       // no client and therefore no route, so `/overview` 404s rather than answering a document whose topic
       // section is permanently unavailable for a service nobody deployed.
-      topicOverview <- clients.all
-        .find(_.service == TopicServiceId)
-        .traverse(TopicOverviewUseCase.resource[F](_, signals, telemetry))
+      topicOverview <- topicClient.traverse(TopicOverviewUseCase.resource[F](_, signals, telemetry))
       // The message browse stream, relayed rather than proxied. A deployment with no message service
       // configured has no client and therefore no route, so the address 404s instead of opening a
       // stream that could only ever end in an error.
@@ -317,8 +325,13 @@ object GatewayWiring {
   /** The service whose list endpoint the gateway aggregates rather than proxies. */
   val ClusterServiceId: ServiceId = ServiceId.unsafe("cluster")
 
-  /** The service the topic-page aggregation calls. Its other five endpoints are proxied untouched. */
+  /** The service the topic-page aggregation and the dashboard's topic totals call. Its other endpoints are
+    * proxied untouched.
+    */
   val TopicServiceId: ServiceId = ServiceId.unsafe("topic")
+
+  /** The service the dashboard's consumer-group totals call. Everything else it serves is proxied. */
+  val ConsumerServiceId: ServiceId = ServiceId.unsafe("consumer")
 
   /** The service whose browse stream is relayed. It has no proxied endpoints: a stream cannot be called and
     * re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.

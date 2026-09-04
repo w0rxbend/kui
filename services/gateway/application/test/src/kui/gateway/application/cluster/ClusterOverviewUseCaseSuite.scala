@@ -14,6 +14,12 @@ import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.{Endpoint, PublicEndpoint}
 
 import kui.cluster.contract.dto.ClustersResponse
+import kui.consumer.contract.dto.GroupsResponse
+import kui.contracts.consumer.GroupSummaryDto
+import kui.contracts.paging.{PageDto, PageInfo}
+import kui.contracts.topic.TopicRowDto
+import kui.kernel.group.{GroupProtocol, GroupState}
+import kui.topic.contract.dto.TopicsResponse
 import kui.config.UpstreamServiceConfig
 import kui.contracts.capability.{CapabilityKey, CapabilityState, DegradedReason, ReasonCode}
 import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
@@ -23,7 +29,7 @@ import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.SseEvent
 import kui.http.upstream.CircuitEvent
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
-import kui.kernel.{ClusterId, CorrelationId, ServiceId}
+import kui.kernel.{ClusterId, CorrelationId, GroupId, ServiceId, TopicName}
 import kui.observability.Telemetry
 import kui.security.{Principal, SignedPrincipal}
 import kui.testkit.fakes.FakeStructuredLogger
@@ -86,8 +92,33 @@ final class ClusterOverviewUseCaseSuite extends CatsEffectSuite {
       )(ctx: CallContext): Stream[IO, SseEvent] = Stream.empty
     }
 
+  /** A client that answers one endpoint with one canned value, whatever the input.
+    *
+    * Enough for the two dashboard extras, which each call exactly one endpoint on their service.
+    */
+  private def answering[R](id: ServiceId, answer: Either[KuiError, R]): ServiceClient[IO] =
+    new ServiceClient[IO] {
+      val service: ServiceId = id
+      def circuitStates: Stream[IO, CircuitEvent] = Stream.empty
+
+      def call[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any], input: I)(
+          ctx: CallContext
+      ): IO[Either[KuiError, O]] = IO.pure(answer.map(_.asInstanceOf[O]))
+
+      def callPublic[I, O](endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any], input: I)(
+          ctx: CallContext
+      ): IO[Either[KuiError, O]] = IO.raiseError(new UnsupportedOperationException)
+
+      def stream[I](
+          endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, Stream[IO, Byte], Fs2Streams[IO]],
+          input: I
+      )(ctx: CallContext): Stream[IO, SseEvent] = Stream.empty
+    }
+
   private def using[A](
-      service: ServiceClient[IO]
+      service: ServiceClient[IO],
+      topics: Option[ServiceClient[IO]] = None,
+      groups: Option[ServiceClient[IO]] = None
   )(body: (ClusterOverviewUseCase[IO], CapabilityRegistry[IO]) => IO[A]): IO[A] =
     (for {
       logger <- Resource.eval(FakeStructuredLogger[IO])
@@ -95,8 +126,50 @@ final class ClusterOverviewUseCaseSuite extends CatsEffectSuite {
       signals <- Resource.eval(
         CapabilitySignals.make[IO](RegistryConfig.Default, registry, List(clusterService))
       )
-      overview <- ClusterOverviewUseCase.resource[IO](service, registry, signals, logger)
+      overview <- ClusterOverviewUseCase
+        .resource[IO](service, registry, signals, logger, topics = topics, groups = groups)
     } yield (overview, registry)).use(body.tupled)
+
+  private def topicPage(rows: (String, Int)*): TopicsResponse =
+    TopicsResponse(
+      Section.Ok(
+        PageDto(
+          rows.toList.map((name, partitions) =>
+            TopicRowDto(TopicName.unsafe(name), false, partitions, Some(1), 0, 0, None, None)
+          ),
+          PageInfo(1, 500, Some(rows.size.toLong), None)
+        ),
+        at
+      ),
+      incompleteTopics = 0
+    )
+
+  private def groupPage(rows: (GroupState, Option[Long])*): GroupsResponse =
+    GroupsResponse(
+      Section.Ok(
+        PageDto(
+          rows.toList.zipWithIndex.map { case ((state, lag), index) =>
+            GroupSummaryDto(
+              groupId = GroupId.unsafe(s"group-$index"),
+              state = state,
+              protocol = GroupProtocol.Consumer,
+              isSimple = false,
+              members = 1,
+              topics = 1,
+              partitions = 1,
+              coordinatorId = Some(1),
+              totalLag = lag,
+              pace = None,
+              excludedPartitions = 0,
+              incomplete = None
+            )
+          },
+          PageInfo(1, 200, Some(rows.size.toLong), None)
+        ),
+        at
+      ),
+      incompleteCoordinators = 0
+    )
 
   // -----------------------------------------------------------------------------------------------
 
@@ -314,6 +387,91 @@ final class ClusterOverviewUseCaseSuite extends CatsEffectSuite {
         dto.clusters.toOption.getOrElse(Nil).map(_.cluster.id.value),
         List("prod-eu", "staging", "dead")
       )
+    }
+  }
+
+  // --- The dashboard's two extra sections -----------------------------------------------------
+
+  test("withNoTopicOrConsumerClientBothSectionsSayThisDeploymentHasNoSuchThing") {
+    // `not_configured` and never `unavailable`: a deployment that never deployed a consumer service must
+    // not be shown a permanent error on its first screen (ADR-032).
+    using(client(Right(threeClusters))) { (overview, _) =>
+      overview.overview(caller, correlationId).map { dto =>
+        val rows = dto.clusters.toOption.getOrElse(fail("the outer section failed"))
+        assertEquals(rows.map(_.topics.status).distinct, List("not_configured"))
+        assertEquals(rows.map(_.consumerGroups.status).distinct, List("not_configured"))
+      }
+    }
+  }
+
+  test("topicAndPartitionTotalsAreSummedFromTheTopicServicesOwnPage") {
+    using(
+      client(Right(threeClusters)),
+      topics = Some(answering(ServiceId.unsafe("topic"), Right(topicPage("orders.v1" -> 6, "a" -> 3))))
+    ) { (overview, _) =>
+      overview.overview(caller, correlationId).map { dto =>
+        val totals = dto.clusters.toOption.toList.flatten.head.topics.toOption
+          .getOrElse(fail("the topic section failed"))
+        assertEquals(totals.topicCount, 2L)
+        assertEquals(totals.partitionCount, Some(9))
+        // Ordered by size, so the bars the screen draws are the biggest topics and not the first ones.
+        assertEquals(totals.largest.map(_.name.value), List("orders.v1", "a"))
+      }
+    }
+  }
+
+  test("aDeadConsumerServiceCostsItsOwnSectionAndNothingElse") {
+    // The dashboard's whole argument, asserted on the document: the topic totals and the cluster summaries
+    // must survive a consumer service that is not answering, and the consumer section must carry the
+    // reason rather than a zero.
+    using(
+      client(Right(threeClusters)),
+      topics = Some(answering(ServiceId.unsafe("topic"), Right(topicPage("orders.v1" -> 6)))),
+      groups = Some(
+        answering[GroupsResponse](
+          ServiceId.unsafe("consumer"),
+          Left(InfrastructureError.Unreachable("consumer", "connection refused"))
+        )
+      )
+    ) { (overview, _) =>
+      overview.overview(caller, correlationId).map { dto =>
+        val rows = dto.clusters.toOption.getOrElse(fail("the outer section failed"))
+        assertEquals(dto.clusters.status, "ok")
+        assertEquals(rows.map(_.cluster.summary.status), List("ok", "ok", "unavailable"))
+        assertEquals(rows.map(_.topics.status).distinct, List("ok"))
+        assertEquals(rows.map(_.consumerGroups.status).distinct, List("unavailable"))
+        assertEquals(
+          rows.head.consumerGroups match {
+            case Section.Unavailable(_, message, _) => message
+            case other => fail(s"expected an unavailable consumer section, got $other")
+          },
+          "consumer could not be reached"
+        )
+      }
+    }
+  }
+
+  test("aGroupWithNoLagLeavesTheTotalAbsentRatherThanCountingItAsZero") {
+    // The worst possible lie on this screen. Kafka reports no lag for a partition whose group never
+    // committed and for one whose leader is unreachable; a total that treated those as zero would say a
+    // cluster is keeping up at the exact moment it is not.
+    using(
+      client(Right(threeClusters)),
+      groups = Some(
+        answering(
+          ServiceId.unsafe("consumer"),
+          Right(groupPage(GroupState.Stable -> Some(9L), GroupState.Empty -> None))
+        )
+      )
+    ) { (overview, _) =>
+      overview.overview(caller, correlationId).map { dto =>
+        val totals = dto.clusters.toOption.toList.flatten.head.consumerGroups.toOption
+          .getOrElse(fail("the consumer section failed"))
+        assertEquals(totals.groupCount, 2L)
+        assertEquals(totals.totalLag, None)
+        assertEquals(totals.groupsWithoutLag, 1)
+        assertEquals(totals.byState.map(entry => entry.state.wire -> entry.count), List("STABLE" -> 1, "EMPTY" -> 1))
+      }
     }
   }
 }

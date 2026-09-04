@@ -9,8 +9,15 @@ import munit.FunSuite
 import kui.contracts.Section
 import kui.contracts.capability.{CapabilityState, DegradedReason, ReasonCode}
 import kui.contracts.cluster.{ClusterRowDto, ClusterSecurityDto, ClusterSummaryDto}
-import kui.gateway.contract.dto.{ClusterOverviewDto, ClusterOverviewRow}
-import kui.kernel.{BrokerId, ClusterId, KafkaClusterId}
+import kui.gateway.contract.dto.{
+  ClusterOverviewDto,
+  ClusterOverviewRow,
+  GroupTotalsDto,
+  TopicMagnitudeDto,
+  TopicTotalsDto
+}
+import kui.kernel.group.GroupState
+import kui.kernel.{BrokerId, ClusterId, KafkaClusterId, TopicName}
 
 /** That the dashboard document says both of the things it has to say at once.
   *
@@ -45,7 +52,26 @@ final class ClusterOverviewSuite extends FunSuite {
         at
       )
     ),
-    CapabilityState.Available
+    CapabilityState.Available,
+    // The two totals the dashboard draws, both `Ok`, both on the healthy row.
+    topics = Section.Ok(
+      TopicTotalsDto.of(
+        List(
+          TopicMagnitudeDto(TopicName.unsafe("orders.v1"), 6),
+          TopicMagnitudeDto(TopicName.unsafe("payments.v1"), 3)
+        ),
+        topicCount = 2L
+      ),
+      at
+    ),
+    consumerGroups = Section.Ok(
+      GroupTotalsDto.of(
+        List(GroupState.Stable, GroupState.Empty),
+        List(Some(9L), Some(0L)),
+        groupCount = 2L
+      ),
+      at
+    )
   )
 
   private val dead = ClusterOverviewRow(
@@ -59,7 +85,12 @@ final class ClusterOverviewSuite extends FunSuite {
     ),
     CapabilityState.Degraded(
       DegradedReason(ReasonCode.Starting, "this cluster has not been scraped yet", None, None)
-    )
+    ),
+    // The dead row's three sections disagree with one another on purpose, which is the whole point of
+    // keeping them apart: its Kafka cluster is unreachable, its topic totals failed for that reason, and
+    // this deployment has no consumer service at all — three facts with three different remedies.
+    topics = Section.Unavailable(ReasonCode.UpstreamUnavailable, "connection refused", Some(at)),
+    consumerGroups = Section.NotConfigured
   )
 
   private val overview = ClusterOverviewDto(

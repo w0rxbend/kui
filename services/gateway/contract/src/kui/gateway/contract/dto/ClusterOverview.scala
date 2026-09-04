@@ -11,14 +11,36 @@ import kui.contracts.Section
 import kui.contracts.capability.CapabilityState
 import kui.contracts.cluster.ClusterRowDto
 
-/** One cluster on the dashboard: what the cluster service knows about it, and what the gateway's capability
-  * registry says about KUI's ability to serve it.
+/** One cluster on the dashboard: what the cluster service knows about it, what the gateway's capability
+  * registry says about KUI's ability to serve it, and the two totals the dashboard draws that come from other
+  * services entirely.
   *
   * The registry only *decorates* the row. A cluster the registry has an entry for but the cluster service did
   * not return is not invented here: the list is the cluster service's answer, and a gateway that added rows
   * of its own would be holding cluster state, which is the one thing ADR-004 says it must not do.
+  *
+  * ==Three independent statuses on one row==
+  *
+  * `cluster.summary`, `topics` and `consumerGroups` fail separately, and the dashboard is the screen where
+  * that matters most: it is the product's argument in one picture. A cluster whose brokers are answering but
+  * whose consumer service is down shows its broker count and its topic totals beside a consumer panel that
+  * says why it is empty. Folding the three into one status would make one dead service blank the row.
+  *
+  * Both new sections are `NotConfigured` in a deployment with no topic or no consumer service — hidden, not
+  * shown as an error (ADR-032) — and default to that when an older gateway's document is decoded, so a
+  * browser from a newer build still reads an older answer.
+  *
+  * @param topics
+  *   the cluster's topic and partition totals, from the topic service
+  * @param consumerGroups
+  *   the cluster's consumer groups by state, from the consumer service
   */
-final case class ClusterOverviewRow(cluster: ClusterRowDto, capability: CapabilityState)
+final case class ClusterOverviewRow(
+    cluster: ClusterRowDto,
+    capability: CapabilityState,
+    topics: Section[TopicTotalsDto] = Section.NotConfigured,
+    consumerGroups: Section[GroupTotalsDto] = Section.NotConfigured
+)
 
 object ClusterOverviewRow {
 
@@ -27,9 +49,16 @@ object ClusterOverviewRow {
       for {
         cluster <- cursor.get[ClusterRowDto]("cluster")
         capability <- cursor.get[CapabilityState]("capability")
-      } yield ClusterOverviewRow(cluster, capability),
+        topics <- cursor.getOrElse[Section[TopicTotalsDto]]("topics")(Section.NotConfigured)
+        groups <- cursor.getOrElse[Section[GroupTotalsDto]]("consumerGroups")(Section.NotConfigured)
+      } yield ClusterOverviewRow(cluster, capability, topics, groups),
     (row: ClusterOverviewRow) =>
-      Json.obj("cluster" -> row.cluster.asJson, "capability" -> row.capability.asJson)
+      Json.obj(
+        "cluster" -> row.cluster.asJson,
+        "capability" -> row.capability.asJson,
+        "topics" -> row.topics.asJson,
+        "consumerGroups" -> row.consumerGroups.asJson
+      )
   )
 
   given Schema[ClusterOverviewRow] =

@@ -78,6 +78,44 @@ object GoldenDocuments {
       |        },
       |        "capability" : {
       |          "status" : "available"
+      |        },
+      |        "topics" : {
+      |          "status" : "ok",
+      |          "data" : {
+      |            "topicCount" : 2,
+      |            "countedTopics" : 2,
+      |            "partitionCount" : 9,
+      |            "largest" : [
+      |              {
+      |                "name" : "orders.v1",
+      |                "partitionCount" : 6
+      |              },
+      |              {
+      |                "name" : "payments.v1",
+      |                "partitionCount" : 3
+      |              }
+      |            ]
+      |          },
+      |          "fetchedAt" : "2026-09-03T10:11:12.000Z"
+      |        },
+      |        "consumerGroups" : {
+      |          "status" : "ok",
+      |          "data" : {
+      |            "groupCount" : 2,
+      |            "byState" : [
+      |              {
+      |                "state" : "STABLE",
+      |                "count" : 1
+      |              },
+      |              {
+      |                "state" : "EMPTY",
+      |                "count" : 1
+      |              }
+      |            ],
+      |            "totalLag" : 9,
+      |            "groupsWithoutLag" : 0
+      |          },
+      |          "fetchedAt" : "2026-09-03T10:11:12.000Z"
       |        }
       |      },
       |      {
@@ -107,6 +145,15 @@ object GoldenDocuments {
       |            "suggestedPollIntervalMs" : null,
       |            "p95Ms" : null
       |          }
+      |        },
+      |        "topics" : {
+      |          "status" : "unavailable",
+      |          "reason" : "UPSTREAM_UNAVAILABLE",
+      |          "message" : "connection refused",
+      |          "since" : "2026-09-03T10:11:12.000Z"
+      |        },
+      |        "consumerGroups" : {
+      |          "status" : "not_configured"
       |        }
       |      }
       |    ],
