@@ -86,7 +86,17 @@ object Dialog {
       )
 
     // `child.maybe` is what makes "closed" mean "not in the document".
-    div(cls := KernelCss.DialogHost, child.maybe <-- open.signal.map(isOpen => Option.when(isOpen)(panel())))
+    // `.distinct` is load-bearing, not tidiness. A `Var[Boolean]` emits on every `set`, including a `set`
+    // to the value it already holds, and callers do exactly that: the produce drawer keeps its `open` flag
+    // in step with a draft by writing `open.set(draft.isDefined)` whenever the draft changes -- which is on
+    // every keystroke. Without `distinct` each of those emissions builds a *new* panel and `child.maybe`
+    // swaps the old one out, so the element the user is typing into is destroyed and replaced between one
+    // character and the next. Found in a browser: the Publish form's value box accepted exactly one
+    // character per click, and focus then jumped to the drawer's close button.
+    div(
+      cls := KernelCss.DialogHost,
+      child.maybe <-- open.signal.distinct.map(isOpen => Option.when(isOpen)(panel()))
+    )
   }
 
   /** `aria-modal="true"` tells a screen reader that everything outside this element is unavailable while it
