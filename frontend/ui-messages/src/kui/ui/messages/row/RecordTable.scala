@@ -191,7 +191,8 @@ object RecordTable {
     */
   private def opensTheRow(event: dom.MouseEvent): Boolean = {
     val onAControl = event.target match {
-      case element: dom.Element => element.closest("button, a, input, select, textarea, label") != null
+      case element: dom.Element =>
+        Option(element.closest("button, a, input, select, textarea, label")).isDefined
       case _ => false
     }
     val selecting = Option(dom.window.getSelection()).exists(_.toString.nonEmpty)
