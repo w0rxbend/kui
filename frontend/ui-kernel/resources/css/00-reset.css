@@ -49,12 +49,41 @@ html {
   /* Keep the scrollbar gutter reserved so that a page growing past one screen does not shift its
    * whole layout sideways by the scrollbar's width. */
   scrollbar-gutter: stable;
-  /* Firefox's two standard properties. They inherit, so the root covers every scroll container in
-   * the product and a universal selector is not needed. The WebKit pseudo-elements below do the same
-   * job for browsers that do not implement these; neither mechanism can express the other, so both
-   * are stated rather than one being preferred. */
-  scrollbar-width: thin;
+  /* The thumb and track colour. This property does inherit, so stating it once at the root reaches
+   * every scroll container in the product. Its partner `scrollbar-width` does not inherit and is
+   * therefore set on every element just below. */
   scrollbar-color: var(--kui-color-scrollbar-thumb) transparent;
+}
+
+/* `scrollbar-width` is not an inherited property, so the root declaration above used to leave every
+ * inner scroller — the one under every table wide enough to need it — computing `auto`, which is the
+ * operating system's full-width bar. Measured in Chrome on the brokers table: the root computed
+ * `thin` while `.kui-table-scroll` computed `auto` and reserved 16 pixels. Every element gets it. */
+* {
+  scrollbar-width: thin;
+}
+
+/* And then, in the browsers that have the pseudo-elements, both of the standard properties are taken
+ * straight back off again.
+ *
+ * The two mechanisms are not additive: a browser that supports both uses the standard properties
+ * when they are set and ignores `::-webkit-scrollbar` entirely. Measured on the brokers table in
+ * Chrome — with `scrollbar-color` set the bar was the operating system's own, eleven pixels wide
+ * with a stepper arrow at each end; withdrawing it made the block below take effect and the bar
+ * became the design's: ten pixels, no arrows, a rounded thumb inset from the edge of the panel.
+ *
+ * `@supports selector(...)` is the only way to ask a browser which of the two it is going to use,
+ * and it answers correctly: true in Chrome and Safari, false in Firefox, which therefore never sees
+ * this block and keeps the standard properties set above. So each engine draws the closest thing it
+ * can to the design, and neither is handed a rule it will silently drop. */
+@supports selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: auto;
+  }
+
+  html {
+    scrollbar-color: auto;
+  }
 }
 
 /* Scrollbars.
@@ -69,8 +98,10 @@ html {
  * with `background-clip: padding-box` is what insets the thumb inside the track: it is the design's
  * own technique, and it means the thumb does not touch the edge of the panel it is in.
  *
- * Firefox gets the standard two properties; everything else gets the WebKit pseudo-elements. Neither
- * mechanism can express the other, so both are stated. */
+ * This is the design in full: ten pixels, a thumb inset by a transparent border and no steppers. It
+ * is what Chrome and Safari draw, because the `@supports` block above withdraws the standard
+ * properties from exactly the browsers that reach here. Firefox has only the standard properties and
+ * gets the nearest it can express, which is a thin bar in the same colour. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
