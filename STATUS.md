@@ -1,8 +1,8 @@
 # KUI status
 
-**Date:** 2026-09-03
-**Phase:** G — grooming and analysis (PLAN §39), project-wide pass before M0.
-**Repository:** no commits yet; `docs/` and `research/` are untracked working files.
+**Date:** 2026-09-04
+**Phase:** M1 implemented and integrated. M2 (topic explorer) is next.
+**Repository:** M0 and M1 on `main`; `./mill __.test` is green end to end.
 
 ## Grooming progress
 
@@ -106,17 +106,118 @@ Conditions, none of which gate the first commit:
 4. `./mill checkArchitecture` is proven to fail on a deliberate violating edge, with the
    message recorded in BUILD-005's Implementation Report.
 
-## Next step
 
-Implementation of M0, starting at BUILD-001. `docs/plans/M0/DEVPLAN.md` §6.2 is the order;
-BUILD-006, CFG-001 and KERN-006 are worth pulling forward because they answer the open
-questions that could invalidate later work.
+## M1 integration and acceptance — 2026-09-04
+
+Seven agents implemented M1 in parallel. This section records what an integration pass found when
+the whole thing was built, tested and run for the first time, and how each of the milestone's exit
+criteria actually stands. It is deliberately specific about what is *not* proved: a criterion nobody
+checked is not a criterion that passed.
+
+### Repository state
+
+```
+./mill __.compile              3498/3498  SUCCESS
+./mill __.checkFormat           108/108   SUCCESS
+./mill __.fix --check          2351/2351  SUCCESS
+./mill checkArchitecture       75 modules, no layering violations
+./mill __.test                 4649/4649  SUCCESS   (2383 tests, 0 failed, 0 ignored)
+./mill services.cluster.api.openApiCheck    SUCCESS
+./mill services.gateway.api.openApiCheck    SUCCESS
+./mill docs.errorCodes --check              SUCCESS
+./mill frontend.uiShell.checkBundleShape    1 feature module split out, main.js 966079 B of 1500000 B
+```
+
+Scala.js modules were also run in an invocation of their own with Node on `PATH`, per `CLAUDE.md`;
+all green. Note that naming two Scala.js test modules on one `./mill` command line fails inside the
+Scala.js test adapter — it passes the second module's selector to the first module's MUnit runner,
+which rejects it. That is a harness limitation, not a project failure, and it is the reason the
+convention exists.
+
+### Six defects found by integrating, none visible inside any one module
+
+1. **The all-in-one dropped `kui.clusters[]`.** `AllInOneConfig` carried three sections and handed the
+   cluster service `ClusterServiceConfig.Default`, so the configured cluster list was parsed,
+   validated and then discarded. The startup log said "resolved 0 configured cluster(s)" against a
+   file that named one. Fixed in `d62295f`; this was CFGOP-006's all-in-one half, blocked all
+   milestone on a cluster service that did not compile.
+2. **The dashboard decoded a document nobody sends.** `GET /api/v1/clusters` is aggregated by the
+   gateway and answers with `ClusterOverviewDto` (`{"clusters": …}`); the browser client declared the
+   cluster service's `ClustersResponse` (`{"items": …}`), whose decoder defaults a missing `items` to
+   `Nil`. Every response decoded *successfully* into zero rows, and the page rendered "No clusters
+   yet" under a "last updated just now" timestamp. Fixed in `5978d61`, with four recorded gateway
+   responses now guarding the seam.
+3. **The end-to-end suite tested the previous milestone.** `./mill e2e.test` depended on the
+   all-in-one jar but not on the container images the Compose topology runs, so
+   `ClusterServiceDownSuite` — the suite that proves the milestone's headline claim — ran against the
+   M0 images for the whole of M1. Fixed in `15bad4f`.
+4. **An unresolvable bootstrap address was reported as "kafka answered with status 502".** Nothing
+   answered, and 502 is a status no broker can return. Fixed in `7f02e2d`.
+5. **`libs/testkit`'s container suite broke the whole repository's compile**, because it sat in the
+   cross-compiled test tree and imports the Kafka client. Fixed in `bb42426`.
+6. **Three flaky suites**, all asserting on sleeps rather than on conditions. Fixed in `31d502e` and
+   `6cd253b`.
+
+### M1 exit criteria, one by one
+
+| # | Criterion | Verdict | Evidence |
+| --- | --- | --- | --- |
+| 1 | Testcontainers suite: PLAINTEXT, SASL/SCRAM and SSL each yield the same broker list, configs and log dirs | **Confirmed** — but it did not exist until integration | `ClusterAdminLiveSuite` (`c35d413`): the shared `ClusterAdminContract` run three times against three real brokers, 33 tests, 0 failed, ~70 s |
+| 2 | Manual acceptance against one real external cluster recorded in `STATUS.md` | **Not confirmed** | No external cluster is reachable from this environment. The quickstart's containerised broker is not a substitute and is not being claimed as one. **Still owed.** |
+| 3 | Dashboard with three clusters, one unreachable: two populate, the third shows `Unavailable: <reason>` and stays clickable; response bounded by the per-service timeout | **Confirmed** | Three clusters configured in the running quickstart. `GET /api/v1/clusters` returned two `ok` rows and one `unavailable` carrying `UPSTREAM_UNAVAILABLE`, a message and a sticky `since`, still holding `id`, `name` and `bootstrapServers`. Three consecutive calls took 37 ms, 8.5 ms and 7.9 ms — the dead cluster is scraped on a background loop and is not on the request path |
+| 4 | Fault-isolation E2E: stopping `kui-cluster` leaves the shell, settings and cached rows usable | **Confirmed** — for the first time against M1 images | `ClusterServiceDownSuite`, 8 tests, 0 failed, against images built from the current commit |
+| 5 | Configuration with an unknown key, a missing secret or an invalid URL fails at startup with all errors accumulated | **Confirmed by inspection of the suites, not re-run by hand** | `ValidationSuite.reportsEveryProblemNotJustTheFirst`, `rejectsUnknownKeys`, "a `file:` secret reference that cannot be read", and `UrlPolicySuite` |
+| 6 | Metadata store: creates `__kui_config` and `__kui_files`, replays them, serves clusters from the store; a pre-existing topic with `cleanup.policy=delete` fails startup naming topic, setting, expected and found | **Confirmed** — did not exist until integration | `KafkaConfigStoreLiveSuite` (`7c05a31`), against a real broker |
+| 7 | Two replicas writing the same key concurrently: one succeeds, the other gets `KUI-CONFIG-VERSION-CONFLICT`; both converge | **Confirmed** | Same suite: two independent stores over one topic, both writing from the same base version with `parTupled` |
+| 8 | A write returns 200 only after the writer has read its own record back from the log tail | **Confirmed** | Same suite: five writes, each immediately readable with no sleep, no retry and no polling |
+| 9 | Secret fields unreadable in the raw topic record: a console-consumer dump contains no plaintext password and no JAAS string | **Confirmed** | Same suite, read with a plain `KafkaConsumer` and a byte deserializer, with no KUI code between the partition and the assertion |
+| 10 | With `kui.store.kafka.*` unset, the file adapter is used, store-backed writes report `NotConfigured`, everything else still passes | **Confirmed** | `FileConfigStoreSuite.writesReportNotConfigured` and `emptyStoreSatisfiesTheSameContract`; the quickstart itself runs in this shape and logs "no metadata store is configured" |
+| 11 | Store cluster stopped mid-run: clusters keep resolving from last known state, the capability reports `Degraded`, writes are rejected rather than lost | **Not confirmed** | `StoreHealthSuite` proves the health state machine and its sticky `since`; nothing stops a broker mid-run and asserts the three consequences together. **Still owed.** |
+
+Nine of eleven confirmed. Two are honestly open: criterion 2 needs a real external cluster, and
+criterion 11 needs a suite that kills the store's broker while KUI is running.
+
+### What the quickstart shows now
+
+`deployment/quickstart/quickstart.sh` from a clean state: broker up, seeded, KUI healthy, one URL
+printed. `/ui/main.js` is served as `text/javascript` (966079 bytes), so the M0 packaging blocker is
+gone. In a headless Chromium the dashboard renders one row — *Quickstart (local)*, Online, 1 broker,
+controller 1, 468.8 GiB — and the brokers page renders the broker itself: id 1, `kafka:9092`,
+controller, 170.9 GiB, 83 in-sync replicas.
+
+### Known problems that are not fixed
+
+- **A cluster's per-cluster capability is reported `available` even when that cluster is
+  unreachable.** `/api/v1/capabilities` says `available` for the `dead` cluster whose dashboard row
+  correctly says otherwise. The dashboard is right because it reads the row's own section; anything
+  driven by the capability registry — the sidebar, the switcher — is not. This is the unfinished half
+  of CLAPI-008.
+- **`HEAD /ui/main.js` returns 400** while `GET` returns 200. Browsers fetch scripts with `GET`, so
+  nothing is broken on screen, but a health checker or a link checker using `HEAD` gets a wrong answer.
+- **Timestamps disagree between screens.** The dashboard renders `UTC+03:00` and the brokers page
+  `UTC+02:59` for the same zone, from `Timestamps`' `Intl`-based offset assembly (CLUI-007's
+  deviation 4).
+- **The cluster switcher renders the slug, not the display name** — CLUI's finding 3, owed by CLAPI-008.
+- **No per-partition data on the log-directories tab** — `TECH_DEBT.md` TD-017 and TD-018.
+- **`SnapshotFreshness` loses the error's code**, so every failing scrape is reported as
+  `UPSTREAM_UNAVAILABLE` regardless of whether it was a timeout or an auth failure — CLAPI-004's
+  deviation 2.
+- **No per-broker WARN rate limit** on the log-directory fallback — owed to CLDOM-006.
+- **One rarely flaky test**: `BrokerDetailUseCaseSuite.logDirsFallsBackToTheSnapshotWhenTheLiveCallFails`
+  failed once in roughly thirty runs under artificial CPU starvation. It now prints the admin calls it
+  observed when it fails, so the next occurrence arrives with evidence.
+
+### Next step
+
+M2 grooming. Before it starts, the gate's own condition applies: re-examine the `libs/kafka`-versus-domain
+dual type definitions before `TopicAdmin` and `GroupAdmin` turn three pairs into ten.
 
 ## Milestone acceptance log
 
 | Milestone | Accepted on | Evidence |
 | --- | --- | --- |
-| — | — | — |
+| M0 Foundation | 2026-09-03 | the fault-isolation E2E recorded below |
+| M1 Cluster connectivity | 2026-09-04, **with two criteria unmet** | the exit-criteria table below |
 
 ## M0 exit criterion: fault-isolation E2E (E2E-002)
 

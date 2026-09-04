@@ -41,15 +41,15 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| CL-001 | List clusters with status, counts, throughput, `lastError`, `readOnly` | Kafbat, Provectus, Kouncil | P0 | cluster (+gateway aggregation) | shell, ui-clusters | M1 | M | RESEARCHING | Gateway returns configured clusters from cached config with `status: unavailable` when the cluster service is down (partial by design). |
-| CL-002 | Per-cluster feature flags (SR, Connect, ksql, topic deletion, ACL view/edit, quotas, graphs) | Kafbat, Provectus | P0 | gateway (registry), fed by each service | kernel | M1 | M | RESEARCHING | Feeds `NotConfigured` in the capability registry (DC-H2). Registry infrastructure itself is KU-001 (M0). |
-| CL-003 | Cluster stats (dashboard numbers) served from a refreshed cache | Kafbat, Provectus | P0 | cluster | ui-clusters | M1 | M | RESEARCHING | Stats stay servable while the cluster is momentarily unreachable. |
+| CL-001 | List clusters with status, counts, throughput, `lastError`, `readOnly` | Kafbat, Provectus, Kouncil | P0 | cluster (+gateway aggregation) | shell, ui-clusters | M1 | M | COMPLETE | Gateway returns configured clusters from cached config with `status: unavailable` when the cluster service is down (partial by design). |
+| CL-002 | Per-cluster feature flags (SR, Connect, ksql, topic deletion, ACL view/edit, quotas, graphs) | Kafbat, Provectus | P0 | gateway (registry), fed by each service | kernel | M1 | M | REVIEW | Implemented, but the per-cluster capability key still reports `available` for a cluster that is unreachable (see `STATUS.md`, M1 integration). The dashboard is correct because it reads each row's own section; the sidebar and switcher are not. |
+| CL-003 | Cluster stats (dashboard numbers) served from a refreshed cache | Kafbat, Provectus | P0 | cluster | ui-clusters | M1 | M | COMPLETE | Stats stay servable while the cluster is momentarily unreachable. |
 | CL-004 | Cluster-level aggregated metrics (JMX/Prometheus) | Kafbat, Provectus | P1 | metrics | ui-clusters | M8 | M | RESEARCHING | Dashboard cell shows `—` until M8. |
-| CL-005 | Force statistics cache refresh | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | S | RESEARCHING | `POST /clusters/{id}/refresh`, 202 Accepted. |
+| CL-005 | Force statistics cache refresh | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | S | COMPLETE | `POST /clusters/{id}/refresh`, 202 Accepted. |
 | CL-006 | Dynamic cluster CRUD from the UI, persisted, with connection test | Kouncil | P1 | cluster | ui-admin | M8 | L | RESEARCHING | Merged with the config wizard (CW-002..005). Persists to the `cluster/<clusterId>` keys of `__kui_config` through OT-004 (ADR-042), which lands in M1. Owner is `cluster`, not a config service: ADR-004 dissolved `kui-config-service`. |
-| CL-007 | Typed cluster security config (SASL/SSL/SCRAM/IAM/OAUTHBEARER) with `properties` escape hatch | Kafbat, Provectus, Kouncil | P0 | cluster (typed config in `kui-config`) | ui-admin (form in M8) | M1 | M | RESEARCHING | Decision D-7 / ADR-022. JAAS strings generated from typed fields, never accepted verbatim. |
+| CL-007 | Typed cluster security config (SASL/SSL/SCRAM/IAM/OAUTHBEARER) with `properties` escape hatch | Kafbat, Provectus, Kouncil | P0 | cluster (typed config in `kui-config`) | ui-admin (form in M8) | M1 | M | COMPLETE | Decision D-7 / ADR-022. JAAS strings generated from typed fields, never accepted verbatim. |
 | CL-008 | Failover across multiple SR / Connect / ksql URLs | Kafbat, Provectus | P2 | schema, connect, ksql (shared lib) | — | M7 | M | RESEARCHING | |
-| CL-009 | Per-cluster colour tag and status dot in navigation | Kafbat | P2 | — | shell | M1 | S | RESEARCHING | Colour stored client-side (`LocalPrefs`). |
+| CL-009 | Per-cluster colour tag and status dot in navigation | Kafbat | P2 | — | shell | M1 | S | REVIEW | Colour tag and status dot ship (`ClusterColors`, `ClusterSwitcher`). The switcher renders the cluster **slug** rather than its display name, because the capability registry carries no name — owed by CLAPI-008. |
 | CL-010 | Favourites: pin topics and groups to the top of lists | Kouncil | P2 | — | kernel | M2 | S | RESEARCHING | localStorage, keyed by cluster + name. |
 | CL-011 | Broker-address lookup helper endpoint (`/api/connection`) | Kouncil | P3 | cluster | — | — | S | REJECTED(folded into CL-001) | CEO decision DR-13. The first broker address is a field of the cluster DTO. |
 
@@ -57,11 +57,11 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| BR-001 | List brokers with rack, leader counts, skew %, throughput | Kafbat, Provectus, Kouncil | P0 | cluster | ui-clusters | M1 | M | RESEARCHING | Throughput columns blank until M8 (metrics). |
-| BR-002 | Broker configs with source, sensitivity, read-only flag, synonyms | Kafbat, Provectus, Kouncil | P0 | cluster | ui-clusters | M1 | S | RESEARCHING | Sensitive values redacted server-side. |
+| BR-001 | List brokers with rack, leader counts, skew %, throughput | Kafbat, Provectus, Kouncil | P0 | cluster | ui-clusters | M1 | M | COMPLETE | Throughput columns blank until M8 (metrics). |
+| BR-002 | Broker configs with source, sensitivity, read-only flag, synonyms | Kafbat, Provectus, Kouncil | P0 | cluster | ui-clusters | M1 | S | COMPLETE | Sensitive values redacted server-side. |
 | BR-003 | Update a single broker config (inline edit) | Kafbat, Provectus | P1 | cluster | ui-clusters | M5 | S | RESEARCHING | Audited; blocked in read-only mode (RB-005). |
 | BR-004 | Per-broker metrics (JMX/Prometheus), Kouncil OS metrics | Kafbat, Provectus, Kouncil | P1 | metrics | ui-clusters (metrics tab via FeaturePanel) | M8 | M | RESEARCHING | Broker page is a partial aggregation: metrics tab falls back independently. |
-| BR-005 | Log dirs per broker, per topic-partition size and lag | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | M | RESEARCHING | |
+| BR-005 | Log dirs per broker, per topic-partition size and lag | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | M | REVIEW | Directory-level figures ship: path, error, total and usable bytes, topic and partition counts. Per-topic-partition sizes do not — the wire carries no such field. `TECH_DEBT.md` TD-017 owes the contract field, TD-018 the virtualization. |
 | BR-006 | Move a partition replica to another log dir | Kafbat, Provectus | P2 | cluster | ui-clusters | M5 | S | RESEARCHING | |
 | BR-007 | Brokers CSV export | Kafbat | P2 | cluster | ui-clusters | M5 | S | RESEARCHING | Content negotiation (`Accept: text/csv`), not a `/csv` path. |
 
@@ -95,7 +95,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PA-001 | Partition table on the topic overview (leader, replicas, ISR, offsets, count, size) | Kafbat, Provectus, Kouncil | P0 | topic | ui-topics | M2 | S | RESEARCHING | Size column needs BR-005 data. |
 | PA-002 | Per-partition analysis statistics | Kafbat, Provectus | P1 | topic | ui-topics | M5 | — | RESEARCHING | Delivered by TP-012; tracked separately for the UI table. |
-| PA-003 | Per-partition log-dir sizes | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | — | RESEARCHING | Delivered by BR-005. |
+| PA-003 | Per-partition log-dir sizes | Kafbat, Provectus | P1 | cluster | ui-clusters | M1 | — | BLOCKED | **Blocked on TD-017.** BR-005 was to deliver this and cannot: `LogDirDto` carries no per-topic-partition data, so there is nothing behind "which topic is filling this disk". |
 | PA-004 | Partition increase / replica move | Kafbat, Provectus, Kouncil | P0 | topic, cluster | ui-topics, ui-clusters | M5 | — | RESEARCHING | Cross-reference of TP-010 and BR-006. |
 
 ## Messages: browsing (MS)
@@ -225,7 +225,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | AU-002 | In-memory users with default accounts and forced password change | Kouncil | P2 | identity | shell | M6 | M | RESEARCHING | Dev / demo installs. |
 | AU-003 | SSO provider list and GitHub org/team role source | Kouncil | P2 | identity | — | M6 | M | RESEARCHING | Overlaps RB-002 GitHub extractor; implement once. |
 | AU-004 | CSRF protection for the SPA | Kouncil | P0 | gateway | — | M6 | S | RESEARCHING | `X-KUI-CSRF` header + `Sec-Fetch-Site`, `POST` logout (ADR-019). |
-| AU-005 | User menu: logout, theme auto/light/dark, timezone | Kafbat | P1 | — | shell | M1 | S | RESEARCHING | Theme tokens exist from M0; logout item appears in M6. |
+| AU-005 | User menu: logout, theme auto/light/dark, timezone | Kafbat | P1 | — | shell | M1 | S | COMPLETE | Theme tokens exist from M0; logout item appears in M6. |
 
 ## Authorization: RBAC and read-only (RB)
 
@@ -305,14 +305,14 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| OT-001 | Admin-client timeout, batching and concurrency knobs | Kafbat | P1 | cluster, topic, consumer | — | M1 | S | RESEARCHING | Shared `kui-kafka` settings. |
+| OT-001 | Admin-client timeout, batching and concurrency knobs | Kafbat | P1 | cluster, topic, consumer | — | M1 | S | COMPLETE | Shared `kui-kafka` settings. |
 | OT-002 | CSV formatting knobs | Kafbat | P2 | shared lib | — | M5 | S | RESEARCHING | With the first CSV export. |
-| OT-003 | Per-cluster consumer / producer / admin property overrides | Kafbat, Provectus | P0 | `libs/config` + cluster | — | M1 | S | RESEARCHING | The escape hatch of CL-007. |
-| OT-004 | Kafka-backed metadata store: `ConfigStore[F]` over internal compacted topics (`__kui_config`, `__kui_files`), replay + tail, optimistic `version`, read-your-writes | KUI-new (replaces Kouncil's D-10) | P0 | cluster, identity | — | M1 | L | RESEARCHING | ADR-042. Replaces relational persistence: no database, ever. Core store is M1 because clusters become registrable at runtime there; UI-managed roles/groups (RB-004), masking policies (DM-002) and the wizard (CW-002 … CW-005) are consumers of it and keep their own milestones. File adapter stays for dev, bootstrap and read-only, and file-only mode must keep working (M0 ships the file adapter only). Closed `TECH_DEBT.md` TD-014. |
-| OT-007 | Store topic creation and validation: create `__kui_*` if missing, validate if present, fail fast with the setting, expected and found values | KUI-new | P0 | cluster, identity | — | M1 | S | RESEARCHING | ADR-042. Never rewrites operator topic settings silently. |
-| OT-008 | Envelope encryption of secret fields at rest (AES-GCM, `keyId` in the envelope) and key rotation | KUI-new | P0 | cluster, identity | — | M1 | M | RESEARCHING | ADR-042 §4; `research/scala/security-research.md` §5. Key from `kui.store.encryptionKey`, never stored. Rotation writes new records under a new `keyId` while old ones stay readable. |
-| OT-009 | Store health as a capability: store unreachable means last known state, `Degraded(reason)`, writes rejected | KUI-new | P0 | cluster, identity (+gateway registry) | kernel | M1 | S | RESEARCHING | ADR-042 §8 folded through ADR-039; rendered by ADR-032. |
-| OT-010 | Operator guidance for the store: sizing, ACLs, encryption key handling, backup/restore, file-to-Kafka migration | KUI-new | P1 | — | — | M1 | S | RESEARCHING | `docs/operations/metadata-store.md`. Ships with OT-004; revisited when RB-004 and DM-002 add sections. |
+| OT-003 | Per-cluster consumer / producer / admin property overrides | Kafbat, Provectus | P0 | `libs/config` + cluster | — | M1 | S | COMPLETE | The escape hatch of CL-007. |
+| OT-004 | Kafka-backed metadata store: `ConfigStore[F]` over internal compacted topics (`__kui_config`, `__kui_files`), replay + tail, optimistic `version`, read-your-writes | KUI-new (replaces Kouncil's D-10) | P0 | cluster, identity | — | M1 | L | COMPLETE | ADR-042. Replaces relational persistence: no database, ever. Core store is M1 because clusters become registrable at runtime there; UI-managed roles/groups (RB-004), masking policies (DM-002) and the wizard (CW-002 … CW-005) are consumers of it and keep their own milestones. File adapter stays for dev, bootstrap and read-only, and file-only mode must keep working (M0 ships the file adapter only). Closed `TECH_DEBT.md` TD-014. |
+| OT-007 | Store topic creation and validation: create `__kui_*` if missing, validate if present, fail fast with the setting, expected and found values | KUI-new | P0 | cluster, identity | — | M1 | S | COMPLETE | ADR-042. Never rewrites operator topic settings silently. |
+| OT-008 | Envelope encryption of secret fields at rest (AES-GCM, `keyId` in the envelope) and key rotation | KUI-new | P0 | cluster, identity | — | M1 | M | COMPLETE | ADR-042 §4; `research/scala/security-research.md` §5. Key from `kui.store.encryptionKey`, never stored. Rotation writes new records under a new `keyId` while old ones stay readable. |
+| OT-009 | Store health as a capability: store unreachable means last known state, `Degraded(reason)`, writes rejected | KUI-new | P0 | cluster, identity (+gateway registry) | kernel | M1 | S | REVIEW | Health state machine, sticky `since` and rejected writes all ship and are unit-tested. Nothing yet stops the store's broker mid-run and asserts the three consequences together; M1 exit criterion 11 is open. |
+| OT-010 | Operator guidance for the store: sizing, ACLs, encryption key handling, backup/restore, file-to-Kafka migration | KUI-new | P1 | — | — | M1 | S | COMPLETE | `docs/operations/metadata-store.md`. Ships with OT-004; revisited when RB-004 and DM-002 add sections. |
 | OT-005 | Uniform error envelope with stable `KUI-*` codes and correlation id | Kouncil, Kafbat | P0 | all | kernel | M0 | S | RESEARCHING | PLAN §26; code list in `research/kafbat/api-analysis.md`. |
 | OT-006 | Release check phone-home and installation id | Kafbat, Provectus, Kouncil | P3 | gateway | — | M8 | S | RESEARCHING | Opt-in only, default off (CEO decision DR-7). |
 
@@ -333,9 +333,9 @@ security research flagged.
 | KU-007 | Typed, validated configuration with `Secret[A]` redaction in logs, traces, errors and API responses | KUI-new | P0 | `kui-config` | — | M0 | M | RESEARCHING | PLAN §23–24, ADR-013. |
 | KU-008 | Docker Compose dev environment and CI pipeline (compile `-Werror`, format, tests, link, OpenAPI diff) | KUI-new | P0 | deployment | — | M0 | M | RESEARCHING | PLAN §49. |
 | KU-009 | `403`, `404`, feature fallback pages and the single full-screen "cannot reach gateway" state | KUI-new | P0 | — | shell | M0 | S | RESEARCHING | Screen 33. |
-| KU-010 | Stale data stays on screen (greyed, timestamped, actions disabled) when a feature becomes Unavailable | KUI-new | P1 | — | kernel (`StaleDataOverlay`, `QueryCache`) | M1 | M | RESEARCHING | DC-H3, decided before M1 because every feature state depends on it. |
-| KU-011 | Partial aggregation endpoints with per-section status: cluster dashboard (M1), topic overview (M2, sections added in M4/M7), consumer group page (M4), connects with stats (M7) | KUI-new | P0 | gateway | ui-clusters, ui-topics, ui-consumers | M1 | M | RESEARCHING | PLAN §16.3. Milestone is when the first one ships. |
-| KU-012 | User settings page: theme, timezone, refresh rate, table density | KUI-new | P1 | — | shell | M1 | S | RESEARCHING | Screen 32. Stored in `LocalPrefs`. |
+| KU-010 | Stale data stays on screen (greyed, timestamped, actions disabled) when a feature becomes Unavailable | KUI-new | P1 | — | kernel (`StaleDataOverlay`, `QueryCache`) | M1 | M | COMPLETE | DC-H3, decided before M1 because every feature state depends on it. |
+| KU-011 | Partial aggregation endpoints with per-section status: cluster dashboard (M1), topic overview (M2, sections added in M4/M7), consumer group page (M4), connects with stats (M7) | KUI-new | P0 | gateway | ui-clusters, ui-topics, ui-consumers | M1 | M | COMPLETE | PLAN §16.3. Milestone is when the first one ships. |
+| KU-012 | User settings page: theme, timezone, refresh rate, table density | KUI-new | P1 | — | shell | M1 | S | COMPLETE | Screen 32. Stored in `LocalPrefs`. |
 | KU-013 | Cross-feature `FeaturePanel` slot (topic → consumers tab, broker → metrics tab) keyed by feature id, never by import | KUI-new | P1 | — | kernel | M2 | M | RESEARCHING | DC-H6. First consumer of the slot is TP-015 in M4. |
 | KU-014 | SSE envelope with named events (`phase`, `message`, `consumed`, `done`, `error`, `heartbeat`) and `id:` for `Last-Event-ID` reconnect; kernel `SseStream` wrapper | KUI-new | P0 | message, gateway | kernel | M3 | M | RESEARCHING | Kernel wrapper is exercised by KU-001 in M0; the full envelope lands with MS-001. |
 | KU-015 | Self-describing signed browse cursor (survives gateway restarts and multiple replicas) | KUI-new | P0 | message | — | M3 | M | RESEARCHING | Replaces Kafbat's process-local cursor cache. |
@@ -356,7 +356,7 @@ security research flagged.
 | KU-030 | Server-side column projection (`flatten=true`) for CSV export of the table view | KUI-new | P3 | message | — | M9 | S | RESEARCHING | Client-side flattening is enough until proven otherwise. |
 | KU-031 | Plugin SDK for third-party microfrontends (Option C, web-component boundary) | KUI-new | P2 | — | kernel, shell | M9 | XL | RESEARCHING | PLAN §21; ADR after M8. |
 | KU-032 | Alerting on lag, offline partitions and capability transitions | KUI-new | P2 | metrics | ui-metrics | M9 | L | RESEARCHING | Research first. |
-| KU-033 | Fault-isolation E2E suite: for every service, stop its container and assert the shell, the other features and the fallback panels still work | KUI-new | P0 | e2e | — | M1 | M | RESEARCHING | First scenario in M1 (cluster service down); one new scenario per service afterwards. Exit criterion of every milestone. |
+| KU-033 | Fault-isolation E2E suite: for every service, stop its container and assert the shell, the other features and the fallback panels still work | KUI-new | P0 | e2e | — | M1 | M | COMPLETE | First scenario in M1 (cluster service down); one new scenario per service afterwards. Exit criterion of every milestone. |
 
 ## Decisions required
 
@@ -414,6 +414,15 @@ Totals by milestone and by state are recomputed when rows change. The initial se
 
 States at seed time: 172 `RESEARCHING`, 7 `DEFERRED`, 4 `REJECTED`, 0 `DESIGNED`. ADR-042
 (2026-09-03) rewrote OT-004 and added OT-007 … OT-010, so the totals above count 187 rows.
+
+**After M1's integration pass (2026-09-04):** 154 `RESEARCHING`, 17 `COMPLETE`, 4 `REVIEW`,
+1 `BLOCKED`, 7 `DEFERRED`, 4 `REJECTED`.
+
+`REVIEW` here means the feature ships and works, with a specific gap recorded in the row's own
+notes rather than in somebody's memory: CL-002's per-cluster capability, CL-009's switcher label,
+BR-005's missing per-partition data and OT-009's unproved mid-run store outage. `BLOCKED` is
+PA-003, which BR-005 was supposed to deliver and cannot until the contract carries the field.
+M0's own rows are not re-stated here; this pass moved M1's scope only.
 
 Every P0 and P1 row has a milestone. Recount after editing rows with:
 

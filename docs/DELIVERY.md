@@ -27,11 +27,11 @@ tested rather than asserted.
 | Stage | Delivers | State |
 | --- | --- | --- |
 | M0 Foundation | build, libraries, gateway, sample service, shell, single-process assembly, images, Compose | done |
-| M1 Cluster connectivity | real Kafka connections with production security, clusters and brokers, the metadata store | planned |
+| M1 Cluster connectivity | real Kafka connections with production security, clusters and brokers, the metadata store | done |
 | M2 Topic explorer | topic list, search, detail, partitions, configuration | roadmapped |
 | M3 Message explorer | browsing with every seek mode, streaming, serialization formats, publishing, filters | roadmapped |
 | M4 Consumer groups | groups, members, assignments, lag, offset reset | roadmapped |
-| Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | built, blocked on packaging |
+| Quickstart | one command that starts Kafka, seeds it with data, and opens KUI on it | done |
 | Configuration examples | a plain example, a secured example, and the reference for every key | built |
 
 Stages M5 to M9 — cluster administration, authentication, the ecosystem plugins, metrics — are
@@ -66,7 +66,51 @@ Three, each one a file a person can copy:
 document holds only the delivery bar and the sequence above. When a stage completes, its row changes
 here and the detail lives in the milestone's own plan.
 
-## Where this stands, 2026-09-03
+## Where this stands, 2026-09-04
+
+**M1 is done, and the quickstart now shows a real cluster.** The packaging defect recorded below on
+2026-09-03 is fixed: `/ui/main.js` is served as `text/javascript`, 966 KB, and the interface renders.
+
+Run from a clean state, the quickstart brings up a Kafka broker in KRaft mode, seeds it, starts KUI
+and prints one URL. Opening that URL now shows the seeded cluster on the dashboard — one row, online,
+one broker, its controller and its disk usage — and the brokers page shows the broker itself.
+`GET /api/v1/clusters`, `/clusters/{id}`, `/clusters/{id}/brokers`, `/clusters/{id}/brokers/{id}/configs`
+(340 settings) and `/clusters/{id}/log-dirs` all answer against the real broker.
+
+### Three defects found by running it rather than by reading it
+
+None of these was visible in any single module's tests, and all three were found in the first hour of
+running the assembled product.
+
+**The all-in-one dropped the cluster list.** `AllInOneConfig` carried three configuration sections and
+handed the cluster service `ClusterServiceConfig.Default`, so `kui.clusters[]` was parsed, validated
+and then discarded. Every screen the milestone is about was empty and nothing reported an error,
+because an empty registry is a legitimate configuration.
+
+**The dashboard decoded a response nobody sends.** `GET /api/v1/clusters` is the one endpoint the
+gateway aggregates rather than proxies, so it answers with the gateway's `ClusterOverviewDto`
+(`{"clusters": …}`). The browser client declared the cluster service's `ClustersResponse`
+(`{"items": …}`), whose decoder defaults a missing `items` to the empty list — so every response
+decoded *successfully* into zero rows. The page drew "No clusters yet" under a "last updated just now"
+timestamp. Both modules' own suites were green, because each tested itself against its own idea of the
+payload.
+
+**The end-to-end suite tested the previous milestone.** `./mill e2e.test` had a real dependency on the
+all-in-one jar but none on the container images the Compose topology runs, so the two suites that
+drive the distributed shape — including the fault-isolation suite that proves the milestone's headline
+claim — ran against the M0 images for the whole of M1. Its own failure screenshot showed M0's deleted
+"Ping" page.
+
+### What a newcomer sees, and what they do not
+
+They see the dashboard, the broker list, a broker's configuration and its log directories, all against
+their own broker, with a cluster that is down rendered as a row that says why and stays clickable.
+
+They do not see topics, messages or consumer groups: those are M2, M3 and M4, and the seeded data is
+waiting for them. The quickstart's own seed creates eight topics, 111 messages and three consumer
+groups that nothing in the interface can show yet.
+
+## Where this stood, 2026-09-03
 
 The quickstart exists and runs. From a clean machine with only Docker, one command brings up a
 Kafka broker in KRaft mode, waits until it can actually serve metadata rather than merely until the
@@ -82,8 +126,7 @@ found:
 with the page itself, so the browser is handed HTML where it expects a module and refuses to run it.
 The screen is blank while every health check passes and every container reports healthy — the worst
 shape a failure can take. The cause is that the frontend bundle is not packaged into the deployable.
-The fix is written and sits in the working tree; it lands with the end-to-end work that needs the
-interface to render.
+*Fixed; see 2026-09-04 above.*
 
 **Two seeds were built where one was needed.** Two agents each wrote one without knowing about the
 other, and the stack ran the weaker of them while the richer one sat unused and documented. Now
