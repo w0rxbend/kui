@@ -109,6 +109,110 @@ Three, each one a file a person can copy:
 document holds only the delivery bar and the sequence above. When a stage completes, its row changes
 here and the detail lives in the milestone's own plan.
 
+## Where this stands, 2026-09-04 (topic administration)
+
+**KUI can now create a topic.** Until this pass it could read a Kafka cluster and publish records
+into topics somebody else had made; the largest remaining functional gap was that the interface
+could not make one. The topic service gained four operations — create, change configuration, add
+partitions, delete — and the topic screens gained the controls for all four.
+
+Everything here changes somebody's cluster, so what was built is mostly the guards.
+
+**A read-only cluster refuses every one of them before a Kafka client is touched, and the refusal is
+audited (ADR-047).** The check is `MutationGuard` in the application layer, ahead of the adapter:
+it resolves the cluster's profile, refuses with `KUI-READ-ONLY`, and writes the audit record. Driven
+against a cluster configured `readOnly: true`:
+
+```
+POST   …/clusters/readonly/topics                  KUI-READ-ONLY  "cluster Read only is configured
+                                                                   read-only, so topic.create is
+                                                                   not accepted"
+POST   …/clusters/readonly/topics/seed.orders/deletion/plan
+                                                   KUI-READ-ONLY  (…so topic.delete is not accepted)
+kafka-topics.sh --list                             seed.orders    (nothing was created)
+```
+
+The audit line for the refusal is written whether or not the operation was allowed, which is the
+half of ADR-047 that matters most: an attempt to change a cluster somebody has deliberately locked
+is exactly the thing an audit trail exists to have noticed.
+
+**The two operations that cannot be undone are confirmed against a server-computed plan (ADR-045).**
+Deleting a topic and raising its partition count are two calls each, and the second accepts a signed
+token and nothing else — there is no request shape in the contract that destroys something in one
+hop, so `curl` gets the protection the browser gets. Which two operations need a plan is ADR-045's
+own test rather than a judgement about how frightening each one feels: an operation needs one when
+its effect is not a function of its request. Growing a topic depends on how many partitions it has
+now and silently re-routes every future record; deleting depends on how many records are about to
+be lost and on whether the cluster will recreate the topic by itself. Creating a topic and changing
+a setting are single calls, because the request *is* the effect.
+
+Driven against a single-node KRaft broker started for this pass, with a topic created, configured,
+grown, published to and deleted:
+
+```
+create kui.m5.live (3 partitions, rf 1, retention.ms=604800000)
+  broker:  PartitionCount: 3  ReplicationFactor: 1  Configs: retention.ms=604800000
+PATCH config {"set":{"retention.ms":"86400000"}}
+  broker:  retention.ms=86400000  DYNAMIC_TOPIC_CONFIG
+PATCH config {"remove":["retention.ms"]}
+  KUI:     retention.ms 604800000, source default        (the override is gone, not overwritten)
+plan partitions 2                                        KUI-VALIDATION "…already has 3 partitions,
+                                                          and Kafka cannot remove one"
+plan partitions 6 → token, warning KEY_ROUTING_CHANGES
+apply with the token + one character                     KUI-VALIDATION (the confirmation is refused)
+apply with the token                                     3 → 6;  broker: PartitionCount: 6
+apply the same token again                                KUI-VALIDATION "…already has 6 partitions"
+publish 3 records
+deletion plan     partitions 6, records 3, autoCreateEnabled true,
+                  warnings RECORDS_LOST + AUTO_CREATE_ENABLED
+DELETE with no token                                     KUI-VALIDATION "token is required"
+DELETE with the token                                    200
+  broker:  seed.orders            (the topic is gone)
+  KUI:     the list no longer holds it
+```
+
+The replay case is worth reading twice. A spent token is not rejected by remembering it — nothing is
+remembered — but because the apply step re-resolves the plan against the cluster as it is now, and a
+partition count that has already moved cannot be increased to the same number twice. The same
+mechanism refuses a token minted five minutes ago for a topic somebody else has grown since.
+
+**Deleting a topic on a cluster with automatic topic creation is reported honestly.** The plan reads
+`auto.create.topics.enable` off a broker and says, in the sentence the operator confirms, that the
+first client to name the topic will recreate it with the broker's defaults and none of its
+configuration. There are three answers, not two: on, off, and "KUI could not read it", and the third
+is never rendered as the second. This is the behaviour the message browser was bitten by in an
+earlier pass — a browse that created the topic it said was missing — so it is stated at the point of
+decision rather than in a footnote.
+
+**Driven in a browser as well as over the API.** Headless Chromium over the DevTools protocol,
+against the same broker: "New topic" opens the form, a topic is created and the browser lands on its
+page; the Settings tab's Edit button opens the setting prefilled and saving it changes the value on
+the broker (`kafka-configs.sh --describe` reads back `retention.ms=120000`); the danger panel
+previews a partition increase with its warning and previews the delete with its record count and its
+auto-create warning; and confirming the delete leaves the receipt on screen while every control that
+has stopped applying — the partition controls, the delete's own Preview, the link into the message
+browser — is hidden. That last part is deliberate: the receipt is the operator's only record of an
+irreversible action, and this project has already shipped a wizard whose receipt was destroyed by
+the refresh the operation itself caused.
+
+### What this pass did **not** do
+
+- **Purge (`MS-008`) is still missing**, and it is still the only M3 row outstanding. The domain
+  types, the wire DTOs and the golden documents for it already exist in the message service,
+  unwired; what is absent is the endpoint, the `deleteRecords` port, the use case and the control.
+  It was not reached in this pass and nothing here should be read as having closed it.
+- **Replication-factor change, clone and recreate** are M5 rows that remain unbuilt. They are not
+  declared anywhere, which is deliberate: an endpoint that is declared is an endpoint somebody
+  implements.
+- **More than one broker.** Every run used a single node, so nothing about a replication factor
+  larger than one, a partition reassignment in flight, or `createPartitions` with an explicit
+  replica assignment was exercised. The adapter maps `InvalidReplicaAssignment` and
+  `ReassignmentInProgress` to sentences of its own; neither sentence has been seen on a screen.
+- **A cluster with `delete.topic.enable=false`.** The refusal is mapped and names the setting; the
+  path has not been driven against a broker configured that way.
+- **Scale.** A create on a cluster with ten thousand topics asks for a re-scrape of all of them, and
+  what that costs has not been measured.
+
 ## Where this stands, 2026-09-04 (the secured cluster)
 
 **Point 5 of the bar is met, and it was not before.** A KRaft broker speaking `SASL_SSL` with

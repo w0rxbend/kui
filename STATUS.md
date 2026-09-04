@@ -10,6 +10,17 @@ offset-reset wizard is on screen and has been driven end to end. What M3 still l
 **Read next:** `docs/DELIVERY.md`, whose 2026-09-04 integration section is the honest account of
 what works, what does not, and what was never tested.
 
+**Topic administration (M5's `MT-001`…`MT-004`) is implemented and used.** KUI can create a topic
+with its partitions, replication factor and configuration; change a setting or put it back to the
+broker's default; add partitions; and delete a topic. Every one of the four is refused on a cluster
+configured `readOnly` before any Kafka client is touched and writes an audit record either way
+(ADR-047), and the two that cannot be undone — the partition increase and the delete — are confirmed
+against a server-computed plan and applied against a signed token naming exactly what was shown
+(ADR-045). The deletion plan reports how many records are about to be lost and whether the cluster's
+`auto.create.topics.enable` will recreate the topic by itself. All of it was driven against a real
+broker, over the API and in a browser; see `docs/DELIVERY.md`'s 2026-09-04 topic-administration
+section. **Purge (`MS-008`) is still not built** and remains the only M3 row outstanding.
+
 **Delivery-bar point 6 (fault isolation) is now met in full.** The consumer-group list carries the
 same freshness envelope the topic list does, so a cluster that has stopped answering produces a
 `stale` section rather than a bare 200 of lag figures that have quietly stopped moving. Verified
