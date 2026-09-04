@@ -93,10 +93,16 @@ object SchemaRegistrySerdeFactory {
       * returns `Right(None)` for it. Only a transport failure, a timeout, an authentication rejection or a
       * 5xx becomes a `Left`, and the sentence is the `KuiError`'s own display message, which is already
       * written for a person and already free of credentials and stack traces.
+      *
+      * It is used *unadorned*. This used to prefix it with "the schema registry could not be reached: ",
+      * which produced "the schema registry could not be reached: schema-registry could not be reached" on the
+      * two screens that show it, and would have been wrong outright for the failures that are not
+      * unreachability. Both call sites — the picker's disabled row and the note on a record — already say
+      * which serde this is about, so the reason only has to say what went wrong.
       */
     private def probe(registry: SchemaRegistry[F]): F[Either[String, Unit]] =
       registry
         .latestForSubject(ProbeSubject)
-        .map(_.void.leftMap(error => s"the schema registry could not be reached: ${error.message}"))
+        .map(_.void.leftMap(_.message))
   }
 }
