@@ -81,7 +81,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--kui-color-accent);
+  color: var(--kui-color-primary);
   font: inherit;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -167,6 +167,10 @@
   padding: var(--kui-space-3);
   border-left: 3px solid var(--kui-color-warning);
   background: var(--kui-color-warning-container);
+  /* The text colour that belongs to that background, declared with it. A container without its
+   * paired text colour is a combination the contrast test never resolves, because the test checks
+   * declared pairs; this block used to set the background alone and inherit `--kui-color-text`. */
+  color: var(--kui-color-warning);
 }
 
 .kui-messages__decode-error p {
@@ -224,11 +228,18 @@
 }
 
 /* The receipt. It is a status region rather than a toast, so it stays on screen next to the form that
- * produced it: the offsets in it are what somebody uses to go and find the record they just wrote. */
+ * produced it: the offsets in it are what somebody uses to go and find the record they just wrote.
+ *
+ * It sits inside a drawer, which is already a raised surface, so the page background would read as a
+ * hole punched in the panel rather than as a panel of its own. The card surface is the step above the
+ * drawer, which is what a nested panel is, and `--kui-color-text` is the colour declared for every one
+ * of the five surfaces — declared here rather than inherited, so the pair is one the contrast test can
+ * resolve. */
 .kui-messages__form-result {
   padding: var(--kui-space-3);
   border-left: 3px solid var(--kui-color-success);
-  background: var(--kui-color-surface);
+  background: var(--kui-color-surface-elevated);
+  color: var(--kui-color-text);
   font-size: var(--kui-font-size-sm);
 }
 
@@ -285,10 +296,18 @@
 }
 
 /* A column header is a path — `V.order.lines[0].sku` — and is monospace for the same reason the
-   payload is: the dots and brackets are structure, not prose. */
+   payload is: the dots and brackets are structure, not prose.
+
+   It also opts out of the two things the kernel's header treatment does to a label. Upper-casing a
+   JSON path would be a lie: `sku` and `SKU` are different keys, and the header is the only place the
+   reader is told which one this column is. The letter-spacing goes with it, because spaced-out
+   monospace stops looking like a path. */
 .kui-messages__grid-path {
   font-family: var(--kui-font-family-mono);
   font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  letter-spacing: normal;
+  text-transform: none;
   white-space: nowrap;
 }
 
@@ -310,7 +329,7 @@
 
 .kui-messages__grid-picker summary {
   cursor: pointer;
-  color: var(--kui-color-accent);
+  color: var(--kui-color-primary);
 }
 
 /* Up to a hundred and twenty checkboxes, so: columns, scrollable, and bounded in height. A picker
@@ -342,7 +361,7 @@
 
 .kui-messages__filter summary {
   cursor: pointer;
-  color: var(--kui-color-accent);
+  color: var(--kui-color-primary);
 }
 
 .kui-messages__filter-body {

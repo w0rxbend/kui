@@ -86,10 +86,14 @@ object FlatTable {
           cls := MessagesCss.GridTable,
           thead(
             tr(
-              th(cls := MessagesCss.GridFixed, Messages.ColumnPartition),
-              th(cls := MessagesCss.GridFixed, Messages.ColumnOffset),
-              th(cls := MessagesCss.GridFixed, Messages.ColumnTimestamp),
-              children <-- shown.map(_.map(path => th(cls := MessagesCss.GridPath, title := path, path)))
+              th(cls := KernelCss.TableHeaderCell, cls := MessagesCss.GridFixed, Messages.ColumnPartition),
+              th(cls := KernelCss.TableHeaderCell, cls := MessagesCss.GridFixed, Messages.ColumnOffset),
+              th(cls := KernelCss.TableHeaderCell, cls := MessagesCss.GridFixed, Messages.ColumnTimestamp),
+              children <-- shown.map(
+                _.map(path =>
+                  th(cls := KernelCss.TableHeaderCell, cls := MessagesCss.GridPath, title := path, path)
+                )
+              )
             )
           ),
           tbody(
@@ -131,13 +135,18 @@ object FlatTable {
     tr(
       cls := MessagesCss.Row,
       dataAttr("testid") := s"grid-${record.partition.value}-${record.offset.value}",
-      td(cls := MessagesCss.GridFixed, record.partition.value.toString),
-      td(cls := MessagesCss.GridFixed, record.offset.value.toString),
-      td(cls := MessagesCss.GridFixed, Timestamps.absolute(record.timestamp, zone)),
+      td(cls := KernelCss.TableCell, cls := MessagesCss.GridFixed, record.partition.value.toString),
+      td(cls := KernelCss.TableCell, cls := MessagesCss.GridFixed, record.offset.value.toString),
+      td(
+        cls := KernelCss.TableCell,
+        cls := MessagesCss.GridFixed,
+        Timestamps.absolute(record.timestamp, zone)
+      ),
       // A record with nothing for a column renders an empty cell rather than shifting its neighbours
       // along, which is the whole reason the flattener returns a map keyed by path.
       paths.map(path =>
         td(
+          cls := KernelCss.TableCell,
           cls := MessagesCss.GridCell,
           // The full text is in the tooltip, because a cell is one line by design and the value that got
           // clipped is often the one being looked for.
