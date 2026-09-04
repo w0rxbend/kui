@@ -21,15 +21,30 @@ import kui.kernel.PositiveInt
   * exceeded its cap, latency that did not move. Every case uses `TestControl`, so the delays the
   * assertions depend on are simulated: no case waits a real second for a real timeout.
   *
-  * That removes the *simulated* clock as a source of flakiness but not the real one. MUnit still
-  * applies a wall-clock timeout to each case, and a whole-repository `./mill __.test` runs this
-  * suite beside Docker image builds and Kafka containers. One case timed out exactly once that way
-  * on 2026-09-04. `munitIOTimeout` below is raised so that a slow machine reports a slow test
-  * rather than a failing one.
+  * ==The flaky case, and what was actually wrong with it==
+  *
+  * "one log line per circuit transition" failed roughly once in five whole-repository runs and never on its
+  * own, and its timeout was raised to three minutes as a mitigation. That was never a diagnosis, and the
+  * diagnosis turned out not to be slowness at all: the case took eighteen milliseconds of simulated time, so
+  * no amount of machine load could push it past a thirty-second wall clock.
+  *
+  * What it was racing was a subscription. `UpstreamClient` used to write its circuit-transition log lines
+  * from a background fiber subscribed to an `fs2.Topic`, started with `.background` — which returns once the
+  * fiber has been *started*, not once the stream has subscribed. `Topic` delivers only to subscribers that
+  * already exist, so whether the line was written depended on whether that fiber got a turn before the third
+  * failing call tripped the breaker. The case papered over it with a one-second sleep before reading the log,
+  * which is ordering by hope; a scheduler that ran the fibers in a different order lost the event, and the
+  * case then waited for a line that was never going to arrive.
+  *
+  * The fix is in the product, not in the test: `CircuitBreaker.subscribed` registers the subscription during
+  * resource acquisition, so the client cannot be handed out before something is listening. That closes a real
+  * defect as well as the flake — an upstream that is already down when KUI starts trips its circuit during
+  * start-up, and that transition used to be logged to nobody.
+  *
+  * With the race gone, the sleep and the raised timeout are both gone too, and the case asserts on
+  * synchronisation rather than on elapsed time.
   */
 final class UpstreamClientSuite extends CatsEffectSuite {
-
-  override val munitIOTimeout: scala.concurrent.duration.Duration = 3.minutes
 
   private val target = uri"http://ignored/subjects"
 
@@ -369,11 +384,9 @@ final class UpstreamClientSuite extends CatsEffectSuite {
 
     val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
       UpstreamFixture.clientAndLog(config, stub.backend).use { (client, logger) =>
-        for {
-          _ <- request(Method.POST).send(client.backend).attempt.replicateA_(20)
-          _ <- IO.sleep(1.second)
-          entries <- logger.entries
-        } yield entries
+        // No sleep. The subscription is in place before `use` runs, so every transition published here
+        // has somewhere to go, and reading the log immediately is a fact rather than a bet.
+        request(Method.POST).send(client.backend).attempt.replicateA_(20) *> logger.entries
       }
     }
 
@@ -383,6 +396,28 @@ final class UpstreamClientSuite extends CatsEffectSuite {
       assertEquals(transitions.head.level, "info")
       assertEquals(transitions.head.context.get("state"), Some("open"))
       assert(transitions.head.context.contains("error.last"), transitions.head.context.toString)
+    }
+  }
+
+  test("aCircuitThatOpensImmediatelyAfterStartUpIsStillLogged") {
+    // The same fact as the test above with the waiting taken out. `UpstreamClient.resource` starts the
+    // log-writing subscription in the background, and `Topic` delivers only to subscribers that are
+    // already there — so an upstream that is dead the moment KUI starts can trip its breaker before the
+    // subscription exists, and the one line an operator needs is never written.
+    val config = UpstreamFixture.single().copy(failureThreshold = PositiveInt.unsafe(3), maxRetries = 0)
+
+    val program = UpstreamFixture.recording(ResponseKind.Refused).flatMap { stub =>
+      UpstreamFixture.clientAndLog(config, stub.backend).use { (client, logger) =>
+        request(Method.POST).send(client.backend).attempt.replicateA_(3) *> logger.entries
+      }
+    }
+
+    TestControl.executeEmbed(program).map { entries =>
+      assertEquals(
+        entries.filter(_.context.contains("upstream")).size,
+        1,
+        "the circuit opened and nothing was logged; the subscription was not in place yet"
+      )
     }
   }
 

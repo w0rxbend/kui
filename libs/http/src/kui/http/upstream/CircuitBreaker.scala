@@ -4,7 +4,7 @@ import java.time.Instant
 
 import scala.concurrent.duration.FiniteDuration
 
-import cats.effect.kernel.{Clock, Outcome, Ref, Temporal}
+import cats.effect.kernel.{Clock, Outcome, Ref, Resource, Temporal}
 import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import fs2.Stream
@@ -78,8 +78,32 @@ trait CircuitBreaker[F[_]] {
 
   def state: F[CircuitState]
 
-  /** Every transition, and only transitions: a circuit that stays open publishes nothing. */
+  /** Every transition, and only transitions: a circuit that stays open publishes nothing.
+    *
+    * Transitions are *published*, not stored, so this stream carries only what happens after it is
+    * subscribed. A subscriber that must not miss anything has to be in place before the breaker can trip, and
+    * `events` gives it no way to know when that is — see [[subscribed]].
+    */
   def events: Stream[F, CircuitEvent]
+
+  /** The same stream, as a `Resource` that is not acquired until the subscription is actually registered.
+    *
+    * ==Why this exists==
+    *
+    * `events` starts a subscription when the stream is *run*, which is some unknowable moment after whoever
+    * wanted it carried on with their life. `UpstreamClient` runs it in a background fiber and then hands the
+    * client to its caller, so there is a window — start-up — in which the breaker exists, the caller can
+    * already make requests through it, and nothing is listening. An upstream that is dead when KUI starts
+    * trips its breaker inside that window, and the one INFO line an operator needs in order to know the
+    * circuit opened is published to nobody and lost.
+    *
+    * A `Resource` closes the window by construction: acquiring it registers the subscription, so a caller
+    * that acquires before exposing the breaker cannot miss a transition. It is the difference between
+    * ordering by synchronisation and ordering by hoping the scheduler runs a fiber soon enough — and the
+    * latter is why the suite for this file had a test that failed roughly once in five whole-repository runs
+    * and never on its own.
+    */
+  def subscribed: Resource[F, Stream[F, CircuitEvent]]
 }
 
 /** Thrown by [[CircuitBreaker.protect]] when the circuit is open.
@@ -130,6 +154,10 @@ object CircuitBreaker {
     def state: F[CircuitState] = memory.get.map(_.state)
 
     def events: Stream[F, CircuitEvent] = topic.subscribeUnbounded
+
+    // `Int.MaxValue`, matching `subscribeUnbounded`: a transition is rare and tiny, and a bound here would
+    // mean dropping the very line this exists to guarantee.
+    def subscribed: Resource[F, Stream[F, CircuitEvent]] = topic.subscribeAwait(Int.MaxValue)
 
     def protect[A](call: F[A])(succeeded: A => Boolean): F[A] =
       Clock[F].realTimeInstant.flatMap { now =>

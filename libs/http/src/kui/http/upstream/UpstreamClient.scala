@@ -128,13 +128,29 @@ object UpstreamClient {
     * A dead upstream that logs on every attempt floods the log at exactly the moment an operator needs to
     * read it — this is the flooding footgun the reference implementation has. A transition is rare, is the
     * thing worth knowing, and carries the last error that caused it.
+    *
+    * ==Subscribed before the client exists==
+    *
+    * `breaker.subscribed` and not `breaker.events`. The subscription is registered while this `Resource` is
+    * being acquired, which is before `resource` yields the client, so there is no window in which a caller
+    * can make a request through a breaker nothing is listening to. Running `events` in a background fiber
+    * instead left exactly that window open: an upstream that is already down when KUI starts trips its
+    * circuit during start-up, the event is published to no subscribers, and the line an operator needs is
+    * never written. Nothing looks wrong — the requests fail correctly — the log is simply silent about why.
     */
   private def logTransitions[F[_]: Async](
       breaker: CircuitBreaker[F],
       upstream: String,
       logger: StructuredLogger[F]
   ): Resource[F, Unit] =
-    breaker.events
+    breaker.subscribed.flatMap(transitions => drainInto(transitions, upstream, logger))
+
+  private def drainInto[F[_]: Async](
+      transitions: fs2.Stream[F, CircuitEvent],
+      upstream: String,
+      logger: StructuredLogger[F]
+  ): Resource[F, Unit] =
+    transitions
       .evalMap { event =>
         logger.info(
           Map(
