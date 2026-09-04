@@ -37,6 +37,39 @@ controls consistently with the server without re-implementing the rules in anoth
   and win on conflict.
 - Regex values are compiled once at load and linted for catastrophic backtracking.
 
+## Amendments
+
+**Amendment 1 — an endpoint declares its own permission, and an undeclared endpoint is refused.**
+
+Added 2026-09-04 while building the enforcement this ADR specifies. The decision above says the gateway
+pre-checks and every service re-runs `decide`, and left open where the two get the *question* from. Both now
+read it off the endpoint itself: `kui.contracts.rbac.EndpointAuthorization` is a Tapir attribute a contract
+attaches beside the existing mutation marker, naming the operation, the resource, the actions, and which path
+parameter carries the resource's name. `EndpointDecision.decide` turns that plus a request path into a
+`Decision`, and the gateway, the services and the browser all call it.
+
+The alternative was a table of endpoint names on each enforcing side, and it was rejected for the reason this
+ADR exists at all: a rule written twice is a rule that eventually disagrees with itself, and the disagreement
+is normally in the direction of allowing something.
+
+An endpoint carrying no declaration is **refused**, not allowed, and the gateway's `EndpointAuthorizationSuite`
+turns that into a build failure by walking every proxied contract. Unreachable-until-noticed is loud;
+unprotected-until-noticed is how the defects this project keeps finding get shipped.
+
+**Amendment 2 — a resource named only in the request body is checked coarsely at the edge and exactly by its
+service.**
+
+A topic create names its topic in the body. The gateway does not decode service request bodies — it proxies
+them, over endpoints whose input types Tapir has erased — so it cannot match that name against a pattern. Such
+a requirement is declared as `NameSource.RequestBody(field)` and the edge then asserts two things about it:
+the cluster is not read-only, and the caller holds the action on *some* pattern of that resource. The service,
+which has the decoded body, owes the exact check.
+
+This is a deliberate weakening and it is named rather than hidden, so that the endpoints in that position can
+be enumerated — they are, by the same suite — instead of being discovered later. Treating a body-named
+resource as `Unnamed` was rejected: `Permission.covers` would then refuse every create in any deployment with
+RBAC on, which is a different bug in the safer direction and still a bug.
+
 ## Evidence
 
 - `research/scala/security-research.md` §2 (model, matrix, evaluation algorithm, frontend
