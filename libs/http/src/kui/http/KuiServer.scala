@@ -36,14 +36,15 @@ object KuiServer {
   /** How long a request may take before Netty stops waiting for the handler and closes the connection.
     *
     * Set here rather than inherited from Tapir's default, because it is one half of a pair and the pair has
-    * to be read together. Netty's answer to a handler that overruns is a bare `503`: no body, no
-    * `KUI-...` code, no correlation id and no `X-Kui-Correlation-Id` header — the one failure shape KUI never
-    * otherwise produces, and one a browser can only report as its own inability to read the answer.
+    * to be read together. Netty's answer to a handler that overruns is a bare `503`: no body, no `KUI-...`
+    * code, no correlation id and no `X-Kui-Correlation-Id` header — the one failure shape KUI never otherwise
+    * produces, and one a browser can only report as its own inability to read the answer.
     *
-    * So nothing KUI serves may be allowed to reach it. The other half of the pair is the gateway's per-service
-    * call timeout (`UpstreamServiceConfig.DefaultTimeout`, ten seconds, applied in both deployment shapes by
-    * `SttpServiceClient`), which is what actually bounds a request that is waiting on a Kafka broker that has
-    * gone away. Raise a service's timeout above this number and the server starts answering first.
+    * So nothing KUI serves may be allowed to reach it. The other half of the pair is the gateway's
+    * per-service call timeout (`UpstreamServiceConfig.DefaultTimeout`, ten seconds, applied in both
+    * deployment shapes by `SttpServiceClient`), which is what actually bounds a request that is waiting on a
+    * Kafka broker that has gone away. Raise a service's timeout above this number and the server starts
+    * answering first.
     *
     * It does not bound a Server-Sent Events stream: the response begins immediately and the timeout is on
     * beginning it, not on finishing it.
