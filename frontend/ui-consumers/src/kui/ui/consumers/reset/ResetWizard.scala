@@ -70,12 +70,12 @@ object ResetStep {
   * apply, the receipt saying what was written. That state lives in this element, so the element has to
   * outlive every redraw of the page around it.
   *
-  * It did not. The group detail page rebuilt its whole body from each new snapshot of the group, and an
-  * apply *causes* a new snapshot: the committed offsets it just wrote are what changed. So the receipt was
-  * set on an element that was replaced in the same breath, and the wizard blinked back to its closed state
-  * the instant the write succeeded. The reset itself was correct — the offsets moved, the lag on screen
-  * changed — but the operator never saw the confirmation of what had been written, which is the one record
-  * they have of a destructive action.
+  * It did not. The group detail page rebuilt its whole body from each new snapshot of the group, and an apply
+  * *causes* a new snapshot: the committed offsets it just wrote are what changed. So the receipt was set on
+  * an element that was replaced in the same breath, and the wizard blinked back to its closed state the
+  * instant the write succeeded. The reset itself was correct — the offsets moved, the lag on screen changed —
+  * but the operator never saw the confirmation of what had been written, which is the one record they have of
+  * a destructive action.
   *
   * Taking the topic list as a `Signal` is what lets the page build this element once and let the data flow
   * through it, instead of rebuilding it whenever the data changes.
@@ -98,6 +98,7 @@ object ResetWizard {
   ): HtmlElement = {
     val open: Var[Boolean] = Var(false)
     val step: Var[ResetStep] = Var(ResetStep.Composing)
+
     /** The latest topic list, held so that the click handlers below can read it synchronously.
       *
       * A `Signal` cannot be sampled without an owner, and the "preview" handler needs the partitions of the

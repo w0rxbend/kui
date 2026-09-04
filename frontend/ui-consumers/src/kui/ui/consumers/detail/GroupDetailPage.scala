@@ -116,8 +116,8 @@ object GroupDetailPage {
     * Once, and not once per snapshot, because the wizard holds the operator's place in it — which step they
     * are on, and after an apply the receipt of what was written. Building it inside the redraw that each new
     * group snapshot triggers destroyed that state at the worst possible moment: applying a reset is exactly
-    * what makes the next snapshot differ, so the receipt was discarded in the same instant it arrived and
-    * the drawer shut itself. Hence a `Signal` of the topics rather than a list.
+    * what makes the next snapshot differ, so the receipt was discarded in the same instant it arrived and the
+    * drawer shut itself. Hence a `Signal` of the topics rather than a list.
     *
     * It renders nothing while the group holds no offsets on any topic: there is nothing to reset, and a form
     * whose topic list is empty is a control that can only refuse.

@@ -1,9 +1,14 @@
 # KUI status
 
-**Date:** 2026-09-04
-**Phase:** M2, M3 and M4 are implemented, integrated and usable from a browser. M3 reads and does
-not publish; M4 reads and its offset reset has no screen.
-**Repository:** M0 through M4 on `main`; every gate the CI runs is green, `./mill __.test` included.
+**Date:** 2026-09-04 (integration pass)
+**Phase:** M0 through M4 are implemented, integrated and used from a browser against a real broker.
+M3 now reads *and* publishes — publish, republish and copy-to-another-topic all work — and M4's
+offset-reset wizard is on screen and has been driven end to end. What M3 still lacks is purge
+(`MS-008`); nothing else on the delivery bar is outstanding.
+**Repository:** M0 through M4 on `main`; every gate the CI runs is green, `./mill __.test` included
+(8226/8226).
+**Read next:** `docs/DELIVERY.md`, whose 2026-09-04 integration section is the honest account of
+what works, what does not, and what was never tested.
 
 ## Grooming progress
 

@@ -218,25 +218,25 @@ object StaticRoutes {
 
   /** Whether a final path segment names a file this deployment ships rather than a screen it routes to.
     *
-    * The single-page fallback exists so that `/ui/clusters/quickstart/topics/orders.v1` — a path with no
-    * file behind it — is answered with `index.html`, leaving the browser's router to decide what it means.
-    * Applied to *every* miss, though, it also answers a request for a missing JavaScript module with an
-    * HTML document and status `200`, and that is the difference between a page that reports a problem and
-    * a page that is silently blank.
+    * The single-page fallback exists so that `/ui/clusters/quickstart/topics/orders.v1` — a path with no file
+    * behind it — is answered with `index.html`, leaving the browser's router to decide what it means. Applied
+    * to *every* miss, though, it also answers a request for a missing JavaScript module with an HTML document
+    * and status `200`, and that is the difference between a page that reports a problem and a page that is
+    * silently blank.
     *
     * That is not hypothetical. `main.js` is served `no-cache`, but the per-feature module files it imports
     * are named by content hash and served `immutable` for a year. After a redeploy, a browser still holding
-    * the previous build's `main.js` asks for the previous build's chunk names. Those files are gone. With
-    * the fallback applied, each of those requests succeeded with an HTML document that the browser then
-    * tried to evaluate as an ES module, and the application never started — with nothing in the network log
-    * marked as a failure, because every response was a `200`. This was reproduced on 2026-09-04 by
-    * upgrading a running quickstart underneath an open browser profile.
+    * the previous build's `main.js` asks for the previous build's chunk names. Those files are gone. With the
+    * fallback applied, each of those requests succeeded with an HTML document that the browser then tried to
+    * evaluate as an ES module, and the application never started — with nothing in the network log marked as
+    * a failure, because every response was a `200`. This was reproduced on 2026-09-04 by upgrading a running
+    * quickstart underneath an open browser profile.
     *
     * The test is the extension, and only against the extensions in [[ContentTypes]]. It cannot be "has a
-    * dot": Kafka topic names contain dots, so `topics/orders.v1` is a screen, and `v1` is deliberately not
-    * in that table. `js`, `css`, `map`, `png`, `woff2` and the rest are, and none of them is a plausible
-    * ending for a KUI route — except `html`, which is excluded so that a hand-typed `/ui/index.html` still
-    * reaches the shell.
+    * dot": Kafka topic names contain dots, so `topics/orders.v1` is a screen, and `v1` is deliberately not in
+    * that table. `js`, `css`, `map`, `png`, `woff2` and the rest are, and none of them is a plausible ending
+    * for a KUI route — except `html`, which is excluded so that a hand-typed `/ui/index.html` still reaches
+    * the shell.
     */
   private def namesAnAsset(name: String): Boolean =
     extensionOf(name).exists(extension => extension != "html" && ContentTypes.contains(extension))
@@ -284,9 +284,9 @@ object StaticRoutes {
     *
     * ## The assumption this used to make, and why it was false
     *
-    * Until 2026-09-04 a name matching [[HashedName]] — the `internal-<40 hex>.js` files Scala.js emits for
-    * a bundle-split build — was served `public, max-age=31536000, immutable`, on the stated grounds that
-    * "a hashed name and a new set of bytes never occur together".
+    * Until 2026-09-04 a name matching [[HashedName]] — the `internal-<40 hex>.js` files Scala.js emits for a
+    * bundle-split build — was served `public, max-age=31536000, immutable`, on the stated grounds that "a
+    * hashed name and a new set of bytes never occur together".
     *
     * They do. Two consecutive builds of KUI both produced a file named
     * `internal-3ebfae0cba70adf981029a0da5b1e4b5ab5d02c6.js`, and the two files differed: a method the first
@@ -304,14 +304,14 @@ object StaticRoutes {
     *
     * ## What this costs, and what should replace it
     *
-    * Correctness first: every asset is revalidated, so no browser can assemble a page out of two builds.
-    * The price is real — with no validator on the response there is nothing to answer a conditional request
-    * with, so each page load refetches the bundle in full, and the largest chunk alone is about 6 MB.
+    * Correctness first: every asset is revalidated, so no browser can assemble a page out of two builds. The
+    * price is real — with no validator on the response there is nothing to answer a conditional request with,
+    * so each page load refetches the bundle in full, and the largest chunk alone is about 6 MB.
     *
     * The right end state is `no-cache` *plus* a strong `ETag` derived from the bytes, with `If-None-Match`
-    * answered `304`: same correctness, and a revalidation that costs a round trip instead of a download.
-    * That needs conditional-request handling this route does not have yet, and it is recorded as
-    * outstanding rather than half-built here.
+    * answered `304`: same correctness, and a revalidation that costs a round trip instead of a download. That
+    * needs conditional-request handling this route does not have yet, and it is recorded as outstanding
+    * rather than half-built here.
     */
   private def cacheControlOf(name: String): String = {
     val _ = name // every name gets the same answer; the parameter is kept so the call site still reads well

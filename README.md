@@ -2,11 +2,11 @@
 
 A Kafka management and observability interface, written entirely in Scala 3.
 
-> **Status: milestone 0.** There is running code: a gateway, one service, a browser shell, and both
-> deployment shapes. There are no Kafka features yet — the first of those arrive in M1. What M0
-> proves is the foundation: that the pieces compose, that a service can fail without taking the
-> interface down, and that the same code runs as one process or as several. See
-> [ROADMAP.md](docs/ROADMAP.md) for what lands when.
+> **Status: milestones 0 to 4.** KUI connects to real Kafka clusters and is usable from a browser:
+> clusters and brokers, topics and their configuration, browsing and publishing records, consumer
+> groups with their lag, and an offset-reset wizard. What is *not* built is named plainly in
+> [docs/DELIVERY.md](docs/DELIVERY.md) — topic and message deletion, schema registry, connectors,
+> authentication and metrics among them. See [ROADMAP.md](docs/ROADMAP.md) for what lands when.
 
 ## What it is
 
@@ -55,12 +55,16 @@ rather than merely until it has started, seeds it with topics, JSON messages and
 that is behind, starts KUI pointed at it, and prints the URL. `quickstart.sh down` removes all of it,
 volumes included.
 
-Be clear about what you see today: KUI does not connect to Kafka yet — that is Milestone 1, and this
-release is Milestone 0 — so you get the working KUI shell and a home page saying cluster overviews
-appear once the clusters feature is installed, with a real, seeded broker sitting behind it waiting
-for that work to land. [`deployment/quickstart/README.md`](deployment/quickstart/README.md) explains
-what runs, why the broker's readiness check is what it is, and how to run it when 8080 or 9092 are
-already taken.
+What you get is the product against that broker: the cluster and its one node, seven topics with
+their partitions and configuration, the JSON records inside them, a form to publish more, three
+consumer groups with their lag, and a wizard that resets a group's offsets and shows you what it
+would write before it writes it. [`deployment/quickstart/README.md`](deployment/quickstart/README.md)
+explains what runs, why the broker's readiness check is what it is, and how to run it when 8080 or
+9092 are already taken.
+
+One caveat if you have run KUI before: the quickstart reuses whatever `kui-allinone` image is
+already on the machine and only builds one when none is there, so after changing code run
+`./mill deployment.docker.allinone.docker.build` first or you will start the previous build.
 
 ### See the interface, and change it
 
