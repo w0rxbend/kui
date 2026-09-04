@@ -1277,7 +1277,7 @@ still keeps the composed record; only the words changed:
 
 | Typed into the value box | What it says now |
 | --- | --- |
-| `not json at all` | this is not JSON: a JSON document has to start with `` ` ``{`` ` `` or `` ` ``[`` ` ``, and this one starts with `` ` ``n`` ` ``. If you meant to send it as plain text, choose the String serde instead |
+| `not json at all` | this is not JSON: a JSON document has to start with `{` or `[`, and this one starts with `n`. If you meant to send it as plain text, choose the String serde instead |
 | `{"a": 1,}` | this starts like JSON but does not parse at line 1, column 9. Check for a quote, comma or closing bracket that is missing, a comma left before a `}` or `]`, or single quotes where JSON requires double ones |
 | (empty) | there is nothing here to send: a JSON document is at least `{}` or `[]` |
 | `123` | this is valid JSON but not a JSON document: it is a single value … To send a bare number or a bare piece of text, choose a different serde |
