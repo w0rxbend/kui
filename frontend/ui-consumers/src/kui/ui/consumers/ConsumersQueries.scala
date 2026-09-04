@@ -7,7 +7,8 @@ import com.raquo.laminar.api.L.*
 import kui.consumer.contract.GroupListParams
 import kui.consumer.contract.dto.{GroupDetailDto, GroupPageDto}
 import kui.contracts.ErrorEnvelope
-import kui.kernel.{ClusterId, GroupId}
+import kui.gateway.contract.dto.TopicOverviewDto
+import kui.kernel.{ClusterId, GroupId, TopicName}
 import kui.ui.kernel.api.{ApiClient, ApiError}
 import kui.ui.kernel.query.QueryCache
 import kui.ui.kernel.state.{CallScope, HealthReporting}
@@ -58,6 +59,18 @@ final class ConsumersQueries(api: ApiClient) {
       maxEntries = 16
     )
 
+  /** The topic page's Consumers tab: the gateway's topic overview, of which this feature reads one section.
+    *
+    * Keyed by cluster and topic, which is what the URL is keyed by, so opening the tab on a topic that was
+    * looked at a minute ago is free and opening it on a new one is one request.
+    */
+  val topicOverview: QueryCache[(ClusterId, TopicName), TopicOverviewDto] =
+    QueryCache.make(
+      key => call(ConsumersApi.topicOverview, key),
+      staleAfter = ConsumersQueries.Cadence,
+      maxEntries = 16
+    )
+
   /** Drops every cached entry belonging to one cluster, so the next subscription refetches.
     *
     * Prefix invalidation rather than "invalidate everything": after refreshing cluster `A`, every cached
@@ -67,6 +80,7 @@ final class ConsumersQueries(api: ApiClient) {
   def invalidateCluster(cluster: ClusterId): Unit = {
     groups.invalidateWhere((id, _) => id == cluster)
     group.invalidateWhere((id, _) => id == cluster)
+    topicOverview.invalidateWhere((id, _) => id == cluster)
   }
 
   /** Every request this feature makes, with its health report attached.

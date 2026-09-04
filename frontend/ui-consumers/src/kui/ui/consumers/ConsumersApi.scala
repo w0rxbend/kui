@@ -7,7 +7,9 @@ import kui.consumer.contract.dto.ConsumerCodecs.given
 import kui.consumer.contract.dto.{GroupDetailDto, GroupPageDto, LagDeltaDto}
 import kui.consumer.contract.{ConsumerEndpoints, GroupListParams}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
-import kui.kernel.{ClusterId, GroupId}
+import kui.gateway.contract.TopicOverviewEndpoints
+import kui.gateway.contract.dto.TopicOverviewDto
+import kui.kernel.{ClusterId, GroupId, TopicName}
 
 /** The consumer service's endpoints as the *browser* calls them.
   *
@@ -85,6 +87,26 @@ object ConsumersApi {
       .out(jsonBody[LagDeltaDto])
       .name("consumer.lag")
 
-  /** Every client this module has. The suite walks it, so a fourth endpoint cannot be added untested. */
-  val all: List[AnyEndpoint] = List(list, detail, lag)
+  /** `GET /api/v1/clusters/{clusterId}/topics/{topicName}/overview` — what the topic page's Consumers tab
+    * reads.
+    *
+    * It is the *gateway's* endpoint, taken whole rather than rebuilt, and that is the entire point of it.
+    * This feature's own `forTopic` lives on `/internal/v1`, which no browser may call; the gateway calls it
+    * while assembling the topic overview and puts the answer in the document's `consumerGroups` section. So
+    * the tab reads the aggregation, and `ui-topics` never learns this service's routes — the Consumers tab
+    * stays a microfrontend guest rather than an import (DEVPLAN §10 D13).
+    *
+    * The rows inside that section are `Json` on the gateway's type, because their shape belongs to this
+    * service and the gateway must not declare it. `TopicConsumers.rowsOf` decodes them into the contract's
+    * own `TopicConsumerRowDto`, which is the type the consumer service encodes them with.
+    *
+    * Reading the whole overview to render one tab costs nothing extra: the topic page has already fetched
+    * this exact document to draw itself, and the two share the browser's HTTP cache and each other's cache
+    * entry only by URL — which is why the tab's own cache holds it under the same key shape.
+    */
+  val topicOverview: PublicEndpoint[(ClusterId, TopicName), ErrorEnvelope, TopicOverviewDto, Any] =
+    TopicOverviewEndpoints.overview
+
+  /** Every client this module has. The suite walks it, so a fifth endpoint cannot be added untested. */
+  val all: List[AnyEndpoint] = List(list, detail, lag, topicOverview)
 }

@@ -4,9 +4,10 @@ import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.Route
 import org.scalajs.dom
 
-import kui.kernel.{ClusterId, GroupId}
+import kui.kernel.{ClusterId, GroupId, TopicName}
 import kui.ui.consumers.detail.GroupDetailPage
 import kui.ui.consumers.list.GroupListPage
+import kui.ui.consumers.topic.TopicConsumersPanel
 import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
 import kui.ui.kernel.prefs.Timezone
@@ -144,12 +145,48 @@ final class ConsumersFeature extends KuiFeature {
   def unavailableView(reason: UnavailableReason, retry: Observer[Unit]): HtmlElement =
     p(cls := ConsumersCss.Fallback, dataAttr("testid") := "consumers-unavailable", Messages.UnavailableView)
 
-  /** None yet. The topic page's Consumers tab is a panel contributed into the kernel's `topic.tabs` slot, and
-    * it is fed by the gateway's topic-overview aggregation rather than by this feature's own client — that
-    * seam is GRP-035's work, and contributing an empty panel before it exists would put a tab on the topic
-    * page with nothing behind it.
+  /** One: the topic page's Consumers tab.
+    *
+    * This is the whole microfrontend contribution mechanism in four lines. The topic page belongs to
+    * `ui-topics`, which does not know this module exists and must never be made to — `frontend.uiConsumers`
+    * is deliberately not a `moduleDep` of it, and the reverse is forbidden too (M4 DEVPLAN risk R-9), because
+    * a feature that imported another feature would be downloaded whenever that one was.
+    *
+    * What the two share is one string, `FeatureSlots.TopicTabs`, declared in the kernel below both of them,
+    * so a typo is a compile error rather than a tab that silently never appears. The host asks `GuestTabs`
+    * for the merged strip and renders it as if it had written every tab itself.
+    *
+    * The panel's data comes from the gateway's topic-overview aggregation, not from this feature's `forTopic`
+    * endpoint: that one is `/internal/v1` and no browser may call it. So `ui-topics` never learns a route of
+    * this service's either (DEVPLAN §10 D13).
+    *
+    * A cluster or topic name in the context that will not parse renders nothing rather than a broken table.
+    * The context is built by another feature from a URL, and the honest response to "I cannot tell which
+    * topic you mean" is an empty panel, not a request for a topic named by an unparseable string.
     */
-  override def panels: List[PanelContribution] = Nil
+  override def panels: List[PanelContribution] =
+    List(
+      PanelContribution(
+        host = FeatureId.Topics,
+        slot = FeatureSlots.TopicTabs,
+        tabLabel = Some(Messages.TopicTabLabel),
+        render = context =>
+          (
+            context.cluster.flatMap(ClusterId.from(_).toOption),
+            context.params.get(FeatureSlots.TopicParam).flatMap(TopicName.from(_).toOption)
+          ) match {
+            case (Some(clusterId), Some(topicName)) =>
+              TopicConsumersPanel(
+                cluster = clusterId,
+                topic = topicName,
+                queries = queries,
+                hrefFor = group => hrefOf(ConsumersPageId.Detail(clusterId.value, group)),
+                onOpen = group => goTo(ConsumersPageId.Detail(clusterId.value, group))
+              )
+            case _ => div(dataAttr("testid") := "topic-consumers")
+          }
+      )
+    )
 
   /** The caches, so the screens this feature builds can read them. */
   private[consumers] def state: ConsumersQueries = queries

@@ -72,6 +72,37 @@ object Messages {
     if partitions == 1 then "1 partition excluded from this figure"
     else s"$partitions partitions excluded from this figure"
 
+  // --- The topic page's Consumers tab ----------------------------------------------------------
+
+  /** The tab's own label on the topic page's strip. One word, because it sits beside "Overview" and
+    * "Settings" and a longer phrase would make the strip wrap on a narrow window.
+    */
+  val TopicTabLabel: String = "Consumers"
+
+  val ColumnTopicLag: String = "Lag on this topic"
+
+  val TopicLoading: String = "Looking for the groups that read this topic…"
+
+  val TopicEmptyTitle: String = "Nothing consumes this topic"
+  val TopicEmptyDescription: String =
+    "No consumer group holds a committed offset on it. A producer-only topic looks exactly like this."
+
+  /** The section is `not_configured`: this deployment has no consumer service for this cluster. Not an error,
+    * and deliberately not worded as one — an operator shown a permanent red panel stops reading red panels,
+    * including the one that matters (ADR-032).
+    */
+  val TopicNotConfigured: String =
+    "This deployment does not track consumer groups for this cluster, so there is nothing to show here."
+
+  val TopicStale: String =
+    "These are the last consumer groups KUI could read for this topic, not the current ones."
+
+  /** A group with committed offsets on this topic and no members. */
+  val DormantChip: String = "dormant"
+  val DormantExplanation: String =
+    "This group has committed offsets on this topic but nothing is connected. A batch job between runs " +
+      "looks exactly like this."
+
   // --- The detail screen -----------------------------------------------------------------------
 
   val BackToList: String = "Consumer groups"
