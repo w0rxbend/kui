@@ -1,0 +1,131 @@
+package kui.ui.topics
+
+import io.circe.Json
+import munit.ScalaCheckSuite
+import org.scalacheck.Prop.forAll
+import org.scalacheck.{Arbitrary, Gen}
+
+import kui.ui.kernel.feature.{FeatureId, Page}
+
+/** The static half of the registration, which is the half that misbehaves before anything is downloaded.
+  *
+  * A broken route pattern is a 404 for a page that exists. A broken `history.state` codec is a Back button
+  * that lands on "not found". Neither is visible from the feature's own screens, because by the time a screen
+  * is on show both have already worked.
+  */
+final class TopicsRoutesSuite extends ScalaCheckSuite {
+
+  private val prefix = "/ui"
+
+  /** Waypoint resolves a relative URL against an origin. Nothing in these assertions depends on which. */
+  private val Origin = "https://kui.example"
+
+  private val clusterIds: Gen[String] = Gen.oneOf("prod-eu", "local", "quickstart", "a")
+  private val topicNames: Gen[String] = Gen.oneOf("orders", "payments.dlq", "a_b-c", "__consumer_offsets")
+  private val tabs: Gen[TopicTab] = Gen.oneOf(TopicTab.values.toList)
+
+  private given Arbitrary[TopicsPageId] = Arbitrary(
+    Gen.oneOf(
+      clusterIds.map(TopicsPageId.List(_)),
+      for {
+        cluster <- clusterIds
+        topic <- topicNames
+        tab <- tabs
+      } yield TopicsPageId.Detail(cluster, topic, tab)
+    )
+  )
+
+  private def urlFor(page: TopicsPageId): Option[String] =
+    TopicsRoutes.routes(prefix).flatMap(_.relativeUrlForPage(page)).headOption
+
+  private def pageAt(url: String): Option[Page] =
+    TopicsRoutes.routes(prefix).flatMap(route => route.pageForRelativeUrl(Origin, url)).headOption
+
+  property("everyPageRoundTripsThroughItsUrl") {
+    forAll { (page: TopicsPageId) =>
+      urlFor(page).flatMap(pageAt).contains(page)
+    }
+  }
+
+  property("everyPageRoundTripsThroughItsHistoryStateCodec") {
+    forAll { (page: TopicsPageId) =>
+      TopicsRoutes
+        .encodePage(page)
+        .flatMap { json =>
+          val cursor = json.hcursor
+          cursor.get[String]("page").toOption.flatMap(tag => TopicsRoutes.decodePage(tag, cursor))
+        }
+        .contains(page)
+    }
+  }
+
+  test("theRoutePatternsEndOfSegments") {
+    // Without `endOfSegments` a pattern claims its own sub-paths, and a mistyped URL never 404s: it silently
+    // resolves to the page above it, so the user sees the topic list when they asked for a topic.
+    assertEquals(pageAt(s"$prefix/clusters/prod-eu/topics/orders/settings/nonsense"), None)
+    assertEquals(pageAt(s"$prefix/clusters/prod-eu/topics/orders/settings/deeper/still"), None)
+  }
+
+  test("theTablessPatternRefusesAPageThatNamesATab") {
+    // If it did not, `Detail(_, _, Settings)` would encode to the tabless URL and a link to a topic's
+    // configuration would open on its overview — with nothing anywhere reporting a problem.
+    val settings = TopicsPageId.Detail("prod-eu", "orders", TopicTab.Settings)
+    assertEquals(urlFor(settings), Some(s"$prefix/clusters/prod-eu/topics/orders/settings"))
+    val overview = TopicsPageId.Detail("prod-eu", "orders", TopicTab.Overview)
+    assertEquals(urlFor(overview), Some(s"$prefix/clusters/prod-eu/topics/orders"))
+  }
+
+  test("anUnknownTabInAUrlFallsBackToOverview") {
+    // A bookmark can outlive a tab. Landing on the overview of the right topic is a far better answer than
+    // "not found".
+    assertEquals(
+      pageAt(s"$prefix/clusters/prod-eu/topics/orders/statistics"),
+      Some(TopicsPageId.Detail("prod-eu", "orders", TopicTab.Overview))
+    )
+  }
+
+  test("anUnknownTabInAStoredStateFallsBackToOverview") {
+    val stored = Json.obj(
+      "page" -> Json.fromString("topics.detail"),
+      "clusterId" -> Json.fromString("prod-eu"),
+      "topic" -> Json.fromString("orders"),
+      "tab" -> Json.fromString("statistics")
+    )
+    assertEquals(
+      TopicsRoutes.decodePage("topics.detail", stored.hcursor),
+      Some(TopicsPageId.Detail("prod-eu", "orders", TopicTab.Overview))
+    )
+  }
+
+  test("aStoredStateMissingTheTopicIsRefusedRatherThanGuessed") {
+    // Guessing a topic would show the user somebody else's data under the name they asked for.
+    val stored = Json.obj("page" -> Json.fromString("topics.detail"), "clusterId" -> Json.fromString("p"))
+    assertEquals(TopicsRoutes.decodePage("topics.detail", stored.hcursor), None)
+  }
+
+  test("anotherFeaturesStoredStateIsNotClaimed") {
+    // The shell tries each contributor in turn, so a codec that answered for a tag it does not own would
+    // steal another feature's Back button.
+    assertEquals(TopicsRoutes.decodePage("clusters.overview", Json.obj().hcursor), None)
+    assertEquals(TopicsRoutes.encodePage(new Page {}), None)
+  }
+
+  test("theNavEntryNamesTheTopicFeatureId") {
+    assertEquals(TopicsRoutes.nav.featureId, FeatureId.Topics)
+    assertEquals(TopicsRoutes.id, FeatureId.Topics)
+    // The service behind the feature is `topic`, singular, and the shell dims the entry from that name.
+    assertEquals(FeatureId.Topics.serviceId, "topic")
+    // Topics belong to a cluster, so the entry means nothing until one has been chosen.
+    assert(TopicsRoutes.nav.requiresCluster)
+  }
+
+  test("theDeploymentPrefixIsHonoured") {
+    // A deployment mounted under `/kafka` must not produce links to `/ui`; the prefix is a parameter for
+    // exactly this reason.
+    val mounted = TopicsRoutes
+      .routes("/kafka/ui")
+      .flatMap(_.relativeUrlForPage(TopicsPageId.List("prod-eu")))
+      .headOption
+    assertEquals(mounted, Some("/kafka/ui/clusters/prod-eu/topics"))
+  }
+}

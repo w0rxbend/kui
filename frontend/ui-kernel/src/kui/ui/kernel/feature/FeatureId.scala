@@ -16,8 +16,13 @@ package kui.ui.kernel.feature
   */
 enum FeatureId(val value: String, val serviceId: String) {
   case Clusters extends FeatureId("clusters", "cluster")
-  // topics, messages, consumers, schemas, connect, ksql, security, metrics and admin follow in
-  // their own milestones.
+
+  /** The feature is `topics` and the service behind it is `topic`, singular. The two are not the same word,
+    * which is exactly why one is not guessed from the other.
+    */
+  case Topics extends FeatureId("topics", "topic")
+  // messages, consumers, schemas, connect, ksql, security, metrics and admin follow in their own
+  // milestones.
 }
 
 object FeatureId {

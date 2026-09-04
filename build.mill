@@ -141,7 +141,7 @@ trait KuiJsModule extends KuiModule with ScalaJSModule {
   * package to this list; a package that is missing from it still works, it just is not splittable.
   */
 trait KuiFrontendModule extends KuiJsModule {
-  def moduleSplitStyle = ModuleSplitStyle.SmallModulesFor("kui.ui.clusters")
+  def moduleSplitStyle = ModuleSplitStyle.SmallModulesFor("kui.ui.clusters", "kui.ui.topics")
 
   /** The feature microfrontends that must be linked into modules of their own (ADR-012).
     *
@@ -1533,7 +1533,12 @@ object services extends Module {
           libs.config,
           libs.http,
           contract.jvm,
-          services.cluster.contract.jvm
+          services.cluster.contract.jvm,
+          // The topic-overview aggregation calls the topic service's own `getTopic` endpoint, through the
+          // same generic client every proxied route uses. Rule A11 admits another service's `contract` and
+          // nothing else, which is exactly what is wanted here: the gateway names an endpoint value and a
+          // DTO, and knows nothing about how the topic service produces either.
+          services.topic.contract.jvm
         )
 
       def mvnDeps = Seq(

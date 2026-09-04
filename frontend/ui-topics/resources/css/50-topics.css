@@ -1,0 +1,27 @@
+/* The topics feature.
+ *
+ * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ *
+ * The file is numbered 50 so that it lands after the kernel's own sheets (00-25) and after the clusters
+ * feature (40-41). `CssPipeline` decides the cascade from these numbers rather than from who nested their
+ * selectors more deeply, which is what keeps every selector a single class of equal specificity.
+ *
+ * There is very little here on purpose. Almost everything the topic screens draw is a kernel component
+ * already — the windowed table, the pagination bar, the search box, the chips, the magnitude bars — and a
+ * feature stylesheet that restyled them would be a second design system with one user.
+ */
+
+.kui-topics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+  /* A flex child will not shrink below its content unless told it may, and the windowed table inside needs
+   * a parent that can shrink or its scroller never scrolls. */
+  min-height: 0;
+}
+
+/* The sentence the shell draws inside its fallback panel when the topic service is down. */
+.kui-topics__fallback {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+}
