@@ -37,7 +37,7 @@ import kui.gateway.application.capability.{
 import kui.gateway.application.client.ServiceClients
 import kui.gateway.application.cluster.ClusterOverviewUseCase
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
-import kui.gateway.application.topic.TopicOverviewUseCase
+import kui.gateway.application.topic.{ConsumerGroupsSource, TopicOverviewUseCase}
 import kui.http.health.ReadinessCheck
 import kui.http.{BasePath, Cors, ErrorInterceptor}
 import kui.kernel.ServiceId
@@ -60,10 +60,18 @@ import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
   *   the checks behind `/api/v1/health/ready`, exposed so that a composition root that adds upstreams can add
   *   their checks too
   */
+/** @param fillableTopicSections
+  *   which sections of the topic-page aggregation this assembled gateway can actually fill, read from the
+  *   sources that were wired rather than from a list somebody maintains. It is reported because the
+  *   alternative is unobservable: a section whose source was never registered answers `not_configured`, which
+  *   is indistinguishable from a section this build was never meant to serve, and that is exactly how the
+  *   Consumers tab shipped empty against a healthy consumer service
+  */
 final case class GatewayServer[F[_]](
     routes: List[ServerEndpoint[Fs2Streams[F], F]],
     interceptors: List[Interceptor[F]],
-    readiness: List[ReadinessCheck[F]]
+    readiness: List[ReadinessCheck[F]],
+    fillableTopicSections: Set[String]
 )
 
 /** The gateway's composition root (ADR-010).
@@ -185,7 +193,14 @@ object GatewayWiring {
       // The topic page's aggregation, on the same terms: a deployment with no topic service configured has
       // no client and therefore no route, so `/overview` 404s rather than answering a document whose topic
       // section is permanently unavailable for a service nobody deployed.
-      topicOverview <- topicClient.traverse(TopicOverviewUseCase.resource[F](_, signals, telemetry))
+      // The Consumers tab is a map entry, which is what `TopicOverviewUseCase`'s extension point was built
+      // for — and it was missing until now. A section with no source is reported `NotConfigured`, so a
+      // deployment with a perfectly healthy consumer service was telling every operator that it did not
+      // track consumer groups.
+      overviewSources = ConsumerGroupsSource.sources[F](consumerClient)
+      topicOverview <- topicClient.traverse(
+        TopicOverviewUseCase.resource[F](_, signals, telemetry, overviewSources)
+      )
       // The message browse stream, relayed rather than proxied. A deployment with no message service
       // configured has no client and therefore no route, so the address 404s instead of opening a
       // stream that could only ever end in an error.
@@ -215,7 +230,9 @@ object GatewayWiring {
         ) ++
         instrumentation ++
         ErrorInterceptor.interceptors[F](logger),
-      readiness = readiness
+      readiness = readiness,
+      fillableTopicSections =
+        TopicOverviewUseCase.fillable[F](overviewSources, hasTopicClient = topicClient.isDefined)
     )
   }
 

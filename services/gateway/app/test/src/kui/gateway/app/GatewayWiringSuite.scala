@@ -5,6 +5,7 @@ import scala.concurrent.duration.DurationInt
 import cats.effect.IO
 
 import kui.config.{GatewayConfig, ServerConfig, UpstreamServiceConfig}
+import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{Host, Port, PositiveInt, ServiceId}
 import kui.observability.Telemetry
 import kui.testkit.KuiIOSuite
@@ -67,6 +68,40 @@ final class GatewayWiringSuite extends KuiIOSuite {
     // registry's job (GW-003), and it dims a feature rather than taking the whole product out of rotation.
     wire(unreachableUpstreams).map { gateway =>
       assertEquals(gateway.readiness.map(_.name), List("process"))
+    }
+  }
+
+  test("aConfiguredConsumerServiceFillsTheTopicPagesConsumersSection") {
+    // The defect this catches was invisible from every layer that had a test. `TopicOverviewUseCase`
+    // reports a section with no registered source as `not_configured` — correct, and the answer a fully
+    // configured deployment was getting, because this composition root called it without ever passing a
+    // source for `consumerGroups`. The consumer service was deployed, its capability read `available`, its
+    // own endpoint answered when called directly, and the topic page's Consumers tab said the deployment
+    // did not track consumer groups.
+    //
+    // The assertion is about the *set of sections this build can fill*, which is read from what is wired
+    // rather than hard-coded, so it is the one thing that could not have been true by accident.
+    val configured = unreachableUpstreams.gateway.services +
+      (ServiceId.unsafe("consumer") -> unreachableUpstreams.gateway.services(ServiceId.unsafe("topic")))
+
+    val withConsumers =
+      unreachableUpstreams.copy(gateway = unreachableUpstreams.gateway.copy(services = configured))
+
+    wire(withConsumers).map { gateway =>
+      assert(
+        gateway.fillableTopicSections.contains(TopicOverviewDto.ConsumerGroupsSection),
+        s"the topic overview can fill ${gateway.fillableTopicSections}, " +
+          "and a consumer service is configured"
+      )
+    }
+  }
+
+  test("aDeploymentWithNoConsumerServiceStillSaysSoRatherThanPretending") {
+    // The other half, and the reason `not_configured` exists at all: a build with no consumer service must
+    // report the section as one it cannot fill, so the panel says this deployment has no such thing rather
+    // than showing a permanent error.
+    wire(unreachableUpstreams).map { gateway =>
+      assert(!gateway.fillableTopicSections.contains(TopicOverviewDto.ConsumerGroupsSection))
     }
   }
 
