@@ -1664,6 +1664,19 @@ object e2e extends KuiJvmModule {
       * the two rather than a convention that somebody remembers to rebuild.
       */
     override def forkEnv = Task {
+      // Building the two images the Compose topology runs, and throwing the tags away. The tags
+      // are not needed — `docker-compose.yml` names the images itself — but the dependency edge
+      // is, and this is the only way to declare one on a side effect that lives in the Docker
+      // daemon rather than in `out/`.
+      //
+      // Without it, `./mill e2e.test` ran the Compose suites against whichever `kui-gateway` and
+      // `kui-cluster` images happened to be on the machine. During M1 that was the M0 images, so
+      // the fault-isolation suite — the milestone's headline claim — spent the whole milestone
+      // passing against the previous milestone's code, and the failure that finally exposed it was
+      // a screenshot of the deleted Ping page.
+      val _ = deployment.docker.gateway.docker.build()
+      val _ = deployment.docker.cluster.docker.build()
+
       super.forkEnv() ++ Map(
         "KUI_E2E_ALLINONE_JAR" -> apps.allinone.assembly().path.toString,
         "KUI_E2E_COMPOSE_FILE" ->
