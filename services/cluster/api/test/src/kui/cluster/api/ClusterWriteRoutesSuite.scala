@@ -22,10 +22,10 @@ import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
 import kui.cluster.contract.ClusterWriteEndpoints
 import kui.cluster.contract.dto.*
-import kui.cluster.domain.{ClusterProfile, ProfileVersion}
+import kui.cluster.domain.{ClusterProfile, Connectivity, ProfileVersion}
 import kui.contracts.KuiEndpoint
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
-import kui.kernel.{RoleName, Secret, UserName}
+import kui.kernel.{ClusterId, RoleName, Secret, UserName}
 import kui.observability.Telemetry
 import kui.security.*
 import kui.testkit.fakes.FakeStructuredLogger
@@ -68,7 +68,8 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
 
   private def server(
       writes: ClusterWriteUseCaseStub,
-      permitted: Principal => Boolean = _ => true
+      permitted: Principal => Boolean = _ => true,
+      probe: kui.cluster.application.ClusterProbeUseCase[IO] = new ClusterFixtures.StubProbe()
   ): Resource[IO, ClusterTestServer] =
     OtelJavaTestkit.inMemory[IO]().evalMap { testkit =>
       val telemetry = Telemetry.fromProviders(testkit.tracerProvider, testkit.meterProvider)
@@ -81,7 +82,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
       } yield ClusterTestServer(
         TapirStreamStubInterpreter(interceptors, StreamBackendStub[IO, Fs2Streams[IO]](summon))
           .whenServerEndpointsRunLogic(
-            ClusterWriteRoutes[IO](writes, codec, rejections, logger, permitted)
+            ClusterWriteRoutes[IO](writes, probe, codec, rejections, logger, permitted)
           )
           .backend(),
         logger,
@@ -96,11 +97,16 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
   private final class ClusterWriteUseCaseStub(
       val answer: ClusterProfile => Either[KuiError, ClusterProfile] = _.asRight[KuiError],
       val takes: FiniteDuration = Duration.Zero,
-      val seen: Option[Ref[IO, List[(ClusterProfile, ProfileVersion)]]] = None
+      val seen: Option[Ref[IO, List[(ClusterProfile, ProfileVersion)]]] = None,
+      val removal: Either[KuiError, Unit] = Right(()),
+      val removals: Option[Ref[IO, List[(ClusterId, ProfileVersion)]]] = None
   ) extends kui.cluster.application.ClusterWriteUseCase[IO] {
 
     def put(profile: ClusterProfile, expected: ProfileVersion): IO[Either[KuiError, ClusterProfile]] =
       seen.traverse_(_.update(_ :+ ((profile, expected)))) *> IO.sleep(takes).as(answer(profile))
+
+    def delete(id: ClusterId, expected: ProfileVersion): IO[Either[KuiError, Unit]] =
+      removals.traverse_(_.update(_ :+ ((id, expected)))) *> IO.sleep(takes).as(removal)
   }
 
   private def put(
@@ -131,6 +137,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
           val base = basicRequest
             .put(Uri.unsafeParse(s"http://cluster$at"))
             .header(KuiEndpoint.PrincipalHeader, token.value)
+            .header(kui.contracts.HttpHeaders.Csrf, "a-csrf-token")
             .header("Content-Type", "application/json")
             .body(body.noSpaces)
             .response(asStringAlways)
@@ -292,10 +299,217 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     }
   }
 
-  test("theWriteEndpointIsNotInTheListTheGatewayProxies") {
-    // The endpoint ships without a user interface, and it is the permission plus this exclusion that keep
-    // it that way: no browser can reach a path the gateway has no route for.
-    assert(!kui.cluster.contract.ClusterEndpoints.all.exists(_.info.name.contains("cluster.put")))
-    assertEquals(ClusterWriteEndpoints.all.flatMap(_.info.name), List("cluster.put"))
+  // ----------------------------------------------------------------------------------------------
+  // Removing a cluster
+  // ----------------------------------------------------------------------------------------------
+
+  private def remove(
+      service: ClusterTestServer,
+      ifMatch: Option[String] = Some("\"3\""),
+      principal: Principal = editor
+  ): IO[Response[String]] =
+    IO.realTimeInstant.flatMap { now =>
+      service.principals
+        .sign(
+          PrincipalClaims(
+            subject = principal.name,
+            roles = principal.roles,
+            kind = principal.kind,
+            sessionRef = None,
+            issuedAt = now,
+            expiresAt = now.plusSeconds(60L),
+            audience = kui.cluster.application.ClusterService.Id,
+            // No body, so the request line is the whole digest — which is what `SecuredRoutes.apply`
+            // checks against for a body-less endpoint.
+            requestDigest = RequestDigest.ofRequestLine("DELETE", path)
+          )
+        )
+        .flatMap { token =>
+          val base = basicRequest
+            .delete(Uri.unsafeParse(s"http://cluster$path"))
+            .header(KuiEndpoint.PrincipalHeader, token.value)
+            .header(kui.contracts.HttpHeaders.Csrf, "a-csrf-token")
+            .response(asStringAlways)
+
+          ifMatch
+            .fold(base)(tag => base.header(ClusterWriteEndpoints.IfMatchHeader, tag))
+            .send(service.backend)
+        }
+    }
+
+  test("aDeleteRemovesTheClusterAtTheVersionTheCallerNamed") {
+    Ref.of[IO, List[(ClusterId, ProfileVersion)]](Nil).flatMap { removals =>
+      server(new ClusterWriteUseCaseStub(removals = Some(removals)))
+        .use(remove(_))
+        .flatMap(response => removals.get.map((response, _)))
+        .map { (response, seen) =>
+          assertEquals(response.code.code, 200, response.body)
+          // The version travels from the header into the store call unchanged. A delete that dropped it
+          // would be an unconditional delete, which races with somebody else's edit.
+          assertEquals(seen.map((id, version) => (id.value, version.value)), List(("prod-eu", 3L)))
+        }
+    }
+  }
+
+  test("aDeleteWithoutIfMatchIsRefusedBeforeAnythingIsRemoved") {
+    Ref.of[IO, List[(ClusterId, ProfileVersion)]](Nil).flatMap { removals =>
+      server(new ClusterWriteUseCaseStub(removals = Some(removals)))
+        .use(remove(_, ifMatch = None))
+        .flatMap(response => removals.get.map((response, _)))
+        .map { (response, seen) =>
+          assertEquals(response.code.code, 400, response.body)
+          assertEquals(seen, Nil)
+        }
+    }
+  }
+
+  test("aDeleteAtTheCreateVersionIsRefusedByName") {
+    // `"0"` means "create; fail if it exists". Handing it to the store would produce "no record at
+    // version 0", which reads as a bug rather than as the caller having sent the wrong header.
+    server(new ClusterWriteUseCaseStub()).use(remove(_, ifMatch = Some("\"0\""))).map { response =>
+      assertEquals(response.code.code, 400, response.body)
+      assertEquals(code(response), Some(ErrorCode.Validation.wire))
+      assert(response.body.contains("If-Match"), response.body)
+    }
+  }
+
+  test("aDeleteOfAStaticallyConfiguredClusterIsFourOhNineNamingTheFile") {
+    // The store record would go and the configuration file would put it straight back on the next
+    // resolve. An operator watching a row they deleted reappear has no way to tell that from a bug.
+    val refused = new ClusterWriteUseCaseStub(
+      removal = Left(kui.cluster.application.ClusterWriteUseCase.staticallyDefined(ClusterId.unsafe("prod-eu")))
+    )
+
+    server(refused).use(remove(_)).map { response =>
+      assertEquals(response.code.code, 409, response.body)
+      assert(response.body.contains("kui.clusters[]"), response.body)
+    }
+  }
+
+  test("aPrincipalWithoutThePermissionCannotDelete") {
+    Ref.of[IO, List[(ClusterId, ProfileVersion)]](Nil).flatMap { removals =>
+      server(
+        new ClusterWriteUseCaseStub(removals = Some(removals)),
+        permitted = ClusterWriteRoutes.defaultPermission
+      ).use(remove(_, principal = Principal.Anonymous))
+        .flatMap(response => removals.get.map((response, _)))
+        .map { (response, seen) =>
+          assertEquals(response.code.code, 403, response.body)
+          assertEquals(seen, Nil)
+        }
+    }
+  }
+
+  // ----------------------------------------------------------------------------------------------
+  // Testing a connection
+  // ----------------------------------------------------------------------------------------------
+
+  private val probePath = "/internal/v1/clusters/connection-test"
+
+  private def test_connection(
+      service: ClusterTestServer,
+      body: Json = request.asJson,
+      principal: Principal = editor
+  ): IO[Response[String]] =
+    IO.realTimeInstant.flatMap { now =>
+      service.principals
+        .sign(
+          PrincipalClaims(
+            subject = principal.name,
+            roles = principal.roles,
+            kind = principal.kind,
+            sessionRef = None,
+            issuedAt = now,
+            expiresAt = now.plusSeconds(60L),
+            audience = kui.cluster.application.ClusterService.Id,
+            requestDigest =
+              RequestDigests.of("POST", probePath, body.noSpaces.getBytes(StandardCharsets.UTF_8))
+          )
+        )
+        .flatMap { token =>
+          basicRequest
+            .post(Uri.unsafeParse(s"http://cluster$probePath"))
+            .header(KuiEndpoint.PrincipalHeader, token.value)
+            .header(kui.contracts.HttpHeaders.Csrf, "a-csrf-token")
+            .header("Content-Type", "application/json")
+            .body(body.noSpaces)
+            .response(asStringAlways)
+            .send(service.backend)
+        }
+    }
+
+  test("aConnectionTestReportsTheThreeVerdictsDistinguishably") {
+    // One boolean would send an operator to the network when the answer is a password. These are the two
+    // different places the two failures send them.
+    val cases = List(
+      Connectivity.Reachable -> ("reachable", true),
+      Connectivity.AuthenticationFailed("the cluster rejected KUI's credentials") ->
+        ("authentication-failed", false),
+      Connectivity.Unreachable("KUI could not open a connection to this cluster") -> ("unreachable", false)
+    )
+
+    cases.traverse_ { (verdict, expected) =>
+      server(new ClusterWriteUseCaseStub(), probe = new ClusterFixtures.StubProbe(verdict))
+        .use(test_connection(_))
+        .map { response =>
+          assertEquals(response.code.code, 200, response.body)
+          assertEquals(parse(response.body).flatMap(_.hcursor.get[String]("status")), Right(expected._1))
+          assertEquals(parse(response.body).flatMap(_.hcursor.get[Boolean]("reachable")), Right(expected._2))
+        }
+    }
+  }
+
+  test("aConnectionTestValidatesTheSettingsBeforeItOpensAnything") {
+    // "That is not a bootstrap list" and "that address does not answer" are different problems, and the
+    // first one must not be reported as the second.
+    val broken = request.copy(bootstrapServers = "not a broker list")
+
+    server(new ClusterWriteUseCaseStub()).use(test_connection(_, body = broken.asJson)).map { response =>
+      assertEquals(response.code.code, 400, response.body)
+      assertEquals(code(response), Some(ErrorCode.Validation.wire))
+    }
+  }
+
+  test("aConnectionTestIsBehindTheSamePermissionAsTheWrite") {
+    // Unguarded, it would let any caller use KUI to open connections to whatever KUI's network can reach
+    // and read the answers off the three verdicts.
+    server(new ClusterWriteUseCaseStub(), permitted = ClusterWriteRoutes.defaultPermission)
+      .use(test_connection(_, principal = Principal.Anonymous))
+      .map(response => assertEquals(response.code.code, 403, response.body))
+  }
+
+  test("aConnectionTestNeverEchoesACredential") {
+    server(new ClusterWriteUseCaseStub()).use(service => test_connection(service).map((service, _))).flatMap {
+      (service, response) =>
+        assert(!response.body.contains(ClusterFixtures.Canary), response.body)
+        service.logger.entries.map(lines =>
+          assert(!lines.mkString("\n").contains(ClusterFixtures.Canary), lines.toString)
+        )
+    }
+  }
+
+  test("everyWriteEndpointIsPublishedAndMarked") {
+    // The inverse of what this suite used to assert. `put` was deliberately absent from the list the
+    // gateway derives its routes from, because it had no screen; it has one now, and an endpoint the
+    // browser cannot reach would make that screen a set of buttons that answer 404. What keeps an
+    // unauthorised caller out is the permission, which is a rule the product states, rather than a missing
+    // route, which is only a rule nobody has got round to breaking.
+    assertEquals(
+      ClusterWriteEndpoints.all.flatMap(_.info.name).sorted,
+      List("cluster.delete", "cluster.probe", "cluster.put")
+    )
+
+    // Every one of them classified for read-only mode. An unmarked mutation keeps answering on a cluster
+    // an operator has marked read-only and nothing reports it as an exception (ADR-047).
+    assert(
+      ClusterWriteEndpoints.all.forall(endpoint =>
+        endpoint.attribute(KuiEndpoint.MutationKey).isDefined
+      ),
+      ClusterWriteEndpoints.all.flatMap(_.info.name).toString
+    )
+
+    // Only the delete is destructive: a write replaces a record KUI can be told again, a delete removes
+    // credentials KUI cannot reconstruct.
+    assertEquals(ClusterWriteEndpoints.mutating.flatMap(_.info.name), List("cluster.delete"))
   }
 }

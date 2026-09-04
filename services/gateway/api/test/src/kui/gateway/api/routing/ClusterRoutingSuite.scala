@@ -241,7 +241,11 @@ final class ClusterRoutingSuite extends CatsEffectSuite {
     val proxied = ServiceContracts.proxied(service)
 
     assert(!proxied.exists(_.info.name.contains("cluster.list")), proxied.flatMap(_.info.name).toString)
-    assertEquals(proxied.size, ClusterEndpoints.all.size - 1)
+    // Every read endpoint but the aggregated list, plus the three writes the administration screen calls.
+    assertEquals(
+      proxied.size,
+      ClusterEndpoints.all.size - 1 + kui.cluster.contract.ClusterWriteEndpoints.all.size
+    )
     // Compared on the *template*, not on `publicPathOf`: that function reports fixed segments only, so
     // `/api/v1/clusters/{clusterId}` and `/api/v1/clusters` share its answer. Two routes for one address is
     // what this test exists to prevent, and only the template distinguishes them.

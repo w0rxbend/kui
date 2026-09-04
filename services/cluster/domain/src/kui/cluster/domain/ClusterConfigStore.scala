@@ -69,6 +69,24 @@ trait ClusterConfigStore[F[_]] {
     */
   def put(profile: ClusterProfile, expected: ProfileVersion): F[Either[KuiError, ClusterProfile]]
 
+  /** Removes a profile, refusing when `expected` is not the version currently stored.
+    *
+    * The same optimistic check as [[put]], for the same reason: an unconditional delete races with an edit,
+    * and the operator who loses the race sees the cluster they were fixing disappear.
+    *
+    * `Right(())` for a profile that is already gone. Deletion is stated as *idempotent* because the caller is
+    * a retry loop as often as it is a person: a second attempt that reports "no such cluster" would turn a
+    * successful removal into an error message on the screen of the person who performed it.
+    *
+    * The same failure modes as [[put]]: `Conflict` for a stale version, `Unsupported` where there is no
+    * store, `InfrastructureError.*` when the store cluster is unreachable. A delete is never buffered either.
+    *
+    * It removes the profile from the *store*. A cluster that is also written into this deployment's static
+    * configuration file comes straight back on the next resolve, and the use case above says so rather than
+    * pretending the removal failed.
+    */
+  def delete(id: ClusterId, expected: ProfileVersion): F[Either[KuiError, Unit]]
+
   /** Registers a handler invoked with the full resolved profile list on every store change, and returns the
     * action that deregisters it.
     *

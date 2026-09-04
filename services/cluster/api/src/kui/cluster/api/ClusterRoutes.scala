@@ -115,9 +115,15 @@ object ClusterRoutes {
       for {
         result <- brokers.brokers(id)
         now <- Clock[F].realTimeInstant
-      } yield sectionOf(result, now)(list =>
-        SectionMapping.of(Some(list.brokers), list.freshness, now)(_.map(ClusterMapping.broker))
-      ).map(BrokersResponse(_))
+      } yield result.map { list =>
+        BrokersResponse(
+          SectionMapping.of(Some(list.brokers), list.freshness, now)(_.map(ClusterMapping.broker)),
+          // Beside the section rather than inside it: a cluster with no metadata quorum is not a cluster
+          // whose broker list failed, and folding the two together would make a ZooKeeper cluster's
+          // brokers table render as unavailable.
+          list.quorum.map(ClusterMapping.quorum)
+        )
+      }
     }
 
   /** One broker's settings, read live.

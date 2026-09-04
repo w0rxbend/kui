@@ -5,7 +5,7 @@ import java.time.Instant
 import com.raquo.laminar.api.L.*
 
 import kui.contracts.Section
-import kui.contracts.cluster.{BrokerDto, ClusterSummaryDto}
+import kui.contracts.cluster.{BrokerDto, ClusterSummaryDto, QuorumDto}
 import kui.kernel.{BrokerId, ClusterId, Sort, SortOrder}
 import kui.ui.clusters.component.{Bytes, RefreshButton}
 import kui.ui.clusters.{ClustersCss, ClustersQueries, Messages, RefreshFlow}
@@ -42,6 +42,13 @@ object BrokersPage {
 
     val section: Signal[Option[Section[List[BrokerDto]]]] =
       queries.brokers.state(cluster).map(_.lastGood.map(_.brokers))
+
+    /** The metadata quorum, from the same answer the table came from — so its high watermark and the brokers
+      * beside it are one moment. `None` on a ZooKeeper cluster and on any cluster that could not report one,
+      * in which case the panel renders nothing at all rather than an empty quorum.
+      */
+    val quorum: Signal[Option[QuorumDto]] =
+      queries.brokers.state(cluster).map(_.lastGood.flatMap(_.quorum))
 
     /** The cluster's own summary, from the cache the dashboard already fills. Absent until it arrives, which
       * renders as `—` in the strip rather than as a spinner over the table.
@@ -102,6 +109,9 @@ object BrokersPage {
           )
         )
       ),
+      // Below the table, because the brokers are what the page is for and the quorum is the thing an
+      // operator scrolls to once the table has not explained the problem.
+      QuorumPanel(quorum, zone, now),
       div(
         cls := ClustersCss.ScrapedAt,
         span(

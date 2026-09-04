@@ -208,4 +208,128 @@ object Messages {
   val UnavailableView: String =
     "Cluster metadata is unavailable, so no cluster can be inspected or switched to. Pages that do not need " +
       "the cluster service — settings, and the component gallery — still work."
+
+  // --- The administration screen ---------------------------------------------------------------
+
+  val AdminTitle: String = "Manage clusters"
+
+  val AdminDescription: String =
+    "Which Kafka clusters this KUI knows about, and how it reaches them. Changes take effect without a " +
+      "restart and are shared by every KUI replica reading the same metadata store."
+
+  val AddCluster: String = "Add a cluster"
+  val EditCluster: String = "Edit"
+  val DeleteCluster: String = "Delete"
+  val SaveCluster: String = "Save"
+  val Cancel: String = "Cancel"
+  val TestConnection: String = "Test the connection"
+
+  val AdminEmptyTitle: String = "No clusters are configured"
+
+  val AdminEmptyDescription: String =
+    "Add one here, or declare it under kui.clusters in this deployment's configuration file."
+
+  val OriginStatic: String = "from the configuration file"
+  val OriginStored: String = "added here"
+  val OriginStaticThenStored: String = "from the configuration file, edited here"
+
+  /** Why a statically configured cluster has no buttons.
+    *
+    * Said before the operator opens a form rather than as a 409 after they have filled one in: the store
+    * record would go and the next resolve would put the configured profile straight back.
+    */
+  val ClusterIsStatic: String =
+    "This cluster is declared in the configuration file, so it cannot be changed here. Edit kui.clusters " +
+      "and restart."
+
+  val FieldName: String = "Name"
+
+  val FieldNameHint: String =
+    "The URL id is derived from the name, so renaming a cluster creates a new one and leaves the old."
+
+  val FieldBootstrap: String = "Broker addresses"
+
+  val FieldBootstrapHint: String = "host:port, comma separated. Two or three is enough; KUI finds the rest."
+
+  val FieldReadOnly: String = "Read-only — refuse every write KUI can make against this cluster"
+
+  val FieldProtocol: String = "Security protocol"
+  val FieldMechanism: String = "SASL mechanism"
+  val FieldUsername: String = "Username"
+  val FieldPassword: String = "Password"
+  val FieldVerifyHostname: String = "Verify the broker's hostname against its certificate"
+
+  /** The gap, said out loud rather than left for someone to discover.
+    *
+    * A cluster whose certificate authority the JVM already trusts — which is every managed service — works
+    * from this form. A private CA still needs a truststore, and this form has no way to give KUI one.
+    */
+  val TlsMaterialNote: String =
+    "A truststore or keystore for a private certificate authority cannot be uploaded here yet; set it " +
+      "under kui.clusters in the configuration file. Clusters whose certificate the JVM already trusts " +
+      "need nothing."
+
+  val AdminTuningHeading: String = "Admin client timeouts"
+
+  val FieldTimeout: String = "Timeout for one admin call (ms)"
+  val FieldBatchSize: String = "Topics per describe batch"
+  val FieldParallelism: String = "Concurrent admin calls"
+
+  val VerdictReachable: String = "KUI reached this cluster."
+  val VerdictRefused: String = "KUI reached this cluster and it refused the credentials."
+  val VerdictUnreachable: String = "KUI could not reach this cluster."
+
+  val DeleteClusterConfirmTitle: String = "Remove this cluster from KUI?"
+
+  val DeleteClusterConfirmMessage: String =
+    "KUI forgets this cluster's address and credentials. Nothing on the Kafka cluster itself is touched, " +
+      "and it can be added again — but the credentials would have to be typed in afresh."
+
+  def clusterSaved(name: String): String = s"'$name' was saved."
+
+  val ClusterDeleted: String = "The cluster was removed from KUI."
+
+  // --- The KRaft metadata quorum -----------------------------------------------------------------
+
+  val QuorumHeading: String = "Metadata quorum"
+
+  val QuorumLeader: String = "Leader"
+  val QuorumEpoch: String = "Epoch"
+  val QuorumHighWatermark: String = "Committed up to"
+  val QuorumVoterCount: String = "Voters"
+
+  val QuorumVoters: String = "Voters"
+  val QuorumObservers: String = "Observers"
+
+  val QuorumNoObservers: String =
+    "No observers: every node in this cluster votes, which is what a combined controller-and-broker " +
+      "deployment looks like."
+
+  val QuorumNoMembers: String = "The cluster reported none."
+
+  val QuorumLeaderTag: String = "leader"
+
+  val QuorumColumnNode: String = "Node"
+  val QuorumColumnLogEnd: String = "Log end offset"
+  val QuorumColumnLag: String = "Behind by"
+  val QuorumColumnLastFetch: String = "Last fetch"
+  val QuorumColumnLastCaughtUp: String = "Last caught up"
+
+  /** Why a cell has no time in it. The leader does not fetch from anyone; that is not a follower that has
+    * stopped, and the two must not read the same.
+    */
+  val QuorumTimeUnknown: String = "the cluster reported no time for this"
+
+  def quorumHealthy(caughtUp: Int, voters: Int): String =
+    s"$caughtUp of $voters voters are level with the leader, so metadata changes can still be committed."
+
+  /** The sentence a panel of numbers cannot say for itself.
+    *
+    * Without a majority of voters level with the leader, a metadata write cannot commit — which means every
+    * topic create, every configuration change and every ACL is about to start timing out. Saying so here is
+    * the difference between noticing it now and debugging it from the other end an hour later.
+    */
+  def quorumAtRisk(caughtUp: Int, voters: Int): String =
+    s"Only $caughtUp of $voters voters are level with the leader. Metadata changes — creating a topic, " +
+      "changing a configuration, altering an ACL — may not be able to commit."
 }

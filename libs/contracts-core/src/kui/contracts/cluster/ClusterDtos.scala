@@ -117,6 +117,17 @@ object ClusterSummaryDto {
   * @param bootstrapServers
   *   the address KUI dials, `host:port,host:port`. An operator debugging a dead row needs to see it; it is an
   *   address, never a credential
+  * @param version
+  *   the metadata store version this profile was resolved at, which is what a write has to send back in
+  *   `If-Match`. `None` for a cluster that has never been stored — one that comes only from the deployment's
+  *   configuration file — because there is no version for such a cluster to be replaced at, and a screen
+  *   sending zero would be asking to *create* one that already exists.
+  * @param origin
+  *   where this cluster's definition comes from: `"static"`, `"stored"` or `"static-then-stored"`. It exists
+  *   so that the administration screen can say "this one is in the configuration file" *before* the operator
+  *   fills in a form, rather than offering an edit and a delete that the server will refuse. A string rather
+  *   than an enum for the reason `controllerKind` is one: a client meeting a fourth value from a newer KUI
+  *   should degrade, not fail to decode
   */
 final case class ClusterRowDto(
     id: ClusterId,
@@ -124,10 +135,33 @@ final case class ClusterRowDto(
     readOnly: Boolean,
     bootstrapServers: String,
     security: ClusterSecurityDto,
-    summary: Section[ClusterSummaryDto]
+    summary: Section[ClusterSummaryDto],
+    version: Option[Long] = None,
+    origin: String = ClusterRowDto.OriginStatic
 )
 
 object ClusterRowDto {
+
+  /** Only this deployment's configuration file names it. It cannot be edited or removed from the interface:
+    * the store record would go and the file would put it straight back on the next resolve.
+    */
+  val OriginStatic: String = "static"
+
+  /** Only a metadata-store record names it. Editable and removable. */
+  val OriginStored: String = "stored"
+
+  /** Both do, and the stored record won. Editable, because a store write still wins; not removable, for the
+    * reason `OriginStatic` gives.
+    */
+  val OriginStaticThenStored: String = "static-then-stored"
+
+  /** Whether this cluster's definition can be changed from the interface at all. */
+  def isEditable(dto: ClusterRowDto): Boolean = dto.origin != OriginStatic
+
+  /** Whether it can be removed. Narrower than [[isEditable]] on purpose: a cluster the configuration file
+    * also names comes back on the next resolve, so removing it is a button that appears to do nothing.
+    */
+  def isRemovable(dto: ClusterRowDto): Boolean = dto.origin == OriginStored
 
   given Codec[ClusterRowDto] = Codec.from(
     (cursor: HCursor) =>
@@ -138,7 +172,12 @@ object ClusterRowDto {
         bootstrapServers <- cursor.get[String]("bootstrapServers")
         security <- cursor.get[ClusterSecurityDto]("security")
         summary <- cursor.get[Section[ClusterSummaryDto]]("summary")
-      } yield ClusterRowDto(id, name, readOnly, bootstrapServers, security, summary),
+        // Read leniently: a gateway or a recorded document from before these two fields existed still
+        // decodes, and lands on "configured in a file", which is the answer that offers no buttons. The
+        // safe default is the one that refuses to edit, not the one that tries.
+        version <- cursor.getOrElse[Option[Long]]("version")(None)
+        origin <- cursor.getOrElse[String]("origin")(ClusterRowDto.OriginStatic)
+      } yield ClusterRowDto(id, name, readOnly, bootstrapServers, security, summary, version, origin),
     (dto: ClusterRowDto) =>
       Json.obj(
         "id" -> dto.id.asJson,
@@ -146,7 +185,9 @@ object ClusterRowDto {
         "readOnly" -> dto.readOnly.asJson,
         "bootstrapServers" -> dto.bootstrapServers.asJson,
         "security" -> dto.security.asJson,
-        "summary" -> dto.summary.asJson
+        "summary" -> dto.summary.asJson,
+        "version" -> dto.version.asJson,
+        "origin" -> dto.origin.asJson
       )
   )
 

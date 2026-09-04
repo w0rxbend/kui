@@ -27,11 +27,23 @@ object BrokerListRow {
   given CanEqual[BrokerListRow, BrokerListRow] = CanEqual.derived
 }
 
-/** The broker list plus how fresh it is. */
+/** The broker list plus how fresh it is, and the metadata quorum when the cluster has one.
+  *
+  * The quorum travels with the broker list rather than on an endpoint of its own because it is a fact about
+  * the same nodes, read in the same snapshot pass. A separate call would be a second request for a panel that
+  * sits beside the table, and — worse — a second *moment*: a quorum's lag is computed against a high
+  * watermark, and pairing one snapshot's watermark with another snapshot's log end offsets produces a lag
+  * that never existed.
+  *
+  * `None` on a ZooKeeper cluster, on a KRaft cluster too old for `describeMetadataQuorum` (before 3.3), and
+  * on one that refused the call. Those are all "there is no quorum information here", which is what a panel
+  * that renders nothing needs to know.
+  */
 final case class BrokerList(
     cluster: ClusterRef,
     brokers: List[BrokerListRow],
-    freshness: SnapshotFreshness
+    freshness: SnapshotFreshness,
+    quorum: Option[kui.cluster.domain.QuorumInfo] = None
 )
 
 object BrokerList {

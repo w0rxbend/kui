@@ -1,5 +1,7 @@
 package kui.contracts.cluster
 
+import java.time.Instant
+
 import io.circe.syntax.*
 import io.circe.{Codec, HCursor, Json}
 import sttp.tapir.Schema
@@ -254,4 +256,115 @@ object LogDirDto {
     Schema.derived[LogDirDto].description("One log directory of one broker, with its own error if it failed")
 
   given CanEqual[LogDirDto, LogDirDto] = CanEqual.derived
+}
+
+/** One member of the KRaft metadata quorum, as the leader last saw it.
+  *
+  * @param lag
+  *   how far behind the leader's high watermark this member is, computed **server-side** and never negative.
+  *   It is computed there and not here because a lag is a subtraction against the high watermark, and a
+  *   client doing that arithmetic itself would be free to pair one snapshot's watermark with another
+  *   snapshot's offsets — which produces a negative lag, or a spike that resolves itself the next time
+  *   anybody looks
+  * @param lastFetch
+  *   when the leader last heard a fetch from this member. `None` for the leader itself, which does not fetch
+  *   from anyone, and for a member no fetch has ever arrived from
+  * @param lastCaughtUp
+  *   when this member was last level with the leader. The pair of times is the whole diagnosis: a member
+  *   fetching but never catching up is a slow follower, and one that has stopped fetching is a dead one
+  */
+final case class QuorumMemberDto(
+    replicaId: BrokerId,
+    logEndOffset: Long,
+    lag: Long,
+    isLeader: Boolean,
+    isVoter: Boolean,
+    lastFetch: Option[Instant],
+    lastCaughtUp: Option[Instant]
+)
+
+object QuorumMemberDto {
+
+  given Codec[QuorumMemberDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        replicaId <- cursor.get[BrokerId]("replicaId")
+        logEndOffset <- cursor.get[Long]("logEndOffset")
+        lag <- cursor.get[Long]("lag")
+        isLeader <- cursor.getOrElse[Boolean]("isLeader")(false)
+        isVoter <- cursor.getOrElse[Boolean]("isVoter")(true)
+        lastFetch <- cursor.get[Option[Instant]]("lastFetch")
+        lastCaughtUp <- cursor.get[Option[Instant]]("lastCaughtUp")
+      } yield QuorumMemberDto(replicaId, logEndOffset, lag, isLeader, isVoter, lastFetch, lastCaughtUp),
+    (dto: QuorumMemberDto) =>
+      Json.obj(
+        "replicaId" -> dto.replicaId.asJson,
+        "logEndOffset" -> dto.logEndOffset.asJson,
+        "lag" -> dto.lag.asJson,
+        "isLeader" -> dto.isLeader.asJson,
+        "isVoter" -> dto.isVoter.asJson,
+        "lastFetch" -> dto.lastFetch.asJson,
+        "lastCaughtUp" -> dto.lastCaughtUp.asJson
+      )
+  )
+
+  given Schema[QuorumMemberDto] =
+    Schema.derived[QuorumMemberDto].description("One voter or observer of the KRaft metadata quorum")
+
+  given CanEqual[QuorumMemberDto, QuorumMemberDto] = CanEqual.derived
+}
+
+/** The KRaft metadata quorum: who leads it, how far the log has been committed, and who is keeping up.
+  *
+  * ==Why this is worth a panel==
+  *
+  * The metadata quorum is the part of a KRaft cluster whose failure is least visible from anywhere else. A
+  * controller that has fallen behind still answers, topics still list, messages still flow — and every
+  * *administrative* change is being decided by a shrinking set of nodes. The first symptom on any other
+  * screen is a create that times out.
+  *
+  * `describeMetadataQuorum` has been called on every snapshot pass since M1, its answer has been carried on
+  * `ClusterTopology.quorum` since M1, and it has never reached a wire or a screen.
+  *
+  * @param voters
+  *   the members whose acknowledgement a metadata write needs. Their count and their lag decide whether the
+  *   cluster can still commit metadata at all
+  * @param observers
+  *   nodes replicating the metadata log without voting — brokers, in a cluster with dedicated controllers. A
+  *   lagging observer is a broker with a stale view of the cluster, which is a different and smaller problem
+  *   from a lagging voter
+  */
+final case class QuorumDto(
+    leaderId: BrokerId,
+    leaderEpoch: Long,
+    highWatermark: Long,
+    voters: List[QuorumMemberDto],
+    observers: List[QuorumMemberDto]
+)
+
+object QuorumDto {
+
+  given Codec[QuorumDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        leaderId <- cursor.get[BrokerId]("leaderId")
+        leaderEpoch <- cursor.get[Long]("leaderEpoch")
+        highWatermark <- cursor.get[Long]("highWatermark")
+        voters <- cursor.getOrElse[List[QuorumMemberDto]]("voters")(Nil)
+        observers <- cursor.getOrElse[List[QuorumMemberDto]]("observers")(Nil)
+      } yield QuorumDto(leaderId, leaderEpoch, highWatermark, voters, observers),
+    (dto: QuorumDto) =>
+      Json.obj(
+        "leaderId" -> dto.leaderId.asJson,
+        "leaderEpoch" -> dto.leaderEpoch.asJson,
+        "highWatermark" -> dto.highWatermark.asJson,
+        "voters" -> dto.voters.asJson,
+        "observers" -> dto.observers.asJson
+      )
+  )
+
+  given Schema[QuorumDto] =
+    Schema.derived[QuorumDto].description("The KRaft metadata quorum, as the leader last reported it")
+
+  given CanEqual[QuorumDto, QuorumDto] = CanEqual.derived
 }

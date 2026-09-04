@@ -61,24 +61,43 @@ final class MergedDocumentShapeSuite extends FunSuite {
     )
   }
 
-  test("theWriteEndpointIsAbsentFromTheMergedDocument") {
-    // Half of the pair. On its own it would pass if the endpoint had simply never been written.
+  test("theClusterWritesArePublishedToBrowsers") {
+    // The inverse of what this pair used to assert, and the reason for the reversal is worth keeping.
+    //
+    // M1 shipped `PUT /internal/v1/clusters/{id}` and deliberately kept it out of the gateway's contract
+    // map, because there was no screen to call it from — so the pair of tests here made "no browser can
+    // reach it" a checked property. The cluster administration screen exists now, and an endpoint the
+    // browser cannot reach would make that screen a set of buttons that answer 404.
+    //
+    // What keeps an unauthorised caller out is `ApplicationConfig.Edit`, declared on each endpoint and
+    // enforced by the gateway's permission seam and again by the service. That is a rule the product can
+    // state; an unrouted endpoint is only a rule nobody has got round to breaking.
     val rendered = merged.asJson.noSpaces
 
-    assert(!rendered.contains("cluster.put"), "the write endpoint must not be published to browsers")
-    assertEquals(merged.paths.pathItems.get("/api/v1/clusters").flatMap(_.put), None)
+    assert(rendered.contains("cluster.put"), "the write endpoint is reached from the administration screen")
+    assert(rendered.contains("cluster.delete"), rendered.take(200))
+    assert(rendered.contains("cluster.probe"), rendered.take(200))
+
+    assert(merged.paths.pathItems.get("/api/v1/clusters/{clusterId}").flatMap(_.put).isDefined)
+    assert(merged.paths.pathItems.get("/api/v1/clusters/{clusterId}").flatMap(_.delete).isDefined)
   }
 
-  test("theWriteEndpointIsAbsentBecauseItIsNotProxied, not because it does not exist") {
-    // The complement of the case above, and the reason it is here rather than an assertion about the
-    // cluster service's own document: the gateway must not depend on another service's `api` module, so
-    // the other half of the pair lives in `ClusterApiSuite`, which asserts the write *is* in the service's
-    // own document. Either half alone would pass while the intent was broken.
-    assert(
-      kui.cluster.contract.ClusterWriteEndpoints.all.nonEmpty,
-      "the write endpoint exists; it is the routing that excludes it"
+  test("everyPublishedClusterWriteCarriesItsPermissionDeclaration") {
+    // The property that replaced "it is unroutable". A write the gateway proxies with no authorization
+    // declaration is one the permission seam cannot decide about, which is a worse state than the one the
+    // missing route used to prevent.
+    val writes = ServiceContracts
+      .proxied(cluster)
+      .filter(_.info.name.exists(Set("cluster.put", "cluster.delete", "cluster.probe")))
+
+    assertEquals(writes.size, 3, writes.flatMap(_.info.name).toString)
+
+    writes.foreach(endpoint =>
+      assert(
+        endpoint.attribute(kui.contracts.rbac.EndpointAuthorization.Key).isDefined,
+        s"${endpoint.info.name} carries no authorization declaration"
+      )
     )
-    assert(!ServiceContracts.proxied(cluster).exists(_.info.name.contains("cluster.put")))
   }
 
   test("thePublicClusterPathsEqualTheDerivedSet") {

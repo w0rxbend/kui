@@ -52,6 +52,31 @@ final class FakeClusterConfigStore[F[_]: Concurrent] private (
       }
     }
 
+  def delete(id: ClusterId, expected: ProfileVersion): F[Either[KuiError, Unit]] =
+    record(s"delete:${id.value}@${expected.value}") >> state.modify { current =>
+      current.failWith match {
+        case Some(error) => (current, error.asLeft[Unit])
+        case None =>
+          current.profiles.get(id) match {
+            // Already gone. The port states deletion as idempotent, so the fake has to agree or a suite
+            // about retries would be asserting the fake's opinion.
+            case None => (current, ().asRight[KuiError])
+            case Some(held) if held.version != expected =>
+              (
+                current,
+                ApplicationError
+                  .Remote(
+                    ErrorCode.ConfigVersionConflict,
+                    s"cluster '${id.value}' was changed by someone else",
+                    Nil
+                  )
+                  .asLeft[Unit]
+              )
+            case Some(_) => (current.copy(profiles = current.profiles - id), ().asRight[KuiError])
+          }
+      }
+    }
+
   def onChange(handler: List[ClusterProfile] => F[Unit]): F[F[Unit]] =
     state
       .modify { current =>

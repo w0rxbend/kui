@@ -5,7 +5,7 @@ import io.circe.{Codec, HCursor, Json}
 import sttp.tapir.Schema
 
 import kui.contracts.Section
-import kui.contracts.cluster.{BrokerConfigEntryDto, BrokerDto, LogDirDto}
+import kui.contracts.cluster.{BrokerConfigEntryDto, BrokerDto, LogDirDto, QuorumDto}
 
 /** The brokers of one cluster, or the reason there are none to show.
   *
@@ -14,13 +14,31 @@ import kui.contracts.cluster.{BrokerConfigEntryDto, BrokerDto, LogDirDto}
   * data and the time it was fetched — both of which a screen can render. A 5xx would tell the browser only
   * that something went wrong somewhere, which is the answer it can do least with.
   */
-final case class BrokersResponse(brokers: Section[List[BrokerDto]])
+/** @param quorum
+  *   the KRaft metadata quorum, when this cluster has one and KUI could read it. It travels with the broker
+  *   list rather than on an endpoint of its own because it is a fact about the same nodes read in the same
+  *   snapshot pass — and because a quorum's lag is computed against a high watermark, so a second call would
+  *   be a second *moment* and could produce a lag that never existed.
+  *
+  * `None` on a ZooKeeper cluster, on a KRaft cluster older than 3.3, and on one that refused
+  * `describeMetadataQuorum`. All three mean "there is no quorum information here", which is exactly what a
+  * panel that renders nothing needs to know — and none of them is a failure of the brokers call, which is why
+  * this is an `Option` beside the section rather than a second section.
+  */
+final case class BrokersResponse(brokers: Section[List[BrokerDto]], quorum: Option[QuorumDto] = None)
 
 object BrokersResponse {
 
   given Codec[BrokersResponse] = Codec.from(
-    (cursor: HCursor) => cursor.get[Section[List[BrokerDto]]]("brokers").map(BrokersResponse(_)),
-    (response: BrokersResponse) => Json.obj("brokers" -> response.brokers.asJson)
+    (cursor: HCursor) =>
+      for {
+        brokers <- cursor.get[Section[List[BrokerDto]]]("brokers")
+        // Read leniently, so a recorded document from before the quorum existed still decodes and lands
+        // on "no quorum panel" rather than on a decode failure.
+        quorum <- cursor.getOrElse[Option[QuorumDto]]("quorum")(None)
+      } yield BrokersResponse(brokers, quorum),
+    (response: BrokersResponse) =>
+      Json.obj("brokers" -> response.brokers.asJson, "quorum" -> response.quorum.asJson)
   )
 
   given Schema[BrokersResponse] =

@@ -219,7 +219,8 @@ object ClusterFixtures {
   final class StubWrites(
       answer: ClusterProfile => Either[KuiError, ClusterProfile] = _.asRight[KuiError],
       takes: FiniteDuration = Duration.Zero,
-      seen: Option[Ref[IO, List[(ClusterProfile, ProfileVersion)]]] = None
+      seen: Option[Ref[IO, List[(ClusterProfile, ProfileVersion)]]] = None,
+      deleted: ClusterId => Either[KuiError, Unit] = _ => Right(())
   ) extends ClusterWriteUseCase[IO] {
 
     def put(profile: ClusterProfile, expected: ProfileVersion): IO[Either[KuiError, ClusterProfile]] =
@@ -227,6 +228,19 @@ object ClusterFixtures {
         // The store's contract is that a write is readable back before it returns, so the wait belongs
         // inside this call: a route that answered first would be answering before the fact.
         IO.sleep(takes).as(answer(profile))
+
+    def delete(id: ClusterId, expected: ProfileVersion): IO[Either[KuiError, Unit]] =
+      IO.sleep(takes).as(deleted(id))
+  }
+
+  /** A probe that always says the same thing. The verdict is a parameter because the three verdicts are the
+    * whole point of the endpoint.
+    */
+  final class StubProbe(verdict: Connectivity = Connectivity.Reachable)
+      extends kui.cluster.application.ClusterProbeUseCase[IO] {
+
+    def probe(profile: ClusterProfile): IO[Either[KuiError, Connectivity]] =
+      IO.pure(Right(verdict))
   }
 
   def notFound(id: ClusterId): KuiError =

@@ -6,7 +6,7 @@ import cats.effect.IO
 import fs2.Stream
 
 import kui.cluster.application.*
-import kui.cluster.domain.{ClusterProfile, ClusterRef, ProfileVersion, StoreHealth}
+import kui.cluster.domain.{ClusterProfile, ClusterRef, Connectivity, ProfileVersion, StoreHealth}
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{BrokerId, ClusterId}
 
@@ -71,7 +71,19 @@ object EmptyClusterUseCases {
       IO.pure(
         Left(ApplicationError.Unsupported("the metadata store is not configured in this deployment"))
       )
+
+    def delete(id: ClusterId, expected: ProfileVersion): IO[Either[KuiError, Unit]] =
+      IO.pure(
+        Left(ApplicationError.Unsupported("the metadata store is not configured in this deployment"))
+      )
   }
+
+  /** Nothing to connect to in this fixture, so the probe reports the honest verdict rather than a success. */
+  val probe: kui.cluster.application.ClusterProbeUseCase[IO] =
+    new kui.cluster.application.ClusterProbeUseCase[IO] {
+      def probe(profile: ClusterProfile): IO[Either[KuiError, Connectivity]] =
+        IO.pure(Right(Connectivity.Unreachable("no cluster is configured in this deployment")))
+    }
 
   /** A cluster id nothing is configured under, for the cases that need a failure both transports agree on. */
   val UnknownCluster: ClusterId = ClusterId.unsafe("not-configured")

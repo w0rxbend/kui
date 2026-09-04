@@ -3,7 +3,7 @@ package kui.ui.clusters
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
-import kui.cluster.contract.ClusterEndpoints
+import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.cluster.contract.dto.*
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
@@ -113,6 +113,49 @@ object ClustersApi {
       .out(jsonBody[RefreshAcceptedDto])
       .name("clusters.refresh")
 
-  /** Every client this module has. The suite walks it, so a sixth endpoint cannot be added untested. */
-  val all: List[AnyEndpoint] = List(clusters, cluster, brokers, brokerConfigs, logDirs, refresh)
+  // -----------------------------------------------------------------------------------------------
+  // Administering the deployment's own cluster list
+  // -----------------------------------------------------------------------------------------------
+
+  /** `PUT /api/v1/clusters/{clusterId}` — register a cluster, or replace the one that is there.
+    *
+    * `If-Match` is required by the contract and is a plain header here rather than part of the body: the
+    * version is metadata *about* the record, and a body that carried one could disagree with the record it
+    * was replacing. `"0"` means "create; fail if it already exists", which keeps one code path instead of two
+    * endpoints.
+    *
+    * The CSRF header the service declares is deliberately not declared here. `ApiClient` puts it on every
+    * request that is not a `GET`, and a header declared in two places is a header that stops agreeing.
+    */
+  val put: PublicEndpoint[(ClusterId, String, ClusterWriteRequest), ErrorEnvelope, ClusterProfileDto, Any] =
+    KuiEndpoint.base.put
+      .in(clustersBase / clusterIdPath)
+      .in(header[String](ClusterWriteEndpoints.IfMatchHeader))
+      .in(jsonBody[ClusterWriteRequest])
+      .out(jsonBody[ClusterProfileDto])
+      .name("clusters.put")
+
+  /** `DELETE /api/v1/clusters/{clusterId}` — remove a cluster from the metadata store. */
+  val delete: PublicEndpoint[(ClusterId, String), ErrorEnvelope, Unit, Any] =
+    KuiEndpoint.base.delete
+      .in(clustersBase / clusterIdPath)
+      .in(header[String](ClusterWriteEndpoints.IfMatchHeader))
+      .name("clusters.delete")
+
+  /** `POST /api/v1/clusters/connection-test` — can KUI reach this, with these settings?
+    *
+    * No cluster id anywhere, because the whole point is to answer before anything has been written. The
+    * answer distinguishes "could not reach it" from "reached it and it refused our credentials", which are
+    * the two different forms the operator has to go back to.
+    */
+  val probe: PublicEndpoint[ClusterWriteRequest, ErrorEnvelope, ConnectivityDto, Any] =
+    KuiEndpoint.base.post
+      .in(clustersBase / ClusterWriteEndpoints.ProbeSegment)
+      .in(jsonBody[ClusterWriteRequest])
+      .out(jsonBody[ConnectivityDto])
+      .name("clusters.probe")
+
+  /** Every client this module has. The suite walks it, so a tenth endpoint cannot be added untested. */
+  val all: List[AnyEndpoint] =
+    List(clusters, cluster, brokers, brokerConfigs, logDirs, refresh, put, delete, probe)
 }

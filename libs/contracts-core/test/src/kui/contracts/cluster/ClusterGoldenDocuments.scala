@@ -66,7 +66,9 @@ object ClusterGoldenDocuments {
       |      "scrapedAt" : "2026-09-03T10:11:12.000Z"
       |    },
       |    "fetchedAt" : "2026-09-03T10:11:12.000Z"
-      |  }
+      |  },
+      |  "version" : null,
+      |  "origin" : "static"
       |}""".stripMargin
 
   val broker: String =

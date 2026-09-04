@@ -122,12 +122,21 @@
           "cluster"
         ],
         "summary" : "Register or replace one cluster",
-        "description" : "Answers only after the write has been read back from the store, so a 200 means every replica that has caught up can already see it. A version that does not match answers 409 KUI-CONFIG-VERSION-CONFLICT; a deployment with no metadata store answers 501. The response is the redacted profile and never an echo of the request.",
+        "description" : "Part of the cluster.write flow. This call changes nothing. Answers only after the write has been read back from the store, so a 200 means every replica that has caught up can already see it. A version that does not match answers 409 KUI-CONFIG-VERSION-CONFLICT; a deployment with no metadata store answers 501. The response is the redacted profile and never an echo of the request.",
         "operationId" : "cluster.put",
         "parameters" : [
           {
             "name" : "X-Kui-Principal",
             "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
             "required" : true,
             "schema" : {
               "type" : "string"
@@ -174,7 +183,77 @@
             }
           },
           "400" : {
-            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header If-Match, Invalid value for: body",
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: header If-Match, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Remove one cluster from the metadata store",
+        "description" : "Mutation (cluster.delete). This call changes the cluster and cannot be undone. Removes the stored profile and its credentials. A cluster this deployment also declares in its configuration file answers 409: the store record would go and the file would put it straight back, so the refusal names the file instead of pretending to succeed. A deployment with no metadata store answers 501.",
+        "operationId" : "cluster.delete",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "If-Match",
+            "in" : "header",
+            "description" : "The version being replaced, quoted; \"0\" to create",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: header If-Match",
             "content" : {
               "text/plain" : {
                 "schema" : {
@@ -449,6 +528,77 @@
           },
           "400" : {
             "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/connection-test" : {
+      "post" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Can KUI reach this cluster with these settings?",
+        "description" : "Part of the cluster.write flow. This call changes nothing. Opens one bounded connection and describes the cluster, which exercises DNS, TCP, TLS and SASL in one call. It stores nothing. The answer distinguishes 'could not reach it' from 'reached it and it refused our credentials', because those send an operator to two different forms.",
+        "operationId" : "cluster.probe",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ClusterWriteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectivityDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
             "content" : {
               "text/plain" : {
                 "schema" : {
@@ -824,6 +974,9 @@
         "properties" : {
           "brokers" : {
             "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "quorum" : {
+            "$ref" : "#/components/schemas/QuorumDto"
           }
         }
       },
@@ -947,7 +1100,8 @@
           "readOnly",
           "bootstrapServers",
           "security",
-          "summary"
+          "summary",
+          "origin"
         ],
         "properties" : {
           "id" : {
@@ -968,6 +1122,13 @@
           },
           "summary" : {
             "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "origin" : {
+            "type" : "string"
           }
         }
       },
@@ -1091,6 +1252,26 @@
           },
           "generatedAt" : {
             "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ConnectivityDto" : {
+        "title" : "ConnectivityDto",
+        "description" : "Whether KUI can currently talk to a cluster, and if not why",
+        "type" : "object",
+        "required" : [
+          "status",
+          "reachable"
+        ],
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "reachable" : {
+            "type" : "boolean"
+          },
+          "detail" : {
             "type" : "string"
           }
         }
@@ -1348,6 +1529,84 @@
             "$ref" : "#/components/schemas/Sensitive"
           }
         ]
+      },
+      "QuorumDto" : {
+        "title" : "QuorumDto",
+        "description" : "The KRaft metadata quorum, as the leader last reported it",
+        "type" : "object",
+        "required" : [
+          "leaderId",
+          "leaderEpoch",
+          "highWatermark"
+        ],
+        "properties" : {
+          "leaderId" : {
+            "description" : "a broker node id, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "leaderEpoch" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "highWatermark" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "voters" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/QuorumMemberDto"
+            }
+          },
+          "observers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/QuorumMemberDto"
+            }
+          }
+        }
+      },
+      "QuorumMemberDto" : {
+        "title" : "QuorumMemberDto",
+        "description" : "One voter or observer of the KRaft metadata quorum",
+        "type" : "object",
+        "required" : [
+          "replicaId",
+          "logEndOffset",
+          "lag",
+          "isLeader",
+          "isVoter"
+        ],
+        "properties" : {
+          "replicaId" : {
+            "description" : "a broker node id, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "logEndOffset" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "lag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "isLeader" : {
+            "type" : "boolean"
+          },
+          "isVoter" : {
+            "type" : "boolean"
+          },
+          "lastFetch" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastCaughtUp" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
       },
       "ReadinessReport" : {
         "title" : "ReadinessReport",

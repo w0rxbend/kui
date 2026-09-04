@@ -22,7 +22,7 @@ import kui.cluster.domain.{
   StoreHealth
 }
 import kui.cluster.infrastructure.store.{ClusterConfigStoreAdapter, ProfileChangeListener}
-import kui.cluster.infrastructure.{ClusterAdminAdapter, ClusterAdminClients}
+import kui.cluster.infrastructure.{ClusterAdminAdapter, ClusterAdminClients, ConnectivityProbeAdapter}
 import kui.config.store.*
 import kui.config.{ClusterConfig, StoreConfig}
 import kui.contracts.health.CheckResult
@@ -73,6 +73,7 @@ object ClusterBootstrap {
       topology: ClusterTopologyUseCase[F],
       brokers: BrokerDetailUseCase[F],
       write: ClusterWriteUseCase[F],
+      probe: ClusterProbeUseCase[F],
       capabilities: CapabilityReportUseCase[F],
       health: F[StoreHealth],
       storeMode: String
@@ -137,6 +138,15 @@ object ClusterBootstrap {
       brokers = BrokerDetailUseCase.make[F](registry, snapshots, admin, logger)
       capabilities = CapabilityReportUseCase.make[F](registry, snapshots)
       write = ClusterWriteUseCase.make[F](registry, clusterStore, logger)
+      // The connectivity probe. It has been a working, tested adapter with no constructor since M1 — the
+      // "test connection" button it was written for did not exist, so nothing ever built one. It takes the
+      // raw `KafkaClusterAdmin` rather than `admin` above, because it must not be traced and retried as a
+      // read: it is a bounded yes/no with its own five-second timeout, and inheriting the read path's
+      // minute would make the button useless on exactly the address it exists to diagnose.
+      probe = ClusterProbeUseCase.make[F](
+        new ConnectivityProbeAdapter[F](KafkaClusterAdmin[F](pool), clients, logger),
+        logger
+      )
     } yield Bootstrapped(
       store = configStore,
       registry = registry,
@@ -144,6 +154,7 @@ object ClusterBootstrap {
       topology = topology,
       brokers = brokers,
       write = write,
+      probe = probe,
       capabilities = capabilities,
       health = clusterStore.health,
       storeMode = if store.kafka.isDefined then "kafka" else if store.dir.isDefined then "file" else "none"

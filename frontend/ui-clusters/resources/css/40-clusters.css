@@ -105,3 +105,128 @@
   justify-content: space-between;
   gap: var(--kui-space-3);
 }
+
+/* --- Managing the deployment's own cluster list ------------------------------------------------- */
+
+.kui-clusters__note {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The sentence after a save or a delete. Its own colour, so that a confirmation and a refusal are not
+ * two identical grey paragraphs in the same place. */
+.kui-clusters__notice {
+  margin: 0 0 var(--kui-space-3) 0;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-accent-container);
+}
+
+.kui-clusters__admin-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--kui-space-3);
+}
+
+.kui-clusters__admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+/* One row per cluster: what it is on the left, what can be done to it on the right. A list rather than
+ * a table because every row has the same three facts and none of them are worth sorting by -- the
+ * dashboard is the screen for comparing clusters. */
+.kui-clusters__admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-clusters__admin-row-identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-clusters__admin-row-name {
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* The address wraps rather than being truncated: a bootstrap list is the field an operator is checking
+ * character by character when a cluster will not connect, and an ellipsis hides the end of it. */
+.kui-clusters__admin-row-address {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.kui-clusters__admin-row-origin {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-clusters__admin-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  flex-shrink: 0;
+}
+
+.kui-clusters__admin-row-actions > div {
+  display: flex;
+  gap: var(--kui-space-2);
+}
+
+.kui-clusters__admin-form {
+  margin-top: var(--kui-space-4);
+  padding: var(--kui-space-4);
+  border: 1px solid var(--kui-color-border-strong);
+  border-radius: var(--kui-radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-clusters__admin-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding-top: var(--kui-space-3);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+.kui-clusters__admin-form-actions {
+  display: flex;
+  gap: var(--kui-space-2);
+  justify-content: flex-end;
+}
+
+.kui-clusters__admin-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+/* The probe's answer. Coloured, because the whole point of pressing the button is to find out which of
+ * two answers it is, and a sentence in the body colour makes that a reading task. */
+.kui-clusters__verdict {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-clusters__verdict--good {
+  background: var(--kui-color-success-container);
+}
+
+.kui-clusters__verdict--bad {
+  background: var(--kui-color-danger-container);
+}

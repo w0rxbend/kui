@@ -70,7 +70,14 @@ object BrokerDetailUseCase {
           case Left(error) => error.asLeft[BrokerList].pure[F]
           case Right(profile) =>
             viewOf(profile).map { view =>
-              BrokerList(profile.ref, rowsOf(view), view.freshness).asRight[KuiError]
+              BrokerList(
+                profile.ref,
+                rowsOf(view),
+                view.freshness,
+                // Straight off the same snapshot the rows came from, so the quorum's high watermark and
+                // the brokers beside it are one moment rather than two.
+                view.topology.flatMap(_.quorum)
+              ).asRight[KuiError]
             }
         }
 

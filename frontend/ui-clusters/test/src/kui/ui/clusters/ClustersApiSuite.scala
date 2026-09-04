@@ -36,11 +36,14 @@ class ClustersApiSuite extends FunSuite {
     "brokers" -> pathOf(ClustersApi.brokers, cluster),
     "brokerConfigs" -> pathOf(ClustersApi.brokerConfigs, (cluster, broker, true)),
     "logDirs" -> pathOf(ClustersApi.logDirs, (cluster, Some(broker))),
-    "refresh" -> pathOf(ClustersApi.refresh, cluster)
+    "refresh" -> pathOf(ClustersApi.refresh, cluster),
+    "put" -> pathOf(ClustersApi.put, (cluster, "\"0\"", ClustersApiSuite.writeRequest)),
+    "delete" -> pathOf(ClustersApi.delete, (cluster, "\"3\"")),
+    "probe" -> pathOf(ClustersApi.probe, ClustersApiSuite.writeRequest)
   )
 
   test("everyClientTargetsThePublicPrefix") {
-    // Every endpoint, not a hand-written list of them: adding a seventh without a test is not possible.
+    // Every endpoint, not a hand-written list of them: adding a tenth without a test is not possible.
     assertEquals(calls.length, ClustersApi.all.length)
     calls.foreach { (name, path) =>
       assert(path.startsWith(PublicApi.Prefix), s"$name calls $path")
@@ -60,7 +63,12 @@ class ClustersApiSuite extends FunSuite {
           s"?${ClusterEndpoints.DocsParam}=true"),
       "logDirs" ->
         s"$one/${ClusterEndpoints.LogDirsSegment}?${ClusterEndpoints.BrokerIdParam}=${broker.value}",
-      "refresh" -> s"$one/${ClusterEndpoints.RefreshSegment}"
+      "refresh" -> s"$one/${ClusterEndpoints.RefreshSegment}",
+      // The write and the delete share the cluster's own path; the connection test has no cluster in it
+      // at all, because it answers before anything has been written.
+      "put" -> one,
+      "delete" -> one,
+      "probe" -> s"$clusters/${kui.cluster.contract.ClusterWriteEndpoints.ProbeSegment}"
     )
     calls.foreach((name, path) => assertEquals(path, expected(name), name))
   }
@@ -181,4 +189,47 @@ class ClustersApiSuite extends FunSuite {
 
   private def inputsOf(endpoint: AnyEndpoint): String =
     s"${endpoint.securityInput.show} ${endpoint.input.show}"
+
+  test("theWriteAndTheDeleteCarryIfMatchAndTheProbeDoesNot") {
+    // The version travels in a header rather than in the body, because it is metadata *about* the record:
+    // in the body a caller could send a version that disagreed with the record it was replacing. The
+    // probe writes nothing, so there is no version for it to claim.
+    val ifMatch = kui.cluster.contract.ClusterWriteEndpoints.IfMatchHeader.toLowerCase
+
+    assert(inputsOf(ClustersApi.put).toLowerCase.contains(ifMatch), inputsOf(ClustersApi.put))
+    assert(inputsOf(ClustersApi.delete).toLowerCase.contains(ifMatch), inputsOf(ClustersApi.delete))
+    assert(!inputsOf(ClustersApi.probe).toLowerCase.contains(ifMatch), inputsOf(ClustersApi.probe))
+  }
+
+  test("noClientDeclaresACsrfHeader") {
+    // `ApiClient` puts it on every request that is not a GET. A header declared in two places is a header
+    // that stops agreeing, and the failure mode is a 403 that reads as a permissions problem.
+    List(ClustersApi.put, ClustersApi.delete, ClustersApi.probe).foreach { endpoint =>
+      assert(!inputsOf(endpoint).toLowerCase.contains("csrf"), endpoint.showShort)
+    }
+  }
+}
+
+object ClustersApiSuite {
+
+  /** A minimal valid write body. The paths are what this suite asserts, so the contents only have to be
+    * something the codec can encode.
+    */
+  val writeRequest: kui.cluster.contract.dto.ClusterWriteRequest =
+    kui.cluster.contract.dto.ClusterWriteRequest(
+      name = "local",
+      readOnly = false,
+      bootstrapServers = "broker-1:9092",
+      security = kui.cluster.contract.dto.ClusterSecurityWrite(
+        protocol = "PLAINTEXT",
+        mechanism = None,
+        username = None,
+        password = None,
+        truststore = None,
+        keystore = None,
+        verifyHostname = true
+      ),
+      properties = Map.empty,
+      admin = kui.cluster.contract.dto.AdminTuningWrite(60000L, 200, 4)
+    )
 }

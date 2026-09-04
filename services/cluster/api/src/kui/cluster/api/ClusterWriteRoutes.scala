@@ -6,26 +6,29 @@ import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.otel4s.metrics.Counter
 import sttp.tapir.server.ServerEndpoint
 
-import kui.cluster.application.ClusterWriteUseCase
+import kui.cluster.application.{ClusterProbeUseCase, ClusterWriteUseCase}
 import kui.cluster.contract.ClusterWriteEndpoints
+import kui.cluster.contract.dto.{ClusterWriteRequest, ConnectivityDto}
+import kui.cluster.domain.{Connectivity, ProfileVersion}
 import kui.http.principal.SecuredRoutes
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
+import kui.kernel.ClusterId
 import kui.security.{Principal, PrincipalCodec}
 
-/** `PUT /internal/v1/clusters/{clusterId}`, the one write M1 ships.
-  *
-  * It has no user interface: the cluster wizard is M8. It exists because the metadata store's guarantees
-  * cannot be demonstrated without a writer, and because building the surface once - now, against the store's
-  * own contract - is cheaper than building it twice.
+/** Registering, changing, removing and testing a cluster.
   *
   * ==Permission is checked here==
   *
-  * The gateway's permission seam guards proxied routes, and this route is deliberately not proxied, so the
-  * service checks for itself. With authentication disabled nothing grants the permission, which is what makes
-  * "reachable only by an internal caller and by tests" a property of the *permission* rather than of the
-  * network - the honest reading of the decision that put this endpoint here with no UI.
+  * These routes are now proxied by the gateway like any other, so the gateway's permission seam sees them
+  * too. The check below stays, and it is not redundant: a service trusts the signed principal and nothing
+  * else about who is calling it (ADR-020), and the day someone deploys the cluster service reachable on a
+  * network the gateway is not the only thing on, this is the check that still holds.
   *
-  * ==What comes back==
+  * With authentication disabled nothing grants `ApplicationConfig.Edit`, so an anonymous KUI cannot change
+  * its own cluster list. That is the intended behaviour and not an oversight: a deployment that has not been
+  * told who anybody is has no basis on which to let them rewrite its connections.
+  *
+  * ==What comes back from a write==
   *
   * The redacted profile, never an echo of the request. Echoing would put every secret the caller just sent
   * back on the wire and into any proxy log between the two, for no benefit: a caller that wants to confirm
@@ -33,13 +36,17 @@ import kui.security.{Principal, PrincipalCodec}
   */
 object ClusterWriteRoutes {
 
-  /** The permission a caller needs. Nothing grants it while `kui.auth.type` is `disabled`, which is the
-    * point: an anonymous principal cannot change a deployment's clusters.
+  /** The permission a caller needs for all three routes.
+    *
+    * The connection test needs it as much as the write does. It takes an address from a caller and opens a
+    * connection to it, so an unguarded one would let anybody use KUI as a scanner of whatever KUI's network
+    * can reach and read the answers off the three verdicts.
     */
   val RequiredPermission: String = "ApplicationConfig.Edit"
 
   def apply[F[_]: Async](
       write: ClusterWriteUseCase[F],
+      probe: ClusterProbeUseCase[F],
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       logger: StructuredLogger[F],
@@ -47,24 +54,25 @@ object ClusterWriteRoutes {
   ): List[ServerEndpoint[Any, F]] = {
     val secured = ClusterApi.Securing[F](principals, rejections, logger)
 
+    /** The permission gate, as one value, so that three routes cannot check it three slightly different ways
+      * — or, as has happened elsewhere in this project, so that the third route cannot forget.
+      */
+    def guarded[A](principal: Principal)(action: => F[Either[KuiError, A]]): F[Either[KuiError, A]] =
+      if permitted(principal) then action
+      else
+        Async[F].pure(
+          Left(ApplicationError.Forbidden(s"changing a cluster requires $RequiredPermission"): KuiError)
+        )
+
     List(
       // `withBody`, not `secured`: this endpoint carries a request body, and ADR-020 Amendment 1 binds
       // the token to it by hashing the bytes the gateway signed — reconstructed by re-encoding the
       // decoded request through this very contract's codec. Bound to the request line alone, every call
-      // to it would be refused as `request_mismatch`. It has no UI and is not proxied, so nothing had
-      // ever noticed.
-      secured.withBody(ClusterWriteEndpoints.put)((_, _, request) => SecuredRoutes.bodyBytes(request)) {
+      // to it would be refused as `request_mismatch`.
+      secured.withBody(ClusterWriteEndpoints.put)((_, _, _, request) => SecuredRoutes.bodyBytes(request)) {
         principal =>
-          { case (id, ifMatch, request) =>
-            if !permitted(principal) then
-              Async[F].pure(
-                Left(
-                  ApplicationError.Forbidden(
-                    s"changing a cluster requires $RequiredPermission"
-                  ): KuiError
-                )
-              )
-            else
+          { case (_, id, ifMatch, request) =>
+            guarded(principal) {
               ClusterWriteMapping.versionOf(ifMatch) match {
                 case Left(error) => Async[F].pure(Left(error))
                 case Right(expected) =>
@@ -77,19 +85,82 @@ object ClusterWriteRoutes {
                       } yield written.map(ClusterMapping.profile(_, now))
                   }
               }
+            }
+          }
+      },
+
+      // No body, so the ordinary binding: the request line is the whole digest.
+      secured(ClusterWriteEndpoints.delete) { principal =>
+        { case (_, id, ifMatch) =>
+          guarded(principal) {
+            ClusterWriteMapping.versionOf(ifMatch) match {
+              case Left(error) => Async[F].pure(Left(error))
+              // "Create" is not a version anything can be deleted at. Refusing it by name beats handing
+              // zero to the store, which would answer "no record at version 0" and read as a bug.
+              case Right(expected) if expected.isStatic =>
+                Async[F].pure(Left(NotAVersionToDeleteAt))
+              case Right(expected) => write.delete(id, expected)
+            }
+          }
+        }
+      },
+
+      secured.withBody(ClusterWriteEndpoints.probe)((_, request) => SecuredRoutes.bodyBytes(request)) {
+        principal =>
+          { case (_, request) =>
+            guarded(principal) {
+              profileToProbe(request) match {
+                case Left(error) => Async[F].pure(Left(error))
+                case Right(profile) => probe.probe(profile).map(_.map(connectivity))
+              }
+            }
           }
       }
     )
   }
 
+  /** The unsaved profile a connection test is run against.
+    *
+    * The id is derived from the name exactly as a save would derive it (ADR-031), and the whole write
+    * validation runs, so the button answers "that address is not a bootstrap list" before it answers
+    * "unreachable" — which is the difference between an operator fixing a typo and an operator debugging a
+    * network.
+    *
+    * The version is `Static` because nothing is being written and no version is being claimed.
+    */
+  def profileToProbe(request: ClusterWriteRequest): Either[KuiError, kui.cluster.domain.ClusterProfile] =
+    kui.config.ClusterConfig
+      .slug(request.name)
+      .leftMap(problem =>
+        ApplicationError.Invalid(
+          "the cluster is not valid",
+          List(kui.kernel.error.FieldError(Some("name"), List(problem)))
+        ): KuiError
+      )
+      .flatMap((id: ClusterId) => ClusterWriteMapping.profileOf(id, ProfileVersion.Static, request))
+
+  /** The domain verdict as the wire's three-value string plus its sentence. */
+  def connectivity(verdict: Connectivity): ConnectivityDto = verdict match {
+    case Connectivity.Reachable => ConnectivityDto(ConnectivityDto.Reachable, reachable = true, None)
+    case Connectivity.AuthenticationFailed(detail) =>
+      ConnectivityDto(ConnectivityDto.AuthenticationFailed, reachable = false, Some(detail))
+    case Connectivity.Unreachable(detail) =>
+      ConnectivityDto(ConnectivityDto.Unreachable, reachable = false, Some(detail))
+  }
+
   /** Whether this principal may change a cluster.
     *
     * Roles are compared by name because the role vocabulary itself is M6's: the check has to exist now so
-    * that M6 replaces one function rather than finding every route that forgot to ask, and it has to *fail*
-    * now so that an endpoint with no UI is not an endpoint anyone can call.
+    * that M6 replaces one function rather than finding every route that forgot to ask.
     */
   def defaultPermission(principal: Principal): Boolean =
     principal.roles.exists(_.value == RequiredPermission)
+
+  /** `If-Match: "0"` on a delete. */
+  val NotAVersionToDeleteAt: KuiError = ApplicationError.Invalid(
+    "If-Match: \"0\" means 'create'; a delete must name the version it is removing",
+    List(kui.kernel.error.FieldError(Some("If-Match"), List("the version currently stored, quoted")))
+  )
 
   /** The error a caller sees when this deployment has nowhere to write.
     *

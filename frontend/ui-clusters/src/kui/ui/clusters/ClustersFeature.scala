@@ -6,6 +6,7 @@ import org.scalajs.dom
 
 import kui.kernel.{BrokerId, ClusterId}
 import kui.ui.clusters.brokers.{BrokerDetailPage, BrokerTab, BrokersPage}
+import kui.ui.clusters.admin.ClusterAdminPage
 import kui.ui.clusters.dashboard.DashboardPage
 import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
@@ -66,6 +67,7 @@ final class ClustersFeature extends KuiFeature {
   /** Which screen a page belongs to, ignoring anything that only changes what is inside it. */
   private def screenOf(page: Page): Screen =
     page match {
+      case ClustersPageId.Manage => Screen.Manage
       case ClustersPageId.Brokers(clusterId) => Screen.Brokers(clusterId)
       case ClustersPageId.BrokerDetail(clusterId, brokerId, _) => Screen.Broker(clusterId, brokerId)
       case _ => Screen.Dashboard
@@ -74,10 +76,17 @@ final class ClustersFeature extends KuiFeature {
   private def build(screen: Screen): HtmlElement =
     screen match {
       case Screen.Dashboard => dashboard
+      case Screen.Manage => manage
       case Screen.Brokers(clusterId) => brokers(ClusterId.from(clusterId).toOption)
       case Screen.Broker(clusterId, brokerId) =>
         brokerDetail(ClusterId.from(clusterId).toOption, BrokerId.from(brokerId).toOption)
     }
+
+  /** The administration screen, built once so that a half-filled form survives a redraw of the list behind it
+    * — which a save is exactly what causes.
+    */
+  private lazy val manage: HtmlElement =
+    ClusterAdminPage(queries = queries, backHref = hrefOf(ClustersPageId.Overview))
 
   private lazy val dashboard: HtmlElement =
     DashboardPage(
@@ -185,6 +194,7 @@ final class ClustersFeature extends KuiFeature {
 /** Which screen is on show, with everything that only changes what is *inside* it stripped out. */
 private enum Screen {
   case Dashboard
+  case Manage
   case Brokers(clusterId: String)
   case Broker(clusterId: String, brokerId: Int)
 }

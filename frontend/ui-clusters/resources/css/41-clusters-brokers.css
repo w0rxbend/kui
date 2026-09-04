@@ -92,3 +92,74 @@
   letter-spacing: 0.15em;
   color: var(--kui-color-text-muted);
 }
+
+/* --- The KRaft metadata quorum ------------------------------------------------------------------ */
+
+.kui-clusters__quorum {
+  margin-top: var(--kui-space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-clusters__section-heading {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+}
+
+/* Leader, epoch, watermark and voter count on one strip that wraps, above the two tables they describe. */
+.kui-clusters__quorum-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-4);
+}
+
+.kui-clusters__quorum-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-clusters__quorum-item-label {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-clusters__quorum-item-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* The one sentence on this panel that is an alarm rather than a fact. Coloured, because a metadata
+ * quorum that cannot commit is the state an operator most needs to be interrupted about. */
+.kui-clusters__quorum-warning {
+  margin: 0;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-clusters__quorum-table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-clusters__quorum-table-heading {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* Tabular figures so a column of offsets lines up digit under digit, which is how a difference between
+ * two large numbers is spotted without reading either of them. */
+.kui-clusters__quorum-lag {
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-clusters__quorum-lag--behind {
+  color: var(--kui-color-danger);
+  font-weight: var(--kui-font-weight-bold);
+}

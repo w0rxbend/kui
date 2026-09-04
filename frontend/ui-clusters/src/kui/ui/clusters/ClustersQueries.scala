@@ -75,6 +75,41 @@ final class ClustersQueries(api: ApiClient) {
   def requestRefresh(cluster: ClusterId): EventStream[Either[ApiError, RefreshAcceptedDto]] =
     call(ClustersApi.refresh, cluster)
 
+  /** Register a cluster, or replace the one that is there.
+    *
+    * `expected` is the version the caller believes is stored; `ClusterProfileDto.etagOf` turns it into the
+    * `If-Match` value, and `ProfileVersion.Static` — zero — means "create". Every cached answer about the
+    * cluster is dropped on success, because its address, its credentials and its very existence may all have
+    * just changed.
+    *
+    * Nothing is dropped on a refusal. Refetching after a rejected write would redraw the whole screen to show
+    * the same thing, which reads as the write having half worked.
+    */
+  def putCluster(
+      cluster: ClusterId,
+      expected: Long,
+      request: ClusterWriteRequest
+  ): EventStream[Either[ApiError, ClusterProfileDto]] =
+    call(ClustersApi.put, (cluster, ClusterProfileDto.etagOf(expected), request)).map { outcome =>
+      if outcome.isRight then invalidateCluster(cluster)
+      outcome
+    }
+
+  /** Remove a cluster from the metadata store, at the version the caller believes is stored. */
+  def deleteCluster(cluster: ClusterId, expected: Long): EventStream[Either[ApiError, Unit]] =
+    call(ClustersApi.delete, (cluster, ClusterProfileDto.etagOf(expected))).map { outcome =>
+      if outcome.isRight then invalidateCluster(cluster)
+      outcome
+    }
+
+  /** Can KUI reach a cluster with these settings? Writes nothing, and so invalidates nothing.
+    *
+    * Not a cache, and it must never become one. The whole value of the answer is that it is about the network
+    * *now*; a cached "unreachable" would go on telling an operator their fix had not worked after it had.
+    */
+  def probeCluster(request: ClusterWriteRequest): EventStream[Either[ApiError, ConnectivityDto]] =
+    call(ClustersApi.probe, request)
+
   /** Drops every cached entry belonging to one cluster, so the next subscription refetches.
     *
     * Prefix invalidation rather than "invalidate everything": after refreshing cluster `A`, every cached

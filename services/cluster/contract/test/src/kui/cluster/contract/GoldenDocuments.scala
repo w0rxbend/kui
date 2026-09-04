@@ -43,7 +43,9 @@ object GoldenDocuments {
       |          "scrapedAt" : "2026-09-03T10:11:12.000Z"
       |        },
       |        "fetchedAt" : "2026-09-03T10:11:12.000Z"
-      |      }
+      |      },
+      |      "version" : null,
+      |      "origin" : "static"
       |    },
       |    {
       |      "id" : "dead-cluster",
@@ -61,7 +63,9 @@ object GoldenDocuments {
       |        "reason" : "UPSTREAM_UNAVAILABLE",
       |        "message" : "connection refused",
       |        "since" : "2026-09-03T10:10:00.000Z"
-      |      }
+      |      },
+      |      "version" : null,
+      |      "origin" : "static"
       |    }
       |  ],
       |  "generatedAt" : "2026-09-03T10:11:13.000Z"
@@ -89,7 +93,8 @@ object GoldenDocuments {
       |    ],
       |    "fetchedAt" : "2026-09-03T10:11:12.000Z",
       |    "reason" : "UPSTREAM_TIMEOUT"
-      |  }
+      |  },
+      |  "quorum" : null
       |}""".stripMargin
 
   val brokerConfigsResponse: String =

@@ -47,8 +47,25 @@ object ClusterMapping {
       bootstrapServers = profile.bootstrap.value,
       security = security(profile.security),
       summary =
-        SectionMapping.of(topology, freshness, at)(summary(_, freshness.scrapedAtOption.getOrElse(at)))
+        SectionMapping.of(topology, freshness, at)(summary(_, freshness.scrapedAtOption.getOrElse(at))),
+      // The store version, and only for a profile that actually has one. A statically configured cluster
+      // was never written, so there is no version for a write to replace — and sending zero would be
+      // asking the store to *create* a cluster that is already on the screen.
+      version = Option.when(profile.origin != ProfileOrigin.Static)(profile.version.value),
+      origin = originOf(profile.origin)
     )
+
+  /** The wire spelling of where a cluster's definition came from.
+    *
+    * The administration screen reads it to decide whether to offer an edit at all. Answering that question
+    * before the form is opened is the difference between "this one lives in your configuration file" and a
+    * 409 after the operator has typed everything in again.
+    */
+  def originOf(origin: ProfileOrigin): String = origin match {
+    case ProfileOrigin.Static => ClusterRowDto.OriginStatic
+    case ProfileOrigin.Stored => ClusterRowDto.OriginStored
+    case ProfileOrigin.StaticThenStored => ClusterRowDto.OriginStaticThenStored
+  }
 
   /** What one scrape found. The three partition counts have no source in M1 and are `None` by construction:
     * the domain models them as `Option` for exactly this reason (DEVPLAN D5).
@@ -92,6 +109,34 @@ object ClusterMapping {
     * skew computed one broker at a time divides by a different denominator than its neighbour and the two
     * numbers do not add up on the page they are shown on together.
     */
+  /** The metadata quorum, with every member's lag computed here rather than left to a client.
+    *
+    * The lag is a subtraction against the leader's high watermark, and the domain owns that arithmetic
+    * (`QuorumInfo.lagOf`) precisely so that two members' lags cannot be computed against two different
+    * watermarks. Sending the raw offsets and letting a browser subtract would hand that invariant to every
+    * client that ever reads this — and the first one to get it wrong would show a negative lag.
+    */
+  def quorum(info: QuorumInfo): QuorumDto = {
+    def member(state: ReplicaState, isVoter: Boolean): QuorumMemberDto =
+      QuorumMemberDto(
+        replicaId = state.replicaId,
+        logEndOffset = state.logEndOffset,
+        lag = info.lagOf(state),
+        isLeader = state.replicaId == info.leaderId,
+        isVoter = isVoter,
+        lastFetch = state.lastFetch,
+        lastCaughtUp = state.lastCaughtUp
+      )
+
+    QuorumDto(
+      leaderId = info.leaderId,
+      leaderEpoch = info.leaderEpoch,
+      highWatermark = info.highWatermark,
+      voters = info.voters.toList.sortBy(_.replicaId.value).map(member(_, isVoter = true)),
+      observers = info.observers.sortBy(_.replicaId.value).map(member(_, isVoter = false))
+    )
+  }
+
   def broker(row: BrokerListRow): BrokerDto =
     BrokerDto(
       id = row.broker.id,

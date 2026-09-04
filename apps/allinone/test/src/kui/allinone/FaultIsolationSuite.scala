@@ -90,6 +90,7 @@ final class FaultIsolationSuite extends KuiIOSuite {
         EmptyClusterUseCases.topology,
         EmptyClusterUseCases.brokers,
         EmptyClusterUseCases.writes,
+        EmptyClusterUseCases.probe,
         if healthy then workingCapabilities else brokenCapabilities,
         List(if healthy then ReadinessCheck.always[IO]("process") else brokenReadiness),
         principals,

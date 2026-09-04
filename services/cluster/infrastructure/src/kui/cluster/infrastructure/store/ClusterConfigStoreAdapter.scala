@@ -74,6 +74,19 @@ final class ClusterConfigStoreAdapter[F[_]: Async] private (
           .map(_.map(record => profile.at(ProfileVersion.unsafe(record.version), ProfileOrigin.Stored)))
     }
 
+  def delete(id: ClusterId, expected: ProfileVersion): F[Either[KuiError, Unit]] =
+    ClusterConfigStoreAdapter.keyFor(id) match {
+      case Left(error) => Async[F].pure(Left(error))
+      case Right(key) =>
+        // A create-versioned delete makes no sense — there is nothing to remove at version zero — so the
+        // static version is refused here rather than being handed to the store as a base version no record
+        // can have.
+        if expected.isStatic then Async[F].pure(Right(()))
+        else
+          store
+            .delete(key = key, baseVersion = expected.value, updatedBy = ClusterConfigStoreAdapter.WrittenBy)
+    }
+
   /** Registers a handler called with the whole resolved profile list on every store change.
     *
     * Whole lists rather than deltas, because a subscriber then never has to reconcile against a separate

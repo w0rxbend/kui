@@ -7,9 +7,9 @@ import org.scalacheck.Prop.forAll
 
 import kui.cluster.application.{BrokerListRow, SnapshotFreshness}
 import kui.cluster.contract.dto.ClusterProfileDto
-import kui.cluster.domain.{ControllerMode, LogDirError, PartitionSummary}
+import kui.cluster.domain.{ControllerMode, LogDirError, PartitionSummary, QuorumInfo, ReplicaState}
 import kui.contracts.cluster.ClusterSummaryDto
-import kui.kernel.Secret
+import kui.kernel.{BrokerId, Secret}
 import kui.kernel.cluster.*
 
 /** That the mapping tells the truth about a cluster, and never tells anyone a credential.
@@ -179,5 +179,36 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     forAll(Gen.choose(0, 100000), Gen.choose(0.0d, 100000.0d)) { (value, mean) =>
       ClusterMapping.skewPercent(value, mean).foreach(skew => assert(skew.isFinite, s"$value / $mean"))
     }
+  }
+
+  test("everyQuorumMembersLagIsComputedAgainstTheSameHighWatermark") {
+    // The reason the lag is computed here rather than left to a browser: it is a subtraction against the
+    // leader's high watermark, and a client doing it itself would be free to pair one snapshot's watermark
+    // with another snapshot's offsets. The first client to get that wrong shows a negative lag.
+    val info = QuorumInfo
+      .from(
+        leaderId = BrokerId.unsafe(1),
+        leaderEpoch = 7L,
+        highWatermark = 1000L,
+        voters = List(
+          ReplicaState(BrokerId.unsafe(1), 1000L, None, None),
+          ReplicaState(BrokerId.unsafe(2), 940L, Some(ClusterFixtures.At), Some(ClusterFixtures.At))
+        ),
+        observers = List(ReplicaState(BrokerId.unsafe(9), 1200L, Some(ClusterFixtures.At), None))
+      )
+      .fold(error => fail(error.message), identity)
+
+    val dto = ClusterMapping.quorum(info)
+
+    assertEquals(dto.leaderId.value, 1)
+    assertEquals(dto.highWatermark, 1000L)
+    assertEquals(dto.voters.map(m => (m.replicaId.value, m.lag)), List((1, 0L), (2, 60L)))
+    assertEquals(dto.voters.map(_.isLeader), List(true, false))
+    assert(dto.voters.forall(_.isVoter))
+
+    // An observer reporting an offset above the leader's high watermark is a racing read, not a member
+    // that is ahead of the truth. The domain clamps it at zero and the wire carries that.
+    assertEquals(dto.observers.map(m => (m.replicaId.value, m.lag)), List((9, 0L)))
+    assert(dto.observers.forall(!_.isVoter))
   }
 }

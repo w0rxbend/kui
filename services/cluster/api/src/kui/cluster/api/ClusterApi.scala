@@ -17,6 +17,7 @@ import sttp.tapir.server.interceptor.Interceptor
 import kui.cluster.application.{
   BrokerDetailUseCase,
   CapabilityReportUseCase,
+  ClusterProbeUseCase,
   ClusterRegistry,
   ClusterService,
   ClusterTopologyUseCase,
@@ -67,8 +68,11 @@ object ClusterApi {
     *   the broker detail use cases. The list comes from the snapshot; configuration and log directories are
     *   read live, because a disk that failed three seconds ago is why the page was opened.
     * @param write
-    *   the one write M1 ships: registering or replacing a cluster. It has no user interface and is not
-    *   proxied by the gateway; the permission it requires is what keeps it out of a browser's reach.
+    *   registering, replacing and removing a cluster. Proxied by the gateway and reached from the cluster
+    *   administration screen; `ApplicationConfig.Edit` is what a caller needs.
+    * @param probe
+    *   the connection test the administration form runs before it saves. It is behind the same permission as
+    *   the write, because an unguarded one would let any caller use KUI to open connections on its network.
     * @param capabilities
     *   what this service can currently do, recomputed per request rather than cached — the gateway polls it
     *   precisely to learn when the answer changes.
@@ -85,6 +89,7 @@ object ClusterApi {
       topology: ClusterTopologyUseCase[F],
       brokers: BrokerDetailUseCase[F],
       write: ClusterWriteUseCase[F],
+      probe: ClusterProbeUseCase[F],
       capabilities: CapabilityReportUseCase[F],
       readiness: List[ReadinessCheck[F]],
       principals: PrincipalCodec[F],
@@ -98,7 +103,7 @@ object ClusterApi {
     // fit into a list typed on `Fs2Streams` that the streaming endpoints need.
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
       ClusterRoutes[F](registry, topology, brokers, principals, rejections, logger) ++
-      ClusterWriteRoutes[F](write, principals, rejections, logger) ++
+      ClusterWriteRoutes[F](write, probe, principals, rejections, logger) ++
       ProfileRoutes[F](registry, principals, rejections, telemetry, logger)
 
   /** The cross-cutting chain, outermost first, exactly as `libs/http`'s server wants it.

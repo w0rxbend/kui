@@ -190,3 +190,45 @@ object ClusterWriteRequest {
   given CanEqual[ClusterWriteRequest, ClusterWriteRequest] = CanEqual.derived
 
 }
+
+/** The verdict of a connection attempt against a cluster the operator has typed but not yet saved.
+  *
+  * Three fields rather than one boolean, because "we could not reach it" and "we reached it and it refused
+  * our credentials" send an operator to two different places — the network and the credentials form — and a
+  * single `reachable: false` sends them to the wrong one half the time.
+  *
+  * @param status
+  *   `reachable`, `authentication-failed` or `unreachable`. A string rather than an enum so that a browser
+  *   built against an older KUI degrades on a fourth value instead of failing to decode
+  * @param detail
+  *   one sentence, safe to display. It never contains a host, a URL with credentials or a JAAS string: the
+  *   probe adapter fixes the sentences and its suite asserts that
+  */
+final case class ConnectivityDto(status: String, reachable: Boolean, detail: Option[String])
+
+object ConnectivityDto {
+
+  val Reachable: String = "reachable"
+  val AuthenticationFailed: String = "authentication-failed"
+  val Unreachable: String = "unreachable"
+
+  given Codec[ConnectivityDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        status <- cursor.get[String]("status")
+        reachable <- cursor.get[Boolean]("reachable")
+        detail <- cursor.get[Option[String]]("detail")
+      } yield ConnectivityDto(status, reachable, detail),
+    (dto: ConnectivityDto) =>
+      Json.obj(
+        "status" -> dto.status.asJson,
+        "reachable" -> dto.reachable.asJson,
+        "detail" -> dto.detail.asJson
+      )
+  )
+
+  given Schema[ConnectivityDto] =
+    Schema.derived[ConnectivityDto].description("Whether KUI can currently talk to a cluster, and if not why")
+
+  given CanEqual[ConnectivityDto, ConnectivityDto] = CanEqual.derived
+}

@@ -25,6 +25,14 @@ object ClustersPageId {
     */
   case object Overview extends ClustersPageId
 
+  /** The administration screen: add, edit and remove the clusters this KUI knows about.
+    *
+    * A page of its own rather than a mode of the dashboard, and it has a URL, because it is the page an
+    * operator is sent a link to — "add the staging cluster, here is where" — and because a form the browser's
+    * Back button cannot leave is a form people close by reloading.
+    */
+  case object Manage extends ClustersPageId
+
   /** One cluster's brokers.
     *
     * The id is a `String` and not a `ClusterId` because a page is data that has to survive a round trip
@@ -66,6 +74,10 @@ object ClustersRoutes extends FeatureRoutes {
     */
   private val OverviewTag = "clusters.overview"
 
+  private val ManageTag = "clusters.manage"
+
+  private val ManageSegment = "manage"
+
   private val BrokersTag = "clusters.brokers"
 
   private val BrokersSegment = "brokers"
@@ -96,6 +108,14 @@ object ClustersRoutes extends FeatureRoutes {
       // `endOfSegments` is deliberate: without it the pattern matches a prefix, so `/ui/clusters` would
       // also claim `/ui/clusters/anything` and a mistyped sub-path would never produce a 404.
       Route.static(ClustersPageId.Overview, root / ClustersSegment / endOfSegments, uiPrefix),
+      // Before the `{clusterId}/brokers` pattern, and it does not collide with it: that one has three
+      // segments and this has two. `manage` is not a legal cluster id anyway — a slug is matched by the
+      // codec, not by this pattern — but ordering it first costs nothing and removes the question.
+      Route.static(
+        ClustersPageId.Manage,
+        root / ClustersSegment / ManageSegment / endOfSegments,
+        uiPrefix
+      ),
       Route[ClustersPageId.Brokers, String](
         encode = _.clusterId,
         decode = ClustersPageId.Brokers(_),
@@ -154,6 +174,7 @@ object ClustersRoutes extends FeatureRoutes {
   def encodePage(page: Page): Option[Json] =
     page match {
       case ClustersPageId.Overview => Some(Json.obj("page" -> Json.fromString(OverviewTag)))
+      case ClustersPageId.Manage => Some(Json.obj("page" -> Json.fromString(ManageTag)))
       case ClustersPageId.Brokers(clusterId) =>
         Some(Json.obj("page" -> Json.fromString(BrokersTag), "clusterId" -> Json.fromString(clusterId)))
       case ClustersPageId.BrokerDetail(clusterId, brokerId, tab) =>
@@ -170,6 +191,7 @@ object ClustersRoutes extends FeatureRoutes {
 
   def decodePage(tag: String, cursor: HCursor): Option[Page] =
     if tag == OverviewTag then Some(ClustersPageId.Overview)
+    else if tag == ManageTag then Some(ClustersPageId.Manage)
     else if tag == BrokersTag then cursor.get[String]("clusterId").toOption.map(ClustersPageId.Brokers(_))
     else if tag == BrokerTag then
       // Both fields, or nothing: a stored state that names a cluster but no broker cannot be turned into a

@@ -74,7 +74,9 @@ object GoldenDocuments {
       |              "scrapedAt" : "2026-09-03T10:11:12.000Z"
       |            },
       |            "fetchedAt" : "2026-09-03T10:11:12.000Z"
-      |          }
+      |          },
+      |          "version" : null,
+      |          "origin" : "static"
       |        },
       |        "capability" : {
       |          "status" : "available"
@@ -135,7 +137,9 @@ object GoldenDocuments {
       |            "reason" : "UPSTREAM_UNAVAILABLE",
       |            "message" : "connection refused",
       |            "since" : "2026-09-03T10:11:12.000Z"
-      |          }
+      |          },
+      |          "version" : null,
+      |          "origin" : "static"
       |        },
       |        "capability" : {
       |          "status" : "degraded",

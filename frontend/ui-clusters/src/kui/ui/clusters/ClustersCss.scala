@@ -37,4 +37,41 @@ object ClustersCss {
   val ConfigName = "kui-clusters__config-name"
   val ConfigValue = "kui-clusters__config-value"
   val ConfigRedacted = "kui-clusters__config-redacted"
+
+  // --- The administration screen ---------------------------------------------------------------
+
+  val Note = "kui-clusters__note"
+  val Notice = "kui-clusters__notice"
+
+  val AdminControls = "kui-clusters__admin-controls"
+  val AdminList = "kui-clusters__admin-list"
+  val AdminRow = "kui-clusters__admin-row"
+  val AdminRowIdentity = "kui-clusters__admin-row-identity"
+  val AdminRowName = "kui-clusters__admin-row-name"
+  val AdminRowAddress = "kui-clusters__admin-row-address"
+  val AdminRowOrigin = "kui-clusters__admin-row-origin"
+  val AdminRowActions = "kui-clusters__admin-row-actions"
+
+  val AdminForm = "kui-clusters__admin-form"
+  val AdminFormGroup = "kui-clusters__admin-form-group"
+  val AdminFormActions = "kui-clusters__admin-form-actions"
+  val AdminToggle = "kui-clusters__admin-toggle"
+
+  val VerdictGood = "kui-clusters__verdict kui-clusters__verdict--good"
+  val VerdictBad = "kui-clusters__verdict kui-clusters__verdict--bad"
+
+  // --- The KRaft metadata quorum -----------------------------------------------------------------
+
+  val SectionHeading = "kui-clusters__section-heading"
+
+  val Quorum = "kui-clusters__quorum"
+  val QuorumSummary = "kui-clusters__quorum-summary"
+  val QuorumItem = "kui-clusters__quorum-item"
+  val QuorumItemLabel = "kui-clusters__quorum-item-label"
+  val QuorumItemValue = "kui-clusters__quorum-item-value"
+  val QuorumWarning = "kui-clusters__quorum-warning"
+  val QuorumTable = "kui-clusters__quorum-table"
+  val QuorumTableHeading = "kui-clusters__quorum-table-heading"
+  val QuorumCaughtUp = "kui-clusters__quorum-lag"
+  val QuorumBehind = "kui-clusters__quorum-lag kui-clusters__quorum-lag--behind"
 }
