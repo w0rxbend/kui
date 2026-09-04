@@ -2315,6 +2315,215 @@ object services extends Module {
 
   }
 
+  /** `kui-identity-service`: who somebody is, and what their roles let them do (ADR-015, ADR-021).
+    *
+    * The one service in KUI with no Kafka client anywhere in its tree, and the layering shows it:
+    * there is a `domain` of passwords and accounts, an `application` of sign-in flows, an
+    * `infrastructure` of a key derivation function and an OpenID Connect relying party, and nothing
+    * that has ever heard of a topic. Its capability document reports no clusters, because it has
+    * none.
+    *
+    * It is also the only service whose contract the gateway does **not** proxy. A login is the
+    * moment a browser is given a session, and sessions live at the gateway (ADR-019), so the
+    * gateway's own `auth` routes under `/api/v1` call these endpoints one hop inward rather than
+    * forwarding them outward. `ServiceContracts` says so at the one place it would otherwise be
+    * registered.
+    */
+  object identity extends Module {
+
+    /** Passwords, accounts and the shape of a sign-in. Rule A1 allows it `libs/kernel` and
+      * cats-core and nothing else; `KuiPureModule` additionally forbids `var` here.
+      *
+      * The encoded password hash is parsed here and derived somewhere else on purpose: a `domain`
+      * module that could reach for `javax.crypto` is one that eventually does.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The sign-in flows: the form login, the forced password change, the OpenID Connect pair, and
+      * the permission answer.
+      *
+      * `libs.securityCore` is the role model and the audit port — `Rbac.resolveRoles` runs here,
+      * once per login, which is what lets every service downstream decide from the signed principal
+      * without ever asking an identity provider anything.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain, libs.kernel.jvm, libs.securityCore.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The adapters: PBKDF2 from the JDK, the configured account list with the metadata store laid
+      * over it, and the OpenID Connect relying party.
+      *
+      * `libs.config` is here for `kui.auth.users[]` and for the store the changed passwords go into;
+      * nimbus is here to verify an ID token's signature, and it is the same library — at the same
+      * version — that `libs/security-core` already uses to sign the internal principal header.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps =
+        Seq(domain, application, libs.config, libs.kernel.jvm, libs.securityCore.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.nimbusds:nimbus-jose-jwt:${Versions.nimbus}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}"
+        )
+      }
+    }
+
+    /** Server logic: contract to use case, `KuiError` to the HTTP envelope, principal verification
+      * and the OpenAPI document. It starts nothing.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.identity.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.identity.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}"
+        )
+      }
+    }
+
+    /** The composition root and the process, plus the `HashPassword` tool an operator runs to fill
+      * in `kui.auth.users[].passwordHash`.
+      */
+    object app extends KuiJvmModule {
+      def moduleDeps =
+        Seq(api, infrastructure, libs.config, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        // The OpenID Connect provider is reached over HTTP, so this process opens a backend of its
+        // own — and only in a deployment that configured a provider at all.
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The published wire shape of `kui-identity-service`.
+      *
+      * Cross-compiled like every other contract, because the browser reads the login response and
+      * the permission list, and one source is what keeps the two halves from drifting.
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+      object js extends Shared with KuiJsModule {
+        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
+        def mvnDeps =
+          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+      }
+    }
+  }
+
   /** `kui-consumer-service`: who consumes what, how far behind they are, and the offset reset.
     *
     * Only `contract` exists here so far. The layers that hold behaviour arrive with the tasks that
