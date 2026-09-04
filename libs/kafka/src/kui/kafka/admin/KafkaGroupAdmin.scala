@@ -7,7 +7,12 @@ import scala.jdk.OptionConverters.*
 import cats.effect.Async
 import cats.effect.syntax.all.*
 import cats.syntax.all.*
-import org.apache.kafka.clients.admin.{DescribeConsumerGroupsOptions, ListGroupsOptions}
+import org.apache.kafka.clients.admin.{
+  DescribeConsumerGroupsOptions,
+  ListConsumerGroupOffsetsOptions,
+  ListConsumerGroupOffsetsSpec,
+  ListGroupsOptions
+}
 import org.apache.kafka.common.GroupState as KafkaGroupState
 import org.apache.kafka.common.errors.{
   GroupIdNotFoundException,
@@ -230,12 +235,77 @@ object KafkaGroupAdmin {
 
     private def bounded(parallelism: Int): Int = math.max(1, parallelism)
 
+    // ---------------------------------------------------------------- committedOffsets
+
     def committedOffsets(
-        @unused conn: ClusterConnection,
-        @unused groups: List[GroupId],
-        @unused partitions: Option[Set[TopicPartition]],
-        @unused requireStable: Boolean
-    ): F[Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]] = notYet("committedOffsets")
+        conn: ClusterConnection,
+        groups: List[GroupId],
+        partitions: Option[Set[TopicPartition]],
+        requireStable: Boolean
+    ): F[Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]] =
+      if groups.isEmpty then Async[F].pure(Right(BatchResult.empty[GroupId, List[CommittedOffset]]))
+      else
+        groups.distinct
+          .grouped(conn.admin.groupChunkSize)
+          .toList
+          .parTraverseN(bounded(conn.admin.parallelism))(chunk =>
+            offsetsChunk(conn, chunk, partitions, requireStable)
+          )
+          .map(
+            _.foldLeft(BatchResult.empty[GroupId, List[CommittedOffset]])((acc, part) => acc.combine(part))
+          )
+          .attempt
+          .map {
+            case Right(result) => Right(result)
+            case Left(failure) =>
+              Left(KafkaErrorMapper.map(GroupAdmin.Operation.Offsets, failure, apiTimeout(conn)))
+          }
+
+    /** One multi-group `listConsumerGroupOffsets` (KIP-709, Kafka 3.3), downgraded to one call per group when
+      * the broker will not take the multi-group form.
+      *
+      * `requireStable` is dropped on a broker that refuses it rather than failing the call: an operator
+      * looking at a group's offsets is better served by offsets that may include an in-flight transaction
+      * than by an error, and the downgrade is logged.
+      */
+    private def offsetsChunk(
+        conn: ClusterConnection,
+        chunk: List[GroupId],
+        partitions: Option[Set[TopicPartition]],
+        requireStable: Boolean
+    ): F[BatchResult[GroupId, List[CommittedOffset]]] =
+      pool
+        .run(conn, GroupAdmin.Operation.Offsets) { admin =>
+          val spec = new ListConsumerGroupOffsetsSpec()
+          partitions.foreach(wanted => spec.topicPartitions(wanted.toList.map(kafkaPartition).asJava): Unit)
+
+          val request = chunk.map(id => id.value -> spec).toMap.asJava
+          val options = new ListConsumerGroupOffsetsOptions().requireStable(requireStable)
+
+          Async[F]
+            .delay(admin.listConsumerGroupOffsets(request, options))
+            .flatMap { result =>
+              val perGroup = chunk.map { id =>
+                id -> KafkaFutures
+                  .fromFuture(Async[F].delay(result.partitionsToOffsetAndMetadata(id.value)))
+                  .map(AdminConversions.committedOffsets)
+              }.toMap
+
+              AdminBatch.perKey(perGroup, bounded(conn.admin.parallelism), GroupAdmin.Operation.Offsets)
+            }
+        }
+        .recoverWith {
+          case failure if requireStable && isFilterUnsupported(failure) =>
+            logged(
+              _.debug(
+                s"cluster ${conn.id.value} does not support requireStable committed offsets; " +
+                  "asking without it"
+              )
+            ) >> offsetsChunk(conn, chunk, partitions, requireStable = false)
+        }
+
+    private def kafkaPartition(partition: TopicPartition): org.apache.kafka.common.TopicPartition =
+      new org.apache.kafka.common.TopicPartition(partition.topic.value, partition.partition.value)
 
     def alterOffsets(
         @unused conn: ClusterConnection,

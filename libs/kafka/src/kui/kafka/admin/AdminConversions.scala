@@ -4,12 +4,13 @@ import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
 import org.apache.kafka.clients.admin as jadmin
+import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.acl.AclOperation
 import org.apache.kafka.common.{GroupState as KafkaGroupState, GroupType, Node, TopicPartition}
 
 import kui.kafka.{KafkaErrorMapper, SkipReason}
 import kui.kernel.group.{GroupProtocol, GroupState}
-import kui.kernel.{BrokerId, GroupId, KafkaClusterId, PartitionId, TopicName}
+import kui.kernel.{BrokerId, GroupId, KafkaClusterId, Offset, PartitionId, TopicName}
 
 /** Kafka's objects, turned into KUI's.
   *
@@ -286,4 +287,31 @@ object AdminConversions {
     case AclOperation.ALL => GroupOperation.All
     case _ => GroupOperation.Unknown
   }
+
+  /** The committed offsets of one group, with the partitions it has never committed on left out.
+    *
+    * Kafka reports "never committed" as a `null` `OffsetAndMetadata`, and the reference product's `orElse(0)`
+    * on that value is exactly how "we do not know" becomes "you are perfectly caught up" on a capacity
+    * dashboard. Here the partition is simply absent, and that absence travels to `LagAnomaly.NoCommit` rather
+    * than to a zero.
+    *
+    * `committedAt` is always `None`: the AdminClient's `OffsetAndMetadata` carries an offset, a leader epoch
+    * and free-text metadata, and no commit timestamp. The field stays on the type because M5 reads
+    * `__consumer_offsets` directly, where the timestamp does exist.
+    */
+  private[kafka] def committedOffsets(
+      raw: java.util.Map[TopicPartition, OffsetAndMetadata]
+  ): List[CommittedOffset] =
+    raw.asScala.toList
+      .flatMap { (tp, committed) =>
+        Option(committed).map { value =>
+          CommittedOffset(
+            partition = partition(tp),
+            offset = Offset.unsafe(value.offset),
+            metadata = Option(value.metadata).filter(_.nonEmpty),
+            committedAt = None
+          )
+        }
+      }
+      .sortBy(_.partition)
 }
