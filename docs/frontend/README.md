@@ -906,4 +906,6 @@ module and a JVM test module in one Mill invocation currently fail together (blo
   between what a design import may replace and what it may not.
 - [`components.md`](components.md) — the primitive catalogue, with each component's API and its
   accessibility contract.
-- [`features.md`](features.md) — how to add a microfrontend.
+- [`features.md`](features.md) — how to add a microfrontend: the seven registration steps, the split
+  border and how it is destroyed, feature state, row models as pure functions, the four failure
+  renderings, cross-feature panels, and the five rules each learned the expensive way.
