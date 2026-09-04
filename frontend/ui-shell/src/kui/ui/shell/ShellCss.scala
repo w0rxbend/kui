@@ -30,6 +30,7 @@ object ShellCss {
   val ClusterSwitcher = "kui-shell__cluster-switcher"
   val ClusterSwitcherTrigger = "kui-shell__cluster-switcher-trigger"
   val ClusterSwitcherCaret = "kui-shell__cluster-switcher-caret"
+  val ClusterSwitcherCaretOpen = "kui-shell__cluster-switcher-caret--open"
   val ClusterSwitcherList = "kui-shell__cluster-switcher-list"
   val ClusterSwitcherOption = "kui-shell__cluster-switcher-option"
   val ClusterSwitcherOptionCurrent = "kui-shell__cluster-switcher-option--current"

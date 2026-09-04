@@ -204,8 +204,19 @@
   background-color: var(--kui-color-state-layer);
 }
 
+/* The disclosure affordance. A chevron and not a dot: the design's marker vocabulary keeps a bare
+ * dot for things that are not pressable, and this is the control that scopes every destination
+ * under it. It turns over when the list is open, so the shape says which way the control will go
+ * next as well as that it goes somewhere. */
 .kui-shell__cluster-switcher-caret {
+  display: flex;
+  flex: 0 0 auto;
   color: var(--kui-color-text-muted);
+  transition: transform var(--kui-duration-fast) ease;
+}
+
+.kui-shell__cluster-switcher-caret--open {
+  transform: rotate(180deg);
 }
 
 .kui-shell__cluster-switcher-list {
@@ -218,7 +229,9 @@
   padding: var(--kui-space-1);
   border: 1px solid var(--kui-color-border);
   border-radius: var(--kui-radius-lg);
-  background-color: var(--kui-color-surface-elevated);
+  /* The highest surface, which is where the design puts a popover: this list opens over the drawer
+   * and has to read as floating above it rather than as another panel of it. */
+  background-color: var(--kui-color-surface-overlay);
   box-shadow: var(--kui-shadow-md);
   list-style: none;
   overflow-y: auto;

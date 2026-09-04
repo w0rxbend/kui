@@ -91,7 +91,15 @@ object ClusterSwitcher {
           case Some(entry) => row(entry, showColourPicker = false)
           case None => L.span(cls := ShellCss.ClusterSwitcherEmpty, Messages.NoClusters)
         },
-        L.span(cls := ShellCss.ClusterSwitcherCaret, aria.hidden := true, Icon.dot),
+        // A chevron, not a dot. The trigger already announces itself correctly to a screen reader
+        // (`aria-haspopup="listbox"`, `aria-expanded`); a 4px filled circle told a sighted user
+        // nothing at all, so the primary cluster-scoping control did not look like a menu.
+        L.span(
+          cls := ShellCss.ClusterSwitcherCaret,
+          cls(ShellCss.ClusterSwitcherCaretOpen) <-- expanded.signal,
+          aria.hidden := true,
+          Icon.chevronDown
+        ),
         onClick.mapTo(()) --> Observer[Unit](_ => expanded.update(!_)),
         onKeyDown --> Observer[dom.KeyboardEvent] { event =>
           // Down from the trigger opens the list, which is what the combobox pattern promises and what a
