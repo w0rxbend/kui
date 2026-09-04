@@ -6,7 +6,15 @@ import com.raquo.waypoint.*
 import io.circe.{HCursor, Json}
 
 import kui.ui.kernel.component.Icon
-import kui.ui.kernel.feature.{FeatureId, FeatureRoutes, NavEntry, Page}
+import kui.ui.kernel.feature.{
+  FeatureId,
+  FeatureRegistry,
+  FeatureRoutes,
+  FeatureSlots,
+  GuestTabs,
+  NavEntry,
+  Page
+}
 
 /** Which tab of a topic's detail page is open.
   *
@@ -15,29 +23,51 @@ import kui.ui.kernel.feature.{FeatureId, FeatureRoutes, NavEntry, Page}
   * they were sent. It also means the Settings tab's data is a separate query that is not fetched at all until
   * somebody opens the tab.
   *
-  * Only two, and no third that says "coming in M5". A tab that promises a milestone is a promise with a date
-  * on it (DEVPLAN §10 D13).
+  * ## Why this is an open string and not an enum of two cases
+  *
+  * It was an enum, and that made a third of the strip unaddressable. The topic page's tabs are not all its
+  * own: another feature contributes one through `FeatureSlots.TopicTabs`, and the consumers feature
+  * contributes "Consumers". A closed enum of the page's own tabs cannot name that one, so clicking it left
+  * the address bar saying Overview, refreshing lost the tab, a copied link sent the recipient to the wrong
+  * screen, and typing the obvious `…/orders.v1/consumers` produced "That page does not exist" while
+  * `…/orders.v1/settings` worked.
+  *
+  * The id is the tab's id in the strip as well as its URL segment, so the two vocabularies cannot drift: the
+  * page's own tabs are `overview` and `settings`, and a guest's tab is its feature's id.
   */
-enum TopicTab(val segment: Option[String]) {
+final case class TopicTab(id: String) {
 
-  /** The default, and the one with no segment of its own, so a topic's canonical URL is its short form and a
-    * link to a topic needs to know nothing about tabs.
+  /** The URL segment, or `None` for the default tab — so a topic's canonical URL is its short form and a link
+    * to a topic needs to know nothing about tabs.
     */
-  case Overview extends TopicTab(None)
-  case Settings extends TopicTab(Some("settings"))
+  def segment: Option[String] = Option.unless(id == TopicTab.OverviewId)(id)
 }
 
 object TopicTab {
 
+  val OverviewId: String = "overview"
+  val SettingsId: String = "settings"
+
+  val Overview: TopicTab = TopicTab(OverviewId)
+  val Settings: TopicTab = TopicTab(SettingsId)
+
   val Default: TopicTab = Overview
+
+  /** The tabs the topic page renders itself. Guests' tabs are not here and are not knowable from here: they
+    * come from the feature registry at navigation time.
+    */
+  val own: List[TopicTab] = List(Overview, Settings)
 
   /** Reads a tab back from a URL segment.
     *
-    * Anything unrecognised is the default rather than a failure: a bookmark can outlive a tab, and landing on
-    * the overview of the right topic is a far better answer than "not found".
+    * Anything is accepted, including a segment naming a feature this build does not have: a bookmark can
+    * outlive a tab, and `Tabs` falls back to its first tab when the selected id matches none of them, so an
+    * unknown id lands on the overview of the right topic. Deciding which segments are *routable* is a
+    * different question and is answered in `TopicsRoutes.routes`, where refusing an unknown one is what
+    * leaves `/topics/t/messages` for the message browser.
     */
   def fromSegment(raw: Option[String]): TopicTab =
-    raw.flatMap(value => values.find(_.segment.contains(value))).getOrElse(Default)
+    raw.filter(_.nonEmpty).map(TopicTab(_)).getOrElse(Default)
 
   given CanEqual[TopicTab, TopicTab] = CanEqual.derived
 }
@@ -140,7 +170,7 @@ object TopicsRoutes extends FeatureRoutes {
           (page.clusterId, page.topic, page.tab.segment.getOrElse(""))
         ),
         decode = {
-          case (clusterId, topic, tab) if TopicTab.values.exists(_.segment.contains(tab)) =>
+          case (clusterId, topic, tab) if routableTabs.contains(tab) =>
             TopicsPageId.Detail(clusterId, topic, TopicTab.fromSegment(Some(tab)))
         },
         pattern = root / ClustersSegment / segment[String] / TopicsSegment / segment[String] /
@@ -148,6 +178,17 @@ object TopicsRoutes extends FeatureRoutes {
         basePath = uiPrefix
       )
     )
+
+  /** Every tab segment this page will answer to: its own, plus one per feature that has registered a tab
+    * against `FeatureSlots.TopicTabs`.
+    *
+    * A `def`, deliberately. `routes` is built while the shell is wiring itself up, and the feature registry
+    * is filled in that same pass; reading it eagerly here would depend on which of the two ran first. This is
+    * read when a URL is matched, which is always afterwards.
+    */
+  private def routableTabs: scala.collection.immutable.List[String] =
+    TopicTab.own.flatMap(_.segment) ++
+      GuestTabs.idsOf(FeatureRegistry.staticRoutes, id, FeatureSlots.TopicTabs)
 
   /** A `matchEncode` for one of the two detail patterns.
     *
@@ -192,9 +233,17 @@ object TopicsRoutes extends FeatureRoutes {
       for {
         clusterId <- cursor.get[String]("clusterId").toOption
         topic <- cursor.get[String]("topic").toOption
-        // The tab is read leniently, so a state written before a tab existed still decodes and Back across a
-        // deployment upgrade lands on the overview rather than on "not found".
-        tab = TopicTab.fromSegment(cursor.get[Option[String]]("tab").toOption.flatten)
+        // A tab this build cannot route is dropped rather than carried, so a state written before a tab
+        // existed - or by a deployment that had a feature this one does not - still decodes, and Back across
+        // an upgrade lands on the overview of the right topic rather than on "not found". Carrying it would
+        // be worse than dropping it: `encodePage` would then write a URL back out that nothing decodes.
+        tab = cursor
+          .get[Option[String]]("tab")
+          .toOption
+          .flatten
+          .filter(routableTabs.contains)
+          .map(TopicTab(_))
+          .getOrElse(TopicTab.Default)
       } yield TopicsPageId.Detail(clusterId, topic, tab)
     else None
 }

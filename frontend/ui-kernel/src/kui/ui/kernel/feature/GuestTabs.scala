@@ -80,6 +80,20 @@ object GuestTabs {
       }
     )
 
+  /** The ids of the tabs registered against one slot, without building any of them.
+    *
+    * A host page needs these separately from the tabs themselves, because its *router* has to recognise a
+    * guest's tab in a URL and the router runs in `main.js`, before any guest module exists. The ids are the
+    * contributing features' own ids, which is the same value [[of]] gives each `Tab`, so a URL segment and a
+    * tab id cannot drift apart.
+    */
+  def idsOf(statics: List[FeatureRoutes], host: FeatureId, slot: String): List[String] =
+    statics.flatMap(registration =>
+      registration.guestTabs.collect {
+        case guest if guest.host == host && guest.slot == slot => registration.id.value
+      }
+    )
+
   /** A host's own tabs followed by its guests'. The one call a host page makes. */
   def merged(
       own: Signal[List[Tab]],

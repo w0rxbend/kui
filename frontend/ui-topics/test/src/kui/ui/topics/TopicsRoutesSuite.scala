@@ -5,7 +5,10 @@ import munit.ScalaCheckSuite
 import org.scalacheck.Prop.forAll
 import org.scalacheck.{Arbitrary, Gen}
 
-import kui.ui.kernel.feature.{FeatureId, Page}
+import com.raquo.waypoint.Route
+
+import kui.ui.kernel.component.Icon
+import kui.ui.kernel.feature.{FeatureId, FeatureRegistry, FeatureRoutes, FeatureSlots, GuestTab, NavEntry, Page}
 
 /** The static half of the registration, which is the half that misbehaves before anything is downloaded.
   *
@@ -22,7 +25,7 @@ final class TopicsRoutesSuite extends ScalaCheckSuite {
 
   private val clusterIds: Gen[String] = Gen.oneOf("prod-eu", "local", "quickstart", "a")
   private val topicNames: Gen[String] = Gen.oneOf("orders", "payments.dlq", "a_b-c", "__consumer_offsets")
-  private val tabs: Gen[TopicTab] = Gen.oneOf(TopicTab.values.toList)
+  private val tabs: Gen[TopicTab] = Gen.oneOf(TopicTab.own)
 
   private given Arbitrary[TopicsPageId] = Arbitrary(
     Gen.oneOf(
@@ -91,6 +94,47 @@ final class TopicsRoutesSuite extends ScalaCheckSuite {
     )
   }
 
+  test("aTabAnotherFeatureContributedIsAddressable") {
+    // The defect: the topic page's tab strip is not all its own. The consumers feature contributes a
+    // "Consumers" tab through `FeatureSlots.TopicTabs`, and the tab was rendered, opened and drawn correctly
+    // - while the address bar went on saying the page was on Overview. Refreshing lost the tab, a copied link
+    // sent the recipient to the wrong screen, and typing `…/orders/consumers` produced "That page does not
+    // exist" beside a `…/orders/settings` that worked.
+    //
+    // The registry is installed here because that is exactly what the router reads: which segments are
+    // routable is a function of which features this build shipped, not of a list written in this file.
+    FeatureRegistry.install(Map.empty, List(TopicsRoutes, GuestFeatureRoutes))
+    try {
+      val consumers = TopicsPageId.Detail("prod-eu", "orders", TopicTab("consumers"))
+
+      assertEquals(urlFor(consumers), Some(s"$prefix/clusters/prod-eu/topics/orders/consumers"))
+      assertEquals(pageAt(s"$prefix/clusters/prod-eu/topics/orders/consumers"), Some(consumers))
+      // And the segment that is another feature's *page* rather than a tab on this one is still refused, so
+      // the message browser keeps its URL.
+      assertEquals(pageAt(s"$prefix/clusters/prod-eu/topics/orders/messages"), None)
+    } finally FeatureRegistry.install(Map.empty, Nil)
+  }
+
+  test("aStoredTabThisBuildCannotRouteFallsBackToOverview") {
+    // A `history.state` entry written by a deployment that had a feature this one does not. Carrying the tab
+    // through would be worse than dropping it: `encodePage` would write a URL back out that no route decodes,
+    // so Back would land on "not found" instead of on the topic.
+    val stored = Json.obj(
+      "page" -> Json.fromString("topics.detail"),
+      "clusterId" -> Json.fromString("prod-eu"),
+      "topic" -> Json.fromString("orders"),
+      "tab" -> Json.fromString("consumers")
+    )
+
+    FeatureRegistry.install(Map.empty, List(TopicsRoutes))
+    try
+      assertEquals(
+        TopicsRoutes.decodePage("topics.detail", stored.hcursor),
+        Some(TopicsPageId.Detail("prod-eu", "orders", TopicTab.Overview))
+      )
+    finally FeatureRegistry.install(Map.empty, Nil)
+  }
+
   test("theNavEntryLandsOnTheChosenClustersTopicList") {
     // `landing` carries a placeholder cluster id, and a placeholder that reaches the sidebar becomes an
     // empty path segment, which collapses: `/ui/clusters//topics` is `/ui/clusters/topics` and matches no
@@ -145,4 +189,31 @@ final class TopicsRoutesSuite extends ScalaCheckSuite {
       .headOption
     assertEquals(mounted, Some("/kafka/ui/clusters/prod-eu/topics"))
   }
+}
+
+/** A stand-in for the consumers feature's static registration: enough of one to contribute a tab.
+  *
+  * A top-level object rather than a value inside the suite, because this is what the shell installs — a
+  * feature's static half, declared once per feature and reachable before anything is downloaded.
+  */
+object GuestFeatureRoutes extends FeatureRoutes {
+
+  val id: FeatureId = FeatureId.Consumers
+
+  val landing: Page = TopicsPageId.List("")
+
+  val nav: NavEntry =
+    NavEntry(featureId = id, label = "Consumers", icon = () => Icon.dot, order = 400, requiresCluster = true)
+
+  def routes(uiPrefix: String): scala.collection.immutable.List[Route[? <: Page, ?]] =
+    scala.collection.immutable.List.empty
+
+  override def guestTabs: scala.collection.immutable.List[GuestTab] =
+    scala.collection.immutable.List(
+      GuestTab(host = FeatureId.Topics, slot = FeatureSlots.TopicTabs, label = "Consumers")
+    )
+
+  def encodePage(page: Page): Option[Json] = None
+
+  def decodePage(tag: String, cursor: io.circe.HCursor): Option[Page] = None
 }

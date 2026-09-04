@@ -88,7 +88,7 @@ object TopicDetailPage {
       * `Var`'s own writes are turned back into `onTab`. Two directions through one place, so the strip and
       * the address bar cannot hold different opinions about which tab is open.
       */
-    val selected: Var[String] = Var(TopicTab.Default.toString)
+    val selected: Var[String] = Var(TopicTab.Default.id)
 
     /** Whether this page's topic has been deleted from under it.
       *
@@ -127,12 +127,12 @@ object TopicDetailPage {
       Val(
         List(
           Tab(
-            TopicTab.Overview.toString,
+            TopicTab.Overview.id,
             Messages.TabOverview,
             () => overviewTab(detail, topicSection, partitionViewportHeight)
           ),
           Tab(
-            TopicTab.Settings.toString,
+            TopicTab.Settings.id,
             Messages.TabSettings,
             () =>
               SettingsTab(
@@ -182,17 +182,18 @@ object TopicDetailPage {
         href := browseHref(backHref, cluster, topic),
         Messages.BrowseMessages
       ),
-      tab --> { current => selected.set(current.toString) },
+      tab --> { current => selected.set(current.id) },
       // Only a *real* change is reported. `Tabs` writes its selection on mount and again whenever the URL
       // pushes one in, and reporting those back would push a history entry for a navigation nobody made —
       // the Back button would then need two presses to leave a page the user had opened once. Comparing
       // against the tab the URL currently names is what tells the two apart; `distinct` alone cannot,
       // because the first event through a stream always passes it.
+      // Any id the strip can select is reported, not only the page's own two. A guest's tab carries its
+      // feature's id, and filtering to a closed list here is what used to leave the address bar saying
+      // Overview while the Consumers tab was on screen.
       selected.signal.changes
         .withCurrentValueOf(tab)
-        .collect { case (id, current) if id != current.toString => id } --> { id =>
-        TopicTab.values.find(_.toString == id).foreach(onTab)
-      },
+        .collect { case (id, current) if id != current.id => id } --> { id => onTab(TopicTab(id)) },
       child.maybe <-- Signal
         .combine(notFound, deleted.signal)
         .map((missingTopic, wasDeleted) => Option.when(missingTopic && !wasDeleted)(missing(topic))),
