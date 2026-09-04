@@ -1,0 +1,10 @@
+{
+  "name" : "orders",
+  "internal" : false,
+  "partitionCount" : 6,
+  "replicationFactor" : 3,
+  "outOfSyncReplicas" : 0,
+  "offlinePartitions" : 0,
+  "messageCount" : 1048576,
+  "sizeBytes" : 734003200
+}

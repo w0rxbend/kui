@@ -1,0 +1,51 @@
+{
+  "row" : {
+    "name" : "payments",
+    "internal" : false,
+    "partitionCount" : 2,
+    "replicationFactor" : 3,
+    "outOfSyncReplicas" : 1,
+    "offlinePartitions" : 1,
+    "messageCount" : null,
+    "sizeBytes" : null
+  },
+  "partitions" : [
+    {
+      "partition" : 0,
+      "leader" : 1,
+      "replicas" : [
+        {
+          "broker" : 1,
+          "leader" : true,
+          "inSync" : true
+        },
+        {
+          "broker" : 2,
+          "leader" : false,
+          "inSync" : true
+        }
+      ],
+      "earliestOffset" : 0,
+      "latestOffset" : 512,
+      "messageCount" : 512,
+      "sizeBytes" : 65536
+    },
+    {
+      "partition" : 1,
+      "leader" : null,
+      "replicas" : [
+        {
+          "broker" : 2,
+          "leader" : false,
+          "inSync" : false
+        }
+      ],
+      "earliestOffset" : null,
+      "latestOffset" : null,
+      "messageCount" : null,
+      "sizeBytes" : null
+    }
+  ],
+  "cleanupPolicy" : "delete",
+  "segmentCount" : 12
+}

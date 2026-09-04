@@ -1,0 +1,9 @@
+{
+  "name" : "retention.ms",
+  "value" : "604800000",
+  "defaultValue" : "604800000",
+  "source" : "default_config",
+  "sensitive" : false,
+  "readOnly" : false,
+  "documentation" : "How long a log segment is kept before it is discarded"
+}
