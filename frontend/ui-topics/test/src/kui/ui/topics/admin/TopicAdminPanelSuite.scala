@@ -8,7 +8,8 @@ import com.raquo.laminar.api.L.*
 import munit.FunSuite
 import org.scalajs.dom
 
-import kui.kernel.TopicName
+import kui.kernel.{Offset, PartitionId, TopicName}
+import kui.message.contract.{PurgePartitionPlanDto, PurgePlanDto, PurgeReceiptDto, PurgeResultDto, PurgeWarningDto}
 import kui.topic.contract.dto.{DeletionPlanDto, PartitionPlanDto, PlanWarningDto}
 import kui.ui.kernel.api.ApiError
 
@@ -47,6 +48,18 @@ final class TopicAdminPanelSuite extends FunSuite {
       computedAt = at
     )
 
+  private def purgePlan(records: Long, token: Option[String]): PurgePlanDto =
+    PurgePlanDto(
+      topic = topic,
+      partitions = List(
+        PurgePartitionPlanDto(PartitionId.unsafe(0), Offset.unsafe(0L), Offset.unsafe(records))
+      ),
+      warnings = List(PurgeWarningDto("RECORDS_LOST", "the records are gone")),
+      token = token,
+      expiresAt = token.map(_ => at.plusSeconds(300)),
+      computedAt = at
+    )
+
   /** Records every call the panel makes, so "it sent the token it was given" is an assertion about what went
     * out rather than about what came back.
     */
@@ -55,6 +68,8 @@ final class TopicAdminPanelSuite extends FunSuite {
     val partitionTokens: mutable.ListBuffer[String] = mutable.ListBuffer.empty
     val deletionPlans: mutable.ListBuffer[Unit] = mutable.ListBuffer.empty
     val deletionTokens: mutable.ListBuffer[String] = mutable.ListBuffer.empty
+    val purgePlans: mutable.ListBuffer[Unit] = mutable.ListBuffer.empty
+    val purgeTokens: mutable.ListBuffer[String] = mutable.ListBuffer.empty
     var deleted: Int = 0
   }
 
@@ -63,7 +78,10 @@ final class TopicAdminPanelSuite extends FunSuite {
       plannedPartitions: Either[ApiError, PartitionPlanDto] = Right(partitionPlan(3, 6, Some("p-token"))),
       appliedPartitions: Either[ApiError, PartitionPlanDto] = Right(partitionPlan(3, 6, None)),
       plannedDeletion: Either[ApiError, DeletionPlanDto] = Right(deletionPlan(Some(16L), Some("d-token"))),
-      appliedDeletion: Either[ApiError, DeletionPlanDto] = Right(deletionPlan(Some(16L), None))
+      appliedDeletion: Either[ApiError, DeletionPlanDto] = Right(deletionPlan(Some(16L), None)),
+      plannedPurge: Either[ApiError, PurgePlanDto] = Right(purgePlan(16L, Some("g-token"))),
+      appliedPurge: Either[ApiError, PurgeReceiptDto] =
+        Right(PurgeReceiptDto(purgePlan(16L, None), PurgeResultDto(Nil, Nil)))
   ): HtmlElement =
     TopicAdminPanel(
       topic = topic,
@@ -83,6 +101,14 @@ final class TopicAdminPanelSuite extends FunSuite {
       applyDeletion = token => {
         calls.deletionTokens.append(token)
         EventStream.fromValue(appliedDeletion)
+      },
+      planPurge = () => {
+        calls.purgePlans.append(())
+        EventStream.fromValue(plannedPurge)
+      },
+      applyPurge = token => {
+        calls.purgeTokens.append(token)
+        EventStream.fromValue(appliedPurge)
       },
       onDeleted = () => calls.deleted += 1
     )
@@ -121,8 +147,10 @@ final class TopicAdminPanelSuite extends FunSuite {
     mounted(panelWith(calls)) { root =>
       assert(find(root, "topic-partitions-apply").isEmpty)
       assert(find(root, "topic-delete-apply").isEmpty)
+      assert(find(root, "topic-purge-apply").isEmpty)
       assertEquals(calls.partitionTokens.toList, Nil)
       assertEquals(calls.deletionTokens.toList, Nil)
+      assertEquals(calls.purgeTokens.toList, Nil)
     }
   }
 
@@ -210,6 +238,37 @@ final class TopicAdminPanelSuite extends FunSuite {
       assert(find(root, "topic-delete-apply").isEmpty)
       val shown = find(root, "topic-delete-error").getOrElse(fail("the refusal was not shown"))
       assert(shown.textContent.nonEmpty, "a refusal with no sentence tells the operator nothing")
+    }
+  }
+
+  test("aPurgeTakesAPlanAndThenATypedConfirmationAndReportsWhatWentt") {
+    val calls = new Calls
+    mounted(panelWith(calls)) { root =>
+      click(root, "topic-purge-plan")
+      assertEquals(calls.purgePlans.size, 1)
+      assert(find(root, "topic-plan-warning-records-lost").isDefined)
+
+      click(root, "topic-purge-apply")
+      assertEquals(calls.purgeTokens.toList, Nil)
+
+      click(root, "topic-purge-confirm-confirm")
+      assertEquals(calls.purgeTokens.toList, List("g-token"))
+
+      val receipt = find(root, "topic-purge-receipt").getOrElse(fail("the purge left no receipt"))
+      assert(receipt.textContent.contains("16"), receipt.textContent)
+    }
+  }
+
+  test("aPurgeOfAnEmptyTopicOffersNothingToConfirm") {
+    // A confirmation dialogue for an operation that changes nothing is how operators learn to click
+    // through confirmation dialogues.
+    val calls = new Calls
+    mounted(panelWith(calls, plannedPurge = Right(purgePlan(0L, Some("g-token"))))) { root =>
+      click(root, "topic-purge-plan")
+
+      assert(find(root, "topic-purge-plan-result").isDefined)
+      assert(find(root, "topic-purge-apply").isEmpty)
+      assertEquals(calls.purgeTokens.toList, Nil)
     }
   }
 }

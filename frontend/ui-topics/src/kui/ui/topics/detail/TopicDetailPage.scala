@@ -116,6 +116,8 @@ object TopicDetailPage {
       applyPartitions = token => queries.increasePartitions(cluster, topic, token),
       planDeletion = () => queries.planDeletion(cluster, topic),
       applyDeletion = token => queries.deleteTopic(cluster, topic, token),
+      planPurge = () => queries.planPurge(cluster, topic),
+      applyPurge = token => queries.purge(cluster, topic, token),
       onDeleted = () => deleted.set(true)
     )
 

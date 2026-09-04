@@ -10,10 +10,12 @@ import kui.kernel.error.{ApplicationError, FieldError, KuiError}
 import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, OffsetRange, TopicName}
 import kui.message.application.produce.{ProduceUseCase, ResendUseCase}
+import kui.message.application.purge.{PurgeOffer, PurgeUseCase}
 import kui.message.contract.*
 import kui.message.domain.*
 
-/** The two routes that write to a topic: publish, and resend.
+/** The routes that change a topic: publish, resend, and empty it — plus the one that only says what emptying
+  * it would do.
   *
   * ==Read-only and audit (ADR-047)==
   *
@@ -41,12 +43,75 @@ object MessageMutationRoutes {
   def apply[F[_]: Async](
       produce: ProduceUseCase[F],
       resend: ResendUseCase[F],
+      purge: PurgeUseCase[F],
       secured: MessageApi.Securing[F],
       maxCount: Int = ProduceRequest.DefaultMaxCount
   ): List[ServerEndpoint[Any, F]] =
     List(
       produceRoute(produce, secured, maxCount),
-      resendRoute(resend, secured)
+      resendRoute(resend, secured),
+      planPurgeRoute(purge, secured),
+      purgeRoute(purge, secured)
+    )
+
+  /** What emptying this topic would destroy. Changes nothing.
+    *
+    * No body, so it is bound with `secured(...)` rather than `withBody`: its digest is the request line,
+    * which is what ADR-020 says for a call that carries nothing to hash.
+    */
+  private def planPurgeRoute[F[_]: Async](
+      purge: PurgeUseCase[F],
+      secured: MessageApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured(MessageMutationEndpoints.planPurge) { _ => (_, cluster, topic) =>
+      purge.plan(cluster, topic).map(_.map(offer))
+    }
+
+  /** Empty the topic up to exactly the offsets the token names. */
+  private def purgeRoute[F[_]: Async](
+      purge: PurgeUseCase[F],
+      secured: MessageApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured.withBody(MessageMutationEndpoints.purge)((_, _, _, request) => SecuredRoutes.bodyBytes(request)) {
+      _ => (_, cluster, topic, request) =>
+        purge.apply(cluster, topic, request.token).map(_.map(receipt))
+    }
+
+  /** A plan that has not been applied: the numbers, the token, and when the token stops being accepted. */
+  private def offer(planned: PurgeOffer): PurgePlanDto =
+    planOf(planned.plan).copy(token = Some(planned.token), expiresAt = Some(planned.expiresAt))
+
+  /** A plan that has been applied, beside what the broker reported.
+    *
+    * No token and no expiry: it has been spent. Both halves are here because they answer different questions
+    * — what the operator agreed to lose, which cannot be read off the cluster afterwards, and what the broker
+    * actually did partition by partition.
+    */
+  private def receipt(applied: (PurgePlan, PurgeResult)): PurgeReceiptDto = {
+    val (plan, result) = applied
+
+    PurgeReceiptDto(
+      plan = planOf(plan),
+      result = PurgeResultDto(
+        purged = result.newLowWatermarks.toList
+          .sortBy(_._1.value)
+          .map((partition, offset) => PurgedPartitionDto(partition, offset)),
+        failed = result.skipped.toList
+          .sortBy(_._1.value)
+          .map((partition, reason) => PurgeFailureDto(partition, reason))
+      )
+    )
+  }
+
+  private def planOf(plan: PurgePlan): PurgePlanDto =
+    PurgePlanDto(
+      topic = plan.topic,
+      partitions =
+        plan.partitions.map(one => PurgePartitionPlanDto(one.partition, one.lowWatermark, one.highWatermark)),
+      warnings = plan.warnings.map(warning => PurgeWarningDto(warning.code, warning.message)),
+      token = None,
+      expiresAt = None,
+      computedAt = plan.computedAt
     )
 
   /** Publish a record, `count` times. */

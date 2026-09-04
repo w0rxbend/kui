@@ -3,6 +3,7 @@ package kui.ui.topics.admin
 import com.raquo.laminar.api.L.*
 
 import kui.kernel.TopicName
+import kui.message.contract.{PurgePlanDto, PurgeReceiptDto}
 import kui.topic.contract.dto.{DeletionPlanDto, PartitionPlanDto, PlanWarningDto}
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
@@ -64,6 +65,8 @@ object TopicAdminPanel {
       applyPartitions: String => EventStream[Either[ApiError, PartitionPlanDto]],
       planDeletion: () => EventStream[Either[ApiError, DeletionPlanDto]],
       applyDeletion: String => EventStream[Either[ApiError, DeletionPlanDto]],
+      planPurge: () => EventStream[Either[ApiError, PurgePlanDto]],
+      applyPurge: String => EventStream[Either[ApiError, PurgeReceiptDto]],
       onDeleted: () => Unit
   ): HtmlElement = {
 
@@ -86,6 +89,7 @@ object TopicAdminPanel {
       ),
       partitionsSection(partitionCount, planPartitions, applyPartitions)
         .amend(cls(TopicsCss.Hidden) <-- gone.signal),
+      purgeSection(topic, planPurge, applyPurge).amend(cls(TopicsCss.Hidden) <-- gone.signal),
       deleteSection(
         topic,
         planDeletion,
@@ -196,6 +200,121 @@ object TopicAdminPanel {
             // Back to Idle rather than back to the plan: the token has been spent or has expired, and
             // offering the same button again would ask the operator to confirm a plan the server will
             // no longer accept.
+            step.set(ChangeStep.Idle)
+            problem.set(Some(error.userMessage))
+        }
+      }
+    )
+  }
+
+  // ----------------------------------------------------------------------------------------- purge
+
+  /** Emptying the topic: the operation ADR-045 was written for.
+    *
+    * It is beside the delete rather than on the message browser because that is where a person looks for it —
+    * "empty this topic" and "delete this topic" are neighbours in an operator's head, whatever they are in
+    * the service map.
+    *
+    * A plan over a topic that is already empty offers no confirmation at all. A confirmation dialogue for an
+    * operation that changes nothing is how operators learn to click through confirmation dialogues.
+    */
+  private def purgeSection(
+      topic: TopicName,
+      plan: () => EventStream[Either[ApiError, PurgePlanDto]],
+      applyPlan: String => EventStream[Either[ApiError, PurgeReceiptDto]]
+  ): HtmlElement = {
+    val step: Var[ChangeStep[PurgePlanDto]] = Var(ChangeStep.Idle)
+    val receipt: Var[Option[PurgeReceiptDto]] = Var(None)
+    val problem: Var[Option[String]] = Var(None)
+    val planning: Var[Boolean] = Var(false)
+    val applying: Var[Option[String]] = Var(None)
+    val confirming: Var[Boolean] = Var(false)
+
+    div(
+      cls := TopicsCss.DangerSection,
+      dataAttr("testid") := "topic-purge-section",
+      h3(cls := TopicsCss.DangerSectionTitle, Messages.PurgeTitle),
+      p(cls := TopicsCss.FormHint, Messages.PurgeHint),
+      Button(
+        label = Val(Messages.Preview),
+        onClick = Observer[Unit] { _ =>
+          problem.set(None)
+          receipt.set(None)
+          step.set(ChangeStep.Planning)
+          planning.set(true)
+        },
+        disabled = step.signal.map(isBusy),
+        testId = Some("topic-purge-plan")
+      ),
+      child.maybe <-- step.signal.map {
+        case ChangeStep.Planned(plan) =>
+          Some(
+            div(
+              cls := TopicsCss.Plan,
+              dataAttr("testid") := "topic-purge-plan-result",
+              p(
+                cls := TopicsCss.PlanSummary,
+                Messages.purgePlan(topic.value, plan.records, plan.partitions.count(_.records > 0L))
+              ),
+              warnings(plan.warnings.map(warning => PlanWarningDto(warning.code, warning.message))),
+              // Nothing to confirm when there is nothing to delete.
+              child.maybe <-- Val(
+                Option.when(!plan.isNoOp)(
+                  Button(
+                    label = Val(Messages.PurgeConfirm),
+                    onClick = Observer[Unit](_ => confirming.set(true)),
+                    variant = ButtonVariant.Danger,
+                    testId = Some("topic-purge-apply")
+                  )
+                )
+              )
+            )
+          )
+
+        case _ => None
+      },
+      child.maybe <-- receipt.signal.map(
+        _.map(answer =>
+          p(
+            cls := TopicsCss.Receipt,
+            role := "status",
+            dataAttr("testid") := "topic-purge-receipt",
+            Messages.purged(topic.value, answer.plan.records, answer.result.failed.size)
+          )
+        )
+      ),
+      child.maybe <-- problem.signal.map(_.map(alert("topic-purge-error"))),
+      ConfirmDialog(
+        open = confirming,
+        title = Val(Messages.PurgeConfirmTitle),
+        message = Val(Messages.purgeConfirmMessage(topic.value)),
+        onConfirm = Observer[Unit] { _ =>
+          step.now() match {
+            case ChangeStep.Planned(plan) =>
+              step.set(ChangeStep.Applying(plan))
+              plan.token.foreach(token => applying.set(Some(token)))
+            case _ => ()
+          }
+        },
+        confirmLabel = Messages.PurgeConfirm,
+        testId = Some("topic-purge-confirm")
+      ),
+      planning.signal.changes.filter(identity).flatMapSwitch(_ => plan()) --> { outcome =>
+        planning.set(false)
+        outcome match {
+          case Right(answer) => step.set(ChangeStep.Planned(answer))
+          case Left(error) =>
+            step.set(ChangeStep.Idle)
+            problem.set(Some(error.userMessage))
+        }
+      },
+      applying.signal.changes.collect { case Some(token) => token }.flatMapSwitch(applyPlan) --> { outcome =>
+        applying.set(None)
+        outcome match {
+          case Right(answer) =>
+            receipt.set(Some(answer))
+            step.set(ChangeStep.Idle)
+          case Left(error) =>
             step.set(ChangeStep.Idle)
             problem.set(Some(error.userMessage))
         }

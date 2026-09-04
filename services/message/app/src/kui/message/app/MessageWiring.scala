@@ -13,16 +13,19 @@ import kui.config.ClusterConfig
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
+import kui.kafka.{AdminClientPool, AdminMetrics}
 import kui.kernel.{ClusterId, Secret}
 import kui.message.api.{MessageApi, MessageRoutes}
 import kui.message.application.BrowseUseCase
 import kui.message.application.cursor.CursorCodec
 import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
+import kui.message.application.purge.{PurgeToken, PurgeUseCase}
 import kui.message.infrastructure.{
   BrowseTuning,
   ClusterSerdeSource,
   ConfiguredClusterProfiles,
   KafkaBrowseConsumer,
+  KafkaRecordDeleter,
   KafkaRecordProducer,
   KafkaRecordSource,
   LoggingAuditSink
@@ -128,6 +131,24 @@ object MessageWiring {
       // implementation, and it is bounded by the same budget a browse is — a copy of ten million
       // records is refused by a ceiling rather than attempted.
       resend = ResendUseCase.make[F](producers, source, guard, MessageRoutes.DefaultBudget)
+      // The purge (MS-008). It is the one operation in this service that takes data away, so it gets
+      // its own port and its own admin client rather than borrowing the browse consumer's: emptying a
+      // topic is a pair of admin calls — `listOffsets` for the plan, `deleteRecords` for the apply —
+      // and neither belongs on a consumer that exists to read records.
+      //
+      // The plan is signed with the same `kui.streaming.cursorKey` the browse cursor uses (ADR-026):
+      // one secret and one rotation procedure, with the two uses kept apart by the operation name
+      // inside the payload.
+      adminMetrics <- Resource.eval(AdminMetrics.otel[F](telemetry))
+      adminPool <- AdminClientPool.resource[F](adminMetrics, Some(logger))
+      deleter = new KafkaRecordDeleter[F](adminPool, profiles.connectionFor, logger)
+      purge = PurgeUseCase.make[F](
+        deleter,
+        profiles,
+        guard,
+        PurgeToken.make[F](signingKey),
+        logger
+      )
       // Readiness is deliberately empty, and for a stronger reason than the topic service's. "Can this
       // service answer" is true as soon as it is wired: it holds no snapshot, so there is nothing to be
       // waiting for. A readiness check that dialled a broker would take the message service out of
@@ -139,6 +160,7 @@ object MessageWiring {
         browse,
         produce,
         resend,
+        purge,
         profiles.ids,
         readiness,
         principals,

@@ -8,7 +8,8 @@ import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, TopicName}
 import kui.security.SignedPrincipal
 
-/** The two calls that write to a topic: publishing a record, and copying a range of records into another one.
+/** Everything this service does that changes a topic: publishing a record, copying a range of records into
+  * another one, and emptying one.
   *
   * ==Why they are here and the browse endpoint is not==
   *
@@ -25,7 +26,7 @@ import kui.security.SignedPrincipal
   * exist rather than from the day there is a session to bind it to — a header added later has to be added to
   * every client that already shipped.
   *
-  * ==Why there is no plan token here (ADR-045)==
+  * ==Which of them carry a plan token, and why (ADR-045)==
   *
   * ADR-045 requires a plan for a destructive operation, and asks a specific question: *what exactly will this
   * do to what is already there?* Publishing and resending have no answer to that question, because they take
@@ -33,7 +34,11 @@ import kui.security.SignedPrincipal
   * they filled in, and the whole of what a resend will do from the range and the destination — and the server
   * answers both with what actually landed, offset by offset, which is a receipt rather than an offer.
   *
-  * A purge is the operation on this service that *is* destructive, and it is the one that will carry a plan.
+  * A purge is the operation on this service that *is* destructive, and it carries a plan. What it destroys is
+  * not in its request at all — it is however many records the topic happens to hold when the broker is asked,
+  * a number that moves while the operator is deciding and that cannot be recovered afterwards. So `planPurge`
+  * resolves the offsets and changes nothing, and `purge` takes only the token that plan was signed with.
+  * There is no request in this contract that empties a topic in one hop.
   */
 object MessageMutationEndpoints {
 
@@ -45,6 +50,13 @@ object MessageMutationEndpoints {
     */
   val ResendSegment: String = "resend"
 
+  /** The last path segment of a purge, and of the plan that precedes it. A verb in the path for the same
+    * reason `resend` is one: `DELETE …/messages` would read as "delete these messages" and name no particular
+    * ones, while a purge is one operation over the whole topic with a plan attached.
+    */
+  val PurgeSegment: String = "purge"
+  val PlanSegment: String = "plan"
+
   /** The operation names, as they appear in the audit record and in the endpoint's marker.
     *
     * `val`s rather than literals at the use site because the same strings are
@@ -54,6 +66,7 @@ object MessageMutationEndpoints {
     */
   val ProduceOperation: String = "produce"
   val ResendOperation: String = "resend"
+  val PurgeOperation: String = "purge"
 
   private val base = "internal" / "v1" / ClustersSegment
 
@@ -128,6 +141,77 @@ object MessageMutationEndpoints {
       )
       .tag("message")
 
-  /** Every mutating endpoint this service serves. */
-  val all: List[AnyEndpoint] = List(produce, resend)
+  /** What emptying this topic would destroy. Changes nothing.
+    *
+    * Marked `destructive = false` and it genuinely is not a mutation: it reads two offsets per partition. It
+    * carries the marker anyway because it refuses on a read-only cluster, which is deliberate — a screen that
+    * renders a plan the operator is not allowed to apply teaches them that the refusal at the end is a bug.
+    */
+  val planPurge: Endpoint[
+    SignedPrincipal,
+    (String, ClusterId, TopicName),
+    ErrorEnvelope,
+    PurgePlanDto,
+    Any
+  ] =
+    KuiEndpoint
+      .mutation(PurgeOperation, destructive = false)
+      .post
+      .in(messagesOf / PurgeSegment / PlanSegment)
+      .out(jsonBody[PurgePlanDto])
+      .name("message.purge.plan")
+      .summary("What emptying this topic would destroy")
+      .description(
+        KuiEndpoint.mutationNote(PurgeOperation, destructive = false) +
+          "Reads each partition's current start and end offset and answers with how many records would go, " +
+          "a warning per thing worth knowing — that committed consumer offsets are not moved, and that a " +
+          "compacted topic will very likely have the purge refused by the broker — and a token valid for " +
+          "five minutes. Changes nothing."
+      )
+      .tag("message")
+
+  /** Empty the topic up to exactly the offsets a plan token names.
+    *
+    * The destructive operation ADR-045 was written for. Kafka's `deleteRecords` moves each partition's low
+    * watermark forward and the records below it are gone: no tombstone, no copy and no undo. Taking only a
+    * token is what makes the deleted range the range the operator read rather than whatever the topic held by
+    * the time they pressed the button.
+    */
+  val purge: Endpoint[
+    SignedPrincipal,
+    (String, ClusterId, TopicName, PurgeConfirmRequest),
+    ErrorEnvelope,
+    PurgeReceiptDto,
+    Any
+  ] =
+    KuiEndpoint
+      .mutation(PurgeOperation, destructive = true)
+      .post
+      .in(messagesOf / PurgeSegment)
+      .in(jsonBody[PurgeConfirmRequest])
+      .out(jsonBody[PurgeReceiptDto])
+      .name("message.purge")
+      .summary("Delete every record a purge plan named")
+      .description(
+        KuiEndpoint.mutationNote(PurgeOperation, destructive = true) +
+          "Takes only a plan token. It deletes up to the offsets the plan resolved and not to the topic's " +
+          "end as it stands now, so records produced between the plan and the confirmation survive — they " +
+          "are not what the operator agreed to lose. The topic, its configuration and its partition count " +
+          "are untouched; this empties the log rather than recreating the topic. The answer carries both " +
+          "the plan that was applied and what the broker reported per partition, because after a purge the " +
+          "number of records destroyed cannot be read off the cluster at all."
+      )
+      .tag("message")
+
+  /** Every mutating endpoint this service serves, plus the plan phase that reads.
+    *
+    * `planPurge` is in this list and deliberately not in `destructive`: it belongs with these because it is
+    * part of the same flow and shares their read-only refusal, and it is not destructive because it writes
+    * nothing.
+    */
+  val all: List[AnyEndpoint] = List(produce, resend, planPurge, purge)
+
+  /** The one endpoint here that cannot be undone, read from the marker rather than listed by hand. */
+  val destructive: List[AnyEndpoint] =
+    all.filter(endpoint => endpoint.attribute(KuiEndpoint.MutationKey).exists(_.destructive))
 }

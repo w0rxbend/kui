@@ -11,6 +11,7 @@ import kui.gateway.contract.dto.TopicOverviewDto
 import kui.contracts.{PublicApi, Section}
 import kui.kernel.search.SearchMode
 import kui.kernel.{ClusterId, PageRequest, PageSize, PositiveInt, Sort, SortOrder, TopicName}
+import kui.message.contract.PurgeConfirmRequest
 import kui.topic.contract.dto.*
 import kui.topic.contract.{GoldenDocuments, TopicEndpoints, TopicListParams, TopicQueryCodecs, TopicSortField}
 
@@ -67,11 +68,13 @@ final class TopicsApiSuite extends FunSuite {
     "planPartitions" -> pathOf(TopicsApi.planPartitions, (cluster, topic, PartitionIncreaseRequest(6))),
     "increasePartitions" -> pathOf(TopicsApi.increasePartitions, (cluster, topic, ConfirmRequest("t"))),
     "planDeletion" -> pathOf(TopicsApi.planDeletion, (cluster, topic)),
-    "deleteTopic" -> pathOf(TopicsApi.deleteTopic, (cluster, topic, "t"))
+    "deleteTopic" -> pathOf(TopicsApi.deleteTopic, (cluster, topic, "t")),
+    "planPurge" -> pathOf(TopicsApi.planPurge, (cluster, topic)),
+    "purge" -> pathOf(TopicsApi.purge, (cluster, topic, PurgeConfirmRequest("t")))
   )
 
   test("everyClientTargetsThePublicPrefix") {
-    // Every endpoint, not a hand-written list of them: adding a thirteenth without a test is not possible.
+    // Every endpoint, not a hand-written list of them: adding a fifteenth without a test is not possible.
     assertEquals(calls.length, TopicsApi.all.length)
     calls.foreach { (name, path) =>
       assert(path.startsWith(PublicApi.Prefix), s"$name calls $path")

@@ -16,6 +16,7 @@ import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.{ClusterId, ServiceId}
 import kui.message.application.BrowseUseCase
 import kui.message.application.produce.{ProduceUseCase, ResendUseCase}
+import kui.message.application.purge.PurgeUseCase
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
 
@@ -49,6 +50,7 @@ object MessageApi {
       browse: BrowseUseCase[F],
       produce: ProduceUseCase[F],
       resend: ResendUseCase[F],
+      purge: PurgeUseCase[F],
       clusters: List[ClusterId],
       readiness: List[ReadinessCheck[F]],
       principals: PrincipalCodec[F],
@@ -60,10 +62,11 @@ object MessageApi {
 
     HealthEndpoints.make[F](readiness, capabilityDocument[F](clusters)) ++
       MessageRoutes[F](browse, principals, rejections, logger, telemetry) ++
-      // The two writes. They are `ServerEndpoint[Any, F]` — no stream capability — and widen into this
-      // list because Tapir's capability parameter is contravariant: a route that needs nothing of the
-      // interpreter runs on one that offers streaming.
-      MessageMutationRoutes[F](produce, resend, secured)
+      // The writes, and the purge plan that precedes the one destructive one. They are
+      // `ServerEndpoint[Any, F]` — no stream capability — and widen into this list because Tapir's
+      // capability parameter is contravariant: a route that needs nothing of the interpreter runs on
+      // one that offers streaming.
+      MessageMutationRoutes[F](produce, resend, purge, secured)
   }
 
   /** The cross-cutting chain, outermost first, in the order the cluster service fixed and every service

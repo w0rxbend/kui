@@ -7,6 +7,7 @@ import com.raquo.laminar.api.L.*
 import kui.contracts.ErrorEnvelope
 import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{ClusterId, TopicName}
+import kui.message.contract.{PurgeConfirmRequest, PurgePlanDto, PurgeReceiptDto}
 import kui.topic.contract.TopicListParams
 import kui.topic.contract.dto.*
 import kui.ui.kernel.api.{ApiClient, ApiError}
@@ -155,6 +156,18 @@ final class TopicsQueries(api: ApiClient) {
       token: String
   ): EventStream[Either[ApiError, DeletionPlanDto]] =
     invalidatingOnSuccess(cluster, call(TopicsApi.deleteTopic, (cluster, topic, token)))
+
+  /** What emptying this topic would destroy. Reads; changes nothing. */
+  def planPurge(cluster: ClusterId, topic: TopicName): EventStream[Either[ApiError, PurgePlanDto]] =
+    call(TopicsApi.planPurge, (cluster, topic))
+
+  /** Delete exactly the records the plan token names. */
+  def purge(
+      cluster: ClusterId,
+      topic: TopicName,
+      token: String
+  ): EventStream[Either[ApiError, PurgeReceiptDto]] =
+    invalidatingOnSuccess(cluster, call(TopicsApi.purge, (cluster, topic, PurgeConfirmRequest(token))))
 
   private def invalidatingOnSuccess[A](
       cluster: ClusterId,

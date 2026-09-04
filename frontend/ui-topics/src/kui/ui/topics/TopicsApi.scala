@@ -8,6 +8,7 @@ import kui.contracts.{ErrorEnvelope, KuiEndpoint, PublicApi}
 import kui.gateway.contract.TopicOverviewEndpoints
 import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{ClusterId, TopicName}
+import kui.message.contract.{MessageMutationEndpoints, PurgeConfirmRequest, PurgePlanDto, PurgeReceiptDto}
 import kui.topic.contract.dto.*
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints, TopicListParams, TopicQueryCodecs}
 
@@ -184,7 +185,38 @@ object TopicsApi {
       .out(jsonBody[DeletionPlanDto])
       .name("topics.delete")
 
-  /** Every client this module has. The suite walks it, so a twelfth endpoint cannot be added untested. */
+  // --- Emptying a topic (MS-008) ----------------------------------------------------------------
+  //
+  // These two are the *message* service's endpoints, and this feature calls them anyway. The reason is
+  // where a person looks: "empty this topic" belongs beside "delete this topic", on the topic page,
+  // under the same heading about changes that cannot be undone. Putting it on the message browser
+  // instead would be tidier by ownership and worse by use.
+  //
+  // Nothing about the message service is learned here beyond its published contract: the paths are built
+  // from `MessageMutationEndpoints`' own constants and the documents are decoded with its own DTOs, so a
+  // renamed segment breaks this build rather than the link — the same arrangement `BrowseAddress` already
+  // has for the link into the browser.
+
+  /** `POST …/topics/{topicName}/messages/purge/plan` — what emptying the topic would destroy. */
+  val planPurge: PublicEndpoint[(ClusterId, TopicName), ErrorEnvelope, PurgePlanDto, Any] =
+    KuiEndpoint.base.post
+      .in(
+        oneTopic / MessageMutationEndpoints.MessagesSegment /
+          MessageMutationEndpoints.PurgeSegment / MessageMutationEndpoints.PlanSegment
+      )
+      .out(jsonBody[PurgePlanDto])
+      .name("messages.purge.plan")
+
+  /** `POST …/topics/{topicName}/messages/purge` — delete exactly what the token names. */
+  val purge
+      : PublicEndpoint[(ClusterId, TopicName, PurgeConfirmRequest), ErrorEnvelope, PurgeReceiptDto, Any] =
+    KuiEndpoint.base.post
+      .in(oneTopic / MessageMutationEndpoints.MessagesSegment / MessageMutationEndpoints.PurgeSegment)
+      .in(jsonBody[PurgeConfirmRequest])
+      .out(jsonBody[PurgeReceiptDto])
+      .name("messages.purge")
+
+  /** Every client this module has. The suite walks it, so a fourteenth endpoint cannot be added untested. */
   val all: List[AnyEndpoint] =
     List(
       list,
@@ -198,6 +230,8 @@ object TopicsApi {
       planPartitions,
       increasePartitions,
       planDeletion,
-      deleteTopic
+      deleteTopic,
+      planPurge,
+      purge
     )
 }

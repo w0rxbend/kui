@@ -254,8 +254,8 @@ object Messages {
 
   val DangerTitle: String = "Changes that cannot be undone"
   val DangerHint: String =
-    "Both of these are shown to you in full before anything happens, and both are applied against exactly " +
-      "what you were shown."
+    "Each of these is shown to you in full before anything happens, and each is applied against exactly " +
+      "what you were shown — not against whatever the topic looks like by the time you press the button."
 
   val DangerGone: String =
     "This topic has been deleted. What it held is gone; the record of what was destroyed is below."
@@ -275,6 +275,31 @@ object Messages {
 
   def partitionsApplied(current: Int, target: Int): String =
     s"$target partitions, up from $current. Records written from now on are routed across all $target."
+
+  // Emptying a topic
+
+  val PurgeTitle: String = "Empty this topic"
+  val PurgeHint: String =
+    "Every record currently in the topic is deleted. The topic itself, its settings and its partitions stay " +
+      "exactly as they are. Preview it first: the preview counts what is there now, and what it counts is " +
+      "what gets deleted — records that arrive while you are deciding are left alone."
+  val PurgeConfirm: String = "Empty the topic"
+  val PurgeConfirmTitle: String = "Empty this topic?"
+
+  def purgeConfirmMessage(topic: String): String =
+    s"Every record now in '$topic' will be deleted. This cannot be undone."
+
+  def purgePlan(topic: String, records: Long, partitions: Int): String =
+    if records <= 0L then s"'$topic' holds no records, so there is nothing to delete."
+    else
+      s"'$topic' holds $records record${if records == 1L then "" else "s"} across " +
+        s"$partitions partition${if partitions == 1 then "" else "s"}."
+
+  def purged(topic: String, records: Long, failed: Int): String = {
+    val emptied = s"$records record${if records == 1L then "" else "s"} were deleted from '$topic'."
+    if failed <= 0 then emptied
+    else s"$emptied $failed partition${if failed == 1 then " was" else "s were"} refused by the broker."
+  }
 
   // Deleting a topic
 
