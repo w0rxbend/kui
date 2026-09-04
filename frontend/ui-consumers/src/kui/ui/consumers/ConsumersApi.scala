@@ -73,11 +73,12 @@ object ConsumersApi {
 
   /** `GET /api/v1/clusters/{clusterId}/consumer-groups/lag` — what changed since a token.
     *
-    * Declared here because it is part of this feature's surface and a client that could not name it would
-    * have to hand-write the URL when the list gains its poller. Nothing on the screens calls it yet: the
-    * screens read the snapshot through `list` and `detail`, and the poller is the next task's work. The
-    * `since` token is the server's own and opaque to the browser — sending a browser clock back instead, as
-    * the reference product does, silently drops or replays updates whenever the two clocks disagree.
+    * Called by `LagPoller`, once per interval, about exactly the groups the list has on screen. The `since`
+    * token is the server's own and opaque to the browser — sending a browser clock back instead, as the
+    * reference product does, silently drops or replays updates whenever the two clocks disagree. The answer
+    * also names how long to wait before asking again, and the poller obeys it rather than holding an interval
+    * of its own: that is the one mechanism by which a struggling consumer service can slow every open browser
+    * down at once.
     */
   val lag: PublicEndpoint[(ClusterId, Set[GroupId], Option[String]), ErrorEnvelope, LagDeltaDto, Any] =
     KuiEndpoint.base.get

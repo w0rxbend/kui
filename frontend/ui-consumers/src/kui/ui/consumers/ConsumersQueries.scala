@@ -5,7 +5,7 @@ import scala.concurrent.duration.*
 import com.raquo.laminar.api.L.*
 
 import kui.consumer.contract.GroupListParams
-import kui.consumer.contract.dto.{GroupDetailDto, GroupPageDto}
+import kui.consumer.contract.dto.{GroupDetailDto, GroupPageDto, LagDeltaDto}
 import kui.contracts.ErrorEnvelope
 import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{ClusterId, GroupId, TopicName}
@@ -82,6 +82,20 @@ final class ConsumersQueries(api: ApiClient) {
     group.invalidateWhere((id, _) => id == cluster)
     topicOverview.invalidateWhere((id, _) => id == cluster)
   }
+
+  /** One lag poll. Not a cache: the answer is a *delta* against a token, so a second subscriber reading a
+    * cached one would be reading somebody else's diff and would apply it to rows it does not have.
+    *
+    * It is here rather than in the poller for the reason the class comment gives — this is the one file in
+    * the feature that issues a request, which is what makes the health-reporting rule checkable by reading
+    * rather than by grepping.
+    */
+  def lagSince(
+      cluster: ClusterId,
+      groups: Set[GroupId],
+      since: Option[String]
+  ): EventStream[Either[ApiError, LagDeltaDto]] =
+    call(ConsumersApi.lag, (cluster, groups, since))
 
   /** Every request this feature makes, with its health report attached.
     *

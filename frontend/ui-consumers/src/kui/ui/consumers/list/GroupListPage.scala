@@ -8,7 +8,7 @@ import kui.consumer.contract.dto.GroupPageDto
 import kui.consumer.contract.{ConsumerEndpoints, GroupListParams}
 import kui.contracts.consumer.{GroupSortField, GroupSummaryDto}
 import kui.kernel.group.GroupState
-import kui.kernel.{ClusterId, Sort, SortOrder}
+import kui.kernel.{ClusterId, GroupId, Sort, SortOrder}
 import kui.ui.consumers.{ConsumersCss, ConsumersQueries, GroupStateChip, Messages}
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
@@ -31,12 +31,17 @@ import kui.ui.kernel.time.Timestamps
   * the count. A refetch dims the rows rather than removing them, so a failed refetch leaves the previous
   * answer readable underneath the overlay and the user loses nothing by having tried.
   *
-  * ## Nothing polls, yet
+  * ## The lag column keeps moving on its own
   *
-  * The snapshot's own age is on screen through the stale overlay and the refresh button is the user's
-  * control. The contract carries a delta endpoint for a poller (`ConsumersApi.lag`) whose whole point is that
-  * the server, not the browser, decides the interval; wiring it is the next task's work and half a poller
-  * would be worse than none.
+  * Every other number here is a fact about configuration and changes when somebody changes it. Lag is not: it
+  * moves continuously and it is the reason the screen is open, so a figure that sat still until the user
+  * pressed Refresh would be a number whose age is the only thing that matters about it. `LagPoller` asks the
+  * delta endpoint what has changed, on the interval the *server* names in each answer, and `LagFeed` lays the
+  * result over the rows this page fetched. It never refetches the page and never reorders it: a lag figure
+  * arriving must not move a row out from under somebody's cursor.
+  *
+  * The snapshot's own age is still on screen through the stale overlay, and the refresh button is still the
+  * user's control over everything the poll does not carry.
   *
   * ## What is deliberately absent
   *
@@ -130,7 +135,30 @@ object GroupListPage {
 
     val answer: Signal[Option[GroupPageDto]] = state.map(_.lastGood)
 
-    val rows: Signal[List[GroupSummaryDto]] = answer.map(_.map(_.items).getOrElse(Nil))
+    val fetched: Signal[List[GroupSummaryDto]] = answer.map(_.map(_.items).getOrElse(Nil))
+
+    /** The groups the poller asks about: exactly the ones on screen, and nothing else.
+      *
+      * Derived from the fetched rows rather than from the request, because a page of twenty-five is what the
+      * user can see and asking about a cluster's four thousand groups to repaint twenty-five cells would make
+      * the poll the most expensive request in the product.
+      */
+    val onScreen: Signal[Set[GroupId]] = fetched.map(_.map(_.groupId).toSet).distinct
+
+    val poller = new LagPoller(
+      cluster = cluster,
+      groups = onScreen,
+      poll = (id, ids, since) => queries.lagSince(id, ids, since)
+    )
+
+    /** What is drawn: the page the list endpoint sent, with the poller's later figures laid over it.
+      *
+      * Laid over rather than refetched, so a lag figure arriving cannot reorder the table under somebody's
+      * cursor. The sort, the filter and the paging are the server's and they stay where they were until the
+      * user changes one.
+      */
+    val rows: Signal[List[GroupSummaryDto]] =
+      fetched.combineWith(poller.view).map(LagFeed.applyTo)
 
     val total: Signal[Option[Long]] = answer.map(_.flatMap(_.page.totalItems))
 
@@ -218,6 +246,9 @@ object GroupListPage {
       cls := ConsumersCss.Page,
       dataAttr("testid") := "page-consumers-list",
       h1(Messages.Title),
+      // The poller's subscriptions hang off this element, so navigating away unmounts it and the polling
+      // stops with it. Anything longer-lived would go on asking about a screen nobody is looking at.
+      poller.binder,
       // The URL is authoritative, so the table's sort is pushed *into* it whenever the URL changes, and the
       // table's own writes are turned back into URL updates. Both directions pass through here.
       Signal.combine(sortField, direction).map((field, order) => Sort(field.wire, order)) --> { chosen =>
