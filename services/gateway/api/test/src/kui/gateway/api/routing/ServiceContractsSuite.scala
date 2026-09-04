@@ -6,7 +6,7 @@ import sttp.tapir.AnyEndpoint
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
-import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints}
+import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
 /** That the one map naming the gateway's downstream services says what the rest of the gateway assumes.
@@ -60,7 +60,10 @@ final class ServiceContractsSuite extends FunSuite {
     // Its remaining endpoint is the browse stream, which this derivation cannot proxy at all: a stream has
     // to be relayed with its own cancellation and heartbeat handling rather than called and re-encoded,
     // which `MessageStreamRoutes` does.
-    assertEquals(ServiceContracts.of(message), MessageMutationEndpoints.all ++ FilterEndpoints.all)
+    assertEquals(
+      ServiceContracts.of(message),
+      MessageMutationEndpoints.all ++ FilterEndpoints.all ++ TrackEndpoints.all
+    )
   }
 
   test("a service the gateway has no contract for is not an error") {

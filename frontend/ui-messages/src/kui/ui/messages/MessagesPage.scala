@@ -92,7 +92,8 @@ object MessagesPage {
       cluster: ClusterId,
       api: ApiClient,
       zone: Signal[String],
-      session: BrowseSession
+      session: BrowseSession,
+      trackHref: String = ""
   ): HtmlElement = {
 
     /** What the two drawers are showing. `None` is closed.
@@ -186,7 +187,15 @@ object MessagesPage {
       dataAttr("testid") := "page-messages",
       // The topic is the heading, not the word "Messages": the reader knows what screen they are on and what
       // they need to be sure of is which topic they are reading.
-      h1(topic.value),
+      div(
+        cls := MessagesCss.Heading,
+        h1(topic.value),
+        // Offered only when the caller knew the address. The page is also built by tests and by the
+        // fallback branch, and a link to nowhere is worse than no link.
+        Option.when(trackHref.nonEmpty)(
+          a(href := trackHref, dataAttr("testid") := "messages-track-link", Messages.TrackLink)
+        )
+      ),
       controls(query, startKind, running, rewrite, session, pressed, draft, topic, view),
       // The smart filter, under the control bar rather than on it: it is a paragraph of expression with
       // its own help and its own failure, and a multi-line box wedged between two dropdowns would make the

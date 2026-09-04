@@ -12,6 +12,8 @@ object MessagesCss {
   val Controls = "kui-messages__controls"
   val ControlGroup = "kui-messages__control-group"
   val ControlLabel = "kui-messages__control-label"
+  val Heading = "kui-messages__heading"
+  val Lead = "kui-messages__lead"
   val Status = "kui-messages__status"
   val StatusPhase = "kui-messages__status-phase"
 

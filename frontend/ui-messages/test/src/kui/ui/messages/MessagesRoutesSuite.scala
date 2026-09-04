@@ -98,6 +98,8 @@ final class MessagesRoutesSuite extends ScalaCheckSuite {
   test("routesAreRegisteredExactlyOnce") {
     val patterns = MessagesRoutes.routes(prefix).map(_.toString)
     assertEquals(patterns.distinct.size, patterns.size)
-    assertEquals(patterns.size, 1)
+    // Two: one topic's records, and the cluster-wide event track. The track page has no topic in its
+    // address, so the two patterns cannot overlap and a URL can only ever match one of them.
+    assertEquals(patterns.size, 2)
   }
 }

@@ -5,7 +5,7 @@ import scala.annotation.nowarn
 import com.raquo.waypoint.*
 import io.circe.{HCursor, Json}
 
-import kui.message.contract.BrowseAddress
+import kui.message.contract.{BrowseAddress, TrackEndpoints}
 import kui.ui.kernel.component.Icon
 import kui.ui.kernel.feature.{FeatureId, FeatureRoutes, NavEntry, Page}
 
@@ -33,6 +33,14 @@ object MessagesPageId {
     */
   final case class Browse(clusterId: String, topic: String) extends MessagesPageId
 
+  /** One cluster's event track (ET-003).
+    *
+    * A cluster and no topic, because a track is a search *across* topics: which ones is part of the question
+    * and lives in the form, not in the address. That is also why this page can be reached from the sidebar
+    * where a browse cannot.
+    */
+  final case class Track(clusterId: String) extends MessagesPageId
+
   given CanEqual[MessagesPageId, MessagesPageId] = CanEqual.derived
 }
 
@@ -46,10 +54,16 @@ object MessagesPageId {
 object MessagesRoutes extends FeatureRoutes {
 
   private val BrowseTag = "messages.browse"
+  private val TrackTag = "messages.track"
 
   private val ClustersSegment = BrowseAddress.ClustersSegment
   private val TopicsSegment = BrowseAddress.TopicsSegment
   private val MessagesSegment = BrowseAddress.MessagesSegment
+
+  /** The last segment of the track page's address. It is the service's own, so the screen and the endpoint it
+    * calls cannot come to spell the same word differently.
+    */
+  private val TrackSegment = TrackEndpoints.TrackSegment
 
   val id: FeatureId = FeatureId.Messages
 
@@ -86,6 +100,14 @@ object MessagesRoutes extends FeatureRoutes {
         pattern = root / ClustersSegment / segment[String] / TopicsSegment / segment[String] /
           MessagesSegment / endOfSegments,
         basePath = uiPrefix
+      ),
+      // The track page: a cluster and no topic. It is declared after the browse so that a URL naming a
+      // topic can never be claimed by it, though the patterns cannot in fact overlap.
+      Route.applyPF[MessagesPageId, String](
+        matchEncode = trackEncode,
+        decode = clusterId => MessagesPageId.Track(clusterId),
+        pattern = root / ClustersSegment / segment[String] / MessagesSegment / TrackSegment / endOfSegments,
+        basePath = uiPrefix
       )
     )
 
@@ -101,6 +123,12 @@ object MessagesRoutes extends FeatureRoutes {
     { case value: Matchable if claim.isDefinedAt(value) => claim(value) }
   }
 
+  @nowarn("msg=unmatchable type Any")
+  private def trackEncode: PartialFunction[Any, String] = {
+    val claim: PartialFunction[Matchable, String] = { case page: MessagesPageId.Track => page.clusterId }
+    { case value: Matchable if claim.isDefinedAt(value) => claim(value) }
+  }
+
   def encodePage(page: Page): Option[Json] =
     page match {
       case MessagesPageId.Browse(clusterId, topic) =>
@@ -111,6 +139,8 @@ object MessagesRoutes extends FeatureRoutes {
             "topic" -> Json.fromString(topic)
           )
         )
+      case MessagesPageId.Track(clusterId) =>
+        Some(Json.obj("page" -> Json.fromString(TrackTag), "clusterId" -> Json.fromString(clusterId)))
       case _ => None
     }
 
@@ -122,5 +152,6 @@ object MessagesRoutes extends FeatureRoutes {
         clusterId <- cursor.get[String]("clusterId").toOption
         topic <- cursor.get[String]("topic").toOption
       } yield MessagesPageId.Browse(clusterId, topic)
+    else if tag == TrackTag then cursor.get[String]("clusterId").toOption.map(MessagesPageId.Track.apply)
     else None
 }

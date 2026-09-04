@@ -5,7 +5,7 @@ import sttp.tapir.AnyEndpoint
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
-import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints}
+import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
@@ -50,7 +50,9 @@ object ServiceContracts {
       // compiles an expression, the other runs it against a record the caller sent — but both are still
       // ordinary request/response calls the browser has to be able to reach, and a filter editor with no
       // route to register against is a filter engine nothing can use, which is what MS-007 was.
-      ServiceId.unsafe("message") -> (MessageMutationEndpoints.all ++ FilterEndpoints.all),
+      ServiceId.unsafe(
+        "message"
+      ) -> (MessageMutationEndpoints.all ++ FilterEndpoints.all ++ TrackEndpoints.all),
       // Both lists, for the same reason as the topic and consumer services: the schema service
       // publishes its five reads from one object and its three bodied endpoints from another. The
       // second list holds the two compatibility writes *and* the compatibility check, which is not a

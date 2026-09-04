@@ -16,7 +16,7 @@ import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.{ClusterId, ServiceId}
 import kui.message.application.produce.{ProduceUseCase, ResendUseCase}
 import kui.message.application.purge.PurgeUseCase
-import kui.message.application.{BrowseUseCase, FilterUseCase}
+import kui.message.application.{BrowseUseCase, FilterUseCase, TrackUseCase}
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
 
@@ -49,6 +49,7 @@ object MessageApi {
   def routes[F[_]: {Async, Parallel}](
       browse: BrowseUseCase[F],
       filters: FilterUseCase[F],
+      track: TrackUseCase[F],
       produce: ProduceUseCase[F],
       resend: ResendUseCase[F],
       purge: PurgeUseCase[F],
@@ -71,7 +72,10 @@ object MessageApi {
       // Registering and testing a filter. They are neither browse nor mutation: they change nothing on
       // the cluster and open no Kafka client, which is why they are a third list rather than an addition
       // to either of the other two.
-      FilterRoutes[F](filters, secured)
+      FilterRoutes[F](filters, secured) ++
+      // Following one business event across several topics. It reads Kafka, like a browse, and answers all
+      // at once, like a mutation — which is why it is neither of the two lists above.
+      TrackRoutes[F](track, secured)
   }
 
   /** The cross-cutting chain, outermost first, in the order the cluster service fixed and every service

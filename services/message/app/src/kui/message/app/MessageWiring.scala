@@ -23,7 +23,7 @@ import kui.message.api.{MessageApi, MessageRoutes}
 import kui.message.application.cursor.CursorCodec
 import kui.message.application.produce.{MutationGuard, ProduceUseCase, ResendUseCase}
 import kui.message.application.purge.{PurgeToken, PurgeUseCase}
-import kui.message.application.{BrowseUseCase, FilterUseCase}
+import kui.message.application.{BrowseUseCase, FilterUseCase, TrackUseCase}
 import kui.message.infrastructure.{
   BrowseTuning,
   CelFilterSource,
@@ -125,6 +125,10 @@ object MessageWiring {
         filterSource
       )
       filters = FilterUseCase.make[F](filterSource)
+      // A track reads through the same record source a browse does, so the seek arithmetic and the
+      // decoding have one implementation: what a track matches on is exactly what the browse screen would
+      // have shown for the same record.
+      track = TrackUseCase.make[F](profiles, serdeSource, source)
       // ADR-047's three parts, wired once and shared by both writes. The guard is the only way this
       // service changes a cluster: it holds the read-only refusal and the audit record, and it is what
       // returns the result, so a use case cannot be added that writes without going through them.
@@ -167,6 +171,7 @@ object MessageWiring {
       routes = MessageApi.routes[F](
         browse,
         filters,
+        track,
         produce,
         resend,
         purge,

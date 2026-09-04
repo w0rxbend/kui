@@ -82,6 +82,8 @@ object Messages {
       "record.valueAsText, record.keyAsText, record.headers, record.partition, record.offset and " +
       "record.timestampMs. Only records it returns true for are delivered."
 
+  val TrackLink: String = "Track an event across topics"
+
   // --- The export (MS-011) -----------------------------------------------------------------------
 
   val ExportCsv: String = "Export CSV"

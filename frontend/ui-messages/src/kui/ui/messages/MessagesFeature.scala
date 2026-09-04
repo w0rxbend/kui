@@ -10,6 +10,7 @@ import kui.ui.kernel.feature.*
 import kui.ui.kernel.prefs.Timezone
 import kui.ui.kernel.state.AuthState
 import kui.ui.messages.browse.BrowseSession
+import kui.ui.messages.track.TrackPage
 
 /** The message-browsing microfrontend.
   *
@@ -53,9 +54,16 @@ final class MessagesFeature extends KuiFeature {
       onUnmountCallback(_ => sessions.now().values.foreach(_.stop()))
     )
 
+  /** Which screen a page is, as a pair the feature can compare.
+    *
+    * The track page has no topic, so it is spelled as a cluster with the reserved empty-looking marker below
+    * rather than as a second `Var`: `build` is the only thing that reads it and it distinguishes the two by
+    * that marker, which keeps "which screen is showing" a single value.
+    */
   private def screenOf(page: Page): (String, String) =
     page match {
       case MessagesPageId.Browse(clusterId, topic) => (clusterId, topic)
+      case MessagesPageId.Track(clusterId) => (clusterId, MessagesFeature.TrackScreen)
       case _ => ("", "")
     }
 
@@ -68,17 +76,28 @@ final class MessagesFeature extends KuiFeature {
   private def build(screen: (String, String)): HtmlElement = {
     val (clusterId, topicName) = screen
 
-    (ClusterId.from(clusterId).toOption, TopicName.from(topicName).toOption) match {
-      case (Some(cluster), Some(topic)) =>
-        MessagesPage(
-          topic = topic,
-          cluster = cluster,
-          api = MessagesFeature.api,
-          zone = Timezone.choice.signal,
-          session = sessionFor(cluster, topic)
-        )
-      case _ => div(cls := MessagesCss.Page, dataAttr("testid") := "page-messages")
-    }
+    if topicName == MessagesFeature.TrackScreen then
+      ClusterId.from(clusterId).toOption match {
+        case Some(cluster) =>
+          TrackPage(cluster = cluster, api = MessagesFeature.api, zone = Timezone.choice.signal)
+        case None => div(cls := MessagesCss.Page, dataAttr("testid") := "page-track")
+      }
+    else
+      (ClusterId.from(clusterId).toOption, TopicName.from(topicName).toOption) match {
+        case (Some(cluster), Some(topic)) =>
+          MessagesPage(
+            topic = topic,
+            cluster = cluster,
+            api = MessagesFeature.api,
+            zone = Timezone.choice.signal,
+            session = sessionFor(cluster, topic),
+            // The way in to the track screen. It is offered from here because this is where a person is
+            // when the question turns from "what is in this topic" into "where else did this go", and
+            // because the sidebar knows a cluster but not that this feature has a second screen.
+            trackHref = hrefOf(MessagesPageId.Track(cluster.value))
+          )
+        case _ => div(cls := MessagesCss.Page, dataAttr("testid") := "page-messages")
+      }
   }
 
   private def sessionFor(cluster: ClusterId, topic: TopicName): BrowseSession = {
@@ -128,6 +147,13 @@ final class MessagesFeature extends KuiFeature {
 }
 
 object MessagesFeature {
+
+  /** The marker that says "this screen is the track, not a topic".
+    *
+    * A topic name Kafka cannot hold — it has a slash in it — so no real topic can ever be mistaken for it and
+    * no URL can produce it.
+    */
+  private[messages] val TrackScreen: String = "/track"
 
   private lazy val bootstrap: Bootstrap = Bootstrap.read()
 
