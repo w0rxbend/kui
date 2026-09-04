@@ -18,10 +18,18 @@ import kui.kernel.PositiveInt
   *
   * This is the mechanical half of the product's central promise (PLAN §2.1), so the assertions are
   * mostly about what did *not* happen: calls that never reached the network, concurrency that never
-  * exceeded its cap, latency that did not move. Every case uses `TestControl`, so there is no
-  * `sleep` in the suite and nothing here can be flaky under load.
+  * exceeded its cap, latency that did not move. Every case uses `TestControl`, so the delays the
+  * assertions depend on are simulated: no case waits a real second for a real timeout.
+  *
+  * That removes the *simulated* clock as a source of flakiness but not the real one. MUnit still
+  * applies a wall-clock timeout to each case, and a whole-repository `./mill __.test` runs this
+  * suite beside Docker image builds and Kafka containers. One case timed out exactly once that way
+  * on 2026-09-04. `munitIOTimeout` below is raised so that a slow machine reports a slow test
+  * rather than a failing one.
   */
 final class UpstreamClientSuite extends CatsEffectSuite {
+
+  override val munitIOTimeout: scala.concurrent.duration.Duration = 3.minutes
 
   private val target = uri"http://ignored/subjects"
 
