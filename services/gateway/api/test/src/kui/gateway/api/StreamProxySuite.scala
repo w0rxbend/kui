@@ -23,6 +23,14 @@ import kui.http.sse.{SseEvent, SseWire}
   */
 final class StreamProxySuite extends CatsEffectSuite {
 
+  /** MUnit's default is 30 seconds, and one test here pushes a million events through the relay. On an idle
+    * machine that takes about nine seconds; in a full `__.test` run it shares the CPU with a dozen
+    * Testcontainers suites starting brokers, and it has been seen to exceed thirty. The timeout is a safety
+    * net against a stream that never finishes, not an assertion about speed, so widening it costs nothing:
+    * a relay that really did accumulate would never finish at any timeout.
+    */
+  override def munitIOTimeout: scala.concurrent.duration.Duration = 3.minutes
+
   private val envelope = ErrorEnvelope(
     code = "KUI-UPSTREAM-UNAVAILABLE",
     message = "the message service stopped sending",
