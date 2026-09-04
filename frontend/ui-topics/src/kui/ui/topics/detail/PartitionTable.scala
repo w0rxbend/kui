@@ -32,12 +32,23 @@ object PartitionTable {
       partitions: Signal[List[PartitionDto]],
       viewportHeight: Var[Int] = Var(0),
       stale: Signal[Boolean] = Val(false)
-  ): HtmlElement =
+  ): HtmlElement = {
+    val ordered: Signal[List[PartitionDto]] = partitions.map(_.sortBy(_.partition.value))
+
+    /** The scale the message bars are drawn against: the largest count among the partitions on screen.
+      *
+      * Against the rows actually shown, not against a cluster-wide figure, for the same reason the topic list
+      * does it that way — the question a bar answers is "which of these is the big one", and a bar scaled to
+      * something off the screen answers a question nobody asked.
+      */
+    val largestMessageCount: Signal[Long] =
+      ordered.map(rows => rows.flatMap(_.messageCount).maxOption.getOrElse(0L))
+
     VirtualizedTable[PartitionDto](
       // Ordered by id, always. A partition table is read by looking for a number, and a table that arrived
       // in whatever order the broker answered in would make that a search rather than a lookup.
-      rows = partitions.map(_.sortBy(_.partition.value)),
-      columns = columns,
+      rows = ordered,
+      columns = columns(largestMessageCount),
       rowKey = _.partition.value.toString,
       emptyState = () =>
         div(
@@ -50,8 +61,17 @@ object PartitionTable {
       viewportHeight = viewportHeight,
       testId = Some("partition-table")
     )
+  }
 
-  private val columns: List[Column[PartitionDto]] = List(
+  /** The design's rule, applied to the table it matters most in: a quantity is a figure with a bar beside it,
+    * so relative magnitude is readable without reading numbers. On the two-thousand-partition topic that
+    * justified windowing this table, finding the hot partition otherwise means reading every number.
+    *
+    * Only the message count gets one. The size column would draw an empty groove on every row, because the
+    * topic service does not ask the brokers for log-dir sizes and `sizeBytes` is therefore `None` for every
+    * partition; a bar for a value nobody measured is furniture that claims a measurement.
+    */
+  private def columns(largestMessageCount: Signal[Long]): List[Column[PartitionDto]] = List(
     Column[PartitionDto](
       id = "partition",
       header = Messages.ColumnPartition,
@@ -85,11 +105,7 @@ object PartitionTable {
     Column[PartitionDto](
       id = "messages",
       header = Messages.ColumnMessages,
-      render = row =>
-        span(
-          dataAttr("testid") := s"partition-row-${row.partition.value}-messages",
-          row.messageCount.fold(DataTable.missing)(_.toString)
-        ),
+      render = row => messagesCell(row, largestMessageCount),
       align = ColumnAlign.Numeric
     ),
     Column[PartitionDto](
@@ -99,6 +115,26 @@ object PartitionTable {
       align = ColumnAlign.Numeric
     )
   )
+
+  /** The message count with its bar, or the em dash on its own.
+    *
+    * A leaderless partition has no count, and it must not be shown as `0`: the row would then read as an
+    * empty partition on a healthy topic, which is the opposite of what is happening. An absent count gets no
+    * bar either, for the reason the size column gets none at all.
+    */
+  private def messagesCell(row: PartitionDto, largest: Signal[Long]): Modifier[HtmlElement] = {
+    val testId = s"partition-row-${row.partition.value}-messages"
+    row.messageCount match {
+      case None => span(dataAttr("testid") := testId, DataTable.missing)
+      case Some(count) =>
+        MagnitudeBar(
+          value = Val(count.toString),
+          fraction = largest.map(max => Bytes.fraction(Some(count), max)),
+          inline = true,
+          testId = Some(testId)
+        )
+    }
+  }
 
   /** The broker leading this partition, or the word "offline" — never Kafka's node id `-1`. */
   private def leaderCell(row: PartitionDto): Modifier[HtmlElement] =

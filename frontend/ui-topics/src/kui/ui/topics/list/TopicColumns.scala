@@ -97,13 +97,7 @@ object TopicColumns {
       Column[TopicRow](
         id = TopicSortField.Size.wire,
         header = Messages.ColumnSize,
-        render = row =>
-          MagnitudeBar(
-            value = Val(Bytes.format(row.sizeBytes)),
-            fraction = largestSize.map(max => Bytes.fraction(row.sizeBytes, max)),
-            inline = true,
-            testId = Some(s"topic-row-${row.name}-size")
-          ),
+        render = row => sizeCell(row, largestSize),
         sortable = true,
         align = ColumnAlign.Numeric
       )
@@ -150,6 +144,26 @@ object TopicColumns {
         )
       )
     )
+
+  /** A size, with a bar only when there is a size.
+    *
+    * A bar drawn for an absent value is not a neutral thing to draw: an empty groove beside an em dash, on
+    * every row of the column, teaches the reader that the groove means nothing — and the bar is the whole
+    * reason the column is worth its width. The broker does not always report log-dir sizes, and until it does
+    * the honest rendering of "unknown" is the same em dash every other unknown figure gets, with no furniture
+    * around it pretending a measurement was taken.
+    */
+  private def sizeCell(row: TopicRow, largest: Signal[Long]): Modifier[HtmlElement] =
+    row.sizeBytes match {
+      case None => span(dataAttr("testid") := s"topic-row-${row.name}-size", DataTable.missing)
+      case Some(_) =>
+        MagnitudeBar(
+          value = Val(Bytes.format(row.sizeBytes)),
+          fraction = largest.map(max => Bytes.fraction(row.sizeBytes, max)),
+          inline = true,
+          testId = Some(s"topic-row-${row.name}-size")
+        )
+    }
 
   /** The cell to get right.
     *
