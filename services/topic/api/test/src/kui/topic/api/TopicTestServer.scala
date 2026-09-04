@@ -15,12 +15,13 @@ import sttp.client4.testing.BackendStub
 import sttp.tapir.server.stub4.TapirStubInterpreter
 
 import kui.cache.{Snapshot, SnapshotCell, SnapshotStatus}
-import kui.http.principal.PrincipalVerification
+import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.security.Principal
 import kui.kernel.error.{InfrastructureError, KuiError}
-import kui.kernel.{ClusterId, Secret, ServiceId, TopicName, UserName}
+import kui.kernel.{ClusterId, RoleName, Secret, ServiceId, TopicName, UserName}
 import kui.observability.Telemetry
 import kui.security.*
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 import kui.testkit.fakes.FakeStructuredLogger
 import kui.topic.application.*
 import kui.topic.domain.{
@@ -93,13 +94,14 @@ object TopicTestServer {
       method: String = "GET",
       audience: ServiceId = TopicApi.Id,
       validFor: FiniteDuration = 60.seconds,
-      subject: String = "alice"
+      subject: String = "alice",
+      roles: Set[RoleName] = Set.empty
   ): IO[SignedPrincipal] =
     IO.realTimeInstant.flatMap(now =>
       codec.sign(
         PrincipalClaims(
           subject = UserName.unsafe(subject),
-          roles = Set.empty,
+          roles = roles,
           kind = PrincipalKind.Session,
           sessionRef = None,
           issuedAt = now,
@@ -239,7 +241,12 @@ object TopicTestServer {
       partitionPlan: Either[KuiError, Planned[PartitionPlan]] = Left(NotConfigured),
       partitionsApplied: Either[KuiError, PartitionPlan] = Left(NotConfigured),
       deletionPlan: Either[KuiError, Planned[DeletionPlan]] = Left(NotConfigured),
-      deleted: Either[KuiError, DeletionPlan] = Left(NotConfigured)
+      deleted: Either[KuiError, DeletionPlan] = Left(NotConfigured),
+      // What this service allows on its own account, independently of whatever the gateway decided.
+      // It defaults to allowing everything so that a suite about topics is about topics; the suite that
+      // is about the guard passes a real policy.
+      rbac: RbacPolicy = RbacPolicy.Disabled,
+      clusterFlags: Map[ClusterId, ClusterFlags] = Map.empty
   ): Resource[IO, TopicTestServer] =
     OtelJavaTestkit.inMemory[IO]().evalMap { testkit =>
       for {
@@ -259,7 +266,12 @@ object TopicTestServer {
           Nil,
           codec,
           rejections,
-          logger
+          logger,
+          RbacGuard.fromPolicy[IO](
+            rbac,
+            cluster => clusterFlags.getOrElse(cluster, ClusterFlags.Writable),
+            logger
+          )
         )
 
         TopicTestServer(

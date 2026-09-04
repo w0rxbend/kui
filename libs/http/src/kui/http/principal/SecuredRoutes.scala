@@ -55,16 +55,42 @@ import kui.security.{Principal, PrincipalCodec, RequestDigest, RequestDigests, S
   * and it buys back the binding that stops a token minted for one call from being replayed with a different
   * body, which is the property that actually matters on a mutating endpoint.
   *
+  * ==Authentication, then authorization==
+  *
+  * Verifying the signature answers "who is this", and answering it is not the same as deciding what they may
+  * do. [[guard]] is the second question, run after the principal is known and before the endpoint's own logic
+  * — so a caller who reaches this service directly, bypassing the gateway entirely, is refused here on the
+  * same rule the gateway would have applied. A service that trusted its caller would be open to anything that
+  * can reach its port.
+  *
   * @param service
   *   this service's id, which is the `aud` claim a token must have been minted for. A token for `topic` is
   *   refused by `message`, and that is the check this parameter exists for.
+  * @param guard
+  *   this deployment's permission rules. It defaults to allowing everything so that a composition root that
+  *   has not yet been given a policy still compiles and runs — with the gateway as its only enforcement
+  *   point, which is a weaker deployment and is why every service's wiring passes a real one.
   */
 final class SecuredRoutes[F[_]: Async](
     principals: PrincipalCodec[F],
     service: ServiceId,
     rejections: Counter[F, Long],
-    logger: StructuredLogger[F]
+    logger: StructuredLogger[F],
+    guard: RbacGuard[F]
 ) {
+
+  /** The same, with no permission rules: the gateway becomes the only enforcement point.
+    *
+    * It exists so that a composition root which has not been given a policy yet still compiles, and it is
+    * spelled out as a constructor rather than hidden in a default argument so that `new SecuredRoutes(...)`
+    * with four arguments is a visible choice somebody can grep for.
+    */
+  def this(
+      principals: PrincipalCodec[F],
+      service: ServiceId,
+      rejections: Counter[F, Long],
+      logger: StructuredLogger[F]
+  ) = this(principals, service, rejections, logger, RbacGuard.allowAll[F])
 
   import SecuredRoutes.Failure
 
@@ -81,7 +107,9 @@ final class SecuredRoutes[F[_]: Async](
       }
       .serverLogic { case (principal, ctx) =>
         input =>
-          logic(principal)(input).flatMap {
+          authorized(endpoint, principal, ctx) {
+            logic(principal)(input)
+          }.flatMap {
             case Right(value) => value.asRight[Failure].pure[F]
             case Left(error) => SecuredRoutes.failure[F](error, ctx).map(_.asLeft[O])
           }
@@ -109,7 +137,9 @@ final class SecuredRoutes[F[_]: Async](
       }
       .serverLogic { case (principal, ctx) =>
         input =>
-          logic(principal)(ctx)(input).flatMap {
+          authorized(endpoint, principal, ctx) {
+            logic(principal)(ctx)(input)
+          }.flatMap {
             case Right(value) => value.asRight[Failure].pure[F]
             case Left(error) => SecuredRoutes.failure[F](error, ctx).map(_.asLeft[O])
           }
@@ -144,12 +174,27 @@ final class SecuredRoutes[F[_]: Async](
           PrincipalVerification.verify[F](principals, service, logger, rejections)(token, bound).flatMap {
             case Left(error) => SecuredRoutes.failure[F](error, bound).map(_.asLeft[O])
             case Right(principal) =>
-              logic(principal)(input).flatMap {
+              authorized(endpoint, principal, bound) {
+                logic(principal)(input)
+              }.flatMap {
                 case Right(value) => value.asRight[Failure].pure[F]
                 case Left(error) => SecuredRoutes.failure[F](error, bound).map(_.asLeft[O])
               }
           }
       }
+
+  /** The permission check, run between "who is this" and "do the work".
+    *
+    * It short-circuits: the endpoint's logic is a by-name parameter and is never evaluated for a refused
+    * call, so a denied request costs this service exactly one decision over data it already had.
+    */
+  private def authorized[O](endpoint: Endpoint[?, ?, ?, ?, ?], principal: Principal, ctx: RequestContext)(
+      logic: => F[Either[KuiError, O]]
+  ): F[Either[KuiError, O]] =
+    guard.authorize(principal, endpoint, ctx.digest.path).flatMap {
+      case Right(_) => logic
+      case Left(refusal) => refusal.asLeft[O].pure[F]
+    }
 }
 
 object SecuredRoutes {

@@ -16,6 +16,7 @@ import sttp.tapir.server.interceptor.Interceptor
 
 import kui.cache.CacheMetrics
 import kui.config.ClusterConfig
+import kui.http.principal.RbacGuard
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
@@ -34,6 +35,7 @@ import kui.topic.application.{
   TopicPlanToken
 }
 import kui.topic.domain.ClockPort
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 import kui.topic.infrastructure.{
   ConfiguredClusterProfiles,
   KafkaTopicAdmin,
@@ -75,6 +77,10 @@ object TopicWiring {
     *   the configured clusters, from `kui.clusters[]`. In the all-in-one deployment this is the same list the
     *   cluster service was given, read once from the same file — see [[ConfiguredClusterProfiles]] for why
     *   this shape does not go through the HTTP profile client.
+    * @param rbac
+    *   the deployment's roles. This service re-runs the same decision the gateway already took, from the
+    *   principal the gateway signed, because the gateway is a door and not a wall: anything that can reach
+    *   this port could otherwise call it with no permissions at all.
     * @param scrapeInterval
     *   how often each cluster's topic list is refreshed in the background. There is no TTL: a snapshot older
     *   than this is shown and marked stale, never withheld.
@@ -84,6 +90,7 @@ object TopicWiring {
     */
   def make[F[_]: {Async, Parallel, Files}](
       clusters: List[ClusterConfig],
+      rbac: RbacPolicy,
       scrapeInterval: FiniteDuration,
       internalPrefix: String,
       cursorKey: Option[Secret[String]],
@@ -130,6 +137,15 @@ object TopicWiring {
       // service out of rotation whenever a broker was slow to answer, which is exactly the coupling the
       // snapshot exists to break.
       readiness = List.empty[ReadinessCheck[F]]
+
+      // The permission check this service runs for itself, over the same declaration on the same
+      // endpoints the gateway read. Read-only comes from the very `kui.clusters[]` entries above, so a
+      // read-only cluster is refused here whether or not the request came through the gateway.
+      permissions = RbacGuard.fromPolicy[F](
+        rbac,
+        cluster => ClusterFlags(clusters.find(_.id == cluster).exists(_.readOnly)),
+        logger
+      )
     } yield TopicServer(
       routes = TopicApi
         .routes[F](
@@ -141,7 +157,8 @@ object TopicWiring {
           readiness,
           principals,
           rejections,
-          logger
+          logger,
+          permissions
         ),
       interceptors = interceptors,
       readiness = readiness,

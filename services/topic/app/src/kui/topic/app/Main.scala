@@ -38,6 +38,7 @@ object Main extends IOApp {
         TopicWiring
           .make[IO](
             config.clusters,
+            config.rbac,
             config.topics.refreshInterval,
             config.topics.internalPrefix,
             config.streaming.cursorKey,

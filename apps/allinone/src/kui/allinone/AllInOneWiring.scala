@@ -10,7 +10,7 @@ import org.typelevel.log4cats.StructuredLogger
 
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
-import kui.config.{ClusterConfig, ConsumersConfig, StreamingConfig, TopicsConfig}
+import kui.config.{ClusterConfig, ConsumersConfig, StreamingConfig, TopicsConfig, UrlPolicy}
 import kui.consumer.api.ConsumerApi
 import kui.consumer.app.ConsumerWiring
 import kui.gateway.api.InfoRoutes
@@ -19,6 +19,8 @@ import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.kernel.ServiceId
 import kui.message.api.MessageApi
 import kui.message.app.MessageWiring
+import kui.schema.api.SchemaApi
+import kui.schema.app.SchemaWiring
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 import kui.topic.api.TopicApi
@@ -138,7 +140,8 @@ object AllInOneWiring {
     * which milestone's services are actually in this binary. [[services]] must agree with it, and
     * `AllInOneWiringSuite` asserts that it does rather than leaving the two to drift.
     */
-  val Services: List[ServiceId] = List(ClusterApi.Id, ConsumerApi.Id, MessageApi.Id, TopicApi.Id)
+  val Services: List[ServiceId] =
+    List(ClusterApi.Id, ConsumerApi.Id, MessageApi.Id, SchemaApi.Id, TopicApi.Id)
 
   /** Every KUI service, wired in this process and reachable in memory.
     *
@@ -171,6 +174,7 @@ object AllInOneWiring {
       topicService <- TopicWiring
         .make[F](
           clusters,
+          rbac,
           topics.refreshInterval,
           topics.internalPrefix,
           streaming.cursorKey,
@@ -199,6 +203,24 @@ object AllInOneWiring {
       // Kafka consumer when somebody browses, streams what was asked for, and closes it again. So
       // there is no interval to configure here and nothing for a broker outage to make stale.
       messageService <- MessageWiring.make[F](clusters, streaming.cursorKey, telemetry, principals, logger)
+      // The schema service, which is the first one that may have nothing to do. A deployment where no
+      // cluster configures `schemaRegistry` still wires it, still serves its routes and still reports
+      // every cluster as not_configured — because "this deployment has no registry" is an answer the
+      // browser needs in order to hide the feature, and a service left out of the process altogether
+      // would instead look like a service that is down.
+      //
+      // Its URL policy comes from the process environment, exactly as the configuration loader's does:
+      // a registry at `http://schema-registry:8081` is the ordinary arrangement inside a Compose
+      // network, and a stricter policy here than the one that accepted the address would mean a
+      // registry KUI logged at startup and could never call.
+      schemaEnvironment <- Resource.eval(Async[F].delay(sys.env))
+      schemaService <- SchemaWiring.make[F](
+        clusters,
+        UrlPolicy.fromEnv(schemaEnvironment),
+        telemetry,
+        principals,
+        logger
+      )
     } yield ServiceClients.of[F](
       List[ServiceClient[F]](
         InProcessServiceClient.make[F](
@@ -223,6 +245,12 @@ object AllInOneWiring {
           MessageApi.Id,
           messageService.routes,
           messageService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          SchemaApi.Id,
+          schemaService.routes,
+          schemaService.interceptors,
           principals
         )
       )

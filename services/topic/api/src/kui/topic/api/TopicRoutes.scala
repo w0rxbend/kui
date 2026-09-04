@@ -15,6 +15,7 @@ import kui.topic.application.*
 import kui.topic.contract.dto.*
 import kui.topic.contract.{TopicEndpoints, TopicListParams}
 import kui.topic.domain.{TopicError, TopicSnapshot}
+import kui.http.principal.RbacGuard
 
 /** The five endpoints, bound to use cases.
   *
@@ -48,9 +49,10 @@ object TopicRoutes {
       config: TopicConfigUseCase[F],
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
-      logger: StructuredLogger[F]
+      logger: StructuredLogger[F],
+      guard: RbacGuard[F]
   ): List[ServerEndpoint[Any, F]] = {
-    val secured = TopicApi.Securing[F](principals, rejections, logger)
+    val secured = TopicApi.Securing[F](principals, rejections, logger, guard)
 
     List(
       listTopics(snapshots, secured),
