@@ -155,6 +155,7 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
       for {
         _ <- built.admin.set(_.copy(logDirs = Left(unreachable)))
         result <- built.brokers.logDirs(prod.id, broker1)
+        calls <- built.admin.callsFor(prod.id)
       } yield result match {
         case Right(view) =>
           assertEquals(view.dirs.size, 1, "the snapshot's directories answer instead")
@@ -165,7 +166,7 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
             },
             s"a fallback read is stale whatever the snapshot says, got ${view.freshness}"
           )
-        case Left(error) => fail(s"the page must still render: $error")
+        case Left(error) => fail(s"the page must still render: $error (admin calls: $calls)")
       }
     }
   }

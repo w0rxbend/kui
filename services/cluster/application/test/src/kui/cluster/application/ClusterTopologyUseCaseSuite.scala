@@ -228,7 +228,11 @@ final class ClusterTopologyUseCaseSuite extends munit.CatsEffectSuite {
     // that overlap, and against an instant fake twenty sequential presses really are twenty calls.
     val scenario = ClusterRig.resource(List(prod), delay = SlowAdmin).use { rig =>
       for {
-        _ <- IO.sleep(SlowAdmin * 2)
+        // `settled` and not a sleep: the first refresh is started by the registry on a background
+        // fiber, so "long enough" is not a duration. Resetting the call log while that first
+        // refresh is still in flight is what made this test occasionally see zero calls — the
+        // twenty presses deduplicated against a refresh whose record had just been erased.
+        _ <- ClusterRig.settled(rig)
         _ <- rig.admin.reset
         results <- List.fill(20)(rig.topology.forceRefresh(prod.id)).parSequence
         _ <- IO.sleep(SlowAdmin * 2)

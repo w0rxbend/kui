@@ -75,6 +75,10 @@ object ClusterRig {
     * exactly the flake this helper exists to remove.
     */
   def settled(rig: ClusterRig): IO[Unit] = {
+    // The budget is one virtual (or real) minute rather than a second: a suite that deliberately
+    // makes the admin port take ten seconds per call still has to be able to reach a first
+    // snapshot, and polling stops the moment the cells are ready, so a healthy rig pays nothing
+    // for the headroom.
     def ready: IO[Boolean] =
       rig.registry.refs.flatMap { refs =>
         refs.traverse { ref =>
@@ -85,13 +89,22 @@ object ClusterRig {
         }
       }.map(_.forall(identity))
 
+    // Giving up quietly would turn "the snapshot was never loaded" into a confusing assertion
+    // failure somewhere else in the suite, minutes of reading away from the cause. It fails here,
+    // saying what it waited for, instead.
     def attempt(remaining: Int): IO[Unit] =
       ready.flatMap { settled =>
-        if settled || remaining <= 0 then IO.unit
+        if settled then IO.unit
+        else if remaining <= 0 then
+          IO.raiseError(
+            new AssertionError(
+              "the snapshot cells were still initializing after 60 seconds; the rig never settled"
+            )
+          )
         else IO.sleep(1.millisecond) >> attempt(remaining - 1)
       }
 
-    attempt(1000)
+    attempt(60000)
   }
 
   /** Retries `read` until `holds` is true, or gives up after a bounded number of attempts.
