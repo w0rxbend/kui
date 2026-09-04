@@ -82,7 +82,20 @@ final class BrowseSession(
 
     // The connection state is the stream's own; it is mirrored into the progress record so that the status
     // line reads one value rather than combining two signals that can disagree for a tick.
-    val connections = handle.connection.changes.map(state => progressVar.update(_.copy(connection = state)))
+    //
+    // A `Closed` state also releases the handle. `running` is "is there a handle", and the button reads
+    // Stop while it is true — so without this a browse that ended by itself, which is what every bounded
+    // browse does the moment it has read its limit, left the button saying Stop for ever. The status line
+    // said "Finished" beside a button offering to stop the thing that had finished, and there was no way
+    // back to Read short of reloading the page. The handle is already closed by then; dropping the
+    // reference is all that is left to do, and `stop()` on an already-closed handle is a no-op anyway.
+    val connections = handle.connection.changes.map { state =>
+      progressVar.update(_.copy(connection = state))
+      state match {
+        case SseConnection.Closed(_) => handleVar.update(_.filterNot(_ eq handle))
+        case SseConnection.Open | SseConnection.Connecting | SseConnection.Reconnecting(_) => ()
+      }
+    }
 
     val events = handle.events.map {
       case Right(BrowseEvent.Record(message)) =>
