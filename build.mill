@@ -1320,6 +1320,34 @@ object services extends Module {
     }
   }
 
+  /** The Topic Catalogue context (`docs/domain/context-map.md`): what topics exist on a cluster, what
+    * shape they have, and how they are configured. Read-only in M2.
+    *
+    * It is the first KUI service that is not the cluster service and still needs to talk to Kafka,
+    * which is why `services.cluster.client` exists and why rule A11 was written in the same
+    * milestone: this service learns how to connect to a cluster over the cluster service's
+    * `/internal/v1` profile contract, and it may see that service's `contract` and `client` modules
+    * and nothing else.
+    *
+    * The layers that hold behaviour are added by the tasks that have something to put in them, for
+    * the same reason M0 gave for the cluster service: an empty module is an invitation to put
+    * something in it.
+    */
+  object topic extends Module {
+
+    /** Business rules and the ports they are stated in terms of. Rule A1 allows it `libs/kernel`
+      * and cats-core and nothing else; `KuiPureModule` additionally forbids `var` here.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+  }
+
   /** The one process a browser ever talks to (ADR-004 §3).
     *
     * The gateway owns no domain and holds no Kafka client. It is edge concerns only: the header policy, the
