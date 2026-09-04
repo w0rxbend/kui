@@ -61,6 +61,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* The display face carries headings, and headings are `h1`-`h6` — not the nine hand-picked rules
+ * that happened to name the token. Set once here, so a new page gets the right face by writing a
+ * heading rather than by remembering a declaration. The weight is left to the browser's own bold,
+ * which is the display weight; the tighter leading is what stops a two-line heading reading as two
+ * separate lines of text. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--kui-font-family-display, system-ui, sans-serif);
+  line-height: var(--kui-font-line-height-tight, 1.25);
+}
+
 /* Form controls are the one part of HTML that does not inherit typography from its ancestors. */
 input,
 button,
