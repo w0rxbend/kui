@@ -87,15 +87,15 @@ final class PurgeTokenSuite extends munit.CatsEffectSuite {
   }
 
   test("somethingThatIsNotATokenAtAllIsRefusedRatherThanCrashing") {
-    List("", ".", "not-base64.not-base64", "a.b.c").traverseCase { raw =>
-      tokens.verify(cluster, topic, raw, later).map(verified => assert(verified.isLeft, raw))
-    }
-  }
+    // A codec that parses before it verifies is one an attacker can drive with a payload they never had to
+    // sign; a codec that throws on rubbish is one a stray request turns into a 500.
+    val rubbish = List("", ".", "not-base64.not-base64", "a.b.c")
 
-  extension [A](values: List[A])
-    /** Runs a check over every value, sequentially. Written out rather than pulled from cats' syntax so this
-      * suite depends on nothing but the effect it is already using.
-      */
-    private def traverseCase(check: A => IO[Unit]): IO[Unit] =
-      values.foldLeft(IO.unit)((acc, value) => acc.flatMap(_ => check(value)))
+    rubbish
+      .foldLeft(IO.unit)((checked, raw) =>
+        checked.flatMap(_ =>
+          tokens.verify(cluster, topic, raw, later).map(verified => assert(verified.isLeft, raw))
+        )
+      )
+  }
 }
