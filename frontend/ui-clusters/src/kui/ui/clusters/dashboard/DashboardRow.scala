@@ -49,6 +49,15 @@ final case class DashboardRow(
     offlinePartitions: Option[Int],
     underReplicatedPartitions: Option[Int],
     diskUsageBytes: Option[Long],
+    /** How many topics the cluster holds, internal ones included, from the topic service. `None` when this
+      * deployment has no topic service or that service could not answer for this cluster.
+      */
+    topicCount: Option[Long],
+    /** Every partition of every topic. `None` when the topic service could not answer *or* when the cluster
+      * has more topics than the gateway summed — see `TopicTotalsDto`. Never a partial sum.
+      */
+    partitionCount: Option[Int],
+    consumerGroupCount: Option[Long],
     fetchedAt: Option[Instant]
 ) {
 
@@ -82,7 +91,18 @@ object DashboardRow {
     // `toOption.toList.flatten`: the *outer* section says whether the cluster service answered at all.
     // When it did not, there are no rows — the overlay above the table is what tells the user why, and
     // inventing rows here would put made-up clusters on a screen.
-    response.clusters.toOption.toList.flatten.map(_.cluster).flatMap(row)
+    response.clusters.toOption.toList.flatten.flatMap(entry =>
+      row(entry.cluster).map(
+        _.copy(
+          // The topic and consumer figures arrive in their own sections and fail on their own, so they are
+          // read separately from the cluster's summary and left absent when their section is anything but
+          // `Ok` or `Stale`. A dead consumer service costs this table one column, not a row.
+          topicCount = entry.topics.toOption.map(_.topicCount),
+          partitionCount = entry.topics.toOption.flatMap(_.partitionCount),
+          consumerGroupCount = entry.consumerGroups.toOption.map(_.groupCount)
+        )
+      )
+    )
 
   private def row(dto: ClusterRowDto): Option[DashboardRow] =
     dto.summary match {
@@ -102,6 +122,9 @@ object DashboardRow {
             offlinePartitions = data.offlinePartitionCount,
             underReplicatedPartitions = data.underReplicatedPartitionCount,
             diskUsageBytes = data.totalDiskUsageBytes,
+            topicCount = None,
+            partitionCount = None,
+            consumerGroupCount = None,
             fetchedAt = Some(fetchedAt)
           )
         )
@@ -122,6 +145,9 @@ object DashboardRow {
             offlinePartitions = data.offlinePartitionCount,
             underReplicatedPartitions = data.underReplicatedPartitionCount,
             diskUsageBytes = data.totalDiskUsageBytes,
+            topicCount = None,
+            partitionCount = None,
+            consumerGroupCount = None,
             fetchedAt = Some(fetchedAt)
           )
         )
@@ -148,6 +174,9 @@ object DashboardRow {
       offlinePartitions = None,
       underReplicatedPartitions = None,
       diskUsageBytes = None,
+      topicCount = None,
+      partitionCount = None,
+      consumerGroupCount = None,
       fetchedAt = None
     )
 

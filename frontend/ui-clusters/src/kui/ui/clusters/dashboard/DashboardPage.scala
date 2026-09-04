@@ -223,16 +223,12 @@ object DashboardPage {
       case "status" => Some("" -> DashboardRow.statusOrder(row.status).toDouble)
       case "version" => row.version.map(_ -> 0.0)
       case "brokers" => row.brokerCount.map("" -> _.toDouble)
-      case "partitions" => partitionTotal(row).map("" -> _.toDouble)
+      case "partitions" => row.partitionCount.map("" -> _.toDouble)
+      case "topics" => row.topicCount.map("" -> _.toDouble)
+      case "groups" => row.consumerGroupCount.map("" -> _.toDouble)
       case "urp" => row.underReplicatedPartitions.map("" -> _.toDouble)
       case "disk" => row.diskUsageBytes.map("" -> _.toDouble)
       case _ => None
-    }
-
-  private def partitionTotal(row: DashboardRow): Option[Int] =
-    (row.onlinePartitions, row.offlinePartitions) match {
-      case (None, None) => None
-      case (online, offline) => Some(online.getOrElse(0) + offline.getOrElse(0))
     }
 
   private def columns(
@@ -290,9 +286,11 @@ object DashboardPage {
         header = Messages.ColumnPartitions,
         sortable = true,
         align = ColumnAlign.Numeric,
-        // Always `—` in M1: the counts need a `describeTopics` sweep, which is the topic service's job. The
-        // column exists so that filling it later is a data change and not a layout change.
-        render = _ => DataTable.missing
+        // Filled from M4's dashboard aggregation: the gateway asks the topic service for each cluster's
+        // topics and sums their partitions. Absent — never zero — when that service could not answer, or
+        // when the cluster holds more topics than one page could sum, because a partial sum is a number
+        // that looks exact and is not.
+        render = row => row.partitionCount.fold(DataTable.missing)(_.toString)
       ),
       Column(
         id = "urp",
@@ -318,8 +316,18 @@ object DashboardPage {
       Column(
         id = "topics",
         header = Messages.ColumnTopics,
-        // Always `—`, honestly, until the topic service exists. No tooltip promising a date.
-        render = _ => DataTable.missing
+        sortable = true,
+        align = ColumnAlign.Numeric,
+        render = row => row.topicCount.fold(DataTable.missing)(_.toString)
+      ),
+      Column(
+        id = "groups",
+        header = Messages.ColumnConsumerGroups,
+        sortable = true,
+        align = ColumnAlign.Numeric,
+        // Its own column and its own absence, because the consumer service fails independently of the
+        // topic service: one dead service must cost this table one column and not two.
+        render = row => row.consumerGroupCount.fold(DataTable.missing)(_.toString)
       )
     )
 

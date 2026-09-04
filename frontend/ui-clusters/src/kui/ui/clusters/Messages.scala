@@ -41,6 +41,8 @@ object Messages {
 
   val ColumnDisk: String = "Disk"
 
+  val ColumnConsumerGroups: String = "Consumer groups"
+
   val ColumnTopics: String = "Topics"
 
   val BrokersTitle: String = "Brokers"
