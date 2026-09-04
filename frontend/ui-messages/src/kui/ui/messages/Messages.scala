@@ -59,6 +59,11 @@ object Messages {
 
   val Read: String = "Read"
   val Stop: String = "Stop"
+  val Pause: String = "Pause"
+  val Resume: String = "Resume"
+  val PauseHint: String =
+    "Hold new records back without closing the stream. Nothing is lost: what arrives while paused is " +
+      "shown the moment you resume."
   val TryAgain: String = "Try again"
 
   // --- The status line -------------------------------------------------------------------------
@@ -69,6 +74,13 @@ object Messages {
 
   /** The count is the one number that says whether a filter matched nothing or the topic is empty. */
   def delivered(records: Int): String = if records == 1 then "1 record" else s"$records records"
+
+  /** What a paused tail says about the records waiting behind the pause.
+    *
+    * It is on the status line so that a paused screen reads as paused rather than as a stream that stopped
+    * for a reason nobody can see.
+    */
+  def waiting(records: Int): String = if records == 1 then "1 record waiting" else s"$records records waiting"
 
   def scanned(records: Long): String =
     if records == 1L then "1 record read from Kafka" else s"$records records read from Kafka"

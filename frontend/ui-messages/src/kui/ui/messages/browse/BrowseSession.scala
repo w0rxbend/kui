@@ -54,6 +54,25 @@ final class BrowseSession(
   private val progressVar: Var[BrowseProgress] = Var(BrowseSession.Idle)
   private val handleVar: Var[Option[SseHandle[BrowseEvent]]] = Var(None)
 
+  /** Whether new records are being held back rather than shown.
+    *
+    * Pausing is not stopping, and on a tail the difference is the whole point. A busy topic redraws the table
+    * faster than a person can read one row, so the moment somebody sees something interesting the row they
+    * are looking at is gone. Stopping would answer that by closing the stream — and then the records produced
+    * while they read are lost, because a tail has no way back to them. Pausing keeps the stream open and the
+    * consumer reading, and simply queues what arrives until they are ready for it.
+    */
+  private val pausedVar: Var[Boolean] = Var(false)
+
+  /** What has arrived since the pause, newest first, capped like the table itself.
+    *
+    * The cap is the same one and for the same reason: a paused tail on a busy topic is exactly the shape that
+    * grows without bound, and a tab that dies while nobody is looking at it is the worst version of that
+    * failure. Past the cap the oldest held record is dropped, which is what the table would have done to it
+    * anyway once it was released.
+    */
+  private val heldVar: Var[List[MessageDto]] = Var(Nil)
+
   /** Where the last finished browse stopped, as the server signed it.
     *
     * Held here and nowhere else. The browser cannot compute the next offsets — forward and backward
@@ -80,6 +99,13 @@ final class BrowseSession(
   val progress: Signal[BrowseProgress] = progressVar.signal
 
   val running: Signal[Boolean] = handleVar.signal.map(_.isDefined)
+
+  val paused: Signal[Boolean] = pausedVar.signal
+
+  /** How many records are waiting to be shown. Zero unless paused, and on the status line so that a paused
+    * screen says how far behind it is rather than looking like a stream that died.
+    */
+  val held: Signal[Int] = heldVar.signal.map(_.size)
 
   /** Whether there is a next page to ask for.
     *
@@ -116,6 +142,9 @@ final class BrowseSession(
 
   private def run(query: BrowseQuery, keepRows: Boolean): EventStream[Unit] = {
     stop()
+    // A new browse is a new question, so it starts unpaused and holding nothing. Carrying a pause across a
+    // Read would leave the user pressing a button that appears to do nothing at all.
+    setPaused(false)
     if !keepRows then rowsVar.set(Nil)
     lastQuery = Some(query.copy(cursor = None))
     // The cursor from the *previous* page is spent the moment this one starts. Leaving it in place would
@@ -153,7 +182,11 @@ final class BrowseSession(
 
     val events = handle.events.map {
       case Right(BrowseEvent.Record(message)) =>
-        rowsVar.update(current => (message :: current).take(BrowseSession.MaxRows))
+        // The count moves even while paused, because it counts what the *stream* delivered. A paused
+        // screen that also stopped counting would be indistinguishable from a stream that had stalled,
+        // which is the one thing the pause must not be mistaken for.
+        if pausedVar.now() then heldVar.update(current => (message :: current).take(BrowseSession.MaxRows))
+        else rowsVar.update(current => (message :: current).take(BrowseSession.MaxRows))
         progressVar.update(progress => progress.copy(records = progress.records + 1, phase = None))
       case Right(BrowseEvent.Phase(phase)) => progressVar.update(_.copy(phase = Some(phase.name)))
       case Right(BrowseEvent.Consumed(consumed)) => progressVar.update(_.copy(consumed = Some(consumed)))
@@ -165,12 +198,31 @@ final class BrowseSession(
     EventStream.merge(events, connections)
   }
 
+  /** Holds new records back, or lets the held ones through.
+    *
+    * Releasing prepends what was held, newest first, which puts the table back exactly where it would have
+    * been had the pause never happened — the pause changes when rows appear, never which ones or in what
+    * order.
+    */
+  def setPaused(on: Boolean): Unit = {
+    pausedVar.set(on)
+    if !on then {
+      val waiting = heldVar.now()
+      heldVar.set(Nil)
+      if waiting.nonEmpty then rowsVar.update(current => (waiting ++ current).take(BrowseSession.MaxRows))
+    }
+  }
+
   /** Stops the browse and releases the server's consumer. Idempotent, because unmount and the Stop button can
     * both reach it.
     */
   def stop(): Unit = {
     handleVar.now().foreach(_.close())
     handleVar.set(None)
+    // Whatever was held is shown rather than discarded. Those records were delivered; throwing them away
+    // because the user pressed Stop would lose evidence that arrived before the press, and on a tail there
+    // is no second chance to read them.
+    setPaused(false)
   }
 
   /** Forgets the continuation, for a screen that is about to browse something else. */

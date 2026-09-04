@@ -97,7 +97,8 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
   private def request(
       limit: Int,
       filter: Option[String] = None,
-      of: ClusterId = cluster
+      of: ClusterId = cluster,
+      live: Boolean = false
   ): BrowseRequest =
     BrowseRequest
       .of(
@@ -112,7 +113,7 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
         valueSerde = None,
         stringFilter = filter,
         filter = None,
-        live = false
+        live = live
       )
       .getOrElse(fail("the request under test is not a legal browse"))
 
@@ -250,6 +251,17 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
 
     events(useCase(records), request(10)).map(produced =>
       assertEquals(produced.lastOption, Some(BrowseEvent.Finished(BrowseEnd.Exhausted, None)))
+    )
+  }
+
+  test("a tail delivers past its limit, because a limit is a page size and a tail has no pages") {
+    // `limit` bounds a page; a tail is not paged, and the bound that keeps a tail from growing without
+    // end is on the screen — the browser keeps the newest rows and drops the rest. A tail that stopped at
+    // `limit` would be a Follow control that worked once.
+    val records = List(raw(0, "one"), raw(1, "two"), raw(2, "three")).map(_.asRight[KuiError])
+
+    events(useCase(records), request(limit = 1, live = true)).map(produced =>
+      assertEquals(delivered(produced), List("one", "two", "three"))
     )
   }
 

@@ -332,6 +332,22 @@ object MessagesPage {
           if isRunning then session.stop() else pressed.writer.onNext(())
         }
       ),
+      // Pause is offered only while a tail is actually running, because it is meaningless anywhere else:
+      // a bounded browse ends on its own within seconds, and pausing one would hold back records the user
+      // is about to be shown anyway. A control that is present but inert is what this whole screen's
+      // Follow checkbox used to be.
+      child.maybe <-- running
+        .combineWith(query.map(_.live), session.paused)
+        .map((isRunning, isLive, isPaused) =>
+          Option.when(isRunning && isLive)(
+            Button(
+              label = Val(if isPaused then Messages.Resume else Messages.Pause),
+              onClick = Observer[Unit](_ => session.setPaused(!isPaused)),
+              variant = ButtonVariant.Secondary,
+              testId = Some("messages-pause")
+            ).amend(title := Messages.PauseHint)
+          )
+        ),
       // Publish is on the control bar and not beside Read, because it is the screen's other job rather
       // than a variant of its first one. Secondary, so that the primary action on a reading screen stays
       // the one that reads.
@@ -385,8 +401,8 @@ object MessagesPage {
       // `role="status"`, so a screen reader hears the browse finish rather than having to go and look.
       role := "status",
       child.text <-- session.progress
-        .combineWith(running)
-        .map((progress, isRunning) => summary(progress, isRunning)),
+        .combineWith(running, session.held)
+        .map((progress, isRunning, held) => summary(progress, isRunning, held)),
       // A phase is what the stream is doing before the first record arrives — resolving a profile, seeking —
       // and on a large or a sick cluster each of those takes seconds. Without it, a slow browse and a hung
       // one look identical.
@@ -396,7 +412,7 @@ object MessagesPage {
       )
     )
 
-  private[messages] def summary(progress: browse.BrowseProgress, running: Boolean): String = {
+  private[messages] def summary(progress: browse.BrowseProgress, running: Boolean, held: Int = 0): String = {
     val state =
       progress.connection match {
         case SseConnection.Connecting => Messages.Connecting
@@ -408,6 +424,9 @@ object MessagesPage {
     val counts =
       List(
         Option.when(progress.records > 0 || running)(Messages.delivered(progress.records)),
+        // Only when something is actually being held: a "0 records waiting" on every unpaused screen is
+        // noise, and the number is here to explain a table that has stopped moving on purpose.
+        Option.when(held > 0)(Messages.waiting(held)),
         progress.consumed.map(consumed => Messages.scanned(consumed.records))
       ).flatten
 

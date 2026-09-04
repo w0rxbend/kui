@@ -123,7 +123,7 @@ object BrowseRequest {
       cluster = cluster,
       topic = topic,
       seek = seek,
-      direction = direction.getOrElse(SeekMode.defaultDirection(seek)),
+      direction = directionFor(live, seek, direction),
       partitions = chosen,
       limit = clamp(limit, limits),
       isolation = isolation.getOrElse(IsolationLevel.Default),
@@ -133,6 +133,22 @@ object BrowseRequest {
       filter = filter,
       live = live
     )
+
+  /** Which way a browse reads, with tailing overruling everything.
+    *
+    * A tail runs *forwards*, always. This is not a preference: the default direction of `Latest` — which is
+    * the seek a tail uses, and the one the Follow control sets — is `Backward`, so a live browse that took
+    * the ordinary default would be asked to read backwards from the end of the log. Backwards from the end is
+    * an empty range, and the browse would deliver nothing and then wait forever for records it had already
+    * decided not to read. Forwards from the end is what "follow" means: nothing yet, and then everything that
+    * is written from now on.
+    *
+    * An explicit `direction=BACKWARD` sent alongside `live=true` is overruled rather than refused, because
+    * the two are not a contradiction the caller stated — `BrowseQuery` sends the seek and the flag, and the
+    * direction is the service's own inference from the seek.
+    */
+  def directionFor(live: Boolean, seek: SeekMode, direction: Option[Direction]): Direction =
+    if live then Direction.Forward else direction.getOrElse(SeekMode.defaultDirection(seek))
 
   /** The clamping table, in one place: absent, zero, negative and over-large all land on a legal page size.
     */

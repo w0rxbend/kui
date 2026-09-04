@@ -190,6 +190,65 @@ final class BrowseSessionSuite extends FunSuite {
     assertEquals(rig.opened.size, 1)
   }
 
+  private def held(browse: BrowseSession): Int = {
+    var latest = 0
+    browse.held.foreach(value => latest = value): Unit
+    latest
+  }
+
+  test("aPausedTailHoldsNewRecordsBackWithoutClosingTheStream") {
+    // Pausing is not stopping, and on a tail that is the whole distinction. Stopping would close the
+    // consumer, and the records produced while somebody reads the row that caught their eye would be gone
+    // with no way back to them.
+    val rig = new Rig(List(None))
+    rig.browse.start(BrowseQuery.Default).foreach(_ => ()): Unit
+    rig.deliver(0L)
+    rig.browse.setPaused(true)
+    rig.deliver(1L)
+    rig.deliver(2L)
+
+    assertEquals(rows(rig.browse).map(_.offset.value), List(0L))
+    assertEquals(held(rig.browse), 2)
+  }
+
+  test("resumingShowsWhatArrivedWhilePausedInTheOrderItArrived") {
+    val rig = new Rig(List(None))
+    rig.browse.start(BrowseQuery.Default).foreach(_ => ()): Unit
+    rig.deliver(0L)
+    rig.browse.setPaused(true)
+    rig.deliver(1L)
+    rig.deliver(2L)
+    rig.browse.setPaused(false)
+
+    // Newest first, which is the order the table is in: the pause changes when rows appear, never which
+    // ones or in what order.
+    assertEquals(rows(rig.browse).map(_.offset.value), List(2L, 1L, 0L))
+    assertEquals(held(rig.browse), 0)
+  }
+
+  test("stoppingAPausedTailShowsWhatWasHeldRatherThanDiscardingIt") {
+    // Those records were delivered before the press. Throwing them away because the user pressed Stop
+    // would lose evidence that had already arrived.
+    val rig = new Rig(List(None))
+    rig.browse.start(BrowseQuery.Default).foreach(_ => ()): Unit
+    rig.browse.setPaused(true)
+    rig.deliver(1L)
+    rig.browse.stop()
+
+    assertEquals(rows(rig.browse).map(_.offset.value), List(1L))
+  }
+
+  test("aNewBrowseStartsUnpaused") {
+    // Carrying a pause across a Read would leave the user pressing a button that appears to do nothing.
+    val rig = new Rig(List(None, None))
+    rig.browse.start(BrowseQuery.Default).foreach(_ => ()): Unit
+    rig.browse.setPaused(true)
+    rig.browse.start(BrowseQuery.Default).foreach(_ => ()): Unit
+    rig.deliver(5L)
+
+    assertEquals(rows(rig.browse).map(_.offset.value), List(5L))
+  }
+
   test("aBrowseIsRunningWhileItsStreamIsOpen") {
     val connection = Var[SseConnection](SseConnection.Connecting)
     val browse = started(connection, new EventBus, Var(0))

@@ -26,50 +26,67 @@ import kui.message.domain.TimestampType
   * before its stopping condition was ever consulted.
   */
 final class FakeBrowseConsumer(
-    log: Map[PartitionId, Vector[RawRecord]],
+    log: Ref[IO, Map[PartitionId, Vector[RawRecord]]],
     assigned: Ref[IO, List[PartitionId]],
     positions: Ref[IO, Map[PartitionId, Long]],
     polls: Ref[IO, Int]
 ) extends BrowseConsumer[IO] {
 
   def partitions(topic: TopicName): IO[Either[KuiError, List[PartitionId]]] =
-    log.keys.toList.sortBy(_.value).asRight[KuiError].pure[IO]
+    log.get.map(_.keys.toList.sortBy(_.value).asRight[KuiError])
 
   def beginningOffsets(
       topic: TopicName,
       partitions: List[PartitionId]
   ): IO[Either[KuiError, Map[PartitionId, Long]]] =
-    partitions
-      .map(partition => partition -> log.get(partition).flatMap(_.headOption).fold(0L)(_.offset.value))
-      .toMap
-      .asRight[KuiError]
-      .pure[IO]
+    log.get.map(current =>
+      partitions
+        .map(partition => partition -> current.get(partition).flatMap(_.headOption).fold(0L)(_.offset.value))
+        .toMap
+        .asRight[KuiError]
+    )
 
   def endOffsets(
       topic: TopicName,
       partitions: List[PartitionId]
   ): IO[Either[KuiError, Map[PartitionId, Long]]] =
-    partitions
-      .map(partition => partition -> log.get(partition).flatMap(_.lastOption).fold(0L)(_.offset.value + 1L))
-      .toMap
-      .asRight[KuiError]
-      .pure[IO]
+    log.get.map(current =>
+      partitions
+        .map(partition =>
+          partition -> current.get(partition).flatMap(_.lastOption).fold(0L)(_.offset.value + 1L)
+        )
+        .toMap
+        .asRight[KuiError]
+    )
 
   def offsetsForTimes(
       topic: TopicName,
       partitions: List[PartitionId],
       millis: Long
   ): IO[Either[KuiError, Map[PartitionId, Option[Long]]]] =
-    partitions
-      .map(partition =>
-        partition -> log
-          .getOrElse(partition, Vector.empty)
-          .find(_.timestamp.toEpochMilli >= millis)
-          .map(_.offset.value)
-      )
-      .toMap
-      .asRight[KuiError]
-      .pure[IO]
+    log.get.map(current =>
+      partitions
+        .map(partition =>
+          partition -> current
+            .getOrElse(partition, Vector.empty)
+            .find(_.timestamp.toEpochMilli >= millis)
+            .map(_.offset.value)
+        )
+        .toMap
+        .asRight[KuiError]
+    )
+
+  /** Writes one more record into the log, the way a producer would while a tail is open.
+    *
+    * This is what makes live tailing testable without a broker: a bounded browse reads a log that was already
+    * complete when it started, and a tail is defined by the records that arrive after that moment. Nothing
+    * else in this fake changes; the poll loop simply finds a record at a position that had nothing at it
+    * before.
+    */
+  def append(record: RawRecord): IO[Unit] =
+    log.update(current =>
+      current.updated(record.partition, current.getOrElse(record.partition, Vector.empty) :+ record)
+    )
 
   def assign(topic: TopicName, partitions: List[PartitionId]): IO[Either[KuiError, Unit]] =
     assigned.set(partitions).as(().asRight[KuiError])
@@ -84,9 +101,10 @@ final class FakeBrowseConsumer(
     polls.update(_ + 1) *> (for {
       partitions <- assigned.get
       current <- positions.get
+      records <- log.get
       next = partitions.collectFirst(Function.unlift { partition =>
         val at = current.getOrElse(partition, 0L)
-        log.getOrElse(partition, Vector.empty).find(_.offset.value == at).map(partition -> _)
+        records.getOrElse(partition, Vector.empty).find(_.offset.value == at).map(partition -> _)
       })
       _ <- next.traverse_((partition, record) => positions.update(_.updated(partition, record.offset.value + 1L)))
     } yield next.map(_._2).toList.asRight[KuiError])
@@ -119,6 +137,9 @@ object FakeBrowseConsumer {
     )
 
   def of(log: Map[PartitionId, Vector[RawRecord]]): IO[FakeBrowseConsumer] =
+    Ref.of[IO, Map[PartitionId, Vector[RawRecord]]](log).flatMap(of)
+
+  def of(log: Ref[IO, Map[PartitionId, Vector[RawRecord]]]): IO[FakeBrowseConsumer] =
     (Ref.of[IO, List[PartitionId]](Nil), Ref.of[IO, Map[PartitionId, Long]](Map.empty), Ref.of[IO, Int](0))
       .mapN(new FakeBrowseConsumer(log, _, _, _))
 
@@ -130,6 +151,21 @@ object FakeBrowseConsumer {
     */
   def opening(
       log: Map[PartitionId, Vector[RawRecord]],
+      closed: Ref[IO, Boolean]
+  ): (ClusterId, IsolationLevel) => Resource[IO, Either[KuiError, BrowseConsumer[IO]]] =
+    (_, _) =>
+      Resource
+        .make(of(log))(_ => closed.set(true))
+        .map(consumer => (consumer: BrowseConsumer[IO]).asRight[KuiError])
+
+  /** The same thing over a log the test can still write to after the browse has started.
+    *
+    * A live tail cannot be tested against a fixed log: the records it exists to deliver are the ones written
+    * while it is open. The `Ref` is the test's handle on the log, and every consumer this opens reads through
+    * it, so an append made at any point during the browse is visible to the next poll.
+    */
+  def openingGrowing(
+      log: Ref[IO, Map[PartitionId, Vector[RawRecord]]],
       closed: Ref[IO, Boolean]
   ): (ClusterId, IsolationLevel) => Resource[IO, Either[KuiError, BrowseConsumer[IO]]] =
     (_, _) =>

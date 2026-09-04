@@ -4,6 +4,7 @@ import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
 import cats.effect.kernel.{Deferred, Ref}
+import cats.syntax.all.*
 
 import kui.kernel.browse.{Direction, PollBudget, SeekMode}
 import kui.kernel.error.KuiError
@@ -31,11 +32,19 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
       BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
     )
 
+  private def growingSourceOver(
+      log: Ref[IO, Map[PartitionId, Vector[RawRecord]]],
+      closed: Ref[IO, Boolean],
+      tuning: BrowseTuning = BrowseTuning(pollTimeout = 1.milli, emptyPollsBeforeEnd = 0)
+  ): KafkaRecordSource[IO] =
+    new KafkaRecordSource[IO](FakeBrowseConsumer.openingGrowing(log, closed), tuning)
+
   private def request(
       seek: SeekMode,
       direction: Direction,
       limit: Int,
-      partitions: Option[Set[PartitionId]] = None
+      partitions: Option[Set[PartitionId]] = None,
+      live: Boolean = false
   ): BrowseRequest =
     BrowseRequest
       .of(
@@ -50,7 +59,7 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
         valueSerde = None,
         stringFilter = None,
         filter = None,
-        live = false
+        live = live
       )
       .getOrElse(fail("the request under test is not a legal browse"))
 
@@ -185,6 +194,105 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
   test("an empty topic is a finished browse with no records, not a failure") {
     browse(Map(FakeBrowseConsumer.partition(0, 0)), request(SeekMode.Latest, Direction.Backward, 10))
       .map(records => assertEquals(records, Nil))
+  }
+
+  // ----------------------------------------------------------------------------------------- live
+
+  /** A tail over a log the test writes to while it is open.
+    *
+    * `expected` records are taken and the stream is then let go, because a tail does not end by itself — that
+    * is the property under test, and a `compile.toList` over one would never return. The writes are made from
+    * a second fiber after a short pause so that they land *after* the browse has planned its windows, which
+    * is the only arrangement that distinguishes a tail from an ordinary forward read of a log that already
+    * contained them.
+    */
+  private def tail(
+      initial: Map[PartitionId, Vector[RawRecord]],
+      writes: List[RawRecord],
+      of: BrowseRequest,
+      expected: Int,
+      over: PollBudget = budget
+  ): IO[List[(Int, Long)]] =
+    for {
+      log <- Ref.of[IO, Map[PartitionId, Vector[RawRecord]]](initial)
+      closed <- Ref.of[IO, Boolean](false)
+      producing = IO.sleep(50.millis) *> writes.traverse_(record =>
+        log.update(current =>
+          current.updated(record.partition, current.getOrElse(record.partition, Vector.empty) :+ record)
+        )
+      )
+      reading = growingSourceOver(log, closed).browse(of, over).take(expected.toLong).compile.toList
+      records <- IO.both(reading, producing).map(_._1)
+    } yield offsets(records)
+
+  test("a live browse stays open past the end of the log and delivers what is written next") {
+    // The defect this stands for: a tail that plans its window against the end of the log as it stood
+    // when the browse started reads an empty range, delivers nothing and stops — which is exactly what
+    // the Follow live control did. Two records are written 50 ms after the browse begins.
+    val initial = Map(FakeBrowseConsumer.partition(0, 3))
+    val later = List(FakeBrowseConsumer.record(0, 3L), FakeBrowseConsumer.record(0, 4L))
+
+    tail(initial, later, request(SeekMode.Latest, Direction.Forward, limit = 10, live = true), expected = 2)
+      .map(seen => assertEquals(seen, List((0, 3L), (0, 4L))))
+  }
+
+  test("a live browse does not stop at the caller's limit") {
+    // `limit` is a page size, and a tail has no pages. A tail that honoured it would deliver one record
+    // and close, which on screen is a Follow control that works once.
+    val initial = Map(FakeBrowseConsumer.partition(0, 1))
+    val later = List(1L, 2L, 3L).map(FakeBrowseConsumer.record(0, _))
+
+    tail(initial, later, request(SeekMode.Latest, Direction.Forward, limit = 1, live = true), expected = 3)
+      .map(seen => assertEquals(seen, List((0, 1L), (0, 2L), (0, 3L))))
+  }
+
+  test("a live browse does not end when several polls in a row come back empty") {
+    // `emptyPollsBeforeEnd` is 0 in this suite, so a bounded read gives up on the very first empty poll.
+    // A quiet topic is the ordinary state of a tail rather than the end of one, and the 50 ms before the
+    // first write is many empty polls at a 1 ms poll timeout.
+    val initial = Map(FakeBrowseConsumer.partition(0, 0))
+
+    tail(
+      initial,
+      List(FakeBrowseConsumer.record(0, 0L)),
+      request(SeekMode.Beginning, Direction.Forward, limit = 10, live = true),
+      expected = 1
+    ).map(seen => assertEquals(seen, List((0, 0L))))
+  }
+
+  test("a live browse outlives the budget's deadline") {
+    // The deadline is the last line of defence for a read that scans without matching. A tail is the one
+    // read whose purpose is to still be open later, and closing it after a minute would end the stream
+    // for a reason nothing on the screen could explain.
+    val brief = PollBudget.unsafe(10_000, 1L << 20, 20.millis)
+    val initial = Map(FakeBrowseConsumer.partition(0, 1))
+
+    tail(
+      initial,
+      List(FakeBrowseConsumer.record(0, 1L)),
+      request(SeekMode.Latest, Direction.Forward, limit = 10, live = true),
+      expected = 1,
+      over = brief
+    ).map(seen => assertEquals(seen, List((0, 1L))))
+  }
+
+  test("cancelling a live browse closes the Kafka consumer") {
+    // The one way a tail ends. Everything else about it is arranged so that it does not stop, which makes
+    // this the only release path its consumer has.
+    for {
+      log <- Ref.of[IO, Map[PartitionId, Vector[RawRecord]]](Map(FakeBrowseConsumer.partition(0, 1)))
+      closed <- Ref.of[IO, Boolean](false)
+      started <- Deferred[IO, Unit]
+      fiber <- growingSourceOver(log, closed)
+        .browse(request(SeekMode.Beginning, Direction.Forward, limit = 10, live = true), budget)
+        .evalTap(_ => started.complete(()).void)
+        .compile
+        .drain
+        .start
+      _ <- started.get
+      _ <- fiber.cancel
+      wasClosed <- closed.get
+    } yield assert(wasClosed, "the consumer was still open after the tail was cancelled")
   }
 
   // --------------------------------------------------------------------------------- cancellation

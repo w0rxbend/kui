@@ -85,6 +85,19 @@ final class BrowseRequestSuite extends ScalaCheckSuite {
     assert(build(seek = SeekMode.AtOffset(Offset.unsafe(42)), live = false).isRight)
   }
 
+  property("aTailAlwaysReadsForwards") {
+    // The default direction of `Latest` — the seek a tail uses — is backwards, and backwards from the end
+    // of the log is an empty range. A tail that took the ordinary default would deliver nothing and then
+    // wait forever, which is precisely what the Follow live control did.
+    forAll(Gen.oneOf(SeekMode.Latest, SeekMode.Beginning), Gen.option(Gen.oneOf(Direction.All))) {
+      (seek, asked) =>
+        build(seek = seek, direction = asked, live = true).map(_.direction) match {
+          case Right(direction) => assertEquals(direction, Direction.Forward)
+          case Left(error) => fail(s"unexpected rejection: $error")
+        }
+    }
+  }
+
   test("partitionSubsetMustBeNonEmptyWhenPresent") {
     assert(build(partitions = Some(Set.empty)).isLeft)
     assert(build(partitions = None).isRight)

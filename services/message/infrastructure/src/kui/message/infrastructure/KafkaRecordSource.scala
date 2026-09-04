@@ -80,7 +80,13 @@ final class KafkaRecordSource[F[_]: Temporal](
       // The budget's deadline, applied to the whole read. It is the last line of defence rather than the
       // first: `limit` normally ends a browse long before this does, and a browse that hits this one has
       // been scanning without matching, which is exactly when a user needs it to stop by itself.
-      .interruptAfter(budget.deadline)
+      //
+      // A tail is exempt, and it is the one read that has to be. Its whole purpose is to still be open in
+      // ten minutes' time; a sixty-second deadline would close it just as the user stopped watching it, and
+      // the screen would show a stream that had ended for no reason anybody could name. What ends a tail is
+      // the user — the Stop button, or the tab closing — and that arrives as a cancellation, which closes
+      // the consumer through the same `Resource` this deadline would have.
+      .through(stream => if request.live then stream else stream.interruptAfter(budget.deadline))
 
   // ------------------------------------------------------------------------------------ planning
 
@@ -105,6 +111,13 @@ final class KafkaRecordSource[F[_]: Temporal](
       val start = clamp(starts.getOrElse(partition, low), low, high)
 
       request.direction match {
+        // A tail has no upper bound, and that is the difference between it and every other read. An
+        // ordinary forward browse stops at `high`, the end of the log as it stood when the browse was
+        // planned. A tail wants precisely the records written *after* that moment, so its window runs to
+        // infinity — and it is emitted even when `start == high`, which is the normal case for a tail
+        // started from `Latest` on a quiet topic. Dropping that window is what made the Follow control
+        // deliver an immediately-empty stream.
+        case _ if request.live => Some(Window(partition, start, Long.MaxValue))
         // Forwards: from where the seek landed, up to the end of the log.
         case Direction.Forward => Option.when(start < high)(Window(partition, start, high))
         // Backwards: from the oldest record still held, up to — but not including — where the seek
@@ -180,16 +193,24 @@ final class KafkaRecordSource[F[_]: Temporal](
       .eval(assignAndSeek(consumer, request.topic, windows.map(window => window.partition -> window.low)))
       .flatMap {
         case Left(error) => Stream.emit(Left(error))
-        case Right(_) => polling(consumer, windows, request.limit)
+        case Right(_) => polling(consumer, windows, request.limit, request.live)
       }
 
   /** The poll loop, as a stream, so a record reaches the browser as it arrives rather than when the last one
     * does.
+    *
+    * @param live
+    *   a tail. Every one of the three reasons an ordinary browse stops is a reason a tail must not: it has
+    *   read its `limit` (a tail has no total, only a rate), several polls in a row came back empty (a quiet
+    *   topic is the ordinary state of a tail, not the end of one), and every partition reached its window's
+    *   end (a tail's window has no end). So a tail stops for exactly one reason — the caller went away — and
+    *   that arrives as cancellation rather than as a decision made here.
     */
   private def polling(
       consumer: BrowseConsumer[F],
       windows: List[Window],
-      limit: Int
+      limit: Int,
+      live: Boolean
   ): Stream[F, Either[KuiError, RawRecord]] = {
     val bounds = windows.map(window => window.partition -> window.high).toMap
 
@@ -199,13 +220,15 @@ final class KafkaRecordSource[F[_]: Temporal](
           case Left(error) => (List(Left(error)), None)
           case Right(polled) =>
             val next = progress.after(polled)
-            val room = limit - progress.emitted
+            val room = if live then polled.size else limit - progress.emitted
             val kept = polled.filter(inside(bounds)).take(math.max(0, room))
             val advanced = next.copy(emitted = next.emitted + kept.size)
             val done =
-              advanced.emitted >= limit ||
-                advanced.empties > tuning.emptyPollsBeforeEnd ||
-                reachedEnd(advanced, bounds)
+              !live && (
+                advanced.emitted >= limit ||
+                  advanced.empties > tuning.emptyPollsBeforeEnd ||
+                  reachedEnd(advanced, bounds)
+              )
 
             (kept.map(_.asRight[KuiError]), Option.unless(done)(advanced))
         }

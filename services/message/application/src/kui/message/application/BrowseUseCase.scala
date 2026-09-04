@@ -230,7 +230,12 @@ object BrowseUseCase {
           Step(
             events =
               if matched then Chunk.singleton(BrowseEvent.Record(record)) ++ progress else Chunk.empty,
-            more = next.delivered < request.limit.toLong
+            // A tail has no total. `limit` is a page size, and a page is a thing a bounded browse has; a
+            // browse that is still open after an hour has delivered whatever was written in that hour and
+            // is not finished. The bound on a tail is on the *screen* — `BrowseSession.MaxRows` keeps the
+            // newest five hundred rows and drops the rest — because that is where an unbounded stream can
+            // be bounded without deciding on the user's behalf that they have watched enough.
+            more = request.live || next.delivered < request.limit.toLong
           )
         }
 
