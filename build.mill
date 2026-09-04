@@ -1069,7 +1069,12 @@ object frontend extends Module {
     // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
     def moduleDir = super.moduleDir / os.up / "ui-topics"
 
-    def moduleDeps = Seq(uiKernel, services.topic.contract.js)
+    // `services.gateway.contract.js` alongside the topic service's own, for the reason `uiClusters`
+    // records: the topic *overview* is a gateway aggregation and answers with the gateway's type,
+    // while the other five endpoints are proxied through untouched and keep the service's. Decoding
+    // an aggregation against the owning service's type is what made the M1 dashboard render "No
+    // clusters yet" against a working broker.
+    def moduleDeps = Seq(uiKernel, services.topic.contract.js, services.gateway.contract.js)
 
     object test extends ScalaJSTests with KuiJsDomTests {
       def moduleDeps = super.moduleDeps ++ Seq(services.topic.contract.js.test)
