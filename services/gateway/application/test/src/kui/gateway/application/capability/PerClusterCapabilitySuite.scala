@@ -54,6 +54,21 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
       )
     } yield (registry, signals)
 
+  /** Reads until the answer satisfies `holds`, or gives up after five (virtual) seconds.
+    *
+    * Returns the last value read either way, so a test that gives up still fails on its own
+    * assertion with the state it actually saw, rather than on a timeout that says nothing.
+    */
+  private def eventually[A](read: IO[A])(holds: A => Boolean): IO[A] = {
+    def attempt(remaining: Int): IO[A] =
+      read.flatMap(value =>
+        if holds(value) || remaining <= 0 then IO.pure(value)
+        else IO.sleep(1.millisecond) *> attempt(remaining - 1)
+      )
+
+    attempt(5000)
+  }
+
   private def afterOnePoll[A](
       clusters: Map[ClusterId, ClusterCapability],
       health: ServiceHealth = ServiceHealth.Healthy
@@ -189,10 +204,12 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
       for {
         before <- registry.state(key("b"))
         _ <- signals.update(key("a"))(_.copy(serviceReport = Some(capability("unavailable"))))
-        // One second, not the registry's default debounce: this fixture's registry debounces in a
-        // millisecond, and sleeping ten seconds would let the next poll overwrite what was just written.
-        _ <- IO.sleep(1.second)
-        a <- registry.state(key("a"))
+        // Polled rather than slept for. The registry applies a debounced write on a fiber of its own,
+        // so "has cluster a moved yet" is a condition and not a duration; a fixed one-second sleep
+        // failed about one run in ten. The window stays well inside the ten-second poll interval,
+        // because the next poll would overwrite what was just written and the test would then be
+        // asserting on the poller rather than on the update.
+        a <- eventually(registry.state(key("a")))(_ != CapabilityState.Available)
         b <- registry.state(key("b"))
       } yield {
         assertEquals(before, CapabilityState.Available)
@@ -214,7 +231,18 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
     TestControl.executeEmbed(
       StubServiceClient[IO](cluster, ServiceHealth.Healthy, Map.empty).flatMap { stub =>
         fixture(stub).use { (registry, signals) =>
-          registry.changes.take(1).compile.toList.background.use { collected =>
+          // Filtered on the key this test is about rather than taking whichever event arrives first.
+          // The registry also publishes service-level entries — whose `key.cluster` is `None` — and
+          // whether one of those lands before the per-cluster change is a scheduling detail, not a
+          // property of the product. Taking the first event made this suite fail about one run in
+          // twenty on a `None` it was never asking about.
+          registry.changes
+            .filter(_.entry.key.cluster.exists(_.value == "prod-eu"))
+            .take(1)
+            .compile
+            .toList
+            .background
+            .use { collected =>
             for {
               _ <- IO.sleep(1.second)
               _ <- signals.update(key("prod-eu"))(
