@@ -112,8 +112,8 @@ object AuthConfigSection {
   /** A deployment that asks for a mode it has not configured is told at start-up rather than at the first
     * login attempt.
     *
-    * `type: form` with no users is the mistake that matters: KUI starts, the browser shows a login screen, and
-    * no password on earth works. There is no bootstrap account invented in its place, because an account
+    * `type: form` with no users is the mistake that matters: KUI starts, the browser shows a login screen,
+    * and no password on earth works. There is no bootstrap account invented in its place, because an account
     * invented by a server and printed into a log is an account somebody will still be able to use in six
     * months.
     */
@@ -168,7 +168,11 @@ object AuthConfigSection {
       case None => none[OidcDraft].validNel
       case Some(issuer) =>
         (
-          ConfigReader.required(lookup, s"$OidcPrefix.clientId", "the client id registered with the provider"),
+          ConfigReader.required(
+            lookup,
+            s"$OidcPrefix.clientId",
+            "the client id registered with the provider"
+          ),
           ConfigReader
             .required(
               lookup,

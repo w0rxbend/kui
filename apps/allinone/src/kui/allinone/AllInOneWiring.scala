@@ -22,16 +22,16 @@ import kui.config.{
 import kui.consumer.api.ConsumerApi
 import kui.consumer.app.ConsumerWiring
 import kui.gateway.api.InfoRoutes
-import kui.identity.api.IdentityApi
-import kui.identity.app.IdentityWiring
 import kui.gateway.app.{GatewayServer, GatewayWiring}
 import kui.gateway.application.client.{ServiceClient, ServiceClients}
+import kui.identity.api.IdentityApi
+import kui.identity.app.IdentityWiring
 import kui.kernel.ServiceId
 import kui.message.api.MessageApi
 import kui.message.app.MessageWiring
+import kui.observability.Telemetry
 import kui.schema.api.SchemaApi
 import kui.schema.app.SchemaWiring
-import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 import kui.security.rbac.RbacPolicy
 import kui.topic.api.TopicApi

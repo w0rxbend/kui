@@ -42,8 +42,8 @@ import kui.http.health.ReadinessCheck
 import kui.http.{BasePath, Cors, ErrorInterceptor}
 import kui.kernel.ServiceId
 import kui.observability.{KuiInterceptors, Telemetry}
-import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
 import kui.security.rbac.ClusterFlags
+import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
 
 /** Everything a gateway needs in order to be served, with no listener started.
   *
