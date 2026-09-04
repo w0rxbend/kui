@@ -1,48 +1,58 @@
 # KUI status
 
-**Date:** 2026-09-04 (integration pass)
-**Phase:** M0 through M4 are implemented, integrated and used from a browser against a real broker.
-M3 now reads *and* publishes — publish, republish and copy-to-another-topic all work — and M4's
-offset-reset wizard is on screen and has been driven end to end. What M3 still lacks is purge
-(`MS-008`); nothing else on the delivery bar is outstanding.
-**Repository:** M0 through M4 on `main`; every gate the CI runs is green, `./mill __.test` included
-(8226/8226).
-**Read next:** `docs/DELIVERY.md`, whose 2026-09-04 integration section is the honest account of
-what works, what does not, and what was never tested.
+**Date:** 2026-09-04 (full audit; nine auditors, one area each, against the tree at `HEAD` and the
+two running deployments).
+**Phase:** M0–M4 are delivered and usable. M5 landed early in part (topic administration, purge).
+M6, M7 and M8 are **not started**: there is no authentication, no authorization, no schema
+registry, no Kafka Connect, no ksqlDB, no ACLs, no quotas and no broker metrics.
+**Position:** **53 of 177 in-scope capabilities are delivered — 30%.** The remaining 124 are
+enumerated, sized and ordered in `docs/BACKLOG.md`.
+**Read next:** `docs/FEATURE_MATRIX.md` (every state re-set by the audit) and `docs/BACKLOG.md`
+(what is left, in waves, with a recommended next build).
 
-**Topic administration (M5's `MT-001`…`MT-004`) is implemented and used.** KUI can create a topic
-with its partitions, replication factor and configuration; change a setting or put it back to the
-broker's default; add partitions; and delete a topic. Every one of the four is refused on a cluster
-configured `readOnly` before any Kafka client is touched and writes an audit record either way
-(ADR-047), and the two that cannot be undone — the partition increase and the delete — are confirmed
-against a server-computed plan and applied against a signed token naming exactly what was shown
-(ADR-045). The deletion plan reports how many records are about to be lost and whether the cluster's
-`auto.create.topics.enable` will recreate the topic by itself. All of it was driven against a real
-broker, over the API and in a browser; see `docs/DELIVERY.md`'s 2026-09-04 topic-administration
-section.
+## What this replaces
 
-**Purge (`MS-008`) is built too, so no M3 row is outstanding.** Emptying a topic is the operation
-ADR-045 was written for, and it is the clearest demonstration of why: the plan resolves each
-partition's end offset, and the apply deletes up to *those* offsets — so records produced between
-the preview and the confirmation survive, which was checked against a broker rather than reasoned
-about. The plan also says the two things operators are most often surprised by: that committed
-consumer offsets are not moved, and that Kafka refuses to delete records from a topic that is only
-compacted.
+The previous header of this file said M0–M4 were complete, that no delivery-bar item was
+outstanding, and that `./mill __.test` was green at 8226/8226. Three corrections:
 
-**Delivery-bar point 6 (fault isolation) is now met in full.** The consumer-group list carries the
-same freshness envelope the topic list does, so a cluster that has stopped answering produces a
-`stale` section rather than a bare 200 of lag figures that have quietly stopped moving. Verified
-against a real broker that was stopped mid-session: the API answered
-`{"groups":{"status":"stale","reason":"UPSTREAM_UNAVAILABLE",…}}` with its rows intact, and the
-screen showed `Stale: the cluster is not answering` over a dimmed table.
+1. **8226 is Mill's task count, not a test count.** Summing every cached suite result gives about
+   **3 915 test cases** across 60 modules. The M1 section of this file gets this right; later
+   passes lost the distinction.
+2. **CI does not run those suites.** The `test` job runs three commands over two modules. The
+   repository has 47 test source trees, and no service suite runs in CI at all. A change to any
+   service can land red.
+3. **Two headline claims were false.** Live tailing (`MS-005`) was reported `COMPLETE`; the server
+   validates the `live` flag and no code consumes it — a record produced into an open stream never
+   arrives, and the `Follow live` checkbox is inert. The user menu (`AU-005`) was reported
+   `COMPLETE`; it is a theme toggle, with no logout control and no timezone control anywhere.
 
-All four defects the previous section left open are closed: error text no longer shows wire codes to
-users (the code moves to the badge tooltip and the correlation line), the topic page's Consumers tab
-comes from the static feature registrations so it no longer depends on browsing history, the flaky
-`UpstreamClientSuite` case was diagnosed as a subscription race in `UpstreamClient` and fixed in the
-product, and static assets now carry a strong `ETag` answered `304`. Running the product also turned
-up a fifth: the gateway never registered a source for the topic overview's `consumerGroups` section,
-so the Consumers panel said the deployment did not track consumer groups whatever was deployed.
+## The real position, by area
+
+| Area | Delivered | Honest summary |
+| --- | --- | --- |
+| Clusters, brokers, store | Most of M1 | Registry, stats with a real freshness envelope, broker list and configs, log dirs, encrypted Kafka-backed store. Kafka **version is never detected** (the release table stops at Kafka 4.0). The KRaft quorum is fetched every 30 s and rendered nowhere. Cluster CRUD is written and deliberately unreachable. |
+| Topics, partitions | M2 **and most of M5** | List, detail, config, partitions, create, alter, delete, partition increase and purge all work from a browser, plan-gated and audited. Recreate, clone, replication-factor change, analysis, active producers, CSV and batch actions do not exist. |
+| Messages | M3 read and write, minus tailing | Browse with every seek mode, cursor paging, contains filter, produce, resend and purge all work. **Tailing, the CEL filter engine, the JSON grid, event tracking, masking and every schema-aware serde are not reachable** — most of them are built and wired into nothing. |
+| Consumer groups | M4 | List, detail, lag polling and the six-mode reset wizard work. Delete-group and delete-offsets are served through the public API with **no control in the interface**. Lag pace is measured and never displayed. |
+| Auth, RBAC, audit, masking | Almost nothing | CSRF, sessions and the signed gateway→service principal work. **There is no authentication of any kind** (`authType` accepts only `disabled`), no role model, no permission gating, and the masking engine has no caller. Read-only mode and the console audit sink do work. |
+| Schema Registry, Connect, ksqlDB | Nothing | No service, no microfrontend, no config key, no container to point at. The topic page's slots for them exist and correctly report `not_configured`. |
+| ACLs, quotas, metrics | Nothing | No security or metrics service. ACL and quota capability flags are probed correctly and then discarded before they reach the wire. KUI's own telemetry is partly wired and has never been scraped. |
+| Deployment and DX | Strong, with holes | Three reproducible images, a one-command quickstart and a three-cluster demo that all work. But only `cluster` has a `Main` — **`topic`, `message` and `consumer` cannot be deployed separately**, so the README's "one process or eleven" is false today; `deployment/compose/smoke.sh` fails on a clean run against an endpoint deleted in M1. |
+| Tests and debt | Honest but thin | Two suites run against a real broker, both owned by `cluster` and `config`. The topic, message and consumer adapters are asserted only against fakes, and the port contract that was meant to bind fake to adapter is run by the fake alone. Three promised test fixtures (TOP-007, MSG-042, GRP-036) were never built. Three architecture rules (A12–A14) were allocated by an Accepted ADR and never implemented. M3 and M4 shipped 88 tasks with **no Implementation Reports at all**. |
+
+## What to build next
+
+`docs/BACKLOG.md` argues it in full. The short version: **authentication and authorization
+(Wave 1) and Schema Registry serdes (Wave 2)**, ahead of everything the roadmap put before them.
+Nobody can expose this product to a team without a login, and a Kafka interface that cannot read
+Avro cannot read most production traffic. The audit's own finding that the CEL filter, masking and
+tracking engines are built and unwired makes Wave 2 cheaper than its milestone number suggests.
+
+---
+
+**Everything below this line is the historical log**, kept as written. It records what was believed
+at each pass, including the two claims the 2026-09-04 audit overturned. Where it disagrees with the
+sections above, the sections above are current.
 
 ## Grooming progress
 
@@ -74,9 +84,13 @@ Reference clones: `research/REFERENCES.md` (Kafbat `fa485c2`, Provectus `83b5a60
 
 ## Product artifacts
 
-- `docs/FEATURE_MATRIX.md` — 183 rows (150 from research + 33 KUI-only), all P0/P1 rows
-  assigned to a milestone; 21 CEO decisions recorded (DR-1 … DR-21); states: 172
-  `RESEARCHING`, 7 `DEFERRED`, 4 `REJECTED`, 0 `DESIGNED` (no ADR is Accepted yet).
+- `docs/FEATURE_MATRIX.md` — 188 capability rows (150 from research + 38 KUI-only), all P0/P1
+  rows assigned to a milestone; 21 CEO decisions recorded (DR-1 … DR-21). States after the
+  2026-09-04 audit: 53 `COMPLETE`, 12 `REVIEW`, 2 `TESTING`, 16 `IMPLEMENTING`, 93 `RESEARCHING`,
+  1 `BLOCKED`, 7 `DEFERRED`, 4 `REJECTED`. (The historical counts below are left as written; they
+  record what was believed at the time.)
+- `docs/BACKLOG.md` — the 124 undelivered capabilities, grouped into six waves with sizes,
+  dependencies and the shared edges that must land before parallel work starts.
 - `docs/ROADMAP.md` — M0..M9 with goals, scope by feature ID, non-goals, executable exit
   criteria, risks, services and microfrontends introduced, parity checkpoint (Kafbat parity and
   union superset both at the end of M8; message-exploration superset already at M3).
