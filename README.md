@@ -39,8 +39,10 @@ uses, so a change to a contract cannot silently break one side.
 **It streams instead of accumulating.** Browsing records, following a query, watching metrics: all
 of it flows from Kafka to the browser without buffering whole topics in memory.
 
-**It can be one process or eleven.** The same modules compose into a single JVM for local use, or
-into separate containers for production. No code changes between the two.
+**It can be one process or five.** The same modules compose into a single JVM for local use, or
+into a gateway and four services in separate containers for production. No code changes between the
+two: `deployment/compose/docker-compose.yml` runs the second shape, and
+`deployment/compose/smoke.sh` stops one of its containers and shows the other four carrying on.
 
 ## Quick start
 
@@ -292,23 +294,28 @@ rather than saying "build failed". Every one of them is a command you can run yo
 | `compile` | Every module compiles, with warnings treated as errors | `./mill __.compile` |
 | `style` | Formatting and lint rules are clean | `./mill __.checkFormat` then `./mill __.fix --check` |
 | `architecture` | No module dependency breaks the layering rules of ADR-041 | `./mill checkArchitecture` |
-| `test` | Every unit, property and contract suite passes, on the JVM and in JavaScript | `./mill libs.kernel.jvm.test build-tests.test`, then `./mill libs.kernel.js.test`, then `./mill frontend.uiKernel.test` |
-| `frontend` | The frontend links with the optimising linker and has the bundle shape ADR-012 needs | `./mill frontend.__.fullLinkJS` then `./mill frontend.uiKernel.checkBundleShape` |
+| `generated` | The committed OpenAPI documents and error-code table still match the code they were generated from | `./mill __.openApiCheck` then `./mill docs.errorCodes --check` |
+| `test` | Every unit, property and contract suite passes, on the JVM and in JavaScript | `./scripts/run-tests.sh` |
+| `frontend` | The frontend links with the optimising linker and has the bundle shape ADR-012 needs | `./mill frontend.__.fullLinkJS` then `./mill frontend.uiShell.checkBundleShape` |
+| `e2e` | The five container images build, the Compose stack survives one service dying, and a real browser can drive the product | `./mill e2e.test` |
 
 Two things about the `test` stage are worth knowing before you are surprised by them.
 
 It needs **Node** on your `PATH` (see the note on frontend tests above) and `jsdom` installed into a
 `node_modules` directory at the repository root. CI does both for you; a laptop does not.
 
-It is also three commands rather than the one `./mill __.test` PLAN §49 asks for. Running a Scala.js
-test module in the same Mill invocation as any other test module currently fails inside Mill's own
-test runner, for reasons that have nothing to do with this code — see B-003 in
-[BLOCKERS.md](BLOCKERS.md). Each module is green on its own, so the coverage is the same; the
-command list is just longer until that is fixed.
+It runs through `./scripts/run-tests.sh` rather than a list of Mill commands, and the reason is worth
+one paragraph. Mill's `.test` is a *command*, so `./mill a.test b.test` does not run two modules: it
+runs the first and hands `b.test` to the test framework as a name filter. The workflow used exactly
+that form, MUnit matched nothing, every suite was reported "ignored", and the step passed green
+having executed no tests at all. The script asks Mill which test modules exist, names them with
+selector syntax — `./mill '{a.test,b.test}'`, which really does run them all — and then counts
+`<testcase>` elements in the JUnit reports rather than trusting the number Mill prints at the end,
+which is a count of *build tasks* and roughly twice the number of tests. Today that is **4140 test
+cases across 57 modules**.
 
-Stages PLAN §49 lists that have no build task yet — integration tests, the OpenAPI diff, the Docker
-build, end-to-end — are deliberately not in the workflow. The task that creates each one adds its
-own job. A job that cannot fail is not a check.
+Stages PLAN §49 lists that have no build task yet are deliberately not in the workflow. The task that
+creates each one adds its own job. A job that cannot fail is not a check.
 
 Caching: `~/.cache/coursier`, `~/.cache/mill` and `out/` are cached, keyed on `build.mill`,
 `.mill-version` and `mill-build/build.mill`, so a dependency change invalidates the cache instead of

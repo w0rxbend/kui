@@ -1594,3 +1594,144 @@ the ones their messages describe, and one of this pass's own edits was committed
 `33c438a` and `656c036`. Nothing was lost and every gate below was run on the merged result, but the
 commit boundaries in that window do not correspond to the work their messages describe, and anybody
 bisecting through them should know it.
+
+---
+
+## Wave 0: CI that means something, three more processes, and per-partition disks — 2026-09-04
+
+Three items from `docs/BACKLOG.md`'s shared-edge wave: E7 (continuous integration), E5 (service
+entry points and images) and the contract half of E6 (log directories per partition).
+
+### E7 — the test job had been running zero tests
+
+The audit recorded that CI ran three commands over two of 47 test source trees. The truth was worse,
+and it is worth writing down because the mistake is easy to make again.
+
+`./mill libs.kernel.jvm.test build-tests.test` does not run two test modules. Mill's `.test` is a
+*command*, and a command takes arguments, so the second name was handed to MUnit as a filter naming
+which tests to run. MUnit matched nothing, reported every suite "ignored", and the step exited zero.
+That was the first of the three commands in the CI test job, and it executed **zero test cases**.
+The other two commands were single Scala.js modules and did run.
+
+The same mistake in the other order produced blocker B-003. `./mill libs.kernel.js.test
+build-tests.test` fails loudly — `UnsupportedOperationException: build-tests.test` — because the
+Scala.js test runner rejects an argument it cannot interpret, and that was recorded as a Mill defect
+that forced the three-command shape. It was never a Mill defect. Mill's way to name several modules
+is its selector syntax, `./mill '{a.test,b.test}'`, and with it every test module in this repository
+— JVM and Scala.js, in one invocation — runs and passes. B-003 is moved to Resolved.
+
+The second half of the problem was the number. `./mill __.test` finishes with something like
+`8226/8226, SUCCESS`, and that number was being read as a test count in `STATUS.md`. It is Mill's
+*task* count: compiles, dependency resolutions, Scala.js link steps. Reading it as tests overstated
+the suite by about a factor of two.
+
+`./scripts/run-tests.sh` fixes both. It asks Mill which test modules exist rather than carrying a
+list that would go stale silently, runs them with selector syntax, and counts `<testcase>` elements
+in the JUnit reports Mill writes. Observed:
+
+```
+$ ./scripts/run-tests.sh
+run-tests.sh: 60 test modules
+...
+8040/8040, SUCCESS] ./mill {apps.allinone.test,...,tools.errorCodes.test} 235s
+
+run-tests.sh: these modules wrote no report because they contain no test sources:
+  services.message.api.test
+  services.message.app.test
+  services.topic.app.test
+run-tests.sh: they count as 0 test cases. Either give them tests or delete the module.
+
+run-tests.sh: 60 modules (57 with tests), 4140 test cases, all passing.
+```
+
+**4140 test cases, not 8226 and not 3915.** Three declared test modules contain no sources at all;
+they are named rather than hidden, because "the suite is green" reads differently once you know that.
+
+Also in E7:
+
+- a new `generated` CI job runs `./mill __.openApiCheck` (the four services' documents plus the
+  merged one) and `./mill docs.errorCodes --check`. Both tasks existed; neither was a CI job, so a
+  stale generated document could reach `main`;
+- `deployment/compose/smoke.sh` is fixed and now runs in CI. It asserted `GET /api/v1/ping`, an M0
+  scaffold endpoint deleted in M1, so it failed on a clean run — and the root README tells new
+  contributors to run it. It asserts `GET /api/v1/clusters` instead, whose section status reads `ok`
+  only when the gateway really reached the cluster service;
+- the four shipped artifacts still documenting that endpoint were corrected.
+
+### E5 — the distributed deployment can now actually start
+
+`gateway` and `cluster` had a `main` and an image. `topic`, `message` and `consumer` could only run
+inside the all-in-one assembly, so the deployment shape the README, `ARCHITECTURE.md` and
+`deployment/compose` all describe could not be brought up, and fault isolation — the product's
+central design claim — could be demonstrated for one service out of four.
+
+`kui.http.ServiceMain` is the shared process shell: configuration, log format, principal codec,
+telemetry, wiring, listener, drain. It is shared rather than copied because its third step is a
+refusal — a service with no signing keys and no explicit development escape hatch must not start —
+and four copies of a refusal is four chances for one of them to start anyway. Two pieces the cluster
+service owned moved into `libs/http` with it: `ProcessPrincipalCodec` and `ProcessLoggerFactory`,
+with their tests. The cluster service's own `Main` is now 44 lines instead of 140.
+
+Then three `main`s, three `KuiImage`s, and a five-container compose topology. Verified by running it
+rather than by reading it:
+
+```
+$ ./deployment/compose/smoke.sh
+=== all five processes are up and the gateway can reach every service
+  cluster capability: available
+  topic capability: available
+  message capability: available
+  consumer capability: available
+  proxied cluster list: ok
+=== stopping kui-cluster: one real process dies
+=== the gateway survives it and says what is wrong
+  cluster capability: unavailable
+  topic capability: available
+  message capability: available
+  consumer capability: available
+=== starting kui-cluster again: recovery needs no intervention
+  cluster capability: available
+  proxied cluster list: ok
+=== PASSED
+```
+
+The three lines that say `available` while `cluster` is `unavailable` are the new thing. Until this
+commit there was no way to make that statement at all.
+
+The script also stopped reading `.entries[0]`. That index used to name the cluster service and,
+with four services registered, silently started naming a different one — a check that keeps passing
+while checking nothing, which is the same class of defect as E7's.
+
+Two smaller decisions worth recording. The three new services share one configuration file,
+`kui-service.yaml`, because they read the same settings; the cluster service keeps its own for the
+metadata-store section nobody else reads. And streaming cursors and plan tokens are signed with
+`KUI_CURSOR_KEY`, a separate variable from `KUI_PRINCIPAL_KEY`: the two protect different things, and
+sharing a value would mean rotating the identity key silently invalidated every open confirmation.
+
+**No client module was built.** The backlog's E5 row asked for two. They are not needed: the gateway
+turns each service's published endpoint value into an outbound request through `SttpServiceClient`,
+so a service's contract module *is* its client. The cluster service's `client` module exists for a
+different reason — other services fetch cluster profiles from it — and nothing else has that shape.
+
+### E6 — which topic is filling this disk
+
+`LogDirDto` carried a directory's path, error, size, free space, topic count and partition count, and
+no per-topic-partition entries, so four screens showed a dash where a size belongs. The cluster
+service's domain model has held the breakdown since M1; only the wire format threw it away.
+
+`LogDirDto.replicas` now carries it: topic, partition, `sizeBytes`, `offsetLag`, and `isFuture` —
+true while this is the incoming copy of a partition being moved onto the disk, which a consumer that
+sums every entry without checking would double-count. The service sorts biggest-first, because every
+client wants the same order and a truncated unsorted list would drop exactly the large partitions the
+page was opened to find. The field decodes as empty when absent, so an older response still decodes.
+
+No screen reads it yet. That is the second half of TD-017 and it belongs with `VirtualizedTable`
+(TD-018), which exists precisely for a table of thousands of rows.
+
+### One thing about how this pass was run
+
+Three other agents were committing to `main` throughout. Two full-suite runs were red on their
+in-flight work — `libs/security-core`'s new RBAC vocabulary and `libs/serde-confluent` — and one
+`__.checkFormat` and one `__.fix --check` still fail on frontend and e2e files this pass did not
+touch. Every result quoted above was observed on the merged working tree at the moment it is stated,
+and each commit here names only its own paths.

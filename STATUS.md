@@ -6,7 +6,15 @@ and M5's topic administration with them: create a topic, change a setting, add p
 and delete it, the last three confirmed against a server-computed plan and applied against a signed
 token. No row of the delivery bar is outstanding.
 **Repository:** on `main`; every gate the CI runs is green — `__.checkFormat`, `__.fix --check`,
-`checkArchitecture`, `__.openApiCheck`, `__.checkBundleShape` and `__.test`.
+`checkArchitecture`, `__.openApiCheck`, `docs.errorCodes --check`, `__.checkBundleShape` and
+`./scripts/run-tests.sh`.
+
+**Wave 0 progress (2026-09-04).** E7 (CI), E5 (three service processes and images) and the contract
+half of E6 (per-partition log directories) are done. E7 turned out to be the most important of the
+three: `./mill a.test b.test` hands `b.test` to `a.test` as a *test-name filter*, so the CI test
+job's first command had been running **zero** test cases while reporting green. Every suite now runs
+— 4140 cases across 57 modules — and the number CI reports is a count of test cases rather than of
+Mill build tasks.
 **Read next:** `docs/DELIVERY.md`, whose *closing integration pass* section is the honest account of
 what works, what does not, and what was never tested.
 
@@ -233,7 +241,9 @@ controller, 170.9 GiB, 83 in-sync replicas.
 
 ### Known problems that are not fixed
 
-- **No per-partition data on the log-directories tab** — `TECH_DEBT.md` TD-017 and TD-018.
+- **No per-partition data on the log-directories tab** — `TECH_DEBT.md` TD-017 and TD-018. The wire
+  half of TD-017 landed on 2026-09-04: `LogDirDto.replicas` now carries each topic-partition's size
+  and lag, sorted biggest-first. No screen reads it yet.
 - **No per-broker WARN rate limit** on the log-directory fallback — owed to CLDOM-006.
 - **`KafkaConfigStoreLiveSuite` is flaky when the whole repository's tests run at once.** It passes
   every time on its own (`./mill libs.config.test`) and failed in three of five full `./mill __.test`
@@ -316,7 +326,7 @@ pass found by driving the assembled product.
 ./mill __.checkFormat                      189/189, SUCCESS
 ./mill __.fix --check                    4164/4164, SUCCESS
 ./mill checkArchitecture                 129 modules, 10 rules, no layering violations
-./mill __.test                           8226/8226, SUCCESS  (243s)
+./scripts/run-tests.sh                   4140 test cases across 57 modules, all passing (235s)
 ./mill __.openApiCheck                   1307/1307, SUCCESS
 ./mill build-tests.test                    137/137, SUCCESS
 ./mill frontend.uiShell.checkBundleShape   4 feature modules split out, main.js 929,950 B of 1,500,000 B
