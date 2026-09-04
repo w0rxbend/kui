@@ -107,10 +107,20 @@
   vertical-align: middle;
 }
 
-/* The last row's rule would cut across the panel's rounded bottom edge. */
+/* The last row's rule would cut across the panel's rounded bottom edge.
+ *
+ * Only the outermost cells round. Rounding *every* cell in the row put a 24px arc on both bottom
+ * corners of all nine cells, so each pair of neighbours met in a cusp and the bottom edge of the
+ * table grew a row of spikes. The panel has two bottom corners, not eighteen. */
 .kui-table__body tr:last-child .kui-table__cell {
   border-bottom: 0;
+}
+
+.kui-table__body tr:last-child .kui-table__cell:first-child {
   border-bottom-left-radius: var(--kui-radius-xl);
+}
+
+.kui-table__body tr:last-child .kui-table__cell:last-child {
   border-bottom-right-radius: var(--kui-radius-xl);
 }
 
