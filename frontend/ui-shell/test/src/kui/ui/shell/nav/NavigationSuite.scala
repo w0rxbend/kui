@@ -252,6 +252,39 @@ class NavigationSuite extends FunSuite {
     }
   }
 
+  test("aClusterScopedEntryFollowsTheClusterWhenTheSwitcherChangesIt") {
+    // Found by driving a real browser: after choosing another cluster in the switcher, a sidebar
+    // entry still carried the address of the cluster that had just been left, so clicking it
+    // navigated to a page the user had not asked for.
+    //
+    // The cause was the keying of the entries. An entry's `href` and click handler are settled once,
+    // from the first value the element is given -- correct for whether it is a link at all, which is
+    // a permission decision that does not change while the page is open, and wrong for where it
+    // goes, which changes with the chosen cluster. Keyed on the entry's test id alone, the element
+    // was reused across a cluster change and kept the stale destination.
+    val chosen = Var(ClusterId.from("prod").toOption)
+    val sidebar =
+      Sidebar(
+        routerFor(List(scoped -> Val(FeatureState.Ready))),
+        Navigation.items(List(scoped -> Val(FeatureState.Ready)), chosen.signal),
+        "/ui"
+      )
+
+    mounted(sidebar) { root =>
+      def destination: String =
+        entryOf(root, "nav-topics").flatMap(entry => Option(entry.getAttribute("href"))).getOrElse("")
+
+      assert(destination.endsWith("/ui/clusters/prod/stub"), s"before the switch it linked to '$destination'")
+
+      chosen.set(ClusterId.from("secured").toOption)
+
+      assert(
+        destination.endsWith("/ui/clusters/secured/stub"),
+        s"after the switch it still linked to '$destination'"
+      )
+    }
+  }
+
   test("aFeatureThatIsNotASidebarDestinationIsNotDrawn") {
     val chosen = ClusterId.from("prod").toOption
     mounted(sidebarFor(hiddenFromSidebar -> Val(FeatureState.Ready))(cluster = chosen)) { root =>

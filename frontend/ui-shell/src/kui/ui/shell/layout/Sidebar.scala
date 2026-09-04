@@ -35,8 +35,10 @@ import kui.ui.shell.{Messages, ShellCss}
   * `children <-- items.map(...)` would throw every entry away and build new ones each time any capability
   * changed. That loses focus — a keyboard user tabbing through the navigation when a service goes down would
   * be dropped back to the top of the page — and it makes one service's outage rewrite the whole sidebar.
-  * `split` matches each item to its existing element by `testId` and hands that element the new value through
-  * a signal, so a state change updates exactly one entry's classes and tooltip and touches nothing else.
+  * `split` matches each item to its existing element by `testId` *and its destination*, and hands that
+  * element the new value through a signal, so a state change updates exactly one entry's classes and tooltip
+  * and touches nothing else. The destination is part of the key because it is one of the few things about an
+  * entry that is settled once rather than bound to the signal — see `split` below.
   */
 object Sidebar {
 
@@ -67,7 +69,20 @@ object Sidebar {
       switcher,
       ul(
         cls := ShellCss.SidebarList,
-        children <-- items.split(_.testId)((_, initial, item) => entry(router, initial, item))
+        // Keyed by the entry *and where it goes*, not by the entry alone.
+        //
+        // `entry` settles the `href` and the click handler once, from the first value it is given,
+        // because whether an entry is a link at all is decided by permission and that does not change
+        // while the page is open. Its destination does: every cluster-scoped entry points at
+        // `/ui/clusters/<the chosen cluster>/…`, and choosing a different cluster in the switcher
+        // changes it. Keyed on `testId` alone the element was reused across that change and kept the
+        // old cluster's address, so after switching clusters the sidebar's Topics link still went to
+        // the cluster you had just left — a navigation that lands on a page you did not ask for.
+        // Including the destination in the key rebuilds exactly those entries whose address changed
+        // and leaves the rest alone, which is what a state change must still not disturb.
+        children <-- items.split(item => (item.testId, item.page))((_, initial, item) =>
+          entry(router, initial, item)
+        )
       )
     )
 
