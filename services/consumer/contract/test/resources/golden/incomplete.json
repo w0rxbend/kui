@@ -1,0 +1,6 @@
+{
+  "membersKnown" : true,
+  "offsetsKnown" : true,
+  "endOffsetsKnown" : false,
+  "note" : "3 of 12 partitions have no leader, so their end offsets could not be read"
+}

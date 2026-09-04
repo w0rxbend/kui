@@ -1,0 +1,9 @@
+{
+  "groupId" : "billing-replay",
+  "topic" : "orders",
+  "partitions" : [
+    0,
+    1,
+    2
+  ]
+}

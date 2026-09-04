@@ -1,0 +1,29 @@
+{
+  "groupId" : "orders-indexer",
+  "topic" : "orders",
+  "target" : "OFFSET",
+  "partitions" : [
+    {
+      "partition" : 0,
+      "current" : 41200,
+      "proposed" : 42440,
+      "delta" : 1240
+    },
+    {
+      "partition" : 1,
+      "current" : null,
+      "proposed" : 0,
+      "delta" : null
+    }
+  ],
+  "warnings" : [
+    {
+      "kind" : "CLAMPED",
+      "partition" : 0,
+      "message" : "9000000 is past the end of partition 0; it was clamped to 42440"
+    }
+  ],
+  "noOp" : false,
+  "token" : "plan.v1.e30.4f6a9c",
+  "expiresAt" : "2026-09-04T09:20:00.000Z"
+}

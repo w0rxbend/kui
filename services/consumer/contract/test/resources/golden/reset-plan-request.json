@@ -1,0 +1,15 @@
+{
+  "topic" : "orders",
+  "partitions" : [
+    0,
+    1
+  ],
+  "target" : "OFFSET",
+  "timestamp" : null,
+  "offsets" : {
+    "0" : 42440,
+    "1" : 0
+  },
+  "shiftBy" : null,
+  "durationMs" : null
+}

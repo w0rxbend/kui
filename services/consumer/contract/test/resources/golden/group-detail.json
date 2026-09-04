@@ -1,0 +1,75 @@
+{
+  "groupId" : "orders-indexer",
+  "state" : "PREPARING_REBALANCE",
+  "protocol" : "CONSUMER",
+  "isSimple" : false,
+  "partitionAssignor" : "cooperative-sticky",
+  "coordinatorId" : 2,
+  "members" : [
+    {
+      "memberId" : "consumer-orders-indexer-1-6f1c",
+      "groupInstanceId" : "indexer-a",
+      "clientId" : "orders-indexer",
+      "host" : "/10.1.4.7",
+      "partitions" : [
+        "orders-0"
+      ],
+      "rebalancing" : true
+    }
+  ],
+  "topics" : [
+    {
+      "topic" : "orders",
+      "lag" : 1240,
+      "excludedPartitions" : 2,
+      "partitions" : [
+        {
+          "partition" : 0,
+          "committed" : 41200,
+          "begin" : 0,
+          "end" : 42440,
+          "lag" : 1240,
+          "anomalies" : [
+          ],
+          "memberId" : "consumer-orders-indexer-1-6f1c",
+          "host" : "/10.1.4.7"
+        },
+        {
+          "partition" : 1,
+          "committed" : null,
+          "begin" : 0,
+          "end" : 9001,
+          "lag" : null,
+          "anomalies" : [
+            "NO_COMMIT"
+          ],
+          "memberId" : "consumer-orders-indexer-2-9ab3",
+          "host" : "/10.1.4.8"
+        },
+        {
+          "partition" : 2,
+          "committed" : 51000,
+          "begin" : 0,
+          "end" : 50000,
+          "lag" : null,
+          "anomalies" : [
+            "COMMITTED_BEYOND_END"
+          ],
+          "memberId" : null,
+          "host" : null
+        }
+      ]
+    }
+  ],
+  "totalLag" : 1240,
+  "excludedPartitions" : 2,
+  "assignments" : {
+    "status" : "LAST_SEEN",
+    "observedAt" : "2026-09-04T09:14:30.000Z"
+  },
+  "observedAt" : "2026-09-04T09:15:00.000Z",
+  "stale" : {
+    "fetchedAt" : "2026-09-04T09:14:30.000Z",
+    "reason" : "UPSTREAM_TIMEOUT"
+  }
+}

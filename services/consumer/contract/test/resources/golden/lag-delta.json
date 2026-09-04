@@ -1,0 +1,24 @@
+{
+  "changed" : [
+    {
+      "groupId" : "orders-indexer",
+      "totalLag" : 980,
+      "pace" : 415.5,
+      "state" : "STABLE",
+      "members" : 3
+    },
+    {
+      "groupId" : "billing-replay",
+      "totalLag" : null,
+      "pace" : null,
+      "state" : "EMPTY",
+      "members" : 0
+    }
+  ],
+  "gone" : [
+    "retired-consumer"
+  ],
+  "token" : "v7:1a2b3c4d",
+  "nextPollMs" : 5000,
+  "full" : false
+}

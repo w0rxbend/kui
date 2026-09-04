@@ -52,6 +52,12 @@ object Versions {
   val fs2Kafka        = "4.0.0"
   val snappy          = "1.1.10.8"
   val lz4             = "1.11.2"
+  val caffeine        = "3.2.4"
+  // Held in one place because two unrelated libraries drag it in: `dev.cel` (which resolves 4.35.1
+  // on its own) and Confluent's Protobuf deserializer. They share a classpath in every `app`
+  // module, so KUI names the version rather than letting resolution pick.
+  val protobuf        = "4.36.1"
+  val cel             = "0.14.0"
   val nimbus          = "10.9.1"
   val bouncycastle    = "1.85"
   val munit           = "1.3.6"
@@ -599,16 +605,21 @@ object libs extends Module {
     }
   }
 
-  /** The one caching primitive M1 needs: a single value that is refreshed on a schedule and keeps
+  /** The two caching primitives of ADR-016: a single value that is refreshed on a schedule and keeps
     * answering while the refresh fails (ADR-016).
     *
-    * `BoundedCache`, ADR-016's other primitive, is deliberately absent: it arrives with its first
-    * consumer in M2/M3. A cache with no caller has no TTL policy to test against.
+    * `BoundedCache`, ADR-016's other primitive, arrived in M3 with its first callers: the compiled
+    * CEL programs of `libs/filter` and the Schema-Registry schemas of `libs/serde-confluent`. A
+    * cache with no caller has no TTL policy to test against, which is why it waited.
     */
   object cache extends KuiPureModule with KuiJvmModule {
     def moduleDeps = Seq(kernel.jvm, observability)
 
     def mvnDeps = Seq(
+      // Caffeine backs `BoundedCache` (ADR-016). It is a Java library with its own eviction and
+      // expiry, wrapped behind a `Resource` and an effect-typed interface so that nothing outside
+      // this module ever names a Caffeine type.
+      mvn"com.github.ben-manes.caffeine:caffeine:${Versions.caffeine}",
       mvn"org.typelevel::cats-core::${Versions.cats}",
       mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
       mvn"co.fs2::fs2-core::${Versions.fs2}",
@@ -624,6 +635,44 @@ object libs extends Module {
         // Virtual time: the whole contract of this module is about what happens after thirty
         // seconds of a failing upstream, and a suite that slept through that would be slow and
         // flaky at once.
+        mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
+      )
+    }
+  }
+
+  /** The only user-programmable predicate KUI accepts (ADR-017).
+    *
+    * CEL — Google's Common Expression Language — is a sandboxed, non-Turing-complete expression
+    * language with a linear-time regex engine, which is what makes it safe to evaluate an expression
+    * a user typed against every record of a browse. `libs/filter` is the only module that names a
+    * `dev.cel` type; rule A12 keeps it that way, so the fallback if CEL ever has to go is a second
+    * implementation of `MessagePredicate` rather than a redesign.
+    */
+  object filter extends KuiPureModule with KuiJvmModule {
+    def moduleDeps = Seq(kernel.jvm, cache, observability)
+
+    def mvnDeps = Seq(
+      mvn"dev.cel:cel:${Versions.cel}",
+      // Pinned, not inherited. CEL 0.14.0 resolves protobuf-java 4.35.1 and
+      // `libs/serde-confluent` pins 4.36.1; on an `app` module's classpath both are present and
+      // whichever wins is decided by resolution order rather than by anyone's choice. Naming the
+      // same version in both places makes the agreement explicit and a future divergence a diff.
+      mvn"com.google.protobuf:protobuf-java:${Versions.protobuf}",
+      mvn"org.typelevel::cats-core::${Versions.cats}",
+      mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+      mvn"io.circe::circe-core::${Versions.circe}",
+      mvn"io.circe::circe-parser::${Versions.circe}",
+      mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+      mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+    )
+
+    object test extends ScalaTests with KuiTests {
+      def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+
+      def mvnDeps = super.mvnDeps() ++ Seq(
+        mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        // The evaluation deadline is the whole contract of the CEL engine, and a suite that slept
+        // through it would be slow and flaky at once.
         mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
       )
     }
@@ -952,13 +1001,14 @@ object frontend extends Module {
     // `ClustersFeature` only inside the import thunk, which is what lets the linker put the
     // feature in a module of its own (ADR-012). `checkBundleShape` fails the build if that line
     // is ever crossed.
-    def moduleDeps = Seq(uiKernel, uiClusters, services.gateway.contract.js)
+    def moduleDeps = Seq(uiKernel, uiClusters, uiTopics, services.gateway.contract.js)
 
     def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
 
     /** The feature microfrontends that must end up in JavaScript modules of their own. */
     def bundleFeatures = Seq(
-      BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters")
+      BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters"),
+      BundleShape.Feature("kui.ui.topics.TopicsFeature", "kui.ui.topics")
     )
 
     object test extends ScalaJSTests with KuiJsDomTests {
@@ -999,6 +1049,34 @@ object frontend extends Module {
     }
   }
 
+  /** The topic explorer (M2), and the second microfrontend.
+    *
+    * It depends on `services.topic.contract.js` so the browser decodes exactly what the topic service
+    * encodes, from the same source (ADR-003), and on the shell not at all: the shell depends on every
+    * feature, and the reverse edge would be a cycle as well as the end of lazy loading.
+    *
+    * Its test module additionally depends on `services.topic.contract.js.test`, which is where the
+    * contract's committed sample documents live as constants. Decoding *those exact bytes* in the browser's
+    * own suite is the seam test M1 lacked: the dashboard decoded `ClustersResponse` while the gateway sent
+    * `ClusterOverviewDto`, every response decoded successfully into zero rows, and the page rendered "No
+    * clusters yet" against a working broker with no error anywhere. Both modules' suites were green because
+    * each tested itself against its own idea of the payload. Copying the documents into this module would
+    * have reproduced exactly that — two beliefs, free to drift — so nothing is copied and the one committed
+    * document is read from both sides.
+    */
+  object uiTopics extends KuiFrontendModule {
+
+    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
+    def moduleDir = super.moduleDir / os.up / "ui-topics"
+
+    def moduleDeps = Seq(uiKernel, services.topic.contract.js)
+
+    object test extends ScalaJSTests with KuiJsDomTests {
+      def moduleDeps = super.moduleDeps ++ Seq(services.topic.contract.js.test)
+      def mvnDeps    = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
+    }
+  }
+
   /** The message explorer (M3).
     *
     * It starts life holding only the parts of the table view that are pure — the JSON flattener and its
@@ -1023,7 +1101,7 @@ object frontend extends Module {
   /** Every frontend module whose `resources/css` directory contributes to `kui.css`, in no
     * particular order — `CssPipeline` decides the cascade, not this list.
     */
-  private def cssModules: Seq[KuiFrontendModule] = Seq(uiKernel, uiShell, uiClusters)
+  private def cssModules: Seq[KuiFrontendModule] = Seq(uiKernel, uiShell, uiClusters, uiTopics)
 
   /** Concatenates every module's CSS into one `kui.css` (ADR-024).
     *
@@ -1522,6 +1600,10 @@ object services extends Module {
         application,
         contract.jvm,
         cluster.contract.jvm,
+        // Rule A11: another service's `contract` is the only layer the gateway may see, and rule A4 says
+        // the same thing for the gateway specifically. One entry per service in `ServiceContracts`, one
+        // module dependency here, and nothing else in the gateway knows the topic service exists.
+        topic.contract.jvm,
         libs.kernel.jvm,
         libs.contractsCore.jvm,
         libs.securityCore.jvm,
@@ -1585,7 +1667,12 @@ object services extends Module {
         // that fake to live in `libs/testkit`, and it cannot: `CapabilityRegistry` is a gateway type
         // (ADR-041 §1a), and rule A5 forbids a library module from depending on a service module. One
         // shared fake in the gateway's own test module is the arrangement that keeps both true.
-        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, application.test)
+        // `services.topic.contract.jvm.test` is here for one thing: `GoldenDocuments`, the topic
+        // service's own committed sample responses. `TopicProxySuite` replays those exact bytes through
+        // the gateway's client and asserts that what comes out of the gateway is what the topic service
+        // put in. Copying the documents into this module instead would give two files that drift, which
+        // is the shape of the defect the suite exists to catch.
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, application.test, topic.contract.jvm.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
           mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
@@ -1717,6 +1804,54 @@ object services extends Module {
       * the service encodes, from one source (ADR-003). Rule A2 forbids it any edge into a domain or
       * an application module, which is why the sort field it accepts is declared here rather than
       * imported from `services.topic.domain` — see `TopicSortField`'s own comment.
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+      object js extends Shared with KuiJsModule {
+        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
+        def mvnDeps =
+          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+      }
+    }
+  }
+
+  /** `kui-consumer-service`: who consumes what, how far behind they are, and the offset reset.
+    *
+    * Only `contract` exists here so far. The layers that hold behaviour arrive with the tasks that
+    * have something to put in them, for the reason M0 gave for the cluster service: an empty module
+    * is an invitation to put something in it.
+    */
+  object consumer extends Module {
+
+    /** The published wire shape of `kui-consumer-service`.
+      *
+      * Cross-compiled, because the browser decodes exactly what this service encodes, from one
+      * source (ADR-003) — and because a suite that runs the *same* assertions on both platforms is
+      * the only thing that makes M1's second integration defect impossible: a browser decoding a
+      * document nobody sends, defaulting the missing field to an empty list, and rendering "nothing
+      * here" with no error anywhere.
+      *
+      * Rule A2 forbids it any edge to `domain` or `application`. That is why the consumer-group
+      * vocabulary it puts on the wire comes from `libs/kernel` and the shapes it shares with the
+      * gateway's aggregations come from `libs/contracts-core`, rather than from a service layer.
       */
     object contract extends Module {
 

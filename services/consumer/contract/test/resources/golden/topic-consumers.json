@@ -1,0 +1,47 @@
+{
+  "rows" : [
+    {
+      "group" : {
+        "groupId" : "orders-indexer",
+        "state" : "STABLE",
+        "protocol" : "CONSUMER",
+        "isSimple" : false,
+        "members" : 3,
+        "topics" : 1,
+        "partitions" : 12,
+        "coordinatorId" : 2,
+        "totalLag" : 1240,
+        "pace" : 415.5,
+        "excludedPartitions" : 0,
+        "incomplete" : null
+      },
+      "topicLag" : 1240,
+      "partitions" : 12,
+      "dormant" : false
+    },
+    {
+      "group" : {
+        "groupId" : "billing-replay",
+        "state" : "EMPTY",
+        "protocol" : "CLASSIC",
+        "isSimple" : false,
+        "members" : 0,
+        "topics" : 1,
+        "partitions" : 12,
+        "coordinatorId" : 2,
+        "totalLag" : null,
+        "pace" : null,
+        "excludedPartitions" : 3,
+        "incomplete" : {
+          "membersKnown" : true,
+          "offsetsKnown" : true,
+          "endOffsetsKnown" : false,
+          "note" : "3 of 12 partitions have no leader, so their end offsets could not be read"
+        }
+      },
+      "topicLag" : null,
+      "partitions" : 12,
+      "dormant" : true
+    }
+  ]
+}
