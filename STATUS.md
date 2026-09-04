@@ -10,6 +10,21 @@ offset-reset wizard is on screen and has been driven end to end. What M3 still l
 **Read next:** `docs/DELIVERY.md`, whose 2026-09-04 integration section is the honest account of
 what works, what does not, and what was never tested.
 
+**Delivery-bar point 6 (fault isolation) is now met in full.** The consumer-group list carries the
+same freshness envelope the topic list does, so a cluster that has stopped answering produces a
+`stale` section rather than a bare 200 of lag figures that have quietly stopped moving. Verified
+against a real broker that was stopped mid-session: the API answered
+`{"groups":{"status":"stale","reason":"UPSTREAM_UNAVAILABLE",…}}` with its rows intact, and the
+screen showed `Stale: the cluster is not answering` over a dimmed table.
+
+All four defects the previous section left open are closed: error text no longer shows wire codes to
+users (the code moves to the badge tooltip and the correlation line), the topic page's Consumers tab
+comes from the static feature registrations so it no longer depends on browsing history, the flaky
+`UpstreamClientSuite` case was diagnosed as a subscription race in `UpstreamClient` and fixed in the
+product, and static assets now carry a strong `ETag` answered `304`. Running the product also turned
+up a fifth: the gateway never registered a source for the topic overview's `consumerGroups` section,
+so the Consumers panel said the deployment did not track consumer groups whatever was deployed.
+
 ## Grooming progress
 
 | Step | Owner | Artifact | State |
