@@ -580,7 +580,12 @@ object MessagesPage {
     failure match {
       case SseError.Decode(event, cause) => s"A '$event' event could not be read: $cause"
       case SseError.Transport(cause) => s"The stream stopped: $cause"
-      case SseError.Server(envelope) => envelope.message
+      // Not `envelope.message` verbatim. A broker that has gone away reaches this line as
+      // "kafka answered with status 502", which names a status no Kafka broker can return and never
+      // mentions the actual problem. The rule lives in the kernel so that the browse status line and every
+      // other error surface say the same thing about the same failure.
+      case SseError.Server(envelope) =>
+        kui.ui.kernel.api.UserFacing.sentence(envelope.code, envelope.message)
     }
 
   /** The kernel's own control class, so these fields look like every other field in KUI rather than like a

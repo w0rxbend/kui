@@ -308,7 +308,8 @@ object TopicListPage {
     */
   private def staleReason(section: Section[PageDto[TopicRowDto]]): Option[StaleReason] =
     section match {
-      case Section.Stale(_, _, reason) => Some(StaleReason(Messages.StaleState, Some(reason.wire)))
+      case Section.Stale(_, _, reason) =>
+        Some(StaleReason(Messages.StaleState, Some(reason.sentence), code = Some(reason.wire)))
       case Section.Unavailable(_, message, _) => Some(StaleReason.unavailable(message))
       case _ => None
     }

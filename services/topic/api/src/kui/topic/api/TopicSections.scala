@@ -5,7 +5,7 @@ import java.time.Instant
 import kui.cache.{Snapshot, SnapshotStatus}
 import kui.contracts.Section
 import kui.contracts.capability.ReasonCode
-import kui.kernel.error.*
+import kui.kernel.error.KuiError
 import kui.topic.application.Fresh
 
 /** The staleness contract: how "how fresh is this?" becomes a section of a response.
@@ -87,19 +87,11 @@ object TopicSections {
 
   /** Why a section is not `Ok`, from the error that made it so.
     *
-    * Classified by failure *case* rather than by error code, because "could not connect" and "the breaker is
-    * open" share a code and mean different things on a screen.
+    * The classification itself lives on `ReasonCode` in `libs/contracts-core`, because the consumer-group
+    * list has to make exactly the same translation and two copies of it are two chances for two screens to
+    * describe the same outage differently. This name is kept because the whole file reads in terms of it.
     */
-  def reasonOf(error: KuiError): ReasonCode = error match {
-    case ApplicationError.Forbidden(_) => ReasonCode.Forbidden
-    case ApplicationError.Unsupported(_) => ReasonCode.NotConfigured
-    case InfrastructureError.CircuitOpen(_, _) => ReasonCode.CircuitOpen
-    case InfrastructureError.Timeout(_, _) => ReasonCode.UpstreamTimeout
-    case InfrastructureError.AuthFailed(_) => ReasonCode.UpstreamAuth
-    case InfrastructureError.Unreachable(_, _) | InfrastructureError.Upstream(_, _) =>
-      ReasonCode.UpstreamUnavailable
-    case _ => ReasonCode.Unknown
-  }
+  def reasonOf(error: KuiError): ReasonCode = ReasonCode.of(error)
 
   /** The same classification for a reason the use case has already reduced to a sentence.
     *

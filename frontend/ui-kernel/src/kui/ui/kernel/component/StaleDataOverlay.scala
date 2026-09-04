@@ -10,15 +10,34 @@ import kui.ui.kernel.time.Timestamps
 
 /** Why the content under the overlay is not being refreshed.
   *
-  * The `state` word is the one the capability registry uses — `Unavailable`, `Degraded` — and the `detail` is
-  * the registry's own reason string, which ADR-032 requires to be rendered verbatim rather than translated
-  * into something friendlier. A reason a user can paste into a message to whoever runs the cluster is worth
-  * more than a reassuring sentence.
+  * The `state` word is the one the capability registry uses — `Unavailable`, `Degraded` — and `detail` is the
+  * sentence shown beside it. `code` is the machine-readable reason, if the caller has one, and it goes in the
+  * badge's tooltip rather than into the line on screen.
+  *
+  * That split is the point. ADR-032 requires that the reason survive rather than be replaced with something
+  * reassuring, and it does: the code is still there for anyone who has to quote it. What it must not be is
+  * the whole message, because `Stale: UPSTREAM_UNAVAILABLE` gives the person looking at the table nothing
+  * they can do. The sentence tells them the cluster is not answering; the code tells whoever they ask for
+  * help which failure it was.
   */
-final case class StaleReason(state: String, detail: Option[String]) {
+final case class StaleReason(state: String, detail: Option[String], code: Option[String] = None) {
 
-  /** The one line the badge shows after the timestamp. */
+  /** The one line the badge shows after the timestamp.
+    *
+    * `detail` is a sentence written for whoever is looking at the screen. It used to be the wire reason code,
+    * and a badge reading `Stale: UPSTREAM_UNAVAILABLE` told an operator nothing they could act on — the code
+    * belongs in a log line and a support conversation, not on a table. It has not been thrown away: it
+    * travels as [[code]] and the badge puts it in its tooltip, so it is still one hover, or one copied
+    * screenshot, from whoever needs it.
+    */
   def summary: String = detail.fold(state)(reason => s"$state: $reason")
+
+  /** The badge's tooltip: when the data was fetched, and the machine-readable reason if there is one. */
+  def tooltip(fetchedAt: Option[String]): Option[String] =
+    (fetchedAt.toList ++ code.map(raw => s"Reason code: $raw")) match {
+      case Nil => None
+      case parts => Some(parts.mkString(" · "))
+    }
 }
 
 object StaleReason {
@@ -126,7 +145,10 @@ object StaleDataOverlay {
       role := "status",
       aria.live := "polite",
       Components.testIdAttr(testId.map(id => s"$id-stale-badge")),
-      fetchedAt.map(at => title := Timestamps.absolute(at, zone)),
+      // The absolute time and the wire reason code both live here rather than in the badge's text: the
+      // line on screen stays a sentence, and the identifier somebody needs in order to ask for help is
+      // still attached to it.
+      reason.tooltip(fetchedAt.map(at => Timestamps.absolute(at, zone))).map(text => title := text),
       span(cls := KernelCss.StaleBadgeTime, Timestamps.lastUpdated(fetchedAt, now)),
       span(cls := KernelCss.StaleBadgeReason, reason.summary)
     )

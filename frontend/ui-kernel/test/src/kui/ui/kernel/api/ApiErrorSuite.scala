@@ -91,6 +91,54 @@ class ApiErrorSuite extends FunSuite {
     }
   }
 
+  test("anUpstreamFailureIsRewrittenIntoASentenceAboutTheCluster") {
+    // The defect: `kafka answered with status 502` reached the browse screen verbatim. It names a status no
+    // Kafka broker can return — nothing in Kafka's protocol is HTTP — and never says the thing the operator
+    // needs to know, which is that the broker is unreachable.
+    val error = ApiError.of(
+      ErrorEnvelope(
+        code = ErrorCode.UpstreamUnavailable.wire,
+        message = "kafka answered with status 502",
+        details = Nil,
+        correlationId = "corr-9",
+        timestamp = Instant.parse("2026-09-03T10:11:12Z"),
+        retryable = true
+      )
+    )
+
+    assertEquals(error.userMessage, UserFacing.Unreachable)
+    assert(!error.userMessage.contains("502"), error.userMessage)
+
+    // The code is not lost. It is what a support conversation is about, and it is still on the value and
+    // still in the correlation line the user quotes.
+    error match {
+      case ApiError.Envelope(code, message, _, correlation, _) =>
+        assertEquals(code, ErrorCode.UpstreamUnavailable.wire)
+        assertEquals(message, "kafka answered with status 502")
+        assertEquals(correlation, "corr-9")
+      case other => fail(s"expected an envelope, got $other")
+    }
+  }
+
+  test("aSlowClusterAndRejectedCredentialsEachGetTheirOwnSentence") {
+    assertEquals(envelopeWith(ErrorCode.Timeout.wire).userMessage, UserFacing.Slow)
+    assertEquals(envelopeWith(ErrorCode.UpstreamAuth.wire).userMessage, UserFacing.Credentials)
+  }
+
+  test("aBusinessFailuresOwnWordsAreLeftAlone") {
+    // The half that keeps the rule honest. Most KUI messages name the topic or the cluster the request was
+    // about, and no client-side string can do better than that — so only the small listed set is rewritten.
+    assertEquals(
+      envelopeWith(ErrorCode.Validation.wire).userMessage,
+      s"Something about ${ErrorCode.Validation.wire}."
+    )
+    assertEquals(
+      ApiError.Envelope("KUI-SOMETHING-NEWER", "A newer KUI knows more.", Nil, "corr-1", true).userMessage,
+      "A newer KUI knows more.",
+      "a code this build has never heard of must show the server's words, not a guess"
+    )
+  }
+
   test("theRawTransportCauseIsKeptForTheConsoleAndNeverShownToTheUser") {
     val error = ApiError.Unreachable("net::ERR_CONNECTION_REFUSED")
     assertEquals(error.userMessage, ApiError.UnreachableMessage)

@@ -9,6 +9,7 @@ import sttp.tapir.Schema
 import kui.contracts.ErrorEnvelope.given
 import kui.contracts.KernelCodecs.given
 import kui.contracts.KernelSchemas.given
+import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, ServiceId}
 
 /** Why a feature is not fully available.
@@ -36,12 +37,54 @@ enum ReasonCode {
     case Starting => "STARTING"
     case Unknown => "UNKNOWN"
   }
+
+  /** The same fact, written for the person looking at the screen.
+    *
+    * A badge reading `Stale: UPSTREAM_UNAVAILABLE` puts a wire code in front of a user who cannot act on it;
+    * a support conversation and a log line need the code and a screen needs a sentence. Both survive: the
+    * browser renders this text and keeps [[wire]] in the badge's tooltip, so the code is still one hover — or
+    * one copied screenshot — away.
+    *
+    * The sentences are deliberately about *KUI's* relationship with the cluster rather than about HTTP. "the
+    * cluster is not answering" is something an operator can go and check; "kafka answered with status 502"
+    * describes the gateway's view of its own plumbing.
+    */
+  def sentence: String = this match {
+    case UpstreamUnavailable => "the cluster is not answering"
+    case UpstreamTimeout => "the cluster is answering too slowly"
+    case CircuitOpen => "KUI has paused its calls while the cluster recovers"
+    case UpstreamAuth => "KUI's credentials for this cluster were rejected"
+    case NotConfigured => "this deployment has no such thing configured"
+    case Forbidden => "you are not allowed to see this"
+    case Starting => "KUI has not finished reading this cluster yet"
+    case Unknown => "KUI could not refresh this"
+  }
 }
 
 object ReasonCode {
 
   /** Anything unrecognised becomes `Unknown` rather than a decode failure (ADR-032). */
   def fromWire(raw: String): ReasonCode = values.find(_.wire == raw).getOrElse(Unknown)
+
+  /** Why a section or a capability is not `Ok`, from the error that made it so.
+    *
+    * Classified by failure *case* rather than by error code, because "could not connect" and "the breaker is
+    * open" share the code `KUI-UPSTREAM-UNAVAILABLE` and mean different things on a screen: one is a cluster
+    * to go and look at, the other is KUI deliberately not calling one for a while.
+    *
+    * It lives beside the enum rather than in any one service because more than one service has to make this
+    * translation — the topic list and the consumer-group list both do — and two hand-written copies of it are
+    * two chances for two screens to describe the same outage differently.
+    */
+  def of(error: KuiError): ReasonCode = error match {
+    case ApplicationError.Forbidden(_) => Forbidden
+    case ApplicationError.Unsupported(_) => NotConfigured
+    case InfrastructureError.CircuitOpen(_, _) => CircuitOpen
+    case InfrastructureError.Timeout(_, _) => UpstreamTimeout
+    case InfrastructureError.AuthFailed(_) => UpstreamAuth
+    case InfrastructureError.Unreachable(_, _) | InfrastructureError.Upstream(_, _) => UpstreamUnavailable
+    case _ => Unknown
+  }
 
   given Codec[ReasonCode] =
     Codec.from(Decoder[String].map(fromWire), Encoder[String].contramap(_.wire))

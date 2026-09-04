@@ -85,12 +85,18 @@ enum ApiError {
 
   /** What to put on screen.
     *
-    * The server's `message` is used verbatim when there is one — it is written for the user and may name the
-    * topic or the cluster that this particular request was about, which no client-side string can. The other
-    * three cases have no server text, so the kernel supplies it.
+    * The server's `message` is used when there is one — it is written for the user and may name the topic or
+    * the cluster that this particular request was about, which no client-side string can. The three cases
+    * with no server text get the kernel's own.
+    *
+    * The one exception is an upstream failure, whose message describes KUI's plumbing rather than the
+    * operator's problem: `kafka answered with status 502` names a status no Kafka broker can return and does
+    * not mention the thing that is actually wrong. [[UserFacing.sentence]] is where that substitution is
+    * decided, once, for every screen. The code itself is untouched — it is still on this value, still in the
+    * correlation line, and still in the logs on both sides.
     */
   def userMessage: String = this match {
-    case Envelope(_, message, _, _, _) => message
+    case Envelope(code, message, _, _, _) => UserFacing.sentence(code, message)
     case Unreachable(_) => ApiError.UnreachableMessage
     case Timeout => ApiError.TimeoutMessage
     case Decoding(_) => ApiError.DecodingMessage
