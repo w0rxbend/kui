@@ -19,7 +19,15 @@ against a server-computed plan and applied against a signed token naming exactly
 (ADR-045). The deletion plan reports how many records are about to be lost and whether the cluster's
 `auto.create.topics.enable` will recreate the topic by itself. All of it was driven against a real
 broker, over the API and in a browser; see `docs/DELIVERY.md`'s 2026-09-04 topic-administration
-section. **Purge (`MS-008`) is still not built** and remains the only M3 row outstanding.
+section.
+
+**Purge (`MS-008`) is built too, so no M3 row is outstanding.** Emptying a topic is the operation
+ADR-045 was written for, and it is the clearest demonstration of why: the plan resolves each
+partition's end offset, and the apply deletes up to *those* offsets — so records produced between
+the preview and the confirmation survive, which was checked against a broker rather than reasoned
+about. The plan also says the two things operators are most often surprised by: that committed
+consumer offsets are not moved, and that Kafka refuses to delete records from a topic that is only
+compacted.
 
 **Delivery-bar point 6 (fault isolation) is now met in full.** The consumer-group list carries the
 same freshness envelope the topic list does, so a cluster that has stopped answering produces a

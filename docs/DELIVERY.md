@@ -195,12 +195,48 @@ browser — is hidden. That last part is deliberate: the receipt is the operator
 irreversible action, and this project has already shipped a wizard whose receipt was destroyed by
 the refresh the operation itself caused.
 
-### What this pass did **not** do
+### Purge (`MS-008`), the last M3 row, is also built
 
-- **Purge (`MS-008`) is still missing**, and it is still the only M3 row outstanding. The domain
-  types, the wire DTOs and the golden documents for it already exist in the message service,
-  unwired; what is absent is the endpoint, the `deleteRecords` port, the use case and the control.
-  It was not reached in this pass and nothing here should be read as having closed it.
+It is the operation ADR-045 was written for, and it is now the third entry in the same panel. Two
+calls: the first reads each partition's start and end offset and answers with how many records would
+go and a token; the second takes only that token and deletes up to exactly the offsets the first one
+resolved.
+
+That last part is the whole feature, and it was driven to prove it:
+
+```
+publish 5 records
+purge plan     partition 0: 0 → 3   partition 1: 0 → 2   records 5
+               warnings RECORDS_LOST + CONSUMER_OFFSETS_UNCHANGED
+publish 2 more records                                   (after the plan was read)
+purge with a tampered token                              KUI-VALIDATION
+purge with the token                                     purged 0 before 3, 1 before 2
+broker: --time -2 (log start)   0:3   1:2                (the planned offsets)
+broker: --time -1 (log end)     0:4   1:3                (the 2 later records are still there)
+```
+
+An operator lost exactly what they were shown and nothing that arrived while they were deciding. A
+purge that re-read the end offsets at apply time — which is what a single-call endpoint would have
+to do — would have deleted those two records as well.
+
+Two things the plan says that operators are routinely surprised by, and that no reference product
+says: committed consumer offsets are **not** moved by a purge, so a group below the new start of the
+log follows its own `auto.offset.reset` and by default skips to the end; and Kafka refuses
+`deleteRecords` on a topic that is only compacted, so a compacted topic is warned about before the
+broker rejects the attempt. Both are on the screen the operator confirms.
+
+It is `deleteRecords` and deliberately not delete-and-recreate, which is how the reference product
+empties a topic: that throws away the topic's identity, leaves consumer groups pointed at a log that
+no longer exists, and races automatic topic creation. The log is emptied and the topic, its
+configuration and its partition count are untouched — visible on the screen afterwards, where the
+partition table reads first offset 7, next offset 7 rather than starting again from zero.
+
+The control is on the topic page beside "delete this topic", not on the message browser, because
+that is where a person looks for it.
+
+### What this pass did **not** do
+- **A compacted topic was never purged.** The warning is computed from `cleanup.policy` and the
+  broker's refusal is mapped, but no run has seen either on a screen.
 - **Replication-factor change, clone and recreate** are M5 rows that remain unbuilt. They are not
   declared anywhere, which is deliberate: an endpoint that is declared is an endpoint somebody
   implements.
