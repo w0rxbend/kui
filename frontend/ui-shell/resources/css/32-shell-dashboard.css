@@ -140,7 +140,7 @@
 /* Stale numbers are dimmed and kept. They are still the last true reading, and an empty panel would
  * throw away information the reader can use — as long as the reason above them says how old it is. */
 .kui-shell__dashboard-panel--stale .kui-shell__dashboard-figure-value {
-  opacity: 0.65;
+  opacity: var(--kui-opacity-stale);
 }
 
 .kui-shell__dashboard-panel-reason {

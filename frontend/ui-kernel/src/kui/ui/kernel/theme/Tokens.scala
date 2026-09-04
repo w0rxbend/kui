@@ -77,6 +77,9 @@ object Tokens {
     val ScrollbarThumb = "--kui-color-scrollbar-thumb"
     val ScrollbarThumbHover = "--kui-color-scrollbar-thumb-hover"
 
+    /** The veil behind a dialog or a drawer. One value for both, because they say the same thing. */
+    val Scrim = "--kui-color-scrim"
+
     val all: List[String] = List(
       Surface,
       SurfaceRaised,
@@ -106,7 +109,8 @@ object Tokens {
       Focus,
       StateLayer,
       ScrollbarThumb,
-      ScrollbarThumbHover
+      ScrollbarThumbHover,
+      Scrim
     )
   }
 
@@ -206,6 +210,14 @@ object Tokens {
     val all: List[String] = List(Dropdown, Drawer, Dialog, Toast)
   }
 
+  /** Dimming. Two values, not five: a control that is off, and a figure that is out of date. */
+  object Opacity {
+    val Disabled = "--kui-opacity-disabled"
+    val Stale = "--kui-opacity-stale"
+
+    val all: List[String] = List(Disabled, Stale)
+  }
+
   object Duration {
     val Fast = "--kui-duration-fast"
     val Normal = "--kui-duration-normal"
@@ -218,5 +230,5 @@ object Tokens {
     */
   val all: List[String] =
     Color.all ++ Space.all ++ Density.all ++ Font.all ++ Radius.all ++ Shadow.all ++ Z.all ++
-      Duration.all
+      Opacity.all ++ Duration.all
 }

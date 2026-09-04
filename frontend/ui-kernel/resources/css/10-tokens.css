@@ -99,6 +99,12 @@
    * more weight to be seen than a full-width hover wash does. */
   --kui-color-scrollbar-thumb: rgba(23, 28, 34, 0.2); /* design */
   --kui-color-scrollbar-thumb-hover: rgba(23, 28, 34, 0.32); /* design */
+  /* The veil behind a dialog or a drawer. One value for both: they are the same idea -- the page is
+   * still there, and you are not talking to it -- and two of them said, with no reason given, that a
+   * drawer holds you slightly less than a dialog does. Black rather than a themed neutral, because
+   * a veil darkens; in the dark theme it has to work harder to separate an already-dark panel from
+   * an already-dark page, so it is heavier there. */
+  --kui-color-scrim: rgba(0, 0, 0, 0.45); /* kui */
 
   /* --- Colour: the accent (blue, the default seed) --------------------------------------- */
   --kui-color-primary: #0b57d0; /* design */
@@ -203,6 +209,15 @@
   --kui-z-dialog: 300;
   --kui-z-toast: 400;
 
+  /* --- Opacity ----------------------------------------------------------------------------- */
+
+  /* Dimming. "This control is off" and "this figure is out of date" are two statements, so there are
+   * two values -- but only two. Written out one at a time they had become five numbers between 0.5
+   * and 0.65 scattered across six files, which meant a disabled pagination button and a disabled
+   * kernel button sat side by side on the same screen at two different weights. */
+  --kui-opacity-disabled: 0.55;
+  --kui-opacity-stale: 0.65;
+
   /* --- Motion ------------------------------------------------------------------------------ */
 
   /* Short enough that the interface never feels like it is waiting for itself. The reset neutralises
@@ -275,6 +290,7 @@
     --kui-color-state-layer: rgba(227, 230, 235, 0.08); /* design */
     --kui-color-scrollbar-thumb: rgba(227, 230, 235, 0.14); /* design */
     --kui-color-scrollbar-thumb-hover: rgba(227, 230, 235, 0.26); /* design */
+    --kui-color-scrim: rgba(0, 0, 0, 0.6); /* kui */
 
     --kui-color-primary: #a8c7fa; /* design */
     --kui-color-primary-contrast: #062e6f; /* design */
@@ -340,6 +356,7 @@
   --kui-color-state-layer: rgba(227, 230, 235, 0.08); /* design */
   --kui-color-scrollbar-thumb: rgba(227, 230, 235, 0.14); /* design */
   --kui-color-scrollbar-thumb-hover: rgba(227, 230, 235, 0.26); /* design */
+  --kui-color-scrim: rgba(0, 0, 0, 0.6); /* kui */
 
   --kui-color-primary: #a8c7fa; /* design */
   --kui-color-primary-contrast: #062e6f; /* design */

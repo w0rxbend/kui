@@ -17,7 +17,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--kui-space-4);
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--kui-color-scrim);
 }
 
 .kui-dialog {
@@ -107,7 +107,7 @@
   inset: 0;
   z-index: var(--kui-z-drawer);
   display: flex;
-  background-color: rgba(0, 0, 0, 0.35);
+  background-color: var(--kui-color-scrim);
 }
 
 .kui-drawer {
@@ -393,7 +393,7 @@
  * are the reason the region is still on screen at all. `pointer-events` stops the mouse; the
  * component removes the controls from the tab order itself, because CSS cannot. */
 .kui-stale--stale .kui-stale__content {
-  opacity: 0.55;
+  opacity: var(--kui-opacity-stale);
   pointer-events: none;
   transition: opacity var(--kui-duration-fast) ease;
 }

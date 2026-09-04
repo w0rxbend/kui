@@ -148,7 +148,7 @@
 /* Loading dims the rows that are already there rather than replacing them. Replacing them would
  * collapse the table to nothing, jump the page, and jump it back a moment later. */
 .kui-table--loading .kui-table__body {
-  opacity: 0.5;
+  opacity: var(--kui-opacity-stale);
 }
 
 /* The empty state fills the panel rather than sitting in a padded cell; the cell is only a
