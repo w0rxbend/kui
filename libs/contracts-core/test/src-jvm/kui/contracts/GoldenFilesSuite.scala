@@ -21,7 +21,8 @@ final class GoldenFilesSuite extends FunSuite {
       .stripLineEnd
 
   (GoldenDocuments.all ++ kui.contracts.cluster.ClusterGoldenDocuments.all ++
-    kui.contracts.topic.TopicGoldenDocuments.all).foreach { document =>
+    kui.contracts.topic.TopicGoldenDocuments.all ++
+    kui.contracts.message.MessageGoldenDocuments.all).foreach { document =>
     test(s"${document._1} on disk matches the constant the cross-platform suites assert") {
       assertNoDiff(read(document._1), document._2)
     }

@@ -1,0 +1,5 @@
+{
+  "target" : "value",
+  "serde" : "Avro",
+  "cause" : "Unknown magic byte 0x7b at position 0"
+}

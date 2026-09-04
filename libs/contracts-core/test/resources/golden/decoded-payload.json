@@ -1,0 +1,9 @@
+{
+  "text" : "{\"orderId\":\"A-1\"}",
+  "kind" : "json",
+  "serde" : "Avro",
+  "properties" : {
+    "schemaId" : "42",
+    "subject" : "orders-value"
+  }
+}
