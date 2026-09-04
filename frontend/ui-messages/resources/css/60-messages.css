@@ -1,0 +1,174 @@
+/* The message browser.
+ *
+ * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ *
+ * The file is numbered 60 so that it lands after the kernel's own sheets (00-25), the clusters feature
+ * (40-41) and topics (50), and before consumers (70). `CssPipeline` decides the cascade from these numbers
+ * rather than from who nested their selectors more deeply, which is what keeps every selector a single class
+ * of equal specificity.
+ */
+
+.kui-messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+  min-height: 0;
+}
+
+/* The sentence the shell draws inside its fallback panel when the message service is down. */
+.kui-messages__fallback {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-messages__error {
+  color: var(--kui-color-danger);
+}
+
+/* --- The control bar -------------------------------------------------------------------------- */
+
+/* Where to start, which partitions, what text, follow, and Read — on one line that wraps rather than
+ * scrolls: a control that has slid off the right edge of a bar is a control nobody finds. */
+.kui-messages__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--kui-space-4);
+}
+
+.kui-messages__control-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-messages__control-label {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* --- The status line -------------------------------------------------------------------------- */
+
+/* What the stream is doing, how many records arrived, and how many were read from Kafka to find them. */
+.kui-messages__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-3);
+  min-height: 1.5em; /* Reserved, so the table does not jump when the line appears. */
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-messages__status-phase {
+  color: var(--kui-color-text);
+}
+
+/* --- The table -------------------------------------------------------------------------------- */
+
+.kui-messages__table {
+  /* Fixed, so that one long value cannot widen the value column and push the timestamp off the screen. */
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* The offset cell is a real button, so it needs to stop looking like one. */
+.kui-messages__toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--kui-color-accent);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.kui-messages__toggle:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-messages__row--open {
+  background: var(--kui-color-surface-hover);
+}
+
+/* One line each, clipped. A JSON payload rendered in full would make one row taller than the viewport and
+ * push every other record off the screen; the whole document is one click away in the detail. */
+.kui-messages__key,
+.kui-messages__value {
+  overflow: hidden;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- The opened record ------------------------------------------------------------------------ */
+
+.kui-messages__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-elevated);
+}
+
+.kui-messages__detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-messages__detail-heading {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The payload, pretty-printed. It wraps rather than scrolling sideways, because a long line read by
+ * dragging a horizontal scrollbar is a line nobody reads. */
+.kui-messages__payload {
+  max-height: 24rem;
+  margin: 0;
+  overflow: auto;
+  padding: var(--kui-space-3);
+  border-radius: var(--kui-radius-sm);
+  background: var(--kui-color-surface);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Headers as a definition list: the name is the term and the value is the definition, which is what they
+ * are, and which a screen reader then reads as a pair. */
+.kui-messages__headers {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--kui-space-1) var(--kui-space-4);
+  margin: 0;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-messages__header-name {
+  color: var(--kui-color-text-muted);
+}
+
+/* A record delivered with a serde failure attached. It is a note, not an error page: the record arrived,
+ * and the bytes are what the reader came for. */
+.kui-messages__decode-error {
+  padding: var(--kui-space-3);
+  border-left: 3px solid var(--kui-color-warning);
+  background: var(--kui-color-warning-container);
+}
+
+.kui-messages__decode-error p {
+  margin: 0;
+}

@@ -22,11 +22,14 @@ enum FeatureId(val value: String, val serviceId: String) {
     */
   case Topics extends FeatureId("topics", "topic")
 
+  /** Reading records. The feature is `messages` and the service behind it is `message`, singular. */
+  case Messages extends FeatureId("messages", "message")
+
   /** Consumer groups. The feature is `consumers` and the service behind it is `consumer`, singular — the
     * same near-miss `Topics` has, and the same reason neither is guessed from the other.
     */
   case Consumers extends FeatureId("consumers", "consumer")
-  // messages, schemas, connect, ksql, security, metrics and admin follow in their own milestones.
+  // schemas, connect, ksql, security, metrics and admin follow in their own milestones.
 }
 
 object FeatureId {

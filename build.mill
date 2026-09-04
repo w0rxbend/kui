@@ -142,7 +142,7 @@ trait KuiJsModule extends KuiModule with ScalaJSModule {
   */
 trait KuiFrontendModule extends KuiJsModule {
   def moduleSplitStyle =
-    ModuleSplitStyle.SmallModulesFor("kui.ui.clusters", "kui.ui.topics", "kui.ui.consumers")
+    ModuleSplitStyle.SmallModulesFor("kui.ui.clusters", "kui.ui.topics", "kui.ui.messages", "kui.ui.consumers")
 
   /** The feature microfrontends that must be linked into modules of their own (ADR-012).
     *
@@ -1002,7 +1002,8 @@ object frontend extends Module {
     // `ClustersFeature` only inside the import thunk, which is what lets the linker put the
     // feature in a module of its own (ADR-012). `checkBundleShape` fails the build if that line
     // is ever crossed.
-    def moduleDeps = Seq(uiKernel, uiClusters, uiTopics, uiConsumers, services.gateway.contract.js)
+    def moduleDeps =
+      Seq(uiKernel, uiClusters, uiTopics, uiMessages, uiConsumers, services.gateway.contract.js)
 
     def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
 
@@ -1010,6 +1011,7 @@ object frontend extends Module {
     def bundleFeatures = Seq(
       BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters"),
       BundleShape.Feature("kui.ui.topics.TopicsFeature", "kui.ui.topics"),
+      BundleShape.Feature("kui.ui.messages.MessagesFeature", "kui.ui.messages"),
       BundleShape.Feature("kui.ui.consumers.ConsumersFeature", "kui.ui.consumers")
     )
 
@@ -1098,10 +1100,13 @@ object frontend extends Module {
     // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
     def moduleDir = super.moduleDir / os.up / "ui-messages"
 
-    def moduleDeps = Seq(uiKernel)
+    def moduleDeps = Seq(uiKernel, services.message.contract.js)
+
+    def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
 
     object test extends ScalaJSTests with KuiJsDomTests {
-      def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
+      def moduleDeps = super.moduleDeps ++ Seq(services.message.contract.js.test)
+      def mvnDeps    = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
     }
   }
 
@@ -1133,7 +1138,7 @@ object frontend extends Module {
     * particular order — `CssPipeline` decides the cascade, not this list.
     */
   private def cssModules: Seq[KuiFrontendModule] =
-    Seq(uiKernel, uiShell, uiClusters, uiTopics, uiConsumers)
+    Seq(uiKernel, uiShell, uiClusters, uiTopics, uiMessages, uiConsumers)
 
   /** Concatenates every module's CSS into one `kui.css` (ADR-024).
     *
@@ -1563,6 +1568,18 @@ object services extends Module {
       object jvm extends Shared with KuiJvmModule {
         def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
 
+        // `src-jvm` holds the one endpoint that cannot be cross-compiled: the browse stream, whose
+        // body is an event stream and therefore needs `fs2` and a stream capability. The browser has
+        // no use for it — it opens that address with `EventSource`, which takes a URL rather than a
+        // Tapir endpoint — and the documents inside the stream are still declared once, in the
+        // shared sources, and compiled into both halves.
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"co.fs2::fs2-core::${Versions.fs2}",
+          // For `sttp.capabilities.fs2.Fs2Streams`. It arrives through the sttp client's fs2
+          // module, which is the coordinate this build already pins for it everywhere else.
+          mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}"
+        )
+
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
@@ -1801,6 +1818,11 @@ object services extends Module {
         // module dependency here, and nothing else in the gateway knows the topic service exists.
         topic.contract.jvm,
         consumer.contract.jvm,
+        // The message service's contract, for the browse stream. It is the one endpoint the gateway
+        // cannot derive a proxy route for — a stream has to be relayed rather than called and
+        // re-encoded — so `MessageStreamRoutes` names the endpoint value directly. Still rule A11: a
+        // published contract and nothing else.
+        message.contract.jvm,
         libs.kernel.jvm,
         libs.contractsCore.jvm,
         libs.securityCore.jvm,
@@ -2414,6 +2436,8 @@ object apps extends Module {
       services.topic.api,
       services.consumer.app,
       services.consumer.api,
+      services.message.app,
+      services.message.api,
       libs.config,
       libs.observability,
       libs.http

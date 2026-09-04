@@ -31,6 +31,7 @@ object FeatureRegistryImpl {
     Map(
       FeatureId.Clusters -> (() => js.dynamicImport(new kui.ui.clusters.ClustersFeature())),
       FeatureId.Topics -> (() => js.dynamicImport(new kui.ui.topics.TopicsFeature())),
+      FeatureId.Messages -> (() => js.dynamicImport(new kui.ui.messages.MessagesFeature())),
       FeatureId.Consumers -> (() => js.dynamicImport(new kui.ui.consumers.ConsumersFeature()))
     )
 
@@ -41,5 +42,10 @@ object FeatureRegistryImpl {
     * code into `main.js`.
     */
   def staticRoutes: List[FeatureRoutes] =
-    List(kui.ui.clusters.ClustersRoutes, kui.ui.topics.TopicsRoutes, kui.ui.consumers.ConsumersRoutes)
+    List(
+      kui.ui.clusters.ClustersRoutes,
+      kui.ui.topics.TopicsRoutes,
+      kui.ui.messages.MessagesRoutes,
+      kui.ui.consumers.ConsumersRoutes
+    )
 }
