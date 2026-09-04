@@ -2,6 +2,7 @@ package kui.kafka
 
 import java.util.concurrent.{CompletionException, ExecutionException}
 
+import org.apache.kafka.common.config.ConfigException
 import org.apache.kafka.common.errors.*
 import org.scalacheck.Prop.forAll
 import org.scalacheck.{Gen, Prop}
@@ -369,6 +370,25 @@ final class KafkaErrorMapperSuite extends KuiSuite {
     // A partial result caused by slowness is indistinguishable from a cluster that genuinely has
     // less data, and would be rendered as fact.
     assertEquals(KafkaErrorMapper.suppressible(new TimeoutException("t")), None)
+  }
+
+  test("anUnresolvableBootstrapAddressIsUnreachableAndNotAFabricatedHttpStatus") {
+    // What a typo in `bootstrapServers` actually produces. The Kafka client raises a
+    // `ConfigException` before it opens a socket, so this is not an `ApiException` and used to fall
+    // through to the catch-all, which reports `Upstream("kafka", 502)` — rendered to an operator as
+    // "kafka answered with status 502". Nothing answered, and 502 is a status no Kafka broker can
+    // return, so the one person who could fix the typo was sent looking for a proxy.
+    val raised = new ConfigException("No resolvable bootstrap urls given in bootstrap.servers")
+
+    KafkaErrorMapper.map("describeCluster", raised) match {
+      case InfrastructureError.Unreachable(upstream, message) =>
+        assertEquals(upstream, "kafka")
+        assert(
+          message.contains("bootstrap.servers"),
+          s"the client's own message names the setting to fix, and must survive: $message"
+        )
+      case other => fail(s"an unresolvable bootstrap address is unreachability, not $other")
+    }
   }
 }
 

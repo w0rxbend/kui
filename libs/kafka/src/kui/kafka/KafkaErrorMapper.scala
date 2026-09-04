@@ -1,5 +1,6 @@
 package kui.kafka
 
+import org.apache.kafka.common.config.ConfigException
 import org.apache.kafka.common.errors.*
 
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
@@ -65,6 +66,18 @@ object KafkaErrorMapper {
       case _: SslAuthenticationException => InfrastructureError.AuthFailed("kafka")
       case _: BrokerNotAvailableException =>
         InfrastructureError.Unreachable("kafka", s"the broker is not available for $operation")
+
+      // A bootstrap address that does not resolve, or a client property the Kafka client itself
+      // rejects. This is not an `ApiException` — no broker was ever spoken to — so without this case
+      // it fell through to the catch-all below and an operator whose `bootstrapServers` had a typo in
+      // it was told "kafka answered with status 502". Nothing answered. The client's own message says
+      // what is wrong ("No resolvable bootstrap urls given in bootstrap.servers") and is passed
+      // through verbatim, because it names the setting the operator has to go and fix.
+      case config: ConfigException =>
+        InfrastructureError.Unreachable(
+          "kafka",
+          Option(config.getMessage).getOrElse("the client configuration was rejected")
+        )
 
       // ---- Authorization. Application errors on purpose: a user without an ACL must not dim a
       // capability for everyone else, which is the exact failure ADR-039 §6 exists to prevent.
