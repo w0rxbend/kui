@@ -1,0 +1,187 @@
+# KUI managing three Kafka clusters at once: a development one, a production-shaped one, and a
+# secured one. This is the shape a real deployment has, and it is the file the demonstration
+# environment in `deployment/demo/` runs.
+#
+# WHY THREE. Managing more than one cluster is what KUI is for, and a single cluster cannot show
+# any of it: not the cluster switcher, not the per-cluster capability badges, and above all not the
+# behaviour the whole architecture exists to prove -- when one cluster stops answering, the other
+# two carry on working normally and the broken one explains itself instead of taking the console
+# down with it. Copy this file, replace the three `bootstrapServers` lines with your own, and you
+# have that.
+#
+# HOW TO RUN IT AS WRITTEN
+#
+#     docker run --rm -p 8080:8080 \
+#       -e KUI_CURSOR_KEY="$(openssl rand -base64 48)" \
+#       -e KUI_SECURED_PASSWORD=... \
+#       -e KUI_SECURED_TRUSTSTORE_PASSWORD=... \
+#       -v "$PWD/three-clusters.yaml:/etc/kui/kui.yaml:ro" \
+#       -v "$PWD/certs:/etc/kui/certs:ro" \
+#       ghcr.io/kui/kui-allinone:latest --config /etc/kui/kui.yaml
+#
+# The host names below (`kafka-dev`, `kafka-prod-1`, `kafka-secured`) are Docker Compose service
+# names, so they resolve only from inside that stack's network. From a shell on your own machine
+# they mean nothing; that is normal and is not a KUI problem.
+#
+# ---------------------------------------------------------------------------------------------
+# THE ENVIRONMENT VARIABLES THIS FILE NEEDS
+#
+# Nothing secret is written in this file -- every secret is a *reference* to somewhere else, which
+# is what makes the file safe to commit. KUI follows the reference while it starts and refuses to
+# start, naming the variable, if it cannot: an unset secret is never quietly treated as an empty
+# one.
+#
+#   KUI_CURSOR_KEY                     signs the message browser's paging cursors and the offset
+#                                      reset wizard's plan tokens. At least 32 bytes; generate one
+#                                      with `openssl rand -base64 48`. You may leave it out for a
+#                                      single process -- see the note by the key below.
+#   KUI_SECURED_PASSWORD               the SCRAM password of the `secured` cluster's KUI user.
+#   KUI_SECURED_TRUSTSTORE_PASSWORD    the password of the PKCS12 truststore that holds the private
+#                                      certificate authority the secured brokers were signed by.
+#
+# If your platform delivers secrets as mounted files rather than as environment variables -- which
+# is what Kubernetes Secrets and Docker Compose secrets do -- write `file:/run/secrets/<name>`
+# instead of `env:<NAME>`. Both forms work at every key that takes a secret.
+# ---------------------------------------------------------------------------------------------
+
+kui:
+  server:
+    # Every network interface. Inside a container this is not a way of exposing KUI to the world:
+    # a container's own address is not knowable in advance, and binding `127.0.0.1` there makes the
+    # process unreachable even from the container next to it. Control who can reach KUI with your
+    # network, not with this key.
+    host: "0.0.0.0"
+    port: 8080
+
+  # `disabled` is the only value KUI accepts today; real authentication arrives with the identity
+  # service in M6. Writing it down rather than relying on the default makes the security posture of
+  # the file explicit, which matters for the one setting nobody should have to guess at.
+  auth:
+    type: disabled
+
+  telemetry:
+    # One short human line per event. The default is `json`, which is what a log system wants and
+    # what a person watching a terminal does not.
+    logFormat: text
+
+  streaming:
+    # One shared key for the two things KUI hands a browser and later accepts back as an
+    # instruction: the message browser's paging cursor, and the offset-reset wizard's plan token.
+    #
+    # Leave it out and each process generates its own at startup, which is exactly right for one
+    # process on a laptop and wrong the moment there are two: a cursor minted by one replica is
+    # rejected by the other, so "load more" works one press in two, and a wizard left open across a
+    # restart can never be applied. Neither failure names itself, so configure the key before the
+    # second replica rather than after.
+    cursorKey: "env:KUI_CURSOR_KEY"
+
+  # ===========================================================================================
+  # THE THREE CLUSTERS
+  #
+  # Nothing below is checked against a broker while KUI starts. Reachability is not knowable from a
+  # file, and a cluster that is spelled correctly and switched off is a valid configuration: it
+  # appears on the dashboard as `Unavailable` with the reason, and stays clickable. If one dead
+  # broker stopped KUI from starting, one dead broker would take the whole console down -- which is
+  # the opposite of what a Kafka console is for.
+  #
+  # Everything that *is* knowable from the file is checked, and every problem is reported at once:
+  # a malformed address, an unknown SASL mechanism, a missing password, two clusters that would
+  # share one id. One restart, not one restart per mistake.
+  # ===========================================================================================
+  clusters:
+
+    # -----------------------------------------------------------------------------------------
+    # 1. Development: one broker, no security, nothing to configure.
+    #
+    # The shortest a cluster entry can be. No `security` block means PLAINTEXT -- no authentication
+    # and no encryption at all -- which is right for a broker on your own machine and wrong for
+    # anything a network can reach.
+    # -----------------------------------------------------------------------------------------
+    - name: "Development"
+      id: "development"
+      bootstrapServers: "kafka-dev:9092"
+
+    # -----------------------------------------------------------------------------------------
+    # 2. Production: three brokers, and the tuning a busy cluster wants.
+    #
+    # Listing all three addresses is not redundancy theatre. `bootstrapServers` is only the list of
+    # brokers a client tries in order to ask "who is in this cluster and which broker leads which
+    # partition"; from then on it talks to whichever brokers the answer named. Listing one broker
+    # therefore works perfectly -- right up until that one broker is the one that is restarting,
+    # and then nothing can connect even though two thirds of the cluster is healthy.
+    # -----------------------------------------------------------------------------------------
+    - name: "Production"
+      id: "production"
+      bootstrapServers: "kafka-prod-1:9092,kafka-prod-2:9092,kafka-prod-3:9092"
+
+      # How KUI talks to this one cluster's brokers, and only this one. Every key is optional and
+      # every default is already a working number, so a cluster with no `admin` block is not a
+      # cluster with no timeouts. They are written out here because this is the entry somebody
+      # tuning a large cluster will come looking at.
+      admin:
+        # How long one request to a broker may take.
+        requestTimeout: 30s
+        # The whole-call budget, the Kafka client's own internal retries included. It must be at
+        # least as long as `requestTimeout`; shorter is refused rather than clamped, because a
+        # client that gives up before its own single request can finish looks, from a dashboard,
+        # exactly like a broken cluster.
+        apiTimeout: 60s
+        # How many topics or partitions go into one admin request, and how many such requests are
+        # in flight at once. If this cluster starts timing out, bring `chunkSize` DOWN before you
+        # push `requestTimeout` up: a smaller request that succeeds beats a larger one that
+        # eventually does not, and the admin client has a single network thread, so a long request
+        # also holds up everything queued behind it.
+        chunkSize: 200
+        parallelism: 4
+
+    # -----------------------------------------------------------------------------------------
+    # 3. Secured: SASL over TLS, against brokers signed by a private certificate authority.
+    #
+    # Two different things are being set here and they are easy to confuse:
+    #
+    #   `protocol`   how the connection itself behaves. SASL_SSL means authenticate AND encrypt.
+    #                The one people get wrong is SASL_PLAINTEXT, which authenticates but does not
+    #                encrypt -- it sends your credentials across the network in the clear.
+    #   `mechanism`  how the password is proved without being sent. SCRAM-SHA-512 is a
+    #                challenge-response scheme; PLAIN really does send the password, which is only
+    #                acceptable inside the tunnel that SASL_SSL provides.
+    #
+    # The spellings are Kafka's own, upper case, so they can be copied straight out of Kafka's
+    # documentation without translation.
+    # -----------------------------------------------------------------------------------------
+    - name: "Secured"
+      id: "secured"
+      bootstrapServers: "kafka-secured:9093"
+      security:
+        protocol: SASL_SSL
+        mechanism: SCRAM-SHA-512
+        username: "kui"
+        password: "env:KUI_SECURED_PASSWORD"
+        ssl:
+          # Whether the certificate the broker presents must match the host name that was dialled.
+          # Leave this on. Turning it off to make a certificate error go away also removes the
+          # check that the broker is who it claims to be, which is most of what TLS was doing.
+          verifyHostname: true
+          # Only needed when the brokers' certificates come from a private certificate authority
+          # that the container's own trust store has never heard of. A cluster whose certificate
+          # was issued by a public authority needs none of this block.
+          truststore:
+            location: "/etc/kui/certs/kafka-ca.p12"
+            password: "env:KUI_SECURED_TRUSTSTORE_PASSWORD"
+            type: PKCS12
+
+# ---------------------------------------------------------------------------------------------
+# WHAT IS DELIBERATELY NOT IN THIS FILE
+#
+# `kui.gateway.*`  -- the addresses of the other KUI processes and the key they sign their internal
+#                     calls with. One all-in-one process has no other processes to call, so it
+#                     needs none of it. `production.yaml` next to this file shows the distributed
+#                     shape, where every process must be given the same `principalKeys` list.
+# `kui.store.*`    -- KUI's own metadata store, which lets clusters be added and edited from the
+#                     interface instead of from a file. `production.yaml` and
+#                     `docs/operations/metadata-store.md` cover it; a file-only deployment like
+#                     this one does not need it.
+#
+# Every key KUI reads, with its type, its default and what happens when it is wrong, is listed in
+# `docs/operations/configuration.md`.
+# ---------------------------------------------------------------------------------------------

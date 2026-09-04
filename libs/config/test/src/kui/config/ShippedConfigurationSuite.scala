@@ -35,14 +35,34 @@ final class ShippedConfigurationSuite extends KuiSuite {
     ("deployment/compose/kui-cluster.yaml", UrlPolicy.Dev, signingKey),
     ("deployment/compose/kui-allinone.yaml", UrlPolicy.Dev, Map.empty),
     ("deployment/quickstart/kui-quickstart.yaml", UrlPolicy.Dev, Map.empty),
+    (
+      "deployment/secured/kui-secured.yaml",
+      UrlPolicy.Dev,
+      signingKey ++ Map(
+        "KUI_ANALYTICS_PASSWORD" -> "an-analytics-password",
+        "KUI_ANALYTICS_TRUSTSTORE_PASSWORD" -> "a-truststore-password",
+        "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted"
+      )
+    ),
     ("deployment/examples/minimal.yaml", UrlPolicy.Strict, Map.empty),
+    (
+      "deployment/examples/three-clusters.yaml",
+      UrlPolicy.Strict,
+      Map(
+        "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted",
+        "KUI_SECURED_PASSWORD" -> "a-scram-password",
+        "KUI_SECURED_TRUSTSTORE_PASSWORD" -> "a-truststore-password"
+      )
+    ),
     (
       "deployment/examples/production.yaml",
       UrlPolicy.Strict,
       signingKey ++ Map(
         "KUI_ANALYTICS_PASSWORD" -> "an-analytics-password",
         "KUI_ANALYTICS_TRUSTSTORE_PASSWORD" -> "a-truststore-password",
-        "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted"
+        "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted",
+        "KUI_STORE_ENCRYPTION_KEY" -> "a-store-encryption-key",
+        "KUI_STORE_PASSWORD" -> "a-store-password"
       )
     )
   )
@@ -83,7 +103,9 @@ final class ShippedConfigurationSuite extends KuiSuite {
     val environment = signingKey ++ Map(
       "KUI_ANALYTICS_PASSWORD" -> "an-analytics-password",
       "KUI_ANALYTICS_TRUSTSTORE_PASSWORD" -> "a-truststore-password",
-      "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted"
+      "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted",
+      "KUI_STORE_ENCRYPTION_KEY" -> "a-store-encryption-key",
+      "KUI_STORE_PASSWORD" -> "a-store-password"
     )
 
     val loaded = KuiConfigSource

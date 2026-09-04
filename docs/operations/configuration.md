@@ -9,21 +9,21 @@ If you would rather start from a file than a table, there are two you can copy:
 | File | What it is |
 | --- | --- |
 | [`deployment/examples/minimal.yaml`](../../deployment/examples/minimal.yaml) | The simplest thing that works: one cluster, no security. |
-| [`deployment/examples/production.yaml`](../../deployment/examples/production.yaml) | Several clusters, one secured with SASL over TLS, every secret read from the environment. |
+| [`deployment/examples/three-clusters.yaml`](../../deployment/examples/three-clusters.yaml) | **Start here.** One KUI process managing three clusters — a plaintext development one, a three-broker production-shaped one, and a secured one — with every secret read from the environment. It is the file `deployment/demo/` runs, and the shape most real deployments have. |
+| [`deployment/examples/production.yaml`](../../deployment/examples/production.yaml) | The same idea in the distributed topology: a gateway process and service processes in separate containers, with the shared signing keys and the Kafka-backed metadata store that shape needs. |
 
-Both were loaded through KUI's own configuration loader, under the strict production URL policy,
-before being committed — an example that has never been loaded is a guess, and a wrong example
-fails on somebody's first run, which is the worst possible moment. Nothing yet loads them
-automatically on every build; wiring them into `libs.config.test` so they cannot drift is tracked
-as follow-up work.
+Every one of them is loaded through KUI's own configuration loader, under the URL policy of the
+deployment it describes, by `ShippedConfigurationSuite` in `libs/config/test` — on every build, so
+none of them can quietly go stale. An example that has never been loaded is a guess, and a wrong
+example fails on somebody's first run, which is the worst possible moment. The same suite covers
+the quickstart's, the Compose stacks' and the secured stack's files.
 
-> **Where the product is today.** Milestone 0 is complete: KUI builds, runs as one process or as
-> separate containers, serves its interface, and reports which of its services are reachable. It
-> does **not** connect to Kafka yet — that is M1. So a configuration file with clusters in it loads
-> today and KUI reports the cluster capability as *not yet available*. Keys in the tables below
-> that belong to unfinished milestones are marked **M1** or **M6**, and the marking says whether
-> the key is *accepted and ignored* or *not accepted at all*. The difference matters: one of them
-> starts, the other refuses to.
+> **Where the product is today.** KUI connects to Kafka and works: it lists clusters and brokers,
+> administers topics, browses and publishes messages, and shows consumer groups, their lag and the
+> offset-reset wizard. Two sections are not read yet and are marked in the tables below — `kui.rbac`
+> (**M6**, the authorization model) and `kui.auth.type` beyond `disabled` (**M6** as well). The
+> marking always says which of two very different things happens: a key that is *accepted and
+> ignored* starts the process, and a value that is *not accepted at all* refuses to.
 
 ## Where a value can come from
 
@@ -263,6 +263,7 @@ refused, naming the gap, because it nearly always means a deleted entry or a mis
 | `kui.clusters.<n>.security.principal` | `…_SECURITY_PRINCIPAL` | *(required for GSSAPI)* | |
 | `kui.clusters.<n>.security.keytab` | `…_SECURITY_KEYTAB` | *(unset)* | A path inside the container. |
 | `kui.clusters.<n>.security.useTicketCache` | `…_SECURITY_USETICKETCACHE` | `false` | Use an existing Kerberos ticket cache instead of a keytab. |
+| `kui.clusters.<n>.security.storeKey` | `…_SECURITY_STOREKEY` | `true` | GSSAPI only: keep the key from the keytab in the login context, so KUI can renew its own ticket instead of failing when the first one expires. |
 | `kui.clusters.<n>.security.tokenEndpoint` | `…_SECURITY_TOKENENDPOINT` | *(required for OAUTHBEARER)* | |
 | `kui.clusters.<n>.security.clientId` | `…_SECURITY_CLIENTID` | *(required for OAUTHBEARER)* | |
 | `kui.clusters.<n>.security.clientSecret` | `…_SECURITY_CLIENTSECRET` | *(required for OAUTHBEARER)* | A secret. |
@@ -281,7 +282,7 @@ refused, naming the gap, because it nearly always means a deleted entry or a mis
 | `kui.clusters.<n>.admin.requestTimeout` | `…_ADMIN_REQUESTTIMEOUT` | `30s` | How long one request to a broker may take. Becomes `request.timeout.ms`. |
 | `kui.clusters.<n>.admin.apiTimeout` | `…_ADMIN_APITIMEOUT` | `60s` | The whole-call budget, the client's own retries included. Becomes `default.api.timeout.ms`. |
 | `kui.clusters.<n>.admin.chunkSize` | `…_ADMIN_CHUNKSIZE` | `200` | How many topics, partitions or config resources go into one admin request. |
-| `kui.clusters.<n>.admin.groupChunkSize` | `…_ADMIN_GROUPCHUNKSIZE` | `50` | The same, for consumer groups. Read and validated today; the first code that uses it ships in M4. |
+| `kui.clusters.<n>.admin.groupChunkSize` | `…_ADMIN_GROUPCHUNKSIZE` | `50` | The same, for consumer groups. Separate from `chunkSize` because describing fifty groups costs a broker far more than describing fifty topics. |
 | `kui.clusters.<n>.admin.parallelism` | `…_ADMIN_PARALLELISM` | `4` | How many chunks are in flight at once against this one cluster. |
 | `kui.clusters.<n>.properties.<kafka.property>` | *(not settable from the environment)* | *(empty)* | Raw Kafka client properties, applied last. |
 
@@ -366,6 +367,19 @@ so rather than a setting that quietly does nothing. And a value whose key looks 
 (anything containing `password`, `secret`, `key`, `token`, `credential`, `jaas`, `passwd` or
 `auth`) is redacted in every log line and diagnostic. A secret inside `properties` still uses
 `env:NAME`; the *value* travels through the environment, only the *key* cannot.
+
+**More than one cluster, and what happens when one of them dies.** The list is a list because
+managing several clusters from one console is the point of the product, and because the clusters in
+it are genuinely independent of one another. Each one gets its own connection, its own background
+snapshot and its own capability state, so a cluster that stops answering — a broker restarting, a
+network partition, an expired certificate — is reported as `Unavailable` on its own row, with the
+reason and the age of the last good snapshot, while every other cluster in the file keeps working
+normally. Nothing about the failure is global: no page goes blank, no request queues behind the
+dead cluster's timeout, and KUI does not restart.
+
+That is a claim worth watching rather than reading.
+[`deployment/demo/README.md`](../../deployment/demo/README.md) brings up three clusters on one
+machine and walks through stopping one of them and starting it again.
 
 ### `kui.topics` — the topic service's own dials
 
