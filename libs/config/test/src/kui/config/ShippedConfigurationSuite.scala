@@ -44,6 +44,14 @@ final class ShippedConfigurationSuite extends KuiSuite {
         "KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted"
       )
     ),
+    (
+      "deployment/demo/kui-demo.yaml",
+      UrlPolicy.Dev,
+      Map(
+        "KUI_DEMO_SECURED_PASSWORD" -> "a-scram-password",
+        "KUI_DEMO_TRUSTSTORE_PASSWORD" -> "a-truststore-password"
+      )
+    ),
     ("deployment/examples/minimal.yaml", UrlPolicy.Strict, Map.empty),
     (
       "deployment/examples/three-clusters.yaml",
