@@ -30,11 +30,17 @@ final case class ClusterCapabilityReport(
       * as an explicit field because the wire DTO has it and the gateway's fold reads it.
       */
     configured: Boolean,
+    /** The cluster's display name, as its operator wrote it. Carried here so that the gateway, and through it
+      * the browser's cluster switcher, has something to show other than the slug.
+      */
+    name: Option[String],
     /** The health of *this service's* ability to serve this cluster. */
     state: CapabilityState,
-    /** Whether the last topology refresh against the cluster's brokers succeeded. `false` does not make
-      * `state` anything other than `Available`: an unreachable managed cluster is a section of a healthy
-      * response, not a broken capability.
+    /** Whether the last topology refresh against the cluster's brokers succeeded.
+      *
+      * Separate from `state` because the two answer different questions: `reachable` is about the Kafka
+      * cluster, `state` is about what KUI can currently do with it. A cluster whose brokers are not answering
+      * but whose last snapshot is still on the screen is unreachable *and* usable.
       */
     reachable: Boolean,
     /** The probed capability tokens. Empty for a cluster that has never been reached, which reads correctly
@@ -65,6 +71,7 @@ object ClusterCapabilityReport {
   def apply(configured: Boolean, features: Set[String], available: Boolean): ClusterCapabilityReport =
     ClusterCapabilityReport(
       configured = configured,
+      name = None,
       state =
         if available then CapabilityState.Available
         else CapabilityState.Degraded(CapabilityReportUseCase.StartingReason),
@@ -107,12 +114,29 @@ object CapabilityReportUseCase {
 
   val Operation: String = "kui.cluster.capabilities"
 
-  /** The mapping table as a pure, total function of the two observations.
+  /** The mapping table as a pure, total function of the two observations, **for one cluster**.
     *
-    * The invariant it encodes, stated once so that a later edit which "helpfully" reports an unreachable
-    * cluster as degraded fails a test: **no state of any managed Kafka cluster can move this service's
-    * reported capability below `Available`.** Only two things can — the metadata store being degraded, and
-    * the process not having finished starting. Everything else about a managed cluster is data on a page.
+    * ==The invariant, and where it actually lives==
+    *
+    * The rule this table used to encode was: no state of any managed Kafka cluster can move the reported
+    * capability below `Available`. It exists so that one unreachable Kafka cluster cannot dim the cluster
+    * feature for everybody — DEVPLAN D4 and ADR-039 §6 — and it was enforced here because M0's gateway folded
+    * every cluster a service reported into one verdict and took the worst.
+    *
+    * The gateway does not do that any more. `ReadinessPoller.summarise` builds the service-wide entry from
+    * the service's readiness and circuit alone and never looks at a cluster's status, and
+    * `PerClusterCapabilitySuite.anUnreachableClusterDoesNotChangeTheServiceCapability` is what keeps it that
+    * way. The invariant is therefore enforced where it belongs — on the service's own key — and enforcing it
+    * *here* as well had a cost: this value is the **per-cluster** entry, and reporting `Available` for a
+    * cluster KUI has never reached made `/api/v1/capabilities` say `available` for a dead cluster whose own
+    * dashboard row correctly said otherwise. The dashboard was right because it reads the row's own section;
+    * the sidebar and the cluster switcher, which are driven by the capability registry, were wrong. That is
+    * the unfinished half of CLAPI-008, and it undermined the promise the product is built around in the one
+    * place a user looks first.
+    *
+    * So a cluster that is not answering is now reported `Degraded` on its own key, with the failure's own
+    * message as the reason. `Degraded` and not `Unavailable`: a service answering this request is by
+    * definition reachable, and a self-reported `Unavailable` would be a service claiming it is not there.
     *
     * The store row comes first because it takes precedence: a degraded store degrades every entry whatever
     * the clusters themselves are doing, since configuration changes cannot be accepted and the profiles being
@@ -134,8 +158,11 @@ object CapabilityReportUseCase {
           // it is a constant and not a sentence.
           case SnapshotFreshness.Loading => (CapabilityState.Degraded(StartingReason), false)
           case SnapshotFreshness.Fresh(_) => (CapabilityState.Available, true)
-          case SnapshotFreshness.Stale(_, _, _) => (CapabilityState.Available, false)
-          case SnapshotFreshness.Unavailable(_, _) => (CapabilityState.Available, false)
+          // Data is on the screen and the last refresh failed: usable, and not well. The message is
+          // the failure's own, so the switcher's tooltip says what went wrong rather than "degraded".
+          case SnapshotFreshness.Stale(_, error, _) => (CapabilityState.Degraded(error.message), false)
+          case SnapshotFreshness.Unavailable(error, _) =>
+            (CapabilityState.Degraded(error.message), false)
         }
     }
   }
@@ -158,13 +185,14 @@ object CapabilityReportUseCase {
 
       def report: F[CapabilityReport] =
         registry.snapshot.flatMap { resolved =>
-          resolved.profiles.keys.toList
-            .traverse(id => entryOf(id, resolved.storeHealth).map(id -> _))
+          resolved.profiles.toList
+            .traverse((id, profile) => entryOf(id, Some(profile.label), resolved.storeHealth).map(id -> _))
             .map(entries => CapabilityReport(entries.toMap, resolved.storeHealth))
         }
 
       private def entryOf(
           id: ClusterId,
+          name: Option[String],
           storeHealth: StoreHealth
       ): F[ClusterCapabilityReport] =
         for {
@@ -180,6 +208,7 @@ object CapabilityReportUseCase {
 
           ClusterCapabilityReport(
             configured = true,
+            name = name,
             state = state,
             reachable = reachable,
             features = probed.flatMap(_.value).fold(Set.empty[String])(tokensOf),

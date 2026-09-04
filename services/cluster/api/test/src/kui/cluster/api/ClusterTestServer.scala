@@ -157,6 +157,9 @@ object ClusterTestServer {
             Map(
               Cluster -> kui.cluster.application
                 .ClusterCapabilityReport(configured, Set("CLUSTER_TOPOLOGY"), available)
+                // The name an operator wrote. It is on the document because the browser's cluster
+                // switcher is drawn from it and from nothing else.
+                .copy(name = Some("Production EU"))
             )
           )
         )

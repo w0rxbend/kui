@@ -30,6 +30,9 @@ final class CapabilityReportUseCaseSuite extends munit.CatsEffectSuite with muni
 
   private val at: Instant = Instant.parse("2026-09-04T09:00:00Z")
 
+  /** The failure a cluster that cannot be reached leaves on its snapshot. */
+  private val noRoute: KuiError = InfrastructureError.Unreachable("the cluster", "no route")
+
   private val unreachable: KuiError = InfrastructureError.Unreachable("the cluster", "no route")
 
   private val degradedStore: StoreHealth = StoreHealth.Degraded("the broker did not answer", at)
@@ -50,20 +53,23 @@ final class CapabilityReportUseCaseSuite extends munit.CatsEffectSuite with muni
     )
   }
 
-  test("staleIsAvailableAndNotReachable") {
-    // The decision most likely to be argued with: an unreachable *managed* cluster is a section of
-    // a healthy response, not a broken capability.
+  test("staleIsDegradedWithTheFailuresOwnMessageAndNotReachable") {
+    // A cluster whose last refresh failed is usable — its last snapshot is still on the screen — and it
+    // is not healthy, and its own capability entry has to say so. Saying `Available` here is what made
+    // `/api/v1/capabilities` report a dead cluster as available while its dashboard row said otherwise.
     assertEquals(
-      CapabilityReportUseCase.stateOf(SnapshotFreshness.Stale(at, "no route", at), StoreHealth.Online),
-      (CapabilityState.Available, false)
+      CapabilityReportUseCase.stateOf(SnapshotFreshness.Stale(at, noRoute, at), StoreHealth.Online),
+      (CapabilityState.Degraded(noRoute.message), false)
     )
   }
 
-  test("unavailableIsAvailableAndNotReachable") {
-    // Same decision, for the cluster that was never reached at all.
+  test("unavailableIsDegradedWithTheFailuresOwnMessageAndNotReachable") {
+    // Same decision, for the cluster that was never reached at all. `Degraded` rather than
+    // `Unavailable`, because a service answering this request is by definition reachable and a
+    // self-reported `Unavailable` would be a service claiming it is not there.
     assertEquals(
-      CapabilityReportUseCase.stateOf(SnapshotFreshness.Unavailable("no route", at), StoreHealth.Online),
-      (CapabilityState.Available, false)
+      CapabilityReportUseCase.stateOf(SnapshotFreshness.Unavailable(noRoute, at), StoreHealth.Online),
+      (CapabilityState.Degraded(noRoute.message), false)
     )
   }
 
@@ -158,9 +164,14 @@ final class CapabilityReportUseCaseSuite extends munit.CatsEffectSuite with muni
         assert(before.clusters(prod.id).scrapedAt.isDefined)
         assertEquals(after.clusters(prod.id).scrapedAt, before.clusters(prod.id).scrapedAt)
         assertEquals(after.clusters(prod.id).reachable, false)
-        // And still `Available`: the cluster service is fine, and its pages render with a stale
-        // section.
-        assertEquals(after.clusters(prod.id).state, CapabilityState.Available)
+        // Degraded and not available: the cluster service itself is fine — that is the *service's* key,
+        // which the gateway builds from readiness — but this cluster is not answering, and this entry
+        // is the one the sidebar and the switcher read. It carries the failure's own message, so the
+        // dot has something to say when a user hovers it.
+        assertEquals(
+          after.clusters(prod.id).state,
+          CapabilityState.Degraded(unreachable.message)
+        )
       }
     }
 
@@ -179,25 +190,57 @@ final class CapabilityReportUseCaseSuite extends munit.CatsEffectSuite with muni
     }
   }
 
-  property("noManagedClusterConditionCanProduceAnythingBelowAvailable") {
+  property("onlyAFreshScrapeIsReportedAvailable") {
+    // The per-cluster entry says what KUI can currently do with *this* cluster, and the only condition
+    // under which the answer is "everything" is a scrape that succeeded. Anything else is degraded.
+    //
+    // This property replaces one that asserted the opposite — that no managed cluster's condition could
+    // move the entry below `Available`. That rule exists to stop one dead cluster dimming the cluster
+    // feature for everybody (DEVPLAN D4, ADR-039 §6), and it is now enforced where it belongs, on the
+    // *service's* key: `ReadinessPoller.summarise` builds that key from readiness and the circuit alone,
+    // and `PerClusterCapabilitySuite.anUnreachableClusterDoesNotChangeTheServiceCapability` keeps it so.
+    // Enforcing it on the per-cluster key as well was what made a dead cluster read as available in the
+    // sidebar and the switcher.
     val freshness: Gen[SnapshotFreshness] = Gen.oneOf(
       Gen.const(SnapshotFreshness.Loading),
       Gen.const(SnapshotFreshness.Fresh(at)),
-      Gen.const(SnapshotFreshness.Stale(at, "no route", at)),
-      Gen.const(SnapshotFreshness.Unavailable("no route", at))
+      Gen.const(SnapshotFreshness.Stale(at, noRoute, at)),
+      Gen.const(SnapshotFreshness.Unavailable(noRoute, at))
     )
 
     val healthy: Gen[StoreHealth] =
       Gen.oneOf(StoreHealth.Online, StoreHealth.NotConfigured)
 
     Prop.forAll(freshness, healthy) { (state, store) =>
-      val (reported, _) = CapabilityReportUseCase.stateOf(state, store)
+      val (reported, reachable) = CapabilityReportUseCase.stateOf(state, store)
 
-      // A future edit to `stateOf` that "helpfully" reports an unreachable cluster as degraded
-      // fails here, with a name that explains why it is wrong.
-      if state == SnapshotFreshness.Loading then reported != CapabilityState.Available
-      else reported == CapabilityState.Available
+      val isFresh = state match {
+        case SnapshotFreshness.Fresh(_) => true
+        case _ => false
+      }
+
+      (reported == CapabilityState.Available) == isFresh && reachable == isFresh
     }
+  }
+
+  test("anUnreachableClustersEntryIsDegradedAndCarriesItsName") {
+    // End to end through the use case rather than through `stateOf`: the entry a gateway actually reads.
+    ClusterRig
+      .resource(List(prod), setup = _.set(_.copy(description = Left(noRoute))))
+      .evalTap(ClusterRig.settled)
+      .use { rig =>
+        rig.capabilities.report.map { report =>
+          val entry = report.clusters(prod.id)
+
+          assert(
+            entry.state != CapabilityState.Available,
+            s"a cluster KUI cannot reach must not report itself available: ${entry.state}"
+          )
+          assertEquals(entry.reachable, false)
+          // The name an operator wrote, so the switcher has something to show but the slug.
+          assertEquals(entry.name, Some(prod.label))
+        }
+      }
   }
 
   test("reportCarriesNoSecretAndNoBootstrapString") {

@@ -123,6 +123,26 @@ class CapabilityStoreSuite extends FunSuite {
     assertEquals(current(fixture.store.states), Map[CapabilityKey, CapabilityState](clusterKey -> down))
   }
 
+  test("aNameOnceLearnedIsKeptWhenLaterFramesCarryNone") {
+    // The cluster switcher labels its rows from these names. Health frames arrive constantly and only
+    // some of them carry a name — a circuit-breaker change knows a key's health and nothing about what
+    // it is called — so a store that took each frame's name literally would flip the switcher between
+    // the operator's name for a cluster and its slug every time a breaker moved.
+    val fixture = new Fixture
+    val stream = fixture.start()
+    stream.open()
+
+    stream.send(snapshot(CapabilityEntry(clusterKey, CapabilityState.Available, at, Some("Production EU"))))
+    assertEquals(current(fixture.store.names), Map(clusterKey -> "Production EU"))
+
+    stream.send(delta(down, previous = Some(CapabilityState.Available)))
+    assertEquals(
+      current(fixture.store.names),
+      Map(clusterKey -> "Production EU"),
+      "a nameless frame must not unlearn the name"
+    )
+  }
+
   test("aDeltaForAnUnknownKeyIsAddedAndOneForAKnownKeyReplaces") {
     val fixture = new Fixture
     val stream = fixture.start()

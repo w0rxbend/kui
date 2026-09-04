@@ -230,7 +230,7 @@ object Shell {
         uiPrefix = uiPrefix,
         switcher = Some(
           ClusterSwitcher(
-            entries = CapabilityStore.states.map(ClusterEntry.of),
+            entries = CapabilityStore.states.combineWith(CapabilityStore.names).map(ClusterEntry.of),
             current = CurrentCluster.selected,
             open = cluster => router.pushState(clusterPage(features, cluster))
           )

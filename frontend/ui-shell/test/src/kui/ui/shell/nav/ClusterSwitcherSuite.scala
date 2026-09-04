@@ -55,12 +55,16 @@ class ClusterSwitcherSuite extends FunSuite {
   private def keyDown(element: dom.Element, pressed: String): Unit =
     element.dispatchEvent(new dom.KeyboardEvent("keydown", new dom.KeyboardEventInit { key = pressed; bubbles = true })): Unit
 
-  final private class Fixture(states: Map[CapabilityKey, CapabilityState], current: Option[ClusterId] = None) {
+  final private class Fixture(
+      states: Map[CapabilityKey, CapabilityState],
+      current: Option[ClusterId] = None,
+      names: Map[CapabilityKey, String] = Map.empty
+  ) {
     val chosen: Var[Option[ClusterId]] = Var(current)
     val opened: mutable.ListBuffer[ClusterId] = mutable.ListBuffer.empty
 
     val element: HtmlElement =
-      ClusterSwitcher(Val(ClusterEntry.of(states)), chosen, id => opened.append(id): Unit)
+      ClusterSwitcher(Val(ClusterEntry.of(states, names)), chosen, id => opened.append(id): Unit)
   }
 
   test("everyConfiguredClusterIsListedAndNotConfiguredOnesAreNot") {
@@ -160,10 +164,52 @@ class ClusterSwitcherSuite extends FunSuite {
   }
 
   test("aClusterWithNoDisplayNameFallsBackToItsId") {
-    // The registry carries no display name yet. The switcher degrades to the slug rather than showing a
-    // blank row, and the missing field is owed by the contract.
+    // A service that reported no name at all. The switcher degrades to the slug rather than showing a
+    // blank row.
     val entries = ClusterEntry.of(Map(entryFor("prod-eu-1") -> CapabilityState.Available))
     assertEquals(entries.map(_.displayName), List("prod-eu-1"))
+  }
+
+  test("theSwitcherRendersTheOperatorsNameAndNotTheSlug") {
+    // The whole reason the switcher exists. Real cluster ids differ by one character — `prod-eu-1` and
+    // `prod-eu-2` — and reading the wrong one means acting on the wrong cluster; the name an operator
+    // chose is the string that tells them apart. It used to render the slug, because the capability
+    // stream carried no name and `ClusterEntry.of` had nothing else to use.
+    val key = entryFor("prod-eu-1")
+    val fixture = new Fixture(
+      Map(key -> CapabilityState.Available),
+      names = Map(key -> "Production EU (primary)")
+    )
+
+    assertEquals(ClusterEntry.of(Map(key -> CapabilityState.Available), Map(key -> "Production EU (primary)"))
+      .map(_.displayName), List("Production EU (primary)"))
+
+    mounted(fixture.element) { root =>
+      click(byTestId(root, "cluster-switcher-trigger"))
+      val option = byTestId(root, "cluster-switcher-option-prod-eu-1")
+      assert(option.textContent.contains("Production EU (primary)"), option.textContent)
+      // The trigger shows the selected cluster, and it has to read the same way.
+      assert(
+        byTestId(root, "cluster-switcher-trigger").textContent.contains("Production EU (primary)"),
+        byTestId(root, "cluster-switcher-trigger").textContent
+      )
+      // The id is still the machine-readable handle, on the attribute rather than in the label.
+      assertEquals(option.getAttribute("data-testid"), "cluster-switcher-option-prod-eu-1")
+    }
+  }
+
+  test("aClusterNamedByOneOfItsServicesIsNamedForAllOfThem") {
+    // One cluster has one entry per service scoped to it, and only the services that know a name send
+    // one. A single name is enough to label the row.
+    val entries = ClusterEntry.of(
+      Map(
+        entryFor("prod", topicService) -> CapabilityState.Available,
+        entryFor("prod") -> CapabilityState.Available
+      ),
+      Map(entryFor("prod") -> "Production")
+    )
+
+    assertEquals(entries.map(_.displayName), List("Production"))
   }
 
   test("theColourTagAndTheStatusDotAreDistinctElements") {

@@ -70,10 +70,23 @@ final class Capabilities(
 
   private val known = Var(Map.empty[CapabilityKey, CapabilityState])
 
+  /** The display name the gateway last reported for each key.
+    *
+    * Kept beside the states rather than inside them because a name is identity and a state is health: they
+    * change on completely different occasions, and a frame that carries no name must leave the last one
+    * standing rather than blank the label. Names are never unlearned for the same reason the gateway never
+    * unlearns one — a switcher that flipped between an operator's name for a cluster and its slug as its
+    * health moved would be worse than one that only ever showed the slug.
+    */
+  private val knownNames = Var(Map.empty[CapabilityKey, String])
+
   private val connectionState = Var[SseConnection](SseConnection.Connecting)
 
   /** Everything the gateway has told us. Never emptied by a failure — see [[applySnapshot]]. */
   val states: Signal[Map[CapabilityKey, CapabilityState]] = known.signal
+
+  /** What each capability is called, for the screens that show a person a name. */
+  val names: Signal[Map[CapabilityKey, String]] = knownNames.signal
 
   /** What the capability stream is doing, for the banner UI-010 renders. */
   val connection: Signal[SseConnection] = connectionState.signal
@@ -215,6 +228,7 @@ final class Capabilities(
     val replacement = snapshot.entries.map(entry => entry.key -> entry.state).toMap
     val previous = known.now()
     known.set(replacement)
+    rememberNames(snapshot.entries)
     replacement.foreach((key, state) => reportTransition(key, previous.get(key), state))
   }
 
@@ -226,7 +240,14 @@ final class Capabilities(
     // frame was missed.
     val before = change.previous.orElse(known.now().get(key))
     known.update(_.updated(key, change.entry.state))
+    rememberNames(List(change.entry))
     reportTransition(key, before, change.entry.state)
+  }
+
+  /** Records every name an entry carried, and forgets none. */
+  private def rememberNames(entries: List[CapabilityEntry]): Unit = {
+    val named = entries.flatMap(entry => entry.name.map(entry.key -> _))
+    if named.nonEmpty then knownNames.update(_ ++ named)
   }
 
   /** Raises a toast when a capability crosses into or out of `Unavailable`.
@@ -338,6 +359,10 @@ object CapabilityStore {
     */
   def states: Signal[Map[CapabilityKey, CapabilityState]] =
     instance.fold(Signal.fromValue(Map.empty))(_.states)
+
+  /** The display names the gateway has reported, keyed the same way the states are. */
+  def names: Signal[Map[CapabilityKey, String]] =
+    instance.fold(Signal.fromValue(Map.empty))(_.names)
 
   def connection: Signal[SseConnection] =
     instance.fold(Signal.fromValue(SseConnection.Connecting))(_.connection)

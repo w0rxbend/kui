@@ -50,7 +50,13 @@ final class CapabilitySignals[F[_]: Async] private (
         now,
         config.degradedP95Threshold
       )
-      _ <- registry.report(key, folded)
+      // The name travels with the state because the registry is where the browser reads both. A cluster
+      // key's name is the display name the owning service reported for it; a service-wide key has none.
+      _ <- registry.report(
+        key,
+        folded,
+        inputs.getOrElse(key, CapabilityInputs.unknown).serviceReport.flatMap(_.name)
+      )
     } yield ()
 
   /** The service-wide key of one service, for the callers that only ever mean that one. */

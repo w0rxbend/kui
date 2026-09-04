@@ -22,9 +22,9 @@ import kui.ui.kernel.state.FeatureState
   * live status costs no new connection.
   *
   * @param displayName
-  *   what a person reads. The registry carries no display name yet, so this falls back to the id — it
-  *   degrades rather than breaking, and the gap is owed by the contract rather than patched with a second
-  *   request from here.
+  *   what a person reads: the name the cluster's operator wrote in the configuration, which the owning
+  *   service reports on its capability document and the gateway carries on every capability entry. A cluster
+  *   whose service has not named it falls back to the id, which degrades rather than breaking.
   */
 final case class ClusterEntry(clusterId: ClusterId, displayName: String, state: FeatureState)
 
@@ -41,15 +41,27 @@ object ClusterEntry {
     * the *worst* of them. A cluster whose topic service is fine and whose cluster service is unreachable is
     * not a healthy cluster, and a dot that reported the best of its services would be reassuring and wrong.
     */
-  def of(states: Map[CapabilityKey, CapabilityState]): List[ClusterEntry] =
+  def of(
+      states: Map[CapabilityKey, CapabilityState],
+      names: Map[CapabilityKey, String] = Map.empty
+  ): List[ClusterEntry] =
     states.toList
-      .flatMap((key, state) => key.cluster.map(_ -> state))
-      .groupBy((cluster, _) => cluster)
+      .flatMap((key, state) => key.cluster.map(cluster => (cluster, key, state)))
+      .groupBy((cluster, _, _) => cluster)
       .toList
       .flatMap { (cluster, entries) =>
         val worst =
-          entries.map((_, state) => FeatureState.derive(Some(state), permitted = true)).minBy(severity)
-        Option.when(!isNotConfigured(worst))(ClusterEntry(cluster, cluster.value, worst))
+          entries.map((_, _, state) => FeatureState.derive(Some(state), permitted = true)).minBy(severity)
+        // The first name any of this cluster's services reported, in a stable order so that two services
+        // naming one cluster differently cannot make the label flicker. The id is the fallback: showing
+        // `prod-eu-1` is a degradation, showing nothing would be a blank row.
+        val label = entries
+          .sortBy((_, key, _) => key.service.value)
+          .flatMap((_, key, _) => names.get(key))
+          .headOption
+          .getOrElse(cluster.value)
+
+        Option.when(!isNotConfigured(worst))(ClusterEntry(cluster, label, worst))
       }
       .sortBy(entry => (entry.displayName.toLowerCase, entry.clusterId.value))
 

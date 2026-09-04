@@ -128,7 +128,7 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
         // missing. "We have not asked" and "it is not deployed" are different answers, and the browser
         // renders them differently.
         snapshot.entries.foreach {
-          case CapabilityEntry(_, CapabilityState.Degraded(reason), _) =>
+          case CapabilityEntry(_, CapabilityState.Degraded(reason), _, _) =>
             assertEquals(reason.code, ReasonCode.Starting)
           case other => fail(s"expected degraded-starting before any poll, got $other")
         }
@@ -297,7 +297,7 @@ final class CapabilityRoutesSuite extends CatsEffectSuite {
       def changes: fs2.Stream[IO, kui.contracts.capability.CapabilityChange] = subscribeStream
       def subscribe: Resource[IO, fs2.Stream[IO, kui.contracts.capability.CapabilityChange]] =
         Resource.pure(subscribeStream)
-      def report(key: CapabilityKey, state: CapabilityState): IO[Unit] = IO.unit
+      def report(key: CapabilityKey, state: CapabilityState, name: Option[String]): IO[Unit] = IO.unit
       def probeNow(service: ServiceId): IO[Unit] = IO.unit
       def attachProbe(probe: ServiceId => IO[Unit]): IO[Unit] = IO.unit
 

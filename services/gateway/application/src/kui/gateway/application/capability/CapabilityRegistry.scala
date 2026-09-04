@@ -62,8 +62,17 @@ trait CapabilityRegistry[F[_]] {
     */
   def subscribe: Resource[F, Stream[F, CapabilityChange]]
 
-  /** Records what the pollers and feeds observed. Total: it never fails and never blocks. */
-  def report(key: CapabilityKey, state: CapabilityState): F[Unit]
+  /** Records what the pollers and feeds observed. Total: it never fails and never blocks.
+    *
+    * @param name
+    *   the display name of the thing this key is about, when the caller knows one. Remembered per key and
+    *   carried on every entry the registry publishes, so the browser's cluster switcher can show an
+    *   operator's own name for a cluster rather than its slug. A later report that knows no name leaves the
+    *   remembered one alone: a circuit-breaker feed knows a key's health and nothing about its name, and
+    *   letting it blank the label would make the switcher flip between the name and the slug as breakers
+    *   opened and closed.
+    */
+  def report(key: CapabilityKey, state: CapabilityState, name: Option[String] = None): F[Unit]
 
   /** Forces an immediate re-check of one service and returns once its state has been recomputed, so the UI's
     * "Retry now" button is honest rather than decorative.
@@ -100,7 +109,20 @@ object CapabilityRegistry {
       subscribers <- Resource.eval(Ref.of[F, Map[Long, Subscriber[F]]](Map.empty))
       nextId <- Resource.eval(Ref.of[F, Long](0L))
       probe <- Resource.eval(Ref.of[F, ServiceId => F[Unit]](_ => Async[F].unit))
-    } yield new Impl[F](config, logger, supervisor, lock, gauge, states, pending, subscribers, nextId, probe)
+      names <- Resource.eval(Ref.of[F, Map[CapabilityKey, String]](Map.empty))
+    } yield new Impl[F](
+      config,
+      logger,
+      supervisor,
+      lock,
+      gauge,
+      states,
+      pending,
+      subscribers,
+      nextId,
+      probe,
+      names
+    )
 
   /** One subscriber's bounded mailbox. `None` ends the stream. */
   final private case class Subscriber[F[_]](queue: Queue[F, Option[CapabilityChange]])
@@ -124,7 +146,8 @@ object CapabilityRegistry {
       pending: Ref[F, Map[CapabilityKey, CapabilityState]],
       subscribers: Ref[F, Map[Long, Subscriber[F]]],
       nextId: Ref[F, Long],
-      probe: Ref[F, ServiceId => F[Unit]]
+      probe: Ref[F, ServiceId => F[Unit]],
+      names: Ref[F, Map[CapabilityKey, String]]
   ) extends CapabilityRegistry[F] {
 
     def snapshot: F[Map[CapabilityKey, CapabilityState]] = states.get.map(_.view.mapValues(_.state).toMap)
@@ -141,9 +164,9 @@ object CapabilityRegistry {
 
     def probeNow(service: ServiceId): F[Unit] = probe.get.flatMap(_.apply(service))
 
-    def report(key: CapabilityKey, next: CapabilityState): F[Unit] =
+    def report(key: CapabilityKey, next: CapabilityState, name: Option[String]): F[Unit] =
       lock.permit.surround {
-        Clock[F].realTimeInstant.flatMap { now =>
+        rememberName(key, name) *> Clock[F].realTimeInstant.flatMap { now =>
           decide(key, next).flatMap {
             // Any report other than the outage itself cancels a pending outage. Without this, a service
             // that failed once and recovered inside the debounce window would still be published as down
@@ -236,17 +259,25 @@ object CapabilityRegistry {
         }
       }
 
+    /** Keeps the last name anybody supplied for this key, and never unlearns one. */
+    private def rememberName(key: CapabilityKey, name: Option[String]): F[Unit] =
+      name.traverse_(value => names.update(_.updated(key, value)))
+
     private def commit(
         key: CapabilityKey,
         next: CapabilityState,
         previous: Option[CapabilityState],
         now: Instant
     ): F[Unit] =
-      states.update(_.updated(key, CapabilityEntry(key, next, now))) *>
-        pending.update(_ - key) *>
-        record(key, previous, next) *>
-        log(key, previous, next) *>
-        publish(CapabilityChange(CapabilityEntry(key, next, now), previous))
+      names.get.flatMap { known =>
+        val entry = CapabilityEntry(key, next, now, known.get(key))
+
+        states.update(_.updated(key, entry)) *>
+          pending.update(_ - key) *>
+          record(key, previous, next) *>
+          log(key, previous, next) *>
+          publish(CapabilityChange(entry, previous))
+      }
 
     /** One gauge that moves between buckets, so `sum by (state)` is the number of keys in each. */
     private def record(

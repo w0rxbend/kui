@@ -6,7 +6,9 @@
       "features" : [
         "CLUSTER_TOPOLOGY"
       ],
-      "status" : "available"
+      "status" : "available",
+      "name" : "Production EU",
+      "reason" : null
     }
   }
 }

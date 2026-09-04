@@ -86,6 +86,9 @@ object CapabilityMapping {
     Transformer
       .define[ClusterCapabilityReport, ClusterCapability]
       .withFieldComputed(_.status, statusOf)
+      // `name` is a field on both sides and Chimney copies it; `reason` is computed, because on this
+      // side it lives inside the state rather than beside it.
+      .withFieldComputed(_.reason, reasonOf)
       .buildTransformer
 
   /** The document `GET /capabilities` answers with.

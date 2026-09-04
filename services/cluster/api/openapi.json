@@ -787,6 +787,12 @@
           },
           "status" : {
             "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
           }
         }
       },

@@ -6,13 +6,17 @@
       "features" : [
         "SCHEMA_REGISTRY"
       ],
-      "status" : "available"
+      "status" : "available",
+      "name" : null,
+      "reason" : null
     },
     "staging" : {
       "configured" : false,
       "features" : [
       ],
-      "status" : "not_configured"
+      "status" : "not_configured",
+      "name" : null,
+      "reason" : null
     }
   }
 }

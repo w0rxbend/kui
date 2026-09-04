@@ -52,7 +52,8 @@ object GoldenDocuments {
       |      "state" : {
       |        "status" : "available"
       |      },
-      |      "updatedAt" : "2026-09-03T10:11:12.000Z"
+      |      "updatedAt" : "2026-09-03T10:11:12.000Z",
+      |      "name" : null
       |    },
       |    {
       |      "key" : {
@@ -62,7 +63,8 @@ object GoldenDocuments {
       |      "state" : {
       |        "status" : "not_configured"
       |      },
-      |      "updatedAt" : "2026-09-03T10:11:12.000Z"
+      |      "updatedAt" : "2026-09-03T10:11:12.000Z",
+      |      "name" : null
       |    }
       |  ],
       |  "generatedAt" : "2026-09-03T10:11:13.000Z"
@@ -81,7 +83,8 @@ object GoldenDocuments {
       |      "message" : "readiness probe failed",
       |      "since" : "2026-09-03T10:11:12.000Z"
       |    },
-      |    "updatedAt" : "2026-09-03T10:11:13.000Z"
+      |    "updatedAt" : "2026-09-03T10:11:13.000Z",
+      |    "name" : null
       |  },
       |  "previous" : {
       |    "status" : "available"
@@ -97,13 +100,17 @@ object GoldenDocuments {
       |      "features" : [
       |        "SCHEMA_REGISTRY"
       |      ],
-      |      "status" : "available"
+      |      "status" : "available",
+      |      "name" : null,
+      |      "reason" : null
       |    },
       |    "staging" : {
       |      "configured" : false,
       |      "features" : [
       |      ],
-      |      "status" : "not_configured"
+      |      "status" : "not_configured",
+      |      "name" : null,
+      |      "reason" : null
       |    }
       |  }
       |}""".stripMargin

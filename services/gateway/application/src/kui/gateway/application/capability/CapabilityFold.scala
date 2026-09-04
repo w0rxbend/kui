@@ -134,7 +134,11 @@ object CapabilityFold {
     */
   private def reportedDegraded(inputs: CapabilityInputs): Option[DegradedReason] =
     inputs.serviceReport.filterNot(_.status == Status.Available).map { report =>
-      DegradedReason(ReasonCode.Unknown, s"the service reports itself ${report.status}", None, None)
+      // The service's own words when it gave any. "The service reports itself degraded" is true and
+      // useless; "the cluster could not be reached" is what an operator needs off the switcher's tooltip
+      // without opening a page.
+      val message = report.reason.getOrElse(s"the service reports itself ${report.status}")
+      DegradedReason(ReasonCode.Unknown, message, None, None)
     }
 
   private def slow(inputs: CapabilityInputs, threshold: FiniteDuration): Option[DegradedReason] =

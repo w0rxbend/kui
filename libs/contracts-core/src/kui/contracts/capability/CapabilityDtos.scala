@@ -174,8 +174,25 @@ object CapabilityState {
   given CanEqual[CapabilityState, CapabilityState] = CanEqual.derived
 }
 
-/** One capability and its state, with the moment the gateway last decided it. */
-final case class CapabilityEntry(key: CapabilityKey, state: CapabilityState, updatedAt: Instant)
+/** One capability and its state, with the moment the gateway last decided it.
+  *
+  * @param name
+  *   what a person calls the thing this entry is about — a cluster's display name, as its operator wrote it
+  *   in the configuration. `None` for a service-wide entry, which is about a service and not about anything a
+  *   person named, and for a cluster whose service has not reported a name.
+  *
+  * It is here because the browser's shell renders the cluster switcher from the capability stream and from
+  * nothing else, on purpose: the shell holds no cluster data, so that the cluster contract's decoders stay
+  * out of the bundle every user downloads. Without a name on the stream the switcher had nothing to show but
+  * the slug — `prod-eu-1` where the operator wrote `Production EU (primary)` — which is exactly the string
+  * the switcher exists to stop people misreading.
+  */
+final case class CapabilityEntry(
+    key: CapabilityKey,
+    state: CapabilityState,
+    updatedAt: Instant,
+    name: Option[String] = None
+)
 
 object CapabilityEntry {
 
@@ -185,12 +202,16 @@ object CapabilityEntry {
         key <- cursor.get[CapabilityKey]("key")
         state <- cursor.get[CapabilityState]("state")
         updatedAt <- cursor.get[Instant]("updatedAt")
-      } yield CapabilityEntry(key, state, updatedAt),
+        // Absent rather than null in every frame an older gateway sends, so it decodes as "no name
+        // was given" instead of failing the whole frame and blanking the sidebar.
+        name <- cursor.getOrElse[Option[String]]("name")(None)
+      } yield CapabilityEntry(key, state, updatedAt, name),
     (entry: CapabilityEntry) =>
       Json.obj(
         "key" -> entry.key.asJson,
         "state" -> entry.state.asJson,
-        "updatedAt" -> entry.updatedAt.asJson
+        "updatedAt" -> entry.updatedAt.asJson,
+        "name" -> entry.name.asJson
       )
   )
 
@@ -256,7 +277,21 @@ object CapabilityChange {
   * `features` is a list of strings rather than an enum because each service names its own features and the
   * gateway only passes them through.
   */
-final case class ClusterCapability(configured: Boolean, features: List[String], status: String)
+/** @param name
+  *   the cluster's display name as its operator wrote it, when the service knows one. It travels here because
+  *   this document is the only thing the gateway asks a service about its clusters, and the browser's cluster
+  *   switcher is drawn from what the gateway learned.
+  * @param reason
+  *   why this cluster is not `available`, in the service's own words. Without it the gateway can only report
+  *   "the service reports itself degraded", which tells an operator nothing they did not already see.
+  */
+final case class ClusterCapability(
+    configured: Boolean,
+    features: List[String],
+    status: String,
+    name: Option[String] = None,
+    reason: Option[String] = None
+)
 
 object ClusterCapability {
 
@@ -266,12 +301,17 @@ object ClusterCapability {
         configured <- cursor.getOrElse[Boolean]("configured")(false)
         features <- cursor.getOrElse[List[String]]("features")(Nil)
         status <- cursor.get[String]("status")
-      } yield ClusterCapability(configured, features, status),
+        // Both optional and both defaulted, so a service built before they existed still decodes.
+        name <- cursor.getOrElse[Option[String]]("name")(None)
+        reason <- cursor.getOrElse[Option[String]]("reason")(None)
+      } yield ClusterCapability(configured, features, status, name, reason),
     (capability: ClusterCapability) =>
       Json.obj(
         "configured" -> capability.configured.asJson,
         "features" -> capability.features.asJson,
-        "status" -> capability.status.asJson
+        "status" -> capability.status.asJson,
+        "name" -> capability.name.asJson,
+        "reason" -> capability.reason.asJson
       )
   )
 

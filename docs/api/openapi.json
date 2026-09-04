@@ -667,6 +667,9 @@
           "updatedAt" : {
             "description" : "RFC 3339 timestamp in UTC",
             "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
           }
         }
       },
