@@ -127,12 +127,18 @@ final class ClusterSnapshotsSuite extends munit.CatsEffectSuite {
     val scenario = ClusterRig.resource(List(prod)).use { rig =>
       for {
         _ <- ClusterRig.settled(rig)
+        // Counted from a clean slate, because settling is not free: it forces one refresh of its own
+        // so that every suite starts from a topology built with a finished capability probe. Resetting
+        // here keeps this test measuring the thing it is named after — the background loop's cadence —
+        // rather than the sum of the loop and the setup.
+        _ <- rig.admin.reset
         _ <- IO.sleep(61.seconds)
         calls <- rig.admin.callsFor(prod.id)
       } yield
-      // Exactly three, not "at least one": a duplicated loop would still pass an at-least
-      // assertion and would double every cluster's admin traffic.
-      assertEquals(calls.count(_ == "describeCluster"), 3)
+      // Exactly two, not "at least one": the loop's ticks at 30 s and 60 s and nothing else. A
+      // duplicated loop would still pass an at-least assertion and would double every cluster's
+      // admin traffic.
+      assertEquals(calls.count(_ == "describeCluster"), 2)
     }
 
     TestControl.executeEmbed(scenario)

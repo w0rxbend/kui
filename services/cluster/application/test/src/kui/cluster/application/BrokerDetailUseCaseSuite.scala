@@ -171,6 +171,34 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
     }
   }
 
+  test("theFirstSnapshotHoldsLogDirsEvenWhenTheCapabilityProbeIsSlow") {
+    // The flake in `logDirsFallsBackToTheSnapshotWhenTheLiveCallFails`, made deterministic.
+    //
+    // A cluster's two snapshot cells are started together and each loads on its own fiber. The topology
+    // load reads the capability cell without blocking, and a capability cell that has not answered yet
+    // reports every feature as *unknown* — which makes the topology refresh skip `describeLogDirs`
+    // entirely. Whether the first topology snapshot contains any log directories was therefore a race
+    // between two fibers, and on a starved machine the topology won it about once in thirty runs. The
+    // fallback test then found no directories to fall back to and failed.
+    //
+    // A delay on the admin port makes the losing order the *only* order, so this test failed every run
+    // before `ClusterRig.settled` was taught to wait for the probe and re-read the topology after it.
+    ClusterRig
+      .resource(List(prod), delay = 20.millis, setup = _.set(_.copy(logDirs = Right(everyBroker))))
+      .evalTap(ClusterRig.settled)
+      .use { built =>
+        for {
+          _ <- built.admin.set(_.copy(logDirs = Left(unreachable)))
+          result <- built.brokers.logDirs(prod.id, broker1)
+          calls <- built.admin.callsFor(prod.id)
+        } yield assertEquals(
+          result.map(_.dirs.size),
+          Right(1),
+          s"the settled rig must already hold the snapshot's directories (admin calls: $calls)"
+        )
+      }
+  }
+
   test("logDirsFailsWhenTheLiveCallFailsAndTheSnapshotHasNothing") {
     rig(logDirs = Right(PartialResult.empty[BrokerId, List[LogDir]])).use { built =>
       for {
