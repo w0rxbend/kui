@@ -305,7 +305,7 @@ object Shell {
     // that into "built on first visit, reused afterwards": the element for a singleton page exists
     // once for the life of the application, which is what keeps its scroll position and any open
     // menu alive across a navigation away and back.
-    lazy val home = ErrorReporting.renderSafely(() => HomePage())
+    lazy val home = ErrorReporting.renderSafely(() => HomePage(uiPrefix))
     // The zone list is read once, when the page is first built, rather than on every render: it is
     // several hundred entries and the set does not change while a tab is open.
     lazy val settings = ErrorReporting.renderSafely(() =>
