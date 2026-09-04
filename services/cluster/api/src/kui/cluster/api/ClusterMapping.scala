@@ -97,7 +97,12 @@ object ClusterMapping {
       isController = row.isController,
       partitionCount = None,
       leaderCount = row.leaders,
-      inSyncReplicaCount = row.replicas,
+      // Every replica this broker holds, in-sync or not. Until 2026-09-04 this same number was sent as
+      // `inSyncReplicaCount`, which is true only while nothing is broken: stopping one broker of three left
+      // both survivors reporting their old figure as an in-sync count. Nothing in `describeCluster` or
+      // `describeLogDirs` knows which replicas are in the ISR - only `describeTopics` does, and this service
+      // does not sweep topics - so the field is named for what it actually holds.
+      replicaCount = row.replicas,
       replicaSkewPercent = row.skewPercent,
       leaderSkewPercent = None,
       // What Kafka's own data occupies on this broker: the sum of the replica sizes its log directories

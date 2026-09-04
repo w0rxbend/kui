@@ -141,7 +141,7 @@ object PurgePlan {
         .map(policy =>
           PurgeWarning(
             PurgeWarning.Compacted,
-            s"this topic's cleanup.policy is '$policy'. Kafka refuses to delete records from a topic that " +
+            s"This topic's cleanup.policy is '$policy'. Kafka refuses to delete records from a topic that " +
               "is only compacted, so this purge will very likely be rejected by the broker."
           )
         )
@@ -153,7 +153,7 @@ object PurgePlan {
         List(
           PurgeWarning(
             PurgeWarning.ConsumerOffsets,
-            "committed consumer offsets are not moved by a purge. A group sitting below the new start of " +
+            "Committed consumer offsets are not moved by a purge. A group sitting below the new start of " +
               "the log follows its own auto.offset.reset on the next fetch, which by default means it " +
               "jumps to the end and skips whatever arrives in between."
           )

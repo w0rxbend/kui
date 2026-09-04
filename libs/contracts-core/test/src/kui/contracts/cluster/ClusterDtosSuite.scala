@@ -60,7 +60,7 @@ final class ClusterDtosSuite extends ScalaCheckSuite {
     isController = true,
     partitionCount = None,
     leaderCount = None,
-    inSyncReplicaCount = Some(42),
+    replicaCount = Some(42),
     replicaSkewPercent = Some(3.5d),
     leaderSkewPercent = None,
     diskUsageBytes = Some(183251937970L),

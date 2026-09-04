@@ -269,7 +269,7 @@ object PartitionPlan {
           warnings = List(
             PlanWarning(
               PlanWarning.KeyRouting,
-              s"records are routed by hash(key) % partitions, so raising the count from $current to " +
+              s"Records are routed by hash(key) % partitions, so raising the count from $current to " +
                 s"$target sends most keys to a different partition from the records already stored under " +
                 "them. Per-key ordering is broken across the change, and it cannot be undone: Kafka has no " +
                 "way to remove a partition."
@@ -325,7 +325,7 @@ object DeletionPlan {
         List(
           PlanWarning(
             PlanWarning.AutoCreate,
-            s"this cluster has auto.create.topics.enable=true, so the first producer or consumer to name " +
+            s"This cluster has auto.create.topics.enable=true, so the first producer or consumer to name " +
               s"'${topic.value}' will recreate it — with the broker's default partition count and none of " +
               "this topic's configuration. The data is still gone; only the name comes back."
           )

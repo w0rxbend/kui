@@ -139,7 +139,7 @@ class ClustersApiSuite extends FunSuite {
 
   private val recordedBrokers: String =
     """{"brokers":{"status":"ok","data":[{"id":1,"host":"kafka","port":9092,"rack":null,""" +
-      """"isController":true,"partitionCount":null,"leaderCount":null,"inSyncReplicaCount":83,""" +
+      """"isController":true,"partitionCount":null,"leaderCount":null,"replicaCount":83,""" +
       """"replicaSkewPercent":0.0,"leaderSkewPercent":null,"diskUsageBytes":183246045184,""" +
       """"segmentCount":null}],"fetchedAt":"2026-09-04T01:40:22.443Z"}}"""
 

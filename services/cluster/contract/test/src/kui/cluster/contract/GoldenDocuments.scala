@@ -80,7 +80,7 @@ object GoldenDocuments {
       |        "isController" : true,
       |        "partitionCount" : null,
       |        "leaderCount" : null,
-      |        "inSyncReplicaCount" : 42,
+      |        "replicaCount" : 42,
       |        "replicaSkewPercent" : 3.5,
       |        "leaderSkewPercent" : null,
       |        "diskUsageBytes" : 183251937970,

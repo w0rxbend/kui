@@ -41,7 +41,7 @@ class BrokersPageSuite extends FunSuite {
       isController = isController,
       partitionCount = replicas,
       leaderCount = Some(10),
-      inSyncReplicaCount = Some(30),
+      replicaCount = Some(30),
       replicaSkewPercent = None,
       leaderSkewPercent = None,
       diskUsageBytes = disk,

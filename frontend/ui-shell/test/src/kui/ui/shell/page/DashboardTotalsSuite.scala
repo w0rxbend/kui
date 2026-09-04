@@ -83,6 +83,26 @@ final class DashboardTotalsSuite extends FunSuite {
     assertEquals(figures.missingBrokers, 0)
   }
 
+  test("aClusterAnsweringOnlyFromTheLastGoodSnapshotIsNotCountedAsOnline") {
+    // The defect: `clustersOnline` counted anything `Section.toOption` returned a value for, and `toOption`
+    // deliberately keeps `Stale` — rows the gateway last saw are still rows to draw. Reused as an online
+    // count, that made the dashboard's first tile read "1 of 1 Clusters online" while every panel under it
+    // said "cluster not responding", and while the cluster list on the next screen said "0 online, 1 not
+    // online". Online means the cluster answered this time.
+    val figures = DashboardTotals.of(
+      List(
+        row("a", Section.Stale(summary(3), at, ReasonCode.UpstreamUnavailable)),
+        row("b", Section.Ok(summary(1), at))
+      )
+    )
+
+    assertEquals(figures.clusters, 2)
+    assertEquals(figures.clustersOnline, 1)
+    // The stale cluster still contributes its numbers: it has some, and they are the last true ones.
+    assertEquals(figures.brokers, Some(4))
+    assertEquals(figures.missingBrokers, 0)
+  }
+
   test("oneUnreachableClusterMakesTheBrokerTotalAbsentRatherThanSmaller") {
     // Three brokers is not "the number of brokers" when a second cluster did not answer, and it is the
     // number a reader would act on.

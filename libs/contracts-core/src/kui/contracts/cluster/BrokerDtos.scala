@@ -15,6 +15,16 @@ import kui.kernel.BrokerId
   * for the reason `ClusterSummaryDto` records, so they are always `None`; replica counts and the skew
   * percentages *are* derivable from `describeLogDirs` and do ship (BR-001).
   *
+  * @param replicaCount
+  *   how many partition replicas this broker holds, counted from the log directories it reports. This is the
+  *   *total*, in-sync and lagging alike. It was called `inSyncReplicaCount` until 2026-09-04 and was filled
+  *   from this same total, which is the same number on a healthy cluster and a false one exactly when a
+  *   broker falls behind: with one broker of three stopped, the survivors kept reporting their pre-failure
+  *   figure as if every replica were still caught up. The in-sync count cannot be had from the calls this
+  *   service makes — `describeCluster` and `describeLogDirs` know nothing about ISR, and the only source is
+  *   `describeTopics`, one call per batch of topics, which the cluster service does not sweep
+  *   (`research/kafka/admin-capabilities.md`). So the field says what it holds instead of claiming a number
+  *   nobody computed
   * @param replicaSkewPercent
   *   how far this broker's replica count is from the cluster's mean, as a percentage computed server-side so
   *   that the table, a CSV export and any other client round the same way. `None` means "not computable" — a
@@ -28,7 +38,7 @@ final case class BrokerDto(
     isController: Boolean,
     partitionCount: Option[Int],
     leaderCount: Option[Int],
-    inSyncReplicaCount: Option[Int],
+    replicaCount: Option[Int],
     replicaSkewPercent: Option[Double],
     leaderSkewPercent: Option[Double],
     diskUsageBytes: Option[Long],
@@ -47,7 +57,7 @@ object BrokerDto {
         isController <- cursor.getOrElse[Boolean]("isController")(false)
         partitionCount <- cursor.get[Option[Int]]("partitionCount")
         leaderCount <- cursor.get[Option[Int]]("leaderCount")
-        inSyncReplicaCount <- cursor.get[Option[Int]]("inSyncReplicaCount")
+        replicaCount <- cursor.get[Option[Int]]("replicaCount")
         replicaSkew <- cursor.get[Option[Double]]("replicaSkewPercent")
         leaderSkew <- cursor.get[Option[Double]]("leaderSkewPercent")
         diskUsageBytes <- cursor.get[Option[Long]]("diskUsageBytes")
@@ -60,7 +70,7 @@ object BrokerDto {
         isController,
         partitionCount,
         leaderCount,
-        inSyncReplicaCount,
+        replicaCount,
         replicaSkew,
         leaderSkew,
         diskUsageBytes,
@@ -75,7 +85,7 @@ object BrokerDto {
         "isController" -> dto.isController.asJson,
         "partitionCount" -> dto.partitionCount.asJson,
         "leaderCount" -> dto.leaderCount.asJson,
-        "inSyncReplicaCount" -> dto.inSyncReplicaCount.asJson,
+        "replicaCount" -> dto.replicaCount.asJson,
         "replicaSkewPercent" -> dto.replicaSkewPercent.asJson,
         "leaderSkewPercent" -> dto.leaderSkewPercent.asJson,
         "diskUsageBytes" -> dto.diskUsageBytes.asJson,

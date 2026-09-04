@@ -237,7 +237,7 @@ object KafkaTopicWriter {
 
       case _: TopicDeletionDisabledException =>
         dom.TopicError.Rejected(
-          "this cluster has delete.topic.enable=false, so its brokers refuse every topic deletion. It is a " +
+          "This cluster has delete.topic.enable=false, so its brokers refuse every topic deletion. It is a " +
             "broker setting and cannot be changed from here."
         )
 

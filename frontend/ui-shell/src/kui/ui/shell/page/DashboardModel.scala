@@ -55,7 +55,17 @@ object DashboardTotals {
 
     DashboardTotals(
       clusters = rows.size,
-      clustersOnline = rows.count(_.cluster.summary.toOption.isDefined),
+      // `Section.Ok` and nothing else. Not `toOption`, which also keeps `Stale` - that leniency is right for
+      // deciding whether a row still has *numbers* to draw, and wrong for counting how many clusters are
+      // answering. Stopping the quickstart's broker used to leave the strip reading "1 of 1 Clusters online"
+      // above panels that all said "cluster not responding", and beside a cluster list that said "0 online,
+      // 1 not online" - two screens of the same product disagreeing about whether the only cluster was up.
+      clustersOnline = rows.count(row =>
+        row.cluster.summary match {
+          case Section.Ok(_, _) => true
+          case _ => false
+        }
+      ),
       brokers = complete(brokerCounts).map(_.sum),
       topics = complete(topicTotals).map(_.map(_.topicCount).sum),
       // Two levels of "could not compute": a cluster whose topic section failed, and a cluster whose topic
