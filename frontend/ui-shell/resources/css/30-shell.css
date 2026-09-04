@@ -119,8 +119,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.875rem; /* 46px */
-  height: 2.875rem;
+  /* 46px. Off the 4px spacing scale on purpose: it is the design's own measurement of the mark,
+   * not a gap between things, and it is declared as a variable so the two axes cannot drift. */
+  --kui-brand-mark-size: 2.875rem;
+
+  width: var(--kui-brand-mark-size);
+  height: var(--kui-brand-mark-size);
   border-radius: var(--kui-radius-lg);
   background: linear-gradient(
     145deg,
@@ -158,14 +162,17 @@
   min-height: 3.25rem; /* 52px */
   padding: var(--kui-space-2) var(--kui-space-4);
   border-radius: var(--kui-radius-pill);
-  font-weight: var(--kui-font-weight-display);
+  /* The body weight, not the display weight. The design carries the active destination with the
+   * secondary container colour; weight is not one of its signals, and setting all six rows at 700
+   * leaves the row that is genuinely emphasised with nothing left to say. */
+  font-weight: var(--kui-font-weight-medium);
   font-size: var(--kui-font-size-md);
   color: var(--kui-color-text);
   text-decoration: none;
 }
 
 .kui-shell__sidebar-link:hover {
-  background: var(--kui-color-surface-hover);
+  background: var(--kui-color-state-layer);
   color: var(--kui-color-text);
 }
 
