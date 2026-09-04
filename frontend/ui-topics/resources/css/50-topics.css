@@ -394,6 +394,7 @@
   padding: var(--kui-space-3);
   border-radius: var(--kui-radius-md);
   background: var(--kui-color-success-container);
+  color: var(--kui-color-success);
   font-weight: var(--kui-font-weight-bold);
 }
 

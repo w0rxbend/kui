@@ -98,12 +98,23 @@
   color: var(--kui-color-text-muted);
 }
 
+/* The time the data was read. Small, muted and always present, fresh or stale: it is the visible
+ * half of the staleness contract and it is what makes not polling acceptable — the answer to "how
+ * old is this" is never more than a glance away.
+ *
+ * The "last read at" line under a broker panel: a row with the timestamp at one end and the refresh
+ * control at the other, set as a quiet caption. It used to be declared here *and* again in
+ * 41-clusters-brokers.css, with neither block mentioning the other, and the cascade silently merged
+ * the two into the single element this is. The merge is now written down once. */
 .kui-clusters__scraped-at {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--kui-space-3);
+  padding-top: var(--kui-space-3);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
 }
 
 /* --- Managing the deployment's own cluster list ------------------------------------------------- */
@@ -121,6 +132,7 @@
   padding: var(--kui-space-2) var(--kui-space-3);
   border-radius: var(--kui-radius-md);
   background: var(--kui-color-accent-container);
+  color: var(--kui-color-accent-container-contrast);
 }
 
 .kui-clusters__admin-controls {
@@ -223,10 +235,16 @@
   border-radius: var(--kui-radius-md);
 }
 
+/* A container colour never travels without the text colour declared as its partner. `success` and
+ * `danger` pair their container with the *solid* tone rather than with a `-contrast` token, which
+ * is the convention every status chip in the kernel follows; without it these two inherited plain
+ * body text and nobody had checked that against either fill. */
 .kui-clusters__verdict--good {
   background: var(--kui-color-success-container);
+  color: var(--kui-color-success);
 }
 
 .kui-clusters__verdict--bad {
   background: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
 }

@@ -87,7 +87,9 @@
 .kui-consumers__state-chip--on {
   border-color: var(--kui-color-accent);
   background: var(--kui-color-accent-container);
-  color: var(--kui-color-text);
+  /* The pair the accent container declares, not body text on it: in the dark theme body text on
+   * #00504a is the wrong half of the pairing and nobody had checked it. */
+  color: var(--kui-color-accent-container-contrast);
 }
 
 /* --- Rows ------------------------------------------------------------------------------------- */
