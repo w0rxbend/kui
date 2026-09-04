@@ -147,25 +147,25 @@ object HomePage {
       ),
       tile(
         "Brokers",
-        totals.map(_.brokers.map(_.toString)),
+        totals.map(_.brokers.map(count => Numbers.grouped(count))),
         totals.map(figures => uncounted(figures.missingBrokers)),
         "dashboard-total-brokers"
       ),
       tile(
         "Topics",
-        totals.map(_.topics.map(_.toString)),
+        totals.map(_.topics.map(count => Numbers.grouped(count))),
         totals.map(figures => uncounted(figures.missingTopics)),
         "dashboard-total-topics"
       ),
       tile(
         "Partitions",
-        totals.map(_.partitions.map(_.toString)),
+        totals.map(_.partitions.map(count => Numbers.grouped(count))),
         totals.map(figures => uncounted(figures.missingPartitions)),
         "dashboard-total-partitions"
       ),
       tile(
         "Consumer groups",
-        totals.map(_.consumerGroups.map(_.toString)),
+        totals.map(_.consumerGroups.map(count => Numbers.grouped(count))),
         totals.map(figures => uncounted(figures.missingGroups)),
         "dashboard-total-groups"
       ),
@@ -260,7 +260,7 @@ object HomePage {
       link = None,
       body = summary =>
         List(
-          figureRow("Brokers", Some(summary.brokerCount.toString)),
+          figureRow("Brokers", Some(Numbers.grouped(summary.brokerCount))),
           figureRow(
             "Controller",
             // A KRaft cluster mid-failover genuinely has no controller for a moment. "none" and `—` are
@@ -286,11 +286,11 @@ object HomePage {
       link = Some(s"$uiPrefix/clusters/$id/topics" -> "All topics"),
       body = totals =>
         List(
-          figureRow("Topics", Some(totals.topicCount.toString)),
+          figureRow("Topics", Some(Numbers.grouped(totals.topicCount))),
           figureRow(
             "Partitions",
             // Absent rather than a sum over the page the gateway could read. See `TopicTotalsDto`.
-            totals.partitionCount.map(_.toString)
+            totals.partitionCount.map(count => Numbers.grouped(count))
           )
         ) ++ largestTopics(totals),
       note = totals =>
@@ -339,8 +339,8 @@ object HomePage {
       link = Some(s"$uiPrefix/clusters/$id/consumer-groups" -> "All groups"),
       body = totals =>
         List(
-          figureRow("Groups", Some(totals.groupCount.toString)),
-          figureRow("Total lag", totals.totalLag.map(_.toString))
+          figureRow("Groups", Some(Numbers.grouped(totals.groupCount))),
+          figureRow("Total lag", totals.totalLag.map(count => Numbers.grouped(count)))
         ) ++ stateChips(totals),
       note = totals =>
         Option.when(totals.totalLag.isEmpty && totals.groupCount > 0)(

@@ -290,7 +290,7 @@ object DashboardPage {
         // topics and sums their partitions. Absent — never zero — when that service could not answer, or
         // when the cluster holds more topics than one page could sum, because a partial sum is a number
         // that looks exact and is not.
-        render = row => row.partitionCount.fold(DataTable.missing)(_.toString)
+        render = row => row.partitionCount.fold(DataTable.missing)(count => Numbers.grouped(count))
       ),
       Column(
         id = "urp",
@@ -334,7 +334,7 @@ object DashboardPage {
         header = Messages.ColumnTopics,
         sortable = true,
         align = ColumnAlign.Numeric,
-        render = row => row.topicCount.fold(DataTable.missing)(_.toString)
+        render = row => row.topicCount.fold(DataTable.missing)(count => Numbers.grouped(count))
       ),
       Column(
         id = "groups",
@@ -343,7 +343,7 @@ object DashboardPage {
         align = ColumnAlign.Numeric,
         // Its own column and its own absence, because the consumer service fails independently of the
         // topic service: one dead service must cost this table one column and not two.
-        render = row => row.consumerGroupCount.fold(DataTable.missing)(_.toString)
+        render = row => row.consumerGroupCount.fold(DataTable.missing)(count => Numbers.grouped(count))
       )
     )
 

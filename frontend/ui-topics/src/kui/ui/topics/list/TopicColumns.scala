@@ -179,7 +179,7 @@ object TopicColumns {
       row.missingCountReason match {
         case None =>
           MagnitudeBar(
-            value = Val(row.messages.fold(DataTable.missing)(_.toString)),
+            value = Val(row.messages.fold(DataTable.missing)(count => Numbers.grouped(count))),
             fraction = largest.map(max => Bytes.fraction(row.messages, max)),
             inline = true
           )
