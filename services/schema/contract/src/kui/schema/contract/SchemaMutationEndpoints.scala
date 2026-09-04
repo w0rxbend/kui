@@ -4,6 +4,7 @@ import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
 import kui.contracts.KernelSchemas.given
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, Subject}
 import kui.schema.contract.dto.*
@@ -12,6 +13,7 @@ import kui.schema.contract.dto.CompatibilityCheckRequest.given
 import kui.schema.contract.dto.CompatibilityDto.given
 import kui.schema.contract.dto.SetCompatibilityRequest.given
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, Resource}
 
 /** The endpoints that carry a request body: two that change a setting, and one that changes nothing.
   *
@@ -81,6 +83,13 @@ object SchemaMutationEndpoints {
       .in(clustersBase / clusterIdPath / SchemasSegment / CompatibilitySegment)
       .in(jsonBody[SetCompatibilityRequest])
       .out(jsonBody[CompatibilityDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "schema.compatibility.global.set",
+          ResourceRequirement.unnamed(Resource.Schema, Action.SchemaModifyGlobalCompatibility)
+        )
+      )
       .name("schema.compatibility.global.set")
       .summary("Set the registry-wide compatibility level")
       .description(
@@ -107,6 +116,13 @@ object SchemaMutationEndpoints {
       )
       .in(jsonBody[SetCompatibilityRequest])
       .out(jsonBody[CompatibilityDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "schema.compatibility.subject.set",
+          ResourceRequirement.named(Resource.Schema, SchemaEndpoints.SubjectParam, Action.SchemaEdit)
+        )
+      )
       .name("schema.compatibility.subject.set")
       .summary("Set one subject's compatibility level")
       .description(
@@ -131,6 +147,13 @@ object SchemaMutationEndpoints {
       )
       .in(jsonBody[CompatibilityCheckRequest])
       .out(jsonBody[CompatibilityCheckDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "schema.compatibility.check",
+          ResourceRequirement.named(Resource.Schema, SchemaEndpoints.SubjectParam, Action.SchemaView)
+        )
+      )
       .name("schema.compatibility.check")
       .summary("Whether a proposed schema would be accepted for this subject")
       .description(

@@ -6,6 +6,7 @@ import sttp.tapir.json.circe.jsonBody
 import kui.contracts.KernelCodecs.given
 import kui.contracts.KernelSchemas.given
 import kui.contracts.paging.PageDto
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, SortOrder, Subject}
 import kui.schema.contract.dto.*
@@ -13,6 +14,7 @@ import kui.schema.contract.dto.CompatibilityDto.given
 import kui.schema.contract.dto.SchemaDto.given
 import kui.schema.contract.dto.SubjectVersionsDto.given
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, Resource}
 
 /** What a subject list request asks for, after the query string has been decoded.
   *
@@ -109,6 +111,7 @@ object SchemaEndpoints {
       .in(clustersBase / clusterIdPath / SchemasSegment / SubjectsSegment)
       .in(listParams)
       .out(jsonBody[PageDto[Subject]])
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("schema.subjects"))
       .name("schema.subjects")
       .summary("The subjects registered on this cluster's Schema Registry")
       .description(
@@ -123,6 +126,11 @@ object SchemaEndpoints {
     KuiEndpoint.internal.get
       .in(clustersBase / clusterIdPath / SchemasSegment / SubjectsSegment / subjectPath / VersionsSegment)
       .out(jsonBody[SubjectVersionsDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("schema.versions", ResourceRequirement.named(Resource.Schema, SubjectParam, Action.SchemaView))
+      )
       .name("schema.versions")
       .summary("The version numbers of one subject")
       .description(
@@ -139,6 +147,11 @@ object SchemaEndpoints {
           VersionsSegment / versionPath
       )
       .out(jsonBody[SchemaDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("schema.version", ResourceRequirement.named(Resource.Schema, SubjectParam, Action.SchemaView))
+      )
       .name("schema.version")
       .summary("The schema behind one version of a subject")
       .description(
@@ -152,6 +165,10 @@ object SchemaEndpoints {
     KuiEndpoint.internal.get
       .in(clustersBase / clusterIdPath / SchemasSegment / CompatibilitySegment)
       .out(jsonBody[CompatibilityDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.clusterScoped("schema.compatibility.global")
+      )
       .name("schema.compatibility.global")
       .summary("The compatibility level every subject without its own follows")
       .description(
@@ -173,6 +190,14 @@ object SchemaEndpoints {
         clustersBase / clusterIdPath / SchemasSegment / SubjectsSegment / subjectPath / CompatibilitySegment
       )
       .out(jsonBody[CompatibilityDto])
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one(
+            "schema.compatibility.subject",
+            ResourceRequirement.named(Resource.Schema, SubjectParam, Action.SchemaView)
+          )
+      )
       .name("schema.compatibility.subject")
       .summary("The compatibility level in force for one subject")
       .description(

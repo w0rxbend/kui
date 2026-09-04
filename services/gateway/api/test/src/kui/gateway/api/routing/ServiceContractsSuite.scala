@@ -7,6 +7,7 @@ import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
+import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
 /** That the one map naming the gateway's downstream services says what the rest of the gateway assumes.
@@ -21,6 +22,7 @@ final class ServiceContractsSuite extends FunSuite {
   private val topic = ServiceId.unsafe("topic")
   private val consumer = ServiceId.unsafe("consumer")
   private val message = ServiceId.unsafe("message")
+  private val schema = ServiceId.unsafe("schema")
 
   /** The public address of one endpoint, including its path parameters.
     *
@@ -34,7 +36,7 @@ final class ServiceContractsSuite extends FunSuite {
   }
 
   test("everyConfiguredServiceHasItsContract") {
-    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message))
+    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message, schema))
     // Both of the cluster service's lists. `ClusterWriteEndpoints` used to be deliberately absent, so
     // that the one write M1 shipped had no public route while it had no screen; the administration screen
     // exists now, and an endpoint the browser cannot reach would make it a set of buttons that answer 404.
@@ -64,13 +66,20 @@ final class ServiceContractsSuite extends FunSuite {
       ServiceContracts.of(message),
       MessageMutationEndpoints.all ++ FilterEndpoints.all ++ TrackEndpoints.all
     )
+    // Both of the schema service's lists. The second one holds the two compatibility writes *and* the
+    // compatibility check, which is not a mutation at all -- it is grouped by request shape, not by
+    // effect -- so leaving it out would drop the one endpoint a registration flow needs most.
+    assertEquals(
+      ServiceContracts.of(schema),
+      SchemaEndpoints.all ++ SchemaMutationEndpoints.all
+    )
   }
 
   test("a service the gateway has no contract for is not an error") {
     // A service deployed before the gateway build that routes it is configured, polled and reported in the
     // capability snapshot; it simply has no proxied routes yet. No service is in that position today, so
     // the case is made with an id nothing serves rather than left untested until one is.
-    assertEquals(ServiceContracts.of(ServiceId.unsafe("schema")), Nil)
+    assertEquals(ServiceContracts.of(ServiceId.unsafe("connect")), Nil)
   }
 
   test("theTopicEndpointsAreProxiedAndNoneIsAggregated") {

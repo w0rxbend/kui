@@ -35,8 +35,13 @@ final class OpenApiMergeSuite extends FunSuite {
     assertEquals(
       OpenApiMerge.paths(merged(List(gatewayDoc, clusterDoc))),
       List(
+        "/api/v1/auth/login",
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
+        "/api/v1/auth/oidc/callback",
+        "/api/v1/auth/oidc/start",
+        "/api/v1/auth/password",
+        "/api/v1/auth/settings",
         "/api/v1/capabilities",
         "/api/v1/capabilities/stream",
         "/api/v1/capabilities/{service}/probe",
