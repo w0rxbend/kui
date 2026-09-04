@@ -418,7 +418,7 @@ reach the bottom of the viewport without either knowing the other's size.
 | --- | --- | --- |
 | Frame | `kui-shell` | Grid columns `var(--kui-sidebar-width, 15rem) 1fr` — see R2 |
 | Skip link | `kui-shell__skip` | Off-screen at `top: -3rem`, slides to `top: var(--kui-space-2)` on focus. Must remain the first focusable element in the document |
-| Header | `__header`, `__brand`, `__header-spacer`, `__header-actions`, `__version`, `__cluster-slot` | `__cluster-slot` deliberately reserves the space the M1 cluster switcher will take, so adding it does not move the theme button |
+| Header | `__header`, `__brand`, `__header-spacer`, `__header-actions`, `__version` | The cluster switcher is in the drawer, not here: it scopes the destinations below it. `__cluster-slot`, which reserved space for it, was removed once that was settled |
 | Sidebar | `__sidebar`, `__sidebar-list`, `__sidebar-link`, `--current`, `--dimmed`, `--disabled`, `-label`, `-dot` | See §7 on the non-colour cues |
 | Content | `__content`, `__page`, `__page-error`, `__page-error-detail` | `__content:focus { outline: none }` — it is focusable only so the skip link can move focus into it |
 | Gallery | `__gallery`, `-section`, `-row`, `-swatch`, `-icons`, `-icon` | A development page (the component gallery, UI-003). Its styling only has to be legible, not designed |
@@ -782,8 +782,7 @@ arrives with per-component tokens must be *flattened into* this set, not adopted
 - **`data-testid` is the selector contract.** End-to-end tests select on `data-testid` and never on a
   class or on visible text — which is exactly the property that lets class names be rewritten freely.
   A redesign must keep emitting them.
-- **Reserved space stays reserved.** `__cluster-slot` (so the M1 switcher does not move the theme
-  button), `__sort-placeholder` (so sorting does not shift a column), the transparent 2px underline
+- **Reserved space stays reserved.** `__sort-placeholder` (so sorting does not shift a column), the transparent 2px underline
   on unselected tabs (so selecting one does not move it), and the loading spinner replacing the icon
   rather than joining it (so a button does not change width). These look like styling; each is
   preventing a specific layout jump.

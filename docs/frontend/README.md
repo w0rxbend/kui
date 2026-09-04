@@ -456,8 +456,9 @@ Two follow-on points that catch people out:
 
 - **Take the layout without the action.** If the design's toolbar is balanced around three buttons and
   research supports two, lay the toolbar out for two. Do not reserve the third slot, and do not
-  invent a handler to fill it. (`__cluster-slot` in the shell header is not a counter-example: that
-  space is reserved for a *specified* M1 feature, and the reservation is documented.)
+  invent a handler to fill it. A reservation that outlives its decision is worse than no reservation:
+  the shell header carried a `__cluster-slot` placeholder for a switcher that ended up in the drawer,
+  and it sat there empty on every screen until somebody noticed.
 - **A button that KUI already has, drawn differently, is not this case at all.** That is styling, and
   the design wins outright.
 
