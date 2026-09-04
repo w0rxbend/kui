@@ -108,10 +108,22 @@ object ContractRouting {
 
       public
         .errorOut(statusCode)
-        .serverSecurityLogic[(Principal, CorrelationId, Option[ClusterId]), F](callerOf[F])
-        .serverLogic { case (principal, correlationId, cluster) =>
+        .serverSecurityLogic[(Principal, CorrelationId, Option[ClusterId], List[String]), F](callerOf[F])
+        .serverLogic { case (principal, correlationId, cluster, segments) =>
           input =>
-            proxy(service, endpoint, typed, client, signals, rbac, principal, correlationId, cluster, input)
+            proxy(
+              service,
+              endpoint,
+              typed,
+              client,
+              signals,
+              rbac,
+              principal,
+              correlationId,
+              cluster,
+              segments,
+              input
+            )
         }
     }
 
@@ -160,10 +172,11 @@ object ContractRouting {
       principal: Principal,
       correlationId: CorrelationId,
       cluster: Option[ClusterId],
+      requestSegments: List[String],
       input: Any
   ): F[Either[(ErrorEnvelope, StatusCode), Any]] =
     for {
-      permitted <- rbac.check(principal, original, cluster)
+      permitted <- rbac.check(principal, original, cluster, requestSegments)
       result <- permitted match {
         case Left(denied) => Async[F].pure(Left(denied))
         case Right(_) =>
@@ -237,14 +250,16 @@ object ContractRouting {
     */
   private def callerOf[F[_]: Async](
       request: ServerRequest
-  ): F[Either[(ErrorEnvelope, StatusCode), (Principal, CorrelationId, Option[ClusterId])]] =
+  ): F[Either[(ErrorEnvelope, StatusCode), (Principal, CorrelationId, Option[ClusterId], List[String])]] =
     ErrorInterceptor.correlationIdOf[F](request).flatMap { correlationId =>
       val principal = request
         .attribute(SessionMiddleware.Attribute)
         .map(_.principal)
         .getOrElse(Principal.Anonymous)
 
-      ClusterScope.of(request.uri.path.toList) match {
+      val segments = request.uri.path.toList
+
+      ClusterScope.of(segments) match {
         case ClusterScope.Scope.Malformed(raw, error) =>
           Clock[F].realTimeInstant.map { now =>
             val invalid: KuiError = ApplicationError.Invalid(
@@ -256,7 +271,7 @@ object ContractRouting {
           }
 
         case scope =>
-          Async[F].pure(Right((principal, correlationId, ClusterScope.clusterOf(scope))))
+          Async[F].pure(Right((principal, correlationId, ClusterScope.clusterOf(scope), segments)))
       }
     }
 

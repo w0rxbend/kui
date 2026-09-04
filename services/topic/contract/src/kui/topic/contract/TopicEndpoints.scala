@@ -3,6 +3,8 @@ package kui.topic.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
+import kui.security.rbac.{Action, Resource}
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, TopicName}
@@ -58,6 +60,7 @@ object TopicEndpoints {
       .in(TopicQueryCodecs.listParams)
       .out(jsonBody[TopicsResponse])
       .name("topic.list")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("topic.list"))
       .summary("One page of a cluster's topics")
       .description(
         "The page's total is counted after every filter, including the internal-topic filter, so the " +
@@ -72,6 +75,11 @@ object TopicEndpoints {
       .in(topicsBase / clusterIdPath / TopicsSegment / topicNamePath)
       .out(jsonBody[TopicDetailResponse])
       .name("topic.get")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("topic.get", ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicView))
+      )
       .summary("One topic, with the head of its partition table")
       .description(
         "Answers 404 when no such topic exists on the cluster, and a different 404 when no such cluster " +
@@ -87,6 +95,11 @@ object TopicEndpoints {
       .in(topicsBase / clusterIdPath / TopicsSegment / topicNamePath / ConfigSegment)
       .out(jsonBody[TopicConfigResponse])
       .name("topic.config")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("topic.config", ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicView))
+      )
       .summary("One topic's configuration keys, read-only")
       .description(
         "Read-only in M2: edits arrive in M5 with read-only mode and audit. A caller who may see the " +
@@ -102,6 +115,13 @@ object TopicEndpoints {
       .in(topicsBase / clusterIdPath / TopicsSegment / topicNamePath / PartitionsSegment)
       .out(jsonBody[PartitionsResponse])
       .name("topic.partitions")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "topic.partitions",
+          ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicView)
+        )
+      )
       .summary("Every partition of one topic, with leaders, replicas and offsets")
       .description(
         "A partition with no leader is reported with a null leader and no message count, never with " +
@@ -120,6 +140,7 @@ object TopicEndpoints {
       .out(jsonBody[RefreshAcceptedDto])
       .out(statusCode(sttp.model.StatusCode.Accepted))
       .name("topic.refresh")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("topic.refresh"))
       .summary("Ask for this cluster's topics to be read now")
       .description(
         "Answers 202 with the time the request was taken. It changes nothing on the Kafka cluster: it " +

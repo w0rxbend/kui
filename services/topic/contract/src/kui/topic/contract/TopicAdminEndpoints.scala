@@ -3,6 +3,8 @@ package kui.topic.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
+import kui.security.rbac.{Action, Resource}
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, TopicName}
@@ -104,6 +106,11 @@ object TopicAdminEndpoints {
       .in(jsonBody[CreateTopicRequest])
       .out(jsonBody[CreatedTopicDto])
       .name("topic.create")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("topic.create", ResourceRequirement.inBody(Resource.Topic, "name", Action.TopicCreate))
+      )
       .summary("Create a topic")
       .description(
         KuiEndpoint.mutationNote(CreateOperation, destructive = false) +
@@ -134,6 +141,13 @@ object TopicAdminEndpoints {
       .in(jsonBody[UpdateTopicConfigRequest])
       .out(jsonBody[dto.TopicConfigResponse])
       .name("topic.config.update")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "topic.config.alter",
+          ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicEdit)
+        )
+      )
       .summary("Set and reset entries of a topic's configuration")
       .description(
         KuiEndpoint.mutationNote(AlterConfigOperation, destructive = false) +
@@ -164,6 +178,13 @@ object TopicAdminEndpoints {
       .in(jsonBody[PartitionIncreaseRequest])
       .out(jsonBody[PartitionPlanDto])
       .name("topic.partitions.plan")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "topic.partitions.increase",
+          ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicEdit)
+        )
+      )
       .summary("What raising this topic's partition count would do")
       .description(
         KuiEndpoint.mutationNote(IncreasePartitionsOperation, destructive = false) +
@@ -195,6 +216,13 @@ object TopicAdminEndpoints {
       .in(jsonBody[ConfirmRequest])
       .out(jsonBody[PartitionPlanDto])
       .name("topic.partitions.increase")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "topic.partitions.increase",
+          ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicEdit)
+        )
+      )
       .summary("Raise a topic's partition count to what a plan token names")
       .description(
         KuiEndpoint.mutationNote(IncreasePartitionsOperation, destructive = true) +
@@ -219,6 +247,11 @@ object TopicAdminEndpoints {
       .in(oneTopic / DeletionSegment / PlanSegment)
       .out(jsonBody[DeletionPlanDto])
       .name("topic.deletion.plan")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("topic.delete", ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicDelete))
+      )
       .summary("What deleting this topic would destroy")
       .description(
         KuiEndpoint.mutationNote(DeleteOperation, destructive = false) +
@@ -253,6 +286,11 @@ object TopicAdminEndpoints {
       )
       .out(jsonBody[DeletionPlanDto])
       .name("topic.delete")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("topic.delete", ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicDelete))
+      )
       .summary("Delete a topic")
       .description(
         KuiEndpoint.mutationNote(DeleteOperation, destructive = true) +

@@ -3,6 +3,8 @@ package kui.consumer.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
+import kui.security.rbac.{Action, Resource}
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.consumer.contract.dto.*
 import kui.consumer.contract.dto.ConsumerCodecs.given
 import kui.contracts.consumer.{GroupSortField, TopicConsumersDto}
@@ -149,6 +151,7 @@ object ConsumerEndpoints {
       .in(listParams)
       .out(jsonBody[GroupsResponse])
       .name("consumer.list")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("consumer.list"))
       .summary("The cluster's consumer groups, with lag and pace")
       .description(
         "Read from the group snapshot rather than from a live describe, so the lag and the end offsets it " +
@@ -172,6 +175,13 @@ object ConsumerEndpoints {
       .in(clustersBase / clusterIdPath / GroupsSegment / groupIdPath)
       .out(jsonBody[GroupDetailDto])
       .name("consumer.detail")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "consumer.detail",
+          ResourceRequirement.named(Resource.ConsumerGroup, GroupIdParam, Action.ConsumerGroupView)
+        )
+      )
       .summary("One consumer group: members, assignments and per-partition lag")
       .description(
         "An unknown group answers 200 with an empty group in state DEAD, not 404: the port fabricates a " +
@@ -211,6 +221,7 @@ object ConsumerEndpoints {
       )
       .out(jsonBody[LagDeltaDto])
       .name("consumer.lag")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("consumer.lag"))
       .summary("Which groups' lag changed since the given token")
       .description(
         "The token is issued by this service and carries the snapshot version it was cut from. A client " +
@@ -230,6 +241,11 @@ object ConsumerEndpoints {
       .in(clustersBase / clusterIdPath / TopicsSegment / topicPath / GroupsSegment)
       .out(jsonBody[TopicConsumersDto])
       .name("consumer.forTopic")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("consumer.forTopic", ResourceRequirement.named(Resource.Topic, TopicParam, Action.TopicView))
+      )
       .summary("Every consumer group that reads this topic, with its lag on this topic alone")
       .description(
         "Feeds the gateway's topic-overview aggregation. A group's lag here is its lag on this topic, which " +

@@ -185,7 +185,8 @@ final class ClusterRoutingSuite extends CatsEffectSuite {
         def check(
             principal: Principal,
             endpoint: AnyEndpoint,
-            cluster: Option[ClusterId]
+            cluster: Option[ClusterId],
+            requestSegments: List[String]
         ): IO[Either[KuiError, Unit]] = asked.update(_ :+ cluster).as(Right(()))
       }
 
@@ -195,6 +196,29 @@ final class ClusterRoutingSuite extends CatsEffectSuite {
           _ <- server.get("/api/v1/clusters")
           seen <- asked.get
         } yield assertEquals(seen.map(_.map(_.value)), List(Some("prod-eu"), None))
+      }
+    }
+  }
+
+  test("theRbacPreCheckReceivesTheRequestPath") {
+    // The check needs the path because a permission is granted over a pattern and the name being matched
+    // - the topic, the group - is in the path. Handing it the cluster alone would make every per-resource
+    // rule unenforceable at the edge, silently.
+    Ref.of[IO, List[List[String]]](Nil).flatMap { asked =>
+      val recording = new RbacPreCheck[IO] {
+        def check(
+            principal: Principal,
+            endpoint: AnyEndpoint,
+            cluster: Option[ClusterId],
+            requestSegments: List[String]
+        ): IO[Either[KuiError, Unit]] = asked.update(_ :+ requestSegments).as(Right(()))
+      }
+
+      serving(rbac = recording) { (server, _) =>
+        for {
+          _ <- server.get("/api/v1/clusters/prod-eu/brokers")
+          seen <- asked.get
+        } yield assertEquals(seen, List(List("api", "v1", "clusters", "prod-eu", "brokers")))
       }
     }
   }

@@ -4,6 +4,7 @@ import sttp.model.StatusCode
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
+import kui.contracts.rbac.EndpointAuthorization
 import kui.cluster.contract.dto.{ClusterProfileDto, ProfileResult}
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
@@ -78,6 +79,7 @@ object ProfileEndpoints {
         )
       )
       .name("cluster.profile")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("cluster.profile"))
       .summary("A cluster's resolved connection settings, for another KUI service")
       .description(
         "The ETag is the profile's store version. A caller keeps the last profile it saw and re-fetches " +

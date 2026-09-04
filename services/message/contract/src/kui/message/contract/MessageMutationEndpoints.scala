@@ -3,6 +3,8 @@ package kui.message.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
+import kui.security.rbac.{Action, Resource}
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, TopicName}
@@ -98,6 +100,13 @@ object MessageMutationEndpoints {
       .in(jsonBody[ProduceRequestDto])
       .out(jsonBody[ProduceResultDto])
       .name("message.produce")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "produce",
+          ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicMessagesProduce)
+        )
+      )
       .summary("Publish a record to a topic")
       .description(
         KuiEndpoint.mutationNote(ProduceOperation, destructive = false) +
@@ -130,6 +139,16 @@ object MessageMutationEndpoints {
       .in(jsonBody[ResendRequestDto])
       .out(jsonBody[ResendResultDto])
       .name("message.resend")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization(
+          "resend",
+          List(
+            ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicMessagesRead),
+            ResourceRequirement.inBody(Resource.Topic, "toTopic", Action.TopicMessagesProduce)
+          )
+        )
+      )
       .summary("Copy a range of records into another topic")
       .description(
         KuiEndpoint.mutationNote(ResendOperation, destructive = false) +
@@ -160,6 +179,11 @@ object MessageMutationEndpoints {
       .in(messagesOf / PurgeSegment / PlanSegment)
       .out(jsonBody[PurgePlanDto])
       .name("message.purge.plan")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("purge", ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicMessagesDelete))
+      )
       .summary("What emptying this topic would destroy")
       .description(
         KuiEndpoint.mutationNote(PurgeOperation, destructive = false) +
@@ -191,6 +215,11 @@ object MessageMutationEndpoints {
       .in(jsonBody[PurgeConfirmRequest])
       .out(jsonBody[PurgeReceiptDto])
       .name("message.purge")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization
+          .one("purge", ResourceRequirement.named(Resource.Topic, TopicNameParam, Action.TopicMessagesDelete))
+      )
       .summary("Delete every record a purge plan named")
       .description(
         KuiEndpoint.mutationNote(PurgeOperation, destructive = true) +

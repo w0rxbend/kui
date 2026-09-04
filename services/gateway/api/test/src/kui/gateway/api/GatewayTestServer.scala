@@ -18,6 +18,7 @@ import kui.http.{ErrorInterceptor, KuiServer}
 import kui.kernel.{Host, Port}
 import kui.observability.Telemetry
 import kui.testkit.fakes.FakeStructuredLogger
+import kui.security.rbac.RbacPolicy
 
 /** A gateway on a real port, for the assertions that only a real server can make.
   *
@@ -87,7 +88,8 @@ object GatewayTestServer {
   private def configView(basePath: String): GatewayServiceConfigView =
     GatewayServiceConfigView(
       ServerConfig(Host.unsafe("localhost"), Port.unsafe(0), basePath),
-      GatewayConfig.Default
+      GatewayConfig.Default,
+      RbacPolicy.Disabled
     )
 
   /** The telemetry a suite uses when it needs one at all: records nothing, costs nothing. */

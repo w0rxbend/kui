@@ -17,7 +17,7 @@ import kui.config.PrincipalKeyConfig
 import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.api.openapi.DocsRoutes
-import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
+import kui.gateway.api.routing.{ContractRouting, PolicyRbacPreCheck, RbacPreCheck, ServiceContracts}
 import kui.gateway.api.{
   CapabilityRoutes,
   ClusterOverviewRoutes,
@@ -43,6 +43,7 @@ import kui.http.{BasePath, Cors, ErrorInterceptor}
 import kui.kernel.ServiceId
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.{JwsPrincipalCodec, PrincipalCodec, SigningKey}
+import kui.security.rbac.ClusterFlags
 
 /** Everything a gateway needs in order to be served, with no listener started.
   *
@@ -171,8 +172,16 @@ object GatewayWiring {
             .leftMap(BadContract.apply)
         )
       )
+      // The edge's permission check, built from the deployment's roles and its per-cluster read-only
+      // flags. Every proxied call goes through it before it leaves the gateway; a refusal costs the
+      // service behind it nothing at all.
+      rbac = new PolicyRbacPreCheck[F](
+        config.rbac,
+        cluster => Async[F].pure(config.clusterFlags.getOrElse(cluster, ClusterFlags.Writable)),
+        logger
+      )
       proxied <- Resource.eval(
-        Async[F].fromEither(proxyRoutes[F](clients, signals).leftMap(BadContract.apply))
+        Async[F].fromEither(proxyRoutes[F](clients, signals, rbac).leftMap(BadContract.apply))
       )
       // The dashboard, which the gateway answers itself over the cluster service's client. A deployment
       // with no cluster service configured has no such client and therefore no route: the path 404s,
@@ -360,7 +369,8 @@ object GatewayWiring {
     */
   def proxyRoutes[F[_]: Async](
       clients: ServiceClients[F],
-      signals: CapabilitySignals[F]
+      signals: CapabilitySignals[F],
+      rbac: RbacPreCheck[F]
   ): Either[String, List[ServerEndpoint[Fs2Streams[F], F]]] =
     clients.all
       .traverse(client =>
@@ -371,7 +381,7 @@ object GatewayWiring {
           ServiceContracts.proxied(client.service),
           client,
           signals,
-          RbacPreCheck.allowAll[F]
+          rbac
         )
       )
       .map(_.flatten)

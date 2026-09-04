@@ -3,6 +3,8 @@ package kui.consumer.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
+import kui.security.rbac.{Action, Resource}
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.consumer.contract.dto.*
 import kui.consumer.contract.dto.ConsumerCodecs.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
@@ -84,6 +86,14 @@ object ConsumerMutationEndpoints {
       .in(jsonBody[ResetPlanRequest])
       .out(jsonBody[ResetPlanDto])
       .name("consumer.offsets.plan")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "consumer.offsets.reset",
+          ResourceRequirement
+            .named(Resource.ConsumerGroup, ConsumerEndpoints.GroupIdParam, Action.ConsumerGroupResetOffsets)
+        )
+      )
       .summary("What resetting this group's offsets would do")
       .description(
         KuiEndpoint.mutationNote(ResetOffsetsOperation, destructive = false) +
@@ -113,6 +123,14 @@ object ConsumerMutationEndpoints {
       .in(jsonBody[ResetApplyRequest])
       .out(jsonBody[ResetPlanDto])
       .name("consumer.offsets.apply")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "consumer.offsets.reset",
+          ResourceRequirement
+            .named(Resource.ConsumerGroup, ConsumerEndpoints.GroupIdParam, Action.ConsumerGroupResetOffsets)
+        )
+      )
       .summary("Write the offsets a plan token names")
       .description(
         KuiEndpoint.mutationNote(ResetOffsetsOperation, destructive = true) +
@@ -129,6 +147,14 @@ object ConsumerMutationEndpoints {
       .delete
       .in(groupBase)
       .name("consumer.group.delete")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "consumer.group.delete",
+          ResourceRequirement
+            .named(Resource.ConsumerGroup, ConsumerEndpoints.GroupIdParam, Action.ConsumerGroupDelete)
+        )
+      )
       .summary("Delete a consumer group")
       .description(
         KuiEndpoint.mutationNote(DeleteGroupOperation, destructive = true) +
@@ -158,6 +184,14 @@ object ConsumerMutationEndpoints {
       .in(query[TopicName](TopicParam).description("Delete this group's committed offsets for this topic"))
       .out(jsonBody[DeletedOffsetsDto])
       .name("consumer.offsets.delete")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "consumer.offsets.delete",
+          ResourceRequirement
+            .named(Resource.ConsumerGroup, ConsumerEndpoints.GroupIdParam, Action.ConsumerGroupResetOffsets)
+        )
+      )
       .summary("Delete a group's committed offsets for one topic")
       .description(
         KuiEndpoint.mutationNote(DeleteOffsetsOperation, destructive = true) +

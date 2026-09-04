@@ -13,6 +13,7 @@ import kui.gateway.application.session.SessionStore
 import kui.gateway.contract.GatewayEndpoints
 import kui.http.BasePath
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
+import kui.security.rbac.RbacPolicy
 
 /** Every route the gateway serves, assembled in one place.
   *
@@ -68,7 +69,7 @@ object GatewayApi {
     // that parameter, so an endpoint requiring nothing fits wherever one that may require streaming does.
     BasePath.prefixAll(GatewayEndpoints.ApiPrefix, HealthEndpoints.probes[F](readiness)) ++
       InfoRoutes[F](config.server, config.gateway) ++
-      AuthRoutes[F](sessions) ++
+      AuthRoutes[F](sessions, config.rbac) ++
       // The capability, proxy and documentation routes the composition root builds, which need
       // components (the registry, the service clients) that this module must not construct itself.
       extra ++
@@ -85,7 +86,15 @@ object GatewayApi {
   * involves the server settings and the upstream list and nothing else — not the telemetry configuration, not
   * the signing keys.
   */
-final case class GatewayServiceConfigView(server: ServerConfig, gateway: GatewayConfig)
+final case class GatewayServiceConfigView(
+    server: ServerConfig,
+    gateway: GatewayConfig,
+    // What `GET /auth/me` answers with, so that the browser hides exactly the controls the edge would
+    // refuse. It is the same `RbacPolicy` value the edge's own check reads, from the same configuration:
+    // a second policy here would be a second answer to "may I", and the interface would be wrong in
+    // whichever direction the two had drifted.
+    rbac: RbacPolicy
+)
 
 /** The bootstrap block `StaticRoutes` embeds in `index.html`, derived from the same configuration and build
   * the rest of the process reports (GW-010) — one source of truth for "which build, which base path, which

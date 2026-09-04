@@ -3,6 +3,8 @@ package kui.cluster.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
+import kui.security.rbac.{Action, Resource}
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.cluster.contract.dto.*
 import kui.contracts.KernelSchemas.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
@@ -58,6 +60,7 @@ object ClusterEndpoints {
       .in(clustersBase)
       .out(jsonBody[ClustersResponse])
       .name("cluster.list")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("cluster.list"))
       .summary("Every configured cluster and its last known state")
       .description(
         "The list of clusters comes from configuration overlaid by the metadata store and is always " +
@@ -71,6 +74,7 @@ object ClusterEndpoints {
       .in(clustersBase / clusterIdPath)
       .out(jsonBody[ClusterDetailResponse])
       .name("cluster.get")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("cluster.get"))
       .summary("One configured cluster and its last known state")
       .description("Answers 404 when no cluster with that id is configured; 400 when the id is malformed.")
       .tag("cluster")
@@ -81,6 +85,7 @@ object ClusterEndpoints {
       .in(clustersBase / clusterIdPath / BrokersSegment)
       .out(jsonBody[BrokersResponse])
       .name("cluster.brokers")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("cluster.brokers"))
       .summary("The cluster's brokers, with rack, controller flag and replica counts")
       .description(
         "Read from the cluster snapshot, not from a fresh admin call: the response carries the time it " +
@@ -100,6 +105,13 @@ object ClusterEndpoints {
       )
       .out(jsonBody[BrokerConfigsResponse])
       .name("cluster.broker.configs")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "cluster.broker.configs",
+          ResourceRequirement.unnamed(Resource.ClusterConfig, Action.ClusterConfigView)
+        )
+      )
       .summary("One broker's settings, read-only")
       .description(
         "Read-only in M1: BR-002 ships without edits, which arrive in M5 with read-only mode and audit. " +
@@ -122,6 +134,7 @@ object ClusterEndpoints {
       )
       .out(jsonBody[LogDirsResponse])
       .name("cluster.logDirs")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("cluster.logDirs"))
       .summary("Log directories and their sizes, for one broker or for all of them")
       .description(
         "A directory that is offline carries its own error while the rest of the answer is good, which " +
@@ -141,6 +154,7 @@ object ClusterEndpoints {
       .out(jsonBody[RefreshAcceptedDto])
       .out(statusCode(sttp.model.StatusCode.Accepted))
       .name("cluster.refresh")
+      .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("cluster.refresh"))
       .summary("Ask for this cluster to be scraped now")
       .description(
         "Answers 202 with the time the request was taken. The snapshot is not new when this returns; " +
