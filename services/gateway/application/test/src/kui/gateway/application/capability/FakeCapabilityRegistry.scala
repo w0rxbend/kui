@@ -45,10 +45,10 @@ final class FakeCapabilityRegistry[F[_]: Async] private (
   def subscribe: cats.effect.kernel.Resource[F, Stream[F, CapabilityChange]] =
     cats.effect.kernel.Resource.pure(changes)
 
-  def report(key: CapabilityKey, next: CapabilityState): F[Unit] =
+  def report(key: CapabilityKey, next: CapabilityState, name: Option[String]): F[Unit] =
     states.modify(current => (current.updated(key, next), current.get(key))).flatMap { previous =>
       published
-        .update(_ :+ CapabilityChange(CapabilityEntry(key, next, Instant.EPOCH), previous))
+        .update(_ :+ CapabilityChange(CapabilityEntry(key, next, Instant.EPOCH, name), previous))
         .void
     }
 

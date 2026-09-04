@@ -30,8 +30,19 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
   private def key(id: String): CapabilityKey = CapabilityKey(cluster, Some(clusterId(id)))
   private val serviceKey: CapabilityKey = CapabilityKey(cluster, None)
 
-  private def capability(status: String, configured: Boolean = true): ClusterCapability =
-    ClusterCapability(configured = configured, features = List("CLUSTER_TOPOLOGY"), status = status)
+  private def capability(
+      status: String,
+      configured: Boolean = true,
+      name: Option[String] = None,
+      reason: Option[String] = None
+  ): ClusterCapability =
+    ClusterCapability(
+      configured = configured,
+      features = List("CLUSTER_TOPOLOGY"),
+      status = status,
+      name = name,
+      reason = reason
+    )
 
   private def fixture(
       stub: StubServiceClient[IO]
@@ -255,6 +266,33 @@ final class PerClusterCapabilitySuite extends CatsEffectSuite {
         }
       }
     )
+  }
+
+  test("aClustersNameAndReasonReachTheEntryTheBrowserReads") {
+    // The switcher renders its rows from these entries and from nothing else — the shell holds no
+    // cluster data on purpose — so a name that stops at the poller is a switcher showing slugs, and a
+    // reason that stops here is a dimmed row that cannot say why.
+    val reported = Map(
+      clusterId("prod-eu") -> capability("available", name = Some("Production EU (primary)")),
+      clusterId("dead") ->
+        capability("degraded", name = Some("Decommissioned"), reason = Some("the cluster could not be reached"))
+    )
+
+    afterOnePoll(reported) { (registry, _, _) =>
+      registry.entries.map { entries =>
+        val byCluster = entries.flatMap(entry => entry.key.cluster.map(_.value -> entry)).toMap
+
+        assertEquals(byCluster("prod-eu").name, Some("Production EU (primary)"))
+        assertEquals(byCluster("dead").name, Some("Decommissioned"))
+        byCluster("dead").state match {
+          case CapabilityState.Degraded(reason) =>
+            assertEquals(reason.message, "the cluster could not be reached")
+          case other => fail(s"a cluster reported degraded must be degraded, got $other")
+        }
+        // The service's own entry names no cluster, because it is not about one.
+        assertEquals(entries.find(_.key.cluster.isEmpty).flatMap(_.name), None)
+      }
+    }
   }
 
   test("aServiceWithNoClustersHasOnlyItsOwnKey") {
