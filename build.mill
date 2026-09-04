@@ -1472,6 +1472,39 @@ object services extends Module {
       }
     }
 
+    /** The use cases: browsing, seeking, publishing, and the cursor that makes "next page" work on any
+      * replica.
+      *
+      * Rule A3 fails the build if tapir, circe, `libs/contracts-core` or `libs/http` reaches it: the
+      * types a use case returns are its own, and `api` maps them (ADR-033). That is why the cursor is
+      * serialised by hand in this module rather than with a derived JSON codec — a cursor is a
+      * compatibility surface, and a derived codec would let a field rename silently invalidate every
+      * cursor a browser is holding.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain, libs.cache)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        // The domain's test module carries the generators every suite here builds on. A generator of a
+        // domain type cannot live in `libs/testkit`: rule A5 forbids a library depending on a service.
+        def moduleDeps =
+          super.moduleDeps ++ Seq(libs.testkit.jvm, services.message.domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
+        )
+      }
+    }
+
     /** The published wire shape of `kui-message-service`.
       *
       * Cross-compiled for the reason every KUI contract is: the browser decodes exactly what the
@@ -1859,6 +1892,52 @@ object services extends Module {
     * is an invitation to put something in it.
     */
   object consumer extends Module {
+
+    /** The consumer-group business rules and the ports they are stated in terms of.
+      *
+      * Rule A1 allows it `libs/kernel` and cats-core, nothing else. Lag arithmetic, the reset
+      * planner and the group aggregate live here because every one of them is a rule with a wrong
+      * answer that reaches a screen — a fabricated zero, an unclamped offset — and a rule that can
+      * be tested with a constructor call should not need an effect to reach it.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The use cases: the snapshot, the five reads, the three mutations and the mutation guard.
+      *
+      * `libs.cache` carries the `SnapshotCell` the group snapshot is held in, exactly as the
+      * cluster service holds its topology. It is not a wire module, so rule A3 is unaffected.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain, libs.cache)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        // The domain's test module carries the group fixtures every suite here builds on. They
+        // cannot live in `libs/testkit`: rule A5 forbids a library depending on a service.
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // Virtual time: the snapshot refresh loop's contract is about what happens after thirty
+          // seconds, and a suite that slept through that would be slow and flaky at once.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
+        )
+      }
+    }
 
     /** The published wire shape of `kui-consumer-service`.
       *
