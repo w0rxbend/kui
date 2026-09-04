@@ -175,6 +175,18 @@
   transition: border-color var(--kui-duration-fast) ease;
 }
 
+/* A textarea is not a tall input. The pill radius that makes a single-line field read as a filled
+ * control carves a 999px arc out of a multi-line box, pushing the first and last lines of text
+ * inward and leaving the corners unusable. The design uses its card radius for every multi-line
+ * block it draws, so a textarea does too. */
+textarea.kui-field__control {
+  border-radius: var(--kui-radius-lg);
+  padding: var(--kui-space-3) var(--kui-space-4);
+  min-height: calc(var(--kui-space-8) * 2);
+  line-height: var(--kui-font-line-height-normal);
+  resize: vertical;
+}
+
 .kui-field__control:disabled {
   opacity: 0.55;
   cursor: not-allowed;

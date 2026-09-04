@@ -72,6 +72,10 @@ object FilterEditor {
             dataAttr("testid") := "messages-filter-source",
             rows := 3,
             placeholder := Messages.SmartFilterPlaceholder,
+            // A filter expression is code. Spell-checking it underlines every field name in red.
+            spellCheck := false,
+            autoComplete := "off",
+            L.autoCapitalize := "off",
             controlled(value <-- draft.signal, onInput.mapToValue --> draft.writer)
           ),
           p(cls := MessagesCss.FilterHint, Messages.SmartFilterHint),

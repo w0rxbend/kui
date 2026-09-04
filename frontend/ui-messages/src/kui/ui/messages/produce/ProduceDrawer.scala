@@ -300,6 +300,11 @@ object ProduceDrawer {
         cls := MessagesCss.FormText,
         dataAttr("testid") := s"produce-$testId",
         rows := 6,
+        // A record key or value is data, not prose. Left on, the browser red-underlines every JSON
+        // field name, which reads as "this is wrong" over something perfectly valid.
+        spellCheck := false,
+        autoComplete := "off",
+        L.autoCapitalize := "off",
         L.disabled <-- absent,
         L.value <-- text,
         onInput.mapToValue --> { raw => onText(raw) }
