@@ -15,8 +15,8 @@ import kui.kernel.{Host, Port}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
-/** That the browser gets the shell, an unhashed asset it must re-fetch, a hashed one it may cache forever,
-  * and a plain HTTP 404-shaped API failure never disguised as HTML — on a real server, because content
+/** That the browser gets the shell, an asset it revalidates against a validator computed from that asset's
+  * bytes, and a plain HTTP 404-shaped API failure never disguised as HTML — on a real server, because content
   * negotiation and cache headers are properties of a response, not of the function that built one.
   */
 final class StaticRoutesSuite extends KuiIOSuite {
@@ -28,9 +28,9 @@ final class StaticRoutesSuite extends KuiIOSuite {
   private def bootstrapFor(basePath: String): BootstrapConfig =
     BootstrapConfig(basePath, s"$basePath/api/v1", "0.1.0-SNAPSHOT")
 
-  /** A gateway serving only the static routes, from the suite's own fixture tree
-    * (`test/resources/web-test`) rather than production's `/web` — a suite must not depend on assets a
-    * frontend build would have to link in first.
+  /** A gateway serving only the static routes, from the suite's own fixture tree (`test/resources/web-test`)
+    * rather than production's `/web` — a suite must not depend on assets a frontend build would have to link
+    * in first.
     */
   private def server(basePath: String = "/", resourcePrefix: String = "/web-test"): Resource[IO, Running] =
     for {
@@ -48,7 +48,7 @@ final class StaticRoutesSuite extends KuiIOSuite {
       backend <- HttpClientFs2Backend.resource[IO]()
     } yield Running(binding, backend)
 
-  private final case class Running(binding: KuiServer.ServerBinding, backend: Backend[IO]) {
+  final private case class Running(binding: KuiServer.ServerBinding, backend: Backend[IO]) {
     def get(path: String): IO[Response[String]] =
       basicRequest
         .get(Uri.unsafeParse(s"http://localhost:${binding.port}$path"))
@@ -245,6 +245,36 @@ final class StaticRoutesSuite extends KuiIOSuite {
     }
   }
 
+  test("anUpgradeUnderTheSameFileNameIsAnswered200WithTheNewBytes") {
+    // The whole defect, reproduced as a test. `web-test` and `web-test-upgraded` are the same deployment
+    // before and after a release: both hold a `main.js`, the two files differ, and the *name* is identical —
+    // which is exactly what the Scala.js linker really does to a bundle chunk, and exactly what the old
+    // `immutable` header assumed could never happen.
+    //
+    // A browser that fetched from the first build and comes back to the second with the tag it was given
+    // must be sent the new bytes, and must be told a new tag. Two servers rather than one restart, because
+    // a classpath resource cannot be edited underneath a running JVM; the request sequence a browser makes
+    // is identical either way.
+    for {
+      before <- server(resourcePrefix = "/web-test").use(_.get("/ui/main.js"))
+      tag = before.header("ETag").getOrElse(fail("no ETag from the first build"))
+      after <- server(resourcePrefix = "/web-test-upgraded").use(_.getIfNoneMatch("/ui/main.js", tag))
+      unchanged <- server(resourcePrefix = "/web-test-upgraded").use { running =>
+        running.get("/ui/main.js").flatMap { fresh =>
+          running.getIfNoneMatch("/ui/main.js", fresh.header("ETag").getOrElse(fail("no ETag")))
+        }
+      }
+    } yield {
+      assertEquals(after.code.code, 200, "an upgraded file must not be answered 304")
+      assertNotEquals(after.body, before.body, "the browser must be sent the bytes of the new build")
+      assert(after.body.contains("rebuilt"), after.body)
+      assertNotEquals(after.header("ETag"), Some(tag), "new bytes must carry a new validator")
+      // And the other half of the bargain: when nothing changed, nothing is downloaded.
+      assertEquals(unchanged.code.code, 304, unchanged.body)
+      assertEquals(unchanged.body, "")
+    }
+  }
+
   test("twoDifferentFilesDoNotShareAValidator") {
     // The validator is over the bytes, never over the name. That is the whole lesson of the defect this
     // replaces: `internal-<40 hex>.js` names the set of classes in a chunk, not the JavaScript emitted for
@@ -329,7 +359,11 @@ final class StaticRoutesSuite extends KuiIOSuite {
           assertEquals(headed.header("Content-Type"), got.header("Content-Type"), path)
           assertEquals(headed.header("Cache-Control"), got.header("Cache-Control"), path)
           // RFC 9110: the headers describe what a `GET` would return, and the body is empty.
-          assertEquals(headed.header("Content-Length"), Some(got.body.getBytes("UTF-8").length.toString), path)
+          assertEquals(
+            headed.header("Content-Length"),
+            Some(got.body.getBytes("UTF-8").length.toString),
+            path
+          )
           assertEquals(headed.body, "", path)
         }
       }
