@@ -22,13 +22,18 @@ object ConsumerFactory {
 
   /** Settings with KUI's defaults applied, before any caller-specific tuning.
     *
-    * Four of those defaults are decisions rather than conveniences, and every one of them is a decision the
+    * Five of those defaults are decisions rather than conveniences, and every one of them is a decision the
     * reference implementations also had to make (`research/kafka/admin-capabilities.md` §4):
     *
     *   - `enable.auto.commit=false`. KUI reads; it does not own anybody's consumer group offsets, and an
     *     auto-commit would silently move a group an operator is looking at.
     *   - `auto.offset.reset=none`. Every KUI consumer seeks deliberately — to an offset, a timestamp, or the
     *     end. Falling back to "earliest" on a bad seek would read a whole topic by accident.
+    *   - `allow.auto.create.topics=false`. This one is not a tuning knob, it is a correctness bug waiting to
+    *     happen. A broker left at Kafka's default `auto.create.topics.enable=true` creates a topic the moment
+    *     a consumer asks for its metadata, so a user who mistyped a topic name in the message browser got
+    *     "topic 'ordrs.v1' does not exist" *and* a brand new empty `ordrs.v1` on their cluster. A read-only
+    *     tool must never write, least of all while telling the user it found nothing.
     *   - `group.id` only when one is given. A consumer without a group does not join a rebalance and cannot
     *     disturb one.
     *   - `Array[Byte]` on both sides. Deserialization is a separate concern with its own error handling (M3's
@@ -49,7 +54,14 @@ object ConsumerFactory {
           .withProperties(properties.unsafeValues)
           .withEnableAutoCommit(false)
           .withAutoOffsetReset(AutoOffsetReset.None)
+          .withProperty(AllowAutoCreateTopicsKey, "false")
 
         groupId.fold(base)(base.withGroupId)
       })
+
+  /** `allow.auto.create.topics`, the consumer-side switch that stops a metadata request from creating a
+    * topic. Named here rather than written as a literal so the suite that pins it and the setting itself
+    * cannot drift apart.
+    */
+  val AllowAutoCreateTopicsKey: String = "allow.auto.create.topics"
 }
