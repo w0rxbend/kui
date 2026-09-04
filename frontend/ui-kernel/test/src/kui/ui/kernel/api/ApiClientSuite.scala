@@ -28,7 +28,7 @@ class ApiClientSuite extends FunSuite with ApiClientFixtures {
 
   test("addsTheCsrfHeaderToMutationsAndNotToGets") {
     val auth = new Auth
-    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("token-42"), authType = "session"))
+    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("token-42"), authType = "session", permissions = Nil))
     val recorder = new RequestRecorder
 
     val client = clientFor(recorder.backend("pong"), auth)
@@ -63,7 +63,7 @@ class ApiClientSuite extends FunSuite with ApiClientFixtures {
     )
 
     val auth = new Auth
-    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("token-42"), authType = "session"))
+    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("token-42"), authType = "session", permissions = Nil))
     val recorder = new RequestRecorder
 
     // And the name is asserted on a real outgoing request too, not only on the constant: a client that
@@ -149,7 +149,7 @@ class ApiClientSuite extends FunSuite with ApiClientFixtures {
 
   test("aFourZeroOneSignalsAuthStateExpiredExactlyOnceForConcurrentCalls") {
     val auth = new Auth
-    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("token"), authType = "session"))
+    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("token"), authType = "session", permissions = Nil))
     val backend = stubBackend(_ => true, unauthenticated.asJson.noSpaces, 401)
     val client = clientFor(backend, auth)
 
@@ -174,7 +174,7 @@ class ApiClientSuite extends FunSuite with ApiClientFixtures {
 
     auth.markExpired()
     auth.markExpired()
-    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("fresh"), authType = "session"))
+    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("fresh"), authType = "session", permissions = Nil))
     auth.markExpired()
 
     assertEquals(expiries, 2)
@@ -183,7 +183,7 @@ class ApiClientSuite extends FunSuite with ApiClientFixtures {
 
   test("aFailedRefreshLeavesThePreviousIdentityAlone") {
     val auth = new Auth
-    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("still-good"), authType = "session"))
+    auth.markSignedIn(AuthInfo(principal = None, csrfToken = Some("still-good"), authType = "session", permissions = Nil))
 
     one(auth.refresh(() => EventStream.fromValue(Left(ApiError.Timeout)))).map { outcome =>
       assertEquals(outcome, Left(ApiError.Timeout))

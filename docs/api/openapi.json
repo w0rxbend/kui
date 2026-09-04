@@ -2493,6 +2493,12 @@
           },
           "authType" : {
             "type" : "string"
+          },
+          "permissions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PermissionDto"
+            }
           }
         }
       },
@@ -3422,6 +3428,33 @@
         "properties" : {
           "partitions" : {
             "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "PermissionDto" : {
+        "title" : "PermissionDto",
+        "type" : "object",
+        "required" : [
+          "resource"
+        ],
+        "properties" : {
+          "clusters" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "resource" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          },
+          "actions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
           }
         }
       },

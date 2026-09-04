@@ -5,9 +5,10 @@ import com.raquo.waypoint.{Router, SplitRender}
 import io.circe.Json
 import org.scalajs.dom
 
-import kui.gateway.contract.dto.AuthMeResponse
+import kui.gateway.contract.dto.{AuthMeResponse, PermissionDto}
 import kui.gateway.contract.{AuthEndpoints, CapabilityEndpoints}
-import kui.kernel.{RoleName, UserName}
+import kui.kernel.{ClusterId, RoleName, UserName}
+import kui.security.rbac.{Action, ClusterPermission, ClusterScope, RbacPolicy, Resource, ResourcePattern}
 import kui.security.{Principal, PrincipalKind}
 import kui.ui.kernel.api.{ApiClient, ApiError, Bootstrap}
 import kui.ui.kernel.feature.{FeatureRegistry, FeatureRoutes, Page}
@@ -149,8 +150,41 @@ object Shell {
       // An empty token is no token. Sending `X-Csrf-Token: ` would be rejected exactly as a missing
       // header is, but with a far more confusing message in the gateway's log.
       csrfToken = Option(response.csrfToken).filter(_.nonEmpty),
-      authType = response.authType
+      authType = response.authType,
+      permissions = response.permissions.flatMap(toPermission)
     )
+
+  /** One grant, from the wire into the kernel's shape.
+    *
+    * `None` — dropped — for a grant this browser cannot make sense of: an unknown resource name, an
+    * unparseable pattern, a resource with no recognised actions left after filtering. That is deliberately
+    * the *safe* direction to fail in, because a dropped grant hides a control and a mistakenly kept one
+    * offers a control the server will refuse. It also means a gateway that grows a twelfth resource does not
+    * stop an older browser from starting.
+    */
+  private[shell] def toPermission(dto: PermissionDto): Option[ClusterPermission] =
+    Resource.fromWire(dto.resource).flatMap { resource =>
+      val actions = dto.actions.flatMap(Action.fromWire(resource, _)).toSet
+      val pattern = dto.value.map(ResourcePattern.compile)
+
+      // A `value` that will not compile is a pattern this browser cannot evaluate, so the honest answer is
+      // to drop the grant rather than to treat it as matching everything or as matching nothing.
+      if actions.isEmpty || pattern.exists(_.isLeft) then None
+      else
+        Some(
+          ClusterPermission(
+            clusters = toScope(dto.clusters),
+            // Closed again on the way in. The server already expanded these, so this changes nothing
+            // today; it means a server that one day forgets to cannot make the browser more permissive
+            // than the server itself, which is the direction that matters.
+            permission = RbacPolicy.permission(resource, pattern.flatMap(_.toOption), actions)
+          )
+        )
+    }
+
+  private def toScope(clusters: List[String]): ClusterScope =
+    if clusters.contains(ClusterScope.EveryWire) then ClusterScope.Every
+    else ClusterScope.Named(clusters.flatMap(ClusterId.from(_).toOption).toSet)
 
   /** Where the capability stream lives.
     *

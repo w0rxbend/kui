@@ -11,8 +11,10 @@ import sttp.client4.{Backend, GenericRequest}
 import sttp.model.{StatusCode, Uri}
 
 import kui.gateway.contract.CapabilityEndpoints
-import kui.gateway.contract.dto.{AuthMeResponse, PrincipalDto}
+import kui.gateway.contract.dto.{AuthMeResponse, PermissionDto, PrincipalDto}
+import kui.kernel.ClusterId
 import kui.security.PrincipalKind
+import kui.security.rbac.{Action, ClusterScope, Resource}
 import kui.ui.kernel.api.{ApiClient, SttpApiClient}
 import kui.ui.kernel.state.Auth
 
@@ -35,7 +37,7 @@ class ShellSessionSuite extends FunSuite {
     var seen: List[GenericRequest[?, ?]] = Nil
 
     private val meBody: String =
-      AuthMeResponse(PrincipalDto("ada", List("admin"), "session"), token, "basic").asJson.noSpaces
+      AuthMeResponse(PrincipalDto("ada", List("admin"), "session"), token, "basic", Nil).asJson.noSpaces
 
     val backend: Backend[Future] =
       BackendStub
@@ -123,16 +125,47 @@ class ShellSessionSuite extends FunSuite {
   test("anUnrecognisedPrincipalKindDoesNotStopTheBrowserFromStarting") {
     assertEquals(
       Shell
-        .toAuthInfo(AuthMeResponse(PrincipalDto("x", Nil, "martian"), "t", "none"))
+        .toAuthInfo(AuthMeResponse(PrincipalDto("x", Nil, "martian"), "t", "none", Nil))
         .principal
         .map(_.kind),
       Some(PrincipalKind.Anonymous)
     )
   }
 
+  test("aPermissionArrivesWithItsPatternCompiledAndItsClustersScoped") {
+    val granted = Shell.toPermission(
+      PermissionDto(List("production", "staging"), "TOPIC", Some("orders.*"), List("DELETE", "VIEW"))
+    )
+
+    assertEquals(granted.map(_.permission.resource), Some(Resource.Topic))
+    assertEquals(
+      granted.map(_.clusters),
+      Some(ClusterScope.Named(Set(ClusterId.unsafe("production"), ClusterId.unsafe("staging"))))
+    )
+    assert(granted.exists(_.permission.value.exists(_.matches("orders-dlq"))))
+    assert(granted.exists(_.permission.actions.contains(Action.TopicDelete)))
+  }
+
+  test("theStarInTheClusterListMeansEveryCluster") {
+    // A cluster id is a lowercase slug, so `*` cannot collide with a real one — which is what lets the
+    // gateway say "everywhere" in a response it computes without knowing what the clusters are.
+    assertEquals(
+      Shell.toPermission(PermissionDto(List("*"), "TOPIC", Some(".*"), List("VIEW"))).map(_.clusters),
+      Some(ClusterScope.Every)
+    )
+  }
+
+  test("aGrantThisBrowserCannotUnderstandIsDroppedRatherThanKept") {
+    // Dropping hides a control; keeping offers one the server will refuse. The first is the safe way to
+    // be wrong, and it means a gateway that grows a twelfth resource does not stop an older browser.
+    assertEquals(Shell.toPermission(PermissionDto(List("*"), "QUANTUM", None, List("VIEW"))), None)
+    assertEquals(Shell.toPermission(PermissionDto(List("*"), "TOPIC", None, List("TELEPORT"))), None)
+    assertEquals(Shell.toPermission(PermissionDto(List("*"), "TOPIC", Some("orders["), List("VIEW"))), None)
+  }
+
   test("anEmptyTokenIsTreatedAsNoTokenRatherThanAnEmptyHeader") {
     assertEquals(
-      Shell.toAuthInfo(AuthMeResponse(PrincipalDto("x", Nil, "anonymous"), "", "none")).csrfToken,
+      Shell.toAuthInfo(AuthMeResponse(PrincipalDto("x", Nil, "anonymous"), "", "none", Nil)).csrfToken,
       None
     )
   }

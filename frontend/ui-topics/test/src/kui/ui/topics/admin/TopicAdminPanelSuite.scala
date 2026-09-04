@@ -81,7 +81,8 @@ final class TopicAdminPanelSuite extends FunSuite {
       appliedDeletion: Either[ApiError, DeletionPlanDto] = Right(deletionPlan(Some(16L), None)),
       plannedPurge: Either[ApiError, PurgePlanDto] = Right(purgePlan(16L, Some("g-token"))),
       appliedPurge: Either[ApiError, PurgeReceiptDto] =
-        Right(PurgeReceiptDto(purgePlan(16L, None), PurgeResultDto(Nil, Nil)))
+        Right(PurgeReceiptDto(purgePlan(16L, None), PurgeResultDto(Nil, Nil))),
+      deletePermitted: Boolean = true
   ): HtmlElement =
     TopicAdminPanel(
       topic = topic,
@@ -110,7 +111,8 @@ final class TopicAdminPanelSuite extends FunSuite {
         calls.purgeTokens.append(token)
         EventStream.fromValue(appliedPurge)
       },
-      onDeleted = () => calls.deleted += 1
+      onDeleted = () => calls.deleted += 1,
+      deletePermitted = Val(deletePermitted)
     )
 
   private def mounted[A](element: HtmlElement)(check: dom.Element => A): A = {
@@ -202,6 +204,22 @@ final class TopicAdminPanelSuite extends FunSuite {
       click(root, "topic-delete-confirm-confirm")
       assertEquals(calls.deletionTokens.toList, List("d-token"))
       assertEquals(calls.deleted, 1)
+    }
+  }
+
+  test("aUserWhoMayNotDeleteIsGivenADisabledButtonAndAReason") {
+    // E4's worked example, from the screen's end. The decision is `Rbac.decide`'s, made from the permission
+    // list `/auth/me` returned; what this asserts is that the screen acts on it — the control is disabled
+    // and says why, rather than being offered and then refused by the server.
+    val calls = new Calls
+    mounted(panelWith(calls, deletePermitted = false)) { root =>
+      val button = find(root, "topic-delete-plan").getOrElse(fail("no delete button"))
+      assertEquals(button.getAttribute("aria-disabled"), "true")
+      assert(button.hasAttribute("disabled"))
+
+      click(root, "topic-delete-plan")
+      // Nothing was even planned. A plan the user cannot apply is a page of counts that ends in a refusal.
+      assertEquals(calls.deletionPlans.toList, Nil)
     }
   }
 

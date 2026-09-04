@@ -140,13 +140,46 @@ object Decision {
   given CanEqual[Decision, Decision] = CanEqual.derived
 }
 
+/** Which clusters a grant applies on.
+  *
+  * `Every` is a case of its own rather than "the set of all cluster ids", because the thing that computes a
+  * grant does not always know what all the cluster ids are. The gateway serves `/auth/me` and holds no
+  * cluster list — the cluster service does — so a default role, or a deployment with no roles configured at
+  * all, has to be able to say "everywhere" without enumerating anywhere.
+  */
+enum ClusterScope {
+
+  /** Every cluster this deployment has, including ones added after this answer was computed. */
+  case Every
+
+  /** Exactly these, as a role named them. */
+  case Named(clusters: Set[ClusterId])
+
+  def includes(cluster: ClusterId): Boolean = this match {
+    case Every => true
+    case Named(clusters) => clusters.contains(cluster)
+  }
+}
+
+object ClusterScope {
+
+  /** How `Every` is spelled on the wire.
+    *
+    * A cluster id is a lowercase slug, so `*` cannot collide with one — which is what makes it safe to put in
+    * the same list as real cluster ids rather than adding a second field beside it.
+    */
+  val EveryWire: String = "*"
+
+  given CanEqual[ClusterScope, ClusterScope] = CanEqual.derived
+}
+
 /** A permission together with the clusters it applies on.
   *
   * This is the shape `/auth/me` sends to the browser and the shape the browser's own gate reads. A
   * `Permission` alone is not enough there, because the browser has to answer "may I delete *this* topic on
   * *this* cluster" and the cluster scoping lives on the role rather than on the permission.
   */
-final case class ClusterPermission(clusters: Set[ClusterId], permission: Permission)
+final case class ClusterPermission(clusters: ClusterScope, permission: Permission)
 
 object ClusterPermission {
   given CanEqual[ClusterPermission, ClusterPermission] = CanEqual.derived
@@ -273,7 +306,7 @@ object Rbac {
         ).isAllowed
       )
 
-  /** Everything this principal may do, across the clusters this deployment has.
+  /** Everything this principal may do, across every cluster.
     *
     * This is what `/auth/me` answers with and what the browser's permission store holds (E4). Every
     * permission arrives with its actions already expanded, so the browser's gate is a lookup and never a
@@ -281,22 +314,28 @@ object Rbac {
     *
     * When RBAC is off the answer is a single wildcard grant per resource over every cluster, rather than an
     * empty list. An empty list and "no restrictions" would otherwise be indistinguishable in the browser, and
-    * the interface would hide every control in the deployment that has asked for no authorization at all —
-    * which is the quickstart.
+    * the interface would hide every write control in a deployment that has asked for no authorization at all
+    * — which is the quickstart.
+    *
+    * The answer is advisory and always was: it says what the *server* will allow, so the interface can hide
+    * what it would refuse. It is not a capability, and holding it grants nothing.
     */
-  def grants(policy: RbacPolicy, principal: Principal, clusters: Set[ClusterId]): List[ClusterPermission] =
+  def grants(policy: RbacPolicy, principal: Principal): List[ClusterPermission] =
     if !policy.enabled then
       Resource.values.toList.map(resource =>
-        ClusterPermission(clusters, RbacPolicy.allPermission(resource, Some(ResourcePattern.Everything)))
+        ClusterPermission(
+          ClusterScope.Every,
+          RbacPolicy.allPermission(resource, Some(ResourcePattern.Everything))
+        )
       )
     else {
       val fromRoles = policy
         .held(principal.roles)
-        .flatMap(role => role.permissions.map(ClusterPermission(role.clusters, _)))
+        .flatMap(role => role.permissions.map(ClusterPermission(ClusterScope.Named(role.clusters), _)))
 
       val fromDefault = policy.defaultRole.toList
         .flatMap(_.permissions)
-        .map(ClusterPermission(clusters, _))
+        .map(ClusterPermission(ClusterScope.Every, _))
 
       fromRoles ++ fromDefault
     }

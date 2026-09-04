@@ -301,10 +301,11 @@ final class RbacLawsSuite extends ScalaCheckSuite {
   test("aDisabledPolicyGrantsEverythingToTheBrowserToo") {
     // `/auth/me` must not answer with an empty permission list here, or the interface hides every write
     // control in the deployment that asked for no authorization at all — which is the quickstart.
-    val granted = Rbac.grants(RbacPolicy.Disabled, user(), Set(Cluster))
+    val granted = Rbac.grants(RbacPolicy.Disabled, user())
 
     assertEquals(granted.map(_.permission.resource).toSet, Resource.values.toSet)
-    assert(granted.forall(_.clusters == Set(Cluster)))
+    assert(granted.forall(_.clusters == ClusterScope.Every))
+    assert(granted.forall(_.clusters.includes(Cluster)))
     assert(granted.forall(entry => entry.permission.actions == entry.permission.resource.allActions))
   }
 

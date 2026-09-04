@@ -7,8 +7,9 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.gateway.application.session.{Session, SessionStore}
 import kui.gateway.contract.AuthEndpoints
-import kui.gateway.contract.dto.{AuthMeResponse, PrincipalDto}
+import kui.gateway.contract.dto.{AuthMeResponse, PermissionDto, PrincipalDto}
 import kui.security.Principal
+import kui.security.rbac.{ClusterPermission, ClusterScope, Rbac, RbacPolicy}
 
 /** Serving `GET /api/v1/auth/me` and `POST /api/v1/auth/logout`.
   *
@@ -24,11 +25,19 @@ object AuthRoutes {
   private val request: sttp.tapir.EndpointInput[ServerRequest] =
     sttp.tapir.extractFromRequest(identity)
 
-  def apply[F[_]: Sync](store: SessionStore[F]): List[ServerEndpoint[Any, F]] =
-    List(me[F], logout[F](store))
+  /** @param policy
+    *   the deployment's roles. `RbacPolicy.Disabled` until there is configuration to build one from (RB-001),
+    *   and a disabled policy is not an empty answer: it grants everything, over every cluster, because a
+    *   deployment that has configured no roles has not asked for authorization.
+    */
+  def apply[F[_]: Sync](
+      store: SessionStore[F],
+      policy: RbacPolicy = RbacPolicy.Disabled
+  ): List[ServerEndpoint[Any, F]] =
+    List(me[F](policy), logout[F](store))
 
-  private def me[F[_]: Sync]: ServerEndpoint[Any, F] =
-    AuthEndpoints.me.in(request).serverLogicSuccess[F](req => sessionOf[F](req).map(toResponse))
+  private def me[F[_]: Sync](policy: RbacPolicy): ServerEndpoint[Any, F] =
+    AuthEndpoints.me.in(request).serverLogicSuccess[F](req => sessionOf[F](req).map(toResponse(policy, _)))
 
   private def logout[F[_]: Sync](store: SessionStore[F]): ServerEndpoint[Any, F] =
     AuthEndpoints.logout.in(request).serverLogicSuccess[F] { req =>
@@ -51,13 +60,34 @@ object AuthRoutes {
         )
     }
 
-  private def toResponse(session: Session): AuthMeResponse =
+  private def toResponse(policy: RbacPolicy, session: Session): AuthMeResponse =
     AuthMeResponse(
       principal = toDto(session.principal),
       csrfToken = session.csrfSecret.value,
-      authType = "disabled"
+      authType = "disabled",
+      // Computed here rather than proxied from a service, because this is the one answer that has to be
+      // the same for every screen in the product: four microfrontends gating the same write control
+      // against four different sources is four ways for them to disagree.
+      permissions = Rbac.grants(policy, session.principal).map(toDto)
     )
 
   private def toDto(principal: Principal): PrincipalDto =
     PrincipalDto(principal.name.value, principal.roles.map(_.value).toList, principal.kind.wire)
+
+  /** One grant, on the wire.
+    *
+    * Sorted, both lists, so that two responses describing the same permissions are byte-identical. An
+    * unsorted set here would make the response change from request to request for no reason, which defeats
+    * every cache and makes a golden-file test impossible to write.
+    */
+  private def toDto(granted: ClusterPermission): PermissionDto =
+    PermissionDto(
+      clusters = granted.clusters match {
+        case ClusterScope.Every => List(ClusterScope.EveryWire)
+        case ClusterScope.Named(clusters) => clusters.map(_.value).toList.sorted
+      },
+      resource = granted.permission.resource.wire,
+      value = granted.permission.value.map(_.raw),
+      actions = granted.permission.actions.map(_.wire).toList.sorted
+    )
 }

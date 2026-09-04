@@ -5,6 +5,7 @@ import io.circe.parser.decode
 import kui.gateway.api.GatewayTestServer
 import kui.gateway.contract.GatewayEndpoints
 import kui.gateway.contract.dto.AuthMeResponse
+import kui.security.rbac.{ClusterScope, Resource}
 import kui.testkit.KuiIOSuite
 
 /** The session and CSRF boundary, exercised through a real server (ADR-019, GW-009).
@@ -48,6 +49,26 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
         assertEquals(body.principal.kind, "anonymous")
         assertEquals(body.principal.name, "anonymous")
         assert(body.csrfToken.nonEmpty)
+      }
+    }
+  }
+
+  test("authMeCarriesTheExpandedPermissionSetTheBrowserGatesOn") {
+    // E4. With no roles configured, the answer is a wildcard grant per resource over every cluster, not an
+    // empty list: an empty list would read in the browser as "you may do nothing", and the interface would
+    // hide every write control in the deployment that has asked for no authorization at all.
+    GatewayTestServer.resource().use { server =>
+      server.get(meUri).map { response =>
+        val body = decode[AuthMeResponse](response.body).fold(error => fail(s"${response.body} ($error)"), identity)
+
+        assertEquals(body.permissions.map(_.resource).toSet, Resource.values.map(_.wire).toSet)
+        assert(body.permissions.forall(_.clusters == List(ClusterScope.EveryWire)))
+        assert(body.permissions.forall(_.value.contains(".*")))
+
+        val topic = body.permissions.find(_.resource == Resource.Topic.wire).getOrElse(fail("no TOPIC grant"))
+        assertEquals(topic.actions.toSet, Resource.Topic.allActions.map(_.wire))
+        // Sorted, so two responses describing the same permissions are byte-identical.
+        assertEquals(topic.actions, topic.actions.sorted)
       }
     }
   }

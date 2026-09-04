@@ -3,6 +3,7 @@ package kui.ui.kernel.state
 import com.raquo.laminar.api.L.*
 
 import kui.security.Principal
+import kui.security.rbac.ClusterPermission
 import kui.ui.kernel.api.ApiError
 
 /** What `GET /api/v1/auth/me` says about the current browser session.
@@ -15,15 +16,26 @@ import kui.ui.kernel.api.ApiError
   * @param authType
   *   how this deployment authenticates: `"none"`, `"basic"`, `"oidc"`, … The settings and header screens show
   *   it, and the sign-in flow M6 adds branches on it.
+  * @param permissions
+  *   what this session is allowed to do, already expanded by the server. It travels with the identity rather
+  *   than being fetched separately because it changes with the identity: a re-established session can be a
+  *   different person with different roles, and two requests would leave a window in which the interface
+  *   showed one person's controls to another.
   */
-final case class AuthInfo(principal: Option[Principal], csrfToken: Option[String], authType: String)
+final case class AuthInfo(
+    principal: Option[Principal],
+    csrfToken: Option[String],
+    authType: String,
+    permissions: List[ClusterPermission]
+)
 
 object AuthInfo {
 
   /** What KUI assumes before `/auth/me` has answered, and what a deployment with authentication switched off
     * keeps forever.
     */
-  val Unknown: AuthInfo = AuthInfo(principal = None, csrfToken = None, authType = "none")
+  val Unknown: AuthInfo =
+    AuthInfo(principal = None, csrfToken = None, authType = "none", permissions = List.empty)
 
   given CanEqual[AuthInfo, AuthInfo] = CanEqual.derived
 }
@@ -61,6 +73,11 @@ final class Auth {
 
   val authType: Var[String] = Var(AuthInfo.Unknown.authType)
 
+  /** What this session may do. Empty until `/auth/me` answers, which is why every write control starts
+    * disabled — see [[Permissions]] for why that is the right way round.
+    */
+  val permissions: Permissions = new Permissions
+
   private val expiredBus: EventBus[Unit] = new EventBus[Unit]
 
   /** Emits once each time a live session stops being one. See the class comment for why "once" matters. */
@@ -74,6 +91,7 @@ final class Auth {
     principal.set(info.principal)
     csrfToken.set(info.csrfToken)
     authType.set(info.authType)
+    permissions.adopt(info.permissions)
     expiryReported = false
   }
 
@@ -87,6 +105,10 @@ final class Auth {
       expiryReported = true
       principal.set(None)
       csrfToken.set(None)
+      // Every write control goes back to disabled the instant the session stops being one. Leaving the
+      // old grants in place would offer an operator a delete button belonging to a session the server has
+      // already forgotten.
+      permissions.adopt(List.empty)
       expiredBus.emit(())
     }
 
@@ -119,6 +141,8 @@ object AuthState {
   def csrfToken: Var[Option[String]] = current.csrfToken
 
   def authType: Var[String] = current.authType
+
+  def permissions: Permissions = current.permissions
 
   def expired: EventStream[Unit] = current.expired
 
