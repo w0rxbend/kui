@@ -227,4 +227,63 @@ object AdminConversions {
       state = toGroupState(raw.groupState.toScala),
       protocol = toGroupProtocol(raw.`type`.toScala)
     )
+
+  private[kafka] def groupDescription(
+      id: GroupId,
+      raw: jadmin.ConsumerGroupDescription
+  ): GroupDescription = {
+    val protocol = toGroupProtocol(Option(raw.`type`))
+
+    GroupDescription(
+      groupId = id,
+      isSimple = raw.isSimpleConsumerGroup,
+      state = toGroupState(Option(raw.groupState)),
+      protocol = protocol,
+      partitionAssignor = Option(raw.partitionAssignor).getOrElse(""),
+      members = raw.members.asScala.toList.map(member => groupMember(member, protocol)).sorted,
+      coordinator = Option(raw.coordinator)
+        .filter(_.id != NoNodeId)
+        .map(node => GroupCoordinator(BrokerId.unsafe(node.id), node.host, node.port)),
+      // `null` means the cluster has no authorizer: ACLs are off, which is not an empty permission set.
+      authorizedOperations = Option(raw.authorizedOperations).map(_.asScala.toSet.map(groupOperation))
+    )
+  }
+
+  /** One member, and where the coordinator is moving it to.
+    *
+    * `targetAssignment()` is a KIP-848 field: a classic member never reports one, and a consumer-protocol
+    * member reports one on every describe, equal to its assignment when it is settled. `GroupMember.of`
+    * collapses that equal case, so a member is "rebalancing" only when it really is.
+    */
+  private[kafka] def groupMember(
+      raw: jadmin.MemberDescription,
+      protocol: GroupProtocol
+  ): GroupMember =
+    GroupMember.of(
+      memberId = raw.consumerId,
+      groupInstanceId = raw.groupInstanceId.toScala,
+      clientId = raw.clientId,
+      host = raw.host,
+      assignment = MemberAssignment(memberAssignment(raw.assignment)),
+      target = Option
+        .when(protocol == GroupProtocol.Consumer)(raw.targetAssignment.toScala)
+        .flatten
+        .map(target => MemberAssignment(memberAssignment(target)))
+    )
+
+  private def memberAssignment(raw: jadmin.MemberAssignment | Null): Set[kui.kernel.TopicPartition] =
+    Option(raw).toSet.flatMap((assignment: jadmin.MemberAssignment) =>
+      assignment.topicPartitions.asScala.toSet.map(partition)
+    )
+
+  private[kafka] def partition(raw: TopicPartition): kui.kernel.TopicPartition =
+    kui.kernel.TopicPartition(TopicName.unsafe(raw.topic), PartitionId.unsafe(raw.partition))
+
+  private[kafka] def groupOperation(raw: AclOperation): GroupOperation = raw match {
+    case AclOperation.DESCRIBE => GroupOperation.Describe
+    case AclOperation.READ => GroupOperation.Read
+    case AclOperation.DELETE => GroupOperation.Delete
+    case AclOperation.ALL => GroupOperation.All
+    case _ => GroupOperation.Unknown
+  }
 }

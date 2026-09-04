@@ -5,13 +5,18 @@ import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
 import cats.effect.Async
+import cats.effect.syntax.all.*
 import cats.syntax.all.*
-import org.apache.kafka.clients.admin.ListGroupsOptions
+import org.apache.kafka.clients.admin.{DescribeConsumerGroupsOptions, ListGroupsOptions}
 import org.apache.kafka.common.GroupState as KafkaGroupState
-import org.apache.kafka.common.errors.{InvalidRequestException, UnsupportedVersionException}
+import org.apache.kafka.common.errors.{
+  GroupIdNotFoundException,
+  InvalidRequestException,
+  UnsupportedVersionException
+}
 import org.typelevel.log4cats.Logger
 
-import kui.kafka.{AdminClientPool, BatchResult, KafkaErrorMapper, KafkaFutures, SkipReason}
+import kui.kafka.{AdminBatch, AdminClientPool, BatchResult, KafkaErrorMapper, KafkaFutures, SkipReason}
 import kui.kernel.cluster.ClusterConnection
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.group.GroupState
@@ -146,10 +151,84 @@ object KafkaGroupAdmin {
         case _ => false
       }
 
+    // ---------------------------------------------------------------- describeGroups
+
     def describeGroups(
-        @unused conn: ClusterConnection,
-        @unused ids: List[GroupId]
-    ): F[Either[KuiError, BatchResult[GroupId, GroupDescription]]] = notYet("describeGroups")
+        conn: ClusterConnection,
+        ids: List[GroupId],
+        includeAuthorizedOperations: Boolean
+    ): F[Either[KuiError, BatchResult[GroupId, GroupDescription]]] =
+      if ids.isEmpty then Async[F].pure(Right(BatchResult.empty[GroupId, GroupDescription]))
+      else
+        ids.distinct
+          .grouped(conn.admin.groupChunkSize)
+          .toList
+          .parTraverseN(bounded(conn.admin.parallelism))(chunk =>
+            describeChunk(conn, chunk, includeAuthorizedOperations)
+          )
+          // Merged in the order the chunks were cut, not the order they finished: a result that
+          // depends on scheduling cannot be reproduced from a bug report.
+          .map(_.foldLeft(BatchResult.empty[GroupId, GroupDescription])((acc, part) => acc.combine(part)))
+          .attempt
+          .map {
+            case Right(result) => Right(result)
+            case Left(failure) =>
+              Left(KafkaErrorMapper.map(GroupAdmin.Operation.Describe, failure, apiTimeout(conn)))
+          }
+
+    /** One `describeConsumerGroups` request, awaited per group id rather than through `all()`.
+      *
+      * `all()` fails the whole chunk when one group is not authorized, which would cost fifty groups their
+      * row because of one ACL. `AdminBatch.perKey` awaits each id's own future, so that failure stays on its
+      * own key with the reason its own exception gives.
+      *
+      * This is also where the fabricated dead group is produced: a `GroupIdNotFoundException` for one id
+      * becomes a `Dead` description with no members, before `KafkaErrorMapper` — or any caller — sees it.
+      */
+    private def describeChunk(
+        conn: ClusterConnection,
+        chunk: List[GroupId],
+        includeAuthorizedOperations: Boolean
+    ): F[BatchResult[GroupId, GroupDescription]] =
+      pool.run(conn, GroupAdmin.Operation.Describe) { admin =>
+        val options = new DescribeConsumerGroupsOptions()
+          .includeAuthorizedOperations(includeAuthorizedOperations)
+
+        Async[F]
+          .delay(admin.describeConsumerGroups(chunk.map(_.value).asJava, options).describedGroups())
+          .flatMap { described =>
+            val perGroup = chunk.map { id =>
+              val effect = Option(described.get(id.value)) match {
+                case None => Async[F].pure(GroupDescription.dead(id))
+                case Some(future) =>
+                  KafkaFutures
+                    .fromFuture(Async[F].delay(future))
+                    .map(raw => AdminConversions.groupDescription(id, raw))
+                    .recoverWith {
+                      case failure if isGroupNotFound(failure) =>
+                        logged(
+                          _.debug(
+                            s"cluster ${conn.id.value} does not know group ${id.value}; " +
+                              "describing it as a dead group with no members"
+                          )
+                        ).as(GroupDescription.dead(id))
+                    }
+              }
+
+              id -> effect
+            }.toMap
+
+            AdminBatch.perKey(perGroup, bounded(conn.admin.parallelism), GroupAdmin.Operation.Describe)
+          }
+      }
+
+    private def isGroupNotFound(failure: Throwable): Boolean =
+      KafkaFutures.unwrap(failure) match {
+        case _: GroupIdNotFoundException => true
+        case _ => false
+      }
+
+    private def bounded(parallelism: Int): Int = math.max(1, parallelism)
 
     def committedOffsets(
         @unused conn: ClusterConnection,

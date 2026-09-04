@@ -59,12 +59,16 @@ trait GroupAdmin[F[_]] {
     * (`OffsetsResetService.java:66-92`). In KUI that caller is `OffsetResetUseCase`, and
     * `ErrorCode.GroupNotFound` is the code it raises.
     *
+    * `includeAuthorizedOperations` costs the broker an ACL evaluation per group, so the list page — which
+    * does not render a lock — asks for it to be left out.
+    *
     * Evidence: `research/kafka/admin-capabilities.md` §3, "Describe groups". Moved here from
     * `libs/kafka/PORT-INVARIANTS.md` §2 by task GRP-002, which deleted it there.
     */
   def describeGroups(
       conn: ClusterConnection,
-      ids: List[GroupId]
+      ids: List[GroupId],
+      includeAuthorizedOperations: Boolean
   ): F[Either[KuiError, BatchResult[GroupId, GroupDescription]]]
 
   /** Committed offsets for several groups at once.
