@@ -138,6 +138,11 @@ object KernelCss {
   val EmptyStateAction = "kui-empty-state__action"
 
   val Table = "kui-table"
+
+  /** The scrolling box a `DataTable` sits in, so a table too wide for the page scrolls inside itself instead
+    * of making the whole document scroll sideways.
+    */
+  val TableScroll = "kui-table-scroll"
   val TableLoading = "kui-table--loading"
   val TableBody = "kui-table__body"
   val TableRow = "kui-table__row"

@@ -111,7 +111,8 @@ final class DataTableSuite extends ScalaCheckSuite with Mounted {
     mounted(DataTable(columns, Val(brokers), _.id, loading = loading.signal)) { root =>
       loading.set(true)
 
-      assertEquals(attributeOf(root, "aria-busy"), Some("true"))
+      // `root` is the scrolling box the table sits in; `aria-busy` belongs on the table itself.
+      assertEquals(attributeOf(root.querySelector("table"), "aria-busy"), Some("true"))
       assertEquals(bodyRows(root).size, 3)
     }
   }

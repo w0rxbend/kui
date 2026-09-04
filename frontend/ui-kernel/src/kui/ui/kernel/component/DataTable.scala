@@ -96,31 +96,47 @@ object DataTable {
 
     def headerCell(column: Column[A]): HtmlElement = DataTable.headerCell(column, sort)
 
-    table(
-      cls := KernelCss.Table,
-      cls(KernelCss.TableLoading) <-- loading,
-      aria.busy <-- loading,
-      Components.testIdAttr(testId),
-      thead(tr(columns.map(headerCell))),
-      tbody(
-        cls := KernelCss.TableBody,
-        children <-- rows.split(rowKey)((_, _, rowSignal) =>
-          tr(
-            cls := KernelCss.TableRow,
-            columns.map(column =>
-              td(
-                cls := KernelCss.TableCell,
-                Option.when(column.align == ColumnAlign.Numeric)(cls := KernelCss.TableCellNumeric),
-                child <-- rowSignal.map(row => span(column.render(row)))
+    /** The table is wrapped in a scroller, and the wrapper is the element this returns.
+      *
+      * A table cannot be narrower than the widest thing in it. The clusters list has nine columns with
+      * headers like "UNDER-REPLICATED", and on a 1565px window its intrinsic minimum came to 1456px inside a
+      * 1197px column -- so `width: 100%` lost, the table stuck out of the page, and the *document* grew a
+      * horizontal scrollbar. Every screen then scrolled sideways together: the sidebar slid off the left
+      * while the reader chased a column off the right, and at the same time one column was squeezed hard
+      * enough to break "Development" across two lines. Wide content has to scroll inside its own box; the
+      * page body must never scroll horizontally.
+      *
+      * The wrapper carries the panel's rounded corners so the clipping does not square them off, and
+      * `.kui-table` keeps its own radius for the case where nothing overflows.
+      */
+    div(
+      cls := KernelCss.TableScroll,
+      table(
+        cls := KernelCss.Table,
+        cls(KernelCss.TableLoading) <-- loading,
+        aria.busy <-- loading,
+        Components.testIdAttr(testId),
+        thead(tr(columns.map(headerCell))),
+        tbody(
+          cls := KernelCss.TableBody,
+          children <-- rows.split(rowKey)((_, _, rowSignal) =>
+            tr(
+              cls := KernelCss.TableRow,
+              columns.map(column =>
+                td(
+                  cls := KernelCss.TableCell,
+                  Option.when(column.align == ColumnAlign.Numeric)(cls := KernelCss.TableCellNumeric),
+                  child <-- rowSignal.map(row => span(column.render(row)))
+                )
               )
             )
-          )
-        ),
-        // The empty state sits inside the table so that the header stays above it and the columns
-        // still say what the table would have held.
-        child.maybe <-- rows.map(currentRows =>
-          Option.when(currentRows.isEmpty)(
-            tr(td(colSpan := columns.size.max(1), cls := KernelCss.TableEmpty, empty()))
+          ),
+          // The empty state sits inside the table so that the header stays above it and the columns
+          // still say what the table would have held.
+          child.maybe <-- rows.map(currentRows =>
+            Option.when(currentRows.isEmpty)(
+              tr(td(colSpan := columns.size.max(1), cls := KernelCss.TableEmpty, empty()))
+            )
           )
         )
       )

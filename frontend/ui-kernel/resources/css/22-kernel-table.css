@@ -147,3 +147,17 @@
   padding: 0;
   border-bottom: 0;
 }
+
+/* The scrolling box a `DataTable` sits in.
+ *
+ * A table's width is bounded below by its own content, so a wide table pushes past its column and
+ * makes the *document* scroll sideways -- which drags the sidebar off screen along with it. Found on
+ * the clusters list at 1565px: nine columns wanted 1456px inside a 1197px column, the page grew a
+ * horizontal scrollbar, and "Development" still broke across two lines in a squeezed cell.
+ *
+ * The radius is repeated here because the box clips the table, and a square clip over a rounded panel
+ * shows as four sharp corners. */
+.kui-table-scroll {
+  overflow-x: auto;
+  border-radius: var(--kui-radius-xl);
+}
