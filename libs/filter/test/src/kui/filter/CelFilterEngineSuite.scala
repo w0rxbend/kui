@@ -26,8 +26,17 @@ final class CelFilterEngineSuite extends KuiIOSuite {
     headers = Map("trace-id" -> "abc", "kafka_delivery-attempt" -> "3")
   )
 
+  /** The production default deadline is 10 milliseconds, which is the right budget for a filter that runs
+    * once per record in a browse. It is the wrong budget for a test: the very first CEL evaluation in a JVM
+    * pays for class loading and JIT warm-up, and on a machine running the whole build in parallel that alone
+    * can exceed ten milliseconds — so the tests about what a filter *means* would intermittently observe
+    * `Left(Timeout)` instead of the answer they assert. The tests that are about the deadline itself pass
+    * their own `FilterLimits`, so widening the default here does not weaken them.
+    */
+  private val generous: FilterLimits = FilterLimits.default.copy(evaluationDeadline = 30.seconds)
+
   private def engine(
-      limits: FilterLimits = FilterLimits.default
+      limits: FilterLimits = generous
   ): Resource[IO, MessageFilterPort[IO]] =
     CelFilterEngine.resource[IO](cluster, limits, FilterMetrics.noop[IO], CacheMetrics.noop[IO])
 
