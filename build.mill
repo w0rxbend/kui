@@ -416,7 +416,12 @@ object libs extends Module {
     // *is* a Kafka client, and rendering its `security.*` properties anywhere else would be the
     // second copy of the renderer that `libs/kafka-auth` exists to prevent. ADR-041's rule A10
     // names `libs/config` on its allow-list for exactly this reason.
-    def moduleDeps = Seq(kernel.jvm, kafkaAuth)
+    // `libs.securityCore` is here for `kui.rbac`: the role model is `RbacPolicy`, and this section
+    // produces that type directly rather than a parallel set of configuration types plus a
+    // translation somewhere else. The translation is where the mistakes live — what `actions:
+    // [DELETE]` expands to, whether a pattern compiles — so doing it at load time is what makes a
+    // bad role a startup error naming the key instead of a permission that silently grants nothing.
+    def moduleDeps = Seq(kernel.jvm, kafkaAuth, securityCore.jvm)
 
     def mvnDeps = Seq(
       mvn"org.typelevel::cats-core::${Versions.cats}",

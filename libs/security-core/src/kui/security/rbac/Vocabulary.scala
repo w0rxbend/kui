@@ -50,6 +50,19 @@ enum Resource(val wire: String) {
 
   /** Every action this resource has. `ALL` in a configuration file expands to exactly this set. */
   def allActions: Set[Action] = Action.values.filter(_.resource == this).toSet
+
+  /** Whether an access to this resource names a particular one of them.
+    *
+    * A topic access names a topic; an audit access names nothing, because there is one audit trail. The
+    * distinction was implicit until a configuration file had to be read against it: [[Permission.covers]]
+    * already relies on it — a permission with no pattern matches only an unnamed access — so a `TOPIC`
+    * permission with no `value` grants nothing at all. That is the correct evaluation and a terrible silence
+    * at configuration time, which is why the loader now asks this question and refuses the file instead.
+    */
+  def isNamed: Boolean = this match {
+    case Topic | ConsumerGroup | Schema | Connect | Connector => true
+    case ApplicationConfig | ClusterConfig | Ksql | Acl | Audit | ClientQuotas => false
+  }
 }
 
 object Resource {

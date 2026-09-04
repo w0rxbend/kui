@@ -6,6 +6,16 @@ import kui.kernel.{ClusterId, RoleName}
   * from LDAP are not the same grant.
   */
 enum Provider(val wire: String) {
+
+  /** KUI's own login form, whose accounts live in `kui.auth.users[]`.
+    *
+    * Kafbat has no such provider, because its form mode uses Spring's single built-in account and cannot
+    * assign roles at all. KUI's form mode gives each account a `groups` list precisely so that the smallest
+    * deployment — three named people and no directory server — can still use the same role file as a large
+    * one, and a role's subjects have to be able to say which source a group name came from.
+    */
+  case Form extends Provider("FORM")
+
   case OauthGoogle extends Provider("OAUTH_GOOGLE")
   case OauthGithub extends Provider("OAUTH_GITHUB")
   case OauthCognito extends Provider("OAUTH_COGNITO")

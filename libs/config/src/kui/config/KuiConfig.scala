@@ -2,6 +2,8 @@ package kui.config
 
 import cats.data.NonEmptyList
 
+import kui.security.rbac.RbacPolicy
+
 /** Where one configuration value came from.
   *
   * It is reported with every problem because "port must be between 1 and 65535" is only half an answer: the
@@ -68,20 +70,21 @@ object ConfigErrors {
 
 /** The whole of KUI's static configuration, as one immutable value.
   *
-  * `kui.rbac` is recognised — an operator may already have it in a file without the load failing — but
-  * nothing is read out of it yet:
-  *
-  *   - `kui.clusters[]` is real as of **M1**: it is the static base of the cluster registry. The metadata
-  *     store's records overlay it at runtime (ADR-036 as amended by ADR-042); the precedence chain built here
-  *     stays as it is and the store is inserted as one more layer above the file.
-  *   - `kui.rbac` becomes a real section in **M6**, with the authorization model.
-  *
   * `clusters` is `Nil` when nothing is configured, and that is a supported deployment rather than a startup
   * failure: it is what an operator sees before they have registered anything, and the dashboard shows its "no
-  * clusters configured" empty state.
+  * clusters configured" empty state. `kui.clusters[]` is the static base of the cluster registry; the
+  * metadata store's records overlay it at runtime (ADR-036 as amended by ADR-042), and the store is inserted
+  * as one more layer above the file rather than as a change to the precedence chain built here.
   *
-  * `kui.auth` is recognised too, and the only legal value in M0 is `type: disabled`; anything else is refused
-  * with a message pointing at M6, rather than silently accepted and then ignored.
+  * `auth` and `rbac` are both real sections as of the identity service (ADR-015, ADR-021). Their defaults are
+  * the deployment that has asked for neither: nobody signs in, and every decision is allowed. That default is
+  * not a placeholder — it is the demonstration environment and the quickstart, and it has to keep working
+  * exactly as it did before either section existed.
+  *
+  * `rbac` is held as the evaluator's own `RbacPolicy` rather than as a parallel set of configuration types.
+  * The translation from a file to a policy is where the interesting mistakes live — what `actions: [DELETE]`
+  * expands to, whether a pattern compiles — so it happens once, at load, where a mistake is a startup error
+  * naming the key instead of a permission that silently grants nothing.
   */
 final case class KuiConfig(
     server: ServerConfig,
@@ -91,7 +94,9 @@ final case class KuiConfig(
     topics: TopicsConfig,
     consumers: ConsumersConfig,
     streaming: StreamingConfig,
-    clusters: List[ClusterConfig]
+    clusters: List[ClusterConfig],
+    auth: AuthConfig,
+    rbac: RbacPolicy
 )
 
 object KuiConfig {
@@ -108,7 +113,9 @@ object KuiConfig {
       TopicsConfig.Default,
       ConsumersConfig.Default,
       StreamingConfig.Default,
-      clusters = Nil
+      clusters = Nil,
+      AuthConfig.Default,
+      RbacPolicy.Disabled
     )
 
   given CanEqual[KuiConfig, KuiConfig] = CanEqual.derived

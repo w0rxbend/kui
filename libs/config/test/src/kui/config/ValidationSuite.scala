@@ -265,12 +265,15 @@ final class ValidationSuite extends KuiSuite {
     assertEquals(loaded.gateway.principalKeys.head.key.value, "from-the-environment")
   }
 
-  test("authTypeOtherThanDisabledIsRejectedInM0") {
+  test("an authentication type KUI does not have is still refused, and lists the ones it does") {
+    // This used to refuse everything but `disabled` and point at M6. The identity service is that
+    // milestone: `form` and `oidc` are now real, and the check is that an unrecognised word is still
+    // a startup error rather than a mode that silently becomes no authentication at all.
     val file = ConfigFixtures.yaml("kui:\n  auth:\n    type: oauth2\n")
     val found = problems(load(List(file)))
 
     assertEquals(found.map(_.key), List("kui.auth.type"))
-    assert(found.head.problem.contains("M6"), found.head.problem)
+    assert(found.head.problem.contains("disabled, form, oidc"), found.head.problem)
   }
 
   test("a cors origin list containing '*' is refused at load time") {

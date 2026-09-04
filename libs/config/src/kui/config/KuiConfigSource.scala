@@ -6,6 +6,7 @@ import java.time.Instant
 
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.util.Try
+import scala.util.matching.Regex
 
 import cats.data.{NonEmptyList, ValidatedNel}
 import cats.effect.kernel.Async
@@ -15,7 +16,9 @@ import io.circe.Json
 
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties}
 import kui.kernel.search.SearchMode
+import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, Host, PageSize, Port, PositiveInt, Secret, ServiceId}
+import kui.security.rbac.RbacPolicy
 
 /** Loads [[KuiConfig]] from the command line, the environment and YAML files.
   *
@@ -411,14 +414,6 @@ object KuiConfigSource {
     else Right(origins)
   }
 
-  private def readAuthType(raw: String): Either[String, String] =
-    if raw.equalsIgnoreCase("disabled") then Right("disabled")
-    else
-      Left(
-        s"'$raw' is not supported yet; M0 ships with authentication disabled and the other " +
-          "types arrive with the identity service in M6"
-      )
-
   // ---------------------------------------------------------------------------------------------
   // Decoding
   // ---------------------------------------------------------------------------------------------
@@ -480,13 +475,16 @@ object KuiConfigSource {
       topics <- decodeTopics[F](layers, policy)
       consumers <- decodeConsumers[F](layers)
       streaming <- decodeStreaming[F](layers)
-      clusters <- decodeClusters[F](layers)
-      auth <- read[F, String](
-        field("kui.auth.type", "disabled", readAuthType, "disabled"),
-        layers
-      )
-    } yield (unknown, server, gateway, telemetry, store, topics, consumers, streaming, clusters, auth)
-      .mapN((_, s, g, t, st, tp, cn, sr, cs, _) => Draft(s, g, t, st, tp, cn, sr, cs))
+      clusters <- decodeClusters[F](layers, policy)
+      // `kui.auth` and `kui.rbac` are read through their own sections rather than through the `Field`
+      // chain above, because both are list-shaped: how many accounts and how many roles a file has is
+      // not known until the file has been read, and a `Field` names one key. They ask the layers the
+      // two questions `ConfigReader` declares — what is at this key, and which indices exist under this
+      // prefix — and see nothing else of the precedence chain.
+      auth <- Async[F].pure(AuthConfigSection.decode(layers.first, layers.indicesOf))
+      rbac <- Async[F].pure(RbacConfigSection.decode(layers.first, layers.indicesOf))
+    } yield (unknown, server, gateway, telemetry, store, topics, consumers, streaming, clusters, auth, rbac)
+      .mapN((_, s, g, t, st, tp, cn, sr, cs, a, r) => Draft(s, g, t, st, tp, cn, sr, cs, a, r))
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {
@@ -1268,10 +1266,13 @@ object KuiConfigSource {
       .toRight(s"'$raw' is not a whole number")
       .flatMap(PageSize.from(_).leftMap(_.message))
 
-  private def decodeClusters[F[_]: Async](layers: Layers): F[Problems[List[ClusterConfig]]] = {
+  private def decodeClusters[F[_]: Async](
+      layers: Layers,
+      policy: UrlPolicy
+  ): F[Problems[List[ClusterConfig]]] = {
     val indices = layers.indicesOf(ClustersPrefix)
     indices
-      .traverse(index => decodeCluster[F](layers, index).map(_.map(index -> _)))
+      .traverse(index => decodeCluster[F](layers, index, policy).map(_.map(index -> _)))
       .map(_.sequence)
       .map { drafts =>
         (
@@ -1355,7 +1356,11 @@ object KuiConfigSource {
     * loop the accumulate-everything discipline exists to prevent. Reading a secret is already an effect here,
     * so nothing is lost by doing it in place.
     */
-  private def decodeCluster[F[_]: Async](layers: Layers, index: Int): F[Problems[ClusterConfig]] = {
+  private def decodeCluster[F[_]: Async](
+      layers: Layers,
+      index: Int,
+      policy: UrlPolicy
+  ): F[Problems[ClusterConfig]] = {
     val prefix = s"$ClustersPrefix.$index"
     for {
       name <- read[F, String](
@@ -1380,9 +1385,11 @@ object KuiConfigSource {
         .traverse(draft => ClusterSecurityConfig.resolve[F](draft, layers.env))
         .map(_.andThen(identity))
       admin <- decodeAdminTuning[F](layers, index)
+      registry <- decodeSchemaRegistry[F](layers, s"$prefix.schemaRegistry", policy)
+      serde <- decodeClusterSerde[F](layers, s"$prefix.serde")
       properties = ClientProperties.fromRaw(propertiesUnder(layers, s"$prefix.properties"))
-    } yield (name, servers, readOnly, security, admin).tupled.andThen {
-      (clusterName, bootstrap, readonly, sec, tuning) =>
+    } yield (name, servers, readOnly, security, admin, registry, serde).tupled.andThen {
+      (clusterName, bootstrap, readonly, sec, tuning, schemaRegistry, serdes) =>
         // The id is derived last, and only from a name that decoded: deriving it from a name that did not
         // would report the same bad name twice, once under `.name` and once under `.id`.
         clusterId(layers, prefix, clusterName).map { id =>
@@ -1393,11 +1400,316 @@ object KuiConfigSource {
             security = sec,
             properties = properties,
             readOnly = readonly,
-            admin = tuning
+            admin = tuning,
+            serde = serdes,
+            schemaRegistry = schemaRegistry
           )
         }
     }
   }
+
+  // -------------------------------------------------------------------------------------------
+  // `kui.clusters.<n>.schemaRegistry`: the optional Schema Registry attached to one cluster
+  // -------------------------------------------------------------------------------------------
+
+  /** The registry block, which is absent far more often than it is present.
+    *
+    * `url` being set is the on/off switch, and its absence is not a problem to report: a cluster with no
+    * Schema Registry is an ordinary cluster, and the schema service answers `not_configured` for it. That is
+    * the whole reason this returns an `Option` rather than a value with empty defaults — an empty address
+    * list would make "no registry" indistinguishable from "a registry KUI cannot reach", and those two must
+    * look different on a screen (ADR-032).
+    */
+  private def decodeSchemaRegistry[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      policy: UrlPolicy
+  ): F[Problems[Option[SchemaRegistrySettings]]] = {
+    val urlKey = s"$prefix.url"
+    if layers.first(urlKey).isEmpty then Async[F].pure(none[SchemaRegistrySettings].validNel)
+    else
+      for {
+        urls <- read[F, NonEmptyList[SafeUrl]](
+          field(
+            urlKey,
+            "one or more http or https URLs this deployment is allowed to call, separated by commas",
+            readRegistryUrls(policy)
+          ),
+          layers
+        )
+        callTimeout <- read[F, FiniteDuration](
+          field(
+            s"$prefix.callTimeout",
+            s"a duration between ${SchemaRegistrySettings.MinCallTimeout} and " +
+              s"${SchemaRegistrySettings.MaxCallTimeout}",
+            readBoundedDuration(
+              SchemaRegistrySettings.MinCallTimeout,
+              SchemaRegistrySettings.MaxCallTimeout
+            ),
+            SchemaRegistrySettings.DefaultCallTimeout
+          ),
+          layers
+        )
+        auth <- decodeRegistryAuth[F](layers, s"$prefix.auth", policy)
+      } yield (urls, callTimeout, auth).mapN((addresses, timeout, credentials) =>
+        Some(SchemaRegistrySettings(addresses, credentials, timeout))
+      )
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // `kui.clusters.<n>.serde`: which serde reads which topic (SD-003)
+  // -------------------------------------------------------------------------------------------
+
+  /** The serde block, which is what lets an operator say "this cluster is Avro" once.
+    *
+    * Every key in it is optional and the whole section is optional, so a cluster without one behaves exactly
+    * as every cluster behaved before this slice existed: auto-detection from the bytes, then `String`, then
+    * the fallback that cannot fail. What it adds is the two rungs of `SerdeResolution`'s order that had no
+    * way to be filled in — the per-topic patterns and the cluster default — which is why the resolution table
+    * has been correct and unreachable since it was written.
+    *
+    * Nothing here checks that the named serde will actually be *available*: `SchemaRegistry` is only built
+    * when `schemaRegistry.url` is set and the registry answers, and a default naming a serde that could not
+    * be built falls through to the next rung rather than failing the browse (`SerdeResolution.resolve`).
+    * Refusing the combination at load time would stop KUI from starting because a registry was down, which is
+    * the opposite of what this product promises.
+    */
+  private def decodeClusterSerde[F[_]: Async](
+      layers: Layers,
+      prefix: String
+  ): F[Problems[ClusterSerdeConfig]] =
+    for {
+      defaultKey <- readOptional[F, SerdeName](
+        field(s"$prefix.defaultKey", "a serde name such as String or SchemaRegistry", readSerdeName),
+        layers
+      )
+      defaultValue <- readOptional[F, SerdeName](
+        field(s"$prefix.defaultValue", "a serde name such as String or SchemaRegistry", readSerdeName),
+        layers
+      )
+      schemaCacheSize <- read[F, Long](
+        field(
+          s"$prefix.schemaCacheSize",
+          s"a whole number between ${ClusterSerdeConfig.MinSchemaCacheSize} and " +
+            s"${ClusterSerdeConfig.MaxSchemaCacheSize}",
+          readBoundedLong(ClusterSerdeConfig.MinSchemaCacheSize, ClusterSerdeConfig.MaxSchemaCacheSize),
+          ClusterSerdeConfig.DefaultSchemaCacheSize
+        ),
+        layers
+      )
+      subjectCacheTtl <- read[F, FiniteDuration](
+        field(
+          s"$prefix.subjectCacheTtl",
+          s"a duration between ${ClusterSerdeConfig.MinSubjectCacheTtl} and " +
+            s"${ClusterSerdeConfig.MaxSubjectCacheTtl}",
+          readBoundedDuration(
+            ClusterSerdeConfig.MinSubjectCacheTtl,
+            ClusterSerdeConfig.MaxSubjectCacheTtl
+          ),
+          ClusterSerdeConfig.DefaultSubjectCacheTtl
+        ),
+        layers
+      )
+      patterns <- decodeSerdePatterns[F](layers, s"$prefix.patterns")
+    } yield (defaultKey, defaultValue, schemaCacheSize, subjectCacheTtl, patterns).mapN(
+      (key, value, cacheSize, ttl, rules) => ClusterSerdeConfig(key, value, rules, cacheSize, ttl)
+    )
+
+  /** The pattern list, in the order the operator wrote it.
+    *
+    * Order is load-bearing: `SerdeResolution` takes the *first* matching pattern, so two overlapping entries
+    * mean the earlier one wins. That is why this reads a dense numeric index and refuses a gap, exactly as
+    * the cluster list itself does — a `patterns.0` and a `patterns.2` with no `1` is a deleted entry or a
+    * mistyped environment variable, and renumbering it silently would change which serde reads a topic.
+    */
+  private def decodeSerdePatterns[F[_]: Async](
+      layers: Layers,
+      prefix: String
+  ): F[Problems[List[SerdePatternConfig]]] = {
+    val indices = layers.indicesOf(prefix)
+    indices
+      .traverse(index => decodeSerdePattern[F](layers, prefix, index))
+      .map(_.sequence)
+      .map(entries => (entries, denseSerdeIndex(prefix, indices)).mapN((rules, _) => rules))
+  }
+
+  private def decodeSerdePattern[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      index: Int
+  ): F[Problems[SerdePatternConfig]] = {
+    val entry = s"$prefix.$index"
+    for {
+      serde <- read[F, SerdeName](
+        field(s"$entry.serde", "a serde name such as String or SchemaRegistry", readSerdeName),
+        layers
+      )
+      keys <- readOptional[F, Regex](
+        field(s"$entry.topicKeysPattern", "a regular expression matching whole topic names", readPattern),
+        layers
+      )
+      values <- readOptional[F, Regex](
+        field(s"$entry.topicValuesPattern", "a regular expression matching whole topic names", readPattern),
+        layers
+      )
+    } yield (serde, keys, values)
+      .mapN(SerdePatternConfig.apply)
+      .andThen(rule =>
+        SerdePatternConfig.validate(index, rule) match {
+          case Right(valid) => valid.validNel
+          case Left(problem) =>
+            ConfigProblem(entry, problem, ConfigSourceName.Default).invalidNel
+        }
+      )
+  }
+
+  private def denseSerdeIndex(prefix: String, indices: List[Int]): Problems[Unit] =
+    indices.zipWithIndex.collectFirst {
+      case (configured, expected) if configured != expected =>
+        ConfigProblem(
+          s"$prefix.$configured",
+          s"expected serde patterns to be numbered from 0 with no gaps; " +
+            (if expected == 0 then "the list starts at 0" else s"$configured follows ${expected - 1}"),
+          ConfigSourceName.Default
+        )
+    } match {
+      case None => ().validNel
+      case Some(problem) => problem.invalidNel
+    }
+
+  private def readSerdeName(raw: String): Either[String, SerdeName] =
+    ClusterSerdeConfig.readSerdeName(raw)
+
+  private def readPattern(raw: String): Either[String, Regex] = ClusterSerdeConfig.readPattern(raw)
+
+  private def readBoundedLong(min: Long, max: Long)(raw: String): Either[String, Long] =
+    raw.toLongOption.toRight(s"'$raw' is not a whole number").flatMap { value =>
+      if value < min then Left(s"$value is below the minimum of $min")
+      else if value > max then Left(s"$value is above the maximum of $max")
+      else Right(value)
+    }
+
+  /** A comma-separated address list, in preference order.
+    *
+    * Comma-separated rather than one key per address because that is how every other list-valued key in KUI
+    * is spelled, and because a YAML list of scalars already arrives here as a comma-joined string
+    * (`Layers.scalar`), so both spellings work with one reader.
+    */
+  private def readRegistryUrls(policy: UrlPolicy)(raw: String): Either[String, NonEmptyList[SafeUrl]] =
+    raw.split(',').toList.map(_.trim).filter(_.nonEmpty) match {
+      case Nil => Left("must name at least one address")
+      case addresses =>
+        addresses
+          .traverse(readUrl(policy))
+          .flatMap(urls => NonEmptyList.fromList(urls).toRight("must name at least one address"))
+    }
+
+  /** Basic, OAuth client credentials, or nothing — chosen by `auth.type` and never inferred.
+    *
+    * ADR-014's "never both" is enforced here rather than left to the operator: a configuration that names a
+    * username *and* a client secret is refused with a message saying which keys are surplus, instead of one
+    * of the two silently losing. The one that loses is always the one somebody changes when the other
+    * expires, and the resulting outage looks like a registry problem rather than a KUI configuration problem.
+    */
+  private def decodeRegistryAuth[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      policy: UrlPolicy
+  ): F[Problems[RegistryAuthConfig]] = {
+    val typeKey = s"$prefix.type"
+    val basicKeys = List("username", "password").map(leaf => s"$prefix.$leaf")
+    val oauthKeys = List("tokenEndpoint", "clientId", "clientSecret", "scope").map(leaf => s"$prefix.$leaf")
+
+    /** Keys that belong to a mechanism other than the one chosen. */
+    def surplus(allowed: List[String], chosen: String): Problems[Unit] =
+      (basicKeys ++ oauthKeys).filterNot(allowed.contains).filter(layers.first(_).isDefined) match {
+        case Nil => ().validNel
+        case offenders =>
+          ConfigProblem(
+            typeKey,
+            s"is '$chosen', so ${offenders.mkString(", ")} " +
+              s"${if offenders.sizeIs == 1 then "is" else "are"} not read. KUI authenticates to a Schema " +
+              "Registry with basic credentials or with OAuth client credentials, never both; remove the " +
+              "keys belonging to the mechanism you are not using",
+            layers.first(typeKey).map(_._1).getOrElse(ConfigSourceName.Default)
+          ).invalidNel
+      }
+
+    read[F, String](
+      field(
+        typeKey,
+        "none, basic or oauth",
+        raw => RegistryAuthConfig.fromWire(raw).toRight(s"'$raw' is not none, basic or oauth"),
+        "none"
+      ),
+      layers
+    ).flatMap {
+      case cats.data.Validated.Invalid(problems) =>
+        Async[F].pure(cats.data.Validated.Invalid(problems))
+
+      case cats.data.Validated.Valid("none") =>
+        Async[F].pure(surplus(Nil, "none").map(_ => RegistryAuthConfig.Anonymous))
+
+      case cats.data.Validated.Valid("basic") =>
+        for {
+          username <- read[F, String](
+            field(s"$prefix.username", "the user name the registry knows KUI by", readNonEmpty),
+            layers
+          )
+          password <- readRegistrySecret[F](layers, s"$prefix.password")
+        } yield (username, password, surplus(basicKeys, "basic"))
+          .mapN((user, secret, _) => RegistryAuthConfig.Basic(user, secret))
+
+      case cats.data.Validated.Valid(_) =>
+        for {
+          endpoint <- read[F, SafeUrl](
+            field(
+              s"$prefix.tokenEndpoint",
+              "the OAuth token endpoint, such as https://login.example.com/oauth2/token",
+              readUrl(policy)
+            ),
+            layers
+          )
+          clientId <- read[F, String](field(s"$prefix.clientId", "the OAuth client id", readNonEmpty), layers)
+          clientSecret <- readRegistrySecret[F](layers, s"$prefix.clientSecret")
+          scope <- readOptional[F, String](
+            field(s"$prefix.scope", "the scope to request, if the issuer needs one", readNonEmpty),
+            layers
+          )
+        } yield (endpoint, clientId, clientSecret, scope, surplus(oauthKeys, "oauth"))
+          .mapN((url, id, secret, requested, _) => RegistryAuthConfig.OAuth(url, id, secret, requested))
+    }
+  }
+
+  /** One registry credential, with its `env:` or `file:` reference already followed.
+    *
+    * Resolved here rather than in [[resolveSecrets]] for the reason [[decodeCluster]] gives about every other
+    * per-cluster secret: that second phase runs only when the whole decode succeeded, so a missing
+    * environment variable on one cluster would be hidden by an unrelated typo on another and would only
+    * appear on the next restart.
+    */
+  private def readRegistrySecret[F[_]: Async](
+      layers: Layers,
+      key: String
+  ): F[Problems[Secret[String]]] =
+    read[F, SecretRef](
+      Field(
+        key,
+        "a literal value, env:NAME or file:/path",
+        raw => Right(SecretRef.parse(raw)),
+        None,
+        secret = true
+      ),
+      layers
+    ).flatMap {
+      case cats.data.Validated.Valid(ref) =>
+        SecretRef.resolve[F](ref, layers.env).map {
+          case Right(secret) => secret.validNel
+          case Left(problem) => ConfigProblem(key, problem, ConfigSourceName.Default).invalidNel
+        }
+      case cats.data.Validated.Invalid(problems) =>
+        Async[F].pure(cats.data.Validated.Invalid(problems))
+    }
 
   // -------------------------------------------------------------------------------------------
   // `kui.clusters.<n>.admin`: how KUI talks to one cluster's brokers
@@ -1563,7 +1875,9 @@ object KuiConfigSource {
       topics: TopicsConfig,
       consumers: ConsumersConfig,
       streaming: StreamingDraft,
-      clusters: List[ClusterConfig]
+      clusters: List[ClusterConfig],
+      auth: AuthConfigSection.Draft,
+      rbac: RbacPolicy
   )
 
   /** `kui.streaming` before its `env:` / `file:` reference has been followed. */
@@ -1592,7 +1906,9 @@ object KuiConfigSource {
             .map(_.sequence)
           store <- resolveStore[F](value.store, env)
           streaming <- resolveStreaming[F](value.streaming, env)
-        } yield (keys, store, streaming).mapN((principalKeys, storeConfig, streamingConfig) =>
+          auth <- AuthConfigSection.resolve[F](value.auth, env)
+        } yield (keys, store, streaming, auth).mapN(
+          (principalKeys, storeConfig, streamingConfig, authConfig) =>
           KuiConfig(
             value.server,
             GatewayConfig(
@@ -1607,7 +1923,9 @@ object KuiConfigSource {
             value.topics,
             value.consumers,
             streamingConfig,
-            value.clusters
+            value.clusters,
+            authConfig,
+            value.rbac
           )
         )
     }
@@ -1690,7 +2008,6 @@ object KuiConfigSource {
       List("kui", "gateway", "cors", "enabled"),
       List("kui", "gateway", "cors", "origins"),
       List("kui", "gateway", "cors", "origins", "*"),
-      List("kui", "auth", "type"),
       List("kui", "telemetry", "otlpEndpoint"),
       List("kui", "telemetry", "prometheusPort"),
       List("kui", "telemetry", "logFormat"),
@@ -1740,8 +2057,25 @@ object KuiConfigSource {
       // Open for the same reason as the store's: this map's whole purpose is to carry Kafka client
       // properties KUI does not model, so it cannot have a list of legal names.
       List("kui", "clusters", "*", "properties", "**"),
-      List("kui", "rbac", "**")
-    ) ++ ClusterSecurityConfig
+      List("kui", "clusters", "*", "schemaRegistry", "url"),
+      List("kui", "clusters", "*", "schemaRegistry", "url", "*"),
+      List("kui", "clusters", "*", "schemaRegistry", "callTimeout"),
+      List("kui", "clusters", "*", "schemaRegistry", "auth", "type"),
+      List("kui", "clusters", "*", "schemaRegistry", "auth", "username"),
+      List("kui", "clusters", "*", "schemaRegistry", "auth", "password"),
+      List("kui", "clusters", "*", "schemaRegistry", "auth", "tokenEndpoint"),
+      List("kui", "clusters", "*", "schemaRegistry", "auth", "clientId"),
+      List("kui", "clusters", "*", "schemaRegistry", "auth", "clientSecret"),
+      List("kui", "clusters", "*", "schemaRegistry", "auth", "scope"),
+      List("kui", "clusters", "*", "serde", "defaultKey"),
+      List("kui", "clusters", "*", "serde", "defaultValue"),
+      List("kui", "clusters", "*", "serde", "schemaCacheSize"),
+      List("kui", "clusters", "*", "serde", "subjectCacheTtl"),
+      List("kui", "clusters", "*", "serde", "patterns", "*", "serde"),
+      List("kui", "clusters", "*", "serde", "patterns", "*", "topicKeysPattern"),
+      List("kui", "clusters", "*", "serde", "patterns", "*", "topicValuesPattern"),
+      List("kui", "clusters", "*", "properties", "**")
+    ) ++ AuthConfigSection.keys ++ RbacConfigSection.keys ++ ClusterSecurityConfig
       .keysUnder("kui.store.kafka.security")
       .map(_.split('.').toList)
       ++ ClusterSecurityConfig
