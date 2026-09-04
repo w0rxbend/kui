@@ -30,7 +30,8 @@ object FeatureRegistryImpl {
   def thunks: Map[FeatureId, () => js.Promise[KuiFeature]] =
     Map(
       FeatureId.Clusters -> (() => js.dynamicImport(new kui.ui.clusters.ClustersFeature())),
-      FeatureId.Topics -> (() => js.dynamicImport(new kui.ui.topics.TopicsFeature()))
+      FeatureId.Topics -> (() => js.dynamicImport(new kui.ui.topics.TopicsFeature())),
+      FeatureId.Consumers -> (() => js.dynamicImport(new kui.ui.consumers.ConsumersFeature()))
     )
 
   /** Each feature's navigation entry, route patterns and `history.state` codec.
@@ -40,5 +41,5 @@ object FeatureRegistryImpl {
     * code into `main.js`.
     */
   def staticRoutes: List[FeatureRoutes] =
-    List(kui.ui.clusters.ClustersRoutes, kui.ui.topics.TopicsRoutes)
+    List(kui.ui.clusters.ClustersRoutes, kui.ui.topics.TopicsRoutes, kui.ui.consumers.ConsumersRoutes)
 }

@@ -21,8 +21,12 @@ enum FeatureId(val value: String, val serviceId: String) {
     * which is exactly why one is not guessed from the other.
     */
   case Topics extends FeatureId("topics", "topic")
-  // messages, consumers, schemas, connect, ksql, security, metrics and admin follow in their own
-  // milestones.
+
+  /** Consumer groups. The feature is `consumers` and the service behind it is `consumer`, singular — the
+    * same near-miss `Topics` has, and the same reason neither is guessed from the other.
+    */
+  case Consumers extends FeatureId("consumers", "consumer")
+  // messages, schemas, connect, ksql, security, metrics and admin follow in their own milestones.
 }
 
 object FeatureId {

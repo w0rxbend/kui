@@ -141,7 +141,8 @@ trait KuiJsModule extends KuiModule with ScalaJSModule {
   * package to this list; a package that is missing from it still works, it just is not splittable.
   */
 trait KuiFrontendModule extends KuiJsModule {
-  def moduleSplitStyle = ModuleSplitStyle.SmallModulesFor("kui.ui.clusters", "kui.ui.topics")
+  def moduleSplitStyle =
+    ModuleSplitStyle.SmallModulesFor("kui.ui.clusters", "kui.ui.topics", "kui.ui.consumers")
 
   /** The feature microfrontends that must be linked into modules of their own (ADR-012).
     *
@@ -1001,14 +1002,15 @@ object frontend extends Module {
     // `ClustersFeature` only inside the import thunk, which is what lets the linker put the
     // feature in a module of its own (ADR-012). `checkBundleShape` fails the build if that line
     // is ever crossed.
-    def moduleDeps = Seq(uiKernel, uiClusters, uiTopics, services.gateway.contract.js)
+    def moduleDeps = Seq(uiKernel, uiClusters, uiTopics, uiConsumers, services.gateway.contract.js)
 
     def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
 
     /** The feature microfrontends that must end up in JavaScript modules of their own. */
     def bundleFeatures = Seq(
       BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters"),
-      BundleShape.Feature("kui.ui.topics.TopicsFeature", "kui.ui.topics")
+      BundleShape.Feature("kui.ui.topics.TopicsFeature", "kui.ui.topics"),
+      BundleShape.Feature("kui.ui.consumers.ConsumersFeature", "kui.ui.consumers")
     )
 
     object test extends ScalaJSTests with KuiJsDomTests {
@@ -1103,10 +1105,35 @@ object frontend extends Module {
     }
   }
 
+  /** The consumer-group explorer (M4), and the fourth microfrontend.
+    *
+    * It depends on `services.consumer.contract.js` so the browser decodes exactly what the consumer
+    * service encodes, from the same source (ADR-003), and on the shell not at all: the shell depends
+    * on every feature, and the reverse edge would be a cycle as well as the end of lazy loading.
+    *
+    * `frontend.uiTopics` is deliberately **not** a `moduleDep` and must never become one (M4 DEVPLAN
+    * risk R-9). The topic page's Consumers tab is a panel contributed through the kernel's slot, not
+    * an import: a feature that imported another feature would be downloaded whenever that one was,
+    * which is the whole thing the split exists to prevent.
+    */
+  object uiConsumers extends KuiFrontendModule {
+
+    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
+    def moduleDir = super.moduleDir / os.up / "ui-consumers"
+
+    def moduleDeps = Seq(uiKernel, services.consumer.contract.js)
+
+    object test extends ScalaJSTests with KuiJsDomTests {
+      def moduleDeps = super.moduleDeps ++ Seq(services.consumer.contract.js.test)
+      def mvnDeps    = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
+    }
+  }
+
   /** Every frontend module whose `resources/css` directory contributes to `kui.css`, in no
     * particular order — `CssPipeline` decides the cascade, not this list.
     */
-  private def cssModules: Seq[KuiFrontendModule] = Seq(uiKernel, uiShell, uiClusters, uiTopics)
+  private def cssModules: Seq[KuiFrontendModule] =
+    Seq(uiKernel, uiShell, uiClusters, uiTopics, uiConsumers)
 
   /** Concatenates every module's CSS into one `kui.css` (ADR-024).
     *
@@ -1547,6 +1574,118 @@ object services extends Module {
         object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
       }
     }
+
+    /** The adapters: the Kafka consumer behind the browse port, the configured cluster list behind
+      * `ClusterProfileSource`, and `libs/serde` behind `SerdeSource`.
+      *
+      * Rule A9 keeps this module invisible to everything but `app`, which is the one place that is
+      * supposed to know which adapter implements which port. It is also the only module in the
+      * message service allowed to name `org.apache.kafka`: a `ConsumerRecord` never travels above
+      * it, because a use case that could see one would be a use case that could only be tested
+      * against a broker.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps =
+        Seq(
+          domain,
+          application,
+          libs.kafka,
+          libs.serde,
+          libs.config,
+          libs.kernel.jvm,
+          libs.observability
+        )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        mvn"org.apache.kafka:kafka-clients:${Versions.kafkaClients}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** Server logic: the browse stream as server-sent events, and the one place a `KuiError`
+      * becomes a status.
+      *
+      * The streaming endpoint is declared here rather than in `contract` for the reason the
+      * gateway's capability stream is: describing an event-stream body needs `fs2` and a
+      * server-side stream body, and `contract` has to link for the browser.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}"
+        )
+      }
+    }
+
+    /** The composition root: the one place in the message service that constructs anything
+      * concrete. It starts no listener, so `apps/allinone` can serve its routes beside every other
+      * service's over one port (ADR-010).
+      */
+    object app extends KuiJvmModule {
+      def moduleDeps =
+        Seq(api, infrastructure, libs.config, libs.kafka, libs.serde, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
   }
 
   /** The one process a browser ever talks to (ADR-004 §3).
@@ -1661,6 +1800,7 @@ object services extends Module {
         // the same thing for the gateway specifically. One entry per service in `ServiceContracts`, one
         // module dependency here, and nothing else in the gateway knows the topic service exists.
         topic.contract.jvm,
+        consumer.contract.jvm,
         libs.kernel.jvm,
         libs.contractsCore.jvm,
         libs.securityCore.jvm,
@@ -2082,6 +2222,9 @@ object services extends Module {
           application,
           libs.kafka,
           libs.cache,
+          // `kui.clusters[]`, for the all-in-one deployment's profile source. See
+          // `ConfiguredProfileSource` for why that shape does not go through the HTTP profile client.
+          libs.config,
           libs.http,
           libs.observability,
           libs.securityCore.jvm,
@@ -2099,6 +2242,95 @@ object services extends Module {
 
       object test extends ScalaTests with KuiTests {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification and
+      * the OpenAPI document.
+      *
+      * The only layer allowed to see both an application type and a wire type, which is what makes the
+      * mapping between them (ADR-033) possible without rule A3 failing the build. It starts nothing: there
+      * is no port, no thread and no `IO` here.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.cache,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** Where the generated document is committed: beside the module, because the gateway merges the
+        * services' documents by walking the module tree.
+        */
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.consumer.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.consumer.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"org.typelevel::otel4s-oteljava-testkit::${Versions.otel4s}"
+        )
+      }
+    }
+
+    /** The composition root: the one place in the consumer service that constructs anything concrete.
+      *
+      * It starts no listener, exactly like the cluster and topic services', which is what lets
+      * `apps/allinone` take its routes and serve them beside every other service's over one port (ADR-010).
+      */
+    object app extends KuiJvmModule {
+      def moduleDeps =
+        Seq(api, infrastructure, libs.cache, libs.config, libs.kafka, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
           mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
@@ -2180,6 +2412,8 @@ object apps extends Module {
       services.cluster.api,
       services.topic.app,
       services.topic.api,
+      services.consumer.app,
+      services.consumer.api,
       libs.config,
       libs.observability,
       libs.http

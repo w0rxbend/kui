@@ -1,0 +1,185 @@
+/* The consumer-groups feature.
+ *
+ * Every value comes from a token; see 20-kernel-controls.css for why that rule is absolute.
+ *
+ * The file is numbered 70 so that it lands after the kernel's own sheets (00-25), the clusters feature
+ * (40-41), topics (50) and messages (60). `CssPipeline` decides the cascade from these numbers rather than
+ * from who nested their selectors more deeply, which is what keeps every selector a single class of equal
+ * specificity.
+ *
+ * There is very little here on purpose. Almost everything these screens draw is a kernel component already —
+ * the table, the pagination bar, the search box, the chips, the magnitude bars — and a feature stylesheet
+ * that restyled them would be a second design system with one user.
+ */
+
+.kui-consumers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+  /* A flex child will not shrink below its content unless told it may. */
+  min-height: 0;
+}
+
+/* The sentence the shell draws inside its fallback panel when the consumer service is down. */
+.kui-consumers__fallback {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+}
+
+/* A failed request with nothing held from before: the explanation and its retry. */
+.kui-consumers__error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-4);
+  padding: var(--kui-space-4);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-raised);
+}
+
+/* --- The list screen's control bar ------------------------------------------------------------ */
+
+/* Search, the state chips, the count and refresh, on one line that wraps rather than scrolls: a control
+ * that has slid off the right edge of a bar is a control nobody finds. */
+.kui-consumers__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-4);
+}
+
+.kui-consumers__count {
+  color: var(--kui-color-text-muted);
+  /* Pushes the count and the refresh button to the far end, so the filters stay grouped at the near one. */
+  margin-inline-start: auto;
+}
+
+.kui-consumers__states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+}
+
+/* A state filter. It is a real <button> with aria-pressed, so the keyboard reaches it and a screen reader
+ * says whether it is on; the tint is a second cue, never the only one. */
+.kui-consumers__state-chip {
+  padding: var(--kui-space-1) var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-pill);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  font: inherit;
+  font-size: var(--kui-font-size-sm);
+  cursor: pointer;
+}
+
+.kui-consumers__state-chip:hover {
+  border-color: var(--kui-color-border-strong);
+  color: var(--kui-color-text);
+}
+
+.kui-consumers__state-chip:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-consumers__state-chip--on {
+  border-color: var(--kui-color-accent);
+  background: var(--kui-color-accent-container);
+  color: var(--kui-color-text);
+}
+
+/* --- Rows ------------------------------------------------------------------------------------- */
+
+.kui-consumers__group {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  /* A group id can be 255 characters. It wraps rather than widening the column past the viewport. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kui-consumers__group-link {
+  color: var(--kui-color-accent);
+  /* Clear of the descenders, because a group id is full of underscores and an underline through one hides
+   * it — the same fix the topic list needed. */
+  text-underline-offset: 0.2em;
+}
+
+/* --- The detail screen ------------------------------------------------------------------------ */
+
+/* State, total lag, protocol, assignor, coordinator and "as of", on one strip that wraps. */
+.kui-consumers__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-5);
+  padding: var(--kui-space-4);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-consumers__summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-consumers__summary-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kui-consumers__summary-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-consumers__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-consumers__section-heading {
+  margin: 0;
+  font-size: var(--kui-font-size-lg);
+}
+
+/* Secondary text: a member id, a static instance id, an excluded-partition count, a freshness note. */
+.kui-consumers__note {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-consumers__topic-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-3);
+}
+
+.kui-consumers__topic-name {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+}
+
+/* The partitions a member holds, listed rather than counted. */
+.kui-consumers__partitions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+}
+
+/* A per-partition anomaly, and each assignment chip: small, monospaced, and readable beside an em dash. */
+.kui-consumers__anomaly {
+  padding: 0 var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
+  background: var(--kui-color-surface-elevated);
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}
