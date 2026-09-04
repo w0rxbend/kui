@@ -105,10 +105,19 @@ object Timestamps {
       * Derived rather than asked for: the wall clock the zone shows, minus the instant itself, *is* the
       * offset. Computing it this way means daylight saving is handled by whoever maintains the browser's zone
       * database rather than by this file.
+      *
+      * Both sides of the subtraction are whole seconds, and that is the whole point of writing it this way.
+      * The wall clock these fields describe has no sub-second part — `Intl` was asked for seconds and
+      * answered in seconds — so subtracting the instant's *milliseconds* compared two quantities of different
+      * precision. An instant 600 ms past the second gave 10799.4 seconds instead of 10800, and `offsetOf`
+      * renders 10799 as `UTC+02:59`: the dashboard and the brokers page, formatting the same zone from two
+      * instants a few hundred milliseconds apart, printed two different offsets for it.
+      * `Instant.getEpochSecond` truncates towards the past for negative epochs exactly as the wall clock
+      * does, so the two stay aligned before 1970 as well.
       */
     def offsetSeconds(at: Instant): Int = {
-      val asUtc = js.Date.UTC(year, month - 1, day, hour, minute, second)
-      math.round((asUtc - at.toEpochMilli.toDouble) / 1000.0).toInt
+      val wallClockSeconds = js.Date.UTC(year, month - 1, day, hour, minute, second) / 1000.0
+      (wallClockSeconds - at.getEpochSecond.toDouble).toInt
     }
   }
 

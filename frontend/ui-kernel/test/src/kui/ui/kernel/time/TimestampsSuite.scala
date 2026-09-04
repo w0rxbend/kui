@@ -14,6 +14,36 @@ class TimestampsSuite extends FunSuite {
     assertEquals(Timestamps.absolute(at, "America/New_York"), "2026-09-03 08:05:11 UTC-04:00")
   }
 
+  test("theOffsetDoesNotDependOnTheSubSecondPartOfTheInstant") {
+    // The offset is derived by subtracting the instant from the wall clock the zone shows, and the
+    // wall clock `Intl` hands back is whole seconds. Subtracting an instant that carries
+    // milliseconds therefore produced an offset a fraction of a second short of the real one --
+    // 10799.4 seconds instead of 10800 -- which the label renders as `UTC+02:59`. Two screens
+    // formatting the same zone from two instants a few hundred milliseconds apart then disagreed
+    // about what the offset was.
+    val zone = "Europe/Warsaw"
+    val whole = Instant.parse("2026-09-03T12:05:11Z")
+
+    List(0, 1, 250, 499, 500, 501, 750, 999).foreach { millis =>
+      val withMillis = whole.plusMillis(millis.toLong)
+      assertEquals(
+        Timestamps.offsetSeconds(zone, withMillis),
+        Some(2 * 3600),
+        s"offsetSeconds at +${millis}ms"
+      )
+      assertEquals(
+        Timestamps.offsetLabel(zone, withMillis),
+        "UTC+02:00",
+        s"offsetLabel at +${millis}ms"
+      )
+      assertEquals(
+        Timestamps.absolute(withMillis, zone),
+        "2026-09-03 14:05:11 UTC+02:00",
+        s"absolute at +${millis}ms"
+      )
+    }
+  }
+
   test("anUnknownZoneFallsBackToUtcRatherThanThrowing") {
     assertEquals(Timestamps.absolute(at, "Mars/Olympus"), Timestamps.absolute(at, "UTC"))
   }
