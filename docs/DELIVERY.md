@@ -1177,3 +1177,55 @@ The serde override for *reading* was already built and is reachable: the browse 
   were not seen on a screen.
 - **`docs/api/openapi.json` carries a concurrent pass's endpoints as well as these**, because it is
   regenerated whole and another agent was adding topic creation and deletion at the same time.
+
+## The broker replica count says what it holds, 2026-09-04
+
+The previous section recorded a defect and left it open: the broker DTO's `inSyncReplicaCount` was
+filled from the broker's *total* replica count. This pass closes it by renaming the field to
+`replicaCount` on the wire, in the browser and in the golden documents.
+
+**Renaming rather than computing was the choice, and the reason is in the research.** An in-sync
+count is per partition and lives in `TopicPartitionInfo.isr`, which only `describeTopics` returns
+(`research/kafka/admin-capabilities.md`). The cluster service calls `describeCluster` and
+`describeLogDirs` and sweeps no topics: a log directory lists the replicas stored on a disk, caught
+up or not. Producing a true in-sync count here would mean a `describeTopics` sweep the milestone did
+not budget, on the request path of the broker list, so the field now says what it actually holds.
+
+What changed:
+
+- `BrokerDto.inSyncReplicaCount` → `BrokerDto.replicaCount`, encoder, decoder and Scaladoc.
+- `ClusterMapping.broker` fills it from `row.replicas` under a comment saying why that is not an
+  in-sync count.
+- The brokers table loses its "In sync" column. The "Replicas" column beside it used to read
+  `partitionCount`, which this service never fills, so it always showed `—`; it now reads
+  `replicaCount` and shows a real number. Under-replication is still on the page, in the summary
+  strip, where it comes from `underReplicatedPartitionCount` — a figure Kafka actually reports.
+- The summary strip's "in-sync / total replicas" figure becomes "replicas held", a plain total.
+
+**The test that would have caught it** is
+`ClusterMappingSuite."aBrokerReportsTheReplicasItHoldsAndClaimsNothingAboutWhichAreInSync"`. It is
+the only case in the repository where the two numbers differ — a broker holding 147 replicas of
+which 96 are caught up, which is what a survivor of the three-broker demonstration cluster looks like
+with one broker stopped. It asserts the response carries 147 as `replicaCount` and that no field in
+the encoded broker mentions "insync" at all, so the total can never again be handed out under the
+in-sync name. Every other test in this repository describes a healthy cluster, where the two numbers
+are equal and the bug is invisible; that is exactly how it survived 8226 of them.
+
+**Observed:** `./mill services.cluster.api.test` 0 failed; `./mill frontend.uiClusters.test` 0 failed
+across 525 tasks including `BrokerRowSuite`, `BrokerSummarySuite` and `BrokersPageSuite`;
+`./mill checkArchitecture` — 129 modules, 10 rules, no layering violations; `./mill __.checkFormat`
+green.
+
+**`docs/api/openapi.json` did not change, and that is not an oversight.** It was regenerated with
+`./mill services.gateway.api.openApi` and `./mill services.cluster.api.openApi` and produced no
+diff, because the brokers response documents its `brokers` section as an untyped object — the
+per-broker field names have never appeared in the OpenAPI document. Typing the aggregated sections is
+a separate piece of work.
+
+**One process note, honestly.** This change was meant to land as a single commit, and it did not.
+Two concurrent agents committed with pathspecs wide enough to sweep up this work while it was still
+in the working tree: `feb8655` (message about the dashboard's online count) took the contract, the
+mapping and the golden documents, and `4d3b0ce` (message about the topic indicators) took the
+frontend column and the new test. The tree is consistent and every gate above is green, but the
+rename is spread over two commits whose messages describe other changes, and this section is the
+only place the whole of it is written down.
