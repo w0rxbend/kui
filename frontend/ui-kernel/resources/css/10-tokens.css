@@ -93,6 +93,12 @@
   --kui-color-danger-container: #f9dedc; /* design */
   --kui-color-info: #2c5bb8; /* kui */
   --kui-color-state-layer: rgba(23, 28, 34, 0.06); /* design */
+  /* The scrollbar thumb. Translucent rather than a solid neutral, so that it darkens whatever
+   * surface it happens to sit over instead of standing next to it as a second grey; the design
+   * draws it the same way. It is heavier than --kui-color-state-layer because a 4px-wide bar needs
+   * more weight to be seen than a full-width hover wash does. */
+  --kui-color-scrollbar-thumb: rgba(23, 28, 34, 0.2); /* design */
+  --kui-color-scrollbar-thumb-hover: rgba(23, 28, 34, 0.32); /* design */
 
   /* --- Colour: the accent (blue, the default seed) --------------------------------------- */
   --kui-color-primary: #0b57d0; /* design */
@@ -267,6 +273,8 @@
     --kui-color-danger-container: #5c1b16; /* design */
     --kui-color-info: #90caf9; /* kui */
     --kui-color-state-layer: rgba(227, 230, 235, 0.08); /* design */
+    --kui-color-scrollbar-thumb: rgba(227, 230, 235, 0.14); /* design */
+    --kui-color-scrollbar-thumb-hover: rgba(227, 230, 235, 0.26); /* design */
 
     --kui-color-primary: #a8c7fa; /* design */
     --kui-color-primary-contrast: #062e6f; /* design */
@@ -330,6 +338,8 @@
   --kui-color-danger-container: #5c1b16; /* design */
   --kui-color-info: #90caf9; /* kui */
   --kui-color-state-layer: rgba(227, 230, 235, 0.08); /* design */
+  --kui-color-scrollbar-thumb: rgba(227, 230, 235, 0.14); /* design */
+  --kui-color-scrollbar-thumb-hover: rgba(227, 230, 235, 0.26); /* design */
 
   --kui-color-primary: #a8c7fa; /* design */
   --kui-color-primary-contrast: #062e6f; /* design */

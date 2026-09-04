@@ -54,7 +54,7 @@ html {
    * job for browsers that do not implement these; neither mechanism can express the other, so both
    * are stated rather than one being preferred. */
   scrollbar-width: thin;
-  scrollbar-color: var(--kui-color-border-strong) transparent;
+  scrollbar-color: var(--kui-color-scrollbar-thumb) transparent;
 }
 
 /* Scrollbars.
@@ -64,8 +64,8 @@ html {
  * the reader sees on almost every screen, so leaving it unstyled undoes the palette everywhere the
  * content is taller or wider than its box.
  *
- * The thumb is the state layer -- the same translucent wash used for hover -- so it reads as part of
- * the surface it sits over and needs no colour of its own in either theme. The transparent border
+ * The thumb is translucent, so it darkens whatever surface it happens to sit over rather than
+ * standing next to that surface as a second, unrelated grey. The transparent border
  * with `background-clip: padding-box` is what insets the thumb inside the track: it is the design's
  * own technique, and it means the thumb does not touch the edge of the panel it is in.
  *
@@ -81,15 +81,23 @@ html {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--kui-color-border-strong);
+  background: var(--kui-color-scrollbar-thumb);
   border: 3px solid transparent;
   border-radius: var(--kui-radius-sm);
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--kui-color-text-muted);
+  background: var(--kui-color-scrollbar-thumb-hover);
   background-clip: padding-box;
+}
+
+/* The stepper arrows at each end of the bar. Styling the track and thumb leaves these drawn by the
+ * operating system, so a themed scrollbar still ended in two pale grey buttons with black
+ * triangles. The design has no steppers, and nothing in the product asks the reader to scroll one
+ * line at a time by clicking, so they are removed rather than restyled. */
+::-webkit-scrollbar-button {
+  display: none;
 }
 
 /* A corner where two scrollbars meet defaults to an opaque OS-coloured square. */

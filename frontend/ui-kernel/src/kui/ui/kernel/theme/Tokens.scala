@@ -70,6 +70,13 @@ object Tokens {
       */
     val StateLayer = "--kui-color-state-layer"
 
+    /** The scrollbar thumb, and the same thumb under the pointer. Also translucent, and for the same reason
+      * as the state layer: a scrollbar sits over every surface in the product, so a thumb that darkens what
+      * is behind it needs one value per theme rather than one per surface.
+      */
+    val ScrollbarThumb = "--kui-color-scrollbar-thumb"
+    val ScrollbarThumbHover = "--kui-color-scrollbar-thumb-hover"
+
     val all: List[String] = List(
       Surface,
       SurfaceRaised,
@@ -97,7 +104,9 @@ object Tokens {
       DangerContainer,
       Info,
       Focus,
-      StateLayer
+      StateLayer,
+      ScrollbarThumb,
+      ScrollbarThumbHover
     )
   }
 
