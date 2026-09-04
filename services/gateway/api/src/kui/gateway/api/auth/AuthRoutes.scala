@@ -1,24 +1,54 @@
 package kui.gateway.api.auth
 
-import cats.effect.kernel.Sync
+import cats.effect.kernel.{Clock, Sync}
 import cats.syntax.all.*
+import sttp.model.StatusCode
+import sttp.model.headers.CookieValueWithMeta
 import sttp.tapir.model.ServerRequest
 import sttp.tapir.server.ServerEndpoint
 
+import kui.config.AuthConfig
+import kui.contracts.ErrorEnvelope
+import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.gateway.application.session.{Session, SessionStore}
 import kui.gateway.contract.AuthEndpoints
 import kui.gateway.contract.dto.{AuthMeResponse, PermissionDto, PrincipalDto}
-import kui.security.Principal
+import kui.http.ErrorInterceptor
+import kui.identity.contract.IdentityEndpoints
+import kui.identity.contract.dto.*
+import kui.kernel.error.{ApplicationError, KuiError}
+import kui.kernel.{CorrelationId, RoleName, UserName}
+import kui.observability.Correlation
 import kui.security.rbac.{ClusterPermission, ClusterScope, Rbac, RbacPolicy}
+import kui.security.{Principal, PrincipalKind}
 
-/** Serving `GET /api/v1/auth/me` and `POST /api/v1/auth/logout`.
+/** The gateway's whole authentication surface: `me`, `settings`, `login`, `password`, the OpenID Connect pair
+  * and `logout`.
   *
-  * Both read the session `SessionMiddleware`'s request-attaching interceptor already resolved, via the
-  * request attribute, rather than resolving one independently. That works reliably only because attaching the
-  * session happens in a `RequestInterceptor` — installed ahead of Tapir's own input decoding — and
-  * `sttp.tapir.extractFromRequest` (below) is itself decoded as part of that same phase: an endpoint that
-  * captured the request *after* decoding (an `EndpointInterceptor`, say) would see the version from before
-  * the attribute existed. `SessionMiddleware`'s own documentation explains the ordering in full.
+  * ==Where the session is, and where the decision is==
+  *
+  * The split is the point of this file. The *decision* — is this the right password, what does this ID token
+  * say, which roles does that give — belongs to the identity service and is reached through its published
+  * contract. The *session* — a cookie, a CSRF secret, an id that is replaced when privileges change — belongs
+  * here, because there is one session mechanism in the product and it has been here since Milestone 0.
+  *
+  * ==Signing in replaces the session, rather than editing it==
+  *
+  * [[signIn]] deletes the session the request arrived on and creates a new one for the authenticated
+  * principal. That is the session-fixation defence ADR-019 requires: an attacker who can get a victim to use
+  * a session id of their choosing — through a link, a subdomain, an XSS — holds a useless value the moment
+  * the victim signs in, because the id changed and the CSRF secret changed with it.
+  *
+  * The new cookie is an *output of the login endpoint* rather than something the session middleware stamps,
+  * because the middleware stamps the session the request came in with, which by then is the one that was just
+  * thrown away. `SessionMiddleware`'s stamp step stands aside when a response already carries a session
+  * cookie, and says so.
+  *
+  * ==Reading `me` and `settings` never calls anything==
+  *
+  * Both are answered from the gateway's own state and configuration. An operator whose identity service is
+  * down must still be able to load the interface and see why: a login screen that cannot render during an
+  * authentication outage is a product that disappears exactly when it is needed.
   */
 object AuthRoutes {
 
@@ -26,23 +56,251 @@ object AuthRoutes {
     sttp.tapir.extractFromRequest(identity)
 
   /** @param policy
-    *   the deployment's roles. `RbacPolicy.Disabled` until there is configuration to build one from (RB-001),
-    *   and a disabled policy is not an empty answer: it grants everything, over every cluster, because a
-    *   deployment that has configured no roles has not asked for authorization.
+    *   the deployment's roles. A disabled policy is not an empty answer: it grants everything, over every
+    *   cluster, because a deployment that has configured no roles has not asked for authorization.
+    * @param auth
+    *   what kind of sign-in this deployment uses, which is what `settings` answers and what `me` reports.
+    * @param identity
+    *   the identity service, when this deployment has one. Without it the sign-in routes answer "this
+    *   deployment has no identity service" rather than disappearing: a `404` on `/auth/login` in a deployment
+    *   configured for `form` would send an operator hunting through the browser's network tab, while a
+    *   sentence names the missing upstream.
     */
   def apply[F[_]: Sync](
       store: SessionStore[F],
-      policy: RbacPolicy = RbacPolicy.Disabled
+      policy: RbacPolicy = RbacPolicy.Disabled,
+      auth: AuthConfig = AuthConfig.Default,
+      identity: Option[ServiceClient[F]] = None,
+      basePath: String = "",
+      secureCookies: Boolean = true
   ): List[ServerEndpoint[Any, F]] =
-    List(me[F](policy), logout[F](store))
+    List(
+      me[F](policy, auth),
+      settings[F](auth, policy),
+      login[F](store, identity, basePath, secureCookies),
+      changePassword[F](identity),
+      oidcStart[F](identity),
+      oidcCallback[F](store, identity, basePath, secureCookies),
+      logout[F](store)
+    )
 
-  private def me[F[_]: Sync](policy: RbacPolicy): ServerEndpoint[Any, F] =
-    AuthEndpoints.me.in(request).serverLogicSuccess[F](req => sessionOf[F](req).map(toResponse(policy, _)))
+  // -----------------------------------------------------------------------------------------------
+  // Reads, answered from this process alone
+  // -----------------------------------------------------------------------------------------------
+
+  private def me[F[_]: Sync](policy: RbacPolicy, auth: AuthConfig): ServerEndpoint[Any, F] =
+    AuthEndpoints.me
+      .in(request)
+      .serverLogicSuccess[F](req => sessionOf[F](req).map(toResponse(policy, auth, _)))
+
+  private def settings[F[_]: Sync](auth: AuthConfig, policy: RbacPolicy): ServerEndpoint[Any, F] =
+    AuthEndpoints.settings.serverLogicSuccess[F](_ => Sync[F].pure(settingsOf(auth, policy)))
+
+  /** What the login screen is told.
+    *
+    * Three fields, and the reason there are only three is in `research/scala/security-research.md`: one
+    * reference product serves its own configuration — Kafka credentials included — from an endpoint like this
+    * one. The defence that works is a type that cannot hold a credential, so the provider is reduced to the
+    * label on its button before it ever gets near a response.
+    */
+  private[auth] def settingsOf(auth: AuthConfig, policy: RbacPolicy): AuthSettingsDto =
+    AuthSettingsDto(
+      authType = auth.authType.wire,
+      providerLabel = auth.oidc.map(_.label),
+      // Whether this deployment has configured any roles at all — not what the caller may do, which is
+      // `me`'s answer and needs a principal. The browser uses it to tell "you may do everything because
+      // nobody asked for authorization" apart from "you may do everything because your role says so".
+      rbacEnabled = policy.enabled
+    )
+
+  // -----------------------------------------------------------------------------------------------
+  // Signing in
+  // -----------------------------------------------------------------------------------------------
+
+  private def login[F[_]: Sync](
+      store: SessionStore[F],
+      identity: Option[ServiceClient[F]],
+      basePath: String,
+      secureCookies: Boolean
+  ): ServerEndpoint[Any, F] =
+    AuthEndpoints.login
+      .in(request)
+      .serverLogic[F] { (credentials, req) =>
+        answering[F, (LoginResponse, CookieValueWithMeta)](req) {
+          withIdentity(identity) { client =>
+            call(client, req)(IdentityEndpoints.login, credentials).flatMap {
+              case Left(error) => error.asLeft[(LoginResponse, CookieValueWithMeta)].pure[F]
+
+              case Right(LoginResponse.SignedIn(who)) =>
+                signIn[F](store, req, principalOf(who), basePath, secureCookies)
+                  .map(cookie => (LoginResponse.SignedIn(who), cookie).asRight[KuiError])
+
+              // A required password change grants no session at all, so the session the request arrived
+              // on is left exactly as it was — anonymous. Handing out a cookie here would be handing out
+              // a session to somebody the server has just decided may not have one.
+              case Right(change @ LoginResponse.PasswordChangeRequired(_)) =>
+                currentCookie[F](req, basePath, secureCookies)
+                  .map(cookie => (change, cookie).asRight[KuiError])
+            }
+          }
+        }
+      }
+
+  private def changePassword[F[_]: Sync](identity: Option[ServiceClient[F]]): ServerEndpoint[Any, F] =
+    AuthEndpoints.changePassword
+      .in(request)
+      .serverLogic[F] { (change, req) =>
+        answering[F, Unit](req) {
+          withIdentity(identity)(client => call(client, req)(IdentityEndpoints.changePassword, change))
+        }
+      }
+
+  private def oidcStart[F[_]: Sync](identity: Option[ServiceClient[F]]): ServerEndpoint[Any, F] =
+    AuthEndpoints.oidcStart
+      .in(request)
+      .serverLogic[F] { req =>
+        answering[F, OidcStartResponse](req) {
+          withIdentity(identity)(client => call(client, req)(IdentityEndpoints.oidcStart, ()))
+        }
+      }
+
+  /** The provider sent the browser back. Exchange the code, and — only if that worked — issue a session. */
+  private def oidcCallback[F[_]: Sync](
+      store: SessionStore[F],
+      identity: Option[ServiceClient[F]],
+      basePath: String,
+      secureCookies: Boolean
+  ): ServerEndpoint[Any, F] =
+    AuthEndpoints.oidcCallback
+      .in(request)
+      .serverLogic[F] { (code, state, req) =>
+        answering[F, (StatusCode, String, CookieValueWithMeta)](req) {
+          withIdentity(identity) { client =>
+            call(client, req)(IdentityEndpoints.oidcCallback, OidcCallbackRequest(code, state)).flatMap {
+              case Left(error) => error.asLeft[(StatusCode, String, CookieValueWithMeta)].pure[F]
+              case Right(LoginResponse.SignedIn(who)) =>
+                signIn[F](store, req, principalOf(who), basePath, secureCookies)
+                  .map(cookie => (StatusCode.Found, landingPage(basePath), cookie).asRight[KuiError])
+              case Right(LoginResponse.PasswordChangeRequired(_)) =>
+                // A provider sign-in cannot produce this: there is no KUI password behind it to change.
+                // Answering with the same refusal as an unusable callback keeps the failure honest rather
+                // than redirecting a browser into a flow that has no next step.
+                NoPasswordChangeForProvider
+                  .asLeft[(StatusCode, String, CookieValueWithMeta)]
+                  .pure[F]
+            }
+          }
+        }
+      }
 
   private def logout[F[_]: Sync](store: SessionStore[F]): ServerEndpoint[Any, F] =
     AuthEndpoints.logout.in(request).serverLogicSuccess[F] { req =>
       sessionOf[F](req).flatMap(session => store.delete(session.id))
     }
+
+  // -----------------------------------------------------------------------------------------------
+
+  /** Turns the `KuiError` a use case returned into the envelope and the status the contract declares.
+    *
+    * `ErrorInterceptor.render` is the single code-to-status table (ADR-034), so a refused password is a `401`
+    * and a change with nowhere to be saved is a `501` without this file knowing either number.
+    */
+  private def answering[F[_]: Sync, A](req: ServerRequest)(
+      result: F[Either[KuiError, A]]
+  ): F[Either[(ErrorEnvelope, StatusCode), A]] =
+    result.flatMap {
+      case Right(value) => value.asRight[(ErrorEnvelope, StatusCode)].pure[F]
+      case Left(error) =>
+        for {
+          correlationId <- correlationOf[F](req)
+          now <- Clock[F].realTimeInstant
+          (status, envelope) = ErrorInterceptor.render(error, correlationId, now)
+        } yield (envelope, StatusCode(status)).asLeft[A]
+    }
+
+  /** Replaces the session with a new one for `principal`, and answers with the cookie for it.
+    *
+    * Delete then create, rather than editing the session in place: the id and the CSRF secret both have to
+    * change, because both are values an attacker may already hold.
+    */
+  private def signIn[F[_]: Sync](
+      store: SessionStore[F],
+      req: ServerRequest,
+      principal: Principal,
+      basePath: String,
+      secureCookies: Boolean
+  ): F[CookieValueWithMeta] =
+    for {
+      previous <- sessionOf[F](req)
+      _ <- store.delete(previous.id)
+      now <- Clock[F].realTimeInstant
+      session <- store.create(principal, now)
+    } yield cookieOf(session, basePath, secureCookies)
+
+  /** The cookie for the session the request already has, unchanged.
+    *
+    * Answered on the paths that deliberately do *not* sign anybody in, so that the endpoint's declared output
+    * is satisfied without the response quietly clearing the browser's session.
+    */
+  private def currentCookie[F[_]: Sync](
+      req: ServerRequest,
+      basePath: String,
+      secureCookies: Boolean
+  ): F[CookieValueWithMeta] =
+    sessionOf[F](req).map(cookieOf(_, basePath, secureCookies))
+
+  private def cookieOf(session: Session, basePath: String, secure: Boolean): CookieValueWithMeta =
+    SessionMiddleware.setCookie(session, basePath, secure).valueWithMeta
+
+  /** Where a completed provider sign-in sends the browser. The interface's own root, under whatever path this
+    * deployment is mounted at.
+    */
+  private[auth] def landingPage(basePath: String): String =
+    if basePath.isEmpty then "/ui/" else s"$basePath/ui/"
+
+  /** One call to the identity service, carrying this request's correlation id and the session's principal.
+    *
+    * The principal is the *current* one, which during a login is anonymous. That is correct and is what the
+    * identity service expects: the header proves the call came from the gateway and is bound to these exact
+    * bytes (ADR-020), and it is not a claim that anybody has signed in.
+    */
+  private def call[F[_]: Sync, I, O](client: ServiceClient[F], req: ServerRequest)(
+      endpoint: sttp.tapir.Endpoint[kui.security.SignedPrincipal, I, kui.contracts.ErrorEnvelope, O, Any],
+      input: I
+  ): F[Either[KuiError, O]] =
+    for {
+      session <- sessionOf[F](req)
+      correlationId <- correlationOf[F](req)
+      result <- client.call(endpoint, input)(CallContext(session.principal, correlationId, None))
+    } yield result
+
+  private def correlationOf[F[_]: Sync](req: ServerRequest): F[CorrelationId] =
+    req.header(Correlation.HeaderName).flatMap(Correlation.accept) match {
+      case Some(id) => id.pure[F]
+      case None => Correlation.newRandom[F]
+    }
+
+  /** What every sign-in route answers when this deployment has no identity service configured.
+    *
+    * A sentence rather than a missing route. A `404` on `/auth/login` in a deployment whose configuration
+    * says `type: form` sends an operator into the browser's network tab; this sends them to
+    * `kui.gateway.services.identity`.
+    */
+  private def withIdentity[F[_]: Sync, A](
+      identity: Option[ServiceClient[F]]
+  )(use: ServiceClient[F] => F[Either[KuiError, A]]): F[Either[KuiError, A]] =
+    identity match {
+      case Some(client) => use(client)
+      case None => Sync[F].pure(NotConfigured.asLeft[A])
+    }
+
+  val NotConfigured: KuiError =
+    ApplicationError.Unsupported(
+      "signing in, because this deployment has no identity service (set kui.gateway.services.identity)"
+    )
+
+  val NoPasswordChangeForProvider: KuiError =
+    ApplicationError.InvalidState("a provider sign-in cannot require a KUI password change")
 
   /** Reads the session `SessionMiddleware` attached. In practice it is always present — the middleware runs
     * on every request before any endpoint's own logic does — but a route is written defensively rather than
@@ -60,11 +318,25 @@ object AuthRoutes {
         )
     }
 
-  private def toResponse(policy: RbacPolicy, session: Session): AuthMeResponse =
+  /** The principal the identity service decided on, as this process's own type.
+    *
+    * The roles come across the wire and are trusted *because of where they came from*: an internal call over
+    * a signed contract, from the one service that resolves them. `PrincipalKind.Session` is set here rather
+    * than read from the wire for the same reason the gateway never accepts `X-Kui-Principal` from a browser —
+    * how KUI came to believe an identity is this process's conclusion, not a caller's assertion.
+    */
+  private[auth] def principalOf(who: IdentityPrincipalDto): Principal =
+    Principal(
+      UserName.unsafe(who.name),
+      who.roles.map(RoleName.unsafe).toSet,
+      PrincipalKind.Session
+    )
+
+  private def toResponse(policy: RbacPolicy, auth: AuthConfig, session: Session): AuthMeResponse =
     AuthMeResponse(
       principal = toDto(session.principal),
       csrfToken = session.csrfSecret.value,
-      authType = "disabled",
+      authType = auth.authType.wire,
       // Computed here rather than proxied from a service, because this is the one answer that has to be
       // the same for every screen in the product: four microfrontends gating the same write control
       // against four different sources is four ways for them to disagree.
@@ -72,7 +344,7 @@ object AuthRoutes {
     )
 
   private def toDto(principal: Principal): PrincipalDto =
-    PrincipalDto(principal.name.value, principal.roles.map(_.value).toList, principal.kind.wire)
+    PrincipalDto(principal.name.value, principal.roles.map(_.value).toList.sorted, principal.kind.wire)
 
   /** One grant, on the wire.
     *

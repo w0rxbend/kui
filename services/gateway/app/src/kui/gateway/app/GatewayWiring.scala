@@ -214,6 +214,10 @@ object GatewayWiring {
       // configured has no client and therefore no route, so the address 404s instead of opening a
       // stream that could only ever end in an error.
       messages = clients.all.find(_.service == MessageServiceId)
+      // The identity service, which the sign-in routes call one hop inward. It is the one service whose
+      // contract the gateway does *not* proxy: a login is the moment a browser is given a session, and
+      // sessions live here, so `AuthRoutes` serves `/api/v1/auth/*` itself and calls this client.
+      identity = clients.all.find(_.service == IdentityServiceId)
       instrumentation <- Resource.eval(
         KuiInterceptors.serverInterceptors[F](telemetry, GatewayApi.ServiceName)
       )
@@ -227,7 +231,8 @@ object GatewayWiring {
           topicOverview.toList.flatMap(TopicOverviewRoutes[F](_)) ++
           messages.toList.flatMap(MessageStreamRoutes[F](_)) ++
           proxied ++
-          DocsRoutes[F](docs, BasePath.normalize(config.server.basePath))
+          DocsRoutes[F](docs, BasePath.normalize(config.server.basePath)),
+        identity
       ),
       interceptors = Cors.interceptor[F](config.gateway.cors).toList ++
         EdgeHeaders.interceptors[F] ++
@@ -363,6 +368,12 @@ object GatewayWiring {
     * re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.
     */
   val MessageServiceId: ServiceId = ServiceId.unsafe("message")
+
+  /** The service that decides who somebody is. Its endpoints are never proxied: `ServiceContracts` says so at
+    * the one place they would otherwise be registered, and `AuthRoutes` calls them itself so that a
+    * successful sign-in leaves with a session cookie rather than with a JSON body.
+    */
+  val IdentityServiceId: ServiceId = ServiceId.unsafe("identity")
 
   /** The proxied routes: every configured service the gateway holds a contract for, minus the endpoints the
     * gateway answers itself.

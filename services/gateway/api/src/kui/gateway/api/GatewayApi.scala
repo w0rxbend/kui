@@ -5,10 +5,11 @@ import cats.effect.kernel.Async
 import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.server.ServerEndpoint
 
-import kui.config.{GatewayConfig, ServerConfig}
+import kui.config.{AuthConfig, GatewayConfig, ServerConfig}
 import kui.gateway.api.auth.AuthRoutes
 import kui.gateway.api.static.{BootstrapConfig, StaticRoutes}
 import kui.gateway.application.Gateway
+import kui.gateway.application.client.ServiceClient
 import kui.gateway.application.session.SessionStore
 import kui.gateway.contract.GatewayEndpoints
 import kui.http.BasePath
@@ -54,7 +55,11 @@ object GatewayApi {
       config: GatewayServiceConfigView,
       readiness: List[ReadinessCheck[F]],
       sessions: SessionStore[F],
-      extra: List[ServerEndpoint[Fs2Streams[F], F]] = Nil
+      extra: List[ServerEndpoint[Fs2Streams[F], F]] = Nil,
+      // The identity service, when this deployment has one. It is an `Option` for the same reason every
+      // other upstream is: the gateway starts and serves whatever it can reach, and a missing identity
+      // service becomes a sentence on the sign-in routes rather than a process that will not boot.
+      identity: Option[ServiceClient[F]] = None
   ): List[ServerEndpoint[Fs2Streams[F], F]] =
     // Two kinds of route, prefixed differently, and the difference is worth stating rather than
     // discovering. The gateway's own endpoints are built from `GatewayEndpoints.base`, which already
@@ -69,7 +74,14 @@ object GatewayApi {
     // that parameter, so an endpoint requiring nothing fits wherever one that may require streaming does.
     BasePath.prefixAll(GatewayEndpoints.ApiPrefix, HealthEndpoints.probes[F](readiness)) ++
       InfoRoutes[F](config.server, config.gateway) ++
-      AuthRoutes[F](sessions, config.rbac) ++
+      AuthRoutes[F](
+        sessions,
+        config.rbac,
+        config.auth,
+        identity,
+        BasePath.normalize(config.server.basePath),
+        config.secureCookies
+      ) ++
       // The capability, proxy and documentation routes the composition root builds, which need
       // components (the registry, the service clients) that this module must not construct itself.
       extra ++
@@ -89,6 +101,15 @@ object GatewayApi {
 final case class GatewayServiceConfigView(
     server: ServerConfig,
     gateway: GatewayConfig,
+    // Which kind of sign-in this deployment uses, which `GET /auth/settings` answers and `GET /auth/me`
+    // reports. The gateway answers both from its own configuration rather than by asking the identity
+    // service: a login screen that cannot render while the service behind the login is down is a product
+    // that disappears exactly when an operator needs to see why.
+    auth: AuthConfig,
+    // Whether the session cookie is marked `Secure`. It follows `kui.server.devInsecureCookies`, and the
+    // sign-in routes need it because they issue the cookie themselves rather than letting the session
+    // middleware stamp it.
+    secureCookies: Boolean,
     // What `GET /auth/me` answers with, so that the browser hides exactly the controls the edge would
     // refuse. It is the same `RbacPolicy` value the edge's own check reads, from the same configuration:
     // a second policy here would be a second answer to "may I", and the interface would be wrong in

@@ -1,6 +1,6 @@
 package kui.gateway.app
 
-import kui.config.{GatewayConfig, KuiConfig, ServerConfig, TelemetryConfig}
+import kui.config.{AuthConfig, GatewayConfig, KuiConfig, ServerConfig, TelemetryConfig}
 import kui.gateway.api.GatewayServiceConfigView
 import kui.kernel.ClusterId
 import kui.security.rbac.{ClusterFlags, RbacPolicy}
@@ -25,6 +25,10 @@ import kui.security.rbac.{ClusterFlags, RbacPolicy}
   *   the upstream services, the readiness poll interval, the principal signing keys and the CORS posture
   * @param telemetry
   *   the exporters and the log format
+  * @param auth
+  *   how people sign in to KUI itself: `disabled`, a login form, or an OpenID Connect provider. Nothing about
+  *   a Kafka cluster's own credentials lives here (ADR-022 owns those), and keeping the two in different
+  *   sections is the cheapest defence against a product that hands a browser its broker password
   * @param rbac
   *   the deployment's roles, which the edge's permission check applies to every proxied call. A deployment
   *   that has configured none gets `RbacPolicy.Disabled`, which allows everything except what a read-only
@@ -36,6 +40,7 @@ final case class GatewayServiceConfig(
     server: ServerConfig,
     gateway: GatewayConfig,
     telemetry: TelemetryConfig,
+    auth: AuthConfig,
     rbac: RbacPolicy,
     clusterFlags: Map[ClusterId, ClusterFlags]
 ) {
@@ -47,7 +52,8 @@ final case class GatewayServiceConfig(
     * signature then says which settings assembling a route list actually involves — not the telemetry
     * exporters, and not the signing keys.
     */
-  def view: GatewayServiceConfigView = GatewayServiceConfigView(server, gateway, rbac)
+  def view: GatewayServiceConfigView =
+    GatewayServiceConfigView(server, gateway, auth, !gateway.devInsecureCookies, rbac)
 }
 
 object GatewayServiceConfig {
@@ -58,6 +64,7 @@ object GatewayServiceConfig {
       config.server,
       config.gateway,
       config.telemetry,
+      config.auth,
       config.rbac,
       // Only the flag, not the cluster. The gateway holds no cluster state (ADR-004) and this is not a
       // step towards holding some: read-only is a fact about the deployment's own configuration file,

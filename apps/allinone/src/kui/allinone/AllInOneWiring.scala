@@ -10,10 +10,20 @@ import org.typelevel.log4cats.StructuredLogger
 
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
-import kui.config.{ClusterConfig, ConsumersConfig, StreamingConfig, TopicsConfig, UrlPolicy}
+import kui.config.{
+  AuthConfig,
+  ClusterConfig,
+  ConsumersConfig,
+  StoreConfig,
+  StreamingConfig,
+  TopicsConfig,
+  UrlPolicy
+}
 import kui.consumer.api.ConsumerApi
 import kui.consumer.app.ConsumerWiring
 import kui.gateway.api.InfoRoutes
+import kui.identity.api.IdentityApi
+import kui.identity.app.IdentityWiring
 import kui.gateway.app.{GatewayServer, GatewayWiring}
 import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.kernel.ServiceId
@@ -23,6 +33,7 @@ import kui.schema.api.SchemaApi
 import kui.schema.app.SchemaWiring
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
+import kui.security.rbac.RbacPolicy
 import kui.topic.api.TopicApi
 import kui.topic.app.TopicWiring
 
@@ -116,6 +127,9 @@ object AllInOneWiring {
         config.topics,
         config.consumers,
         config.streaming,
+        config.auth,
+        config.rbac,
+        config.store,
         telemetry,
         principals,
         logger
@@ -141,7 +155,7 @@ object AllInOneWiring {
     * `AllInOneWiringSuite` asserts that it does rather than leaving the two to drift.
     */
   val Services: List[ServiceId] =
-    List(ClusterApi.Id, ConsumerApi.Id, MessageApi.Id, SchemaApi.Id, TopicApi.Id)
+    List(ClusterApi.Id, ConsumerApi.Id, IdentityApi.Id, MessageApi.Id, SchemaApi.Id, TopicApi.Id)
 
   /** Every KUI service, wired in this process and reachable in memory.
     *
@@ -156,6 +170,9 @@ object AllInOneWiring {
       topics: TopicsConfig,
       consumers: ConsumersConfig,
       streaming: StreamingConfig,
+      auth: AuthConfig,
+      rbac: RbacPolicy,
+      store: StoreConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -214,6 +231,12 @@ object AllInOneWiring {
       // network, and a stricter policy here than the one that accepted the address would mean a
       // registry KUI logged at startup and could never call.
       schemaEnvironment <- Resource.eval(Async[F].delay(sys.env))
+      // The identity service, which in a deployment with `kui.auth.type: disabled` — the default, and the
+      // demonstration environment — holds no accounts, opens no connection and answers `settings` with
+      // `disabled`. It is wired in every shape rather than only in the ones that authenticate, so that
+      // "this deployment has no login" is an answer the browser gets from a running service rather than a
+      // route that is missing in half the builds.
+      identityService <- IdentityWiring.make[F](auth, rbac, store, telemetry, principals, logger)
       schemaService <- SchemaWiring.make[F](
         clusters,
         UrlPolicy.fromEnv(schemaEnvironment),
@@ -251,6 +274,12 @@ object AllInOneWiring {
           SchemaApi.Id,
           schemaService.routes,
           schemaService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          IdentityApi.Id,
+          identityService.routes,
+          identityService.interceptors,
           principals
         )
       )

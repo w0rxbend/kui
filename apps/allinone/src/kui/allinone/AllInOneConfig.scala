@@ -2,6 +2,7 @@ package kui.allinone
 
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
+  AuthConfig,
   ClusterConfig,
   ConsumersConfig,
   GatewayConfig,
@@ -13,6 +14,7 @@ import kui.config.{
   TopicsConfig
 }
 import kui.gateway.app.GatewayServiceConfig
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 
 /** Everything the all-in-one process reads out of the configuration, and nothing else.
   *
@@ -52,6 +54,12 @@ import kui.gateway.app.GatewayServiceConfig
   * @param streaming
   *   the key browse cursors and reset plan tokens are signed with. One process signs both, and both are
   *   handed to a browser and taken back, so it is carried here rather than left to each service to invent
+  * @param auth
+  *   how people sign in to KUI itself. Carried for the same reason as `clusters`: the identity service runs
+  *   in this JVM, and in this shape there is no separate process to read it
+  * @param rbac
+  *   the deployment's roles, read by the identity service when it resolves somebody's roles at sign-in and by
+  *   the gateway when it answers what the caller may do. One policy, one file, two readers in one process
   */
 final case class AllInOneConfig(
     server: ServerConfig,
@@ -61,7 +69,9 @@ final case class AllInOneConfig(
     store: StoreConfig,
     topics: TopicsConfig,
     consumers: ConsumersConfig,
-    streaming: StreamingConfig
+    streaming: StreamingConfig,
+    auth: AuthConfig,
+    rbac: RbacPolicy
 ) {
 
   /** The same settings in the shape `GatewayWiring` wants.
@@ -71,7 +81,17 @@ final case class AllInOneConfig(
     * service clients directly and never reads `gateway.services`, so leaving the configured URLs in place
     * cannot cause a connection.
     */
-  def gatewayView: GatewayServiceConfig = GatewayServiceConfig(server, gateway, telemetry)
+  def gatewayView: GatewayServiceConfig =
+    GatewayServiceConfig(
+      server,
+      gateway,
+      telemetry,
+      auth,
+      rbac,
+      // The same derivation the distributed gateway makes from the same list: read-only is a fact about
+      // this deployment's own configuration file, known before any broker is contacted.
+      clusters.map(cluster => cluster.id -> ClusterFlags(cluster.readOnly)).toMap
+    )
 
   /** The same settings in the shape `ClusterWiring` wants.
     *
@@ -101,7 +121,9 @@ object AllInOneConfig {
       config.store,
       config.topics,
       config.consumers,
-      config.streaming
+      config.streaming,
+      config.auth,
+      config.rbac
     )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry

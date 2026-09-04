@@ -303,13 +303,30 @@ object SessionMiddleware {
       }
     )
 
+  /** Appends the session cookie, unless the route already set one of its own.
+    *
+    * The exception is the sign-in routes. Signing in *replaces* the session — a new id and a new CSRF secret,
+    * which is ADR-019's session-fixation defence — so the cookie that has to reach the browser is not the one
+    * this request arrived with, and that is the only one this interceptor knows about. `AuthRoutes` therefore
+    * declares the cookie as an output of those endpoints and this step stands aside, because two `Set-Cookie`
+    * headers for one name is a browser-dependent coin toss over which session the operator ends up in.
+    */
   private def stampCookie[B](
       response: sttp.tapir.server.model.ServerResponse[B],
       session: Session,
       basePath: String,
       secure: Boolean
   ): sttp.tapir.server.model.ServerResponse[B] =
-    response.copy(headers =
-      response.headers :+ Header("Set-Cookie", setCookie(session, basePath, secure).toString)
+    if alreadyCarriesSessionCookie(response) then response
+    else
+      response.copy(headers =
+        response.headers :+ Header("Set-Cookie", setCookie(session, basePath, secure).toString)
+      )
+
+  private def alreadyCarriesSessionCookie[B](
+      response: sttp.tapir.server.model.ServerResponse[B]
+  ): Boolean =
+    response.headers.exists(header =>
+      header.name.equalsIgnoreCase("Set-Cookie") && header.value.startsWith(s"$CookieName=")
     )
 }

@@ -10,7 +10,7 @@ import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.model.Uri
 import sttp.tapir.server.ServerEndpoint
 
-import kui.config.{GatewayConfig, ServerConfig}
+import kui.config.{AuthConfig, GatewayConfig, ServerConfig}
 import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig, SessionStore}
 import kui.http.health.ReadinessCheck
@@ -89,6 +89,8 @@ object GatewayTestServer {
     GatewayServiceConfigView(
       ServerConfig(Host.unsafe("localhost"), Port.unsafe(0), basePath),
       GatewayConfig.Default,
+      AuthConfig.Default,
+      secureCookies = true,
       RbacPolicy.Disabled
     )
 

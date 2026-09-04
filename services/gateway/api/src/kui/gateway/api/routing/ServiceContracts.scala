@@ -61,6 +61,19 @@ object ServiceContracts {
       ServiceId.unsafe("schema") -> (SchemaEndpoints.all ++ SchemaMutationEndpoints.all)
     )
 
+  /** The identity service is **deliberately absent** from the map above, and must stay absent.
+    *
+    * Every other service's contract becomes a public route by being proxied: the prefix is rewritten and the
+    * inputs are forwarded. A login cannot work that way. It is the moment a browser is given a session — a
+    * new id, a new CSRF secret, a `Set-Cookie` — and all three of those live at the gateway, so a proxied
+    * `/api/v1/identity/login` would answer with a principal in a JSON body and set no cookie: a login that
+    * logs nobody in. Worse, it would be a *second* way to reach the identity service's endpoints, past the
+    * session handling and past the CSRF check that `AuthRoutes` goes through.
+    *
+    * `AuthRoutes` serves `/api/v1/auth/...` itself and calls the identity service one hop inward, through the
+    * very same published contract values (ADR-041 rule A4). Adding an entry here would not extend that; it
+    * would undermine it.
+    */
   def of(service: ServiceId): List[AnyEndpoint] = byService.getOrElse(service, Nil)
 
   /** Endpoints the gateway serves **itself**, as an aggregation, and must therefore not derive a proxy route

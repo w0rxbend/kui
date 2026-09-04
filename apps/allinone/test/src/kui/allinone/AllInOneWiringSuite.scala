@@ -10,11 +10,13 @@ import cats.syntax.all.*
 
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
+  AuthConfig,
   ConsumersConfig,
   GatewayConfig,
   PrincipalKeyConfig,
   SafeUrl,
   ServerConfig,
+  StoreConfig,
   StreamingConfig,
   TopicsConfig,
   UpstreamServiceConfig
@@ -24,6 +26,7 @@ import kui.gateway.app.GatewayServer
 import kui.http.KuiServer
 import kui.kernel.{Host, Port, PositiveInt, Secret, ServiceId}
 import kui.observability.Telemetry
+import kui.security.rbac.RbacPolicy
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -95,6 +98,9 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           topics = TopicsConfig.Default,
           consumers = ConsumersConfig.Default,
           streaming = StreamingConfig.Default,
+          auth = AuthConfig.Default,
+          rbac = RbacPolicy.Disabled,
+          store = StoreConfig.Default,
           Telemetry.noop[IO],
           AllInOneFixture.principals,
           logger
@@ -185,7 +191,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         .map { entries =>
           val context = entries.headOption.map(_.context).getOrElse(Map.empty)
           assertEquals(context.get("deployment"), Some("all-in-one"))
-          assertEquals(context.get("services"), Some("cluster,consumer,message,topic"))
+          assertEquals(context.get("services"), Some("cluster,consumer,identity,message,schema,topic"))
         }
     }
   }
