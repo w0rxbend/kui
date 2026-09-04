@@ -44,15 +44,15 @@ final class BuiltinSerdesSuite extends KuiSuite {
     UuidSerde[IO] -> Gen.uuid.map(_.toString),
     JsonSerde[IO] -> Gen.const("""{"a":1,"b":["x"]}"""),
     StringSerde[IO] -> Arbitrary.arbitrary[String],
-    Base64Serde[IO] -> Gen.listOf(Arbitrary.arbitrary[Byte]).map(bs =>
-      java.util.Base64.getEncoder.encodeToString(bs.toArray)
-    ),
+    Base64Serde[IO] -> Gen
+      .listOf(Arbitrary.arbitrary[Byte])
+      .map(bs => java.util.Base64.getEncoder.encodeToString(bs.toArray)),
     HexSerde[IO] -> Gen.listOf(Arbitrary.arbitrary[Byte]).map(bs => HexSerde.toHex(bs.toArray))
   )
 
   cases.foreach { (serde, valid) =>
     property(s"${serde.name.value} round-trips every value it accepts") {
-      forAll(valid) { text => roundTrip(serde, text) == Right(text) }
+      forAll(valid)(text => roundTrip(serde, text) == Right(text))
     }
   }
 
@@ -180,7 +180,9 @@ final class BuiltinSerdesSuite extends KuiSuite {
   property("hex is lowercase, unseparated and exactly two characters per byte") {
     forAll { (bytes: Array[Byte]) =>
       val text = decode(HexSerde[IO], bytes).map(_.text)
-      text.exists(t => t.length == bytes.length * 2 && t == t.toLowerCase && t.forall("0123456789abcdef".contains(_)))
+      text.exists(t =>
+        t.length == bytes.length * 2 && t == t.toLowerCase && t.forall("0123456789abcdef".contains(_))
+      )
     }
   }
 
