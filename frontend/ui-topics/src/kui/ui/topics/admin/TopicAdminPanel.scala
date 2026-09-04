@@ -164,21 +164,20 @@ object TopicAdminPanel {
         // Both halves are gated, the preview as well as the confirmation: composing a change the server
         // will refuse is the failure mode, and it happens at the first click, not the last.
         ActionPermissionWrapper(
-          action =
-            Button(
-              label = Val(Messages.Preview),
-              onClick = Observer[Unit] { _ =>
-                target.now().trim.toIntOption.filter(_ > 0) match {
-                  case None => problem.set(Some(Messages.AddPartitionsInvalid))
-                  case Some(count) =>
-                    problem.set(None)
-                    step.set(ChangeStep.Planning)
-                    planning.set(Some(count))
-                }
-              },
-              disabled = step.signal.map(isBusy),
-              testId = Some("topic-partitions-plan")
-            ),
+          action = Button(
+            label = Val(Messages.PreviewPartitions),
+            onClick = Observer[Unit] { _ =>
+              target.now().trim.toIntOption.filter(_ > 0) match {
+                case None => problem.set(Some(Messages.AddPartitionsInvalid))
+                case Some(count) =>
+                  problem.set(None)
+                  step.set(ChangeStep.Planning)
+                  planning.set(Some(count))
+              }
+            },
+            disabled = step.signal.map(isBusy),
+            testId = Some("topic-partitions-plan")
+          ),
           capability = capability,
           permitted = permitted,
           testId = Some("topic-partitions-plan-gate")
@@ -282,7 +281,7 @@ object TopicAdminPanel {
       p(cls := TopicsCss.FormHint, Messages.PurgeHint),
       ActionPermissionWrapper(
         action = Button(
-          label = Val(Messages.Preview),
+          label = Val(Messages.PreviewPurge),
           onClick = Observer[Unit] { _ =>
             problem.set(None)
             receipt.set(None)
@@ -403,7 +402,7 @@ object TopicAdminPanel {
       // than a disabled button that says why.
       ActionPermissionWrapper(
         action = Button(
-          label = Val(Messages.Preview),
+          label = Val(Messages.PreviewDelete),
           onClick = Observer[Unit] { _ =>
             problem.set(None)
             step.set(ChangeStep.Planning)

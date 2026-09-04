@@ -199,7 +199,17 @@ object Messages {
 
   val Cancel: String = "Cancel"
   val Remove: String = "Remove"
-  val Preview: String = "Preview"
+
+  /** The three preview buttons in the danger panel used to carry this one word.
+    *
+    * Three buttons reading "Preview", in the same variant, stacked one above the other: the control that
+    * grows a topic and the control that destroys it were indistinguishable without reading the paragraph
+    * above each. A button's label should say what pressing it is a step towards, so each one now names its
+    * own change.
+    */
+  val PreviewPartitions: String = "Preview the new partitions"
+  val PreviewPurge: String = "Preview what emptying deletes"
+  val PreviewDelete: String = "Preview what deleting removes"
 
   // Creating a topic
 

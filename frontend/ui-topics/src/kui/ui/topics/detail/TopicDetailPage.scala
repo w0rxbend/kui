@@ -123,6 +123,26 @@ object TopicDetailPage {
       * irreversible action, and an element rebuilt from each new snapshot is one that can be replaced in the
       * same instant its receipt arrives.
       */
+    /** Whether the irreversible controls should be on screen at all.
+      *
+      * Two reasons they might not be. The first is that there is no such topic: `/topics/new` and any other
+      * unrecognised segment land on this page with that segment as the topic name, and the page used to
+      * answer "there is no topic called 'new'" and then render, underneath that sentence, a working "Delete
+      * this topic". A destructive control for a resource the page has just said does not exist is the worst
+      * kind of dead control, so the panel is hidden whenever the topic is missing — except once the topic has
+      * been deleted from this very page, where the panel is holding the operator's only receipt.
+      *
+      * The second is that another tab is open. The panel is rendered after the tab strip and so used to
+      * appear under every tab, including the Consumers tab a guest feature contributes: a heading about
+      * changes that cannot be undone, below a table of consumer groups. It belongs to the overview.
+      */
+    val adminVisible: Signal[Boolean] =
+      Signal
+        .combine(notFound, deleted.signal, selected.signal)
+        .map((missingTopic, wasDeleted, openTab) =>
+          wasDeleted || (!missingTopic && openTab == TopicTab.OverviewId)
+        )
+
     val adminPanel: HtmlElement = TopicAdminPanel(
       topic = topic,
       partitionCount = detail.map(_.map(_.row.partitionCount)),
@@ -142,7 +162,7 @@ object TopicDetailPage {
       // next — purging a queue that has backed up is a normal day; deleting the topic is not.
       editPermitted = permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicEdit),
       purgePermitted = permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicMessagesDelete)
-    )
+    ).amend(cls(TopicsCss.Hidden) <-- adminVisible.map(visible => !visible))
 
     val ownTabs: Signal[List[Tab]] =
       // A thunk per tab, so the Settings tab's query is not issued until somebody opens it. That laziness is
@@ -198,9 +218,12 @@ object TopicDetailPage {
       // for this purpose, so a renamed segment breaks the build rather than the link.
       a(
         cls := TopicsCss.BrowseLink,
-        // Hidden once the topic has been deleted from this page: the browser it points at would open on a
-        // topic that no longer exists, and a link that is certain to fail is worse than no link.
-        cls(TopicsCss.Hidden) <-- deleted.signal,
+        // Hidden once the topic has been deleted from this page, and hidden when there is no such topic to
+        // begin with: the browser it points at would open on a topic that does not exist, and a link that is
+        // certain to fail is worse than no link.
+        cls(TopicsCss.Hidden) <-- Signal
+          .combine(deleted.signal, notFound)
+          .map((wasDeleted, missingTopic) => wasDeleted || missingTopic),
         dataAttr("testid") := "topic-browse-messages",
         href := browseHref(backHref, cluster, topic),
         Messages.BrowseMessages

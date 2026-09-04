@@ -18,7 +18,7 @@ import kui.kernel.{BrokerId, ClusterId, PartitionId, TopicName}
 import kui.topic.contract.dto.{TopicConfigResponse, TopicConfigViewDto}
 import kui.ui.kernel.api.{ApiClient, ApiError}
 import kui.ui.kernel.component.DataTable
-import kui.ui.topics.{Messages, TopicTab, TopicsQueries}
+import kui.ui.topics.{Messages, TopicTab, TopicsCss, TopicsQueries}
 
 /** The topic detail page, the partition table and the settings tab, in a document.
   *
@@ -264,6 +264,33 @@ final class TopicDetailPageSuite extends FunSuite {
       assert(missing.textContent.contains("orders"), missing.textContent)
       assertEquals(optionalTestId(root, "topic-error"), None)
       assertEquals(byTestId(root, "topic-heading").textContent, "orders")
+    }
+  }
+
+  private def dangerZoneHidden(root: dom.Element): Boolean =
+    byTestId(root, "topic-danger-zone").classList.contains(TopicsCss.Hidden)
+
+  test("thereIsNoDangerZoneForATopicThatDoesNotExist") {
+    // `/topics/new` — and any other unrecognised segment — lands here with that segment as the topic name.
+    // The page said "there is no topic called 'new'" and then offered a working Delete this topic under it.
+    val fixture = new Fixture
+    mounted(fixture) { root =>
+      fixture.api.refuse(ApiError.Envelope(ErrorCode.TopicNotFound.wire, "no such topic", Nil, "c-1", false))
+      assert(dangerZoneHidden(root), root.outerHTML)
+      // And no link into a message browser for a topic that is not there.
+      val browse = byTestId(root, "topic-browse-messages")
+      assert(browse.classList.contains(TopicsCss.Hidden), browse.getAttribute("class"))
+    }
+  }
+
+  test("theDangerZoneBelongsToTheOverviewAndNotToEveryTab") {
+    val fixture = new Fixture
+    mounted(fixture) { root =>
+      fixture.api.send(Section.Ok(detail(), fetchedAt))
+      assert(!dangerZoneHidden(root), "the overview should show the irreversible controls")
+      // The Consumers tab is contributed by another feature, so its id is that feature's.
+      fixture.tab.set(TopicTab("consumers"))
+      assert(dangerZoneHidden(root), root.outerHTML)
     }
   }
 
