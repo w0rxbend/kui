@@ -58,6 +58,12 @@ object Versions {
   // module, so KUI names the version rather than letting resolution pick.
   val protobuf        = "4.36.1"
   val cel             = "0.14.0"
+  // Apache Avro, and only Apache Avro: the Confluent wire format is a magic byte, a schema id and a
+  // body, and decoding the body needs the writer's schema and a generic reader, both of which Avro
+  // itself provides under Apache-2.0. See `libs/serde-confluent`'s header for what that buys.
+  val avro            = "1.12.2"
+  // Draft 2020-12 validation for the JSON Schema serde, Apache-2.0, on Maven Central.
+  val jsonSchemaValidator = "3.0.7"
   val nimbus          = "10.9.1"
   val bouncycastle    = "1.85"
   val munit           = "1.3.6"
@@ -527,7 +533,12 @@ object libs extends Module {
     * ADR-008 and ADR-009 keep out.
     */
   object observability extends KuiPureModule with KuiJvmModule {
-    def moduleDeps = Seq(kernel.jvm, config)
+    // `securityCore.jvm` is here for one type: `AuditSink` and the `MutationRecord` it takes.
+    // `LoggingAuditSink` — the structured-log implementation all three mutating services share — needs
+    // both that port and log4cats, and log4cats is this module's. Putting it here rather than in
+    // `security-core` keeps `security-core` pure and cross-compiled, which it must stay because the
+    // browser links it (rule A6). One edge, libs to libs, in the direction libraries already point.
+    def moduleDeps = Seq(kernel.jvm, config, securityCore.jvm)
 
     def mvnDeps = Seq(
       mvn"org.typelevel::cats-core::${Versions.cats}",
@@ -602,6 +613,70 @@ object libs extends Module {
 
       def mvnDeps = super.mvnDeps() ++ Seq(
         mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+      )
+    }
+  }
+
+  /** The Schema-Registry half of the bytes-to-text boundary (ADR-014): the registry client, its two
+    * caches, and the Avro / JSON Schema serdes that plug into `libs/serde`'s `SerdeFactory` seam.
+    *
+    * Kept out of `libs/serde` because it is the module with a network dependency. `libs/serde` is a
+    * pile of pure functions that a deployment with no registry still uses for every topic of JSON,
+    * text and integers; this one owns an HTTP client, a circuit breaker and a schema cache, and is
+    * therefore an optional runtime dependency rather than something every service links.
+    *
+    * **On the name, and on what is not here.** ADR-014 chose to wrap Confluent's own
+    * `kafka-avro-serializer`, `kafka-protobuf-serializer` and `kafka-json-schema-serializer`. That
+    * turned out to be unnecessary for two of the three formats and impossible to do cheaply for the
+    * third, and the licence check ADR-014 flagged as open is the reason the difference matters:
+    *
+    *   - `io.confluent:kafka-avro-serializer` and `kafka-schema-registry-client` are Apache-2.0, but
+    *     they are published only on `packages.confluent.io`, not Maven Central, and everything they
+    *     add over `org.apache.avro:avro` is a registry client and a cache — which is exactly what
+    *     this module already has to own (the caches are ADR-016's, and the HTTP client has to be
+    *     `libs/http`'s so the registry gets KUI's circuit breaker and failover rather than its own).
+    *   - `kafka-protobuf-serializer`, `kafka-protobuf-provider`, `kafka-json-schema-serializer` and
+    *     `kafka-json-schema-provider` 8.3.1 declare the **Confluent Community License** first and
+    *     Apache-2.0 second. CCL permits self-hosted use and forbids offering the software as a
+    *     competing managed service, so it is a licence a KUI *operator* can accept and not one KUI
+    *     can adopt on their behalf without saying so.
+    *
+    * So Avro and JSON Schema are implemented here against Apache-2.0 libraries from Maven Central and
+    * carry no Confluent code at all. Protobuf is the one format with no Apache-licensed dynamic
+    * decoder — decoding needs a `.proto` parser and a descriptor builder — and is deliberately not
+    * implemented: a Protobuf payload decodes to a named failure rather than to silence, so a user
+    * sees why. Adding it is a build change (the Confluent repository) plus a licence decision, and
+    * ADR-014 Amendment 1 records both.
+    */
+  object serdeConfluent extends KuiPureModule with KuiJvmModule {
+
+    // Mill names a module's directory after the Scala identifier; ARCHITECTURE.md ss16 spells library
+    // directories with a dash, and the directory is what a person navigates.
+    override def moduleDir = mill.api.BuildCtx.workspaceRoot / "libs" / "serde-confluent"
+
+    def moduleDeps = Seq(kernel.jvm, serde, cache, config, http, observability)
+
+    def mvnDeps = Seq(
+      mvn"org.apache.avro:avro:${Versions.avro}",
+      mvn"com.networknt:json-schema-validator:${Versions.jsonSchemaValidator}",
+      mvn"org.typelevel::cats-core::${Versions.cats}",
+      mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+      mvn"io.circe::circe-core::${Versions.circe}",
+      mvn"io.circe::circe-parser::${Versions.circe}",
+      mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+      mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+      mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+    )
+
+    object test extends ScalaTests with KuiTests {
+      def moduleDeps = super.moduleDeps ++ Seq(testkit.jvm)
+
+      def mvnDeps = super.mvnDeps() ++ Seq(
+        mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+        // The registry is stubbed rather than run: every promise this module makes about a registry
+        // that answers 404, answers rubbish or does not answer at all is a promise about a response,
+        // and a real registry is the slowest possible way to produce one.
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}"
       )
     }
   }
