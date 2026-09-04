@@ -8,7 +8,7 @@ import kui.cache.{BoundedCache, CacheMetrics}
 import kui.config.SafeUrl
 import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, TopicName}
-import kui.serde.{DeserializeResult, PayloadKind, Serde, SerdeName, Target}
+import kui.serde.{DeserializeResult, PayloadKind, Serde, Target}
 import kui.testkit.KuiIOSuite
 
 /** The serde end to end, against a registry that is a `Map` rather than a server.
@@ -130,16 +130,33 @@ final class SchemaRegistrySerdeSuite extends KuiIOSuite {
     } yield assertEquals(result.map(_.text), Right("""{"unexpected":true}"""))
   }
 
-  test("a Protobuf record is reported by name, with the reason, rather than rendered as nonsense") {
+  test("a Protobuf record decodes against the .proto text the registry returned") {
+    // The body is Confluent's Protobuf framing: `00` for "the first message of the schema", then
+    // `0a 03 6f 2d 31` — field 1, length-delimited, three bytes, "o-1".
+    val body = Array[Byte](0, 0x0a, 0x03, 'o'.toByte, '-'.toByte, '1'.toByte)
     for {
       calls <- Ref.of[IO, Int](0)
-      result <- decode(fake(Map(13 -> protobufSchema), Map.empty, calls), WireFormat.frame(13, Array[Byte](8, 1)))
+      result <- decode(fake(Map(13 -> protobufSchema), Map.empty, calls), WireFormat.frame(13, body))
     } yield result match {
-      case Left(failure) =>
-        assertEquals(failure.serde, SerdeName.SchemaRegistry)
-        assert(failure.cause.contains("Protobuf"), failure.cause)
-        assert(failure.cause.contains("Confluent Community License"), failure.cause)
-      case Right(decoded) => fail(s"expected a refusal, got $decoded")
+      case Right(decoded) =>
+        assert(decoded.text.contains("\"id\""), decoded.text)
+        assert(decoded.text.contains("o-1"), decoded.text)
+      case Left(failure) => fail(s"expected a decoded record, got ${failure.cause}")
+    }
+  }
+
+  test("producing a Protobuf record is refused before the write, with the reason") {
+    // Reading Protobuf works; writing it does not, and a record KUI encoded wrongly would outlive the
+    // mistake in the topic. The refusal happens before anything is sent.
+    for {
+      calls <- Ref.of[IO, Int](0)
+      registry = fake(Map(13 -> protobufSchema), Map(s"${topic.value}-value" -> protobufSchema), calls)
+      written <- serde(registry).use(
+        _.serializer(topic, Target.Value, Map.empty).flatMap(_.serialize("""{"id":"o-1"}""", Nil))
+      )
+    } yield written match {
+      case Left(failure) => assert(failure.cause.contains("cannot yet write"), failure.cause)
+      case Right(_) => fail("expected the write to be refused")
     }
   }
 

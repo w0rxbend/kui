@@ -13,15 +13,14 @@ import kui.serde.*
   *
   * Parsing is the expensive half of decoding — an Avro schema of a few hundred fields costs far more to parse
   * than one record costs to read — and a schema id is immutable, so a parsed schema is valid for as long as
-  * the process runs. The three cases are the three registry schema languages; `Protobuf` carries only its
-  * source text because KUI has no dynamic Protobuf decoder (see the module header in `build.mill`), and
-  * keeping the case rather than dropping it is what lets the failure message name the format instead of
-  * saying "unknown".
+  * the process runs. The three cases are the three registry schema languages; `Protobuf` carries the field table `ProtoSchema` parsed out of the registry's `.proto` text, which is
+  * where the expense is: the wire format names field *numbers*, so every record has to be read against that
+  * table and none of it can be recovered from the bytes.
   */
 enum ParsedSchema {
   case Avro(schema: org.apache.avro.Schema)
   case Json(schema: JsonSchemaDocument)
-  case Protobuf(definition: String)
+  case Protobuf(schema: ProtoFile)
 }
 
 /** The Schema-Registry serde: `SerdeName.SchemaRegistry`, as `libs/serde` has always named it.
@@ -59,9 +58,9 @@ object SchemaRegistrySerde {
 
   private val Summary: String =
     "Decodes payloads written with a Confluent Schema Registry header - one magic byte, the schema id, " +
-      "then the body - by fetching that exact schema from the registry and using it. Avro and JSON Schema " +
-      "are supported; Protobuf payloads are recognised and reported rather than decoded. Schemas are " +
-      "cached by id, which is safe because a registry never reissues an id."
+      "then the body - by fetching that exact schema from the registry and using it. Avro, JSON Schema " +
+      "and Protobuf all decode. Schemas are cached by id, which is safe because a registry never " +
+      "reissues an id."
 
   def apply[F[_]: Async](
       registry: SchemaRegistry[F],
@@ -161,7 +160,11 @@ object SchemaRegistrySerde {
                 .decode(framed.body)
                 .map(text => enrich(DeserializeResult.json(text), found, topic, target))
                 .leftFlatMap(fail)
-            case Right(ParsedSchema.Protobuf(_)) => fail(protobufUnsupported(found.id))
+            case Right(ParsedSchema.Protobuf(schema)) =>
+              ProtobufPayload
+                .decode(schema, framed.body)
+                .map(text => enrich(DeserializeResult.json(text), found, topic, target))
+                .leftFlatMap(fail)
           }
       }
 
@@ -214,14 +217,12 @@ object SchemaRegistrySerde {
           AvroPayload.encode(schema, input).map(WireFormat.frame(found.id, _)).leftFlatMap(encodeFail)
         case Right(ParsedSchema.Json(schema)) =>
           JsonSchemaPayload.encode(schema, input).map(WireFormat.frame(found.id, _)).leftFlatMap(encodeFail)
-        case Right(ParsedSchema.Protobuf(_)) => encodeFail(protobufUnsupported(found.id))
+        case Right(ParsedSchema.Protobuf(_)) => encodeFail(protobufWriteUnsupported(found.id))
       }
 
-    /** Parses a schema, or returns the one already parsed.
-      *
-      * Only successes are cached, and a `Protobuf` schema counts as a success: it parses trivially (its
-      * parsed form is its text) and the refusal happens where the format is used, so the message can say
-      * whether the user was reading or writing.
+    /** Parses a schema, or returns the one already parsed. Only successes are cached: a schema KUI could not
+      * parse is a schema whose failure text has to be re-derived if the registry is ever fixed, and caching
+      * the failure would keep showing the old message after a corrected version was registered.
       */
     private def parseAndCache(found: RegistrySchema): F[Either[String, ParsedSchema]] = {
       val key = java.lang.Integer.valueOf(found.id)
@@ -231,7 +232,7 @@ object SchemaRegistrySerde {
           val attempt = found.schemaType match {
             case SchemaType.Avro => AvroPayload.parse(found.definition).map(ParsedSchema.Avro(_))
             case SchemaType.Json => JsonSchemaPayload.parse(found.definition).map(ParsedSchema.Json(_))
-            case SchemaType.Protobuf => Right(ParsedSchema.Protobuf(found.definition))
+            case SchemaType.Protobuf => ProtobufPayload.parse(found.definition).map(ParsedSchema.Protobuf(_))
           }
           attempt match {
             case Right(value) => parsed.put(key, value).as(attempt)
@@ -240,16 +241,18 @@ object SchemaRegistrySerde {
       }
     }
 
-    /** The one thing this module does not do, said plainly and with the reason.
+    /** The half of Protobuf support this module does not have, said plainly.
       *
-      * A record that renders as "unsupported" with a sentence is worth far more than one that renders as
-      * Base64 and leaves an operator to work out why. Decoding it needs a `.proto` parser and a descriptor
-      * builder, and the only maintained one is Confluent's, under the Confluent Community License.
+      * Reading is implemented (`ProtoSchema` and `ProtobufPayload`); writing is not. Encoding needs the
+      * reverse of the same table plus the canonical-JSON parsing rules for every scalar type, and getting
+      * that subtly wrong writes a malformed record into a topic that outlives the mistake — whereas getting
+      * a decode wrong shows one bad row on a screen. A named refusal before the write is the honest
+      * behaviour until the encoder is written and tested against real producers.
       */
-    private def protobufUnsupported(id: Int): String =
-      s"schema $id is a Protobuf schema, and KUI cannot decode Protobuf payloads yet: doing so needs a " +
-        "dynamic .proto parser, and the only maintained one is licensed under the Confluent Community " +
-        "License rather than Apache-2.0. Avro and JSON Schema payloads decode normally"
+    private def protobufWriteUnsupported(id: Int): String =
+      s"schema $id is a Protobuf schema, and KUI can read Protobuf records but cannot yet write one. " +
+        "Produce this record with a Protobuf-aware producer, or use a topic whose schema is Avro or " +
+        "JSON Schema"
 
     private def fail(cause: String): Either[DeserializeFailure, DeserializeResult] =
       Left(DeserializeFailure(name, cause))

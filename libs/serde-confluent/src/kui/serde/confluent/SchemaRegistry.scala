@@ -171,8 +171,12 @@ object SchemaRegistry {
     *   failover and the circuit breaker is already in it, which is why nothing in this file mentions any of
     *   them.
     * @param baseUrl
-    *   only the path and query of each request are built here; which host it goes to is the backend's
-    *   decision, because failover may send it to the second address.
+    *   the registry's address. Only its *origin* — scheme, host, port — is used to build a request, and any
+    *   path it carries is deliberately ignored here: `UpstreamClient` rebases every request onto the address
+    *   it chose and prefixes that address's own path (`Failover.rebase`), so a registry published under a
+    *   prefix such as `http://registry:8080/apis/ccompat/v7` would otherwise get the prefix twice and answer
+    *   404 to every lookup. Which host a request actually goes to is the backend's decision in any case,
+    *   because failover may send it to the second address.
     */
   def http[F[_]: Async](backend: Backend[F], baseUrl: SafeUrl, auth: SchemaRegistryAuth): SchemaRegistry[F] =
     new Http[F](backend, baseUrl, auth)
@@ -180,8 +184,12 @@ object SchemaRegistry {
   final private class Http[F[_]: Async](backend: Backend[F], baseUrl: SafeUrl, auth: SchemaRegistryAuth)
       extends SchemaRegistry[F] {
 
+    /** The origin of the configured address, with its path dropped for the reason given above. */
     private val root: Uri =
-      Uri.parse(baseUrl.value).getOrElse(uri"http://schema-registry.invalid")
+      Uri
+        .parse(baseUrl.value)
+        .getOrElse(uri"http://schema-registry.invalid")
+        .withPath(Nil)
 
     def schemaById(id: Int): F[Either[KuiError, RegistrySchema]] =
       get(root.addPath("schemas", "ids", id.toString)).map(_.flatMap {
