@@ -55,6 +55,11 @@ object Messages {
 
   val NotConfigured: String = "This deployment does not serve consumer groups for this cluster."
 
+  /** The heading over an answer that is not a failure: a refusal, or a service this deployment does not run.
+    * The sentence underneath says which one it is.
+    */
+  val RefusedTitle: String = "No consumer groups are shown here"
+
   // --- Columns and the state filter ------------------------------------------------------------
 
   val ColumnGroup: String = "Group"

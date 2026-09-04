@@ -103,7 +103,10 @@ object Messages {
   def brokersUnavailable(detail: String): String =
     s"This cluster's brokers could not be read: $detail"
 
-  val BrokersForbidden: String = "You do not have permission to see this cluster's brokers."
+  val BrokersForbiddenTitle: String = "You cannot see this cluster's brokers"
+  val BrokersForbidden: String =
+    "The request worked; the answer is that your account is not permitted to read the broker list on this " +
+      "cluster. Ask whoever administers KUI for the cluster's view permission."
 
   def brokerHeading(cluster: String, broker: Int): String = s"Broker $broker - $cluster"
 

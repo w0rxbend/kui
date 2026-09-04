@@ -199,6 +199,17 @@ class BrokersPageSuite extends FunSuite {
     }
   }
 
+  test("aForbiddenBrokerListIsAnEmptyStateAndNotAnAlert") {
+    val fixture = new Fixture
+    mounted(fixture) { root =>
+      fixture.api.brokers(Section.Forbidden)
+      // Its own test id, so a refusal and a genuine outage are no longer the same element to a test, and
+      // no `role="alert"`: nothing failed.
+      assert(Option(root.querySelector("[data-testid='brokers-forbidden']")).isDefined, root.outerHTML)
+      assertEquals(Option(root.querySelector("[data-testid='brokers-unavailable']")), None)
+    }
+  }
+
   test("anEmptyBrokerListRendersAnEmptyStateNotABlankTable") {
     val fixture = new Fixture
     mounted(fixture) { root =>

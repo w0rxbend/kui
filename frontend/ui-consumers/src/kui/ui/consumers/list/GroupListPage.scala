@@ -370,28 +370,46 @@ object GroupListPage {
         dataAttr("testid") := "groups-count",
         text <-- total.map(_.fold("")(Messages.groupCount))
       ),
+      // Secondary with the refresh icon, which is what the topic list and the cluster pages use. As a Ghost
+      // with no icon this was the one Refresh in the product that did not look like a button at all until
+      // the pointer was over it, so the same action had two different affordances one navigation apart.
       Button(
         label = Val(Messages.Refresh),
         onClick = Observer[Unit](_ => onRefresh()),
-        variant = ButtonVariant.Ghost,
+        variant = ButtonVariant.Secondary,
+        icon = Some(() => Icon.refresh),
         testId = Some("groups-refresh")
       )
     )
 
-  /** The rendering for a failed request with nothing held from before. */
+  /** The rendering for a request that produced no rows and nothing held from before.
+    *
+    * Two renderings, decided by whether asking again could possibly help. A permission refusal and an
+    * unconfigured service are not errors (ADR-032, and the rule the topic list states in its own `refusal`):
+    * the request worked and the answer is "no". Drawing those in the red alert box gave a screen reader a
+    * failure that had not happened and offered a "Try again" that was guaranteed to produce the identical
+    * answer — a button whose only effect is to teach the user that buttons do nothing.
+    */
   private def errorPanel(error: ApiError, retry: () => Unit): HtmlElement =
-    div(
-      cls := ConsumersCss.Error,
-      dataAttr("testid") := "groups-error",
-      role := "alert",
-      p(error.userMessage),
-      Button(
-        label = Val(Messages.TryAgain),
-        onClick = Observer[Unit](_ => retry()),
-        variant = ButtonVariant.Primary,
-        testId = Some("groups-retry")
+    if error.isRetryable then
+      div(
+        cls := ConsumersCss.Error,
+        dataAttr("testid") := "groups-error",
+        role := "alert",
+        p(error.userMessage),
+        Button(
+          label = Val(Messages.TryAgain),
+          onClick = Observer[Unit](_ => retry()),
+          variant = ButtonVariant.Primary,
+          testId = Some("groups-retry")
+        )
       )
-    )
+    else
+      EmptyState(
+        Messages.RefusedTitle,
+        description = Some(error.userMessage),
+        testId = Some("groups-refused")
+      )
 
   /** When the rows in a section were fetched. `Unavailable` has no rows and therefore no time. */
   private def fetchedAtOf(section: Section[GroupPageDto]): Option[Instant] = section match {

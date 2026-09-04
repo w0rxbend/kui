@@ -156,13 +156,16 @@ object BrokersPage {
             p(Messages.brokersUnavailable(message))
           )
         )
+      // A refusal is not an error and must not be drawn as one (ADR-032, and the same rule the topic list
+      // states in `refusal`). The request worked; the answer is "not for you". Drawing it in the error box
+      // with `role="alert"` made a screen reader announce a failure that had not happened, and sharing the
+      // `brokers-unavailable` test id with the genuine outage meant a test could not tell the two apart.
       case Section.Forbidden =>
         Some(
-          div(
-            cls := ClustersCss.Error,
-            dataAttr("testid") := "brokers-unavailable",
-            role := "alert",
-            p(Messages.BrokersForbidden)
+          EmptyState(
+            Messages.BrokersForbiddenTitle,
+            description = Some(Messages.BrokersForbidden),
+            testId = Some("brokers-forbidden")
           )
         )
       case _ => None
