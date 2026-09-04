@@ -8,6 +8,7 @@ import munit.CatsEffectSuite
 import sttp.client4.*
 
 import kui.contracts.KuiEndpoint
+import kui.http.principal.PrincipalVerification
 import kui.kernel.{ServiceId, UserName}
 import kui.observability.MetricNames
 import kui.security.{PrincipalKind, RequestDigest}

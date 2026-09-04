@@ -2,11 +2,7 @@ package kui.consumer.domain
 
 import java.time.Instant
 
-import kui.kernel.{
-  GroupId,
-  Offset,
-  TopicPartition
-}
+import kui.kernel.{GroupId, Offset, TopicPartition}
 
 /** Every rule of KIP-122, and every rule the reference products learned, in one pure function.
   *

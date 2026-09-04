@@ -10,10 +10,11 @@ import sttp.capabilities.fs2.Fs2Streams
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
-import kui.cluster.api.{ClusterApi, PrincipalVerification}
+import kui.cluster.api.ClusterApi
 import kui.cluster.domain.ClockPort
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
+import kui.http.principal.PrincipalVerification
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 

@@ -1,4 +1,4 @@
-package kui.cluster.api
+package kui.http.principal
 
 import cats.Monad
 import cats.effect.kernel.Clock
@@ -23,8 +23,8 @@ import kui.security.{
   *
   * Verifying a signed principal needs two facts that are properties of the HTTP request rather than of the
   * token: which call it covers, and which correlation id the answer should carry. Both are read off the
-  * request once, by an extractor in [[ClusterApi]], and handed here as a value — so everything in this file
-  * is a plain function of its arguments and can be tested without a server.
+  * request once, by an extractor in the service's own `api` module, and handed here as a value — so
+  * everything in this file is a plain function of its arguments and can be tested without a server.
   *
   * @param digest
   *   the method and path the token must have been minted for (ADR-020). A token for
@@ -105,8 +105,8 @@ object PrincipalVerification {
     * cannot forget to check one: it is handed a `Principal` or it is not called at all.
     *
     * `render` is how the caller says what a failure looks like on the wire. Deciding that here would mean
-    * this module knowing about status codes and correlation ids; it knows what a failure *is*, and
-    * [[ClusterApi]] knows how one is served.
+    * this module knowing about status codes and correlation ids; it knows what a failure *is*, and each
+    * service's `api` module knows how one is served.
     */
   def secured[F[_]: {Monad, Clock}, E](
       codec: PrincipalCodec[F],

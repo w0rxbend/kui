@@ -1,4 +1,4 @@
-package kui.cluster.api
+package kui.http.principal
 
 import cats.effect.kernel.{Clock, Sync}
 import cats.syntax.all.*
@@ -14,7 +14,6 @@ import sttp.tapir.{header, statusCode, EndpointIO, EndpointInput, EndpointOutput
 
 import kui.contracts.ErrorEnvelope.given
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
-import kui.http.ErrorInterceptor
 import kui.observability.{Correlation, MetricNames}
 import kui.security.PrincipalError
 
@@ -40,12 +39,14 @@ import kui.security.PrincipalError
   * — which is what makes "handle this one input, ignore the rest" possible without reimplementing the shared
   * handler.
   *
-  * ==Why it is not in `libs/http`==
+  * ==Why it lives here==
   *
-  * It could be, and eventually should be: every one of the eleven services needs exactly this. It is here in
-  * `services/cluster/api` because `libs/http` belongs to another lane and this is the first service to need
-  * it; hoisting it is a mechanical move once a second service exists. See the deviation note in
-  * `docs/plans/M0/tasks/SVC-003.md`.
+  * It was written in `services/cluster/api` in M0, with its own comment saying it belonged in `libs/http` and
+  * that hoisting it was "a mechanical move once a second service exists". M2 is that second service. Rule A11
+  * makes the alternative explicit rather than merely untidy: one service may not see another's `api` module,
+  * so leaving these three hundred lines where they were would have meant the topic service, the message
+  * service and the consumer service each copying them — four implementations of one authentication check,
+  * differing in ways invisible from inside any one of them.
   */
 object PrincipalInterceptor {
 
@@ -89,7 +90,7 @@ object PrincipalInterceptor {
     val reason = PrincipalError.Missing.metricLabel
 
     for {
-      correlationId <- ErrorInterceptor.correlationIdOf[F](ctx.request)
+      correlationId <- kui.http.ErrorInterceptor.correlationIdOf[F](ctx.request)
       now <- Clock[F].realTimeInstant
       _ <- rejections.inc(Attribute(MetricNames.Attr.Reason, reason))
       _ <- logger.warn(

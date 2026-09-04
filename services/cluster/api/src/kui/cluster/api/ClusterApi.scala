@@ -28,6 +28,7 @@ import kui.contracts.ErrorEnvelope
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
+import kui.http.principal.{PrincipalInterceptor, PrincipalVerification, RequestContext}
 import kui.kernel.error.KuiError
 import kui.observability.{Correlation, KuiInterceptors, Telemetry}
 import kui.security.{Principal, PrincipalCodec, RequestDigest, SignedPrincipal}

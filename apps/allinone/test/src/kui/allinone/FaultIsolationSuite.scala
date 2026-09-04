@@ -5,7 +5,8 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.effect.IO
 import cats.effect.kernel.Resource
 
-import kui.cluster.api.{ClusterApi, PrincipalVerification}
+import kui.cluster.api.ClusterApi
+import kui.http.principal.PrincipalVerification
 import kui.cluster.application.{CapabilityReport, CapabilityReportUseCase}
 import kui.contracts.capability.CapabilityKey
 import kui.gateway.application.capability.{

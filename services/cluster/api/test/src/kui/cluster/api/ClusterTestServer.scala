@@ -18,6 +18,7 @@ import sttp.client4.StreamBackend
 import sttp.tapir.server.stub4.TapirStreamStubInterpreter
 
 import kui.cluster.application.{CapabilityReportUseCase, ClusterService}
+import kui.http.principal.PrincipalVerification
 import kui.kernel.{ClusterId, Secret, ServiceId, UserName}
 import kui.observability.Telemetry
 import kui.security.*
