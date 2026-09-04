@@ -173,10 +173,21 @@ final class ClusterAdminAdapter[F[_]: Async](
         Left(InfrastructureError.Unreachable(s"kafka:${profile.id.value}", failure.getClass.getName))
     }
 
-  /** Logs the failure once, and rebuilds the client when — and only when — the connection is what broke. */
+  /** Logs the failure once, and rebuilds the client when — and only when — the connection is what broke.
+    *
+    * The line carries the exception's class name as well as the error code whenever [[flatten]] produced it,
+    * because the code on its own is not enough to act on. `KUI-UPSTREAM-UNAVAILABLE` is what a broker that is
+    * switched off produces, and it is also what a Kafka client that could not be *constructed* produces — a
+    * truststore that will not open, a login module that is not on the classpath. Those need opposite
+    * remedies, and the only thing that separated them was a string this method used to throw away: a secured
+    * cluster whose truststore password was wrong sat on the dashboard reading "unavailable" with nothing
+    * anywhere naming the store.
+    *
+    * The class name and not the message, for the reason [[flatten]] gives.
+    */
   private def reportFailure(profile: ClusterProfile, operation: String)(error: KuiError): F[Unit] =
     logger.warn(
-      s"cluster ${profile.id.value} could not answer $operation: ${error.code.wire}"
+      s"cluster ${profile.id.value} could not answer $operation: ${error.code.wire}${causeOf(error)}"
     ) >> {
       if ReconnectPolicy.shouldInvalidate(error) then
         logger.warn(
@@ -184,6 +195,12 @@ final class ClusterAdminAdapter[F[_]: Async](
         ) >> clients.invalidate(profile.id)
       else Async[F].unit
     }
+
+  /** ` (org.apache.kafka.common.KafkaException)`, or nothing at all when the failure named no exception. */
+  private def causeOf(error: KuiError): String = error match {
+    case InfrastructureError.Unreachable(_, cause) if cause.nonEmpty => s" ($cause)"
+    case _ => ""
+  }
 
   /** A managed service that answers "I do not offer that" is worth one line, at the cadence of the snapshot
     * rather than of a request, so that an operator can see a section is permanently empty by design.
