@@ -111,10 +111,75 @@ Three, each one a file a person can copy:
 document holds only the delivery bar and the sequence above. When a stage completes, its row changes
 here and the detail lives in the milestone's own plan.
 
+## Where this stands, 2026-09-04 (the secured cluster)
+
+**Point 5 of the bar is met, and it was not before.** A KRaft broker speaking `SASL_SSL` with
+`SCRAM-SHA-512` behind a private certificate authority, KUI pointed at it with
+`deployment/examples/production.yaml` — three lines changed, being the two bootstrap addresses and
+the insecure-cookie flag plain HTTP on localhost needs — and every screen this milestone claims
+driven against it. The stack is kept, in `deployment/secured/`, so the next person changing anything
+under `kui.clusters[].security` can run it in about a minute.
+
+What answered, on the secured cluster only: the cluster row reporting `SASL_SSL` and
+`SCRAM-SHA-512` and status `ok`; the broker list; the eight seeded topics; a topic's partitions and
+its Kafka configuration; a message browse with the JSON values parsed and rendered as JSON; and
+three consumer groups — `analytics-indexer` `STABLE` with one live member, `order-fulfilment`
+`EMPTY` with a total lag of 9, `payments-ledger-sync` `EMPTY` — plus the lag-poll endpoint.
+
+### The defect it found, which is the one the exercise was for
+
+**The production example cannot work as written.** It puts the truststore password where every other
+secret goes:
+
+```yaml
+password: "env:KUI_ANALYTICS_TRUSTSTORE_PASSWORD"
+```
+
+The loader resolved `env:` and `file:` for the SASL password and read the three TLS passwords
+verbatim, so the password handed to Kafka was the literal name of the environment variable.
+`Admin.create` threw while opening the PKCS12 store, and the cluster service reported
+`KUI-UPSTREAM-UNAVAILABLE` — the same code a broker that is switched off produces. The secured
+cluster sat on the dashboard reading "Unavailable" for ever with nothing anywhere naming the store,
+the password or the exception.
+
+Every gate was green through all of it. `ShippedConfigurationSuite` asserted that the example
+*loads*, and it did. The M1 adapter suites cover plaintext, SCRAM over plain text and mutual TLS at
+the port level, and `KafkaTopology` records in a comment that there is deliberately no `SaslSsl`
+case — so the exact combination the example documents had never been exercised by anything.
+
+Two fixes carry tests. The TLS passwords are now resolved like every other secret, so `env:` and
+`file:` work under `ssl.truststore.password`, `ssl.keystore.password` and `ssl.keyPassword`, and one
+naming an unset variable stops the process instead of becoming a wrong password. And
+`ShippedConfigurationSuite` now asserts over the *resolved* values rather than over "it loaded", so
+no secret in a shipped example can be its own reference again.
+
+A third change is not a fix so much as the reason this took a day: a cluster failure now logs the
+exception's class name beside the error code, so "the broker is off" and "the client could not be
+built" stop being the same line.
+
+### Two constants that a deployment could not change
+
+Found while reading the same code paths, and both now configuration:
+`kui.consumers.refreshInterval`, which was a constant in the consumer service's composition root,
+and `kui.streaming.cursorKey`, which was a *secret* generated per process. The second is the
+serious one: it signs both the browse cursor and the offset-reset plan token, so two replicas
+rejected each other's, and a restart made a reset wizard an operator had left open impossible to
+apply. Absent, it still falls back to a generated key — correct for one process — but the fallback
+now says so in the startup log instead of being invisible.
+
+### What was not done
+
+The secured cluster was driven through KUI's own HTTP API, not through a browser: no browser was
+reachable from this session. The shell and its bundle serve correctly from the secured stack
+(`/ui/...` 200 `text/html`, `/ui/main.js` 200 `text/javascript`, 884 KB), and every endpoint the
+screens call was exercised, but the rendering itself was last confirmed against the plaintext
+quickstart in the integration pass below.
+
 ## Where this stands, 2026-09-04 (integration pass)
 
 **Points 1, 2, 4 and 6 of the bar are met. Point 3 is met for reading and not for publishing. Point
-5 is met on paper and has not been exercised against a secured cluster.**
+5 is met on paper and has not been exercised against a secured cluster.** *Point 5 is now exercised;
+see the section below, dated the same day.*
 
 One command from a clean machine — no image on disk, `docker rmi` first — builds the all-in-one
 image inside a container, starts a KRaft broker, seeds it, starts KUI and prints one URL. Everything
