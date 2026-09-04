@@ -21,6 +21,7 @@ import kui.gateway.api.routing.{ContractRouting, RbacPreCheck, ServiceContracts}
 import kui.gateway.api.{
   CapabilityRoutes,
   ClusterOverviewRoutes,
+  MessageStreamRoutes,
   EdgeHeaders,
   GatewayApi,
   InfoRoutes,
@@ -177,6 +178,10 @@ object GatewayWiring {
       topicOverview <- clients.all
         .find(_.service == TopicServiceId)
         .traverse(TopicOverviewUseCase.resource[F](_, signals, telemetry))
+      // The message browse stream, relayed rather than proxied. A deployment with no message service
+      // configured has no client and therefore no route, so the address 404s instead of opening a
+      // stream that could only ever end in an error.
+      messages = clients.all.find(_.service == MessageServiceId)
       instrumentation <- Resource.eval(
         KuiInterceptors.serverInterceptors[F](telemetry, GatewayApi.ServiceName)
       )
@@ -188,6 +193,7 @@ object GatewayWiring {
         CapabilityRoutes[F](registry, trigger, telemetry, logger) ++
           overview.toList.flatMap(ClusterOverviewRoutes[F](_)) ++
           topicOverview.toList.flatMap(TopicOverviewRoutes[F](_)) ++
+          messages.toList.flatMap(MessageStreamRoutes[F](_)) ++
           proxied ++
           DocsRoutes[F](docs, BasePath.normalize(config.server.basePath))
       ),
@@ -313,6 +319,11 @@ object GatewayWiring {
 
   /** The service the topic-page aggregation calls. Its other five endpoints are proxied untouched. */
   val TopicServiceId: ServiceId = ServiceId.unsafe("topic")
+
+  /** The service whose browse stream is relayed. It has no proxied endpoints: a stream cannot be called
+    * and re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.
+    */
+  val MessageServiceId: ServiceId = ServiceId.unsafe("message")
 
   /** The proxied routes: every configured service the gateway holds a contract for, minus the endpoints the
     * gateway answers itself.

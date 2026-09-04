@@ -38,7 +38,12 @@ object DocsRoutes {
       kui.gateway.contract.ClusterOverviewEndpoints.all ++
       // The topic page's aggregation, for the same reason: a public path the gateway answers itself, whose
       // response shape is the gateway's own and not the topic service's.
-      kui.gateway.contract.TopicOverviewEndpoints.all
+      kui.gateway.contract.TopicOverviewEndpoints.all ++
+      // The message browse stream. It is documented from the gateway's list rather than from the message
+      // service's proxied endpoints for the same reason the capability stream is: it is not a derived
+      // proxy route at all — a stream is relayed, not called and re-encoded — so nothing in
+      // `ServiceContracts` would ever produce it.
+      kui.gateway.api.MessageStreamRoutes.endpoints[F]
 
   /** Everything the gateway documents: its own endpoints plus every configured service it can route. */
   def documentation[F[_]](services: List[ServiceId]): List[ServiceDoc] =

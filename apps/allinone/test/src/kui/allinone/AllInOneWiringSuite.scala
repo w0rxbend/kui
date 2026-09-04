@@ -181,7 +181,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         .map { entries =>
           val context = entries.headOption.map(_.context).getOrElse(Map.empty)
           assertEquals(context.get("deployment"), Some("all-in-one"))
-          assertEquals(context.get("services"), Some("cluster,consumer,topic"))
+          assertEquals(context.get("services"), Some("cluster,consumer,message,topic"))
         }
     }
   }

@@ -89,7 +89,12 @@ final class MergedDocumentShapeSuite extends FunSuite {
       .map(endpoint => endpoint.showPathTemplate().takeWhile(_ != '?').replace("/internal/v1", "/api/v1"))
 
     val own = ClusterOverviewEndpoints.all.map(_ => "/api/v1/clusters") ++
-      TopicOverviewEndpoints.all.map(_.showPathTemplate().takeWhile(_ != '?'))
+      TopicOverviewEndpoints.all.map(_.showPathTemplate().takeWhile(_ != '?')) ++
+      // The message browse stream: a cluster-scoped path the gateway serves itself, because a stream is
+      // relayed rather than derived as a proxy route, so `ServiceContracts` never produces it.
+      kui.gateway.api.MessageStreamRoutes
+        .endpoints[IO]
+        .map(_.showPathTemplate().takeWhile(_ != '?'))
     val documented = paths.filter(_.startsWith("/api/v1/clusters"))
 
     assertEquals(documented.sorted, (derived ++ own).sorted)
