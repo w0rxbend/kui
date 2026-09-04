@@ -79,13 +79,15 @@ final class ClusterServiceDownSuite extends ComposeE2ESuite {
     scenario.recover(this, stack(), page, sentinel)
   }
 
-  test("ping works again after recovery") {
+  test("the dashboard fetches through the restarted service again") {
+    // The last step of the story: not only is the entry no longer dimmed, a real request made after
+    // recovery reaches the service and comes back. Before M1 this step pinged the sample feature;
+    // it now loads the dashboard, which is the same round trip through the same chain.
     page.navigation.click("clusters")
-    waitForCondition("the clusters page to render after recovery") { page.clusters.isVisible }
+    waitForCondition("the clusters dashboard to render after recovery") { page.clusters.isVisible }
 
-    page.clusters.ping("after-recovery")
-    waitForCondition("the ping reply to come back through the restarted service") {
-      page.clusters.replies.contains("after-recovery")
+    waitForCondition("a successful load through the restarted service") {
+      page.clusters.onlineCount.isDefined && page.clusters.error.isEmpty
     }
   }
 

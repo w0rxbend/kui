@@ -57,7 +57,7 @@ final class ShellSmokeSuite extends AllInOneE2ESuite {
     browser().onRequest(request => requests.append(request.url()))
 
     page.navigation.click("clusters")
-    waitForCondition("the clusters page to render after clicking its entry") {
+    waitForCondition("the clusters dashboard to render after clicking its entry") {
       page.clusters.isVisible
     }
 
@@ -74,16 +74,24 @@ final class ShellSmokeSuite extends AllInOneE2ESuite {
     )
   }
 
-  test("ping round-trips") {
+  test("the dashboard round-trips through the gateway to the cluster service") {
+    // Replaces M0's "ping round-trips". The sample Ping feature was deleted with CLAPI-004, and the
+    // chain it proved — browser, contract client, gateway routing, signed principal, service, back
+    // again — is now proved by the real dashboard rendering its summary strip. The all-in-one
+    // fixture is started with no clusters configured, so the honest expectation is a rendered page
+    // reporting zero of each, and *not* an error panel: "no clusters are configured" and "KUI could
+    // not reach its own cluster service" must not look the same.
     val page = shell.open("/ui/clusters")
-    waitForCondition("the clusters page to render on a deep link") { page.clusters.isVisible }
+    waitForCondition("the clusters dashboard to render on a deep link") { page.clusters.isVisible }
 
-    page.clusters.ping("e2e-hello")
-
-    waitForCondition("the ping reply to appear in the table") {
-      page.clusters.replies.contains("e2e-hello")
+    waitForCondition("the summary strip to be filled by the first successful load") {
+      page.clusters.onlineCount.isDefined
     }
-    assertEquals(page.clusters.error, None)
+
+    assertEquals(page.clusters.error, None, "the first load of the dashboard failed")
+    assertEquals(page.clusters.onlineCount, Some("0"))
+    assertEquals(page.clusters.unavailableCount, Some("0"))
+    assertEquals(page.clusters.rowIds, Nil, "the fixture configures no clusters")
   }
 
   test("deep link to /ui/clusters works on a cold load") {
@@ -91,7 +99,7 @@ final class ShellSmokeSuite extends AllInOneE2ESuite {
     // before the feature's own JavaScript has been downloaded, or a bookmark is a 404.
     val page = shell.open("/ui/clusters")
 
-    waitForCondition("the clusters page to render from a cold deep link") { page.clusters.isVisible }
+    waitForCondition("the clusters dashboard to render from a cold deep link") { page.clusters.isVisible }
     assert(page.navigation.labels.contains("Clusters"), "the navigation is missing on a deep link")
   }
 
