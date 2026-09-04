@@ -5,10 +5,11 @@ import scala.jdk.OptionConverters.*
 
 import org.apache.kafka.clients.admin as jadmin
 import org.apache.kafka.common.acl.AclOperation
-import org.apache.kafka.common.{Node, TopicPartition}
+import org.apache.kafka.common.{GroupState as KafkaGroupState, GroupType, Node, TopicPartition}
 
 import kui.kafka.{KafkaErrorMapper, SkipReason}
-import kui.kernel.{BrokerId, KafkaClusterId, PartitionId, TopicName}
+import kui.kernel.group.{GroupProtocol, GroupState}
+import kui.kernel.{BrokerId, GroupId, KafkaClusterId, PartitionId, TopicName}
 
 /** Kafka's objects, turned into KUI's.
   *
@@ -164,4 +165,66 @@ object AdminConversions {
 
   def logDirs(raw: java.util.Map[String, jadmin.LogDirDescription]): List[LogDir] =
     raw.asScala.toList.map((path, description) => logDir(path, description)).sortBy(_.path)
+  // ------------------------------------------------------------------ consumer groups
+
+  /** The only place in KUI that reads a Kafka group-state value.
+    *
+    * Total by construction. A state this build of KUI has never heard of — Kafka adds them, and `ASSIGNING`,
+    * `RECONCILING` and `NOT_READY` arrived with KIP-848 — maps to `GroupState.Unknown` rather than throwing.
+    * A broker newer than KUI is not an error.
+    *
+    * `None` maps to `Unknown` and emphatically not to `Dead`: `groupState()` is an `Optional` because a
+    * broker older than 2.6 does not report one, and telling an operator that a perfectly healthy group is
+    * being removed is the single most consequential mistake this function could make.
+    *
+    * The KIP-848 rebalance states are folded onto the classic pair an operator already knows: `ASSIGNING` is
+    * the coordinator computing a new assignment (`PreparingRebalance`) and `RECONCILING` is members moving
+    * onto it (`CompletingRebalance`). Two vocabularies on one screen would mean an operator has to know which
+    * protocol a group speaks before they can read its chip.
+    */
+  private[kafka] def toGroupState(raw: Option[KafkaGroupState]): GroupState = raw match {
+    case Some(KafkaGroupState.STABLE) => GroupState.Stable
+    case Some(KafkaGroupState.EMPTY) => GroupState.Empty
+    case Some(KafkaGroupState.DEAD) => GroupState.Dead
+    case Some(KafkaGroupState.PREPARING_REBALANCE) => GroupState.PreparingRebalance
+    case Some(KafkaGroupState.COMPLETING_REBALANCE) => GroupState.CompletingRebalance
+    case Some(KafkaGroupState.ASSIGNING) => GroupState.PreparingRebalance
+    case Some(KafkaGroupState.RECONCILING) => GroupState.CompletingRebalance
+    case Some(KafkaGroupState.NOT_READY) => GroupState.PreparingRebalance
+    case Some(KafkaGroupState.UNKNOWN) => GroupState.Unknown
+    case None => GroupState.Unknown
+  }
+
+  /** Which protocol a group speaks, as far as the broker will say.
+    *
+    * `STREAMS` maps to `Unknown` rather than gaining a case: KUI does not list Kafka Streams groups as
+    * consumer groups, and a name in this enum that no screen renders is decoration.
+    */
+  private[kafka] def toGroupProtocol(raw: Option[GroupType]): GroupProtocol = raw match {
+    case Some(GroupType.CLASSIC) => GroupProtocol.Classic
+    case Some(GroupType.CONSUMER) => GroupProtocol.Consumer
+    case _ => GroupProtocol.Unknown
+  }
+
+  /** Whether a listing is a consumer group at all.
+    *
+    * Kafka 4's `listGroups` sees share groups and Streams groups too (KIP-932, KIP-1071). KUI lists consumer
+    * groups — classic and KIP-848 — and nothing else, so anything else is dropped here, counted by the
+    * caller, and never rendered as a consumer group with no members.
+    */
+  private[kafka] def isConsumerGroup(raw: Option[GroupType]): Boolean = raw match {
+    case Some(GroupType.CLASSIC) => true
+    case Some(GroupType.CONSUMER) => true
+    // A broker that reports no type at all is a broker older than 3.8, which had only consumer groups.
+    case None => true
+    case _ => false
+  }
+
+  private[kafka] def groupListing(raw: jadmin.GroupListing): GroupListing =
+    GroupListing(
+      groupId = GroupId.unsafe(raw.groupId),
+      isSimple = raw.isSimpleConsumerGroup,
+      state = toGroupState(raw.groupState.toScala),
+      protocol = toGroupProtocol(raw.`type`.toScala)
+    )
 }

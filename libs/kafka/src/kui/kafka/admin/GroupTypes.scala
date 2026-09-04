@@ -2,6 +2,7 @@ package kui.kafka.admin
 
 import java.time.Instant
 
+import kui.kafka.SkipReason
 import kui.kernel.group.{GroupProtocol, GroupState}
 import kui.kernel.{BrokerId, GroupId, Offset, TopicPartition}
 
@@ -32,6 +33,37 @@ final case class GroupListing(
 object GroupListing {
   given CanEqual[GroupListing, GroupListing] = CanEqual.derived
   given Ordering[GroupListing] = Ordering.by(_.groupId.value)
+}
+
+/** What one listing pass saw, and what it could not see.
+  *
+  * Not a `BatchResult[BrokerId, _]`, which is what this port's spec asked for. A listing is answered by every
+  * coordinator in the cluster at once, and `ListGroupsResult` in kafka-clients 4.x hands back two things: the
+  * listings that arrived (`valid()`) and the failures that did not (`errors()`) — a bare
+  * `Collection[Throwable]` with no node attached. There is no broker id to key a `BatchResult` by, and
+  * inventing one would put a number on screen that names no broker. So the failures are carried as reasons,
+  * with their count, which is exactly what the caller renders: "3 groups; one coordinator did not answer".
+  *
+  * The distinction that matters is preserved either way: a short list that says it is short, versus a short
+  * list that looks complete. The reference product returns the second, and an operator reads a group that is
+  * merely hidden as a group that was deleted.
+  */
+final case class GroupListingResult(
+    groups: List[GroupListing],
+    /** One entry per coordinator that failed, in the order the client reported them. */
+    coordinatorFailures: List[SkipReason],
+    /** Share groups and Streams groups seen and dropped. Counted rather than silently discarded, because a
+      * cluster where this is large is a cluster whose group list is not what its operator expects.
+      */
+    nonConsumerGroups: Int
+) {
+
+  def isComplete: Boolean = coordinatorFailures.isEmpty
+}
+
+object GroupListingResult {
+  def complete(groups: List[GroupListing]): GroupListingResult = GroupListingResult(groups, Nil, 0)
+  given CanEqual[GroupListingResult, GroupListingResult] = CanEqual.derived
 }
 
 /** The partitions one member holds. */

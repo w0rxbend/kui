@@ -4,7 +4,7 @@ import kui.kafka.BatchResult
 import kui.kernel.cluster.ClusterConnection
 import kui.kernel.error.KuiError
 import kui.kernel.group.GroupState
-import kui.kernel.{BrokerId, GroupId, Offset, TopicPartition}
+import kui.kernel.{GroupId, Offset, TopicPartition}
 
 /** The consumer-group context's window onto a Kafka cluster.
   *
@@ -24,13 +24,16 @@ trait GroupAdmin[F[_]] {
     * succeeds. The result therefore says which coordinators failed rather than pretending the listing is
     * complete: the screen renders the groups it has, with a banner naming the brokers it could not ask.
     *
+    * Every coordinator failing is a `Left`: "there are no groups" and "nobody would tell me" must not render
+    * the same screen.
+    *
     * `states` empty means "every state". Filtering by state is a broker-side feature from Kafka 2.6, so it is
     * probed rather than inferred from a version (`GroupFeature`, ADR-030).
     */
   def listGroups(
       conn: ClusterConnection,
       states: Set[GroupState]
-  ): F[Either[KuiError, BatchResult[BrokerId, List[GroupListing]]]]
+  ): F[Either[KuiError, GroupListingResult]]
 
   /** Describe groups in bulk.
     *
