@@ -150,9 +150,21 @@ object KafkaBrowseConsumer {
         ConsumerFactory.settings[F](connection, None, Some(logger)).flatMap {
           case Left(error) => Resource.pure[F, Either[KuiError, BrowseConsumer[F]]](error.asLeft)
           case Right(settings) =>
+            // The constructor is inside the mapper too, and that is not belt-and-braces.
+            // `new KafkaConsumer(...)` resolves `bootstrap.servers` eagerly and throws a `ConfigException`
+            // when no address resolves — which is what a stopped broker looks like from inside a container.
+            // Uncaught, that escaped this `Resource` as a raised exception and the browse ended with
+            // `KUI-INTERNAL` / "Internal error", while every other screen in the product said
+            // `KUI-UPSTREAM-UNAVAILABLE` about the very same broker. `KafkaErrorMapper` already has a case
+            // for it; the failure simply never reached the mapper.
             Resource
-              .make(create[F](settings.properties, isolation))(closeQuietly[F](_, logger))
-              .map(consumer => new KafkaBrowseConsumer[F](consumer).asRight[KuiError])
+              .make(create[F](settings.properties, isolation).attempt)(closeQuietly[F](_, logger))
+              .map(
+                _.bimap(
+                  KafkaErrorMapper.map("openBrowseConsumer", _),
+                  consumer => new KafkaBrowseConsumer[F](consumer)
+                )
+              )
         }
     }
 
@@ -190,12 +202,20 @@ object KafkaBrowseConsumer {
     * not the caller's problem.
     */
   private def closeQuietly[F[_]: Async](
-      consumer: KafkaConsumer[Array[Byte], Array[Byte]],
+      consumer: Either[Throwable, KafkaConsumer[Array[Byte], Array[Byte]]],
       logger: StructuredLogger[F]
   ): F[Unit] =
-    Async[F]
-      .blocking(consumer.close())
-      .handleErrorWith(t => logger.warn(t)("closing the browse consumer failed; the browse itself finished"))
+    consumer.fold(
+      // Nothing was constructed, so there is nothing to close. The failure is already the browse's
+      // terminal `error` event; logging it again here would double every such line.
+      _ => Async[F].unit,
+      open =>
+        Async[F]
+          .blocking(open.close())
+          .handleErrorWith(t =>
+            logger.warn(t)("closing the browse consumer failed; the browse itself finished")
+          )
+    )
 
   private def topicPartitions(topic: TopicName, partitions: List[PartitionId]): ju.List[TopicPartition] =
     partitions.map(partition => new TopicPartition(topic.value, partition.value)).asJava
