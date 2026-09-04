@@ -7,12 +7,12 @@ import java.util.Base64
 
 import cats.effect.kernel.{Async, Resource, Sync}
 import cats.syntax.all.*
-import com.nimbusds.jose.jwk.source.ImmutableJWKSet
-import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jwt.proc.DefaultJWTProcessor
-import com.nimbusds.jwt.JWTClaimsSet
+import com.nimbusds.jose.jwk.JWKSet
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet
 import com.nimbusds.jose.proc.{JWSVerificationKeySelector, SecurityContext}
+import com.nimbusds.jwt.JWTClaimsSet
+import com.nimbusds.jwt.proc.DefaultJWTProcessor
 import io.circe.parser
 import org.typelevel.log4cats.StructuredLogger
 import sttp.client4.{basicRequest, Backend}
@@ -282,7 +282,12 @@ object OidcRelyingParty {
               new ImmutableJWKSet[SecurityContext](keySet)
             )
           )
+          // Nimbus's `SecurityContext` is its hook for callers that select keys per request; this process
+          // selects one fixed key set, so there is nothing to pass and the library's own documented value
+          // for "no context" is `null`. There is no Option-shaped overload to use instead.
+          // scalafix:off DisableSyntax.null
           processor.process(idToken, null)
+          // scalafix:on DisableSyntax.null
         }
         .leftMap(_ => OidcRelyingParty.Invalid)
         .flatMap(claims => checkClaims(claims, provider, nonce))

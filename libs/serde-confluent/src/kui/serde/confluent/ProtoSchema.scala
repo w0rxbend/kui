@@ -6,17 +6,17 @@ import scala.annotation.tailrec
   *
   * ==Why KUI parses `.proto` itself==
   *
-  * A Protobuf payload is unreadable without its schema: the bytes carry field *numbers* and wire types and
-  * no names, no types and no structure. The registry hands back the schema as `.proto` source text, so
-  * something has to turn that text into a field table. ADR-014 Amendment 1 recorded that the only maintained
-  * dynamic parser is Confluent's `kafka-protobuf-provider`, which is published under the Confluent Community
-  * License and only on Confluent's own repository — a licence KUI cannot accept on an operator's behalf and
-  * a resolver the build would have to add.
+  * A Protobuf payload is unreadable without its schema: the bytes carry field *numbers* and wire types and no
+  * names, no types and no structure. The registry hands back the schema as `.proto` source text, so something
+  * has to turn that text into a field table. ADR-014 Amendment 1 recorded that the only maintained dynamic
+  * parser is Confluent's `kafka-protobuf-provider`, which is published under the Confluent Community License
+  * and only on Confluent's own repository — a licence KUI cannot accept on an operator's behalf and a
+  * resolver the build would have to add.
   *
-  * The alternative is this file: a parser for the subset of the language a *schema held in a schema
-  * registry* actually uses, and `ProtobufPayload`'s decoder over it. It adds no dependency and no licence
-  * obligation. What it costs is honesty about its limits, which is why the failures below are named rather
-  * than silent — see [[ProtoSchema.parse]] and `ProtobufPayload.decode`.
+  * The alternative is this file: a parser for the subset of the language a *schema held in a schema registry*
+  * actually uses, and `ProtobufPayload`'s decoder over it. It adds no dependency and no licence obligation.
+  * What it costs is honesty about its limits, which is why the failures below are named rather than silent —
+  * see [[ProtoSchema.parse]] and `ProtobufPayload.decode`.
   *
   * ==What is supported==
   *
@@ -34,9 +34,9 @@ import scala.annotation.tailrec
   * ==What is not==
   *
   *   - `import`. A schema that imports another names types this text does not contain, and a registry
-  *     schema's imports are its *references*, fetched separately. Rather than decode such a message
-  *     partially and silently render its imported fields as unknown numbers, [[parse]] keeps the import list
-  *     so the decoder can say which file it would have needed.
+  *     schema's imports are its *references*, fetched separately. Rather than decode such a message partially
+  *     and silently render its imported fields as unknown numbers, [[parse]] keeps the import list so the
+  *     decoder can say which file it would have needed.
   *   - `service` and `rpc` definitions, which describe calls rather than data and are skipped.
   *   - proto2 groups, a construct deprecated since 2015 that no registry schema in the wild uses.
   */
@@ -73,8 +73,8 @@ final case class ProtoFile(
     *
     * A Protobuf payload does not name its message type; it carries a path of indexes into the file's
     * declaration order — `[0]` is the first top-level message, `[1, 0]` the first nested message of the
-    * second. An empty path means the first message, which is the case a producer writes as a single zero
-    * byte and is by far the commonest.
+    * second. An empty path means the first message, which is the case a producer writes as a single zero byte
+    * and is by far the commonest.
     */
   def messageAt(path: List[Int]): Either[String, ProtoMessage] = {
     @tailrec
@@ -188,8 +188,8 @@ object ProtoSchema {
   /** Parses `.proto` source text, or says what stopped it.
     *
     * The failure text is written for the operator looking at a record that would not decode, so it names the
-    * construct and, where the construct is one KUI does not implement, says so plainly instead of reporting
-    * a syntax error against a file that is perfectly valid.
+    * construct and, where the construct is one KUI does not implement, says so plainly instead of reporting a
+    * syntax error against a file that is perfectly valid.
     */
   def parse(source: String): Either[String, ProtoFile] =
     try Right(new Parser(Lexer.tokenize(source)).file())
@@ -199,7 +199,7 @@ object ProtoSchema {
 
   final private class ParseFailure(val explanation: String) extends Exception(explanation)
 
-  // scalafix:off DisableSyntax.noThrows
+  // scalafix:off DisableSyntax.throw
   //
   // A recursive-descent parser reports a failure from wherever it happens to be - twelve calls deep in a
   // nested message, halfway through a field - and the alternative to an exception is threading an `Either`
@@ -209,14 +209,23 @@ object ProtoSchema {
   // file the parser is a total function returning `Either`. The ban is lifted for that one line and turned
   // back on immediately.
   private def fail(explanation: String): Nothing = throw new ParseFailure(explanation)
-  // scalafix:on DisableSyntax.noThrows
+  // scalafix:on DisableSyntax.throw
 
   /** Words, punctuation and string literals, with comments removed.
     *
-    * A hand-written lexer rather than a regular expression per construct: the two things that actually
-    * matter here — a `//` inside a string literal and a `/* */` spanning lines — are exactly what a
-    * per-construct regular expression gets wrong, and both appear in real registry schemas.
+    * A hand-written lexer rather than a regular expression per construct: the two things that actually matter
+    * here — a `//` inside a string literal and a `/* */` spanning lines — are exactly what a per-construct
+    * regular expression gets wrong, and both appear in real registry schemas.
     */
+  // scalafix:off DisableSyntax.var
+  //
+  // A lexer and a recursive-descent parser are position machines: both are a cursor walking a sequence, and
+  // the cursor moves. Written without `var` the same code becomes a fold carrying an index, a builder and a
+  // lookahead in a tuple, which does not remove the state -- it only spells it out in a shape that is harder
+  // to read and no easier to reason about. Every `var` below is local to one method or to this one private
+  // object, none escapes, and nothing outside this file can observe any of them: from the outside
+  // `ProtoSchema.parse` is a pure function from a string to an `Either`. The ban is lifted for the parser
+  // and turned back on at the end of the file.
   private object Lexer {
 
     def tokenize(source: String): List[String] = {
@@ -408,9 +417,8 @@ object ProtoSchema {
       ProtoMessage(name, fields.result(), nested.result() ++ mapEntries.result(), enums.result())
     }
 
-    /** `map<key, value> name = n;` as the language defines it: a repeated field of a synthetic entry
-      * message with `key` at 1 and `value` at 2. Decoding it as anything else would disagree with every
-      * encoder.
+    /** `map<key, value> name = n;` as the language defines it: a repeated field of a synthetic entry message
+      * with `key` at 1 and `value` at 2. Decoding it as anything else would disagree with every encoder.
       */
     private def mapField(): (ProtoField, ProtoMessage) = {
       expect("<")
@@ -438,8 +446,7 @@ object ProtoSchema {
 
     private def field(label: ProtoLabel): ProtoField = {
       val declared = next()
-      if declared == "map" then
-        fail("a 'map' field may not carry a label; write 'map<key, value> name = n;'")
+      if declared == "map" then fail("a 'map' field may not carry a label; write 'map<key, value> name = n;'")
       val fieldType = typeOf(declared)
       val name = next()
       expect("=")
@@ -498,10 +505,14 @@ object ProtoSchema {
       // directly: `toMap` would keep the last entry, which is the alias.
       ProtoEnum(
         name,
-        values.result().foldLeft(Map.empty[Int, String])((seen, entry) =>
-          if seen.contains(entry._1) then seen else seen + entry
-        )
+        values
+          .result()
+          .foldLeft(Map.empty[Int, String])((seen, entry) =>
+            if seen.contains(entry._1) then seen else seen + entry
+          )
       )
     }
   }
 }
+
+// scalafix:on DisableSyntax.var
