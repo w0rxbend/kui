@@ -6,8 +6,8 @@
 ## Context
 
 Kafbat caches everything process-locally (statistics snapshot, AdminClient pool, cursors,
-filters, SR subjects) with a mix of plain maps, Guava and Caffeine, mostly without TTL. PLAN §29
-allows caches only with TTL, invalidation, bounds, metrics and a staleness contract.
+filters, SR subjects) with a mix of plain maps, Guava and Caffeine, mostly without TTL. The
+project's caching rules allow caches only with TTL, invalidation, bounds, metrics and a staleness contract.
 
 ## Decision
 
@@ -29,7 +29,6 @@ allows caches only with TTL, invalidation, bounds, metrics and a staleness contr
 
 - `research/kafbat/architecture.md` F9 (inventory of Kafbat caches and their gaps), F4.
 - `research/scala/ecosystem-mapping.md` F9 (Caffeine 3.2.4; Scaffeine dropped).
-- PLAN §29.
 
 ## Consequences
 

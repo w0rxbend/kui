@@ -39,7 +39,7 @@ pipe because `EventSource` cannot POST.
 
 - `research/kafbat/api-analysis.md` Finding 5.1 (no `ERROR` event; abrupt close), 5.4 (KSQL
   pipe), decision row "SSE with named events including `error` and `heartbeat`".
-- `research/kafbat/architecture.md` F5, D4; PLAN §22, §28.
+- `research/kafbat/architecture.md` F5, D4.
 - `research/scala/frontend-research.md` §1.6, §3.6 (why Kafbat used `fetch-event-source`;
   kernel `Sse` wrappers).
 

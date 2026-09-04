@@ -1,7 +1,7 @@
 # KUI architecture decision index
 
 All ADRs live in `docs/adr/`. Status values: Proposed | Accepted | Superseded.
-Reopening an Accepted ADR requires new evidence and a superseding ADR (PLAN §39).
+Reopening an Accepted ADR requires new evidence and a superseding ADR.
 
 | ID | Title | Status | Date |
 | --- | --- | --- | --- |
@@ -47,13 +47,13 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR (PLAN §39
 | [ADR-040](docs/adr/ADR-040-edge-header-policy.md) | Edge header policy: the gateway generates correlation ids and trusts no inbound `X-Kui-*` | Accepted | 2026-09-03 |
 | [ADR-041](docs/adr/ADR-041-layering-rules-machine-enforced.md) | Layering rules are machine-enforced; a domain-owning `application` never depends on the wire (amended: the gateway is outside the rule) | Accepted | 2026-09-03 |
 | [ADR-042](docs/adr/ADR-042-kafka-backed-metadata-store.md) | KUI metadata lives in Kafka, in internal compacted topics | Accepted | 2026-09-03 |
-| [ADR-043](docs/adr/ADR-043-internal-service-to-service-calls.md) | Direct service→service calls are permitted on the callee's published `/internal/v1` contract, under four conditions (settles PLAN §16.6) | Accepted | 2026-09-03 |
+| [ADR-043](docs/adr/ADR-043-internal-service-to-service-calls.md) | Direct service→service calls are permitted on the callee's published `/internal/v1` contract, under four conditions | Accepted | 2026-09-03 |
 | [ADR-044](docs/adr/ADR-044-store-record-envelope-and-field-encryption.md) | The metadata-store record envelope is versioned; secrets are marked by JSON convention and each ciphertext is bound to its record and field | Accepted | 2026-09-03 |
 | [ADR-045](docs/adr/ADR-045-plan-token-confirmation-for-mutations.md) | A destructive operation is confirmed against a server-computed plan carried by an HMAC'd plan token, not against a form | Accepted | 2026-09-04 |
 | [ADR-046](docs/adr/ADR-046-cluster-profile-seam.md) | Cluster credentials travel on `/internal/v1` and exactly one shared module, `services/cluster/client`, consumes them | Accepted | 2026-09-04 |
 | [ADR-047](docs/adr/ADR-047-mutation-marker-readonly-and-audit-sink.md) | Every mutation ships with a `Mutation` marker, a per-cluster read-only refusal and an audit record, from the first one | Accepted | 2026-09-04 |
 
-ADR-039 … ADR-043 were written at and after the G6 grooming gate (2026-09-03) to record decisions the
+ADR-039 … ADR-043 were written at and after the architecture review (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded
 into the ADRs they belong to rather than given numbers of their own: the `KUI-ROUTE-NOT-FOUND`
 code and the `ErrorCode.description` field became **ADR-034 amendments 1 and 2**; the
@@ -61,15 +61,15 @@ proxy-free dev loop and the static route patterns beside dynamic imports became 
 amendments 1 and 2**; the `Forbidden` precedence rule and `Degraded(Starting)` became
 **ADR-032 amendments 1 and 2**.
 
-**ADR-042** (2026-09-03) settles the condition STATUS.md recorded at the G6 gate: KUI's own
+**ADR-042** (2026-09-03) settles the last open condition from the architecture review: KUI's own
 metadata lives in internal compacted Kafka topics, not in a relational database and not in a
 versioned YAML file. It amends **ADR-036** (store adapters and distribution) and clarifies
 **ADR-023** (the audit topic is the store's `__kui_audit`), closes `TECH_DEBT.md` TD-014, and
 replaces `docs/FEATURE_MATRIX.md` OT-004.
 
-## Mapping from PLAN §43
+## Mapping from the original decision list
 
-PLAN's ADR-001..018 keep their numbers. PLAN's "ADR-008 log4cats + Fabric" became
+The original planning document's ADR-001..018 keep their numbers. Its "ADR-008 log4cats + Fabric" became
 "log4cats + Logback; Fabric dropped". Research candidates numbered ADR-017..021 in
 `research/scala/security-research.md` and ADR-019/020 in `research/scala/frontend-research.md`
 were renumbered to ADR-019..025 above to avoid collisions.
@@ -78,10 +78,10 @@ were renumbered to ADR-019..025 above to avoid collisions.
 
 | Topic | Why deferred | Revisit |
 | --- | --- | --- |
-| MCP server library (andimiller/scala-mcp vs linkyard) | M9 scope; contracts must be stable first | M9 grooming |
+| MCP server library (andimiller/scala-mcp vs linkyard) | M9 scope; contracts must be stable first | before M9 planning |
 | Third-party frontend plugin SDK (Option C) | post-M8 | after M8 |
-| Web-component widget library (Shoelace) | design token import (Research Agent I) not delivered | after `research/design/` exists |
+| Web-component widget library (Shoelace) | design token import not delivered | after `research/design/` exists |
 | Shared session store adapter (Kafka compacted topic) | single gateway replica acceptable until M6; ADR-042 now fixes the shape it would take | M6 |
 | Internal events topic `kui.internal.events` | polling suffices for M0–M5 | M6 |
 | Persisting topic analysis results | memory only, as Kafbat; ADR-042 gives it a home if the need appears | when a store need appears |
-| `ui-clusters` page composition and feature-local state shape | one trivial page in M0; the pattern is worth deciding against a real screen | M2 grooming |
+| `ui-clusters` page composition and feature-local state shape | one trivial page in M0; the pattern is worth deciding against a real screen | before M2 planning |

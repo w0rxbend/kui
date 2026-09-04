@@ -5,9 +5,9 @@
 
 ## Context
 
-PLAN §15 proposes twelve deployables and asks the architects to decide whether
+The initial service catalog proposed twelve deployables and left open whether
 `kui-security-service` merges into `kui-cluster-service` and `kui-config-service` into the
-gateway. Microservices are a fault-isolation requirement (PLAN §3), so the split must follow
+gateway. Microservices are a fault-isolation requirement, so the split must follow
 failure domains and bounded contexts, not code size.
 
 ## Decision
@@ -57,7 +57,7 @@ schema, connect, ksql, metrics, identity. Eleven deployables.
 
 - Config service inside the gateway: puts Kafka client dependencies and the SSRF-prone
   validation surface into the Core edge process and gives the gateway domain logic.
-- Config service as its own deployable: a "utility service" without a domain (PLAN §3).
+- Config service as its own deployable: a "utility service" without a domain.
 - Merging security into cluster: rejected above.
 
 ## Reversibility

@@ -2,45 +2,45 @@
 
 **Status:** living document, states corrected in full by the 2026-09-04 audit. Seeded 2026-09-03 from `research/kafbat/feature-matrix.md` (150 rows)
 plus the screen inventory in `research/kafbat/ui-analysis.md` §IA.1 and the KUI-only rows the
-research flagged. Updated by every task that changes a feature's state (PLAN §46, §50).
+research flagged. Updated by every task that changes a feature's state.
 
 This is the product capability list. Every capability found in any reference project is here,
 assigned to a milestone, or explicitly `DEFERRED(reason)` / `REJECTED(reason)`. Nothing is
-dropped silently (PLAN §44).
+dropped silently.
 
 ## How to read this file
 
 - **ID** — stable identifier `AREA-NNN`. Numbers never change; a removed row keeps its ID with
   state `REJECTED`. Research rows keep their research number (`CL-1` became `CL-001`).
 - **Source** — which reference has the behavior: `Kafbat`, `Provectus`, `Kouncil`, or `KUI-new`
-  (no reference has it; KUI adds it because of PLAN §2 or a research finding).
+  (no reference has it; KUI adds it because of the project's product properties or a research finding).
 - **Priority** — `P0` core (must exist before parity can be claimed for that area), `P1` parity
   (needed to claim the union of the three references), `P2` valuable, `P3` marginal.
-- **Owner** — the backend bounded context from PLAN §15 (short names: `gateway`, `cluster`,
+- **Owner** — the backend bounded context (short names: `gateway`, `cluster`,
   `topic`, `message`, `consumer`, `schema`, `connect`, `ksql`, `security`, `identity`,
   `metrics`, `config`). `—` means frontend-only.
-- **MFE** — the microfrontend from PLAN §21 (`shell`, `kernel`, `ui-clusters`, `ui-topics`,
+- **MFE** — the microfrontend (`shell`, `kernel`, `ui-clusters`, `ui-topics`,
   `ui-messages`, `ui-consumers`, `ui-schemas`, `ui-connect`, `ui-ksql`, `ui-security`,
   `ui-metrics`, `ui-admin`). `—` means backend-only.
 - **Milestone** — `M0`..`M9` from `docs/ROADMAP.md`. `—` only for rejected rows.
-- **Cx** — complexity for one implementing agent including tests: `S` (<2 d), `M` (2–5 d),
+- **Cx** — implementation complexity, tests included: `S` (<2 d), `M` (2–5 d),
   `L` (1–2 w), `XL` (>2 w).
-- **State** — PLAN §44:
+- **State** — the lifecycle a feature moves through:
   `NOT_RESEARCHED → RESEARCHING → DESIGNED → PLANNED → IMPLEMENTING → TESTING → REVIEW → COMPLETE`,
   plus `BLOCKED` and `DEFERRED(reason)` / `REJECTED(reason)`.
   A row becomes `DESIGNED` only when the ADRs and domain model it depends on are Accepted
-  (grooming step G3). `RESEARCHING` in this file now means one thing only: **nothing is built.**
+  (during the architecture review). `RESEARCHING` in this file now means one thing only: **nothing is built.**
   Where a row has code that is unreachable, its state is `IMPLEMENTING` and its note says so.
 
 A row reaches `COMPLETE` only when a person can do the thing from a browser against a running KUI.
 Compiling, being unit-tested and being green is `IMPLEMENTING` or `TESTING`, not `COMPLETE`. That
 distinction has now earned its keep three times, and the third time it cut in both directions.
 
-The first two are recorded in `STATUS.md`: code that compiled, passed its suites and could not be
-reached from a screen, twice.
+The first two times, the same thing had happened: code that compiled, passed its suites and could
+not be reached from a screen.
 
-The third is the full audit of 2026-09-04, when nine auditors read the tree area by area and drove
-the two running deployments. **Every state in this file below was set by that audit**, and the notes
+The third is the full audit of 2026-09-04, when the tree was read area by area and both running
+deployments were driven by hand. **Every state in this file below was set by that audit**, and the notes
 say what was checked and how. The audit found drift in both directions, which is why a stale matrix
 is dangerous rather than merely untidy:
 
@@ -61,8 +61,8 @@ The recurring failure this project keeps repeating has a name in these notes: **
 component that is built, tested, green and wired into nothing. `MS-007` (the CEL filter engine),
 `DM-001` (the masking engine), `ET-001` (event tracking), `CL-012` (the KRaft quorum), `MS-004`
 (the JSON flattener), `SD-003` (serde resolution) and `CL-006`'s connectivity probe are all in that
-state today. They are marked `IMPLEMENTING`, never `COMPLETE`, and `docs/BACKLOG.md` costs them as
-wiring work rather than as new features.
+state today. They are marked `IMPLEMENTING`, never `COMPLETE`, because what they need is wiring
+rather than a new implementation.
 
 **Counts as of the 2026-09-04 audit** (188 capability rows): 53 `COMPLETE`, 12 `REVIEW`,
 2 `TESTING`, 16 `IMPLEMENTING`, 93 `RESEARCHING` (not started), 1 `BLOCKED`, 7 `DEFERRED`,
@@ -88,7 +88,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | CL-008 | Failover across multiple SR / Connect / ksql URLs | Kafbat, Provectus | P2 | schema, connect, ksql (shared lib) | — | M7 | M | RESEARCHING | |
 | CL-009 | Per-cluster colour tag and status dot in navigation | Kafbat | P2 | — | shell | M1 | S | COMPLETE | Audited 2026-09-04. The slug-vs-name defect is fixed: the capability entry carries the operator's name. |
 | CL-010 | Favourites: pin topics and groups to the top of lists | Kouncil | P2 | — | kernel | M2 | S | COMPLETE | localStorage, keyed by cluster + name; the star column ships on the topic list. |
-| CL-011 | Broker-address lookup helper endpoint (`/api/connection`) | Kouncil | P3 | cluster | — | — | S | REJECTED(folded into CL-001) | CEO decision DR-13. The first broker address is a field of the cluster DTO. |
+| CL-011 | Broker-address lookup helper endpoint (`/api/connection`) | Kouncil | P3 | cluster | — | — | S | REJECTED(folded into CL-001) | recorded decision DR-13. The first broker address is a field of the cluster DTO. |
 | CL-012 | KRaft quorum panel: leader, epoch, high watermark, voters and observers with lag | KUI-new | P1 | cluster | ui-clusters | M1 | S | IMPLEMENTING | Audited 2026-09-04. **Largest single unwired asset in the product.** `QuorumInfo` is modelled, validated, adapted (`describeMetadataQuorum`), capability-probed and fetched every 30 s into `ClusterTopology` — and read by no contract, no route and no screen. |
 
 ## Brokers (BR)
@@ -125,7 +125,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | TP-016 | Topic → ACLs tab | Kafbat | P2 | security | ui-topics (FeaturePanel) | M7 | S | RESEARCHING | Needs Topic VIEW and ACL VIEW. |
 | TP-017 | Topics CSV export | Kafbat | P2 | topic | ui-topics | M5 | S | RESEARCHING | Content negotiation. |
 | TP-018 | Batch actions on the topic list (multi-select delete / purge / copy) | Kafbat, Provectus | P1 | — (client composition) | ui-topics | M5 | M | RESEARCHING | Partial failure reported per topic. |
-| TP-019 | Topic existence check helper endpoint | Kouncil | P3 | topic | — | — | S | REJECTED(folded into TP-003) | CEO decision DR-13. Forms use `GET /topics/{topic}` and map 404. |
+| TP-019 | Topic existence check helper endpoint | Kouncil | P3 | topic | — | — | S | REJECTED(folded into TP-003) | recorded decision DR-13. Forms use `GET /topics/{topic}` and map 404. |
 
 ## Partitions (PA)
 
@@ -175,7 +175,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | CG-005 | Delete committed offsets for one topic | Kafbat | P1 | consumer | ui-consumers | M4 | S | TESTING | Audited 2026-09-04. Served end to end (200 with the deleted partition list, distinguishing 'had none'); no client and no control in the interface. |
 | CG-006 | Incremental lag polling and lag trend sparkline | Kafbat | P1 | consumer | ui-consumers | M4 | M | REVIEW | Audited 2026-09-04. **The 'nothing calls it, the list does not poll' note was wrong.** `GroupListPage` mounts `LagPoller.binder`; the endpoint answers with a token and `nextPollMs` live. What remains is GRP-033 items 3–4: `LagTrend`, `LagSparkline`, the ▲/▼ arrows and the missing-sample rules — no `lag/` directory exists. |
 | CG-007 | Consumer groups CSV export | Kafbat | P2 | consumer | ui-consumers | M5 | S | RESEARCHING | |
-| CG-008 | Consumer group full-text n-gram search | Kafbat | P2 | consumer | — | M9 | S | DEFERRED(follows TP-002) | CEO decision DR-10. |
+| CG-008 | Consumer group full-text n-gram search | Kafbat | P2 | consumer | — | M9 | S | DEFERRED(follows TP-002) | recorded decision DR-10. |
 | CG-009 | `__consumer_offsets` decoding serde | Kafbat, Provectus | P2 | message | — | M5 | M | RESEARCHING | Part of the extended serde set (KU-023). |
 
 ## Schema registry (SR)
@@ -241,7 +241,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | MT-003 | Inferred metrics without JMX, IO rate scanner | Kafbat | P1 | metrics | — | M8 | M | RESEARCHING | Makes dashboards work on clusters without JMX. |
 | MT-004 | Graph descriptions and Prometheus query proxy with templated PromQL | Kafbat | P2 | metrics | ui-metrics | M8 | L | RESEARCHING | Typed `GraphData` instead of raw PromQL passthrough. uPlot facade (ADR-025). |
 | MT-005 | Prometheus exposition `/metrics`, `/metrics/clusters/{id}` | Kafbat | P2 | metrics | — | M8 | M | RESEARCHING | Outside `/api/v1`, allow-listed, no session auth. |
-| MT-006 | Push-gateway / remote-write sinks | Kafbat | P3 | metrics | — | M9 | M | DEFERRED(pull-based MT-005 covers monitoring) | CEO decision DR-3. |
+| MT-006 | Push-gateway / remote-write sinks | Kafbat | P3 | metrics | — | M9 | M | DEFERRED(pull-based MT-005 covers monitoring) | recorded decision DR-3. |
 | MT-007 | KUI self-metrics (JVM, HTTP, per-service) | Kafbat, Provectus | P0 | all services | — | M0 | S | IMPLEMENTING | Audited 2026-09-04. **The only row in this area with running code, and drifting both ways.** 16 of 26 declared metric names have an emitter; 10 have none, including `kui.upstream.circuit.state`, which `docs/operations/observability.md` claims is live (transitions are logged, never metered). No JVM runtime instrumentation exists. Neither runnable deployment sets `prometheusPort`, so nothing has ever scraped it. |
 
 ## Config wizard and dynamic config (CW)
@@ -281,7 +281,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | AD-001 | Audit log of mutating operations to console and/or a Kafka topic (`ALL` / `ALTER_ONLY`) | Kafbat, Provectus | P1 | identity (sink), fed by gateway | ui-admin | M5 | M | REVIEW | Audited 2026-09-04. **Corrected upward for the console sink**, which is wired in all three services and was observed writing `topic.create on …: succeeded` on a live deployment. Missing: the `__kui_audit` Kafka sink, the `ALL`/`ALTER_ONLY` knob, and a real principal (all three services hard-code a placeholder, and two disagree on its wording). The consumer service duplicates the `AuditSink` port in its own domain instead of using `libs/security-core`. |
 | AD-002 | Audit topic self-protection (browsing it requires `AUDIT:VIEW`) | Kafbat, Provectus | P1 | gateway | — | M6 | S | RESEARCHING | |
-| AD-003 | Entry/exit AOP logger and HTTP trace actuator | Kouncil | P3 | — | — | — | S | REJECTED(replaced by OpenTelemetry tracing, PLAN §30) | CEO decision DR-8. |
+| AD-003 | Entry/exit AOP logger and HTTP trace actuator | Kouncil | P3 | — | — | — | S | REJECTED(replaced by OpenTelemetry tracing) | recorded decision DR-8. |
 
 ## Data masking (DM)
 
@@ -295,7 +295,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | SD-001 | Core built-in serdes: String, Schema Registry (Avro / JSON Schema / Protobuf), Int32/64, UInt32/64, Base64, Hex, UUID; auto-detection by magic byte | Kafbat, Provectus, Kouncil | P0 | message | ui-messages (picker) | M3 | XL | REVIEW | Updated 2026-09-04 by E3. `libs/serde-confluent` now exists: the registry client over `libs/http`'s `UpstreamClient`, ADR-016's two caches, and a `SerdeFactory` that yields a disabled picker row with a reason when the registry is unreachable. **Avro and JSON Schema decode and encode**; **Protobuf does not** and reports itself by name rather than falling back silently — the only maintained dynamic `.proto` decoder is Confluent Community Licensed (ADR-014 Amendment 1). The `Fallback` defect is closed: an explicit `SchemaRegistry` choice against a down registry now returns `KUI-SERDE-UNAVAILABLE`. Not yet wired to a cluster — that is SD-003, which owns the config slice. |
-| SD-002 | Custom serde plugin loading (jar, isolated classloader) | Kafbat, Provectus | P2 | message | — | M7 | L | DEFERRED(needs a serde SPI ADR) | CEO decision DR-9. ADR written in M7 grooming. |
+| SD-002 | Custom serde plugin loading (jar, isolated classloader) | Kafbat, Provectus | P2 | message | — | M7 | L | DEFERRED(needs a serde SPI ADR) | recorded decision DR-9. ADR written before M7 implementation begins. |
 | SD-003 | Default key/value serde per cluster and resolution order | Kafbat, Provectus | P0 | message | — | M3 | S | IMPLEMENTING | Audited 2026-09-04. `SerdeResolution.Rules` and its suite exist; every cluster is built `SerdeProfile.unconfigured` with no factories, and `libs/config` has no serde slice at all, so resolution always falls through to autodetect. |
 | SD-004 | Schema → JSON Schema conversion for produce-form validation | Kafbat, Provectus | P1 | message | ui-messages | M3 | M | RESEARCHING | |
 
@@ -304,7 +304,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | SF-001 | Case-insensitive substring search on every list | Kafbat, Provectus, Kouncil | P0 | each service | kernel (search box) | M2 | S | COMPLETE | `q` parameter, URL-synced, exact and fuzzy modes, on the topic list. |
-| SF-002 | Full-text n-gram index across topics, groups, schemas, connectors, ACLs | Kafbat | P2 | each service (shared index lib) | — | M9 | L | DEFERRED(follows TP-002) | CEO decision DR-10. |
+| SF-002 | Full-text n-gram index across topics, groups, schemas, connectors, ACLs | Kafbat | P2 | each service (shared index lib) | — | M9 | L | DEFERRED(follows TP-002) | recorded decision DR-10. |
 | SF-003 | Virtualized, sortable data table with favourites pinning | Kafbat, Kouncil | P0 | — | kernel | M2 | M | REVIEW | Audited 2026-09-04. `VirtualizedTable` ships with its own suite and **has no caller** (TD-018). The topic and partition tables are unvirtualized. |
 
 ## Event tracking (ET)
@@ -320,9 +320,9 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | NX-001 | Server push notifications (forced logout on permission change, no clusters defined) | Kouncil | P2 | gateway (SSE bus) | kernel (notification bus) | M6 | M | RESEARCHING | Rides the capability SSE channel (KU-001). |
-| NX-002 | In-app survey popup | Kouncil | P3 | — | — | — | S | REJECTED(telemetry and consent concerns, no operator value) | CEO decision DR-5. |
+| NX-002 | In-app survey popup | Kouncil | P3 | — | — | — | S | REJECTED(telemetry and consent concerns, no operator value) | recorded decision DR-5. |
 | NX-003 | Version and latest-release banner | Kafbat, Provectus | P2 | gateway | shell | M8 | S | RESEARCHING | Release lookup only when OT-006 is opted in. |
-| NX-004 | Demo mode with an in-memory fake backend | Kouncil | P3 | — | shell | M9 | M | DEFERRED(marketing aid, not a product capability) | CEO decision DR-6. |
+| NX-004 | Demo mode with an in-memory fake backend | Kouncil | P3 | — | shell | M9 | M | DEFERRED(marketing aid, not a product capability) | recorded decision DR-6. |
 | NX-005 | Custom context path / base path | Kafbat, Provectus, Kouncil | P1 | gateway | shell | M0 | S | RESEARCHING | Reverse-proxy deployments. Part of static asset serving. |
 | NX-006 | CORS configuration | Kafbat, Provectus | P1 | gateway | — | M0 | S | RESEARCHING | Off by default; explicit origin list when enabled. |
 | NX-007 | Shared UI primitives: confirmation modals, toasts, breadcrumbs, empty states, drawers, tabs, forms | Kafbat, Provectus, Kouncil | P0 | — | kernel | M0 | M | COMPLETE | Audited 2026-09-04. Dialogs, toasts, tabs, drawers, empty states, `DataTable` and `VirtualizedTable` all ship and are used. |
@@ -331,13 +331,13 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MC-001 | MCP server exposing API operations as tools, derived from Tapir endpoints | Kafbat | P2 | gateway | — | M8 | L | RESEARCHING | CEO decision DR-11. Read/write classification by method; read-only and RBAC pass through. |
+| MC-001 | MCP server exposing API operations as tools, derived from Tapir endpoints | Kafbat | P2 | gateway | — | M8 | L | RESEARCHING | recorded decision DR-11. Read/write classification by method; read-only and RBAC pass through. |
 
 ## Data catalog (OD)
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| OD-001 | OpenDataDiscovery exporter (topics, connectors, schema fields, lineage) | Kafbat, Provectus | P3 | topic, connect (exporter plugin) | — | M9 | L | DEFERRED(external platform integration, no core value) | CEO decision DR-4. No interface slot is reserved before M9. |
+| OD-001 | OpenDataDiscovery exporter (topics, connectors, schema fields, lineage) | Kafbat, Provectus | P3 | topic, connect (exporter plugin) | — | M9 | L | DEFERRED(external platform integration, no core value) | recorded decision DR-4. No interface slot is reserved before M9. |
 
 ## Other cross-cutting knobs (OT)
 
@@ -352,11 +352,11 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | OT-009 | Store health as a capability: store unreachable means last known state, `Degraded(reason)`, writes rejected | KUI-new | P0 | cluster, identity (+gateway registry) | kernel | M1 | S | REVIEW | Health state machine, sticky `since` and rejected writes all ship and are unit-tested. Nothing yet stops the store's broker mid-run and asserts the three consequences together; M1 exit criterion 11 is open. |
 | OT-010 | Operator guidance for the store: sizing, ACLs, encryption key handling, backup/restore, file-to-Kafka migration | KUI-new | P1 | — | — | M1 | S | COMPLETE | `docs/operations/metadata-store.md`. Ships with OT-004; revisited when RB-004 and DM-002 add sections. |
 | OT-005 | Uniform error envelope with stable `KUI-*` codes and correlation id | Kouncil, Kafbat | P0 | all | kernel | M0 | S | COMPLETE | Audited 2026-09-04. Every live refusal in this audit carried a `KUI-*` code and a correlation id. |
-| OT-006 | Release check phone-home and installation id | Kafbat, Provectus, Kouncil | P3 | gateway | — | M8 | S | RESEARCHING | Opt-in only, default off (CEO decision DR-7). |
+| OT-006 | Release check phone-home and installation id | Kafbat, Provectus, Kouncil | P3 | gateway | — | M8 | S | RESEARCHING | Opt-in only, default off (recorded decision DR-7). |
 
 ## KUI-only capabilities (KU)
 
-Rows no reference has. They come from PLAN §2 (fault isolation, streaming-first, deployable two
+Rows no reference has. They come from KUI's own product properties (fault isolation, streaming-first, deployable two
 ways), from the IA proposal in `research/kafbat/ui-analysis.md`, and from gaps the API and
 security research flagged.
 
@@ -372,7 +372,7 @@ security research flagged.
 | KU-008 | Docker Compose dev environment and CI pipeline (compile `-Werror`, format, tests, link, OpenAPI diff) | KUI-new | P0 | deployment | — | M0 | M | COMPLETE | Re-audited 2026-09-04 after E7. The CI workflow now runs **every** test module through `./scripts/run-tests.sh` — 4140 test cases across 57 modules, counted from the JUnit reports rather than read off Mill's task count — plus a new `generated` job for `__.openApiCheck` (4 modules) and `docs.errorCodes --check`. `deployment/compose/smoke.sh` was fixed (it asserted `GET /api/v1/ping`, deleted in M1) and now runs in the end-to-end job; the four shipped artifacts that documented that endpoint were corrected. The root cause of the old figure was that `./mill a.test b.test` passes `b.test` to `a.test` as a test-name filter, so the JVM step had been running zero cases while reporting green. |
 | KU-009 | `403`, `404`, feature fallback pages and the single full-screen "cannot reach gateway" state | KUI-new | P0 | — | shell | M0 | S | COMPLETE | Audited 2026-09-04. Feature fallback panels and the full-screen gateway-unreachable state are exercised by `ClusterServiceDownSuite`. |
 | KU-010 | Stale data stays on screen (greyed, timestamped, actions disabled) when a feature becomes Unavailable | KUI-new | P1 | — | kernel (`StaleDataOverlay`, `QueryCache`) | M1 | M | COMPLETE | DC-H3, decided before M1 because every feature state depends on it. |
-| KU-011 | Partial aggregation endpoints with per-section status: cluster dashboard (M1), topic overview (M2, sections added in M4/M7), consumer group page (M4), connects with stats (M7) | KUI-new | P0 | gateway | ui-clusters, ui-topics, ui-consumers | M1 | M | COMPLETE | PLAN §16.3. Milestone is when the first one ships. |
+| KU-011 | Partial aggregation endpoints with per-section status: cluster dashboard (M1), topic overview (M2, sections added in M4/M7), consumer group page (M4), connects with stats (M7) | KUI-new | P0 | gateway | ui-clusters, ui-topics, ui-consumers | M1 | M | COMPLETE | Milestone is when the first one ships. |
 | KU-012 | User settings page: theme, timezone, refresh rate, table density | KUI-new | P1 | — | shell | M1 | S | REVIEW | Audited 2026-09-04. Theme ships and a timezone signal is threaded to the message table, but there is no settings page and no control that sets timezone, refresh rate or density (see AU-005). |
 | KU-013 | Cross-feature `FeaturePanel` slot (topic → consumers tab, broker → metrics tab) keyed by feature id, never by import | KUI-new | P1 | — | kernel | M2 | M | COMPLETE | The slot exists and the topic overview renders it: `consumerGroups`, `connectors`, `acls` and `schemas` each come back `not_configured`, which is what the criterion asks for. |
 | KU-014 | SSE envelope with named events (`phase`, `message`, `consumed`, `done`, `error`, `heartbeat`) and `id:` for `Last-Event-ID` reconnect; kernel `SseStream` wrapper | KUI-new | P0 | message, gateway | kernel | M3 | M | COMPLETE | Audited 2026-09-04. `phase`/`message`/`consumed`/`done` with `id:` observed live on the browse stream; the kernel wrapper is used by the message screen. |
@@ -387,20 +387,20 @@ security research flagged.
 | KU-023 | Extended built-in serdes: ProtobufFile, ProtobufRaw, AvroEmbedded, MessagePack, Struct, MirrorMaker2 heartbeat / offset-sync / checkpoint, `__consumer_offsets` | Kafbat | P1 | message | ui-messages (picker) | M5 | L | RESEARCHING | Split out of SD-001 so M3 stays bounded. Includes CG-009. |
 | KU-024 | SSRF-safe outbound URL policy for every configured remote (http/https only, deny link-local and metadata ranges, optional allow-list, no cross-host redirects, upstream bodies never echoed) | KUI-new | P1 | `kui-config`, gateway | — | M8 | M | COMPLETE | Audited 2026-09-04. `UrlPolicy` is applied to every configured remote and is exercised against the nine shipped configuration files. |
 | KU-025 | Helm chart, runbooks, production deployment docs | KUI-new | P1 | deployment | — | M8 | M | RESEARCHING | |
-| KU-026 | Kafbat environment-variable migration tool (`KAFKA_CLUSTERS_0_*` → KUI keys) | KUI-new | P1 | tools | — | M8 | M | RESEARCHING | PLAN §24. |
+| KU-026 | Kafbat environment-variable migration tool (`KAFKA_CLUSTERS_0_*` → KUI keys) | KUI-new | P1 | tools | — | M8 | M | RESEARCHING | — |
 | KU-027 | Performance budgets, load tests and recorded benchmarks (`docs/benchmarks/`) | KUI-new | P1 | benchmarks | — | M8 | M | RESEARCHING | First benchmarks are an M3 exit criterion; the regression gate is M8. |
 | KU-028 | Dependency vulnerability scanning, SBOM, release process | KUI-new | P1 | ci | — | M8 | M | RESEARCHING | |
 | KU-029 | Event-tracking correlation-key grouping (`groups[]` in the track response) | KUI-new | P2 | message | ui-messages | M9 | M | RESEARCHING | Contract reserves the field in M3. |
 | KU-030 | Server-side column projection (`flatten=true`) for CSV export of the table view | KUI-new | P3 | message | — | M9 | S | RESEARCHING | Client-side flattening is enough until proven otherwise. |
-| KU-031 | Plugin SDK for third-party microfrontends (Option C, web-component boundary) | KUI-new | P2 | — | kernel, shell | M9 | XL | RESEARCHING | PLAN §21; ADR after M8. |
+| KU-031 | Plugin SDK for third-party microfrontends (Option C, web-component boundary) | KUI-new | P2 | — | kernel, shell | M9 | XL | RESEARCHING | ADR after M8. |
 | KU-032 | Alerting on lag, offline partitions and capability transitions | KUI-new | P2 | metrics | ui-metrics | M9 | L | RESEARCHING | Research first. |
 | KU-033 | Fault-isolation E2E suite: for every service, stop its container and assert the shell, the other features and the fallback panels still work | KUI-new | P0 | e2e | — | M1 | M | REVIEW | Audited 2026-09-04. **Corrected downward from COMPLETE.** The suite covers the cluster service only — 1 of 4 Kafka-facing services — and cannot cover the others, because `topic`, `message` and `consumer` have no `Main`, no client module and no image. |
 
 ## Decisions required
 
 The research proposed thirteen defer/reject candidates and left several questions open. The
-CEO decisions below are final for the grooming phase; reopening one requires new evidence and a
-superseding entry (PLAN §39, anti-waste rules).
+recorded decisions below are final for the planning phase; reopening one requires new evidence and a
+superseding entry (the project's anti-waste rule against reopening settled decisions).
 
 | # | Row(s) | Candidate | Decision | Reason |
 | --- | --- | --- | --- | --- |
@@ -411,11 +411,11 @@ superseding entry (PLAN §39, anti-waste rules).
 | DR-5 | NX-002 | In-app survey popup | **REJECTED** | Sends usage data to a third party; consent and telemetry concerns; no operator value. Rejected rather than deferred so nobody re-plans it. |
 | DR-6 | NX-004 | Demo mode with fake backend | **DEFERRED → M9** | Marketing aid, not a capability. When it comes, it is a compose file with a seeded cluster, not a fake frontend backend. |
 | DR-7 | OT-006 | GitHub release phone-home, installation id | **ACCEPTED as opt-in, default off, M8** | Useful for upgrade nudges (NX-003) but must never contact the network without an explicit `kui.updates.check=true`. |
-| DR-8 | AD-003 | AOP entry/exit logger, HTTP trace actuator | **REJECTED** | Replaced by OpenTelemetry spans and structured logs (PLAN §30). |
-| DR-9 | SD-002 | Custom serde jars via isolated classloader | **DEFERRED → M7** | Needs an ADR on the KUI serde SPI (Scala trait vs Kafbat `serde-api` compatibility); written in M7 grooming, implemented in M7 with the other plugin surfaces. |
+| DR-8 | AD-003 | AOP entry/exit logger, HTTP trace actuator | **REJECTED** | Replaced by OpenTelemetry spans and structured logs. |
+| DR-9 | SD-002 | Custom serde jars via isolated classloader | **DEFERRED → M7** | Needs an ADR on the KUI serde SPI (Scala trait vs Kafbat `serde-api` compatibility); written before M7 implementation, delivered in M7 with the other plugin surfaces. |
 | DR-10 | TP-002, SF-002, CG-008, KC-010 (n-gram part) | Lucene full-text n-gram index | **DEFERRED → M9** | Adds a Lucene dependency for a problem substring search solves below ~5k topics. Revisit only with a benchmark on a real large cluster. |
 | DR-11 | MC-001 | MCP server | **ACCEPTED, P2, M8** | Kafbat parity feature; tools derive automatically from Tapir endpoints, which are only stable once every service exists (end of M7). |
-| DR-12 | ET-002 (transport) | STOMP / WebSocket transport for async tracking | **REJECTED (transport only)** | KUI streams over SSE (PLAN §28); the async tracking feature stays P0 in M3. |
+| DR-12 | ET-002 (transport) | STOMP / WebSocket transport for async tracking | **REJECTED (transport only)** | KUI streams over SSE; the async tracking feature stays P0 in M3. |
 | DR-13 | CL-011, TP-019 | Kouncil helper endpoints (`/api/connection`, `is-topic-exist`) | **REJECTED (folded)** | Typed contracts already answer both (cluster DTO field; `GET /topics/{topic}` → 404). |
 
 Rulings on the open questions that affect milestone scope:
@@ -423,13 +423,13 @@ Rulings on the open questions that affect milestone scope:
 | # | Question (source) | Ruling |
 | --- | --- | --- |
 | DR-14 | Canonical RBAC vocabulary: Kouncil's 33 function names or Kafbat's resource × action matrix? (feature-matrix Q1) | Kafbat's resource × action matrix, verbatim, because it is also the migration path for Kafbat users. Kouncil's UI-managed groups (RB-004) map onto it. |
-| DR-15 | Unavailable sidebar entries: disabled links (PLAN §16.5 wording) or clickable to a fallback panel? (DC-H1) | Clickable to the fallback panel; `NotConfigured` hidden; `Forbidden` shown disabled with tooltip. PLAN §16.5 wording is amended by this ruling. |
+| DR-15 | Unavailable sidebar entries: disabled links, or clickable to a fallback panel? (DC-H1) | Clickable to the fallback panel; `NotConfigured` hidden; `Forbidden` shown disabled with tooltip. This ruling amends the earlier "disabled links" wording. |
 | DR-16 | Smart-filter test execution without RBAC (feature-matrix Q4, api-analysis) | Requires cluster scope and `TOPIC:MESSAGES_READ` (KU-016). |
 | DR-17 | Connector plugin validation without RBAC (KC-008 research note) | Requires `CONNECTOR:CREATE` or `CONNECTOR:EDIT` and is audited (KU-022). |
 | DR-18 | Async tracking sanity limit: per request or server knob? (feature-matrix Q2) | Both: a server-side hard maximum and a per-request `limit` that cannot exceed it. Same rule as browse. |
 | DR-19 | UI-editable masking policies in M3 or later? (kouncil ui-analysis open question) | File-configured masking in M3 (DM-001); UI policies need user groups, so M6 (DM-002). |
 | DR-20 | Merge `kui-security-service` into `kui-cluster-service`? (D-8) | **Settled by ADR-004: no.** It has its own capability gate, its own failure signature and functionality that is not cluster topology; merging a slow optional feature into the one Core service would break fault isolation. Owner stays `security`. |
-| DR-21 | `kui-config-service` merged into the gateway? (PLAN §15) | **Settled by ADR-004: dissolved, not merged into one place.** Configuration is three ownerships — cluster configuration to `cluster`, auth and RBAC to `identity`, gateway configuration to the gateway — and `/api/v1/config` is a gateway aggregation over them. Owner columns above were updated accordingly at the G6 gate. |
+| DR-21 | `kui-config-service` merged into the gateway? | **Settled by ADR-004: dissolved, not merged into one place.** Configuration is three ownerships — cluster configuration to `cluster`, auth and RBAC to `identity`, gateway configuration to the gateway — and `/api/v1/config` is a gateway aggregation over them. Owner columns above were updated accordingly during that review. |
 
 ## Counts
 

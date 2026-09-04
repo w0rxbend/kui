@@ -15,8 +15,8 @@ Tear it down with `docker compose -f docker-compose.secured.yml down -v`. Nothin
 
 ## Why it exists
 
-Point 5 of `docs/DELIVERY.md` — "point it at your own cluster with a documented example
-configuration, including a secured one" — was met on paper. There was a production example, and the
+One of the things KUI promises — that you can point it at your own cluster with a documented
+example configuration, including a secured one — was met on paper. There was a production example, and the
 adapter suites in `libs/testkit` covered plaintext, SCRAM over plain text, and mutual TLS at the
 port level. What nobody had ever run was **SASL and TLS together**, through the whole product, from
 that example file to a rendered screen. `KafkaTopology` says so in as many words: "There is

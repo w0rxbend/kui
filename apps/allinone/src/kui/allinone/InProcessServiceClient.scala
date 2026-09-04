@@ -45,8 +45,7 @@ import kui.security.PrincipalCodec
   * the gateway, which is the same rule the distributed deployment enforces with a network policy
   * (`ARCHITECTURE.md` §14: services must not be exposed outside the cluster network). It also means the
   * eleven services' identical `/health/live`, `/health/ready` and `/capabilities` paths never have to be
-  * disambiguated, because they never share a router. See the deviation note in
-  * `docs/plans/M0/tasks/AIO-001.md`.
+  * disambiguated, because they never share a router.
   *
   * ==What is honestly missing==
   *

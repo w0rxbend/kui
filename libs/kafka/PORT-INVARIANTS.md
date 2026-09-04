@@ -55,15 +55,15 @@ implementations of a sixty-second-timeout guard is one more than can be kept cor
 The obvious place for this rule is a doc comment on `TopicAdmin.listOffsets`. That trait did not exist when
 this file was written, and could not be created yet.
 
-DEVPLAN §3 forbids declaring empty `TopicAdmin`, `GroupAdmin`, `SecurityAdmin` or
+The project forbids declaring empty `TopicAdmin`, `GroupAdmin`, `SecurityAdmin` or
 `MessageBrowsePort` traits in M1, and risk R-11 says why: an empty trait is an invitation to fill
 it, and a port designed before its first caller exists is designed wrong. M1 implements
 `ClusterAdmin` and nothing else.
 
 But the *knowledge* must not be lost with the trait. This one was expensive to learn — it is a sixty-second
 timeout that looks like a network problem — and it would otherwise be rediscovered as a bug report. So it
-lives in a file next to the module that will eventually implement it, and each milestone's grooming step
-picks this file up through the DEVPLAN's reference to it.
+lives in a file next to the module that will eventually implement it, and each milestone's planning
+picks this file up before the implementation work begins.
 
 **If you are the person creating `TopicAdmin`:** move the remaining section into a doc comment on
 `listOffsets`, delete it from here, and delete this file — it will hold nothing else.

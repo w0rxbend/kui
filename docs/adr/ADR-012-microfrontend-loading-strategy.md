@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §21 offers three options: A single bundle with a static registry, B one link with
+The frontend architecture research offered three options: A single bundle with a static registry, B one link with
 Scala.js module splitting and lazy `import()`, C separately linked plugins. Fault isolation
 in the UI requires that an unavailable feature is never downloaded and never breaks the shell.
 
@@ -29,7 +29,7 @@ in the UI requires that an unavailable feature is never downloaded and never bre
 
 ## Amendments
 
-Settled during M0 grooming (G5) and reviewed at the G6 gate on 2026-09-03. Both are
+Settled and reviewed as part of the M0 architecture review, 2026-09-03. Both are
 clarifications of Option B, not changes to it.
 
 **Amendment 1 — the dev loop needs no proxy.**

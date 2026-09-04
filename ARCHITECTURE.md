@@ -1,11 +1,11 @@
 # KUI architecture
 
-Status: authoritative as of 2026-09-03 (grooming phase G3). Every decision referenced as
+Status: authoritative as of 2026-09-03 (early architecture phase). Every decision referenced as
 `ADR-NNN` lives in `docs/adr/` and is indexed in `DECISIONS.md`. Research findings are cited
 by report file and section rather than restated; read the report when you need the evidence.
 
 This document answers one question: *how are the pieces of KUI shaped, and how do they fit
-together so that the product properties in PLAN §2 hold?* Anything about "why this library"
+together so that KUI's product properties hold?* Anything about "why this library"
 is in an ADR. Anything about "what does this screen do" is in the feature matrix.
 
 Sections:
@@ -63,7 +63,7 @@ Two shapes are built from the same Mill modules (ADR-005):
 | Distributed | one container per service + the gateway; discovery by static `kui.gateway.services.<name>.url` or Kubernetes DNS (Helm values) | production |
 | All-in-one | `apps/allinone`: one JVM, one listening port, every service's application layer wired into the gateway's composition root; the gateway's client for each service is an in-process Tapir interpreter | local development, small installs, E2E tests |
 
-No service mesh, no registry service, no shared database (PLAN §3). Services own their
+No service mesh, no registry service, no shared database. Services own their
 state; most state is a rebuildable snapshot of the target cluster (§9).
 
 The distributed shape is not only described here, it is **verified in CI by a browser**. The `e2e`
@@ -77,7 +77,7 @@ would mean calling a method that pretends to be down. See `docs/testing.md`.
 
 ## 2. Service catalog and tiers
 
-Validated against PLAN §15 with two amendments, both recorded in ADR-004:
+Validated against the original service catalog with two amendments, both recorded in ADR-004:
 
 1. **`kui-security-service` stays a separate service.** It has its own capability gate
    (authorizer present, `ALTER` on the cluster), its own failure signature
@@ -93,7 +93,7 @@ Validated against PLAN §15 with two amendments, both recorded in ADR-004:
    belongs to the gateway. The `/api/v1/config` facade is a gateway aggregation over the two
    owners. Details in §10 and ADR-036.
 
-Tier = what the UI does when the service is down (PLAN §16).
+Tier = what the UI does when the service is down.
 
 | Service | Bounded context (`docs/domain/context-map.md`) | Owns | Tier |
 | --- | --- | --- | --- |
@@ -109,11 +109,11 @@ Tier = what the UI does when the service is down (PLAN §16).
 | `kui-metrics-service` | Kafka Observability | JMX/Prometheus scrapers, inferred metrics, graph descriptions, PromQL templates, `/metrics` exposition | Degradable |
 | `kui-identity-service` | Application Identity and Access | authentication adapters, session store, role model and hot reload, permission query, audit sink | **Core when `kui.auth.type != disabled`**; the gateway runs anonymous when auth is disabled |
 
-Two Degradable/Optional services with different failure domains are never merged (PLAN §15).
+Two Degradable/Optional services with different failure domains are never merged.
 
 ## 3. Bounded contexts and module layout
 
-Each service is one Mill module tree (PLAN §18), hexagonal, with the dependency rule
+Each service is one Mill module tree, hexagonal, with the dependency rule
 enforced by `moduleDeps` (a module cannot import what it does not depend on) and machine-checked
 by `./mill checkArchitecture`, whose rule table is ADR-041 §2. Two consequences of that ADR are
 worth stating here: a domain-owning service's `application` never depends on `libs/contracts-core`
@@ -207,7 +207,7 @@ is enforced by the bundle-shape assertion in BUILD-006 instead.
 
 ## 4. Shared libraries and their public APIs
 
-Shared libraries hold no business rule of a single context (PLAN §19). Sketches below are
+Shared libraries hold no business rule of a single context. Sketches below are
 the *shape*; exact signatures are finalized in the M0 tasks. Scala 3, opaque types for ids,
 `F[_]` at port boundaries, `IO` only in `app`.
 
@@ -513,8 +513,8 @@ and `tracestate` are outside that family and are handled by otel4s.
   cancellation, `KafkaConsumer.resource`).
 - Services may call each other directly on the callee's published `/internal/v1` contract,
   under the four conditions of **ADR-043** (published contract, cached last-known fallback,
-  capability reporting, one hop and no chains). This is the reading of PLAN §16.6 that ADR-043
-  settles; the gateway does not relay internal traffic. The edge list below is closed — adding
+  capability reporting, one hop and no chains). This is the rule on direct service-to-service
+  calls that ADR-043 settles; the gateway does not relay internal traffic. The edge list below is closed — adding
   an edge amends ADR-043:
   every Kafka-facing service → cluster-service (`ClusterProfile`, §10), and
   metrics-service → topic/consumer snapshot endpoints (30 s cadence, tolerant).
@@ -682,7 +682,7 @@ loops run under a `Supervisor`, are cancellable and emit `kui.cache.*` and
 | identity | `RbacPolicy` (compiled once, hot-reloaded from the `rbac/roles` key of `__kui_config` or from a file watcher), sessions, OIDC state entries (5 min, single use) | on change | new store record, file change, session expiry | store unreachable means last known policy plus `Degraded`; writes rejected |
 | gateway | capability registry; `sessionId → Principal` (TTL 30 s); OpenAPI merge | readiness every 10 s | logout, role reload event | — |
 
-Cache discipline (PLAN §29): TTL, invalidation trigger, bound, hit/miss metrics and a named
+Cache discipline: TTL, invalidation trigger, bound, hit/miss metrics and a named
 staleness contract, all recorded in the table above. Secrets and message payloads are never
 cached. Small caches use `Ref` + TTL (`libs/cache.SnapshotCell`); bounded large caches
 (schema by id, compiled filters) wrap Caffeine `AsyncCache` in `IO` (no Scaffeine).
@@ -692,7 +692,7 @@ Search: an in-memory prefix/substring/trigram index inside each snapshot (`libs/
 
 ## 10. Configuration ownership and distribution without restart
 
-Typed configuration (PLAN §24) is loaded by Ciris (ADR-013) from CLI flags → env → YAML
+Typed configuration is loaded by Ciris (ADR-013) from CLI flags → env → YAML
 files → defaults, with Kafbat-compatible env keys mapped explicitly. Ownership (ADR-036):
 
 | Section | Owner (single writer) | Readers | Distribution |
@@ -876,7 +876,7 @@ the graceful degradation in this shape as evidence of more than that.
 
 `frontend/ui-kernel` (design tokens, primitives, `QueryCache`, `Sse`, `ApiClient`, kernel
 `Var`s), `frontend/ui-shell` (Waypoint router, layout, `FeatureGate`, capability banner,
-lazy feature loader) and one module per feature (PLAN §21). Loading is a single Scala.js
+lazy feature loader) and one module per feature. Loading is a single Scala.js
 link with `ModuleKind.ESModule` and `ModuleSplitStyle.SmallModulesFor(feature packages)`;
 the shell references features only through `js.dynamicImport` thunks keyed by `FeatureId`
 (ADR-012). Cross-feature panels (topic page → consumers tab) go through the kernel
@@ -903,11 +903,11 @@ merges the RBAC and capability reasons into one tooltip. The RBAC half is wired 
 
 ## 13. Observability standard
 
-PLAN §30 applies unchanged: otel4s (`oteljava` backend, ADR-009) for traces and metrics,
+The observability standard applies unchanged: otel4s (`oteljava` backend, ADR-009) for traces and metrics,
 log4cats structured logs over Logback/logstash JSON with MDC bridged from the span context
 (ADR-008). Every request/stream/refresh emits `correlation.id`, `user.id` (hashed when
 `kui.telemetry.hashUserIds`), `cluster.id`, `service.name`, `operation`. Metric names are
-the PLAN §30 list plus `kui.stream.events {service, stream, event}`,
+that same standard list plus `kui.stream.events {service, stream, event}`,
 `kui.stream.active {service, stream}`, `kui.cursor.rejected {reason}`,
 `kui.principal.rejected {reason}`, `kui.config.version {section}`. Tapir interceptors in
 `libs/observability` apply them to every server; the sttp client factory in `libs/http` to
@@ -916,7 +916,7 @@ every client. Health endpoints are unauthenticated and allow-listed; everything 
 
 ## 14. Security boundaries
 
-Three concerns, never conflated (PLAN §23): application authentication (identity-service,
+Three concerns, never conflated: application authentication (identity-service,
 ADR-015, ADR-019), Kafka cluster authentication (`libs/kafka-auth`, typed per cluster,
 ADR-022), authorization (`libs/security-core`, enforced at the gateway and re-checked in every
 service from the signed principal, ADR-020, ADR-021).
@@ -996,7 +996,7 @@ kui/
 ├── benchmarks/ docs/ research/ tools/
 ```
 
-`services/config` from PLAN §48 does not exist (§2). Mill task names follow PLAN §48.
+The `services/config` service named in the original service list does not exist (§2); it was dissolved (see the decisions log). Mill task names follow the project's build-command conventions.
 
 ### Naming key
 
@@ -1010,7 +1010,7 @@ The same thing has a different form in different places; each form has one job.
 | `services/<name>/<layer>` | directory path | `services/topic/api` |
 | `services.<name>.<layer>` | Mill module id (`.` for directory nesting; a cross-compiled module adds `.jvm` / `.js`) | `services.topic.api` |
 | `libs/<name>` … `libs.<name>` | same rule for libraries; `kui-<name>` appears in prose only | `libs/kernel`, `libs.kernel.jvm`, "kui-kernel" |
-| `frontend/ui-<name>` … `frontend.ui<Name>` | frontend modules; PLAN §21's `kui-ui-<name>` is prose | `frontend/ui-topics`, `frontend.uiTopics` |
+| `frontend/ui-<name>` … `frontend.ui<Name>` | frontend modules; `kui-ui-<name>` is prose | `frontend/ui-topics`, `frontend.uiTopics` |
 | `kui.ui.<name>` | Scala package, and the `ModuleSplitStyle.SmallModulesFor` entry | `kui.ui.topics` |
 
 The `<name>` form is the identifier of record: a `ServiceId` in code, the `service` label in

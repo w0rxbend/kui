@@ -1,8 +1,6 @@
 # Security research: application auth, RBAC, Kafka cluster auth, audit, masking
 
-**Agent:** Research Agent G (Security)
 **Date:** 2026-09-03
-**Plan sections read:** 9, 15, 20, 23, 24, 31, Appendix D
 
 ## Questions
 
@@ -37,7 +35,7 @@ Web (versions checked 2026-09-03):
 - GCP `managed-kafka-auth-login-handler`: https://github.com/googleapis/managedkafka, https://central.sonatype.com/artifact/com.google.cloud.hosted.kafka/managed-kafka-auth-login-handler
 - Azure Event Hubs OAUTHBEARER: https://learn.microsoft.com/en-us/azure/event-hubs/azure-event-hubs-apache-kafka-overview, Kafbat issue https://github.com/kafbat/kafka-ui/issues/1696
 - Kafka SASL mechanisms and OIDC login (KIP-768): https://kafka.apache.org/41/security/authentication-using-sasl/, https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=186877575
-- Tapir 1.13.x line (1.13.15, 2026-04-03; PLAN §10 pins 1.13.31): https://github.com/softwaremill/tapir/releases
+- Tapir 1.13.x line (1.13.15, 2026-04-03; the KUI stack pins 1.13.31): https://github.com/softwaremill/tapir/releases
 
 ---
 
@@ -396,7 +394,7 @@ Nothing there is preferable to Kafbat's rule model.
 | Threat | Where it shows up in the references | KUI requirement |
 | --- | --- | --- |
 | **SSRF via configured URLs** (Schema Registry, Connect, ksqlDB, Prometheus storage, JMX, OAuth `tokenUrl`, LDAP URL) | Any admin with `APPLICATIONCONFIG.EDIT` can `PUT /api/config` or `POST /api/config/validate` with arbitrary URLs and the server connects to them and returns error text (`ApplicationConfigController.java:107-133`). Prometheus proxy runs server-side PromQL templates only — user input goes through `PromQueryTemplate` parameters and a grammar check, so it is not a raw query proxy (`service/graphs/PromQueryTemplate.java`). `configureNoSsl()` uses `InsecureTrustManagerFactory` (`util/WebClientConfigurator.java:117`). | Treat every outbound URL as config-time input: parse with a strict URL type, allow only `http/https`, optional operator allow-list of hosts/CIDRs, deny link-local/metadata ranges (169.254.0.0/16, `fd00::/8` metadata endpoints) by default, never follow redirects to a different host, never echo upstream response bodies into error messages. Config wizard writes require `APPLICATIONCONFIG.EDIT` **and** audit; consider a separate `config.remote-validation.enabled` flag. |
-| **Secret leakage through config endpoints/logs** | `GET /api/config` returns raw properties including `sasl.jaas.config`; `toString` exclusions are ad hoc; validation errors may include upstream messages. | `Secret[A]` opaque type (PLAN §23) whose `toString`, Circe encoder and log encoder emit `***`; the config read endpoint uses a `Redacted` view derived from the same model; JAAS strings are generated from typed fields, never accepted verbatim, and are built with proper quoting/escaping. Secret values may be resolved from `file://` or env references. |
+| **Secret leakage through config endpoints/logs** | `GET /api/config` returns raw properties including `sasl.jaas.config`; `toString` exclusions are ad hoc; validation errors may include upstream messages. | `Secret[A]` opaque type whose `toString`, Circe encoder and log encoder emit `***`; the config read endpoint uses a `Redacted` view derived from the same model; JAAS strings are generated from typed fields, never accepted verbatim, and are built with proper quoting/escaping. Secret values may be resolved from `file://` or env references. |
 | **Header injection / spoofed principal** | Kafbat is a monolith so no internal principal header exists. A gateway that forwards `X-User` style headers can be spoofed if a service is reachable directly. | Signed principal header (§6.3); services reject requests lacking a valid signature, strip any incoming `X-KUI-*` header at the gateway edge, and bind the signature to method+path+body hash so a captured header cannot be replayed on another endpoint. Log/trace context uses only the verified principal. |
 | **CSRF** | Disabled everywhere in Kafbat; logout is GET. | Session cookie `SameSite=Lax` + `HttpOnly` + `Secure`; every state-changing request must carry a header the browser cannot set cross-site (`X-KUI-CSRF` double-submit token, or simply require `Content-Type: application/json` plus `Origin`/`Sec-Fetch-Site` validation). Logout is `POST`. |
 | **Session fixation / hijack** | Relies on Spring's rotation on login; in-memory session store; 30-min idle timeout. Kouncil's OAuth state map never evicts. | Rotate the session id on login and on privilege change; store server-side session state keyed by an opaque random id (≥ 128 bits) with idle and absolute timeouts; OAuth `state`/`nonce`/PKCE verifier stored in a short-lived, single-use, server-side entry. |
@@ -414,7 +412,7 @@ Nothing there is preferable to Kafbat's rule model.
 ### 6.1 `kui-identity-service` design
 
 Bounded context: application identity. It owns: authentication adapters, session store, role
-configuration, permission evaluation API, audit sink. Modules per PLAN §18:
+configuration, permission evaluation API, audit sink. Modules follow KUI's per-service layout:
 
 ```
 domain/         Principal, Session, Role, Subject, Permission, Action ADTs (from kui-security-core)
@@ -440,7 +438,7 @@ kui.rbac:
 ```
 
 The subject/provider/action vocabulary is kept **identical to Kafbat** (§2.1–2.3) so the
-Kafbat→KUI migration tool (PLAN §24) is a key rename. GitLab is added as `kind: gitlab` (groups
+Kafbat→KUI migration tool is a key rename. GitLab is added as `kind: gitlab` (groups
 from `/api/v4/groups?min_access_level=10`), following the GitHub extractor pattern.
 
 Group resolution stays a login-time computation producing `Set[RoleName]` exactly as Kafbat
@@ -457,7 +455,7 @@ does; the result is stored in the session so RBAC evaluation never calls the IdP
 - **API clients:** `Authorization: Bearer <jwt>` validated against `kui.auth.bearer.jwkSetUri`
   (nimbus `JWTProcessor` with cached JWKS) or introspection; roles resolved via the same subject
   matcher on claims. Stateless, no cookie, no CSRF requirement.
-- **Login flows live at the gateway** (PLAN §20): `POST /api/v1/auth/login` (JSON body,
+- **Login flows live at the gateway**: `POST /api/v1/auth/login` (JSON body,
   form/LDAP), `GET /api/v1/auth/oidc/{id}/start` → 302 to the provider with `state`, `nonce`,
   PKCE `code_challenge` stored server-side (single use, 5-minute TTL), `GET /api/v1/auth/oidc/{id}/callback`
   → code exchange, ID token validation (issuer, audience, nonce, `exp`, signature via JWKS),
@@ -492,7 +490,7 @@ Header `X-KUI-Principal`, value = compact JWS (RFC 7515), built and verified by
   Rolling restart order: add key to services, then gateway, then remove the old key.
 - **Services** expose Tapir endpoints with a `securityIn(header[String]("X-KUI-Principal"))`
   input whose security logic decodes into `Principal`; they re-run the pure RBAC check for the
-  operation (defense in depth, PLAN §20.2).
+  operation (defense in depth).
 
 ### 6.4 Library choices (Scala 3, Cats Effect 3, Tapir 1.13.x)
 
@@ -500,7 +498,7 @@ Header `X-KUI-Principal`, value = compact JWS (RFC 7515), built and verified by
 | --- | --- | --- |
 | OIDC/OAuth2 relying party | **pac4j 6.5.4** (full-featured, Java, `pac4j-oidc` depends on nimbus `oauth2-oidc-sdk`; needs a web-framework adapter — none exists for Tapir/Netty, so KUI would write a `WebContext`/`SessionStore` bridge and pac4j's model is servlet-shaped and mutable). **nimbus-jose-jwt 10.9.1 + `oauth2-oidc-sdk`** (same author, pure Java, immutable request/response types, no framework coupling, used by Spring Security itself). **jwt-scala 11.x** (Scala 3, JWT only, no OIDC). | **nimbus-jose-jwt + nimbus `oauth2-oidc-sdk`** wrapped behind `OidcProviderPort[F]`: discovery document fetch, authorization URL builder (with PKCE + nonce), code exchange, ID token validation (`IDTokenValidator`), userinfo. HTTP calls go through sttp so proxies/TLS follow KUI config. pac4j rejected: adapter cost equals hand-rolling the small OIDC surface KUI needs, and it drags in mutable session abstractions. jwt-scala rejected: no JWKS/OIDC support. Provider quirks (GitHub orgs/teams, GitLab groups, Google `hd`, Cognito `cognito:groups`, Azure `groups` overage) are small `GroupResolver` adapters. |
 | JWS for the principal header | nimbus-jose-jwt (already present) vs. hand-written HMAC | nimbus `JWSObject`/`MACSigner`/`MACVerifier`; keep the claim set as a Circe-encoded case class, not `JWTClaimsSet`, so `kui-security-core` stays framework-free. |
-| LDAP | **UnboundID LDAP SDK 7.0.5** (mature, thread-safe pools, StartTLS/LDAPS, AD-friendly, Apache/LGPL/GPL tri-licence — Apache 2.0 is available), **ldaptive 2.5.1** (own protocol implementation on Netty, Apache 2.0, more moving parts), Apache Directory API (heavier). | **UnboundID** behind `IdentityProviderPort`: `LDAPConnectionPool` for the bind account, `bind` with the user's DN for credential check, `search` for groups (with nested-group option via `memberOf`/`LDAP_MATCHING_RULE_IN_CHAIN` for AD). Wrap in `Sync[F].blocking`. PLAN §12 already points to UnboundID. |
+| LDAP | **UnboundID LDAP SDK 7.0.5** (mature, thread-safe pools, StartTLS/LDAPS, AD-friendly, Apache/LGPL/GPL tri-licence — Apache 2.0 is available), **ldaptive 2.5.1** (own protocol implementation on Netty, Apache 2.0, more moving parts), Apache Directory API (heavier). | **UnboundID** behind `IdentityProviderPort`: `LDAPConnectionPool` for the bind account, `bind` with the user's DN for credential check, `search` for groups (with nested-group option via `memberOf`/`LDAP_MATCHING_RULE_IN_CHAIN` for AD). Wrap in `Sync[F].blocking`. UnboundID is already the KUI stack's pick. |
 | Password hashing (form users) | bcrypt via `at.favre.lib:bcrypt`, or Argon2 via `de.mkammerer:argon2-jvm` | bcrypt (`at.favre.lib:bcrypt`) — pure Java, no native lib; a `kui hash-password` CLI writes the hash into config. |
 | Kafka auth callback handlers | `aws-msk-iam-auth` 2.3.7, `azure-identity` (current), `managed-kafka-auth-login-handler` (GCP) | Optional runtime modules in `kui-kafka-auth`; typed `security` config renders `sasl.*` properties and JAAS strings with escaping (§3). |
 
@@ -539,7 +537,7 @@ about what was accessed.
 
 ### 6.6 All-in-one mode
 
-Same composition root wires every service in-process (PLAN §14). Differences:
+Same composition root wires every service in-process. Differences:
 
 - No `X-KUI-Principal` header is signed or verified; the gateway passes the verified
   `Principal` value directly to service application layers (the Tapir security logic is
@@ -560,8 +558,8 @@ Same composition root wires every service in-process (PLAN §14). Differences:
   `IdentityProviderPort`; form users with bcrypt hashes; optional bearer-token API auth (JWKS or
   introspection) mirroring Kafbat's resource-server mode.
 - Evidence: Kafbat covers DISABLED/LOGIN_FORM/OAUTH2/LDAP with Spring Security (§1.1); pac4j
-  has no Tapir adapter (§6.4); nimbus is what Spring itself uses; UnboundID already named in
-  PLAN §12.
+  has no Tapir adapter (§6.4); nimbus is what Spring itself uses; UnboundID already the KUI
+  stack's pick.
 - Tradeoff: more hand-written OIDC glue than pac4j would give; fewer providers "for free"
   (SAML/CAS out of scope).
 - Reversibility: medium — ports isolate the libraries; swapping to pac4j later touches only the
@@ -581,7 +579,7 @@ Same composition root wires every service in-process (PLAN §14). Differences:
 - Decision: `X-KUI-Principal` compact JWS, HS256 with keyed rotation (`kid`), 60 s expiry,
   request binding (`req` hash), `aud` per service; services reject unsigned requests except in
   all-in-one mode where the principal is passed in-process.
-- Evidence: PLAN §31 mandates HMAC; header-spoofing threat (§5).
+- Evidence: KUI's security design mandates HMAC; header-spoofing threat (§5).
 - Tradeoff: body hashing costs one pass over request bodies at the gateway; symmetric key means
   any service can mint headers (mitigated by optional EdDSA).
 - Reversibility: high (algorithm behind `SignerVerifier`).
@@ -590,7 +588,7 @@ Same composition root wires every service in-process (PLAN §14). Differences:
 - Decision: adopt Kafbat's role/subject/cluster/permission model and its complete
   resource × action matrix (§2.2) verbatim, evaluated by pure functions in
   `kui-security-core` shared with Scala.js; read-only enforced per operation via `isAlter`.
-- Evidence: §2.1–2.5; migration compatibility requirement in PLAN §24.
+- Evidence: §2.1–2.5; migration compatibility is a project requirement.
 - Tradeoff: regex patterns from config carry ReDoS risk (mitigated at load); no per-cluster
   `defaultRole` (matches Kafbat).
 - Reversibility: medium — the vocabulary becomes part of the config contract.

@@ -1,6 +1,5 @@
 # Kafbat UI — screen-by-screen UI/UX inventory
 
-**Agent:** Research Agent H (UI/UX Inventory)
 **Date:** 2026-09-03
 
 ## Questions
@@ -11,7 +10,7 @@
 2. How is navigation structured (sidebar, cluster switcher, breadcrumbs) and what global
    elements exist (toasts, confirmation modals, theme)?
 3. How does the cluster configuration wizard work?
-4. Given PLAN §2, §16, §21 and §22: which KUI screens map to which microfrontend, how should the
+4. Which KUI screens map to which microfrontend, how should the
    capability registry drive navigation, and what does every feature look like when its
    service is Unavailable or Degraded?
 
@@ -700,10 +699,9 @@ Paths are relative to `/tmp/kui-ref/kafbat/frontend/src`.
 
 This section turns the Kafbat inventory above (and the Kouncil inventory in
 `research/kouncil/ui-analysis.md`) into a concrete screen list for KUI, mapped to the
-microfrontends in PLAN §21, with the navigation model driven by the capability registry
-(PLAN §16.2, §16.5) and an explicit degraded-state UX for every feature.
+microfrontends, with the navigation model driven by the capability registry and an explicit degraded-state UX for every feature.
 
-Vocabulary used below (from PLAN §16): a **capability** is a `(service, cluster)` pair whose
+Vocabulary used below: a **capability** is a `(service, cluster)` pair whose
 state is `Available | Degraded(reason) | Unavailable(reason, since)`. A **feature** is a
 frontend module (`KuiFeature`) that declares `requiredCapabilities`. A feature's *effective
 state* is the worst state among its required capabilities for the *current cluster*.
@@ -776,8 +774,8 @@ FeatureState = Ready | Degraded(reason) | Unavailable(reason, since) | Forbidden
 - `Forbidden` comes from the RBAC endpoint (`/api/v1/authorization`), not the registry. Entry is
   shown but disabled with the tooltip "You do not have permission to view X" so users learn what
   exists and whom to ask.
-- `Unavailable` entries are **shown, dimmed, still clickable** (PLAN §16.5 says disabled with the
-  reason; the ADR candidate below argues for clickable-to-fallback because a disabled link gives
+- `Unavailable` entries are **shown, dimmed, still clickable** (the original proposal called for
+  disabling with the reason shown; the ADR candidate below argues for clickable-to-fallback because a disabled link gives
   no place to display `since`, the reason, and a retry). The click lands on the feature's
   fallback panel, never on a blank page.
 - `Degraded` entries show a small amber dot; hovering explains the reason.
@@ -826,10 +824,10 @@ Common rules first (apply to every row):
    usable.
 3. **Cached data.** When data was previously fetched in this session, Unavailable shows the
    stale data greyed with a "Last updated 12:03 — service unavailable" badge instead of the empty
-   fallback; actions remain disabled. This is what makes "the UI stays usable" (PLAN §2.1) true
+   fallback; actions remain disabled. This is what makes "the UI stays usable" true
    in practice.
 4. **Partial aggregates.** Pages that combine sections (dashboard, topic details) render each
-   section with its own status (PLAN §16.3). A failed section becomes a card-sized fallback, not a
+   section with its own status. A failed section becomes a card-sized fallback, not a
    page-level one.
 
 | Feature / screen | Unavailable (service down or circuit open) | Degraded (slow, partial, half-open) |
@@ -840,7 +838,7 @@ Common rules first (apply to every row):
 | Topics list | Fallback panel with cached list greyed if present. Search/sort work on cached rows (client-side). Batch actions and Create disabled. | Full page; Create/Delete/Purge enabled with warning banner. |
 | Create / edit / copy topic | Form opens but Submit disabled with reason; fields still editable so the user can prepare the form. | Submit enabled; warning banner. |
 | Topic details | Overview section: fallback card. Tabs that belong to other features (Consumers, Statistics) are evaluated independently: a Consumers tab whose `consumers` capability is Unavailable shows the tab with a dimmed dot and the tab body is a card fallback. | Amber banner on the tab that is degraded. |
-| Message browser (list and table) | Fallback panel. Filter bar is visible but the Fetch/Live buttons are disabled with reason. Saved smart filters remain editable (they are local). Previously fetched messages stay visible greyed with "stream ended: service unavailable". | Browser works; the SSE phase indicator shows "degraded: <reason>"; time/byte budget warnings surface from the stream (`Consumed(stats)` events, PLAN §22). |
+| Message browser (list and table) | Fallback panel. Filter bar is visible but the Fetch/Live buttons are disabled with reason. Saved smart filters remain editable (they are local). Previously fetched messages stay visible greyed with "stream ended: service unavailable". | Browser works; the SSE phase indicator shows "degraded: <reason>"; time/byte budget warnings surface from the stream (`Consumed(stats)` events). |
 | Live (tailing) mode | If the capability flips to Unavailable mid-stream, the stream is closed, rows keep their content, a toast says "Live mode stopped: message service unavailable", and the Live toggle turns off (not auto-resumed; the user re-enables). | Stream continues; header pill turns amber. |
 | Produce / resend | Side panel opens; Send disabled with reason. Draft preserved in feature state. | Send enabled; warning. |
 | Event tracking | Inputs editable; Track disabled with reason. Results from an earlier run stay on screen. | Runs; banner. |
@@ -876,7 +874,7 @@ Layout and navigation
 Data display
 - `DataTable` (TanStack-equivalent: sortable columns, server/client pagination, row selection with
   indeterminate checkbox, expandable rows, column visibility, sticky header) plus
-  `VirtualizedTable` for messages/topics/groups (PLAN §21 rule).
+  `VirtualizedTable` for messages/topics/groups (KUI's own-virtualization rule).
 - **(new)** `FlattenedJsonColumns` helper for the Kouncil-style table view (column derivation
   from JSON paths, column picker, per-column filter).
 - `Metrics` (Section/Indicator/Light), `Statistics`, `PropertiesList`, `Tag`, `AlertBadge`,
@@ -886,7 +884,7 @@ Data display
   `Skeleton`.
 
 Input and forms
-- `Form` primitives with a validation model shared with Tapir/Iron constraints (PLAN §2.2):
+- `Form` primitives with a validation model shared with Tapir/Iron constraints:
   `Input` (with `min/max/step`, byte and ms suffix variants), `Textbox`, `Select`,
   `MultiSelect`, `InputWithOptions` (combobox), `Checkbox`, `IndeterminateCheckbox`, `Radio`,
   `Switch`, `Search` (debounced, URL-synced), `RefreshRateSelect`, `DurationInput`,
@@ -919,7 +917,7 @@ State and infrastructure (non-visual, still kernel)
 
 **DC-H1 — Sidebar entries of Unavailable features are clickable and lead to a fallback panel,
 not disabled links.**
-Evidence: PLAN §16.5 says "shown disabled with the reason"; a disabled `<a>` has nowhere to put
+Evidence: the original proposal called for showing entries disabled with the reason; a disabled `<a>` has nowhere to put
 `since`, a retry action, or a "what still works" list, and Kafbat's own model
 (`ClusterMenu.tsx:93-119`) hides the entry outright, which users of Kafbat report as confusing
 when SR is merely misconfigured. Tradeoff: one extra click to discover the reason vs a
@@ -933,7 +931,7 @@ distinguish "no config" from "config present, probe failing", which the cluster 
 report. Reversibility: high.
 
 **DC-H3 — Stale data stays on screen (greyed, timestamped) when a feature becomes Unavailable.**
-Evidence: PLAN §2.1 "UI stays usable"; Kafbat drops to an error state on any 5xx via react-query
+Evidence: KUI's "UI stays usable" principle; Kafbat drops to an error state on any 5xx via react-query
 error boundaries. Tradeoff: feature-local state must retain the last successful response and its
 timestamp (small); risk of users acting on stale rows is mitigated by disabling all actions.
 Reversibility: medium (touches every feature's state design; decide before M1).
@@ -955,7 +953,7 @@ Tradeoff: the wrapper needs both the RBAC signal and the capability signal (both
 
 **DC-H6 — Cross-feature panels (topic → consumers tab, broker → metrics tab) are rendered through
 a kernel `FeaturePanel` slot keyed by feature id, never by direct import.**
-Evidence: fault isolation (PLAN §16) is only real if the topic page compiles and renders without
+Evidence: fault isolation is only real if the topic page compiles and renders without
 the consumers module; Kafbat imports `ConsumerGroups` components directly into
 `Topic/Details`, so an error there takes the topic page down. Tradeoff: an indirection and a
 registry of panel ids; slightly weaker compile-time coupling between features (still typed via
@@ -974,13 +972,13 @@ Reversibility: high before M1, low after (contract).
 - Does the capability registry SSE carry per-cluster deltas or full snapshots? Affects
   `CapabilityState` reducer complexity only.
 - Event tracking (Kouncil) needs a bounded multi-topic scan in `kui-message-service`; confirm it
-  fits the `browse` stream contract in PLAN §22 or needs a sibling endpoint before assigning it
+  fits the `browse` stream contract or needs a sibling endpoint before assigning it
   to `kui-ui-messages` in M2.
 
 ## Confidence
 
 **High** for the Kafbat inventory (read from source, cited by line) and for the mapping to
-microfrontends (PLAN §21 is explicit). **Medium** for the degraded-state UX table: it is a design
-proposal grounded in PLAN §16 and the two reference UIs, not in user testing; DC-H1 explicitly
-deviates from PLAN §16.5 wording and needs a CEO/ADR decision. **Medium** for the Kouncil parts
+microfrontends. **Medium** for the degraded-state UX table: it is a design
+proposal grounded in the two reference UIs, not in user testing; DC-H1 explicitly
+deviates from the original disabled-link proposal and needs an ADR decision. **Medium** for the Kouncil parts
 that depend on the Kouncil report's findings about backend endpoints (tracking, resend).

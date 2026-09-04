@@ -1,7 +1,6 @@
 # Kafbat Kafka UI — reference architecture
 
 - **Title:** Kafbat Kafka UI backend/contract architecture analysis
-- **Agent:** Research Agent A (Reference Architecture)
 - **Date:** 2026-09-03
 
 ## Questions
@@ -26,7 +25,7 @@
 - Read with `cat -n`, `grep -n`, `find`, `diff`. All citations below are `path:line` relative to the clone root. Line numbers are exact for the files quoted; ranges are approximate when marked "~".
 - No web sources were used.
 
-Correction to PLAN §6: the clone targets **Java 25** (`build.gradle:11-12`, `contract-typespec/build.gradle` source/target 25), not Java 21, on **Spring Boot 3.5.16** (`gradle/libs.versions.toml:2`). PLAN §6 also lists `e2e-playwright` and `documentation` modules; both exist as directories (`ls` of the clone root) but only `contract`, `contract-typespec`, `serde-api`, `api`, `frontend` are Gradle subprojects (`settings.gradle:9-13`).
+Correction to the previously assumed baseline: the clone targets **Java 25** (`build.gradle:11-12`, `contract-typespec/build.gradle` source/target 25), not Java 21, on **Spring Boot 3.5.16** (`gradle/libs.versions.toml:2`). The project's module inventory also lists `e2e-playwright` and `documentation` modules; both exist as directories (`ls` of the clone root) but only `contract`, `contract-typespec`, `serde-api`, `api`, `frontend` are Gradle subprojects (`settings.gradle:9-13`).
 
 ## Findings
 
@@ -227,34 +226,34 @@ Everything is **process-local and unreplicated**. Caffeine is used only in two p
 - HTTP dependencies (OAuth, GitHub release info, WebClient TLS) are tested with WireMock/MockWebServer (`api/src/test/java/io/kafbat/ui/config/auth/OAuthTestSupport.java`, `util/WebClientConfiguratorTest.java`, `util/GithubReleaseInfoTest.java`).
 - Test resources include RBAC profiles (`application-rbac-ad.yml`, `application-rbac-audit.yml`, `application-roles-definition.yml`) and a `protobuf-serde` directory.
 
-## Decision candidates for KUI (PLAN §14–§20)
+## Decision candidates for KUI
 
 **D1. Contract-first from a single source, consumed by gateway and services.**
-Decision: keep KUI's Tapir endpoint definitions as the single source of routes (PLAN §17/§20 item 3) and forbid hand-written path lists in the gateway, mirroring Kafbat's "controller implements generated interface" invariant.
+Decision: keep KUI's Tapir endpoint definitions as the single source of routes and forbid hand-written path lists in the gateway, mirroring Kafbat's "controller implements generated interface" invariant.
 Evidence: F1, F3 (`contract/build.gradle:42-71`; `controller/MessagesController.java:46`).
 Tradeoff: Tapir gives us this for free but every service must publish its contract module for JVM+JS; the gateway compiles against all contract modules.
 Reversibility: high (adding a hand-written route later is trivial; removing one is not).
 
 **D2. Cluster registry lives in `kui-cluster-service`; other services receive cluster connection config via contract, cache it, and never read `kafka.clusters` themselves.**
-Decision: reproduce `ClustersStorage` + `KafkaClusterFactory` as the cluster service's domain, exposing "resolved cluster connection profile" (bootstrap, client properties, SSL/SASL, SR/Connect/ksql endpoints and auth) through `kui-cluster-service`'s contract, with services holding a last-known copy (PLAN §16 item 6).
+Decision: reproduce `ClustersStorage` + `KafkaClusterFactory` as the cluster service's domain, exposing "resolved cluster connection profile" (bootstrap, client properties, SSL/SASL, SR/Connect/ksql endpoints and auth) through `kui-cluster-service`'s contract, with services holding a last-known copy.
 Evidence: F4 (`service/ClustersStorage.java:15-19`; `service/KafkaClusterFactory.java:74-114`).
 Tradeoff: an extra hop on first use and a cache-invalidation protocol; but it makes the wizard (D8) a single-writer flow instead of a restart.
 Reversibility: medium; the all-in-one shape hides the hop, so the decision can be revisited without changing contracts.
 
 **D3. Split Kafbat's monolithic `Statistics` snapshot by bounded context, keep the "snapshot with status" pattern.**
-Decision: cluster service owns node/controller/quorum/feature snapshot; topic service owns topic descriptions/configs/offsets/index; consumer service owns group descriptions/committed offsets; metrics service owns scraped broker metrics. Each keeps a per-cluster snapshot with `INITIALIZING|ONLINE|OFFLINE(lastError)` and a scrape timestamp, refreshed by its own scheduler, and serves reads from it. Aggregation for dashboards happens in the gateway (PLAN §20 item 4) with per-section status.
+Decision: cluster service owns node/controller/quorum/feature snapshot; topic service owns topic descriptions/configs/offsets/index; consumer service owns group descriptions/committed offsets; metrics service owns scraped broker metrics. Each keeps a per-cluster snapshot with `INITIALIZING|ONLINE|OFFLINE(lastError)` and a scrape timestamp, refreshed by its own scheduler, and serves reads from it. Aggregation for dashboards happens in the gateway with per-section status.
 Evidence: F4 (`service/StatisticsCache.java:21-63`; `service/metrics/scrape/ScrapedClusterState.java:41-150`; `service/ClustersStatisticsScheduler.java:20-36`).
 Tradeoff: Kafbat's single scrape shares one AdminClient round of calls; KUI will perform 3–4 partially overlapping scrapes per cluster (describeTopics is needed by both topic and consumer contexts). Accept the duplication; expose scrape-rate knobs per service.
 Reversibility: medium; the snapshot shape is internal to each service.
 
 **D4. Message browsing = one fs2 `Stream` per request with the same four event types and cursor semantics; cursors become service-local only if the gateway pins the session, otherwise encode them.**
-Decision: adopt `PHASE|MESSAGE|CONSUMING|DONE(cursor?)` as the SSE envelope in `kui-contracts-core` (PLAN §19), the seven polling modes and clamp/timestamp rules of `SeekOperations`, the per-partition range-slicing with pause, the timestamp merge-sort, and fallback-serde-on-error. Replace the in-memory cursor cache by an **opaque, signed cursor value** carrying position, filter id, serde names and limit so any `kui-message-service` replica can continue a page (PLAN §22 risk).
+Decision: adopt `PHASE|MESSAGE|CONSUMING|DONE(cursor?)` as the SSE envelope in `kui-contracts-core`, the seven polling modes and clamp/timestamp rules of `SeekOperations`, the per-partition range-slicing with pause, the timestamp merge-sort, and fallback-serde-on-error. Replace the in-memory cursor cache by an **opaque, signed cursor value** carrying position, filter id, serde names and limit so any `kui-message-service` replica can continue a page (flagged as a risk to track).
 Evidence: F5 (`emitter/RangePollingEmitter.java:48-106`; `emitter/Cursor.java:58-87`; `service/PollingCursorsStorage.java:17-38`; `kafbat-ui-api.yaml:3225-3244`).
 Tradeoff: encoded cursors are larger and cannot reference a compiled filter object; the filter must be re-compilable from its source or a registered id that is itself replicated (see D5).
 Reversibility: high for the envelope (additive), medium for cursor format (changes the contract once).
 
 **D5. CEL smart filters, compiled per service instance, addressed by a content hash.**
-Decision: keep CEL (not Groovy) with Kafbat's `record` schema; the filter id is a hash of the source; the browse request carries the id **and** the source on the first call so any replica can compile on miss (PLAN §22).
+Decision: keep CEL (not Groovy) with Kafbat's `record` schema; the filter id is a hash of the source; the browse request carries the id **and** the source on the first call so any replica can compile on miss.
 Evidence: F5 (`emitter/MessageFilters.java:100-202`; `service/MessagesService.java:336-346`).
 Tradeoff: CEL for Scala means the Java `dev.cel` runtime (JVM only); acceptable since the message service is JVM. Filter-test endpoint stays as a pure function.
 Reversibility: high.
@@ -266,7 +265,7 @@ Tradeoff: Kafbat-compatible **Java** plugin jars would need a bridge; decide in 
 Reversibility: medium (adding a bridge later is additive).
 
 **D7. Serde resolution is owned by `kui-message-service`, with Schema Registry access through the SR client library, not through `kui-schema-service`'s HTTP contract.**
-Decision: the SR-backed serde needs low-latency schema-by-id lookups on every record; route it to a shared `kui-kafka`/`kui-serde` SR client with Caffeine caches (id → schema, subjects TTL) rather than a synchronous cross-service call (PLAN §16 item 6).
+Decision: the SR-backed serde needs low-latency schema-by-id lookups on every record; route it to a shared `kui-kafka`/`kui-serde` SR client with Caffeine caches (id → schema, subjects TTL) rather than a synchronous cross-service call.
 Evidence: F6/F9 (`serdes/builtin/sr/SchemaRegistrySerde.java:57,72-73,190-195`).
 Tradeoff: two components talk to the registry (schema service for management, message service for decoding); config for the registry must be shared via D2.
 Reversibility: high.
@@ -302,7 +301,7 @@ Tradeoff: cross-service read on each scrape; acceptable at 30 s cadence.
 Reversibility: medium.
 
 **D13. Testkit: one static Testcontainers topology per test JVM, configuration injected as properties, and the deliberately-broken endpoints pattern.**
-Decision: `kui-testkit` provides Kafka (with JMX listener), SR, Connect, ksqlDB, Prometheus and AD containers, plus fixtures that include a dead SR URL before the live one, an unreachable Connect cluster and a read-only cluster, so failover and degradation are always exercised (PLAN §32).
+Decision: `kui-testkit` provides Kafka (with JMX listener), SR, Connect, ksqlDB, Prometheus and AD containers, plus fixtures that include a dead SR URL before the live one, an unreachable Connect cluster and a read-only cluster, so failover and degradation are always exercised.
 Evidence: F15 (`api/src/test/java/io/kafbat/ui/AbstractIntegrationTest.java:47-136`).
 Tradeoff: slow first start; mitigated by container reuse.
 Reversibility: high.
@@ -317,11 +316,11 @@ Reversibility: high.
 
 1. Should KUI aim for **binary compatibility with Kafbat's `io.kafbat.ui.serde.api`** so existing community serde jars (AWS Glue, Smile, etc.) load unchanged? This drives whether `kui-serde` keeps a Java-facing shim.
 2. How should paging cursors be made replica-safe: opaque encoded cursor (D4) vs sticky routing at the gateway vs shared store? Needs a decision before the message-service contract is frozen.
-3. Kafbat targets Java 25; PLAN §6 says 21. Confirm the JDK baseline for KUI's Docker images and Testcontainers versions.
+3. Kafbat targets Java 25; the previously assumed baseline was 21. Confirm the JDK baseline for KUI's Docker images and Testcontainers versions.
 4. Which Kafbat `ClusterFeature` flags map to the gateway's capability registry vs to per-cluster "supports" flags returned by services (e.g. `TOPIC_DELETION` is a broker setting, `FTS_ENABLED` is a KUI config)?
 5. The dynamic-config restart model implies Kafbat never handles two config writers; KUI's config service needs an optimistic-concurrency rule (version in the YAML?).
-6. Provectus/Kafbat keep `Statistics` per process; for the distributed shape, do we accept N scrapes per cluster (one per service) or introduce the internal events topic earlier than Milestone 6 (PLAN §17)?
+6. Provectus/Kafbat keep `Statistics` per process; for the distributed shape, do we accept N scrapes per cluster (one per service) or introduce the internal events topic earlier than Milestone 6?
 
 ## Confidence
 
-**High** for module structure, request flow, cluster caching, emitter design, serde resolution, RBAC evaluation, error shape and test topology — all read directly from source with line references. **Medium** for the metrics pipeline internals (`IoRatesMetricsScanner`, `JmxMetricsFormatter`, graph templates were only skimmed) and for the frontend (only package versions and component directories were inspected; Research Agent H covers UX). **Medium** on exact line numbers in `serde-api/Serde.java` for `getParameters`/`couldBePreferable` (marked `~`).
+**High** for module structure, request flow, cluster caching, emitter design, serde resolution, RBAC evaluation, error shape and test topology — all read directly from source with line references. **Medium** for the metrics pipeline internals (`IoRatesMetricsScanner`, `JmxMetricsFormatter`, graph templates were only skimmed) and for the frontend (only package versions and component directories were inspected; the UX research in `research/kafbat/ui-analysis.md` covers that ground). **Medium** on exact line numbers in `serde-api/Serde.java` for `getParameters`/`couldBePreferable` (marked `~`).

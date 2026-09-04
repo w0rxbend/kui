@@ -5,9 +5,9 @@
 
 ## Context
 
-Fault isolation is KUI's first non-negotiable product property (PLAN §2.1): the UI stays
+Fault isolation is KUI's first non-negotiable product property: the UI stays
 usable when any single capability is down, and it tells the user *which* thing is down and
-*why*. PLAN §16.2 requires the gateway to keep a capability registry that records, for each
+*why*. The project's architecture rules require the gateway to keep a capability registry that records, for each
 `(service, cluster)` pair, one of `Available | Degraded(reason) | Unavailable(reason, since)`,
 and ADR-032 defines how the frontend renders each of those.
 
@@ -27,9 +27,9 @@ downstream of it. Getting it wrong is not a cosmetic bug: a fold that flaps turn
 navigation into a strobe light, and a fold that reports `Unavailable` when it merely has not
 looked yet trains operators to ignore the one signal that is supposed to mean something.
 
-The M0 development plan (task GW-003) had to settle the rules in order to be implementable,
-and settled them well. This ADR records them so that M1–M8, which add ten more services to
-the same registry, inherit a decision rather than re-derive one per service.
+Task GW-003 had to settle the rules in order to be implementable, and settled them well. This
+ADR records them so that later milestones, which add ten more services to the same registry,
+inherit a decision rather than re-derive one per service.
 
 ## Decision
 
@@ -138,7 +138,7 @@ contract (`CapabilityState` in `libs/contracts-core`) is unaffected.
 
 ## References
 
-PLAN §2.1, §16.2, §16.4; ADR-004 (health and capability endpoints), ADR-032 (rendering, and
+ADR-004 (health and capability endpoints), ADR-032 (rendering, and
 its amendments), ADR-034 (the error hierarchy this keys on), ADR-037 (circuit breaker);
 `ARCHITECTURE.md` §4.5, §6; tasks GW-003 (the fold), GW-004 (poller and circuit feed),
 GW-006 (the report-on-proxy-failure rule), UI-008 (the browser-side derivation).

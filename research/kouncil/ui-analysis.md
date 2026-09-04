@@ -1,6 +1,5 @@
 # Kouncil — screen-by-screen UI/UX inventory
 
-**Agent:** Research Agent H (UI/UX Inventory)
 **Date:** 2026-09-03
 
 ## Questions
@@ -511,22 +510,22 @@ current. Reversibility: high.
 
 **DC-H11 — Event tracking is in scope for `kui-ui-messages`, but not before the message
 service has a bounded multi-topic scan endpoint with the same budgets as `browse`.**
-Evidence: Kouncil runs tracking as an unbounded server-side scan streamed over STOMP; PLAN §22
-forbids unbounded consumption. Tradeoff: delays a differentiating feature by one milestone.
+Evidence: Kouncil runs tracking as an unbounded server-side scan streamed over STOMP; KUI's streaming
+design forbids unbounded consumption. Tradeoff: delays a differentiating feature by one milestone.
 Reversibility: high.
 
 **DC-H12 — Ship an in-app cluster management screen with "test connection" and a first-launch
 admin bootstrap in `kui-ui-admin`, in addition to file-based configuration.**
 Evidence: Kouncil's `feat-clusters` and `feat-first-time-app-launch`; Kafbat's wizard exists but
 its restart flow is awkward and it has no bootstrap flow. Tradeoff: dynamic config must be
-persisted by the gateway (PLAN §24 decides where). Reversibility: medium.
+persisted by the gateway (where is a decision this project still needs to make). Reversibility: medium.
 
 ## Open questions
 
-- Kouncil's tracking transport is STOMP over WebSocket; KUI standardises on SSE (PLAN §21).
+- Kouncil's tracking transport is STOMP over WebSocket; KUI standardises on SSE.
   Confirm SSE is sufficient for the tracking result stream (it is one-directional, so it
   should be).
-- Kouncil's data-masking policies are configured in the UI; PLAN §22 places masking in the
+- Kouncil's data-masking policies are configured in the UI; KUI's design places masking in the
   message service. Decide whether policies are UI-editable in M2 or file-config only.
 - Should the JSON-flattened columns be derivable server-side for very large payloads to reduce
   bytes over the wire (column projection), or is client-side always enough?

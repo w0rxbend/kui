@@ -8,7 +8,7 @@ import kui.ui.kernel.css.KernelCss
 
 /** The module's smoke test.
   *
-  * It proves two things that everything later in the frontend lane depends on, and nothing else:
+  * It proves two things that everything later in the frontend depends on, and nothing else:
   * that the build compiles a version into the browser bundle, and that a Laminar element really
   * mounts into a `document` under the jsdom test environment. If this suite is red, no component
   * test in UI-003 or UI-004 can be believed.

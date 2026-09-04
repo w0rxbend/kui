@@ -122,7 +122,7 @@ of every request, and a `List` makes that a walk from the head each time.
 
 **Whether a topic is internal.** `TopicSummary.isInternal` is whatever the value was constructed
 with. The rule that decides it — the union of Kafka's own `isInternal` flag and a configured name
-prefix (DEVPLAN §10 D3) — belongs to the application layer and lives in exactly one place, so that
+prefix — belongs to the application layer and lives in exactly one place, so that
 there is exactly one place it can be got wrong. `TopicSummarySuite.internalIsWhateverItWasConstructedWith`
 asserts that the domain applies no prefix rule of its own.
 
@@ -315,8 +315,8 @@ with nothing to show.
 `TopicCapabilityUseCase` reports one entry per configured cluster: `Available`, `Degraded` or
 `Unavailable`. Per cluster, and not per service — a Kafka cluster the topic service cannot reach is
 a section of a screen that cannot render, not a feature that should vanish from the sidebar. Dimming
-the whole Topics entry because one of four clusters is down would hide three working screens
-(DEVPLAN §10 D11). Whether `kui-topic-service` itself is answering is the gateway's readiness
+the whole Topics entry because one of four clusters is down would hide three working screens.
+Whether `kui-topic-service` itself is answering is the gateway's readiness
 poller's business, not this use case's.
 
 `Degraded.since` is passed through from `SnapshotStatus.Offline` rather than stamped when the report

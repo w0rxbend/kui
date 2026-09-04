@@ -103,5 +103,5 @@ Re-encryption is a rewrite of the record at a new `version`, through the ordinar
 ## Evidence
 
 `docs/adr/ADR-042` §4 and §7; `research/scala/security-research.md` §5 (AES-GCM, IV reuse, key
-handling); `docs/adr/ADR-007` (explicit Circe codecs, no automatic derivation on the wire);
-`docs/plans/M1/tasks/STORE-001.md`, `STORE-002.md`, `STORE-003.md`, `STORE-009.md`.
+handling); `docs/adr/ADR-007` (explicit Circe codecs, no automatic derivation on the wire); the store
+implementation and its suites in `libs/config` under `kui/config/store`.

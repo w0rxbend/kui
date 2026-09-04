@@ -15,8 +15,8 @@ import kui.security.audit.{AuditSink, MutationKind, MutationOutcome, MutationRec
   *
   * `kui.security.audit.MutationKind` is the whole of KUI's classification, across every service, and these
   * are the three cases that belong to consumer groups. There used to be a second enum here with the same
-  * three names and the same three operation strings; E2 in `docs/BACKLOG.md` removed it, because two enums
-  * spelling one classification is how an audit trail comes to have two vocabularies.
+  * three names and the same three operation strings; it was removed, because two enums spelling one
+  * classification is how an audit trail comes to have two vocabularies.
   *
   * The list is still declared, because the contract suite's "enumerate every endpoint and assert each one is
   * classified" test reads it.

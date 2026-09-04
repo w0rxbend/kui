@@ -7,7 +7,7 @@
 
 Kafbat maps 22 exception classes to numeric codes (`4007`, `5000`, …) with an HTTP status
 each, includes stack traces unless disabled, and its frontend switches on the numbers.
-Kouncil returns raw exception text with status 500. PLAN §26 requires typed errors and a
+Kouncil returns raw exception text with status 500. The project's error-handling rules require typed errors and a
 single envelope with stable machine-readable codes.
 
 ## Decision
@@ -35,7 +35,7 @@ single envelope with stable machine-readable codes.
 
 ## Amendments
 
-Both were settled during M0 grooming (G5) and reviewed at the G6 gate on 2026-09-03. They are
+Both were settled and reviewed as part of the M0 architecture review, 2026-09-03. They are
 additive and do not change the envelope shape, so this ADR is amended rather than superseded.
 
 **Amendment 1 — two codes the original table missed.**

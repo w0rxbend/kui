@@ -8,16 +8,16 @@
 `docs/ROADMAP.md` §3 states the rule: "Mutations arrive in M5 together with read-only mode and
 audit, so no destructive action ever ships without its safety net."
 
-The milestone plans do not honour it, and neither noticed:
+The milestones as scheduled do not honour it, and neither noticed:
 
 - **M3 ships three mutations.** Produce (`MP-001`), resend (`MP-003`) and purge (`MS-008`)
-  change a Kafka cluster. `docs/plans/M3/DEVPLAN.md` §2 criterion 14 requires all three to be
-  "refused on a read-only cluster with `KUI-READ-ONLY`" — while §3 of the same document says
-  "no read-only mode" and "no audit records" until M5. The criterion names a mechanism the
-  milestone declares out of scope. Purge in particular is irreversible: it moves a log's low
-  watermark and the records below it are gone.
-- **M4 ships three more** (offset reset, delete group, delete offsets) and *did* notice: its
-  §10 D2 invents a three-part substitute — a `Mutation` marker, a per-cluster `readOnly`
+  change a Kafka cluster, and M3's own exit criteria require all three to be "refused on a
+  read-only cluster with `KUI-READ-ONLY`" while its scope says there is no read-only mode and no
+  audit records until M5. The criterion names a mechanism the milestone declares out of scope.
+  Purge in particular is irreversible: it moves a log's low watermark and the records below it are
+  gone.
+- **M4 ships three more** (offset reset, delete group, delete offsets) and *did* notice: it
+  invents a three-part substitute — a `Mutation` marker, a per-cluster `readOnly`
   refusal, and an `AuditSink[F]` port with a log sink — and calls the roadmap's ordering a
   contradiction it has to resolve.
 - **M5 will enumerate.** Its exit criterion is "every mutating operation in every service
@@ -113,7 +113,5 @@ already shipped is the expensive direction, which is the argument for taking the
 
 `docs/ROADMAP.md` §3 (ordering rationale) and M5 exit criteria; ADR-021 (RBAC model),
 ADR-023 (audit and masking), ADR-034 (`KUI-READ-ONLY`), ADR-036 (the profile that carries
-`readOnly`), ADR-045 (plan-token confirmation);
-`docs/plans/M3/DEVPLAN.md` §2 criterion 14 and §3;
-`docs/plans/M4/DEVPLAN.md` §10 D2 (tasks GRP-018, GRP-019, GRP-023, GRP-026);
-`docs/plans/M3` tasks MSG-022, MSG-024, MSG-028, MSG-029.
+`readOnly`), ADR-045 (plan-token confirmation); the M3 and M4
+milestone entries in `docs/ROADMAP.md`.

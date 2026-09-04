@@ -7,8 +7,8 @@
 
 Kouncil's "track" is a time-bounded multi-topic scan with one predicate (header or value,
 `contains | notContains | equals | notEquals | regex`), streamed over STOMP with a 1 000-event
-cap and an empty array as end marker. PLAN §9A makes it a first-class KUI feature; PLAN §22
-forbids unbounded consumption; PLAN §17 standardizes on SSE.
+cap and an empty array as end marker. The parity target makes it a first-class KUI feature; the
+project's streaming rules forbid unbounded consumption and standardize on SSE.
 
 ## Decision
 

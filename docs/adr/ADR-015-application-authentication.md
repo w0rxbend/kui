@@ -46,7 +46,7 @@ coverage on Tapir with framework-free libraries.
 
 - pac4j 6.5.x: servlet-shaped `WebContext`/`SessionStore`, no Tapir adapter, large graph.
 - jwt-scala: JWT only, no OIDC/JWKS.
-- ldaptive: fine library, but UnboundID is more mature for AD and already named in PLAN §12.
+- ldaptive: fine library, but UnboundID is more mature for AD and already the project's chosen library.
 
 ## Reversibility
 

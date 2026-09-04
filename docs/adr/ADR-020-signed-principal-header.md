@@ -5,7 +5,7 @@
 
 ## Context
 
-Services must re-check authorization (defence in depth, PLAN §20) but must not trust a plain
+Services must re-check authorization (defence in depth) but must not trust a plain
 `X-User` header that anyone reaching a service directly could forge. Kafbat is a monolith and
 has no such boundary.
 
@@ -33,7 +33,7 @@ has no such boundary.
 ## Evidence
 
 - `research/scala/security-research.md` §5 "Header injection / spoofed principal", §6.3,
-  ADR-020 candidate; PLAN §31.
+  ADR-020 candidate.
 
 ## Consequences
 

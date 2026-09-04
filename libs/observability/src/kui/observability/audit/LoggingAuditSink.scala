@@ -12,8 +12,8 @@ import kui.security.audit.{AuditPrincipal, AuditSink, MutationRecord}
   *
   * There were three: the message, topic and consumer services each carried their own copy, two of them
   * character-for-character identical and the third writing different field names for the same facts. That is
-  * the failure E2 in `docs/BACKLOG.md` names — an audit trail assembled from three implementations of one
-  * idea cannot answer "everything that changed this cluster today", because the answer depends on which
+  * a failure with a shape worth naming: an audit trail assembled from three implementations of one idea
+  * cannot answer "everything that changed this cluster today", because the answer depends on which
   * service happened to do it.
   *
   * It lives in `libs/observability` rather than in `libs/security-core` for a mechanical reason: the record

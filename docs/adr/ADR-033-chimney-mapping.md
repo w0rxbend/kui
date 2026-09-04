@@ -5,7 +5,7 @@
 
 ## Context
 
-Contract DTOs and domain types are distinct by rule (PLAN §18); mapping between them is
+Contract DTOs and domain types are distinct by rule; mapping between them is
 mechanical and voluminous. Chimney 1.x emits ambiguous-given warnings on Scala ≥ 3.7, which
 `-Werror` turns into errors; the 2.x line targets Scala 3.9 LTS and is at RC1.
 

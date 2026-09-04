@@ -6,7 +6,7 @@
 ## Context
 
 KUI needs one JSON library for contracts (JVM and JS), configuration files, dynamic message
-payloads and structured log values. PLAN §25 forbids `Json` in domain modules.
+payloads and structured log values. The project's data-modeling rules forbid `Json` in domain modules.
 
 ## Decision
 
@@ -28,7 +28,6 @@ payloads and structured log values. PLAN §25 forbids `Json` in domain modules.
   F5 (single JSON AST rule; Fabric dropped).
 - `research/scala/frontend-research.md` §5 (`lossless-json` motivation in Kafbat and why
   Circe on JS removes the need).
-- PLAN §25–§26.
 
 ## Consequences
 
@@ -39,7 +38,7 @@ payloads and structured log values. PLAN §25 forbids `Json` in domain modules.
 ## Alternatives rejected
 
 - uPickle / jsoniter-scala: faster, but Tapir, Ciris-yaml and the ecosystem KUI uses are
-  Circe-first; two JSON ASTs violate PLAN §13.
+  Circe-first; two JSON ASTs violate the project's rule against two libraries for the same responsibility.
 - Automatic derivation: hides codec changes in diffs and breaks the "wire form is explicit" rule.
 
 ## Reversibility

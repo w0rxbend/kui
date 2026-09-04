@@ -1,11 +1,11 @@
 # The verdict a contributor gets on every push, and the same one the maintainers get.
 #
-# PLAN §49 lists the pipeline as a sequence of stages. Each stage is a separate job here, on
+# The pipeline is described as a sequence of stages. Each stage is a separate job here, on
 # purpose: when GitHub says "style failed" the contributor already knows what to fix, whereas one
 # long job called "build" only says that something, somewhere, went wrong. The jobs are independent
-# and run in parallel; the sequence in PLAN §49 is a reading order, not a dependency chain.
+# and run in parallel; the sequence is a reading order, not a dependency chain.
 #
-# Stages PLAN §49 lists whose build tasks do not exist yet are deliberately absent rather than
+# Stages whose build tasks do not exist yet are deliberately absent rather than
 # stubbed. A job that always passes is worse than no job: it looks like coverage. That principle is
 # also why the `test` job runs `./scripts/run-tests.sh` rather than a hand-maintained list of
 # modules — a list goes stale the first time somebody adds a suite, and it goes stale silently.

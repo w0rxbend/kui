@@ -378,7 +378,7 @@ before you build one.
 **How it should look** — layout, spacing, typography, colour, and interaction affordances (what a
 button looks like, where it sits, what hover/focus/disabled/busy look like) — comes from the Claude
 Design project *Kafka UI v2*, current main artboard `Kafka UI v2.dc.html`. That design is revised
-over time and re-imported at the start of every milestone's grooming; whatever the import produced
+over time and re-imported at the start of every milestone's planning; whatever the import produced
 lands under `research/design/`, and the revision it came from is recorded in
 `research/design/REFERENCE.md`. No HTML, CSS or JavaScript from the design is ever copied into this
 repository — it is reimplemented in Laminar with KUI's own CSS and the kernel's tokens (ADR-024).
@@ -415,8 +415,7 @@ identity, revision, values under the design's own names — and nothing about a 
 it. `research/design/gaps.md` is the register of disagreements.
 
 One rule sits above both: **a colour pair from the design that fails WCAG AA contrast is adjusted,
-not adopted**, and the adjustment is written down. Accessibility outranks fidelity to a mockup. See
-PLAN §21 "Visual design reference" for the same rules in their canonical form.
+not adopted**, and the adjustment is written down. Accessibility outranks fidelity to a mockup.
 
 ### Three cases, worked through
 
@@ -471,7 +470,7 @@ The palette is adopted and *adjusted*. It is never rejected, and the test is nev
 
 This one sits inside the design's own authority — colour is exactly what the design decides — so
 "research wins" does not apply and there is nothing to send back. What applies instead is the
-accessibility rule, which is a decision already taken (PLAN §21, UI-013 step 4): the failing value is
+accessibility rule, which is a decision already taken: the failing value is
 moved along its own hue, by the smallest amount that clears the threshold, until `ContrastSuite`
 passes in **both** themes.
 

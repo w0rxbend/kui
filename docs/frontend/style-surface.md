@@ -821,7 +821,7 @@ the design's contents either way. The procedure UI-013 follows:
    deliberately. UI-013 already fixes the precedent for the accessibility case: an imported colour
    pair that fails WCAG AA is adjusted, not adopted.
 4. A design element with no backing feature, or a required feature with no design screen → record
-   both directions, as PLAN §21 requires. A missing screen is not permission to drop the feature,
+   both directions. A missing screen is not permission to drop the feature,
    and an artboard is not permission to add one: UI-013 forbids adding feature-matrix rows from the
    design, because rows come from research and product scope.
 
@@ -843,20 +843,19 @@ sentence and asks for it to be fixed during the import; it is recorded here too 
 ADR-024 alone would come away believing the token *vocabulary* is still negotiable, when only the
 *values* are.
 
-**2. Resolved — PLAN §21 now states the division of authority explicitly.** This entry previously
-recorded that PLAN §21 called the design project the "UI source of truth" without qualification,
-which read as making the design authoritative over what a screen *does*. PLAN §21 "Visual design
-reference" now carries a "Division of authority" subsection saying the opposite in as many words —
-the design is the authority on appearance and explicitly *not* on behaviour — plus a conflict rule, an
-accessibility rule and a reimplementation rule. It also names the project **"Kafka UI v2"**,
-matching UI-013 and `research/design/REFERENCE.md`, so the old naming discrepancy is gone too. The
-reading this document assumes throughout is now PLAN's own. Kept as a row rather than deleted so a
-reader of an older revision can see it was settled deliberately.
+**2. Resolved — the division of authority is now stated explicitly.** This entry previously
+recorded that the design project was called the "UI source of truth" without qualification,
+which read as making the design authoritative over what a screen *does*. That has since been
+settled explicitly: the design is the authority on appearance and explicitly *not* on behaviour —
+plus a conflict rule, an accessibility rule and a reimplementation rule. The project is also named
+**"Kafka UI v2"**, matching UI-013 and `research/design/REFERENCE.md`, so the old naming
+discrepancy is gone too. The reading this document assumes throughout is now the settled one. Kept
+as a row rather than deleted so a reader of an older revision can see it was settled deliberately.
 
-**3. `tokens.md` says "~45 semantic tokens"; there are 46, and `BLOCKERS.md` B-001 says "~40".**
-Trivial, and `TokensSuite`'s ceiling is 60 either way, so nothing is broken. The approximations are
-in prose only — one row of the comparison table in `tokens.md`, and one sentence in the B-001 row.
-Not worth a commit on their own; correct them when those files are next edited.
+**3. `tokens.md` says "~45 semantic tokens"; there are 46.**
+Trivial, and `TokensSuite`'s ceiling is 60 either way, so nothing is broken. The approximation is in
+prose only — one row of the comparison table in `tokens.md`. Not worth a commit on its own; correct
+it when that file is next edited.
 
 **4. Two `var()` calls reference tokens that do not exist** — `--kui-z-modal` and
 `--kui-sidebar-width` (R1, R2). No document mentions either. `TokensSuite` guarantees declarations

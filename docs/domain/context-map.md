@@ -59,8 +59,8 @@ Implemented (KERN-001) — identifiers, all opaque types with `from` validation,
 escape hatch for already-validated values, a `value` extension and an `Ordering`:
 `ClusterId`, `KafkaClusterId`, `TopicName`, `PartitionId`, `Offset`, `BrokerId`, `GroupId`,
 `Subject`, `SchemaId`, `ConnectName`, `ConnectorName`, `TaskId`, `CorrelationId`,
-`ServiceId`, `UserName`, `RoleName`. The validation rule of each one is the table in
-`docs/plans/M0/tasks/KERN-001.md` and is binding on every service.
+`ServiceId`, `UserName`, `RoleName`. The validation rule of each one is stated on the type itself in `libs/kernel`, is covered by that
+module's suites, and is binding on every service.
 
 Implemented (KERN-001) — value objects: `TopicPartition`, `TopicPartitionReplica`,
 `OffsetRange` (half-open, start never after end), `Host`, `Port`, `PositiveInt`, `ByteSize`.

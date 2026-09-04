@@ -225,7 +225,7 @@ final class TopicsFeature extends KuiFeature {
 }
 ```
 
-**Feature state is a class holding `Var`s, never a global** (PLAN §21). A global cache is shared by
+**Feature state is a class holding `Var`s, never a global**. A global cache is shared by
 every instance of the feature and outlives all of them, so two tabs would fight over one list and a
 test would inherit the previous test's rows.
 
@@ -402,7 +402,7 @@ Two harness facts:
   `viewportHeight: Var[Int]` which the component fills in from the real element in a browser and a
   suite sets by hand.
 - **Two Scala.js test modules cannot be named in one Mill invocation.** That is why every frontend
-  command in this repository is on its own line. It is recorded in `STATUS.md`.
+  command in this repository, and in CI, is on its own line.
 
 ---
 

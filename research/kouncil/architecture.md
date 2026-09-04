@@ -1,7 +1,6 @@
 # Consdata Kouncil — reference architecture
 
 - **Title:** Kouncil backend/frontend architecture analysis
-- **Agent:** Research Agent A (Reference Architecture)
 - **Date:** 2026-09-03
 
 ## Questions
@@ -124,7 +123,7 @@
 
 Unit/slice tests only, no Testcontainers (`grep` for `Testcontainers|KafkaContainer` is empty): serde round-trips for Avro/JSON-Schema/Protobuf/none (`kouncil-backend/src/test/java/com/consdata/kouncil/serde/*Test.java`), `EventMatcherTest`, `TopicServiceTest`, `ConsumerGroupServiceTest`, `PolicyApplierTest`, security context tests per provider (`Kouncil{InMemory,Ldap,ActiveDirectory,SSO}ApplicationTests.java`).
 
-## Decision candidates for KUI (PLAN §14–§21)
+## Decision candidates for KUI
 
 **D1. Table-style browsing is a presentation transform in the messages microfrontend, fed by the same message stream as the classic view.**
 Decision: `kui-message-service` keeps emitting Kafbat-style events; the messages microfrontend implements Kouncil's flattening rules (`H[]/K[]/V[]` columns, depth 3, list/object collapse thresholds, 100-char cell truncation, fresh-row flag, 1000-row window) client-side. The service adds only what the grid needs and the browser cannot compute cheaply: `valueKind` (`Text|Json`) — already in `DeserializeResult` — and the raw original value alongside the masked one.
@@ -139,9 +138,9 @@ Tradeoff: page N is computed from current end offsets, so pages shift while prod
 Reversibility: high (additive).
 
 **D3. Event tracking becomes a first-class `kui-message-service` use case streamed over SSE through the gateway, with the sanity limit and end-of-stream marker preserved.**
-Decision: `POST/GET /clusters/{id}/tracking` with `topics[]`, `window`, `match{source: value|header(name), operator: contains|notContains|equals|notEquals|regex, value}`; implementation scans topics smallest-range-first, one fs2 stream, batches sorted by timestamp, hard cap (configurable, default 1000), terminal `DONE` event. Also accept a CEL predicate as an alternative matcher so the smart-filter engine is reused (PLAN §15 `kui-message-service`).
+Decision: `POST/GET /clusters/{id}/tracking` with `topics[]`, `window`, `match{source: value|header(name), operator: contains|notContains|equals|notEquals|regex, value}`; implementation scans topics smallest-range-first, one fs2 stream, batches sorted by timestamp, hard cap (configurable, default 1000), terminal `DONE` event. Also accept a CEL predicate as an alternative matcher so the smart-filter engine is reused, in `kui-message-service`.
 Evidence: F4 (`track/TrackService.java:38-134`; `track/EventMatcher.java:13-48`; `track/AsyncTrackStrategy.java:25-50`).
-Tradeoff: Kouncil's WebSocket/STOMP transport is replaced by SSE fan-in (PLAN §17); the "client unsubscribed → stop" behavior maps to SSE cancellation. Scanning whole topics without an index is expensive; the time window is mandatory in KUI.
+Tradeoff: Kouncil's WebSocket/STOMP transport is replaced by SSE fan-in; the "client unsubscribed → stop" behavior maps to SSE cancellation. Scanning whole topics without an index is expensive; the time window is mandatory in KUI.
 Reversibility: high.
 
 **D4. Resend (copy an offset range to another topic) joins produce in the message service; placeholder templating (`{{count}}`, `{{uuid}}`, `{{timestamp}}`) is a frontend feature.**
@@ -194,10 +193,10 @@ Reversibility: n/a.
 
 ## Open questions
 
-1. Event tracking scans entire topics within a time window; should KUI require an upper bound on scanned bytes/records (Kafbat's polling throttler) and expose progress events (`CONSUMING`) during tracking? Likely yes; confirm with Research Agent H's UX findings.
+1. Event tracking scans entire topics within a time window; should KUI require an upper bound on scanned bytes/records (Kafbat's polling throttler) and expose progress events (`CONSUMING`) during tracking? Likely yes; confirm against the UX findings in `research/kafbat/ui-analysis.md` and `research/kouncil/ui-analysis.md`.
 2. Kouncil's "resend" writes raw bytes to another topic; with Schema Registry the destination subject may not exist. Decide whether KUI validates schema compatibility before resend.
 3. Should the `PAGE` mode (D2) be per-partition (Kouncil) or global (page over the merged timeline)? Per-partition is cheap; global needs cursors.
-4. Kouncil's DB-backed masking scope by user group implies masking decisions depend on the principal; KUI's message service would need the principal's groups (available via the signed principal header, PLAN §17) — confirm this is acceptable for the "defense in depth" rule.
+4. Kouncil's DB-backed masking scope by user group implies masking decisions depend on the principal; KUI's message service would need the principal's groups (available via the signed principal header) — confirm this is acceptable for the "defense in depth" rule.
 
 ## Confidence
 

@@ -1,12 +1,11 @@
 # Kafka admin capabilities for KUI
 
 **Title:** Kafka AdminClient / consumer / Schema Registry / Connect / ksqlDB capability map
-**Agent:** Research Agent D (Kafka domain)
 **Date:** 2026-09-03
 
 ## Questions
 
-1. For every KUI operation in the PLAN §15 service catalog, which Kafka client API implements
+1. For every KUI operation in the service catalog, which Kafka client API implements
    it, what broker version it needs, what it can throw, and what the reference projects had
    to work around.
 2. Which consumer-side primitives message browsing and topic analysis rest on, and what their
@@ -143,7 +142,7 @@ Kouncil `topic/TopicService.java:90-120`). Pull `isolation.level` into the reque
 | Backward paging | For each partition, window `[max(begin, to − ceil(limit/partitions)), to)`, then move `to := from`. Never loads a full partition. | `BackwardEmitter.java:20-41` |
 | Tailing | Seek to `endOffsets` of all partitions and poll forever; throttle to ~20 msg/s to the UI. | `SeekOperations.java:49`; `MessagesService.java:8` |
 | Cancellation | `consumer.wakeup()` from another thread raises `WakeupException` inside `poll`; thread interruption raises `InterruptException`. Both must close the consumer. | `analyze/TopicAnalysisService.java:55,77-85`; `RangePollingEmitter.java:46-52`. In KUI: fs2-kafka `KafkaConsumer.resource` + fiber cancellation. |
-| Byte/time budget | Kafbat tracks bytes per poll and throttles; the whole browse is bounded by page size, so no separate time budget in the reference. KUI adds explicit `limit`, `maxBytes`, `deadline` per PLAN §22. | `emitter/PollingThrottler.java`, `EnhancedConsumer.java:14-20` |
+| Byte/time budget | Kafbat tracks bytes per poll and throttles; the whole browse is bounded by page size, so no separate time budget in the reference. KUI adds explicit `limit`, `maxBytes`, `deadline`. | `emitter/PollingThrottler.java`, `EnhancedConsumer.java:14-20` |
 | Control records | Not returned by `poll` in either isolation level, but they occupy offsets ⇒ `end − begin` overstates counts and a browse must terminate on position, not on record count. | Kafka protocol; Kouncil `TopicService.java:171-173` comment |
 | Produce | `KafkaProducer[Array[Byte], Array[Byte]]` per request with `ProducerRecord(topic, partition?, key?, value?, headers)`; `send` callback gives `RecordMetadata(partition, offset, timestamp)`. | `MessagesService.java:90-147`; Kouncil resend reads a range then re-produces to a target topic (`TopicService.java:233-269`). |
 
@@ -301,8 +300,8 @@ per request" rule and classify by the first keyword instead of a full grammar in
   mapper is total over the classes listed in this document. Suppressible per-key errors
   (`UnknownTopicOrPartitionException`, `TopicAuthorizationException`) become
   `Skipped(key, reason)` entries in a `BatchResult`, never silent drops.
-- **Evidence.** Kafbat `toMonoWithExceptionFilter` silently drops keys (`:383-419`); the
-  PLAN §26 error envelope needs stable codes.
+- **Evidence.** Kafbat `toMonoWithExceptionFilter` silently drops keys (`:383-419`); KUI's
+  error envelope needs stable codes.
 - **Tradeoff.** More explicit result types; the UI can show "3 topics hidden (no
   permission)".
 - **Reversibility.** Medium — result shapes are in contracts.
@@ -367,7 +366,7 @@ per request" rule and classify by the first keyword instead of a full grammar in
   (`SecurityDisabledException`), and CSV import/convenience builders that do not belong to
   cluster metadata.
 - **Evidence.** `acl/AclsService.java`, `quota/ClientQuotaService.java`, `FeatureService.java:48-68`.
-- **Tradeoff.** One more deployable; PLAN §15 allows the merge with an ADR if this proves thin.
+- **Tradeoff.** One more deployable; the merge is allowed with an ADR if this proves thin.
 - **Reversibility.** Medium (ADR required either way).
 
 ## Open questions

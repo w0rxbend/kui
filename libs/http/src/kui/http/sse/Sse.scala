@@ -54,9 +54,8 @@ object SseConfig {
   *     proxy in front of it, which closes it. A heartbeat every fifteen idle seconds keeps it open, and none
   *     is sent while events are flowing.
   *   - **it stops consuming resources the moment the browser goes away.** The cancellation chain is browser
-  *     abort → gateway stream cancelled → service fiber cancelled → consumer closed. The spike measured the
-  *     first link at 8 ms on this server (`docs/spikes/M0-netty-sse.md`), which is why no idle-timeout guard
-  *     is needed here.
+  *     abort → gateway stream cancelled → service fiber cancelled → consumer closed. That first link
+  *     was measured at 8 ms on this server, which is why no idle-timeout guard is needed here.
   *   - **a slow reader cannot exhaust the server.** The buffer is bounded and overflow drops the oldest event
   *     with a counter, never buffers without limit (PLAN §28).
   */
@@ -132,8 +131,8 @@ object Sse {
 
   /** The Tapir output an SSE endpoint declares.
     *
-    * Tapir gives the generic fs2 text-event-stream body and leaves the framing to the caller
-    * (`docs/spikes/M0-netty-sse.md`), which is what [[encode]] does. The charset is fixed to UTF-8 because
+    * Tapir gives the generic fs2 text-event-stream body and leaves the framing to the caller,
+    * which is what [[encode]] does. The charset is fixed to UTF-8 because
     * the SSE specification fixes it.
     */
   def body[F[_]]: StreamBodyIO[Stream[F, Byte], Stream[F, Byte], Fs2Streams[F]] = {

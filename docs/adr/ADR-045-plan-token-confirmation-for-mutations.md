@@ -101,7 +101,7 @@ without it is easy.
 
 ## References
 
-PLAN §22; ADR-026 (the cursor key this reuses); ADR-034 (error envelope);
+ADR-026 (the cursor key this reuses); ADR-034 (error envelope);
 ADR-047 (the marker, refusal and audit record that accompany every mutation);
 `research/kafka/admin-capabilities.md` §3 (KIP-122's rules and the reference products'
-behaviour); `docs/plans/M4/DEVPLAN.md` §10 D3 and D4; tasks GRP-012, GRP-019, GRP-026, GRP-034.
+behaviour).

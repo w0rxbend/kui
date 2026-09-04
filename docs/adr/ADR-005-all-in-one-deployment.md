@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §2.6 requires the same code to run as containers and as one JVM. The risk is two code
+The project's deployment constraints require the same code to run as containers and as one JVM. The risk is two code
 paths in the gateway (HTTP client vs direct call) that drift apart.
 
 ## Decision
@@ -27,7 +27,6 @@ paths in the gateway (HTTP client vs direct call) that drift apart.
 
 ## Evidence
 
-- PLAN §14, §16, §31 (in-process principal), §32 (E2E against all-in-one).
 - `research/scala/security-research.md` §6.6 (all-in-one differences: no header, no own
   listeners, `NoopSigner`).
 - `research/kafbat/architecture.md` D2 ("the all-in-one shape hides the hop").
@@ -41,7 +40,7 @@ paths in the gateway (HTTP client vs direct call) that drift apart.
 
 ## Alternatives rejected
 
-- All-in-one as a Compose of containers only: fails PLAN §2.6 for laptops and small installs.
+- All-in-one as a Compose of containers only: fails the project's requirement to support laptops and small installs.
 - Direct method calls bypassing Tapir in all-in-one: creates the second code path this ADR
   exists to prevent.
 

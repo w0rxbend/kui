@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §12 posed two options: wrap the Confluent client entirely, or write an sttp client for
+The schema-registry research posed two options: wrap the Confluent client entirely, or write an sttp client for
 the registry REST API and use Scala libraries for (de)serialization. Dynamic Protobuf and
 JSON-Schema decoding against registry-supplied schemas has no Scala implementation.
 

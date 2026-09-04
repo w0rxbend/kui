@@ -5,7 +5,7 @@
 
 ## Context
 
-Kafbat relies on Spring's runtime dependency injection. PLAN §11 forbids reflection-based DI.
+Kafbat relies on Spring's runtime dependency injection. The project's technology constraints forbid reflection-based DI.
 KUI needs one place per deployable where concrete adapters are chosen, plus a way to share
 wiring between a service's own `main` and the all-in-one root.
 
@@ -23,7 +23,7 @@ wiring between a service's own `main` and the all-in-one root.
 ## Evidence
 
 - `research/scala/ecosystem-mapping.md` F8 (MacWire 2.6.7, Scala 3 support, low churn expected).
-- PLAN §10, §11, §14 ("kui-allinone wires every service's application layer").
+- The project's technology constraints require that "kui-allinone wires every service's application layer".
 
 ## Consequences
 
@@ -35,7 +35,7 @@ wiring between a service's own `main` and the all-in-one root.
 
 - Manual wiring without MacWire: acceptable but verbose for ~10 services; MacWire is a
   compile-time macro with no runtime cost.
-- Guice/Spring-style runtime DI: reflection, forbidden by PLAN §11.
+- Guice/Spring-style runtime DI: reflection, forbidden by the project's technology constraints.
 
 ## Reversibility
 

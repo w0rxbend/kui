@@ -33,9 +33,9 @@ So what you get when you open the URL is:
 - a broker that is genuinely running, seeded with topics, JSON messages and a consumer group that is
   behind, that you can point your own tools at on `localhost:9092`.
 
-That is the truth about the current release and not a bug in this quickstart. The reason the whole
-thing is built now anyway is the requirement in [`../../docs/DELIVERY.md`](../../docs/DELIVERY.md):
-when Milestone 1 lands, `quickstart.sh` must show real clusters, topics and lag with nothing new for
+That is the truth about the release this file was written against and not a bug in this quickstart.
+The reason the whole thing is built now anyway is a standing requirement: as soon as cluster
+connectivity lands, `quickstart.sh` must show real clusters, topics and lag with nothing new for
 anybody to type. The broker, the seed data and the cluster entry in the configuration are already
 here waiting for it.
 

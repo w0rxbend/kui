@@ -19,7 +19,7 @@ background refresh and cancellation that propagates from the browser to a Kafka 
 - Every client, server, exporter and refresh loop is a `Resource`; background work runs under
   a `Supervisor`; blocking Java calls go through `Sync[F].blocking`.
 - Direct-style Scala (Ox/Gears) is not introduced as a second concurrency runtime. The
-  `/direct-style-scala` permission in PLAN §11 is interpreted as "readable sequential code
+  project's allowance for direct-style Scala is interpreted as "readable sequential code
   inside a single `IO` program", not as a second runtime.
 
 ## Evidence
@@ -43,8 +43,8 @@ background refresh and cancellation that propagates from the browser to a Kafka 
 
 - ZIO: a second effect ecosystem for the same job; Tapir supports both but fs2-kafka, otel4s
   and Ciris are Typelevel-first.
-- Ox / direct style as the runtime: PLAN §11 forbids a second runtime; the ecosystem KUI
-  relies on is CE-based.
+- Ox / direct style as the runtime: the project's constraints forbid a second runtime; the
+  ecosystem KUI relies on is CE-based.
 
 ## Reversibility
 

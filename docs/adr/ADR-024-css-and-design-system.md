@@ -5,9 +5,9 @@
 
 ## Context
 
-PLAN §21 asked for a choice between plain CSS and ScalaCSS. Kafbat uses styled-components
+The project needed a choice between plain CSS and ScalaCSS. Kafbat uses styled-components
 with a 1 600-line theme file and a three-state dark mode; the Claude Design project is the
-visual source of truth and its token extraction (Research Agent I) has not been delivered yet.
+visual source of truth and its token extraction has not been delivered yet.
 
 ## Decision
 
@@ -35,8 +35,8 @@ visual source of truth and its token extraction (Research Agent I) has not been 
 
 - `research/scala/frontend-research.md` §6 (ScalaCSS unmaintained since 2022; Kafbat theming
   model; token list; Shoelace/UI5 bindings), ADR-024 candidate; `research/scala/ecosystem-mapping.md` F12.
-- PLAN §21 "Visual design reference" (design project is the UI source of truth; no design
-  CSS copied).
+- The project's visual design reference: the design project is the UI source of truth; no design
+  CSS copied.
 
 ## Consequences
 

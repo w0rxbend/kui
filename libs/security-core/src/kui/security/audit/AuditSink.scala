@@ -130,7 +130,7 @@ object MutationRecord {
   * It exists because three services write the same trail. Two of them used to spell "nobody was signed in"
   * differently — one said `system (authentication is not enabled)`, the other `anonymous (authentication is
   * not enabled)` — and a trail that answers "who changed this cluster today" with two names for one absence
-  * is a trail nobody can query. E2 in `docs/BACKLOG.md` is that consolidation; this object is where it lands.
+  * is a trail nobody can query. This object is where the one spelling lives.
   */
 object AuditPrincipal {
 

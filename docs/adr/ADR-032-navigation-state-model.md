@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §16.5 says an unavailable feature is "shown disabled with the reason". The UI research
+The project's original UX rule says an unavailable feature is "shown disabled with the reason". The UI research
 found that a disabled link has nowhere to show `since`, a retry or "what still works", and
 that Kafbat's hide-when-unconfigured behaviour must not be conflated with health.
 
@@ -22,7 +22,7 @@ that Kafbat's hide-when-unconfigured behaviour must not be conflated with health
     sensitive.
   - `Unavailable`: entry shown dimmed and **clickable**; the route renders the feature's
     fallback panel (reason, `since`, "Retry now" → `POST /capabilities/{service}/probe`,
-    "what still works"). This amends PLAN §16.5.
+    "what still works"). This amends the project's original UX rule.
   - `Degraded`: amber dot; page fully usable with an inline banner.
   - Stale data from the session stays on screen greyed with its timestamp; actions disabled.
 - The `Degraded` reason is structured (`code`, `message`, `suggestedPollInterval?`, `p95?`) so
@@ -35,7 +35,7 @@ that Kafbat's hide-when-unconfigured behaviour must not be conflated with health
 
 ## Amendments
 
-Settled during M0 grooming (G5) and reviewed at the G6 gate on 2026-09-03. Both fill in cases
+Settled and reviewed as part of the M0 architecture review, 2026-09-03. Both fill in cases
 the original decision left to the reader; neither adds a state to the `FeatureState` ADT.
 
 **Amendment 1 — `Forbidden` outranks every health state.**
@@ -69,7 +69,6 @@ gap before the first snapshot arrives. `Starting` is already a member of `Reason
 - `research/kafbat/ui-analysis.md` IA.2, IA.3, DC-H1, DC-H2, DC-H3, DC-H5, DC-H6, DC-H7, open
   questions (hide forbidden; snapshot vs delta).
 - `research/kouncil/ui-analysis.md` DC-H10 (last-seen assignments greyed).
-- PLAN §2.1, §16.
 
 ## Consequences
 
@@ -79,7 +78,7 @@ gap before the first snapshot arrives. `Starting` is already a member of `Reason
 
 ## Alternatives rejected
 
-- Disabled links (PLAN §16.5 wording): no place for the reason and retry.
+- Disabled links (the original UX wording): no place for the reason and retry.
 - Hiding unavailable features (Kafbat): users cannot tell "misconfigured" from "down".
 
 ## Reversibility

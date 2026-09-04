@@ -5,8 +5,8 @@
 
 ## Context
 
-PLAN §10 chose MUnit and rejected Weaver pending research. The frontend needs a Scala.js
-test runner and an E2E strategy; PLAN §12 had an open "Scala.js Playwright facade" item.
+The project's technology plan chose MUnit and rejected Weaver pending research. The frontend needs a Scala.js
+test runner and an E2E strategy; the plan had an open "Scala.js Playwright facade" item.
 
 ## Decision
 
@@ -28,7 +28,7 @@ test runner and an E2E strategy; PLAN §12 had an open "Scala.js Playwright faca
   Testcontainers against the all-in-one JAR and the distributed Compose; fault-isolation
   scenarios stop a container and assert the shell keeps working. The Scala.js Playwright
   facade research item is closed.
-- Test naming and layering follow PLAN §32; TLS test certificates via BouncyCastle 1.85.
+- Test naming and layering follow the project's testing conventions; TLS test certificates via BouncyCastle 1.85.
 
 ## Evidence
 
@@ -44,7 +44,7 @@ test runner and an E2E strategy; PLAN §12 had an open "Scala.js Playwright faca
 
 ## Alternatives rejected
 
-- Weaver as a second framework: violates PLAN §13; its advantages are reachable in MUnit.
+- Weaver as a second framework: violates the project's rule against two libraries for the same responsibility; its advantages are reachable in MUnit.
 - TypeScript Playwright: a second toolchain in CI; loses shared Scala models and Testcontainers.
 
 ## Reversibility

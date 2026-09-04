@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §18 and `ARCHITECTURE.md` §3 lay out a hexagonal module structure per service —
+The project's architecture rules and `ARCHITECTURE.md` §3 lay out a hexagonal module structure per service —
 `domain`, `application`, `infrastructure`, `contract`, `api`, `app` — with a dependency
 direction that is the whole point of the structure: business rules must not depend on the
 transport, the JSON library, the HTTP server or the wiring framework, so that any of those can
@@ -14,11 +14,11 @@ be replaced without touching the rules.
 Rules like that decay quietly. Nobody sets out to make `application` depend on Tapir; someone
 needs one DTO, adds one `moduleDeps` edge, and the edge is invisible in every subsequent code
 review because reviewers read diffs, not dependency graphs. By the time it is noticed there
-are thirty call sites and the rule is gone. PLAN §3 anticipates this by saying service
-boundaries are "enforced by module dependencies", but it does not say what enforces the module
-dependencies.
+are thirty call sites and the rule is gone. The project's architecture rules anticipate this by
+saying service boundaries are "enforced by module dependencies", but that alone does not say
+what enforces the module dependencies.
 
-M0 grooming turned the rules into a build task, `./mill checkArchitecture` (task BUILD-005),
+The M0 architecture review turned the rules into a build task, `./mill checkArchitecture` (task BUILD-005),
 and in doing so hit a case the prose had not resolved: the gateway's `application` module
 holds the capability registry, and the capability types (`CapabilityState`, `ReasonCode`,
 `DegradedReason`) live in `libs/contracts-core`, which is a wire module built on Tapir and
@@ -163,11 +163,10 @@ by default.
 
 ## References
 
-PLAN §3, §18, §19; ADR-004 (the gateway rule), ADR-033 (mapping at the boundary),
+ADR-004 (the gateway rule), ADR-033 (mapping at the boundary),
 ADR-039 (the fold that lives in gateway `application`); `ARCHITECTURE.md` §3;
 `docs/domain/context-map.md` ("No context imports another context's `domain` module");
-tasks BUILD-005 (the check), BUILD-004 (CI), SVC-001 and GW-002 (the rule applied),
-DEVPLAN §5 (the module map the check validates).
+tasks BUILD-005 (the check), BUILD-004 (CI), SVC-001 and GW-002 (the rule applied).
 
 ## Amendment 1 — 2026-09-03
 
@@ -186,7 +185,7 @@ domain-owning services: `services/cluster/application` still owns its types and 
 the `api` boundary (SVC-001). The gateway's real constraints are now stated positively as A4
 and A8 rather than left implied by A3.
 
-**Tasks updated:** BUILD-005 (rule table), GW-002, GW-003, `DEVPLAN` §5.3 and §10.
+**Tasks updated:** BUILD-005 (rule table), GW-002, GW-003.
 
 
 ## Amendment 2 — 2026-09-03
@@ -218,7 +217,7 @@ express "this file is compiled for one platform" precisely.
 deviation).
 
 
-## Amendment 3 — 2026-09-03 (M1 gate review)
+## Amendment 3 — 2026-09-03 (M1 architecture review)
 
 **What changed.** Two rules are added, and one existing rule is confirmed rather than widened.
 
@@ -231,7 +230,7 @@ deviation).
   This is A8 generalised from the gateway to everyone. `libs/config` is on the list because the
   Kafka `ConfigStore` adapter lives there (ADR-042 §5); the rule names the exception so that a
   sixth one has to be argued in the commit that changes the rule.
-- **A1 is not widened.** M1 grooming asked for `co.fs2:fs2-core` to be added to A1's allow-list,
+- **A1 is not widened.** The M1 architecture review asked for `co.fs2:fs2-core` to be added to A1's allow-list,
   so that a domain port could expose `changes: fs2.Stream[F, List[ClusterProfile]]`. Refused.
   A1's allow-list is `libs.kernel` and cats-core, and its value comes from being short enough
   that adding to it is an event. A port stated in terms of an abstract `F[_]` needs no runtime
@@ -248,13 +247,13 @@ adapter module. The argument of this ADR — that nobody sets out to break layer
 edge for one type — applies identically to a Kafka client and to an adapter edge.
 
 **Tasks updated:** CFGOP-003 (rule table and its build tests), CLDOM-003, CLDOM-004, CLADP-003,
-CLADP-005; `DEVPLAN` §5.1 and §5.2.
+CLADP-005.
 
 
-## Amendment 4 — 2026-09-04 (M2/M3/M4 gate review)
+## Amendment 4 — 2026-09-04 (M2/M3/M4 architecture review)
 
 **What changed.** Four rules are added, and their numbers are allocated centrally because three
-milestones groomed in parallel each proposed a different rule under the number A11.
+milestones planned in parallel each proposed a different rule under the number A11.
 
 | Rule | Forbidden edge | Owning milestone |
 | --- | --- | --- |
@@ -263,7 +262,7 @@ milestones groomed in parallel each proposed a different rule under the number A
 | A13 | `libs.filter`, `dev.cel.*` or `re2j` on the classpath of any module other than `libs/filter`, a service's `application`, `libs/testkit` or an `app` | M3 (task MSG-047) |
 | A14 | declaring a **wire vocabulary** — an enum or set of string constants serialised across a process boundary — anywhere but `libs/kernel` or `libs/contracts-core` | M4 (task GRP-040) |
 
-**Why the numbers are allocated here.** M2's DEVPLAN §5.3, M3's §5.3 and M4's §6.3 each defined
+**Why the numbers are allocated here.** M2's plan, M3's plan and M4's plan each defined
 an "A11", and the three definitions are unrelated. Whichever milestone landed second would have
 either renamed the other's rule or silently redefined it, and a rule table whose numbers mean
 different things in different commits is worse than no table: `checkArchitecture`'s failure
@@ -300,9 +299,6 @@ message already claimed: `contract`, and nothing else. This is a tightening, not
 it is behaviourally identical for every layer that existed before. `client` remains available to
 the services that need it, under A11.
 
-**Standing requirement.** Each of A11–A14 is proven by deliberately introducing a violating
-edge, observing the failure, and reverting, and the message is recorded in the owning task's
-Implementation Report.
-
-**Tasks updated:** TOP-010, MSG-047, GRP-040; `docs/plans/M2/DEVPLAN.md` §5.3,
-`docs/plans/M3/DEVPLAN.md` §5.3 and §6.7, `docs/plans/M4/DEVPLAN.md` §2.8 and §6.3.
+**Standing requirement.** Each of A11–A14 is proven the same way: deliberately introduce an edge
+that violates it, check that the build fails with a message naming the offending edge, and revert.
+A rule nobody has watched fail is a rule nobody knows is wired up.

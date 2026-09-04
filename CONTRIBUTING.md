@@ -23,21 +23,26 @@ KUI is planned in the open. Two documents decide most questions before they reac
   in a pull request that quietly does something else.
 
 Work is tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) and scheduled in
-[docs/ROADMAP.md](docs/ROADMAP.md). Current state and the immediate next step live in
-[STATUS.md](STATUS.md) and [NEXT.md](NEXT.md).
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
-### Task specifications
+### Before you start on something
 
-Every unit of work has a specification in `docs/plans/<milestone>/tasks/`, and each one states its
-goal, its scope, the files it creates, the tests it requires and how to tell it is done. Read the
-whole file before starting: the "degraded behavior" and "design references" sections are where the
-reasoning lives, and they are usually the parts that change how the code should be written.
+Read these four, in this order. Together they are about an hour, and they answer most of the
+questions a first change runs into:
 
-A specification is a plan written before the code existed, so it is sometimes wrong. When you have
-to depart from it, do it deliberately and record it: add a `## Deviations` section to the task file
-saying what you did instead and why. A reader six months from now will find the spec and the code
-disagreeing, and that section is the difference between "somebody thought about this" and "somebody
-did not read the spec".
+1. [ARCHITECTURE.md](ARCHITECTURE.md) — what the services are, which module may depend on which,
+   and why the dependency direction is the way it is.
+2. [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) — whether the thing you want to build already
+   exists, is half built, or was deliberately rejected. Rows are set by reading the code and
+   driving the running application, so a row that says `RESEARCHING` really does mean no code.
+3. [docs/adr/](docs/adr/) — the decision behind whatever you are about to touch. Search it for the
+   library or the mechanism by name before proposing a different one.
+4. [docs/testing.md](docs/testing.md) — which kind of test your change needs, and how to run it.
+
+If the change is larger than a bug fix, open an issue describing the behaviour you want before
+writing the code. A design that disagrees with an accepted ADR is a legitimate proposal, but it
+belongs in a new decision record that supersedes the old one — not in a pull request that quietly
+does something else.
 
 ### Scratch files never enter the repository
 

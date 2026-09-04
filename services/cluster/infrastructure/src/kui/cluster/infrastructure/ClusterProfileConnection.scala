@@ -11,8 +11,8 @@ import kui.kernel.cluster.ClusterConnection
   * than a translation that could be wrong.
   *
   * It exists as its own file even though the domain already assembles the value, because it is the single
-  * named seam between the cluster domain's vocabulary and lane A's. If either side renames a field, exactly
-  * one file in this module has to change.
+  * named seam between the cluster domain's vocabulary and the Kafka client's. If either side renames
+  * a field, exactly one file in this module has to change.
   */
 object ClusterProfileConnection {
 

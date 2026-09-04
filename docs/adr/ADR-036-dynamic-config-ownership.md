@@ -10,7 +10,7 @@
 
 Kafbat's config wizard persists a YAML file and restarts the whole Spring context; only
 `rbac.roles` hot-reloads via a file watcher. Kouncil keeps clusters, groups and policies in a
-relational database with UI CRUD. PLAN §3 forbids a shared database; PLAN §24 asks for
+relational database with UI CRUD. The project's data-ownership rules forbid a shared database and require
 distribution to services without restart; ADR-004 dissolved the config service.
 
 ## Decision

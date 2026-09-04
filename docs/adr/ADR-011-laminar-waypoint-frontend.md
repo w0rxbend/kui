@@ -5,7 +5,7 @@
 
 ## Context
 
-The frontend is Scala.js with no application TypeScript (PLAN §10). Kafbat's React stack
+The frontend is Scala.js with no application TypeScript. Kafbat's React stack
 (react-query, zustand, react-table, styled-components, react-hook-form) must be mapped to
 Laminar idioms with explicit state ownership rules.
 
@@ -46,7 +46,7 @@ Laminar idioms with explicit state ownership rules.
 
 - Laminar 18 milestones: not final; draft release notes still change.
 - Scala.js React facades (slinky/japgolly): reintroduce the React runtime and JS ecosystem
-  dependencies PLAN §10 excludes.
+  dependencies the project's technology constraints exclude.
 
 ## Reversibility
 

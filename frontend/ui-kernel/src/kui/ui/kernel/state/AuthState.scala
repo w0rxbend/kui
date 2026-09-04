@@ -10,7 +10,7 @@ import kui.ui.kernel.api.ApiError
   *
   * A kernel-owned shape rather than the gateway's response type. The gateway's contract module sits *above*
   * the kernel — the kernel is the bottom of the frontend and may not depend on any one service's wire shapes
-  * — so the shell decodes the response and hands the result down as this. The same rule the previous lane-F
+  * — so the shell decodes the response and hands the result down as this. The same rule the earlier frontend
   * task applied to `UnavailableReason`, applied to identity.
   *
   * @param authType

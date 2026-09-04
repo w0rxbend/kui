@@ -10,8 +10,8 @@ a Kubernetes Secret/ConfigMap adapter. That works for one replica writing one fi
 not answer where UI-managed clusters, roles, masking policies and uploaded keystores live when
 KUI runs as eleven services with more than one replica each: a file is per-pod, and a shared
 filesystem is not portable (ADR-036 already rejected it). Kouncil solves the same problem with
-PostgreSQL; PLAN §3 forbids a shared database, and `docs/FEATURE_MATRIX.md` OT-004 has carried
-that contradiction since the G6 gate (`TECH_DEBT.md` TD-014).
+PostgreSQL; the project's data-ownership rules forbid a shared database, and `docs/FEATURE_MATRIX.md`
+OT-004 has carried that contradiction since the M0 architecture review (`TECH_DEBT.md` TD-014).
 
 KUI already requires a Kafka cluster to be useful at all, and Kafka's log compaction is exactly
 a durable, replicated, ordered key-value store with change notification built in.
@@ -95,7 +95,7 @@ user groups, masking policies, uploaded related files, and audit events.
 ## Alternatives rejected
 
 - **Relational database (Kouncil's approach).** A second stateful system to run, back up and
-  migrate, for a few hundred rows. PLAN §3 forbids sharing one, and one database per owning
+  migrate, for a few hundred rows. The project's data-ownership rules forbid sharing one, and one database per owning
   context multiplies the operational burden instead of removing it.
 - **Versioned YAML file only (ADR-036 as written).** Per-pod state; two replicas of the cluster
   service diverge, and uploaded keystores need a shared filesystem that Kubernetes does not give

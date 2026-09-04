@@ -1,6 +1,5 @@
 # Kafbat HTTP API surface analysis (with Provectus and Kouncil deltas) and KUI `/api/v1` mapping
 
-**Agent:** Research Agent C (API and Contract)
 **Date:** 2026-09-03
 **Status:** complete, ready for architect review
 
@@ -781,8 +780,8 @@ Error code mapping proposal: `4007→KUI-CLUSTER-NOT-FOUND`, `4008→KUI-TOPIC-N
 1. Should `clusterId` be a slug of the display name (readable URLs, matches Kafbat) or a stable
    generated id (survives rename)? Recommendation: slug now, rename = new id, ADR needed.
 2. Kouncil's "event tracking" is a filtered multi-topic scan, not a key-correlated trace
-   (Finding 10). Research Agent H decides whether KUI adds key/correlation-id grouping as a
-   first-class feature or keeps Kouncil's semantics; the contract above reserves `groups?`.
+   (Finding 10). KUI must decide whether to add key/correlation-id grouping as a
+   first-class feature or keep Kouncil's semantics; the contract above reserves `groups?`.
 3. Kafbat's audit-topic permission swap (`AUDIT:VIEW` instead of topic permissions) needs an RBAC
    design decision in KUI (identity-service): keep, or model the audit topic as a normal topic
    with a deny-by-default rule.

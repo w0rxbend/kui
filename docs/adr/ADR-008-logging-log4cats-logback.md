@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §10 originally named "log4cats + Fabric structured logger". Research established that
+The original technology plan named "log4cats + Fabric structured logger". Research established that
 Fabric is a JSON AST library (the value model of the `scribe` logger), not a logging model,
 and would be a second JSON AST next to Circe.
 
@@ -26,7 +26,7 @@ and would be a second JSON AST next to Circe.
 ## Evidence
 
 - `research/scala/ecosystem-mapping.md` F5 (what Fabric is; recommendation), F4 (versions).
-- PLAN §13 "No two libraries for the same responsibility", §30.
+- The project's rule against two libraries for the same responsibility.
 
 ## Consequences
 

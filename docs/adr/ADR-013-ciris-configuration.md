@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §10 leaves the config library to research with the requirement: typed model, YAML file
+The project's technology plan left the config library to research with the requirement: typed model, YAML file
 plus environment override, Kafbat-compatible keys (`KAFKA_CLUSTERS_0_NAME`), secrets that
 never print, accumulated validation errors.
 

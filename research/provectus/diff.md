@@ -1,7 +1,6 @@
 # Provectus Kafka UI vs Kafbat Kafka UI — architectural and feature diff
 
 - **Title:** What Kafbat added, removed and renamed relative to its Provectus origin
-- **Agent:** Research Agent A (Reference Architecture)
 - **Date:** 2026-09-03
 
 ## Questions
@@ -66,7 +65,7 @@ Unchanged architecture: Spring WebFlux monolith, `ClustersStorage` immutable map
 
 `diff` of `Serde.java` (package names normalized): Kafbat **adds** `default Serializer serializer(topic, type, Map<String,Object> properties)`, `default List<SerdeParameter> getParameters(topic, type)`, `default boolean couldBePreferable(topic, type)`, and `Serializer.serialize(String input, Headers headers)`; adds the `SerdeParameter` class. All additions are default methods, so **Provectus-era plugin jars remain source- and binary-compatible with Kafbat** apart from the package rename (`com.provectus.kafka.ui.serde.api` → `io.kafbat.ui.serde.api`), which does break old jars.
 
-AWS Glue: neither repository contains a Glue serde (`grep -ril glue` on both `src/main/java` trees is empty). Both READMEs mention "AWS Glue or Smile" as ready-made **external** serde plugins (`provectus/README.md:47`; `kafbat/README.md:58`). PLAN §9A's "AWS Glue serde" is therefore an out-of-tree plugin that targets this API, not a Provectus feature to diff.
+AWS Glue: neither repository contains a Glue serde (`grep -ril glue` on both `src/main/java` trees is empty). Both READMEs mention "AWS Glue or Smile" as ready-made **external** serde plugins (`provectus/README.md:47`; `kafbat/README.md:58`). "AWS Glue serde" as previously assumed is therefore an out-of-tree plugin that targets this API, not a Provectus feature to diff.
 
 ### F5. OpenAPI contract deltas
 
@@ -82,7 +81,7 @@ Message browsing semantics diff: Provectus `getTopicMessages(seekType, seekTo[],
 
 ### F6. Configuration model deltas (`ClustersProperties` field diff)
 
-Kafbat adds: top-level `adminClient{timeout, describeConsumerGroupsPartitionSize/Concurrency, listConsumerGroupOffsetsPartitionSize/Concurrency, getTopicsConfigPartitionSize, describeTopicsPartitionSize}`, `cache{enabled, connectClusterCacheExpiry}`, `fts{enabled, defaultEnabled, schemas/consumers/connect/acl ngram settings}`, `csv{lineDelimeter, quoteCharacter, quoteStrategy, fieldSeparator}`, `defaultMetricsStorage.prometheus{url, pushGatewayUrl/Username/Password/JobName, remoteWrite}`, `messageRelativeTimestamp`, `polling.responseTimeoutMs`; per cluster: `schemaRegistryTopicSubjectSuffix`, `schemaRegistryAuth.oauth{tokenUrl, clientId, clientSecret, scopes, tokenCacheEnabled, tokenRefreshBuffer, maxRetries}`, `ssl.verify`, `kafkaConnect[].consumerNamePattern`, `metrics.prometheusExpose`, `metrics.store`, `audit.requireAuditTopic`, `audit.level` defaulting to `ALTER_ONLY` (was unset). `MetricsConfigData` was renamed `MetricsConfig`. Everything in Provectus's model still exists in Kafbat, so **Provectus configs load unchanged** into Kafbat (KUI's env-key compatibility goal in PLAN §19 `kui-config` therefore only needs to track Kafbat).
+Kafbat adds: top-level `adminClient{timeout, describeConsumerGroupsPartitionSize/Concurrency, listConsumerGroupOffsetsPartitionSize/Concurrency, getTopicsConfigPartitionSize, describeTopicsPartitionSize}`, `cache{enabled, connectClusterCacheExpiry}`, `fts{enabled, defaultEnabled, schemas/consumers/connect/acl ngram settings}`, `csv{lineDelimeter, quoteCharacter, quoteStrategy, fieldSeparator}`, `defaultMetricsStorage.prometheus{url, pushGatewayUrl/Username/Password/JobName, remoteWrite}`, `messageRelativeTimestamp`, `polling.responseTimeoutMs`; per cluster: `schemaRegistryTopicSubjectSuffix`, `schemaRegistryAuth.oauth{tokenUrl, clientId, clientSecret, scopes, tokenCacheEnabled, tokenRefreshBuffer, maxRetries}`, `ssl.verify`, `kafkaConnect[].consumerNamePattern`, `metrics.prometheusExpose`, `metrics.store`, `audit.requireAuditTopic`, `audit.level` defaulting to `ALTER_ONLY` (was unset). `MetricsConfigData` was renamed `MetricsConfig`. Everything in Provectus's model still exists in Kafbat, so **Provectus configs load unchanged** into Kafbat (KUI's env-key compatibility goal for `kui-config` therefore only needs to track Kafbat).
 
 ### F7. Feature-level summary
 
@@ -114,19 +113,19 @@ Removed or dropped in Kafbat: Groovy filters, the v1 message-browsing behavior (
 ## Decision candidates for KUI
 
 **D1. Parity target = Kafbat's contract, with Provectus features considered a strict subset.**
-Decision: KUI's feature matrix is seeded from Kafbat's 70 paths; the only Provectus-specific items (Groovy filters, v1 seek API) are `REJECTED(superseded by CEL / PollingMode)` with CEO sign-off per PLAN §9A.
+Decision: KUI's feature matrix is seeded from Kafbat's 70 paths; the only Provectus-specific items (Groovy filters, v1 seek API) are `REJECTED(superseded by CEL / PollingMode)`, a decision that has been recorded.
 Evidence: F5, F7.
 Tradeoff: none; Kafbat is a superset.
 Reversibility: high.
 
 **D2. Never adopt script-engine filters; keep CEL as the only user-programmable predicate.**
-Decision: `kui-message-service` embeds the `dev.cel` JVM runtime; no Groovy/JS engines (PLAN §31 security).
+Decision: `kui-message-service` embeds the `dev.cel` JVM runtime; no Groovy/JS engines, for security reasons.
 Evidence: F3 filters row (`provectus/.../emitter/MessageFilters.java:41-90` vs `kafbat/.../emitter/MessageFilters.java:100-202`).
 Tradeoff: CEL has no user-defined functions beyond extensions; acceptable.
 Reversibility: high.
 
 **D3. Contract authoring in Tapir replaces TypeSpec, but keep TypeSpec's organisation: one contract file per resource family, and an OpenAPI style check in CI.**
-Decision: mirror `contract-typespec/api/{clusters,brokers,topics,messages,consumer-groups,schemas,kafka-connect,ksql,acls,quotas,auth,config,graphs,prometheus}.tsp` as one Tapir contract module per KUI service (PLAN §18), and run an OpenAPI linter on the aggregated document at `/api/docs` (PLAN §20 item 8) with the same naming conventions (camelCase properties/params) Kafbat enforces (`kafbat/contract/build.gradle:73-89`).
+Decision: mirror `contract-typespec/api/{clusters,brokers,topics,messages,consumer-groups,schemas,kafka-connect,ksql,acls,quotas,auth,config,graphs,prometheus}.tsp` as one Tapir contract module per KUI service, and run an OpenAPI linter on the aggregated document at `/api/docs` with the same naming conventions (camelCase properties/params) Kafbat enforces (`kafbat/contract/build.gradle:73-89`).
 Evidence: F1.
 Tradeoff: none.
 Reversibility: high.
@@ -146,7 +145,7 @@ Reversibility: medium.
 **D6. Adopt Kafbat's newer capabilities as separate milestones rather than as part of core parity.**
 Decision: quotas → `kui-security-service` (M?); graphs/Prometheus store/pushgateway → `kui-metrics-service`; FTS → topic/consumer/schema/connect services behind a feature flag; MCP → gateway (late); connector offsets reset and topic→connectors → `kui-connect-service`; delete-offsets-per-topic → `kui-consumer-service`.
 Evidence: F7.
-Tradeoff: parity date slips if all are in M1; PLAN §45 sequencing handles it.
+Tradeoff: parity date slips if all are in M1; the project's milestone sequencing handles it.
 Reversibility: high.
 
 ## Open questions

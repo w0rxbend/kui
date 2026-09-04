@@ -1,18 +1,17 @@
 # Ecosystem mapping: Kafbat dependencies → KUI Scala stack
 
-**Title:** Validated and versioned ecosystem mapping (PLAN §12) with proposed `DEPENDENCY_MATRIX.md`
-**Agent:** Research Agent E (Scala Ecosystem)
+**Title:** Validated and versioned ecosystem mapping with proposed `DEPENDENCY_MATRIX.md`
 **Date:** 2026-09-03
 
 ## Question(s)
 
 1. For every dependency in Kafbat's `gradle/libs.versions.toml` and `api/build.gradle`: what is it for,
    what does KUI do with it (Replace / Wrap / Drop / Defer), and which Scala/JVM library replaces it?
-2. What is the exact latest version of every library in the KUI stack (PLAN §10/§12), verified
+2. What is the exact latest version of every library in the KUI stack, verified
    against Maven Central and GitHub as of 2026-09-03? Is it Scala 3 and Cats Effect 3 compatible,
    maintained, and what license/transitive weight does it carry?
-3. Resolve every `RESEARCH` row in PLAN §10 and §12 to a concrete recommendation.
-4. Which Kafbat dependencies are not covered by PLAN §12, and how should they map?
+3. Resolve every open research item in the KUI stack's dependency list to a concrete recommendation.
+4. Which Kafbat dependencies are not yet covered by that dependency list, and how should they map?
 
 ## Method and sources
 
@@ -65,7 +64,7 @@ Mill **1.1.8**, Scala.js **1.22.0**. Fallback if 3.9.0 shows ecosystem breakage 
 | `org.typelevel:fs2-kafka` | **4.0.0** (2026-05-04); `4.1.0-RC1` (2026-06-23) | yes | Moved to Typelevel org in 2026; 314 stars, pushed 2026-08-26 | Apache-2.0 | **Group id changed**: 4.x is `org.typelevel`, 3.x stays `com.github.fd4s` (last 3.9.1, 2025-10-24). 4.0.0 pom depends on `kafka-clients 4.2.0`, `fs2-core 3.13.0`, `cats-effect 3.7.0`. 4.x redesigns `CommittableOffset`/`CommittableOffsetBatch` (safe by construction) and folds transactional producers into `KafkaProducer`. |
 | `org.apache.kafka:kafka-clients` | **4.3.1** (2026-06-23) | Java | ASF | Apache-2.0 | Clients require Java 11+; broker/tools 17+. Kafbat pins the Confluent `7.9.5-ccs` fork of 3.9.x; KUI should use vanilla 4.3.1 and let fs2-kafka's 4.2.0 transitive be overridden upward. |
 
-PLAN §10 says "fs2-kafka 4.x" — correct, but PLAN §12 must record the **`org.typelevel` group id** and that
+The KUI stack's dependency notes say "fs2-kafka 4.x" — correct, but must also record the **`org.typelevel` group id** and that
 fs2-kafka 4 pulls Kafka 4.x clients (Kafka 4 drops ZooKeeper-era APIs; Kafbat's 3.9-based code paths for
 `AdminClient` differ in places, notably `describeCluster` and `listConsumerGroups`).
 
@@ -107,9 +106,9 @@ fs2-kafka 4 pulls Kafka 4.x clients (Kafka 4 drops ZooKeeper-era APIs; Kafbat's 
 **immutable JSON-like AST library** — "Abstract Syntax Tree based on JSON concepts, but more abstract for
 parsing and application" — with case-class conversions, deep merge, JSON DDL and a JSON parser
 (`fabric-io`). It is the value model used by the same author's **scribe** logging library, which is
-probably where the "structured-log value model" idea in PLAN §10 came from. It is *not* a logging
-abstraction and it is a second JSON AST next to Circe, which violates PLAN §13 ("no two libraries for
-the same responsibility").
+probably where the "structured-log value model" idea in the stack notes came from. It is *not* a logging
+abstraction and it is a second JSON AST next to Circe, which violates KUI's "no two libraries for
+the same responsibility" rule.
 
 **Recommendation (ADR-008):** **Drop Fabric.** Use `log4cats` `StructuredLogger[F]` (context
 `Map[String, String]` → SLF4J MDC) over Logback with `logstash-logback-encoder` producing JSON lines.
@@ -218,7 +217,7 @@ Scala 3.9.0 and Mill 1.1.8 are validated on 21, and container base images for 25
 one runner, one reporter, IDE support via Metals/BSP in Mill). `munit-cats-effect` covers `IO` suites;
 Weaver's remaining advantages (parallel-by-default, `Resource` sharing across suites) are obtainable in
 MUnit with `ResourceSuiteLocalFixture` and Mill's per-module test parallelism. Do **not** adopt Weaver
-as a second framework (PLAN §13 "no two libraries for the same responsibility"); revisit only if
+as a second framework (KUI's "no two libraries for the same responsibility" rule); revisit only if
 integration suites become slow enough to need Weaver's global-resource model. ScalaCheck via
 `munit-scalacheck`; Discipline via `discipline-munit` for type class instances in `kui-domain`.
 
@@ -246,15 +245,15 @@ SDK (Reactor dependency). Record this as a Research row in ADR to be written at 
 | `be.doeraene:url-dsl` | **0.7.0** (2025-01-03) | — | Transitive via Waypoint. |
 | `org.scala-js:scalajs-dom` | **2.8.1** (2025-07-23) | — | — |
 | `io.github.cquiroz:scala-java-time` | **2.7.0** (2026-06-14) | — | `java.time` on Scala.js; needed by shared contract module. |
-| ScalaCSS (`com.github.japgolly.scalacss:core_sjs1_3`) | **1.0.0** (2021-11) | — | **Reject** — unmaintained for Scala.js 1/Scala 3 for four years. Use plain CSS modules per microfrontend (PLAN §21 already lists CSS modules first). |
-| Playwright Scala.js facade | none maintained found | — | Keep Playwright driven from Mill via a Node runner (PLAN §12 row stands). |
+| ScalaCSS (`com.github.japgolly.scalacss:core_sjs1_3`) | **1.0.0** (2021-11) | — | **Reject** — unmaintained for Scala.js 1/Scala 3 for four years. Use plain CSS modules per microfrontend (already the first-choice option for KUI). |
+| Playwright Scala.js facade | none maintained found | — | Keep Playwright driven from Mill via a Node runner (this recommendation stands). |
 
-**Note on PLAN §10:** "Laminar 17.x" is still correct. Waypoint must be pinned to **9.0.0**, not the
+**Note:** "Laminar 17.x" is still correct. Waypoint must be pinned to **9.0.0**, not the
 `10.0.0-Mx` milestones that Scala Steward would propose.
 
 ---
 
-## Rows in Kafbat's dependency list not covered by PLAN §12 (proposed mapping)
+## Rows in Kafbat's dependency list not yet covered (proposed mapping)
 
 | Kafbat dependency | Responsibility | Proposed KUI decision |
 | --- | --- | --- |
@@ -314,7 +313,7 @@ SDK (Reactor dependency). Record this as a Research row in ADR to be written at 
   `at.yawk.lz4` fork in early 2026; check the CVE advisory before choosing).
 - Confluent Community License review for `kui-serde-confluent` (self-hosted use is permitted; document it).
 - `tapir-netty-server-cats` streaming of SSE/long-lived responses on Netty 4.2 for the message
-  exploration path (PLAN §22) — needs a spike; Tapir's `serverSentEventsBody` and fs2 streams are supported.
+  exploration path — needs a spike; Tapir's `serverSentEventsBody` and fs2 streams are supported.
 - Mill 1.2.0 (RC1 since June 2026): stay on 1.1.8 until 1.2.0 final; re-check `mill-contrib-docker` API.
 
 ## Confidence
@@ -333,7 +332,7 @@ with the evidence stated; the ADRs must carry the final decision.
 ## Proposed `DEPENDENCY_MATRIX.md`
 
 Scopes: `main`, `runtime`, `test`, `build` (Mill plugin / tool), `js` (Scala.js only), `shared`
-(cross-compiled JVM+JS). Modules follow PLAN §18/§19/§48 naming. Versions verified 2026-09-03.
+(cross-compiled JVM+JS). Modules follow KUI's naming convention. Versions verified 2026-09-03.
 
 | Group | Artifact | Version | Scope | Modules | ADR |
 | --- | --- | --- | --- | --- | --- |

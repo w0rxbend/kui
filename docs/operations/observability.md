@@ -74,8 +74,7 @@ then be silently missing in production.
 
 Every metric KUI emits is in this table. The names are constants in
 `libs/observability`'s `MetricNames`, and `MetricNamesSuite` asserts the list against this
-document's source (PLAN §30 plus `ARCHITECTURE.md` §13), so the code and the plan cannot
-drift apart.
+document and `ARCHITECTURE.md` §13, so the code and the docs cannot drift apart.
 
 "Live from" is when the metric starts being *emitted*. Every name is declared from M0, so a
 later milestone cannot accidentally reuse one for something else.

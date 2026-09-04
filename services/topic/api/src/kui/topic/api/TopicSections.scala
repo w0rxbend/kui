@@ -28,8 +28,8 @@ import kui.topic.application.Fresh
   * A timeout, an authentication failure and a circuit breaker opening are three different things an operator
   * does three different things about. M1's cluster service collapsed all of them to `UPSTREAM_UNAVAILABLE`,
   * because the type it read freshness from had already flattened the error into a sentence written for a
-  * person (CLAPI-004 deviation 2, still open in `STATUS.md`). `SnapshotStatus.Offline` carries the `KuiError`
-  * itself, so [[reasonOf]] can classify it, and this task does not repeat that.
+  * person — a known gap that is still open there. `SnapshotStatus.Offline` carries the `KuiError` itself,
+  * so [[reasonOf]] can classify it, and this code does not repeat the mistake.
   *
   * ==Age is deliberately not an input==
   *

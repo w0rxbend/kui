@@ -5,7 +5,7 @@
 
 ## Context
 
-PLAN §10 fixes "Scala 3 latest stable" and "Mill latest stable" but leaves exact versions
+The project's technology constraints fix "Scala 3 latest stable" and "Mill latest stable" but leave exact versions
 to research. The JDK baseline decides which versions of several Java libraries are usable
 (datasketches, Lucene) and which container base images exist.
 
@@ -41,7 +41,7 @@ to research. The JDK baseline decides which versions of several Java libraries a
 
 - Scala 3.3.8 LTS as the primary: loses one year of language fixes; kept only as fallback.
 - JDK 25: young base images; Scala 3.9.0/Mill 1.1.8 not validated on it at decision time.
-- sbt: PLAN §10 mandates Mill; no reason to reopen.
+- sbt: the project's technology constraints mandate Mill; no reason to reopen.
 - Jib-based Docker plugins: archived or without Mill 1.x artifacts.
 
 ## Reversibility

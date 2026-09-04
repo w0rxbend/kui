@@ -12,7 +12,7 @@ import kui.kernel.{ClusterId, GroupId}
   * There used to be a second `MutationRecord`, a second `MutationOutcome` and a second `AuditSink` in this
   * package: this service had forked the port that `libs/security-core` declares. Three services writing one
   * audit trail through two different records is why "everything that changed this cluster today" could not be
-  * answered, and E2 in `docs/BACKLOG.md` is the correction. What survives the fork is this function.
+  * answered, so the fork was collapsed back onto the shared port. What survives it is this function.
   */
 object AuditOffsets {
 

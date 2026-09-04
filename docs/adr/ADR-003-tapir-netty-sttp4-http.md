@@ -7,7 +7,7 @@
 
 Every service, the gateway and the browser share one HTTP contract. Kafbat generates server
 stubs and a TypeScript client from TypeSpec; KUI wants the contract to be Scala code that is
-compiled for both the JVM and Scala.js (PLAN §2.2).
+compiled for both the JVM and Scala.js.
 
 ## Decision
 
@@ -42,7 +42,7 @@ compiled for both the JVM and Scala.js (PLAN §2.2).
 
 ## Alternatives rejected
 
-- http4s-ember as the primary server: Tapir supports it equally, but PLAN §10 chose Netty for
+- http4s-ember as the primary server: Tapir supports it equally, but Netty was chosen for
   throughput; kept as fallback.
 - OpenAPI codegen (TypeSpec or YAML first): duplicates the contract outside Scala and loses
   cross-compilation.

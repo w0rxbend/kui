@@ -26,10 +26,9 @@ import kui.testkit.fakes.FakeStructuredLogger
   * ever opened would leak a Kafka consumer, and the service would die of exhaustion hours later
   * with nothing in the log to explain it.
   *
-  * The M0 spike measured the cancellation itself at 8 ms on this server
-  * (`docs/spikes/M0-netty-sse.md`), which is why there is no idle-timeout guard anywhere in
-  * `libs/http`. What this suite adds is that KUI's own wrapping — the buffer, the heartbeats, the
-  * metrics — does not break the chain the spike measured.
+  * Cancellation itself was measured at 8 ms on this server before Netty was adopted, which is why
+  * there is no idle-timeout guard anywhere in `libs/http`. What this suite adds is that KUI's own
+  * wrapping — the buffer, the heartbeats, the metrics — does not break that chain.
   */
 final class SseCancellationSuite extends CatsEffectSuite {
 

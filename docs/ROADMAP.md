@@ -1,18 +1,18 @@
 # KUI roadmap
 
-**Status:** grooming step G4 output (PLAN §39), 2026-09-03. Refines PLAN §45. Feature IDs refer
-to `docs/FEATURE_MATRIX.md`. Every milestone also inherits the common exit criteria of PLAN §46
-(compiles with `-Werror`, all test kinds green, fault-isolation tests for every service
-introduced, formatting and scalafix clean, OpenAPI regenerated, docs and matrix updated, ADRs
-Accepted, CEO acceptance recorded in `STATUS.md`).
+**Last revised:** 2026-09-03. Feature IDs refer to `docs/FEATURE_MATRIX.md`. Every milestone also
+inherits the same exit criteria: the tree compiles with `-Werror`, every kind of test is green,
+every service introduced has a fault-isolation test, formatting and scalafix are clean, the OpenAPI
+document is regenerated, the documentation and the feature matrix are updated, and every decision
+record the milestone depends on is Accepted.
 
 ## Ordering rationale
 
-The order follows PLAN §4 (correctness → fault isolation → domain clarity → ...) and one product
-rule: **a user must be able to read real data as early as possible, and nothing that is built
+The order follows the project's priority ordering (correctness → fault isolation → domain clarity
+→ maintainability → operational reliability → performance) and one product rule: **a user must be able to read real data as early as possible, and nothing that is built
 later may be able to take that away.**
 
-1. **M0 before any Kafka code.** Fault isolation (PLAN §2.1) is a property of the gateway, the
+1. **M0 before any Kafka code.** Fault isolation is a property of the gateway, the
    capability registry and the shell. If those are built after the features, every feature has
    to be retrofitted. M0 proves the whole chain (contract → client → gateway → shell → fallback
    panel) on a sample service with no Kafka at all, so the pattern is fixed before it is copied
@@ -59,10 +59,10 @@ later may be able to take that away.**
   testkit}`, `services/gateway`, `services/cluster` as an empty shell (health, capabilities,
   one `ping` endpoint), `frontend/{ui-kernel,ui-shell,ui-clusters}`, `apps/allinone`,
   `deployment/{docker,compose}`, `e2e`.
-  ADRs: 001–013 and 018 (PLAN §43), 019 (session and CSRF) and 020 (signed principal), plus
+  ADRs: 001–013 and 018, 019 (session and CSRF) and 020 (signed principal), plus
   the frontend ADRs 024 (CSS) and 025 (facades) proposed in
   `research/scala/frontend-research.md`; ADR-012 decides Option B. ADR-032 and ADR-034 … ADR-037
-  are also load-bearing for M0; ADR-039 … ADR-041 were added at the G6 gate.
+  are also load-bearing for M0; ADR-039 … ADR-041 were added during the architecture review.
 - **Non-goals.** No Kafka `AdminClient`. No login. No real screens beyond the shell, the
   settings stub and the fallback panels. No metrics collection (self-metrics only).
 - **Exit criteria.**
@@ -81,8 +81,8 @@ later may be able to take that away.**
     (unit + contract test).
   - Design tokens and the kernel primitives listed in `research/kafbat/ui-analysis.md` §IA.4
     "Layout and navigation" and "Actions and feedback" exist in light and dark themes.
-- **Risks.** Claude Design import is blocked (BLOCKERS.md B-001): tokens may have to start
-  from Kafbat's palette and be reconciled later. Laminar 18 / Waypoint 10 are pre-release:
+- **Risks.** The external design import may never arrive, so tokens may have to start from
+  Kafbat's palette and be reconciled later. Laminar 18 / Waypoint 10 are pre-release:
   pin 17.2.1 / 9.0.0 and schedule the upgrade. Mill 1.x plugin compatibility for
   ScalablyTyped needs a time-boxed spike.
 - **Introduces.** Services: `gateway`, `cluster` (shell). Microfrontends: `ui-kernel`,
@@ -115,7 +115,7 @@ later may be able to take that away.**
 - **Exit criteria.**
   - Testcontainers suite: PLAINTEXT, SASL_PLAINTEXT/SCRAM and SSL clusters; each yields the
     same broker list, configs and log dirs through the contract client.
-  - Manual acceptance against one real external cluster recorded in `STATUS.md`.
+  - Manual acceptance against one real external cluster, recorded in the release notes.
   - Dashboard with three configured clusters, one unreachable: two rows populate, the third
     shows `Unavailable: <reason>` and remains clickable; response time is bounded by the
     per-service timeout, not by the dead cluster.
@@ -174,7 +174,7 @@ later may be able to take that away.**
 
 ### M3 — Message explorer
 
-- **Goal.** The highest-value and highest-risk path (PLAN §22): stream, page, filter, produce,
+- **Goal.** The highest-value and highest-risk path: stream, page, filter, produce,
   resend and track messages, in two views.
 - **User value.** Everything Kafbat can do with messages plus Kouncil's table view with
   flattened JSON columns, cross-topic event tracking, resend and bulk send. After M3 KUI is
@@ -200,8 +200,8 @@ later may be able to take that away.**
   - Fault-isolation E2E: stopping `kui-message` stops live mode with a toast, keeps fetched
     rows greyed, and leaves topics and brokers untouched. Stopping the schema registry keeps
     the browser working with non-SR serdes and shows "SR unavailable" in the serde chip.
-- **Risks.** Largest milestone by rows (28) and complexity (two XL). Mitigation: the DEVPLAN
-  splits it into lanes (stream, table+flatten, produce+resend, tracking, serdes+masking) that
+- **Risks.** Largest milestone by rows (28) and complexity (two XL). Mitigation: the detailed
+  plan splits it into parallel work streams (stream, table+flatten, produce+resend, tracking, serdes+masking) that
   share only the domain and seek modules; tracking and resend can slip to an M3.1 without
   blocking M4, but the parity checkpoint below moves with them.
 - **Introduces.** Service: `message`. Microfrontend: `ui-messages`. Library: `serde`.
@@ -269,7 +269,7 @@ later may be able to take that away.**
   identity service as its second client, writing the `rbac/roles` and `masking/<clusterId>`
   keys. ADRs: 015 (application auth), 019 (session and CSRF),
   020 (signed principal), 021 (RBAC), 023 (audit and masking).
-  Threat model written; `kui.internal.events` research (PLAN §45) done here.
+  Threat model written; `kui.internal.events` research done here.
 - **Non-goals.** Bearer-token access is P2 and may slip. SAML/CAS out of scope.
 - **Exit criteria.**
   - Testcontainers Keycloak (OIDC) and OpenLDAP logins; session cookie is `HttpOnly; Secure;
@@ -281,7 +281,7 @@ later may be able to take that away.**
     the same request through the gateway succeeds.
   - Fault-isolation E2E: stopping `kui-identity` with `auth.type=DISABLED` changes nothing;
     with auth enabled, existing sessions keep working for their lifetime and new logins show
-    the identity fallback panel (Core tier behavior per PLAN §15).
+    the identity fallback panel (Core-tier behaviour: the shell stays usable without it).
   - Permission change pushes a forced logout notification (NX-001).
 - **Risks.** Two role sources (file and UI store) need a documented merge policy (file wins,
   UI adds). The identity service becomes the second writer to `__kui_config`; ADR-036's

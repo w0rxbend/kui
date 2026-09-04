@@ -1,9 +1,9 @@
 # KUI feature matrix — union of Kafbat, Provectus and Kouncil
 
-**Agent:** Research Agent B (Feature Inventory) · **Date:** 2026-09-03 · **Phase:** G (grooming)
+**Date:** 2026-09-03
 **Status of this document:** first complete pass. Every row starts at `RESEARCHING` (behavior located and
 described from the local clones) unless marked `DESIGNED`. Nothing here is silently dropped: every feature
-found in any reference is either assigned, `DEFERRED(reason)` or `REJECTED(reason)` pending CEO sign-off
+found in any reference is either assigned, `DEFERRED(reason)` or `REJECTED(reason)` pending a recorded decision
 (see §"Deferred / Rejected candidates").
 
 ## Sources (local clones, see `research/REFERENCES.md`)
@@ -17,7 +17,7 @@ found in any reference is either assigned, `DEFERRED(reason)` or `REJECTED(reaso
 Method: every controller handler, every OpenAPI/TypeSpec operation, every frontend route/page and every
 docs page was enumerated (three parallel exhaustive sweeps, then cross-checked against the contract diffs).
 Contract operation counts: Kafbat YAML 90 operationIds (+7 CSV operations only in TypeSpec), Provectus YAML
-78, Kouncil ~75 Spring handlers. Facts that contradict PLAN §9A profile: **neither Kafbat nor Provectus ships
+78, Kouncil ~75 Spring handlers. Facts that contradict the assumed reference profile: **neither Kafbat nor Provectus ships
 an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** the ODD exporter
 (`K/service/integration/odd/`); Provectus filters are **Groovy**, Kafbat's are **CEL**.
 
@@ -25,12 +25,12 @@ an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** th
 
 - **Present in**: `K` Kafbat, `P` Provectus, `C` Kouncil (Consdata).
 - **Priority**: P0 core (M1–M3 must-have), P1 parity (needed to claim union parity), P2 nice, P3 defer.
-- **KUI owner service** per PLAN §15; **microfrontend** per PLAN §21.
-- **Complexity**: S (<2 d), M (2–5 d), L (1–2 w), XL (>2 w) for one implementing agent incl. tests.
+- **KUI owner service** and **microfrontend**: the assigned service and frontend module.
+- **Complexity**: S (<2 d), M (2–5 d), L (1–2 w), XL (>2 w) for one implementer incl. tests.
 - **Test strategy**: `unit` (pure domain), `contract` (Tapir endpoint spec + client round-trip),
   `tc` (Testcontainers Kafka/SR/Connect/ksqlDB integration), `e2e` (Playwright in the shell),
   `prop` (ScalaCheck property tests).
-- **State** per PLAN §44.
+- **State**: the row's current status in the feature lifecycle.
 
 ---
 
@@ -39,7 +39,7 @@ an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** th
 | # | Feature | Present in | Reference behavior | Edge cases handled | Business value | Priority | KUI service | Microfrontend | Cx | Test | State | Citations |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | CL-1 | List clusters | K P C | Returns all configured clusters, filtered by per-user RBAC visibility; each item carries name, status (`online/offline/initializing`), version, broker/partition/topic counts, bytesIn/Out, `lastError`, `readOnly`, `features[]`. Kouncil returns name + brokers + security config + SR (a config object, not stats). | Cluster unreachable → status `offline` + lastError, not an HTTP error. Single unnamed cluster auto-named `Default` (P). Kouncil pushes `CLUSTERS_NOT_DEFINED` notification when empty. | Entry point of the whole UI; feeds dashboard and cluster switcher | P0 | kui-cluster-service (+gateway aggregation) | kui-ui-shell + kui-ui-clusters | M | contract, tc | RESEARCHING | `K/controller/ClustersController.java:26`; `KY:18`; `P/controller/ClustersController.java:24`; `P/config/ClustersProperties.java:191-209`; `C/clusters/ClustersController.java:18`; `C/config/KouncilConfigurationController.java:84-105` |
-| CL-2 | Per-cluster feature flags (capability discovery) | K P | `features[]` on the cluster DTO: `SCHEMA_REGISTRY, KAFKA_CONNECT, KSQL_DB, TOPIC_DELETION, KAFKA_ACL_VIEW, KAFKA_ACL_EDIT` (+K: `CLIENT_QUOTA_MANAGEMENT, GRAPHS_ENABLED, FTS_ENABLED, FTS_DEFAULT_ENABLED`). UI hides tabs/routes accordingly. Kouncil: `GET /api/schemas/configs` tells which clusters have SR. | TOPIC_DELETION detected from broker config `delete.topic.enable`; ACL view/edit detected from `authorizer.class.name` + describe-ACL probe. | Drives KUI's capability registry (PLAN §16/§20) | P0 | kui-gateway capability registry, fed by each service | kui-ui-kernel capability state | M | unit, contract | DESIGNED | `KY:2620-2634`; `K/service/FeatureService.java`; `P/service/FeatureService.java:22-70`; `C/schema/registry/SchemaRegistryController.java:33` |
+| CL-2 | Per-cluster feature flags (capability discovery) | K P | `features[]` on the cluster DTO: `SCHEMA_REGISTRY, KAFKA_CONNECT, KSQL_DB, TOPIC_DELETION, KAFKA_ACL_VIEW, KAFKA_ACL_EDIT` (+K: `CLIENT_QUOTA_MANAGEMENT, GRAPHS_ENABLED, FTS_ENABLED, FTS_DEFAULT_ENABLED`). UI hides tabs/routes accordingly. Kouncil: `GET /api/schemas/configs` tells which clusters have SR. | TOPIC_DELETION detected from broker config `delete.topic.enable`; ACL view/edit detected from `authorizer.class.name` + describe-ACL probe. | Drives KUI's capability registry | P0 | kui-gateway capability registry, fed by each service | kui-ui-kernel capability state | M | unit, contract | DESIGNED | `KY:2620-2634`; `K/service/FeatureService.java`; `P/service/FeatureService.java:22-70`; `C/schema/registry/SchemaRegistryController.java:33` |
 | CL-3 | Cluster stats (dashboard numbers) | K P | `GET …/stats`: brokerCount, zooKeeperStatus (legacy), activeControllers, onlinePartitionCount, offlinePartitionCount, inSyncReplicasCount, outOfSyncReplicasCount, underReplicatedPartitionCount, diskUsage[], version. Computed from the periodically refreshed statistics cache. | Stats served from cache even if the cluster is momentarily down; refreshed on schedule. | Health at a glance | P0 | kui-cluster-service | kui-ui-clusters (dashboard) | M | tc | RESEARCHING | `K/controller/ClustersController.java:51`; `KY:238`; `P/controller/ClustersController.java:49`; `K/service/StatisticsService.java`, `K/service/ClustersStatisticsScheduler.java` |
 | CL-4 | Cluster metrics (aggregated JMX/Prometheus) | K P | `GET …/metrics` returns the summarized metric list for the cluster (from scraped broker metrics). 404 if unavailable. | Missing metrics source → empty. | Throughput visibility | P1 | kui-metrics-service | kui-ui-clusters | M | tc (mock JMX) | RESEARCHING | `K/controller/ClustersController.java:34`; `KY:184`; `K/service/metrics/SummarizedMetrics.java` |
 | CL-5 | Force cache refresh | K P | `POST …/cache` re-runs statistics collection for one cluster. | — | Operator can refresh without waiting for the schedule | P1 | kui-cluster-service | kui-ui-clusters | S | contract | RESEARCHING | `K/controller/ClustersController.java:67`; `KY:80`; `P/controller/ClustersController.java:66` |
@@ -99,9 +99,9 @@ an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** th
 
 | # | Feature | Present in | Reference behavior | Edge cases handled | Business value | Priority | KUI service | Microfrontend | Cx | Test | State | Citations |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MS-1 | Stream messages (SSE) with polling modes | K (v2) P (v1) | K `GET …/messages/v2` params `mode` (`FROM_OFFSET, TO_OFFSET, FROM_TIMESTAMP, TO_TIMESTAMP, LATEST, EARLIEST, TAILING`; default LATEST), `p` partitions, `lim`, `q` string filter, `fid` smart-filter id, `off`, `ts`, `keySerde`, `valueSerde`, `cursor`. Events: `PHASE, MESSAGE, CONSUMING (bytes, elapsed, msgs, filtered), DONE`. P v1: `seekType (BEGINNING/OFFSET/TIMESTAMP/LATEST)`, `seekTo[] = part::offset|ts`, `seekDirection (FORWARD/BACKWARD/TAILING)`, `limit`, `q`, `filterQueryType`. K keeps v1 in the contract but it throws "Not supported". | Default page 100, max 500 (`kafka.polling.*`); poll timeout 1 s; response timeout knob; empty partitions skipped; backward emitter walks ranges; audit topic needs `AuditAction.VIEW`; UI throttled to 20 msg/s in tailing. | The highest-value screen (PLAN §22) | P0 | kui-message-service | kui-ui-messages | XL | tc, prop (seek math), e2e | DESIGNED | `K/controller/MessagesController.java:78-124`; `KY:907,3225-3244,3363-3386`; `K/service/MessagesService.java:61-92,238-240,317,330`; `K/emitter/{ForwardEmitter,BackwardEmitter,RangePollingEmitter,TailingEmitter,SeekOperations,OffsetsInfo,PollingSettings}.java`; `P/controller/MessagesController.java:83-176`; `PY:648-697,2781,2888-2902` |
+| MS-1 | Stream messages (SSE) with polling modes | K (v2) P (v1) | K `GET …/messages/v2` params `mode` (`FROM_OFFSET, TO_OFFSET, FROM_TIMESTAMP, TO_TIMESTAMP, LATEST, EARLIEST, TAILING`; default LATEST), `p` partitions, `lim`, `q` string filter, `fid` smart-filter id, `off`, `ts`, `keySerde`, `valueSerde`, `cursor`. Events: `PHASE, MESSAGE, CONSUMING (bytes, elapsed, msgs, filtered), DONE`. P v1: `seekType (BEGINNING/OFFSET/TIMESTAMP/LATEST)`, `seekTo[] = part::offset|ts`, `seekDirection (FORWARD/BACKWARD/TAILING)`, `limit`, `q`, `filterQueryType`. K keeps v1 in the contract but it throws "Not supported". | Default page 100, max 500 (`kafka.polling.*`); poll timeout 1 s; response timeout knob; empty partitions skipped; backward emitter walks ranges; audit topic needs `AuditAction.VIEW`; UI throttled to 20 msg/s in tailing. | The highest-value screen | P0 | kui-message-service | kui-ui-messages | XL | tc, prop (seek math), e2e | DESIGNED | `K/controller/MessagesController.java:78-124`; `KY:907,3225-3244,3363-3386`; `K/service/MessagesService.java:61-92,238-240,317,330`; `K/emitter/{ForwardEmitter,BackwardEmitter,RangePollingEmitter,TailingEmitter,SeekOperations,OffsetsInfo,PollingSettings}.java`; `P/controller/MessagesController.java:83-176`; `PY:648-697,2781,2888-2902` |
 | MS-2 | Cursor-based "next page" | K | Response events carry a `cursor`; passing `cursor` ignores all other params; cursors cached in a bounded store, eviction → `ValidationException("Next page cursor not found")`. | Cursor eviction; URL carries `cursor` + refresh flag `r`. | Deterministic paging over SSE | P0 | kui-message-service | kui-ui-messages | M | unit, prop | DESIGNED | `K/service/PollingCursorsStorage.java`; `K/service/MessagesService.java:238-240`; `KF/lib/hooks/useMessagesFilters.ts:17-61` |
-| MS-3 | Table-style browsing with per-partition offset paging | C | `GET /api/topic/messages/{topic}/{partition|all|p1,p2}` params `page, limit (default 10), offset?, beginningTimestampMillis?, endTimestampMillis?`. **Paging is per partition, newest first**: position = endOffset − limit·(page−1); seek = position − limit clamped to beginning; explicit `offset` → single record; timestamps resolved via `offsetsForTimes`. Returns messages sorted by timestamp + `partitionOffsets`, `partitionEndOffsets`, `totalResults` (= max per-partition range). Up to 5 empty 200 ms polls. | `startOffset<0` → seekToEnd and skip; empty range skip; timestamp end null → global end. | Kouncil's defining UX (PLAN §9A rule: first-class) | P0 | kui-message-service | kui-ui-messages | L | tc, prop (offset math) | DESIGNED | `C/topic/TopicController.java:31`; `C/topic/TopicService.java:79-133,146-224`; `C/MessagesHelper.java:37-79`; `CF/topic/topic-pagination.component.ts:26-80`; `CD/features/TOPICS.md:16` |
+| MS-3 | Table-style browsing with per-partition offset paging | C | `GET /api/topic/messages/{topic}/{partition|all|p1,p2}` params `page, limit (default 10), offset?, beginningTimestampMillis?, endTimestampMillis?`. **Paging is per partition, newest first**: position = endOffset − limit·(page−1); seek = position − limit clamped to beginning; explicit `offset` → single record; timestamps resolved via `offsetsForTimes`. Returns messages sorted by timestamp + `partitionOffsets`, `partitionEndOffsets`, `totalResults` (= max per-partition range). Up to 5 empty 200 ms polls. | `startOffset<0` → seekToEnd and skip; empty range skip; timestamp end null → global end. | Kouncil's defining UX (treated as first-class) | P0 | kui-message-service | kui-ui-messages | L | tc, prop (offset math) | DESIGNED | `C/topic/TopicController.java:31`; `C/topic/TopicService.java:79-133,146-224`; `C/MessagesHelper.java:37-79`; `CF/topic/topic-pagination.component.ts:26-80`; `CD/features/TOPICS.md:16` |
 | MS-4 | JSON column flattening grid | C | Message values parsed as JSON and flattened into dynamic columns (toggle "JSON"), header columns (toggle "Headers"), common columns; limits ROWS 1000, EXPAND_LIST 10, EXPAND_OBJECT 100, MAX_DEPTH 3, 100-char cell truncation, HTML escaping; drag-reorderable columns; sort by column. | Non-JSON values fall back to raw; deep/large objects truncated. | Spreadsheet-like reading of events | P0 | (client-side) | kui-ui-messages | L | unit (flattener), e2e | DESIGNED | `CF/topic/json-grid.ts:13-51`; `CF/topic/topic.component.ts:47-56,324-333`; `CF/topic/toolbar/topic-toolbar.component.ts:18-83` |
 | MS-5 | Live / tailing mode | K P C | K/P `TAILING` polling mode over SSE with UI throttle; Kouncil "Live update" play/pause toggle re-polls the table. | Paging disabled while live (K). | Real-time debugging | P0 | kui-message-service | kui-ui-messages | M | e2e | DESIGNED | `K/emitter/TailingEmitter.java`; `KF/components/Topics/Topic/Messages/Filters/Filters.tsx:170`; `CF/topic/toolbar/topic-toolbar.component.ts:6-9` |
 | MS-6 | Simple string-contains filter | K P C | K/P `q` + `STRING_CONTAINS`: substring over key, value and headers (K) / key or value (P). Kouncil: client-side search over the whole row JSON. | Applied after deserialization. | Quick search | P0 | kui-message-service | kui-ui-messages | S | unit | DESIGNED | `K/emitter/MessageFilters.java:47-52`; `P/emitter/MessageFilters.java:36`; `CF/topic/topic.component.ts:134-137,304-308` |
@@ -201,7 +201,7 @@ an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** th
 | MT-4 | Graph descriptions + Prometheus query proxy | K | `GET …/graphs/descriptions` (id, defaultPeriod, RANGE/INSTANT, parameters); `POST …/graphs/prometheus` {id, from, to, parameters}; built-ins `broker_bytes_disk(_ts)`, `kafka_topic_partition_current_offset(_per_topic_ts)`; PromQL templating `${cluster}/${topic}` with grammar validation. Feature `GRAPHS_ENABLED`. | Invalid PromQL rejected. | Dashboards | P2 | kui-metrics-service | kui-ui-metrics | L | unit, contract | RESEARCHING | `K/controller/GraphsController.java:38,61`; `K/service/graphs/GraphDescriptions.java:40-70`; `K/service/graphs/PromQueryLangGrammar.java`; `KY:39,60` |
 | MT-5 | Prometheus expose `/metrics`, `/metrics/{cluster}` | K | Exposition of scraped cluster metrics; `metrics.prometheusExpose` toggle; 404 if disabled. | — | Feed external monitoring | P2 | kui-metrics-service | — | M | contract | RESEARCHING | `K/controller/PrometheusExposeController.java:23,35`; `K/service/metrics/prometheus/PrometheusMetricsExposer.java` |
 | MT-6 | Push-gateway / remote-write sinks | K | `metrics.store.prometheus.{url, pushGatewayUrl, …, remoteWrite}`. | — | — | P3 | kui-metrics-service | — | M | unit | RESEARCHING | `K/service/metrics/sink/*.java`; `K/config/ClustersProperties.java:136-145` |
-| MT-7 | App self-metrics (Micrometer) | K P | Application-level JVM/HTTP metrics. | — | Observability of KUI itself (PLAN §30) | P0 | all services | — | S | contract | DESIGNED | `P/util/ApplicationMetrics.java` |
+| MT-7 | App self-metrics (Micrometer) | K P | Application-level JVM/HTTP metrics. | — | Observability of KUI itself | P0 | all services | — | S | contract | DESIGNED | `P/util/ApplicationMetrics.java` |
 
 ## 14. Config wizard / dynamic config
 
@@ -240,7 +240,7 @@ an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** th
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | AD-1 | Audit log to Kafka topic and/or console | K P | Default topic `__kui-audit-log`, partitions/props configurable, `requireAuditTopic`; levels `ALL` / `ALTER_ONLY` (default); record = timestamp, user, cluster, resources, operation name/params, result/error; console-only fallback; app-level ops audited without cluster. | Topic init failure → console fallback. | Compliance | P1 | kui-identity-service (audit sink) fed by gateway | kui-ui-admin | M | tc | RESEARCHING | `K/service/audit/AuditService.java:47-124,162-176,225-229`; `K/service/audit/AuditWriter.java:31-72`; `K/config/ClustersProperties.java:239-251` |
 | AD-2 | Audit topic self-protection | K P | Reading audit topic details/messages requires `AuditAction.VIEW`. | — | — | P1 | kui-gateway | — | S | contract | RESEARCHING | `K/controller/TopicsController.java:171`; `K/controller/MessagesController.java:112` |
-| AD-3 | Entry/exit logging AOP + HTTP trace | C | `@EntryExitLogger` on mutating handlers; actuator `httptrace`. | — | Debug | P3 | shared lib (PLAN §30) | — | S | unit | RESEARCHING | `C/logging/CoreLogger.java:15-29`; `resources/kouncil.yaml:1-8` |
+| AD-3 | Entry/exit logging AOP + HTTP trace | C | `@EntryExitLogger` on mutating handlers; actuator `httptrace`. | — | Debug | P3 | shared lib | — | S | unit | RESEARCHING | `C/logging/CoreLogger.java:15-29`; `resources/kouncil.yaml:1-8` |
 
 ## 18. Data masking
 
@@ -270,8 +270,8 @@ an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** th
 
 | # | Feature | Present in | Reference behavior | Edge cases handled | Business value | Priority | KUI service | Microfrontend | Cx | Test | State | Citations |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ET-1 | Track a business event across topics (sync) | C | `GET /api/track/sync?topicNames[]&field&operator&value&beginningTimestampMillis&endTimestampMillis`; if `field` set → match header of that key, else match deserialized value; operators `LIKE, NOT_LIKE, IS, NOT_IS, REGEX`; topics scanned smallest-partition-range first; consumer max.poll 5000; seek to time-window offsets; stop after 5 empty polls with backoff `100ms·(n+1)`; results sorted by timestamp. | Sanity limit on result count; missing topics validated. | Debug distributed flows (PLAN: first-class) | P0 | kui-message-service | kui-ui-messages (track page) | L | tc, prop (matcher) | DESIGNED | `C/track/TrackController.java:152`; `C/track/TrackService.java:38-134`; `C/track/EventMatcher.java:148-183`; `C/track/TrackOperator.java:143-147`; `CD/features/TOPICS.md:31` |
-| ET-2 | Track async over WebSocket/STOMP | C | `GET /api/track/async` + `asyncHandle`; results batched to `/topic/track/{handle}`; stops when destination unsubscribed or sanity limit hit; empty list = end-of-stream marker; `/api/track/stats` exposes WS stats. STOMP broker `/topic`, `/notifications`, endpoint `/ws`, `allowedOrigins`. | Client disconnect detection via destination registry. | Long scans without HTTP timeouts | P0 | kui-message-service (SSE in KUI per PLAN §28) | kui-ui-messages | M | tc | DESIGNED | `C/track/TrackController.java:137-173`; `C/track/AsyncTrackStrategy.java:210-234`; `C/track/DestinationStore.java:244-265`; `C/config/WebSocketConfig.java:302-340`; `CD/configuration/WEBSOCKET.md` |
+| ET-1 | Track a business event across topics (sync) | C | `GET /api/track/sync?topicNames[]&field&operator&value&beginningTimestampMillis&endTimestampMillis`; if `field` set → match header of that key, else match deserialized value; operators `LIKE, NOT_LIKE, IS, NOT_IS, REGEX`; topics scanned smallest-partition-range first; consumer max.poll 5000; seek to time-window offsets; stop after 5 empty polls with backoff `100ms·(n+1)`; results sorted by timestamp. | Sanity limit on result count; missing topics validated. | Debug distributed flows (treated as first-class) | P0 | kui-message-service | kui-ui-messages (track page) | L | tc, prop (matcher) | DESIGNED | `C/track/TrackController.java:152`; `C/track/TrackService.java:38-134`; `C/track/EventMatcher.java:148-183`; `C/track/TrackOperator.java:143-147`; `CD/features/TOPICS.md:31` |
+| ET-2 | Track async over WebSocket/STOMP | C | `GET /api/track/async` + `asyncHandle`; results batched to `/topic/track/{handle}`; stops when destination unsubscribed or sanity limit hit; empty list = end-of-stream marker; `/api/track/stats` exposes WS stats. STOMP broker `/topic`, `/notifications`, endpoint `/ws`, `allowedOrigins`. | Client disconnect detection via destination registry. | Long scans without HTTP timeouts | P0 | kui-message-service (SSE in KUI) | kui-ui-messages | M | tc | DESIGNED | `C/track/TrackController.java:137-173`; `C/track/AsyncTrackStrategy.java:210-234`; `C/track/DestinationStore.java:244-265`; `C/config/WebSocketConfig.java:302-340`; `CD/configuration/WEBSOCKET.md` |
 | ET-3 | Track filter UI | C | Correlation field/operator/value, topics multi-autocomplete, from/to datetime with validation, async toggle, clear; results table reuses the message grid. | — | — | P0 | — | kui-ui-messages | M | e2e | DESIGNED | `CF/track/track-filter/track-filter.component.ts:20-110`; `CF/track/track.backend.service.ts:26-46` |
 
 ## 22. Notifications / survey / misc UX (Kouncil-derived)
@@ -306,7 +306,7 @@ an AWS Glue serde** (no `Glue` symbol in either tree); Kafbat **still ships** th
 | OT-2 | CSV formatting knobs | K | `kafka.csv.{lineDelimeter, quoteCharacter, quoteStrategy, fieldSeparator}` | P2 | shared lib | S | RESEARCHING | `K/config/ClustersProperties.java:52-58` |
 | OT-3 | Consumer/producer property overrides per cluster; nested-map flattening | K P | `consumerProperties`, `producerProperties`, `properties` | P0 | kui-config-service | S | RESEARCHING | `K/config/ClustersProperties.java:96-98,311-330` |
 | OT-4 | Relational persistence (H2 default, PostgreSQL) with Flyway | C | Clusters, user groups, policies persisted; `spring.datasource.*` | P1 (needed by CL-6, RB-4, DM-2) | kui-config-service / kui-identity-service | M | RESEARCHING | `kouncil-backend/src/main/resources/db/migration/V1..V8`; `CD/configuration/DATABASE.md` |
-| OT-5 | Global exception mapping (500 w/ message; broken-pipe swallowed; SR-not-configured → 400) | C K | Uniform error envelope (PLAN §26) | P0 | all | S | DESIGNED | `C/KouncilControllerAdvisor.java:15-36`; `K/exception/*` |
+| OT-5 | Global exception mapping (500 w/ message; broken-pipe swallowed; SR-not-configured → 400) | C K | Uniform error envelope | P0 | all | S | DESIGNED | `C/KouncilControllerAdvisor.java:15-36`; `K/exception/*` |
 | OT-6 | Installation id / phone-home release check | K P C | GitHub release poll (K/P); installation id file (C) | P3 | kui-gateway | S | RESEARCHING | `K/service/ApplicationInfoService.java`; `C/config/KouncilConfiguration.java:36` |
 
 ---
@@ -329,7 +329,7 @@ client quotas, `/api/config/authentication`, `/login`, topic connectors, topic A
 
 | Feature | Row | Citation | Disposition |
 | --- | --- | --- | --- |
-| Event tracking (sync + async over STOMP) | ET-1..3 | `C/track/*` | **Scheduled P0** (PLAN §9A rule) |
+| Event tracking (sync + async over STOMP) | ET-1..3 | `C/track/*` | **Scheduled P0** (treated as first-class) |
 | Table browsing with per-partition offset paging, JSON column flattening, header columns | MS-3, MS-4 | `C/topic/TopicService.java:79-224`; `CF/topic/json-grid.ts` | **Scheduled P0** |
 | Resend messages between topics with header filtering | MP-3 | `C/topic/TopicService.java:226-292` | Scheduled P1 |
 | Bulk send with `{{count}}/{{timestamp}}/{{uuid}}` placeholders | MP-2 | `C/topic/TopicService.java:295-317` | Scheduled P1 |
@@ -345,10 +345,10 @@ client quotas, `/api/config/authentication`, `/login`, topic connectors, topic A
 | Survey popup | NX-2 | `C/survey/*` | **DEFERRED(low value, telemetry concerns)** |
 | Demo mode | NX-4 | `CF/demo/*` | P3 |
 | GitHub GraphQL org/team → role source | AU-3 | `C/config/security/sso/github/*` | P2 (overlaps Kafbat GitHub extractor RB-2) |
-| Entry/exit AOP logger, HTTP trace actuator | AD-3 | `C/logging/*` | Covered by PLAN §30 tracing; **REJECTED(replaced by OpenTelemetry)** |
+| Entry/exit AOP logger, HTTP trace actuator | AD-3 | `C/logging/*` | Covered by KUI's OpenTelemetry-based tracing; **REJECTED(replaced by OpenTelemetry)** |
 | Kouncil-specific: schema list per topic, key/value `SubjectType`, `latest/{topic}` | SR-1, SR-9 | `C/schema/registry/*` | Scheduled P1 |
 
-## Deferred / Rejected candidates (for CEO sign-off)
+## Deferred / Rejected candidates (pending a recorded decision)
 
 | Row | Candidate | Proposed state | Reason |
 | --- | --- | --- | --- |
@@ -359,11 +359,11 @@ client quotas, `/api/config/authentication`, `/login`, topic connectors, topic A
 | NX-2 | Survey popup | DEFERRED(indefinite) | Telemetry/consent concerns; no ops value. |
 | NX-4 | Demo mode | DEFERRED(post-M8) | Nice for marketing; not a product capability. |
 | OT-6 | GitHub release phone-home | DEFERRED | Make opt-in only; privacy default off. |
-| AD-3 | AOP entry/exit logger | REJECTED | Replaced by structured logging + OpenTelemetry (PLAN §30). |
+| AD-3 | AOP entry/exit logger | REJECTED | Replaced by structured logging + OpenTelemetry. |
 | SD-2 | Custom serde jars via classloader | DEFERRED(M6+) | Needs an ADR on the KUI serde SPI (Scala trait vs Java SPI compatibility with Kafbat `serde-api`). |
 | TP-2 / SF-2 | Lucene FTS index | DEFERRED(M5+) | Adds Lucene dependency; substring search covers <5k topics; revisit with real data. |
 | MC-1 | MCP server | P2, M7 | Valuable but depends on stable Tapir contracts; auto-derive tools from endpoints then. |
-| ET-2 (transport) | STOMP/WebSocket transport | REJECTED(transport only) | KUI streams over SSE (PLAN §28); the async-tracking *feature* stays P0. |
+| ET-2 (transport) | STOMP/WebSocket transport | REJECTED(transport only) | KUI streams over SSE; the async-tracking *feature* stays P0. |
 | CL-11, TP-19 | Kouncil helper endpoints | DEFERRED | Fold into typed contracts as needed by forms. |
 
 ## Decision candidates (Appendix D format)
@@ -373,17 +373,17 @@ client quotas, `/api/config/authentication`, `/login`, topic connectors, topic A
 | D-1 | Adopt Kafbat's messages **v2 contract** (polling modes + server cursor) as KUI's streaming API, and add Kouncil's per-partition **page/offset table mode** as a second, non-streaming endpoint in kui-message-service. | MS-1/MS-2 vs MS-3: Kafbat v1 is dead; Kouncil paging is deterministic and cheap for tables. | Two read paths to maintain; but they serve different UX (stream vs grid). | Medium — both share seek/offset math; the grid endpoint can later be expressed as a cursor mode. |
 | D-2 | JSON flattening (MS-4) is done **client-side** in kui-ui-messages with Kouncil's limits (1000 rows, depth 3, 100-char cells) as defaults. | Kouncil does it in Angular; keeps the message service format-agnostic. | Large payloads cost browser CPU; mitigated by virtualization. | High. |
 | D-3 | Smart filters use **CEL** only; no Groovy. | MS-7; Kafbat migrated; CEL has a Java runtime (`dev.cel`) usable from Scala. | Users with Groovy filters must rewrite. | High (filters are stored client-side). |
-| D-4 | Event tracking (ET-1..3) ships in **M3 with the message browser**, as SSE (sync + async unified: server streams matches as found). | PLAN §9A mandates first-class; STOMP rejected. | Long scans hold an SSE connection; needs cancel-on-disconnect. | High. |
+| D-4 | Event tracking (ET-1..3) ships in **M3 with the message browser**, as SSE (sync + async unified: server streams matches as found). | Treated as first-class; STOMP rejected. | Long scans hold an SSE connection; needs cancel-on-disconnect. | High. |
 | D-5 | RBAC role model = Kafbat YAML model (RB-1) **plus** a persisted, UI-managed role store (Kouncil RB-4) behind the same permission-evaluation API. | Both references; enterprises want file-based, teams want UI. | Two sources of truth → merge policy needed (file wins, UI adds). Requires DB (OT-4). | Medium — ADR required. |
 | D-6 | Masking: config-driven (DM-1) in M3; role-aware UI policies (DM-2) in M5 on top of the same policy engine (`REMOVE/MASK/REPLACE` + `ALL/FIRST_5/LAST_5` modes). | Both models are field-path + topic-pattern; Kouncil adds user-group scoping. | Engine must know the caller's groups → masking runs in message service with identity context. | High. |
 | D-7 | Cluster config is a **typed model** (Kouncil-style auth method/protocol/mechanism enums) with an escape-hatch `properties` map (Kafbat-style). | CL-7. | Typed model may lag new Kafka auth mechanisms; escape hatch covers it. | High. |
-| D-8 | Merge `kui-security-service` (ACLs+quotas) into `kui-cluster-service`? | AC-*/QU-* total 6 endpoints, all AdminClient calls, same failure domain. | Thinner service catalogue vs. bounded-context purity. | Medium — PLAN §15 allows with ADR. |
+| D-8 | Merge `kui-security-service` (ACLs+quotas) into `kui-cluster-service`? | AC-*/QU-* total 6 endpoints, all AdminClient calls, same failure domain. | Thinner service catalogue vs. bounded-context purity. | Medium — allowed with an ADR. |
 | D-9 | MCP tools derived automatically from Tapir endpoints (MC-1) in M7. | Kafbat derives from OpenAPI annotations; Tapir endpoints carry the same metadata. | Needs read/write classification by HTTP method and RBAC pass-through. | High. |
 | D-10 | Persistence for dynamic config / roles / policies: one small relational store (PostgreSQL, H2 for dev) via Flyway-equivalent, owned by kui-config-service + kui-identity-service. | OT-4, CL-6, RB-4, DM-2. | Adds a stateful dependency; file-only mode must keep working. | Medium. |
 
 ## Open questions
 
-1. Does the CEO want Kouncil's function-name permission granularity (33 functions) or Kafbat's resource×action model as the *canonical* RBAC vocabulary? (D-5 assumes Kafbat vocabulary with Kouncil UI.)
+1. Does the project want Kouncil's function-name permission granularity (33 functions) or Kafbat's resource×action model as the *canonical* RBAC vocabulary? (D-5 assumes Kafbat vocabulary with Kouncil UI.)
 2. Should the async event-tracking sanity limit be per-request configurable or a server knob only?
 3. Is the ODD exporter worth a plugin slot in the architecture now (interface only) or fully deferred?
 4. Should `/api/smartfilters/testexecutions` (no RBAC in both references) require `MESSAGES_READ` in KUI? (Recommendation: yes.)

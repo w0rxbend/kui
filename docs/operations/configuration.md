@@ -286,6 +286,68 @@ refused, naming the gap, because it nearly always means a deleted entry or a mis
 | `kui.clusters.<n>.admin.parallelism` | `…_ADMIN_PARALLELISM` | `4` | How many chunks are in flight at once against this one cluster. |
 | `kui.clusters.<n>.properties.<kafka.property>` | *(not settable from the environment)* | *(empty)* | Raw Kafka client properties, applied last. |
 
+### `kui.clusters.<n>.serde` — which decoder reads which topic
+
+Most production Kafka traffic is Avro, Protobuf or JSON Schema, and a record in any of those formats
+is unreadable without its schema: the bytes carry a schema *id* and the schema itself lives in a
+Schema Registry. Point KUI at that registry with `kui.clusters.<n>.schemaRegistry` and the records
+decode; leave it unset and they render as raw bytes, because there is nothing else they could
+honestly be shown as.
+
+"This cluster is Avro" is one line:
+
+```yaml
+kui:
+  clusters:
+    - name: "Production"
+      bootstrapServers: ["kafka:9092"]
+      schemaRegistry:
+        url: ["http://schema-registry:8081"]
+      serde:
+        defaultValue: SchemaRegistry
+```
+
+A cluster where only some topics are registry-backed uses patterns instead, and the first matching
+pattern wins — so write them most specific first:
+
+```yaml
+      serde:
+        patterns:
+          - serde: SchemaRegistry
+            topicValuesPattern: "orders\\..*"
+          - serde: String
+            topicKeysPattern: ".*"
+```
+
+| Key | Environment | Default | Meaning |
+| --- | --- | --- | --- |
+| `kui.clusters.<n>.serde.defaultKey` | `…_SERDE_DEFAULTKEY` | *(unset)* | The serde for record keys on this cluster when no pattern matches. |
+| `kui.clusters.<n>.serde.defaultValue` | `…_SERDE_DEFAULTVALUE` | *(unset)* | The same for record values. |
+| `kui.clusters.<n>.serde.patterns.<i>.serde` | `…_SERDE_PATTERNS_<I>_SERDE` | *(required in an entry)* | The serde this entry selects. |
+| `kui.clusters.<n>.serde.patterns.<i>.topicKeysPattern` | `…_TOPICKEYSPATTERN` | *(unset)* | A regular expression matched against the **whole** topic name, for keys. |
+| `kui.clusters.<n>.serde.patterns.<i>.topicValuesPattern` | `…_TOPICVALUESPATTERN` | *(unset)* | The same, for values. An entry with neither pattern is refused: it could never select anything. |
+| `kui.clusters.<n>.serde.schemaCacheSize` | `…_SERDE_SCHEMACACHESIZE` | `1000` | How many schemas to hold by id (1 … 100000). A registry never reissues an id, so this cache has a size and no expiry. |
+| `kui.clusters.<n>.serde.subjectCacheTtl` | `…_SERDE_SUBJECTCACHETTL` | `30s` | How long the *latest* version of a subject may be reused (1s … 10m). This one must expire, because registering a new version is how a schema evolves. |
+
+The serde names are `String`, `Int32`, `Int64`, `UInt32`, `UInt64`, `UUID`, `Base64`, `Hex`, `Json`
+and `SchemaRegistry`. A name outside that list fails the load and the message lists the ones that
+exist. `Fallback` is deliberately not settable: it is where resolution ends, not a choice.
+
+**How a serde is actually chosen**, in order: what the user picked in the message browser; then
+what the record's own bytes claim (a Schema Registry payload starts with a zero byte and a schema
+id, and is recognised on sight); then the first matching pattern above; then the cluster default;
+then `String`; and behind all of it a fallback that cannot fail, so a browse never breaks on a
+record it cannot decode.
+
+**When the registry is down**, the `SchemaRegistry` row still appears in the serde picker, marked
+unavailable with the reason. Records decode through the fallback and each row carries a marker
+saying the decode fell back. A cluster whose registry is unreachable at startup still starts, and
+every other cluster keeps working.
+
+**Protobuf** decodes for reading and not for writing: KUI parses the `.proto` text the registry
+returns and reads the record against it, and the produce form refuses a Protobuf topic with a
+message saying so. Avro and JSON Schema work in both directions.
+
 **Tuning one cluster without touching the others.** The five keys under `admin` are per cluster, so
 a cluster with ten thousand topics, or a broker on the other side of an ocean, can be tuned on its
 own. The section is optional, and so is every key in it: `admin: { parallelism: 8 }` leaves the

@@ -19,7 +19,7 @@ user's browser arrives at a service carrying whatever `X-Kui-*` values that user
 browsers at the edge". What it does not say is what happens to the correlation id, which is
 the one header where "just pass it through" looks helpful rather than dangerous — a client
 that supplies its own id can correlate its logs with ours, which is a genuinely useful thing
-that many systems allow. The M0 grooming plan settled the question in task GW-001 while
+that many systems allow. The M0 planning settled the question in task GW-001 while
 building the gateway skeleton. This ADR records it, because it is a security boundary and
 because every service added in M1–M8 depends on it holding.
 
@@ -96,7 +96,7 @@ where the id comes from.
 
 ## References
 
-PLAN §17 (header propagation), §31; ADR-008, ADR-009 (where the id is consumed), ADR-019
+ADR-008, ADR-009 (where the id is consumed), ADR-019
 (session and CSRF at the same edge), ADR-020 (signed principal, defence in depth), ADR-031
 (`X-Kui-Cluster-Id`), ADR-034 (`correlationId` in the envelope); `ARCHITECTURE.md` §5, §13,
 §14; tasks GW-001 (`EdgeHeaders.strip`), GW-009 (session and CSRF at the same boundary).

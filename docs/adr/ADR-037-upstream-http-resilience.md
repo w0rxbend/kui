@@ -8,7 +8,7 @@
 Kafbat wraps every external HTTP client (Schema Registry, Connect, ksqlDB, Prometheus) in
 `ReactiveFailover` (rotate on connection refused, 5 s grace) and Connect in a retrying client
 (409/rebalance, 5 × 200 ms). The gateway additionally needs per-service timeouts, bulkheads
-and circuit breakers that feed the capability registry (PLAN §16.4).
+and circuit breakers that feed the capability registry.
 
 ## Decision
 

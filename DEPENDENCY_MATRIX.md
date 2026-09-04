@@ -2,7 +2,7 @@
 
 Finalized 2026-09-03 from `research/scala/ecosystem-mapping.md` (versions verified against
 Maven Central metadata and GitHub on that date). Every row cites the ADR that admits it.
-Adding a dependency requires the PLAN §13 procedure and a row here.
+Adding a dependency requires the review procedure in [CONTRIBUTING.md](CONTRIBUTING.md) and a row here.
 
 Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js only),
 `shared` (cross-compiled JVM+JS). Modules use the ids in `ARCHITECTURE.md` §16
@@ -178,10 +178,14 @@ WireMock, Mockito, Groovy, the official Java MCP SDK, datasketches 9.0.0, Chimne
 | Laminar 18 / Waypoint 10 | Upgrade task once both are final (ADR-011). | Frontend Architect | after release |
 | opentelemetry-exporter-prometheus | Alpha status; fallback to `otel4s-sdk-exporter-prometheus 0.19.x` if unstable (ADR-009). | Infrastructure Lead | M1 |
 
-### Closed by BUILD-006
+### Closed by measurement
 
-| Item | Answer | Findings |
-| --- | --- | --- |
-| tapir-netty-server-cats | Netty keeps a `serverSentEventsBody` open past 10 minutes, flushes each event within ~2 ms, and cancels the fs2 stream within 8 ms of the client leaving. Netty stays; the http4s-ember fallback is not taken. | [docs/spikes/M0-netty-sse.md](docs/spikes/M0-netty-sse.md) |
-| mill-scalablytyped | 0.4.1 generates and compiles a `@codemirror/state` facade under Mill 1.1.8, Scala 3.9 and Scala.js 1.22. Stays as ADR-025's one-off generator. | [docs/spikes/M0-scalablytyped.md](docs/spikes/M0-scalablytyped.md) |
-| com.microsoft.playwright | 1.62.0, which downloads Chromium build 1234 (Chrome for Testing 151.0.7922.34). Both pinned in `build.mill`. | [docs/spikes/M0-playwright-pin.md](docs/spikes/M0-playwright-pin.md) |
+Each of these was an open question about a library that could not be answered from its
+documentation, so it was answered by building the smallest thing that would prove or disprove it
+against the exact versions this repository pins.
+
+| Item | Answer |
+| --- | --- |
+| tapir-netty-server-cats | Netty keeps a `serverSentEventsBody` open past 10 minutes, flushes each event within ~2 ms, and cancels the fs2 stream within 8 ms of the client leaving. Netty stays; the http4s-ember fallback is not taken. |
+| mill-scalablytyped | 0.4.1 generates and compiles a `@codemirror/state` facade under Mill 1.1.8, Scala 3.9 and Scala.js 1.22. Stays as ADR-025's one-off generator. |
+| com.microsoft.playwright | 1.62.0, which downloads Chromium build 1234 (Chrome for Testing 151.0.7922.34). Both pinned in `build.mill`. |

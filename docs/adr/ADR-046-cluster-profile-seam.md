@@ -104,7 +104,4 @@ a new ADR superseding this one.
 ADR-020 (signed principal header), ADR-022 (typed cluster auth, `ClusterConnection`),
 ADR-036 (dynamic config ownership), ADR-037 (upstream resilience), ADR-041 Amendment 4 (rule
 A11), ADR-042 (metadata store), ADR-043 (internal service-to-service calls);
-`ARCHITECTURE.md` §5, §14; M1 task CLAPI-003 and its `TECH_DEBT.md` row;
-`docs/plans/M2/DEVPLAN.md` §10 D1 (tasks TOP-008, TOP-009, TOP-018, TOP-034);
-`docs/plans/M3/DEVPLAN.md` §10 D8 (task MSG-026);
-`docs/plans/M4/DEVPLAN.md` §3 P1 (task GRP-022).
+`ARCHITECTURE.md` §5, §14, and the `TECH_DEBT.md` row for the cluster-profile API.

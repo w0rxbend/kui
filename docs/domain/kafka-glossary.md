@@ -1,8 +1,7 @@
 # KUI Kafka glossary (ubiquitous language)
 
-Owner: Research Agent D (Kafka domain). Date: 2026-09-03.
-Status: grooming-phase draft; every term here is the *only* name KUI uses for the concept
-in code, contracts, UI copy, docs and commits (PLAN.md §25).
+Date: 2026-09-03. Every term here is the *only* name KUI uses for the concept in code, contracts,
+UI copy, documentation and commit messages.
 
 Conventions used below:
 
@@ -504,7 +503,7 @@ ksql contract module, not the domain.
 
 | Term | Meaning in KUI |
 | --- | --- |
-| **Seek mode** | Where browsing starts: `Beginning`, `Latest`, `Offset(Map[TopicPartition, Offset])`, `Timestamp(Instant)` (PLAN §22). Timestamp seeks use `offsetsForTimes`; unresolved partitions fall back to end offsets in backward mode (Kafbat `SeekOperations.java:80-99`). |
+| **Seek mode** | Where browsing starts: `Beginning`, `Latest`, `Offset(Map[TopicPartition, Offset])`, `Timestamp(Instant)`. Timestamp seeks use `offsetsForTimes`; unresolved partitions fall back to end offsets in backward mode (Kafbat `SeekOperations.java:80-99`). |
 | **Polling mode** | `Forward(limit)`, `Backward(limit)`, `Tailing`. Backward walks each partition in windows of `ceil(limit / partitions)` records (Kafbat `BackwardEmitter.java:20-41`). |
 | **Non-empty partition** | `begin < end`; only these are assigned for non-tailing browse (`OffsetsInfo.java:17-29`). |
 | **Fully polled** | `position(tp) ≥ end(tp)` for every assigned partition — the termination condition for "read to end". |

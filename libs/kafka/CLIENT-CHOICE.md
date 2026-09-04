@@ -6,7 +6,7 @@ uses **fs2-kafka** for **consumers and producers**.
 
 This reverses the default ADR-006 assumed — "one adapter over `KafkaAdminClient[F]` … using the raw
 `Admin` escape hatch where fs2-kafka lags". [ADR-006 Amendment 1](../../docs/adr/ADR-006-fs2-kafka-and-admin-ports.md)
-was written and Accepted at the M1 grooming gate review (finding F-08) and records the reversal;
+was written and Accepted during M1 planning (finding F-08) and records the reversal;
 this file is the evidence behind it, verified against the pinned release rather than remembered.
 
 fs2-kafka is not decorative and is not being removed. Consumers and producers are where its value
@@ -27,7 +27,7 @@ every row.
 
 **2. The null controller.** fs2-kafka models the controller as `describeCluster().controller(): F[Node]`.
 Kafka returns `null` for the controller during a KRaft controller failover
-(`research/kafka/admin-capabilities.md` §1, "Describe cluster"), and DEVPLAN §7 requires that "a
+(`research/kafka/admin-capabilities.md` §1, "Describe cluster"), and the project requires that "a
 `null` controller during failover is `None` and not a crash". A type that cannot express absence
 cannot satisfy that requirement; `KafkaFutures.fromNullableFuture` can.
 

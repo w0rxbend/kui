@@ -7,7 +7,7 @@
 
 Kafbat uses Micrometer for application metrics, a Prometheus client for cluster metrics
 exposition and no distributed tracing. KUI requires traces, metrics and correlated logs from
-day one (PLAN §2.4, §30) across several processes.
+day one across several processes.
 
 ## Decision
 
@@ -19,7 +19,7 @@ day one (PLAN §2.4, §30) across several processes.
 - Tapir server interceptors `tapir-otel4s-tracing` and `tapir-opentelemetry-metrics` applied by
   `libs/observability`; the sttp client factory adds client spans and propagates
   `traceparent`.
-- Metric names and span names follow PLAN §30 plus the additions in `ARCHITECTURE.md` §13.
+- Metric names and span names follow the project's naming conventions plus the additions in `ARCHITECTURE.md` §13.
 - The Kafka cluster metrics that Kafbat exposes at `/metrics/{cluster}` are a product feature
   of `kui-metrics-service` (its own exposition), separate from application telemetry.
 - Prometheus Pushgateway parity is a documented gap; metrics push uses OTLP.

@@ -7,10 +7,11 @@ A Kafka management and observability interface, written entirely in Scala 3.
 > configuration, browsing and publishing records, consumer groups with their lag, and an offset-reset
 > wizard. It can also create a topic, change a setting, add partitions, empty a topic and delete one
 > — the three that cannot be undone are confirmed against a plan the server computed and applied
-> against a token naming exactly what you were shown. What is *not* built is named plainly in
-> [docs/DELIVERY.md](docs/DELIVERY.md) — schema registry, connectors, ksqlDB, authentication and
-> metrics among them, and there is no authentication of any kind, so do not put this on a network
-> you do not control. See [ROADMAP.md](docs/ROADMAP.md) for what lands when.
+> against a token naming exactly what you were shown. What is *not* built is named plainly under
+> [What is built, and what is not](#what-is-built-and-what-is-not) below — schema registry,
+> connectors, ksqlDB, access control, authentication and metrics among them, and there is no
+> authentication of any kind, so do not put this on a network you do not control. See
+> [ROADMAP.md](docs/ROADMAP.md) for what lands when.
 
 ## What it is
 
@@ -43,6 +44,49 @@ of it flows from Kafka to the browser without buffering whole topics in memory.
 into a gateway and four services in separate containers for production. No code changes between the
 two: `deployment/compose/docker-compose.yml` runs the second shape, and
 `deployment/compose/smoke.sh` stops one of its containers and shows the other four carrying on.
+
+## What is built, and what is not
+
+The honest version, because a tool you are going to point at a production cluster should not make
+you find its limits by hitting them.
+
+**The bar this project set itself** is that somebody who has never seen KUI can clone it, run one
+command and have KUI and a Kafka broker both running; see their clusters, brokers and topics
+without configuring anything beyond a bootstrap address; read messages from a topic, including the
+JSON inside them, and publish one; see consumer groups and how far behind they are; point it at
+their own cluster with a documented example configuration, including a secured one; and have any
+part of it fail without the rest becoming unusable. That last point is not a feature — it is the
+reason the architecture is shaped the way it is, and it is tested rather than asserted.
+
+**What works today:**
+
+| Area | State |
+| --- | --- |
+| Build, gateway, single-process and multi-container assembly, container images | done |
+| Cluster connectivity: real Kafka connections with SASL/TLS, clusters, brokers, metadata store | done |
+| Topics: list, search, detail, partitions, configuration | done |
+| Topic administration: create, reconfigure, add partitions, empty, delete | done, with read-only mode, plan-token confirmation and an audit trail |
+| Messages: browsing with every seek mode, streaming, serialization formats, publishing, filters | done except purge from the message screen |
+| Consumer groups: groups, members, assignments, lag, offset reset | done, wizard included |
+| Quickstart, configuration examples, demonstration environment | done |
+
+**What is not built:**
+
+- **No authentication and no authorization.** Anyone who can reach the port can do anything KUI
+  can do, including deleting topics. Run it on a network you control.
+- **No schema registry integration**, so Avro and Protobuf payloads are not decoded against a
+  registry.
+- **No Kafka Connect, no ksqlDB, no ACL or quota management.**
+- **No metrics collection**: throughput columns render as `—` rather than as numbers.
+- Some components exist and are tested but are not yet reachable from a screen — live tailing, the
+  CEL filter engine, the masking engine, event tracking and CSV export among them. These are
+  marked `IMPLEMENTING` rather than `COMPLETE` in the feature matrix, and the matrix says exactly
+  which.
+
+Of 177 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md), 53 are
+delivered end to end — about 30%. Every row there was set by reading the code and driving the
+running application, not by asking whether the work had been scheduled.
+[docs/ROADMAP.md](docs/ROADMAP.md) says what lands when.
 
 ## Quick start
 
@@ -286,7 +330,7 @@ somebody finally writes the code that needs it.
 ## What CI runs
 
 Every push to `main` and every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-Each stage of PLAN §49 is a separate GitHub Actions job, so a red check names the thing that broke
+Each stage of the CI pipeline is a separate GitHub Actions job, so a red check names the thing that broke
 rather than saying "build failed". Every one of them is a command you can run yourself:
 
 | Job | What it proves | Run it locally |
@@ -314,7 +358,7 @@ selector syntax — `./mill '{a.test,b.test}'`, which really does run them all �
 which is a count of *build tasks* and roughly twice the number of tests. Today that is **4140 test
 cases across 57 modules**.
 
-Stages PLAN §49 lists that have no build task yet are deliberately not in the workflow. The task that
+Planned stages that have no build task yet are deliberately not in the workflow. The task that
 creates each one adds its own job. A job that cannot fail is not a check.
 
 Caching: `~/.cache/coursier`, `~/.cache/mill` and `out/` are cached, keyed on `build.mill`,
