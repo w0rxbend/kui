@@ -108,6 +108,28 @@
   text-underline-offset: 0.2em;
 }
 
+/* The pace cell. Tabular figures so a column of rates lines up decimal point under decimal point,
+ * which is the only way a column of numbers is read by scanning rather than by reading each one. */
+.kui-consumers__pace {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Committing nothing. The word is in the title; the cell itself is dimmed rather than coloured, because
+ * a stalled group is only interesting next to a lag, and the lag column beside it already carries the
+ * alarm. Colouring both would make every idle group on a healthy cluster look like an incident. */
+.kui-consumers__pace--stalled {
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-muted);
+}
+
+/* Committed offsets moving backwards, which is what somebody else's offset reset looks like from here.
+ * This one is coloured, because it is rare and it is never what the operator looking at the screen
+ * expected to see. */
+.kui-consumers__pace--backwards {
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-danger);
+}
+
 /* --- The detail screen ------------------------------------------------------------------------ */
 
 /* State, total lag, protocol, assignor, coordinator and "as of", on one strip that wraps. */
@@ -215,4 +237,58 @@
 
 .kui-consumers__reset-warnings:empty {
   display: none;
+}
+
+/* --- The changes that cannot be undone ---------------------------------------------------------- */
+
+/* Bordered in the danger colour and set well apart from the tables above it. The border is the whole
+ * point: neither control has an undo, and an operator should be able to see where they are without
+ * reading a word. */
+.kui-consumers__danger {
+  margin-top: var(--kui-space-6);
+  padding: var(--kui-space-4);
+  border: 1px solid var(--kui-color-danger);
+  border-radius: var(--kui-radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-consumers__danger-action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  padding-top: var(--kui-space-3);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+.kui-consumers__danger-action-heading {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* One row per topic: the name on the left, its button on the right, so a group with sixty topics is a
+ * list that can be scanned for the one name being looked for rather than a wall of identical buttons. */
+.kui-consumers__danger-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-consumers__danger-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+}
+
+/* The sentence saying what was actually deleted. `role="status"` on the element, so a screen reader
+ * announces it without moving focus — the operator has just pressed a button and is still there. */
+.kui-consumers__receipt {
+  margin: 0;
+  color: var(--kui-color-text-muted);
 }

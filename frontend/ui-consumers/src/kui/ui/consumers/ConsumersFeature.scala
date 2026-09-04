@@ -105,7 +105,11 @@ final class ConsumersFeature extends KuiFeature {
           group = groupId,
           queries = queries,
           backHref = hrefOf(ConsumersPageId.List(clusterId.value)),
-          zone = Timezone.choice.signal
+          zone = Timezone.choice.signal,
+          // A page about a group that no longer exists describes nothing. Back to the list, which is
+          // where the operator can see what is left — and where the row they just deleted is already
+          // gone, because the delete dropped the cluster's cached answers.
+          onDeleted = () => goTo(ConsumersPageId.List(clusterId.value))
         )
       case (Some(clusterId), None) => listing(Some(clusterId))
       case _ => listing(None)

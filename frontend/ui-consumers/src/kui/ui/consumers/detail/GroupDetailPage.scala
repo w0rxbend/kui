@@ -49,7 +49,8 @@ object GroupDetailPage {
       queries: ConsumersQueries,
       backHref: String,
       zone: Signal[String],
-      now: () => Instant = () => Instant.now()
+      now: () => Instant = () => Instant.now(),
+      onDeleted: () => Unit = () => ()
   ): HtmlElement = {
 
     val state: Signal[QueryState[GroupDetailDto]] = queries.group.state((cluster, group))
@@ -107,7 +108,19 @@ object GroupDetailPage {
       ),
       // A sibling of the snapshot-driven region rather than a child of it, so that a new snapshot redraws
       // the tables without taking the wizard — and the operator's place in it — down with them.
-      wizard(cluster, group, queries, detail, zone, now)
+      wizard(cluster, group, queries, detail, zone, now),
+      // The same reasoning, for the same reason: deleting a group's offsets is exactly what makes the next
+      // snapshot differ, so a panel rebuilt by that snapshot would discard its own receipt.
+      GroupDangerZone(
+        group = group,
+        topics = detail.map(_.toList.flatMap(_.topics)),
+        deleteGroup = () => queries.deleteGroup(cluster, group),
+        // `TopicName` and not a string: the name comes from a subscription the server sent, and passing
+        // it as a string here would mean parsing it back, which can fail, on a screen that has no honest
+        // thing to do with the failure.
+        deleteOffsets = topic => queries.deleteOffsets(cluster, group, topic),
+        onDeleted = onDeleted
+      )
     )
   }
 

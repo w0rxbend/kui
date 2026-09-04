@@ -5,6 +5,7 @@ import sttp.tapir.json.circe.jsonBody
 
 import kui.consumer.contract.dto.ConsumerCodecs.given
 import kui.consumer.contract.dto.{
+  DeletedOffsetsDto,
   GroupDetailDto,
   GroupsResponse,
   LagDeltaDto,
@@ -151,6 +152,41 @@ object ConsumersApi {
       .out(jsonBody[ResetPlanDto])
       .name("consumer.offsets.apply")
 
-  /** Every client this module has. The suite walks it, so a seventh endpoint cannot be added untested. */
-  val all: List[AnyEndpoint] = List(list, detail, lag, topicOverview, planReset, applyReset)
+  /** `DELETE …/consumer-groups/{groupId}` — remove the group.
+    *
+    * One call, no plan token, and that is not an oversight. ADR-045's two-phase shape exists because the
+    * *result* of a reset is arithmetic the operator cannot do in their head, so they have to be shown the
+    * numbers first. A delete has no numbers: the group is named in the path and the outcome is that it is
+    * gone. What that needs is a confirmation the operator cannot click through by reflex, which is a property
+    * of the screen, not of a second request.
+    *
+    * The server refuses while the group still has members, with `KUI-GROUP-NOT-EMPTY`. The browser does not
+    * make its own copy of that rule: a second opinion about a safety property is how the two come to
+    * disagree, and this one can change between the click and the write.
+    */
+  val deleteGroup: PublicEndpoint[(ClusterId, GroupId), ErrorEnvelope, Unit, Any] =
+    KuiEndpoint.base.delete
+      .in(groupsBase / groupIdPath)
+      .name("consumer.group.delete")
+
+  /** `DELETE …/consumer-groups/{groupId}/offsets?topic=…` — forget this group's offsets on one topic.
+    *
+    * The topic is a query parameter and not a path segment, because the resource being deleted is the group's
+    * offsets, narrowed by topic — the contract's own reasoning, and the reason this client cannot spell the
+    * path differently from the server.
+    *
+    * It answers with the partitions whose offsets were removed, so "the group had none on that topic" and
+    * "they were deleted" are distinguishable on screen. A 204 could not tell them apart, and the difference
+    * decides whether the operator has finished.
+    */
+  val deleteOffsets: PublicEndpoint[(ClusterId, GroupId, TopicName), ErrorEnvelope, DeletedOffsetsDto, Any] =
+    KuiEndpoint.base.delete
+      .in(offsetsBase)
+      .in(query[TopicName](ConsumerMutationEndpoints.TopicParam))
+      .out(jsonBody[DeletedOffsetsDto])
+      .name("consumer.offsets.delete")
+
+  /** Every client this module has. The suite walks it, so an eighth endpoint cannot be added untested. */
+  val all: List[AnyEndpoint] =
+    List(list, detail, lag, topicOverview, planReset, applyReset, deleteGroup, deleteOffsets)
 }

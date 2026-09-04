@@ -82,6 +82,15 @@ object GroupColumns {
         sortable = true,
         align = ColumnAlign.Numeric,
         width = Some("14rem")
+      ),
+      Column[GroupSummaryDto](
+        // Not a server sort field, so it carries its own id and is not sortable, exactly as `partitions`
+        // does. A header that sorted by something the server refuses would be a 400 one click away.
+        id = "pace",
+        header = Messages.ColumnPace,
+        render = row => paceCell(row),
+        align = ColumnAlign.Numeric,
+        width = Some("9rem")
       )
     )
 
@@ -115,6 +124,47 @@ object GroupColumns {
           .amend(title := incomplete.note)
       )
     )
+
+  /** How fast the group is committing, or an em dash saying why there is no rate yet.
+    *
+    * ==Why this column exists at all==
+    *
+    * The server has computed this number since M4 and no screen has ever shown it. Lag on its own does not
+    * answer the question an operator actually has, which is "is this getting better?": a lag of two million
+    * that is falling at forty thousand a second needs no action, and a lag of nine hundred that is not moving
+    * needs one now. Two consecutive readings of the lag column answer it after thirty seconds of watching;
+    * this column answers it at a glance.
+    *
+    * ==Zero is not the same as absent, and negative is not an error==
+    *
+    * A rate of zero on a group with lag is the stalled case, and it gets a word rather than a bare `0`,
+    * because `0` beside a large lag is the single most important cell on this screen and reads as nothing at
+    * all. A negative rate is committed offsets moving *backwards*, which is what somebody else's offset reset
+    * looks like from here; it is shown as it is rather than clamped, since noticing it is most of the value.
+    */
+  private def paceCell(row: GroupSummaryDto): Modifier[HtmlElement] =
+    row.pace match {
+      case Some(rate) if rate == 0.0 =>
+        span(
+          dataAttr("testid") := s"group-row-${row.groupId.value}-pace",
+          title := Messages.PaceStalled,
+          cls := ConsumersCss.PaceStalled,
+          "0"
+        )
+      case Some(rate) =>
+        span(
+          dataAttr("testid") := s"group-row-${row.groupId.value}-pace",
+          title := (if rate < 0.0 then Messages.PaceBackwards else Messages.PaceUnit),
+          cls := (if rate < 0.0 then ConsumersCss.PaceBackwards else ConsumersCss.Pace),
+          Numbers.rate(rate)
+        )
+      case None =>
+        span(
+          dataAttr("testid") := s"group-row-${row.groupId.value}-pace",
+          title := Messages.PaceUnknown,
+          DataTable.missing
+        )
+    }
 
   /** The lag figure and its bar, or an em dash that says why there is no figure. */
   private def lagCell(row: GroupSummaryDto, largestLag: Signal[Long]): Modifier[HtmlElement] =

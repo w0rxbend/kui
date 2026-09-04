@@ -63,6 +63,7 @@ object Messages {
   val ColumnTopics: String = "Topics"
   val ColumnPartitions: String = "Partitions"
   val ColumnLag: String = "Lag"
+  val ColumnPace: String = "Pace"
 
   val StateFilterLabel: String = "State"
   val StateFilterAll: String = "Any state"
@@ -77,9 +78,71 @@ object Messages {
   /** The chip beside a group KUI could only partly read. One word; the sentence is on the chip's title. */
   val PartialChip: String = "partial"
 
+  /** What a pace cell says when there is no rate yet.
+    *
+    * Three different reasons, one dash, and the title says which. The server sends `null` for all three —
+    * only one snapshot so far, an unreadable committed total, or a partition set that changed between the two
+    * samples — and only the last one is worth explaining, because it is the one that makes the number
+    * disappear on a screen an operator is watching.
+    */
+  val PaceUnknown: String = "no rate yet: it needs two readings of the same partitions"
+
+  /** The unit, spelled out. `rec/s` saves four characters and costs a reader a guess. */
+  val PaceUnit: String = "records/s"
+
+  val PaceStalled: String = "committing nothing"
+
+  val PaceBackwards: String = "committed offsets are moving backwards, which is what a reset looks like"
+
   def excluded(partitions: Int): String =
     if partitions == 1 then "1 partition excluded from this figure"
     else s"$partitions partitions excluded from this figure"
+
+  // --- Throwing a group's state away -----------------------------------------------------------
+
+  val DangerHeading: String = "Delete"
+
+  val DangerDescription: String =
+    "These remove committed offsets. Nothing here can be undone, and a consumer that starts again " +
+      "afterwards reads from wherever its own auto.offset.reset setting says."
+
+  val ForgetOffsetsHeading: String = "Forget this group's offsets on one topic"
+
+  val ForgetOffsetsDescription: String =
+    "For a topic this group has stopped reading. The group and its offsets on every other topic stay."
+
+  val ForgetOffsets: String = "Forget offsets"
+
+  val ForgetOffsetsNone: String =
+    "This group holds no committed offsets on any topic, so there is nothing to forget."
+
+  val ForgetOffsetsConfirmTitle: String = "Forget the offsets on this topic?"
+
+  def forgetOffsetsConfirmMessage(topic: String): String =
+    s"This group's committed offsets on '$topic' will be deleted. A consumer that starts again on this " +
+      "topic reads from wherever its own auto.offset.reset setting says, which is usually the end."
+
+  /** The receipt. The partition count is the point: zero means the group held no offsets there, and that is a
+    * different outcome from having deleted some, though both are successes.
+    */
+  def forgotOffsets(topic: String, partitions: Int): String =
+    if partitions == 0 then s"This group held no committed offsets on '$topic'. Nothing was deleted."
+    else if partitions == 1 then s"Deleted this group's committed offset on 1 partition of '$topic'."
+    else s"Deleted this group's committed offsets on $partitions partitions of '$topic'."
+
+  val DeleteGroupHeading: String = "Delete the group"
+
+  val DeleteGroupDescription: String =
+    "Removes the group and everything it has committed, on every topic. Kafka refuses while the group " +
+      "still has members, so stop its consumers first."
+
+  val DeleteGroup: String = "Delete the group"
+
+  val DeleteGroupConfirmTitle: String = "Delete this consumer group?"
+
+  def deleteGroupConfirmMessage(group: String): String =
+    s"The group '$group' and every offset it has committed will be deleted. Consumers that use this " +
+      "group id again will start from wherever their own auto.offset.reset setting says."
 
   // --- The topic page's Consumers tab ----------------------------------------------------------
 

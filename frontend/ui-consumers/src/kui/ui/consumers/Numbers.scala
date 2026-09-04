@@ -28,6 +28,28 @@ object Numbers {
     sign + chunks.mkString(GroupSeparator)
   }
 
+  /** A rate, at one decimal place, with an explicit sign when it is negative.
+    *
+    * One decimal, not three: this is a rate sampled over a thirty-second interval, and the digits past the
+    * first are noise from where in the interval the two samples happened to land. Printing them would invite
+    * an operator to compare two numbers that do not differ.
+    *
+    * A rate below one tenth of a record per second but not zero renders as `< 0.1` rather than as `0.0`,
+    * because a group committing something very slowly and a group committing nothing are the difference
+    * between "slow" and "stuck", which is the whole question this column is asked.
+    */
+  def rate(value: Double): String =
+    if value == 0.0 then "0"
+    else if math.abs(value) < 0.05 then if value < 0 then "> -0.1" else "< 0.1"
+    else {
+      val rounded = math.round(math.abs(value) * 10.0) / 10.0
+      val sign = if value < 0 then "-" else ""
+      val whole = rounded.toLong
+      val tenth = math.round((rounded - whole) * 10.0)
+
+      s"$sign${grouped(whole)}.$tenth"
+    }
+
   /** Where `value` sits between zero and `max`, for a magnitude bar.
     *
     * A `max` of zero — every row has caught up — gives zero rather than a division by infinity, so a screen

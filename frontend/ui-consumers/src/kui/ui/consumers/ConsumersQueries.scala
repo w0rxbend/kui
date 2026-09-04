@@ -6,6 +6,7 @@ import com.raquo.laminar.api.L.*
 
 import kui.consumer.contract.GroupListParams
 import kui.consumer.contract.dto.{
+  DeletedOffsetsDto,
   GroupDetailDto,
   GroupsResponse,
   LagDeltaDto,
@@ -128,6 +129,28 @@ final class ConsumersQueries(api: ApiClient) {
       token: String
   ): EventStream[Either[ApiError, ResetPlanDto]] =
     call(ConsumersApi.applyReset, (cluster, group, ResetApplyRequest(token))).map { outcome =>
+      if outcome.isRight then invalidateCluster(cluster)
+      outcome
+    }
+
+  /** Remove the group. The cluster's cached answers go with it, because the list it was on is now wrong.
+    *
+    * Invalidated on success only. Dropping the cache after a refusal would make the screen refetch and redraw
+    * for no reason, and the group would still be there — which reads as the delete having half worked.
+    */
+  def deleteGroup(cluster: ClusterId, group: GroupId): EventStream[Either[ApiError, Unit]] =
+    call(ConsumersApi.deleteGroup, (cluster, group)).map { outcome =>
+      if outcome.isRight then invalidateCluster(cluster)
+      outcome
+    }
+
+  /** Forget this group's committed offsets on one topic, and say which partitions were forgotten. */
+  def deleteOffsets(
+      cluster: ClusterId,
+      group: GroupId,
+      topic: TopicName
+  ): EventStream[Either[ApiError, DeletedOffsetsDto]] =
+    call(ConsumersApi.deleteOffsets, (cluster, group, topic)).map { outcome =>
       if outcome.isRight then invalidateCluster(cluster)
       outcome
     }

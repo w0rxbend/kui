@@ -18,6 +18,10 @@ object ConsumersCss {
   val GroupCell = "kui-consumers__group"
   val GroupLink = "kui-consumers__group-link"
 
+  val Pace = "kui-consumers__pace"
+  val PaceStalled = "kui-consumers__pace--stalled"
+  val PaceBackwards = "kui-consumers__pace--backwards"
+
   val Summary = "kui-consumers__summary"
   val SummaryItem = "kui-consumers__summary-item"
   val SummaryLabel = "kui-consumers__summary-label"
@@ -31,6 +35,12 @@ object ConsumersCss {
   val TopicName = "kui-consumers__topic-name"
   val PartitionList = "kui-consumers__partitions"
   val Anomaly = "kui-consumers__anomaly"
+
+  val DangerSection = "kui-consumers__danger"
+  val DangerAction = "kui-consumers__danger-action"
+  val DangerActionHeading = "kui-consumers__danger-action-heading"
+  val DangerList = "kui-consumers__danger-list"
+  val Receipt = "kui-consumers__receipt"
 
   val ResetForm = "kui-consumers__reset-form"
   val ResetPlan = "kui-consumers__reset-plan"
