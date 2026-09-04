@@ -350,7 +350,16 @@ object MessagesPage {
     *
     * `onChange` and not `onInput`: these fields change *where a browse starts*, and rewriting the URL on
     * every keystroke would push a history entry per character and stop the browse four times while somebody
-    * typed an offset.
+    * typed an offset. `change` fires once, when the field is left or Enter is pressed, which is the moment a
+    * typed offset is actually meant.
+    *
+    * And therefore **not** `controlled`. Laminar's controlled inputs pair a value with the event that reports
+    * every edit, and it rejects `change` on a text field at run time rather than at compile time:
+    * `ObserverError: Can not add input controller (prop: value + event: change)`. That exception was thrown
+    * while the page was mounting, so the whole message browser rendered as "Something went wrong" and not a
+    * single record was ever drawn. A plain `value <-- signal` binding gives what is actually wanted here: the
+    * URL writes the field, the field writes the URL when the user is done, and nothing tries to police the
+    * keystrokes in between.
     */
   private def textBox(
       value: Signal[String],
@@ -363,7 +372,8 @@ object MessagesPage {
       cls := KernelCssField,
       L.placeholder := placeholder,
       dataAttr("testid") := testId,
-      controlled(L.value <-- value, onChange.mapToValue --> { raw => onEntered(raw) })
+      L.value <-- value,
+      onChange.mapToValue --> { raw => onEntered(raw) }
     )
 
   /** The `seekTo` value for a start that needs no number of its own.
