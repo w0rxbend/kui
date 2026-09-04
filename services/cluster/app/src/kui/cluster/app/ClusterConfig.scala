@@ -1,6 +1,7 @@
 package kui.cluster.app
 
 import kui.config.{ClusterConfig, KuiConfig, PrincipalKeyConfig, ServerConfig, StoreConfig, TelemetryConfig}
+import kui.security.rbac.RbacPolicy
 
 /** Everything the cluster process reads out of the configuration, and nothing else.
   *
@@ -32,7 +33,11 @@ final case class ClusterServiceConfig(
     telemetry: TelemetryConfig,
     principalKeys: List[PrincipalKeyConfig],
     clusters: List[ClusterConfig],
-    store: StoreConfig
+    store: StoreConfig,
+    // This deployment's roles, so that the service can re-run the gateway's permission decision itself
+    // (ADR-021) rather than trusting the edge. Without it the cluster-write routes had no policy to consult
+    // and refused every caller.
+    rbac: RbacPolicy
 )
 
 object ClusterServiceConfig {
@@ -57,7 +62,8 @@ object ClusterServiceConfig {
       config.telemetry,
       config.gateway.principalKeys,
       config.clusters,
-      config.store
+      config.store,
+      config.rbac
     )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry

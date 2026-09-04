@@ -31,6 +31,7 @@ import kui.http.principal.{PrincipalInterceptor, RequestContext, SecuredRoutes}
 import kui.kernel.error.KuiError
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
+import kui.security.rbac.RbacPolicy
 
 /** Everything `kui-cluster-service` serves, and the one place a typed failure becomes an HTTP response.
   *
@@ -95,7 +96,12 @@ object ClusterApi {
       principals: PrincipalCodec[F],
       rejections: Counter[F, Long],
       telemetry: Telemetry[F],
-      logger: StructuredLogger[F]
+      logger: StructuredLogger[F],
+      // The deployment's RBAC policy, so that this service can re-run the decision the gateway already took
+      // (ADR-021) instead of inventing a rule of its own. Defaulted to `Disabled` -- RBAC switched off, every
+      // decision allowed -- because that is what a deployment with no roles configured means everywhere else
+      // in KUI, and a different default here would be a second, quieter rule.
+      rbac: RbacPolicy = RbacPolicy.Disabled
   ): List[ServerEndpoint[Fs2Streams[F], F]] =
     // The health endpoints come first because nothing else can match their paths and a probe should
     // travel the shortest route through the router. They are `ServerEndpoint[Any, F]` — "needs no
@@ -103,7 +109,14 @@ object ClusterApi {
     // fit into a list typed on `Fs2Streams` that the streaming endpoints need.
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
       ClusterRoutes[F](registry, topology, brokers, principals, rejections, logger) ++
-      ClusterWriteRoutes[F](write, probe, principals, rejections, logger) ++
+      ClusterWriteRoutes[F](
+        write,
+        probe,
+        principals,
+        rejections,
+        logger,
+        ClusterWriteRoutes.permissionFrom(rbac)
+      ) ++
       ProfileRoutes[F](registry, principals, rejections, telemetry, logger)
 
   /** The cross-cutting chain, outermost first, exactly as `libs/http`'s server wants it.

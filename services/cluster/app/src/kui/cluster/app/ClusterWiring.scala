@@ -107,7 +107,8 @@ object ClusterWiring {
         principals,
         rejections,
         telemetry,
-        logger
+        logger,
+        config.rbac
       ),
       interceptors = interceptors,
       readiness = readiness,

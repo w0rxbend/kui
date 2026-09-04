@@ -100,7 +100,7 @@ final case class AllInOneConfig(
     * service a key set it will never verify against would make the ignored-keys warning above a lie.
     */
   def clusterView: ClusterServiceConfig =
-    ClusterServiceConfig(server, telemetry, principalKeys = Nil, clusters, store)
+    ClusterServiceConfig(server, telemetry, principalKeys = Nil, clusters, store, rbac)
 
   /** Whether this configuration describes upstreams that this shape will not dial. */
   def hasIgnoredServiceUrls: Boolean = gateway.services.nonEmpty

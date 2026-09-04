@@ -11,8 +11,9 @@ import kui.cluster.contract.ClusterWriteEndpoints
 import kui.cluster.contract.dto.{ClusterWriteRequest, ConnectivityDto}
 import kui.cluster.domain.{Connectivity, ProfileVersion}
 import kui.http.principal.SecuredRoutes
-import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.ClusterId
+import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
+import kui.security.rbac.{AccessRequest, Action, ClusterFlags, Decision, Rbac, RbacPolicy, Resource}
 import kui.security.{Principal, PrincipalCodec}
 
 /** Registering, changing, removing and testing a cluster.
@@ -24,9 +25,15 @@ import kui.security.{Principal, PrincipalCodec}
   * else about who is calling it (ADR-020), and the day someone deploys the cluster service reachable on a
   * network the gateway is not the only thing on, this is the check that still holds.
   *
-  * With authentication disabled nothing grants `ApplicationConfig.Edit`, so an anonymous KUI cannot change
-  * its own cluster list. That is the intended behaviour and not an oversight: a deployment that has not been
-  * told who anybody is has no basis on which to let them rewrite its connections.
+  * The check is the deployment's own RBAC policy, evaluated here through `Rbac.decide`, which is the same
+  * evaluator the gateway's edge check and `/api/v1/auth/me` use. One rule, three places that ask it.
+  *
+  * A deployment with no roles configured has RBAC switched off, and `Rbac.decide` allows — which is what the
+  * rest of KUI already does and what `/api/v1/auth/me` already advertises to the browser (a wildcard grant of
+  * `APPLICATIONCONFIG EDIT` over every cluster). Anything else makes the browser draw a form the server will
+  * refuse, which is what this used to do: the check compared the principal's roles to a role *named*
+  * "ApplicationConfig.Edit", a name no role vocabulary produces, so every deployment refused every cluster
+  * write and the administration screen was three buttons and a 403.
   *
   * ==What comes back from a write==
   *
@@ -148,13 +155,33 @@ object ClusterWriteRoutes {
       ConnectivityDto(ConnectivityDto.Unreachable, reachable = false, Some(detail))
   }
 
-  /** Whether this principal may change a cluster.
+  /** The question these three routes ask, as one value.
     *
-    * Roles are compared by name because the role vocabulary itself is M6's: the check has to exist now so
-    * that M6 replaces one function rather than finding every route that forgot to ask.
+    * Global rather than cluster-scoped: a cluster registration names a cluster that KUI may not know yet, and
+    * a connection test names one that may never exist. The thing being changed is KUI's own configuration,
+    * which is what `Resource.ApplicationConfig` is.
     */
-  def defaultPermission(principal: Principal): Boolean =
-    principal.roles.exists(_.value == RequiredPermission)
+  val Access: AccessRequest =
+    AccessRequest.global(
+      "cluster.write",
+      kui.security.rbac.ResourceAccess.unnamed(Resource.ApplicationConfig, Action.ApplicationConfigEdit)
+    )
+
+  /** Whether this principal may change a cluster, according to this deployment's policy.
+    *
+    * `ClusterFlags.Writable` because the request names no cluster: read-only is a property of a Kafka
+    * cluster, and the thing being written here is KUI's list of them.
+    */
+  def permissionFrom(policy: RbacPolicy): Principal => Boolean =
+    principal => Rbac.decide(policy, principal, ClusterFlags.Writable, Access) == Decision.Allowed
+
+  /** The check for a deployment that has been given no policy at all.
+    *
+    * Allows, because a policy with no roles in it is RBAC switched off, and that is the one answer
+    * `Rbac.decide` gives for every other endpoint in the product. A stricter default here would only ever
+    * disagree with what the browser was told it could do.
+    */
+  def defaultPermission(principal: Principal): Boolean = permissionFrom(RbacPolicy.Disabled)(principal)
 
   /** `If-Match: "0"` on a delete. */
   val NotAVersionToDeleteAt: KuiError = ApplicationError.Invalid(

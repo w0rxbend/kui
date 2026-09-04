@@ -28,6 +28,8 @@ import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiEr
 import kui.kernel.{ClusterId, RoleName, Secret, UserName}
 import kui.observability.Telemetry
 import kui.security.*
+import kui.security.rbac as rbac
+import kui.security.rbac.{Action, DefaultRole, RbacPolicy, Role}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** That the one write M1 ships is safe to expose to a wizard a milestone from now.
@@ -40,14 +42,44 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
 
   private val path = "/internal/v1/clusters/prod-eu"
 
-  /** A principal that holds the permission. Nothing grants it while authentication is disabled, which is
-    * what keeps this endpoint out of a browser's reach; a test has to mint one deliberately.
+  private val editorRole: RoleName = RoleName.unsafe("cluster-admin")
+
+  /** A deployment that has configured RBAC: one role that may edit KUI's own configuration, and a default
+    * role for everybody else that may only look at it.
+    *
+    * A policy with something in it is what switches RBAC on at all (`RbacPolicy.enabled`), so this is also
+    * what makes the refusals below refusals rather than the "no policy, allow everything" answer every other
+    * endpoint in KUI gives.
     */
-  private val editor: Principal = Principal(
-    UserName.unsafe("operator"),
-    Set(RoleName.unsafe(ClusterWriteRoutes.RequiredPermission)),
-    PrincipalKind.Session
-  )
+  private val policy: RbacPolicy =
+    RbacPolicy(
+      roles = List(
+        Role(
+          name = editorRole,
+          clusters = Set.empty,
+          subjects = Nil,
+          permissions = List(
+            RbacPolicy.permission(
+              rbac.Resource.ApplicationConfig,
+              None,
+              Set(Action.ApplicationConfigEdit)
+            )
+          )
+        )
+      ),
+      defaultRole = Some(
+        DefaultRole(
+          List(RbacPolicy.permission(rbac.Resource.ApplicationConfig, None, Set(Action.ApplicationConfigView)))
+        )
+      )
+    )
+
+  /** The check three of these routes run, over the policy above. */
+  private val underPolicy: Principal => Boolean = ClusterWriteRoutes.permissionFrom(policy)
+
+  /** A principal in the role that grants the edit. */
+  private val editor: Principal =
+    Principal(UserName.unsafe("operator"), Set(editorRole), PrincipalKind.Session)
 
   private val request = ClusterWriteRequest(
     name = "prod eu",
@@ -276,7 +308,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     Ref.of[IO, List[(ClusterProfile, ProfileVersion)]](Nil).flatMap { seen =>
       val writes = new ClusterWriteUseCaseStub(seen = Some(seen))
 
-      server(writes, permitted = ClusterWriteRoutes.defaultPermission)
+      server(writes, permitted = underPolicy)
         .use(put(_, principal = Principal.Anonymous))
         .flatMap(response => seen.get.map((response, _)))
         .map { (response, written) =>
@@ -390,7 +422,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     Ref.of[IO, List[(ClusterId, ProfileVersion)]](Nil).flatMap { removals =>
       server(
         new ClusterWriteUseCaseStub(removals = Some(removals)),
-        permitted = ClusterWriteRoutes.defaultPermission
+        permitted = underPolicy
       ).use(remove(_, principal = Principal.Anonymous))
         .flatMap(response => removals.get.map((response, _)))
         .map { (response, seen) =>
@@ -473,7 +505,7 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
   test("aConnectionTestIsBehindTheSamePermissionAsTheWrite") {
     // Unguarded, it would let any caller use KUI to open connections to whatever KUI's network can reach
     // and read the answers off the three verdicts.
-    server(new ClusterWriteUseCaseStub(), permitted = ClusterWriteRoutes.defaultPermission)
+    server(new ClusterWriteUseCaseStub(), permitted = underPolicy)
       .use(test_connection(_, principal = Principal.Anonymous))
       .map(response => assertEquals(response.code.code, 403, response.body))
   }
@@ -511,5 +543,26 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
     // Only the delete is destructive: a write replaces a record KUI can be told again, a delete removes
     // credentials KUI cannot reconstruct.
     assertEquals(ClusterWriteEndpoints.mutating.flatMap(_.info.name), List("cluster.delete"))
+  }
+
+  test("a deployment that has not configured RBAC lets a caller change its cluster list") {
+    // The defect this pair of tests exists for. The check used to compare the principal's *role names* to
+    // the literal string "ApplicationConfig.Edit", which is not a name any role vocabulary produces -- so
+    // every deployment refused every cluster write, and the administration screen was a form, three buttons
+    // and a 403. Meanwhile `/api/v1/auth/me` was telling the same browser it held APPLICATIONCONFIG EDIT
+    // over every cluster, because that is what an unconfigured policy grants everywhere else in KUI.
+    //
+    // `RbacPolicy.Disabled` is that deployment, and it must allow, for the same reason the quickstart can
+    // create a topic without anybody logging in.
+    assert(ClusterWriteRoutes.permissionFrom(RbacPolicy.Disabled)(Principal.Anonymous))
+    assert(ClusterWriteRoutes.defaultPermission(Principal.Anonymous))
+  }
+
+  test("a configured policy grants the edit to the role that has it and to nobody else") {
+    assert(underPolicy(editor))
+    assert(!underPolicy(Principal.Anonymous))
+    assert(
+      !underPolicy(Principal(UserName.unsafe("viewer"), Set(RoleName.unsafe("reader")), PrincipalKind.Session))
+    )
   }
 }
