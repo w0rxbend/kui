@@ -7,7 +7,9 @@ and delete it, the last three confirmed against a server-computed plan and appli
 token. No row of the delivery bar is outstanding.
 **Repository:** on `main`; every gate the CI runs is green — `__.checkFormat`, `__.fix --check`,
 `checkArchitecture`, `__.openApiCheck`, `docs.errorCodes --check`, `__.checkBundleShape` and
-`./scripts/run-tests.sh`.
+`./scripts/run-tests.sh` — with one caveat: `__.openApiCheck` failed about one cold run in seven on
+the machine this pass ran on, with no diagnostic of any kind, most likely from resource exhaustion
+rather than from anything in the repository. `docs/DELIVERY.md` has the measurements.
 
 **Wave 0 progress (2026-09-04).** E7 (CI), E5 (three service processes and images) and the contract
 half of E6 (per-partition log directories) are done. E7 turned out to be the most important of the
