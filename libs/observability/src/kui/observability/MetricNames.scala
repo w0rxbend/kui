@@ -50,6 +50,50 @@ object MetricNames {
     */
   val ClusterProfileSubscribed: String = "kui.cluster.profile.subscribed" //                       (M2)
 
+  /** How often a record's intended serde could not read it, so the fallback rendered it instead.
+    *
+    * The metric that tells an operator their default serde is wrong for a topic. Without it, that
+    * misconfiguration is visible only as a screen full of mojibake that nobody reports.
+    */
+  val SerdeDeserializeFailures: String = "kui.serde.deserialize.failures" // {serde, target, topic}  (M3)
+
+  /** Payloads decoded by an auto-detected serde: what the topics nobody configured actually contain. */
+  val SerdeAutodetected: String = "kui.serde.autodetected" // {serde}                                (M3)
+
+  /** Produce payloads that could not become bytes, split by whose problem it is. */
+  val SerdeSerializeFailures: String = "kui.serde.serialize.failures" // {serde, topic, reason}       (M3)
+
+  /** Serde registries built for a cluster. A number that climbs on a stable configuration means profile churn
+    * is rebuilding them, which throws away every cached schema each time.
+    */
+  val SerdeRegistryBuilt: String = "kui.serde.registry.built" // {cluster, reason}                    (M3)
+
+  /** Calls to a Schema Registry, by how they ended. */
+  val SerdeRegistryRequests: String = "kui.serde.registry.requests" // {cluster, outcome}             (M3)
+
+  /** Whether a cluster's Schema Registry is answering: the number the capability fold reads (ADR-039). */
+  val SerdeRegistryUp: String = "kui.serde.registry.up" // {cluster}                                  (M3)
+
+  /** Smart-filter compilations, by outcome (ADR-017). */
+  val FilterCompile: String = "kui.filter.compile" // {outcome}                                       (M3)
+
+  /** How long one record's filter evaluation took. Its p99 is what tells an operator that a user's filter,
+    * and not Kafka, is the reason browsing is slow.
+    */
+  val FilterEvaluateDuration: String = "kui.filter.evaluate.duration" //                              (M3)
+
+  /** Records a filter could not decide on, split into runtime errors and timeouts. The same number the
+    * `consumed` stream event reports as `filterErrors`.
+    */
+  val FilterErrors: String = "kui.filter.errors" // {kind}                                            (M3)
+
+  /** Browses on which a masking rule applied (ADR-023, DM-001).
+    *
+    * Deliberately not a count of fields masked: that number is a function of the payload, and it would leak
+    * the shape of protected data into metrics that are routinely less protected than the data itself.
+    */
+  val MaskingApplied: String = "kui.masking.applied" // {cluster, topic, target}                      (M3)
+
   /** Every name, in the order PLAN §30 lists them followed by the `ARCHITECTURE.md` §13 additions.
     */
   val all: List[String] = List(
@@ -68,7 +112,17 @@ object MetricNames {
     PrincipalRejected,
     ConfigVersion,
     ClusterProfileFetch,
-    ClusterProfileSubscribed
+    ClusterProfileSubscribed,
+    SerdeDeserializeFailures,
+    SerdeAutodetected,
+    SerdeSerializeFailures,
+    SerdeRegistryBuilt,
+    SerdeRegistryRequests,
+    SerdeRegistryUp,
+    FilterCompile,
+    FilterEvaluateDuration,
+    FilterErrors,
+    MaskingApplied
   )
 
   /** The attribute keys, for the same reason the metric names are here: a label that drifts from `upstream`
@@ -89,6 +143,9 @@ object MetricNames {
     val Reason: String = "reason"
     val Section: String = "section"
     val Topic: String = "topic"
+    val Serde: String = "serde"
+    val Target: String = "target"
+    val Kind: String = "kind"
 
     val all: List[String] = List(
       Service,
@@ -104,7 +161,10 @@ object MetricNames {
       Event,
       Reason,
       Section,
-      Topic
+      Topic,
+      Serde,
+      Target,
+      Kind
     )
   }
 }

@@ -29,7 +29,18 @@ final class MetricNamesSuite extends FunSuite {
     "kui.principal.rejected",
     "kui.config.version",
     "kui.cluster.profile.fetch",
-    "kui.cluster.profile.subscribed"
+    "kui.cluster.profile.subscribed",
+    // M3: the serde layer, the smart filters and the masking engine
+    "kui.serde.deserialize.failures",
+    "kui.serde.autodetected",
+    "kui.serde.serialize.failures",
+    "kui.serde.registry.built",
+    "kui.serde.registry.requests",
+    "kui.serde.registry.up",
+    "kui.filter.compile",
+    "kui.filter.evaluate.duration",
+    "kui.filter.errors",
+    "kui.masking.applied"
   )
 
   test("the list matches PLAN §30 and ARCHITECTURE.md §13, exactly and in order") {
