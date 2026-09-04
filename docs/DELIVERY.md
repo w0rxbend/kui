@@ -1229,3 +1229,85 @@ mapping and the golden documents, and `4d3b0ce` (message about the topic indicat
 frontend column and the new test. The tree is consistent and every gate above is green, but the
 rename is spread over two commits whose messages describe other changes, and this section is the
 only place the whole of it is written down.
+
+## Caching, and two rough edges — 2026-09-04 (later)
+
+### The cache-busting fix: an ETag, and now a test for the case it exists for
+
+The choice between content-addressed file names and a validator was settled in favour of the
+**ETag**, and the mechanism itself had already landed: every static asset is served `no-cache` with a
+strong `ETag` that is SHA-256 over the bytes, truncated to sixteen bytes, and `If-None-Match` is
+answered `304` with no body. Content-addressed names would mean changing what the Scala.js linker
+emits *and* the page that imports it, and would still need a fallback for `index.html`, which can
+never be addressed by content because it is the thing that names everything else. The ETag needs
+neither, and — the point of the defect it replaces — it is derived from the content and never from the
+name, so no belief about what a file name means can make it wrong again.
+
+What was missing was the test for the scenario the whole thing exists for: the same file name serving
+different bytes after a release. `web-test-upgraded` is now a second fixture tree — the same
+deployment after a rebuild, with a `main.js` of the same name and different contents — and
+`anUpgradeUnderTheSameFileNameIsAnswered200WithTheNewBytes` fetches from the first build, asks the
+second with the first build's tag, and requires `200` with the new bytes and a new tag; then asks the
+second build with its own tag and requires `304` with an empty body. Both halves of the bargain in one
+case.
+
+It was seen to fail. With `etagOf` computing the digest from the file *name* instead of the bytes —
+precisely the belief the `immutable` header rested on — the run reported:
+
+```
+==> X StaticRoutesSuite.anUpgradeUnderTheSameFileNameIsAnswered200WithTheNewBytes  (line 268)
+==> X StaticRoutesSuite.twoDifferentFilesDoNotShareAValidator
+    Some("58417e0f781b6656949d37258c8b9052") is equal to Some("58417e0f781b6656949d37258c8b9052")
+```
+
+Line 268 is `assertEquals(after.code.code, 200)`: the upgraded file was answered `304`, which is the
+blank page from the original defect, reproduced on demand. With the validator over the bytes, all 18
+cases of `StaticRoutesSuite` pass.
+
+The surrounding code was tidied while the reason for it was still visible: `cacheControlOf`, which had
+been reduced to ignoring its argument and returning a constant, is now the constant `CachePolicy`; the
+three literal `"no-cache"` strings use it; and three comments that still described the `immutable`
+behaviour in the present tense were corrected, including the file's own header.
+
+### The JSON serde's refusal is a sentence now
+
+`expected null got 'not js...' (line 1, column 1)` was circe describing one branch it tried on the way
+to giving up. It reads as though KUI had wanted `null`. The refusal is still attached to the field and
+still keeps the composed record; only the words changed:
+
+| Typed into the value box | What it says now |
+| --- | --- |
+| `not json at all` | this is not JSON: a JSON document has to start with `` ` ``{`` ` `` or `` ` ``[`` ` ``, and this one starts with `` ` ``n`` ` ``. If you meant to send it as plain text, choose the String serde instead |
+| `{"a": 1,}` | this starts like JSON but does not parse at line 1, column 9. Check for a quote, comma or closing bracket that is missing, a comma left before a `}` or `]`, or single quotes where JSON requires double ones |
+| (empty) | there is nothing here to send: a JSON document is at least `{}` or `[]` |
+| `123` | this is valid JSON but not a JSON document: it is a single value … To send a bare number or a bare piece of text, choose a different serde |
+
+Both strings above are the exact text a run printed. The parser's *position* is kept — it is the one
+useful thing in its message — and everything else is written for the person looking at the form. Four
+cases pin the wording, one of them asserting that `expected null` cannot come back; all four were seen
+to fail against the previous text.
+
+### The single-cluster dashboard card is capped
+
+The card grid was `repeat(auto-fit, minmax(22rem, 1fr))`, so one cluster got one card as wide as the
+window. It is now `minmax(22rem, 34rem)` with `justify-content: start`, so cards stop growing at 34rem
+and the row grows its gap instead, with the first card still aligned to the fleet strip above it.
+
+Measured in headless Chromium against the real rule, with one, three and eight cards:
+
+```
+viewport=2560  old-one-card=[2560]  new-one-card=[544]  new-three=[544,544,544]
+viewport=1440  old-one-card=[1440]  new-one-card=[544]
+viewport=500   old-one-card=[500]   new-one-card=[500]
+```
+
+544px is 34rem. Below the cap the card still fills the width, so nothing overflows on a narrow screen.
+
+### What was not done
+
+- The dashboard cap was measured, not looked at: no screenshot of the real dashboard at any width, and
+  nothing here was seen with more than one cluster on screen.
+- The serde wording was proved by test output, not by re-driving the publish drawer in a browser.
+- Two source files this pass edited — `JsonSerde.scala` and `StaticRoutes.scala` — were swept into
+  another concurrent pass's commit (`4d3b0ce`) before they could be committed here; their content is
+  intact in the tree, and the two commits from this pass carry the tests and fixtures.
