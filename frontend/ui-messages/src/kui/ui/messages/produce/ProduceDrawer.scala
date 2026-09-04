@@ -8,7 +8,7 @@ import kui.message.contract.{ProduceResultDto, ProducedRecordDto}
 import kui.ui.kernel.api.ApiClient
 import kui.ui.kernel.component.*
 import kui.ui.kernel.css.KernelCss
-import kui.ui.messages.{Messages, MessagesCss}
+import kui.ui.messages.{Messages, MessagesCss, SerdeChoices}
 
 /** The publish form: a drawer that writes a record to a topic.
   *
@@ -126,6 +126,21 @@ object ProduceDrawer {
           onAbsent = absent => update(_.copy(isTombstone = absent)),
           onText = raw => update(_.copy(value = raw))
         ),
+        // The two serde choices sit between the payloads and the headers, next to the fields they act on
+        // rather than at the bottom with the count: "Value as JSON" is a statement about the value box
+        // above it, and a picker three controls away from what it changes gets set by nobody.
+        serdePicker(
+          Messages.ProduceKeySerdeLabel,
+          testId = "produce-key-serde",
+          chosen = text(_.keySerde),
+          onChosen = raw => update(_.copy(keySerde = raw))
+        ),
+        serdePicker(
+          Messages.ProduceValueSerdeLabel,
+          testId = "produce-value-serde",
+          chosen = text(_.valueSerde),
+          onChosen = raw => update(_.copy(valueSerde = raw))
+        ),
         headerRows(draft, update),
         field(
           Messages.ProduceCountLabel,
@@ -217,6 +232,35 @@ object ProduceDrawer {
           .call(ProduceApi.produce, (cluster, topic, request))
           .map(_.left.map(_.userMessage))
     }
+
+  /** One serde choice, as a menu.
+    *
+    * The same list the browse bar offers, from [[kui.ui.messages.SerdeChoices]], because the mistake this
+    * form can make that a topic does not recover from is publishing with a serde the reader cannot read back
+    * — and two lists maintained apart is how that becomes possible.
+    *
+    * `controlled`, so that a draft arriving from "Republish this record" — which fills the menu with the
+    * serde that record was decoded with — cannot leave the DOM and the draft disagreeing.
+    */
+  private def serdePicker(
+      label: String,
+      testId: String,
+      chosen: Signal[String],
+      onChosen: String => Unit
+  ): HtmlElement =
+    div(
+      cls := MessagesCss.ControlGroup,
+      L.label(
+        cls := MessagesCss.ControlLabel,
+        label,
+        select(
+          cls := KernelCss.FieldControl,
+          dataAttr("testid") := testId,
+          SerdeChoices.options.map((value, name) => option(L.value := value, name)),
+          controlled(L.value <-- chosen, onChange.mapToValue --> { raw => onChosen(raw) })
+        )
+      )
+    )
 
   /** A label, its "there is none" switch, and the text box the switch disables.
     *

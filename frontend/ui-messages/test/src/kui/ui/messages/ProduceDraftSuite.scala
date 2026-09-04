@@ -171,4 +171,44 @@ final class ProduceDraftSuite extends FunSuite {
     assertEquals(document.ranges.head.from.value, 41284L)
     assertEquals(document.ranges.head.until.value, 41285L)
   }
+
+  // --- The serde choice -------------------------------------------------------------------------
+
+  test("anEmptyFormNamesNoSerdeSoTheServiceResolvesTheOneItWouldReadBackWith") {
+    // The default has to send *nothing*, not the empty string: a blank name would reach the service as a
+    // serde it cannot resolve and would turn the case that must always work into a 400.
+    val request = ProduceDraft.empty(topic).request
+    assertEquals(request.map(_._2.keySerde), Right(None))
+    assertEquals(request.map(_._2.valueSerde), Right(None))
+  }
+
+  test("aChosenSerdeIsSentAndSurroundingSpaceIsNotPartOfIt") {
+    val draft = ProduceDraft.empty(topic).copy(keySerde = "Int64", valueSerde = "  Json  ")
+    assertEquals(draft.request.map(_._2.keySerde), Right(Some("Int64")))
+    assertEquals(draft.request.map(_._2.valueSerde), Right(Some("Json")))
+  }
+
+  test("republishingStartsOnTheSerdeTheRecordWasReadWith") {
+    // The one mistake this form can make that leaves a topic worse than it found it is writing a record
+    // with a serde the reader cannot read back. Republish therefore starts on the answer that round-trips,
+    // and choosing anything else is a deliberate act.
+    val draft = ProduceDraft.of(topic, record(key = payload("k1"), value = payload("42")))
+    assertEquals(draft.keySerde, "String")
+    assertEquals(draft.valueSerde, "String")
+  }
+
+  test("aSerdeThePickerCannotShowFallsBackToAutomaticRatherThanIntoAMenuWithNoSuchOption") {
+    // A deployment that configured its own serde, or a record from a newer KUI. Writing the name into a
+    // `select` that has no such `option` leaves the control showing one thing and the form holding another.
+    val exotic = DecodedPayloadDto(text = "x", kind = DecodedPayloadDto.Kind.Text, serde = "AwsGlue", properties = Map.empty)
+    val draft = ProduceDraft.of(topic, record(key = exotic, value = exotic))
+    assertEquals(draft.keySerde, SerdeChoices.Automatic)
+    assertEquals(draft.valueSerde, SerdeChoices.Automatic)
+    assertEquals(draft.request.map(_._2.keySerde), Right(None))
+  }
+
+  test("theBrowseBarAndThePublishFormOfferExactlyTheSameSerdes") {
+    // Two lists maintained apart is how "publish with a serde nobody can read back" becomes possible.
+    assertEquals(MessagesPage.Serdes, SerdeChoices.options)
+  }
 }

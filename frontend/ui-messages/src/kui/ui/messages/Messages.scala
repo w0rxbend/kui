@@ -151,6 +151,15 @@ object Messages {
   val ProduceAddHeader: String = "Add a header"
   val ProduceRemoveHeader: String = "Remove"
 
+  /** The two publish-form serde choices.
+    *
+    * "as" rather than "serde", and phrased the same way as the browse bar's "Key as" / "Value as", because
+    * the two controls are the same choice pointed in opposite directions and reading them the same way is
+    * what makes that obvious.
+    */
+  val ProduceKeySerdeLabel: String = "Write key as"
+  val ProduceValueSerdeLabel: String = "Write value as"
+
   val ProduceCountLabel: String = "Copies"
   val ProduceCountHint: String =
     "How many identical records to publish. One is the ordinary case; more is for filling a topic while " +

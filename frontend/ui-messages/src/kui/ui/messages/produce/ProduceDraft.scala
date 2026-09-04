@@ -3,6 +3,7 @@ package kui.ui.messages.produce
 import kui.contracts.message.{DecodedPayloadDto, HeaderDto}
 import kui.kernel.{PartitionId, TopicName}
 import kui.message.contract.{MessageDto, ProduceRequestDto}
+import kui.ui.messages.SerdeChoices
 
 /** What somebody has typed into the publish form, before it is a request.
   *
@@ -32,6 +33,11 @@ final case class ProduceDraft(
     value: String,
     isTombstone: Boolean,
     headers: List[(String, String)],
+    /** How the key is turned into bytes, or [[kui.ui.messages.SerdeChoices.Automatic]] — the empty string —
+      * to let the service resolve the same serde it would read the record back with.
+      */
+    keySerde: String,
+    valueSerde: String,
     count: String
 ) {
 
@@ -59,12 +65,13 @@ final case class ProduceDraft(
         // somebody clears.
         value = Option.unless(isTombstone)(value),
         headers = named.map((name, text) => HeaderDto(name, Some(text))),
-        // No serde is named, so the service resolves the same one it would read the record back with.
-        // Offering a picker before the resolution is visible on the browse screen would let somebody
-        // publish with a serde they cannot read back, which is the one mistake this form can make that
-        // leaves a topic worse than it found it.
-        keySerde = None,
-        valueSerde = None,
+        // Empty means "let the service resolve it", which is the default and resolves the same serde the
+        // browse screen would decode the record with. A name is sent only when somebody chose one, so the
+        // one mistake this form can make that leaves a topic worse than it found it — writing with a serde
+        // the reader cannot read back — stays something you have to ask for rather than something you can
+        // do by leaving a control alone.
+        keySerde = ProduceDraft.chosen(keySerde),
+        valueSerde = ProduceDraft.chosen(valueSerde),
         count = copies
       )
     )
@@ -73,6 +80,13 @@ final case class ProduceDraft(
 object ProduceDraft {
 
   val TopicRequired: String = "A topic name is needed."
+
+  /** A chosen serde name, or `None` for "let the service decide".
+    *
+    * Blank is not a serde called "". An empty `Some("")` would reach the service as a name it cannot resolve
+    * and would turn the default — the case that must always work — into a 400.
+    */
+  def chosen(raw: String): Option[String] = Option(raw.trim).filter(_.nonEmpty)
 
   val PartitionNotANumber: String = "The partition has to be a whole number, or empty to let Kafka choose."
 
@@ -90,6 +104,8 @@ object ProduceDraft {
       value = "",
       isTombstone = false,
       headers = Nil,
+      keySerde = SerdeChoices.Automatic,
+      valueSerde = SerdeChoices.Automatic,
       count = "1"
     )
 
@@ -113,6 +129,11 @@ object ProduceDraft {
       value = textOf(record.value),
       isTombstone = !isPresent(record.value),
       headers = record.headers.toList.sortBy(_._1),
+      // The serde the record was *read* with, so republishing writes it back the way the reader will read
+      // it. That is the whole difference between this and picking a serde by hand: the form starts on the
+      // answer that round-trips, and changing it is a deliberate act.
+      keySerde = SerdeChoices.offered(record.key.serde),
+      valueSerde = SerdeChoices.offered(record.value.serde),
       count = "1"
     )
 

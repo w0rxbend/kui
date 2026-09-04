@@ -3,7 +3,6 @@ package kui.ui.messages
 import com.raquo.laminar.api.L
 import com.raquo.laminar.api.L.*
 
-import kui.kernel.serde.SerdeName
 import kui.kernel.{ClusterId, TopicName}
 import kui.message.contract.BrowseAddress
 import kui.ui.kernel.api.ApiClient
@@ -69,35 +68,10 @@ import kui.ui.messages.row.RecordTable
   */
 object MessagesPage {
 
-  /** The serdes the picker offers, as `(wire value, label)`, plus "Automatic" first.
-    *
-    * "Automatic" is the empty value and it is the default: the service already chooses per topic, says which
-    * it used on every record, and is right for almost every topic. The picker exists for the ones it is not —
-    * a key written as a big-endian long that autodetection reads as four characters of nonsense, a value the
-    * producer double-encoded — where without an override the only way to read the topic is to edit the
-    * deployment's configuration, which somebody investigating an incident cannot do.
-    *
-    * The names are `SerdeName`'s own constants and not literals: they are the spellings the service resolves
-    * against and the ones an operator already has in their configuration file, and a picker that offered a
-    * fifth spelling would send a name nothing answers to. A deployment that configures a serde beyond these
-    * is not offered it here — that needs the service to publish its list, which no endpoint does yet, and
-    * inventing a name in the browser would be a control that fails on the deployments it was added for.
+  /** The serdes the browse bar's two pickers offer, defined once for both directions in [[SerdeChoices]] —
+    * the publish form offers the same list, and the two must not drift.
     */
-  val Serdes: List[(String, String)] =
-    ("", Messages.SerdeAutomatic) ::
-      List(
-        SerdeName.String,
-        SerdeName.Json,
-        SerdeName.Int32,
-        SerdeName.Int64,
-        SerdeName.UInt32,
-        SerdeName.UInt64,
-        SerdeName.Uuid,
-        SerdeName.Base64,
-        SerdeName.Hex,
-        SerdeName.SchemaRegistry,
-        SerdeName.Fallback
-      ).map(name => name.value -> name.value)
+  val Serdes: List[(String, String)] = SerdeChoices.options
 
   /** The four starts the screen offers, as `(value, label)`. The values are the ones `BrowseQuery` reads. */
   val StartKinds: List[(String, String)] =
