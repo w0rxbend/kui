@@ -1,7 +1,11 @@
 package kui.ui.kernel.feature
 
+import scala.annotation.nowarn
+
 import com.raquo.waypoint.Route
 import io.circe.{HCursor, Json}
+
+import kui.kernel.ClusterId
 
 /** The half of a feature's registration that is **static data** (ADR-012 amendment 2).
   *
@@ -38,6 +42,20 @@ trait FeatureRoutes {
     * stale link behind.
     */
   def landing: Page
+
+  /** Where the sidebar entry goes **once a cluster has been chosen**.
+    *
+    * Almost every feature in KUI is about one cluster, and its front door is a URL with a cluster id in it.
+    * [[landing]] cannot supply that id: it is a constant, evaluated before anybody has chosen anything, so a
+    * cluster-scoped feature has to put a placeholder there. That placeholder used to reach the sidebar
+    * unchanged, and an empty path segment collapses — `/ui/clusters//topics` is `/ui/clusters/topics` — so
+    * every cluster-scoped entry in the navigation pointed at a URL that matched no route. Topics, Messages
+    * and Consumers were all reachable by typing an address and by no click anywhere in the product.
+    *
+    * A feature that is not cluster-scoped ignores the argument, which is why the default is [[landing]] and
+    * only the three cluster-scoped features override it.
+    */
+  def landingFor(@nowarn("msg=unused explicit parameter") cluster: ClusterId): Page = landing
 
   /** Every URL this feature owns, as patterns. Registered with the router at start-up.
     *

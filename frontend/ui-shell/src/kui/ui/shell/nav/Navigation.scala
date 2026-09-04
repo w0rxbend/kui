@@ -2,6 +2,7 @@ package kui.ui.shell.nav
 
 import com.raquo.laminar.api.L.*
 
+import kui.kernel.ClusterId
 import kui.ui.kernel.feature.FeatureRoutes
 import kui.ui.kernel.state.FeatureState
 import kui.ui.kernel.state.FeatureState.*
@@ -44,6 +45,16 @@ object Navigation {
     *   each feature's static registration paired with its live state. The registration supplies the label,
     *   the order and where the entry points, all of which are known before the feature has been downloaded;
     *   the signal supplies everything that changes.
+    * @param cluster
+    *   which cluster is currently chosen, or `None`. A feature whose `nav.requiresCluster` is true has a URL
+    *   with a cluster id in it, and its `landing` is a constant that cannot carry one — so the entry's
+    *   destination is built with [[FeatureRoutes.landingFor]] once a cluster is known, and the entry is left
+    *   out entirely until then.
+    *
+    * This is not a refinement. Before it existed the placeholder page went to the sidebar unchanged, and an
+    * empty path segment collapses: `/ui/clusters//topics` is `/ui/clusters/topics`, which matches no route.
+    * Every cluster-scoped entry in the navigation — Topics, Messages, Consumers — was a dead link, and the
+    * screens behind them could be reached only by typing an address. `NavigationSuite` pins it.
     * @param hideForbidden
     *   the `kui.ui.hideForbidden` switch of ADR-032. Some organisations consider the existence of a feature
     *   sensitive; most find a visible-but-disabled entry more helpful than a menu that changes shape per
@@ -51,18 +62,22 @@ object Navigation {
     */
   def items(
       features: List[(FeatureRoutes, Signal[FeatureState])],
+      cluster: Signal[Option[ClusterId]] = Val(None),
       hideForbidden: Boolean = false
   ): Signal[List[NavItem]] =
     if features.isEmpty then Val(shellItems.sortBy(_.order))
     else
       Signal
         .combineSeq(features.map((registration, state) => state.map(registration -> _)))
-        .map { pairs =>
+        .combineWith(cluster)
+        .map { (pairs, chosen) =>
           val visible = pairs.toList.collect {
-            case (registration, state) if !state.isHidden(hideForbidden) =>
+            case (registration, state)
+                if registration.nav.sidebar && !state.isHidden(hideForbidden) &&
+                  (!registration.nav.requiresCluster || chosen.isDefined) =>
               NavItem(
                 label = registration.nav.label,
-                page = registration.landing,
+                page = chosen.fold(registration.landing)(registration.landingFor),
                 testId = s"nav-${registration.id.value}",
                 state = state,
                 order = registration.nav.order

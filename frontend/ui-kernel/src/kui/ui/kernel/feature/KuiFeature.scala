@@ -40,13 +40,20 @@ final case class UnavailableReason(code: String, message: String, since: Option[
   *   registration order is a fact about the code and sidebar order is a product decision.
   * @param requiresCluster
   *   whether the entry means anything before a cluster is chosen. Topics do not; the cluster list does.
+  * @param sidebar
+  *   whether the sidebar shows this entry at all. Almost always yes. The message browser is the exception:
+  *   its URL names a topic as well as a cluster, the sidebar has no topic to name, and an entry that cannot
+  *   build its own destination is a link that goes nowhere. Its way in is the "Browse messages" link on the
+  *   topic page, which does know the topic. A feature still declares the rest of its `NavEntry` — a label and
+  *   an order — because the shell uses them wherever the feature is named outside the sidebar.
   */
 final case class NavEntry(
     featureId: FeatureId,
     label: String,
     icon: () => SvgElement,
     order: Int,
-    requiresCluster: Boolean
+    requiresCluster: Boolean,
+    sidebar: Boolean = true
 )
 
 /** Everything a host feature's page can tell a panel it did not write.

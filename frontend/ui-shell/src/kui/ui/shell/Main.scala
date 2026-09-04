@@ -226,7 +226,7 @@ object Shell {
     Layout(
       sidebar = Sidebar(
         router = router,
-        items = Navigation.items(states, hideForbidden = false),
+        items = Navigation.items(states, CurrentCluster.signal, hideForbidden = false),
         uiPrefix = uiPrefix,
         switcher = Some(
           ClusterSwitcher(

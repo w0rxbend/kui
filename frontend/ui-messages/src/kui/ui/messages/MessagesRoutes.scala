@@ -68,7 +68,12 @@ object MessagesRoutes extends FeatureRoutes {
       // Between Topics at 200 and Consumers at 300, which is where a reader looking for "the records" would
       // expect it: after the thing that holds them and before the thing that reads them.
       order = 250,
-      requiresCluster = true
+      requiresCluster = true,
+      // Not in the sidebar. A browse names a cluster *and a topic*, and the sidebar knows only the cluster;
+      // the entry used to be drawn anyway and pointed at `/ui/clusters//topics//messages`, which collapses
+      // to a URL matching no route. The way in is the "Browse messages" link on a topic's page, which is the
+      // only place in the product that knows which topic the user means.
+      sidebar = false
     )
 
   def routes(uiPrefix: String): scala.collection.immutable.List[Route[? <: Page, ?]] =

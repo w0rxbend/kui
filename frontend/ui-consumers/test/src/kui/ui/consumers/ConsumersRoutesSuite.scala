@@ -93,6 +93,13 @@ final class ConsumersRoutesSuite extends ScalaCheckSuite {
 
   test("theNavEntryNeedsAClusterAndSortsAfterTopics") {
     assert(ConsumersRoutes.nav.requiresCluster, "a consumer group belongs to a cluster")
+    // And because it does, the sidebar has to be told which cluster: `landing` holds a placeholder id, and
+    // a placeholder that reaches a URL becomes an empty segment, which collapses to a path matching no
+    // route at all.
+    assertEquals(
+      ConsumersRoutes.landingFor(kui.kernel.ClusterId.unsafe("prod-eu")),
+      ConsumersPageId.List("prod-eu")
+    )
     assertEquals(ConsumersRoutes.nav.featureId, FeatureId.Consumers)
     assert(ConsumersRoutes.nav.order > 200, "Brokers, Topics, then Consumers")
   }

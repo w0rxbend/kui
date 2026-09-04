@@ -10,6 +10,7 @@ import munit.FunSuite
 import org.scalajs.dom
 
 import kui.contracts.capability.{DegradedReason, ReasonCode}
+import kui.kernel.ClusterId
 import kui.ui.kernel.feature.{FeatureId, FeatureRoutes, NavEntry, Page}
 import kui.ui.kernel.component.Icon
 import kui.ui.kernel.state.FeatureState
@@ -40,17 +41,34 @@ class NavigationSuite extends FunSuite {
   }
 
   /** A feature registration that names no feature class, which is all the navigation ever needs. */
-  private final class StubRoutes(val id: FeatureId, label: String, sortOrder: Int) extends FeatureRoutes {
+  private final class StubRoutes(
+      val id: FeatureId,
+      label: String,
+      sortOrder: Int,
+      requiresCluster: Boolean = false,
+      inSidebar: Boolean = true
+  ) extends FeatureRoutes {
     val landing: Page = StubPage
     val nav: NavEntry =
-      NavEntry(id, label, () => Icon.dot, order = sortOrder, requiresCluster = false)
+      NavEntry(id, label, () => Icon.dot, order = sortOrder, requiresCluster = requiresCluster, sidebar = inSidebar)
+    override def landingFor(cluster: kui.kernel.ClusterId): Page = ClusterPage(cluster.value)
     def routes(uiPrefix: String): List[Route[? <: Page, ?]] =
-      List(Route.static(StubPage, root / "stub" / endOfSegments, uiPrefix))
+      List(
+        Route.static(StubPage, root / "stub" / endOfSegments, uiPrefix),
+        Route[ClusterPage, String](
+          encode = _.clusterId,
+          decode = ClusterPage(_),
+          pattern = root / "clusters" / segment[String] / "stub" / endOfSegments,
+          basePath = uiPrefix
+        )
+      )
     def encodePage(page: Page): Option[Json] = None
     def decodePage(tag: String, cursor: HCursor): Option[Page] = None
   }
 
   private case object StubPage extends Page
+
+  private final case class ClusterPage(clusterId: String) extends Page
 
   private val clusters = new StubRoutes(FeatureId.Clusters, "Clusters", 100)
 
@@ -68,9 +86,14 @@ class NavigationSuite extends FunSuite {
     )
 
   private def sidebarFor(states: (FeatureRoutes, Signal[FeatureState])*)(
-      hideForbidden: Boolean = false
+      hideForbidden: Boolean = false,
+      cluster: Option[ClusterId] = None
   ): HtmlElement =
-    Sidebar(routerFor(states.toList), Navigation.items(states.toList, hideForbidden), "/ui")
+    Sidebar(
+      routerFor(states.toList),
+      Navigation.items(states.toList, Val(cluster), hideForbidden = hideForbidden),
+      "/ui"
+    )
 
   private def entryOf(root: dom.Element, testId: String): Option[dom.Element] =
     Option(root.querySelector(s"[data-testid='$testId']"))
@@ -198,6 +221,41 @@ class NavigationSuite extends FunSuite {
       assert(entryOf(root, "nav-home").get eq home, "an unrelated entry must not be rebuilt")
       assert(clustersEntry(root) eq entry, "the affected entry is updated in place, not replaced")
       assert(entry.querySelector(s".${ShellCss.SidebarLinkDot}") != null)
+    }
+  }
+
+  // --- Cluster-scoped entries -------------------------------------------------------------------
+  //
+  // A feature whose URL names a cluster cannot state its own sidebar destination: `landing` is a
+  // constant evaluated before anybody has chosen anything, so it holds a placeholder cluster id of "".
+  // That placeholder used to be handed to the sidebar unchanged, and an empty path segment collapses —
+  // `/ui/clusters//stub` is `/ui/clusters/stub` — so the link matched no route at all. Topics, Messages
+  // and Consumers were every one of them a dead link in the running product. These three tests are
+  // what stop that returning.
+
+  private val scoped = new StubRoutes(FeatureId.Topics, "Topics", 200, requiresCluster = true)
+
+  private val hiddenFromSidebar =
+    new StubRoutes(FeatureId.Messages, "Messages", 250, requiresCluster = true, inSidebar = false)
+
+  test("aClusterScopedEntryIsLeftOutUntilAClusterIsChosen") {
+    mounted(sidebarFor(scoped -> Val(FeatureState.Ready))(cluster = None)) { root =>
+      assertEquals(entryOf(root, "nav-topics"), None)
+    }
+  }
+
+  test("aClusterScopedEntryLinksToTheChosenCluster") {
+    val chosen = ClusterId.from("prod").toOption
+    mounted(sidebarFor(scoped -> Val(FeatureState.Ready))(cluster = chosen)) { root =>
+      val href = entryOf(root, "nav-topics").flatMap(e => Option(e.getAttribute("href"))).getOrElse("")
+      assert(href.endsWith("/ui/clusters/prod/stub"), s"the entry linked to '$href'")
+    }
+  }
+
+  test("aFeatureThatIsNotASidebarDestinationIsNotDrawn") {
+    val chosen = ClusterId.from("prod").toOption
+    mounted(sidebarFor(hiddenFromSidebar -> Val(FeatureState.Ready))(cluster = chosen)) { root =>
+      assertEquals(entryOf(root, "nav-messages"), None)
     }
   }
 }

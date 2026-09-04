@@ -61,6 +61,9 @@ object ConsumersRoutes extends FeatureRoutes {
     */
   val landing: Page = ConsumersPageId.List("")
 
+  /** The cluster's consumer groups. */
+  override def landingFor(cluster: kui.kernel.ClusterId): Page = ConsumersPageId.List(cluster.value)
+
   val nav: NavEntry =
     NavEntry(
       featureId = id,
