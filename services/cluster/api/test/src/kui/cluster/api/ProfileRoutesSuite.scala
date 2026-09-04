@@ -116,11 +116,16 @@ final class ProfileRoutesSuite extends CatsEffectSuite {
     }
   }
 
-  test("noSecretAppearsInTheProfileResponse") {
-    // R-12 at the route: the fixture profile's every credential is the canary token.
+  test("theProfileCarriesTheSecurityMaterial") {
+    // The inversion ADR-046 makes. Until M2 this asserted the opposite, and correctly: there was no
+    // consumer that built a Kafka client from this document. There is one now, and a SCRAM password that
+    // did not survive the route is a topic service that cannot connect.
+    //
+    // The assertion that used to live here has not been dropped — it moved to `SecretLeakSuite`, which
+    // asserts over *every* declared endpoint that this is the only one a credential reaches.
     server().use(get(_, path)).map { response =>
-      assert(!response.body.contains(ClusterFixtures.Canary), response.body)
-      // The override map's key survives; its value never left the process.
+      assertEquals(response.code.code, 200, response.body)
+      assert(response.body.contains(ClusterFixtures.Canary), response.body)
       assert(response.body.contains("ssl.truststore.password"), response.body)
     }
   }

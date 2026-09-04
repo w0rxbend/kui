@@ -72,8 +72,10 @@ object ProfileEndpoints {
       .summary("A cluster's resolved connection settings, for another KUI service")
       .description(
         "The ETag is the profile's store version. A caller keeps the last profile it saw and re-fetches " +
-          "with If-None-Match; an unchanged profile answers 304 with no body. Every credential is " +
-          "removed: M1 has no consumer that builds a Kafka client from this."
+          "with If-None-Match; an unchanged profile answers 304 with no body. This document carries the " +
+          "cluster's credentials, because a consuming service builds a Kafka client from it (ADR-046). " +
+          "It is served on /internal/v1 only, to a caller with a signed principal; /internal/v1 must not " +
+          "be exposed outside the deployment network."
       )
       .tag("cluster")
 

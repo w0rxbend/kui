@@ -6,42 +6,63 @@ import io.circe.syntax.*
 import io.circe.{Codec, HCursor, Json}
 import sttp.tapir.Schema
 
+import kui.cluster.contract.dto.ClusterConnectionCodecs.given
 import kui.contracts.ErrorEnvelope.given
 import kui.contracts.KernelCodecs.given
 import kui.contracts.KernelSchemas.given
-import kui.contracts.cluster.ClusterSecurityDto
 import kui.kernel.ClusterId
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterConnection,
+  ClusterSecurity
+}
 
-/** A cluster's resolved connection profile, as a consumer of the cluster service needs to see it.
+/** A cluster's resolved connection settings, for another KUI service.
   *
-  * `version` is the metadata store record's optimistic version (ADR-042), and it is also the value of the
-  * `ETag` header. A consumer compares versions, never payloads: rebuilding every Kafka client is expensive
-  * and must happen when the profile actually changed, not when a scrape happened to re-serialise it.
+  * ==Why this document carries credentials==
   *
-  * **Nothing secret is here, and that is a decision for M1 specifically.** ADR-036 says services fetch
-  * "resolved profiles", and a service that must build its own Kafka client eventually needs credentials — but
-  * no such service exists yet, and shipping a credential-distributing endpoint a milestone before its first
-  * caller means shipping an untested secret path. So the username, the password, the keystore bytes and the
-  * rendered JAAS string are absent, and `propertyKeys` publishes the *keys* of ADR-022's override map without
-  * any of its values, because that map may legitimately contain `sasl.jaas.config`. M2's first consumer
-  * decides how it gets credentials: a second endpoint gated on the caller's audience, or reading the store
-  * itself with the key it already holds. Recorded as milestone-scoped debt.
+  * It is served only on `/internal/v1`, only to a caller carrying a signed principal (ADR-020), and it is the
+  * mechanism ADR-036 names for exactly this purpose: non-owner services "keep receiving the resolved
+  * `ClusterProfile` over the internal contract", and "keystore bytes travel inside the signed inter-service
+  * channel". ADR-046 is the decision, taken at M2's first consumer, and it closes `ARCHITECTURE.md` §14's
+  * open question.
   *
-  * @param propertyKeys
-  *   the keys of the `properties` override map, sorted. A consumer can see *that* a cluster overrides
-  *   `ssl.endpoint.identification.algorithm` without being told what it was set to
+  * The alternative, considered and rejected, was for every Kafka-facing service to become a metadata-store
+  * client holding `kui.store.encryptionKey`. That would put the one key whose loss makes every stored secret
+  * unrecoverable into four processes instead of one, and would give write-capable credentials for
+  * `__kui_config` to three services that must never write it.
+  *
+  * Every credential inside `security` and `properties` is a `Secret`, so `toString`, log interpolation and
+  * span attributes render `***`. The only encoder in KUI that can write one out is `ClusterConnectionCodecs`,
+  * which this document uses and nothing on `/api/v1` does; `kui.cluster.api.SecretLeakSuite` asserts that as
+  * a fact about every declared endpoint rather than as a convention.
+  *
+  * ==What is deliberately absent==
+  *
+  * Keystore *bytes* stored in `__kui_files` are not here yet. ADR-036 says they travel on this channel and
+  * they will, but nothing in M2 configures such a keystore, and shipping a field no producer ever fills is
+  * the permanently-`null` field CLAPI-001 already ruled against. `StoreSource.Inline` exists in the shape
+  * above, so the field arrives with its first producer and not before.
+  *
+  * @param version
+  *   the store version this profile was resolved at; it is also the `ETag`. A consumer compares it rather
+  *   than diffing the document, so an unchanged profile costs one 304. It is on the body **as well as** in
+  *   the header because the header is an HTTP concern that an in-process client (the all-in-one build) does
+  *   not have, and the consumer's rebuild decision must work identically in both deployment shapes
+  * @param updatedAt
+  *   when the cluster service resolved it, for a consumer's own staleness reporting
   */
 final case class ClusterProfileDto(
     id: ClusterId,
     name: String,
     version: Long,
     readOnly: Boolean,
-    bootstrapServers: String,
-    security: ClusterSecurityDto,
-    adminTimeoutMs: Long,
-    adminBatchSize: Int,
-    adminParallelism: Int,
-    propertyKeys: List[String],
+    bootstrapServers: BootstrapServers,
+    security: ClusterSecurity,
+    properties: ClientProperties,
+    admin: AdminTuning,
     updatedAt: Instant
 )
 
@@ -61,12 +82,10 @@ object ClusterProfileDto {
         name <- cursor.get[String]("name")
         version <- cursor.get[Long]("version")
         readOnly <- cursor.getOrElse[Boolean]("readOnly")(false)
-        bootstrapServers <- cursor.get[String]("bootstrapServers")
-        security <- cursor.get[ClusterSecurityDto]("security")
-        adminTimeoutMs <- cursor.get[Long]("adminTimeoutMs")
-        adminBatchSize <- cursor.get[Int]("adminBatchSize")
-        adminParallelism <- cursor.get[Int]("adminParallelism")
-        propertyKeys <- cursor.getOrElse[List[String]]("propertyKeys")(Nil)
+        bootstrapServers <- cursor.get[BootstrapServers]("bootstrapServers")
+        security <- cursor.get[ClusterSecurity]("security")
+        properties <- cursor.getOrElse[ClientProperties]("properties")(ClientProperties.empty)
+        admin <- cursor.get[AdminTuning]("admin")
         updatedAt <- cursor.get[Instant]("updatedAt")
       } yield ClusterProfileDto(
         id,
@@ -75,10 +94,8 @@ object ClusterProfileDto {
         readOnly,
         bootstrapServers,
         security,
-        adminTimeoutMs,
-        adminBatchSize,
-        adminParallelism,
-        propertyKeys,
+        properties,
+        admin,
         updatedAt
       ),
     (dto: ClusterProfileDto) =>
@@ -89,19 +106,26 @@ object ClusterProfileDto {
         "readOnly" -> dto.readOnly.asJson,
         "bootstrapServers" -> dto.bootstrapServers.asJson,
         "security" -> dto.security.asJson,
-        "adminTimeoutMs" -> dto.adminTimeoutMs.asJson,
-        "adminBatchSize" -> dto.adminBatchSize.asJson,
-        "adminParallelism" -> dto.adminParallelism.asJson,
-        "propertyKeys" -> dto.propertyKeys.asJson,
+        "properties" -> dto.properties.asJson,
+        "admin" -> dto.admin.asJson,
         "updatedAt" -> dto.updatedAt.asJson
       )
   )
 
   given Schema[ClusterProfileDto] = Schema
     .derived[ClusterProfileDto]
-    .description("A cluster's resolved connection settings, with every credential removed")
+    .description("A cluster's resolved connection settings, credentials included. Internal channel only")
 
   given CanEqual[ClusterProfileDto, ClusterProfileDto] = CanEqual.derived
+
+  /** Everything a Kafka client is built from, in the one shape `libs/kafka` takes.
+    *
+    * It lives here, on the producing side's own type, so that the reconstruction happens once. A consumer
+    * that assembled a `ClusterConnection` itself would be the second place the field order and the defaults
+    * are decided, which is the shape of defect ADR-046 exists to prevent.
+    */
+  def connectionOf(dto: ClusterProfileDto): ClusterConnection =
+    ClusterConnection(dto.id, dto.bootstrapServers, dto.security, dto.properties, dto.admin)
 }
 
 /** One change notification.

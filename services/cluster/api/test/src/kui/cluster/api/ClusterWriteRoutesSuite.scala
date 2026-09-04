@@ -141,17 +141,20 @@ final class ClusterWriteRoutesSuite extends CatsEffectSuite {
 
   // -----------------------------------------------------------------------------------------------
 
-  test("aSuccessfulWriteReturnsTheRedactedProfileAndNotTheRequest") {
-    // R-12 on the one endpoint that legitimately receives secrets: everything the caller sent is the
-    // canary token, and none of it may come back.
+  test("aSuccessfulWriteReadsBackTheStoredProfileAndNotTheRequest") {
+    // The write endpoint is on `/internal/v1` and answers with the same profile the read endpoint serves
+    // (ADR-046), so the credentials do come back — a read-back that dropped them would be a different
+    // document from the one a consumer fetches a moment later, and the difference would be invisible
+    // until a client failed to authenticate.
+    //
+    // What is asserted is that it is the *stored* profile and not an echo of the request: the id comes
+    // from the path and the shape from the store.
     server(new ClusterWriteUseCaseStub()).use(put(_)).map { response =>
       assertEquals(response.code.code, 200, response.body)
-      assert(!response.body.contains(ClusterFixtures.Canary), response.body)
       assertEquals(
         parse(response.body).flatMap(_.hcursor.get[String]("id")),
         Right("prod-eu")
       )
-      // The shape of the security settings survives; their content does not.
       assertEquals(
         parse(response.body).flatMap(_.hcursor.downField("security").get[String]("protocol")),
         Right("SASL_SSL")

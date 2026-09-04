@@ -74,9 +74,15 @@ final class ClusterWriteDtosSuite extends FunSuite {
     assert(printed.contains("SASL_SSL"), printed)
   }
 
-  test("the response to a write has no field a credential could travel back in") {
-    // The endpoint answers with the redacted profile. Asserted on the *type*: a field that could hold one
-    // would have to be added here first.
+  test("the write reads back the internal profile, on the internal channel and nowhere else") {
+    // In M1 this asserted that the response had no field a credential could travel back in. ADR-046
+    // changed that: the write endpoint is on `/internal/v1`, it answers with the same credential-bearing
+    // profile the read endpoint serves, and a read-back that dropped the credentials would be a
+    // different document from the one a consumer fetches a moment later.
+    //
+    // What is asserted instead is the property that actually matters, and it is asserted on the *type*:
+    // the field list is fixed here, so adding a field to the profile is a failing test in the file whose
+    // subject is what may travel back.
     val profileFields = List(
       "id",
       "name",
@@ -84,10 +90,8 @@ final class ClusterWriteDtosSuite extends FunSuite {
       "readOnly",
       "bootstrapServers",
       "security",
-      "adminTimeoutMs",
-      "adminBatchSize",
-      "adminParallelism",
-      "propertyKeys",
+      "properties",
+      "admin",
       "updatedAt"
     )
 
@@ -96,15 +100,19 @@ final class ClusterWriteDtosSuite extends FunSuite {
       name = "Production EU",
       version = 1L,
       readOnly = false,
-      bootstrapServers = "broker-1.example.com:9093",
-      security = kui.contracts.cluster.ClusterSecurityDto("SASL_SSL", Some("SCRAM-SHA-512"), true, false),
-      adminTimeoutMs = 15000L,
-      adminBatchSize = 200,
-      adminParallelism = 4,
-      propertyKeys = List("ssl.endpoint.identification.algorithm"),
+      bootstrapServers = kui.kernel.cluster.BootstrapServers.unsafe("broker-1.example.com:9093"),
+      security = kui.kernel.cluster.ClusterSecurity.Plaintext,
+      properties = kui.kernel.cluster.ClientProperties.empty,
+      admin = kui.kernel.cluster.AdminTuning.default,
       updatedAt = java.time.Instant.parse("2026-09-03T10:11:12Z")
     ).asJson
 
     assertEquals(encoded.asObject.map(_.keys.toList), Some(profileFields))
+
+    // And the channel: `/internal/v1`, which is what makes carrying credentials on it legitimate.
+    assert(
+      ClusterWriteEndpoints.put.showPathTemplate().startsWith("/internal/v1/"),
+      ClusterWriteEndpoints.put.showPathTemplate()
+    )
   }
 }

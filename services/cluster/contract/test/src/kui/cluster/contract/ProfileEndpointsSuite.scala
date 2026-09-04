@@ -11,31 +11,68 @@ import sttp.tapir.{EndpointIO, EndpointInput}
 
 import kui.cluster.contract.dto.*
 import kui.contracts.KuiEndpoint
-import kui.contracts.cluster.ClusterSecurityDto
-import kui.kernel.ClusterId
+import kui.kernel.cluster.{
+  AdminTuning,
+  BootstrapServers,
+  ClientProperties,
+  ClusterSecurity,
+  KeyStoreRef,
+  SaslMechanism,
+  SaslProtocol,
+  StoreSource,
+  StoreType,
+  TlsConfig,
+  TrustStoreRef
+}
+import kui.kernel.{ClusterId, Secret}
 
-/** That the profile a service fetches carries no credential, and that its ETag is the store version.
+/** That the profile a service fetches carries exactly what a Kafka client is built from, and that its ETag
+  * is the store version.
   *
-  * The redaction assertion here is the second of R-12's three: the contract suite (CLAPI-001) covers the
-  * cluster DTOs, this one covers the profile a service-to-service caller receives, and the store's own suite
-  * covers the raw topic record. Three layers, three separate assertions, because a secret that leaks does so
-  * through whichever of them nobody wrote.
+  * M1's version of this suite asserted the opposite — that the document carried no credential — because M1
+  * had no consumer that built a client from it. ADR-046 is the decision that changed that, and the
+  * corresponding assertion moved rather than disappeared: `kui.cluster.api.SecretLeakSuite` now asserts, over
+  * every declared endpoint, that this is the *only* one a credential can reach.
   */
 final class ProfileEndpointsSuite extends ScalaCheckSuite {
 
   private val at = Instant.parse("2026-09-03T10:11:12Z")
 
+  /** A SCRAM-over-TLS cluster with one plain property override and one sensitive one: the shape that
+    * exercises every kind of credential this document can carry.
+    */
   private val profile = ClusterProfileDto(
     id = ClusterId.unsafe("prod-eu"),
     name = "Production EU",
     version = 7L,
     readOnly = false,
-    bootstrapServers = "broker-1.example.com:9093,broker-2.example.com:9093",
-    security = ClusterSecurityDto("SASL_SSL", Some("SCRAM-SHA-512"), true, false),
-    adminTimeoutMs = 15000L,
-    adminBatchSize = 200,
-    adminParallelism = 4,
-    propertyKeys = List("sasl.jaas.config", "ssl.endpoint.identification.algorithm"),
+    bootstrapServers = BootstrapServers.unsafe("broker-1.example.com:9093,broker-2.example.com:9093"),
+    security = ClusterSecurity.Sasl(
+      SaslProtocol.SaslSsl,
+      SaslMechanism.ScramSha512("kui-service", Secret("hunter2")),
+      Some(
+        TlsConfig(
+          truststore = Some(
+            TrustStoreRef(
+              StoreSource.FromPath("/etc/kui/truststore.p12"),
+              Some(Secret("truststore-pass")),
+              StoreType.Pkcs12
+            )
+          ),
+          keystore = None,
+          verifyHostname = true,
+          enabledProtocols = None,
+          cipherSuites = None
+        )
+      )
+    ),
+    properties = ClientProperties.fromRaw(
+      Map(
+        "ssl.endpoint.identification.algorithm" -> "https",
+        "ssl.truststore.password" -> "truststore-pass"
+      )
+    ),
+    admin = AdminTuning.default,
     updatedAt = at
   )
 
@@ -68,31 +105,85 @@ final class ProfileEndpointsSuite extends ScalaCheckSuite {
     assertEquals(change.asJson.as[ClusterChangeDto], Right(change))
   }
 
-  test("noSecretFieldExistsOnTheProfileDto") {
-    // Built as if every credential a profile can hold were the same distinctive token. The DTO has nowhere
-    // to put one, so the token can only reach the wire through a field that should not exist.
-    val canary = "kui-secret-canary"
-    val leaky = profile.copy(
-      name = "Production EU",
-      propertyKeys = List("sasl.jaas.config", "ssl.truststore.password")
+  test("theProfileCarriesTheSecurityMaterialItsConsumerNeeds") {
+    // The inverse of the assertion this suite carried in M1, and the inversion is the point of ADR-046:
+    // until M2 there was no consumer that built a Kafka client from this document, so it shipped with
+    // every credential removed. There is one now, and a profile without the password is a profile that
+    // cannot open a connection.
+    val encoded = profile.asJson.noSpaces
+
+    assert(encoded.contains("hunter2"), encoded)
+    assert(encoded.contains("truststore-pass"), encoded)
+    assert(encoded.contains("kui-service"), encoded)
+  }
+
+  test("everySecurityMechanismRoundTripsWithItsSecretsIntact") {
+    // A consumer that decoded a mechanism into the wrong case, or lost a password on the way, would fail
+    // to authenticate against a production cluster and nowhere else. One case per mechanism, because
+    // that is the granularity at which this can be silently wrong.
+    val mechanisms = List(
+      SaslMechanism.Plain("user", Secret("p1")),
+      SaslMechanism.ScramSha256("user", Secret("p2")),
+      SaslMechanism.ScramSha512("user", Secret("p3")),
+      SaslMechanism.Gssapi("kafka", "kui@EXAMPLE", Some("/etc/kui.keytab"), true, false),
+      SaslMechanism.OAuthBearer("https://issuer/token", "kui", Secret("p4"), Some("kafka")),
+      SaslMechanism.AwsMskIam(Some("default"), Some("arn:aws:iam::1:role/kui"), Some("eu-west-1")),
+      SaslMechanism.AzureEntra("kui.servicebus.windows.net", None),
+      SaslMechanism.GcpManagedKafka
     )
-    val encoded = leaky.asJson.noSpaces
 
-    assert(!encoded.contains(canary), encoded)
-    // The keys survive, so an operator can see *that* a cluster overrides a property...
-    assert(encoded.contains("sasl.jaas.config"), encoded)
-    // ...and no *field* could carry what it was set to. The check is on field names, not on the whole
-    // document, because "ssl.truststore.password" is a perfectly good thing for propertyKeys to contain -
-    // the key is public, the value is not, and that distinction is the whole point of the field.
-    val fieldNames = leaky.asJson.asObject.toList.flatMap(_.keys) ++
-      leaky.security.asJson.asObject.toList.flatMap(_.keys)
+    mechanisms.foreach { mechanism =>
+      val security = ClusterSecurity.Sasl(SaslProtocol.SaslSsl, mechanism, None)
+      val candidate = profile.copy(security = security)
+      assertEquals(candidate.asJson.as[ClusterProfileDto], Right(candidate), mechanism.toString)
+    }
+  }
 
-    List("password", "keystore", "truststore", "username", "jaas", "secret", "credential").foreach(word =>
-      assert(
-        !fieldNames.exists(name => name.toLowerCase.contains(word) && !name.endsWith("Configured")),
-        s"'$word' is a field name: $fieldNames"
+  test("everySecurityModeRoundTrips") {
+    List(
+      ClusterSecurity.Plaintext,
+      ClusterSecurity.Ssl(TlsConfig.default),
+      ClusterSecurity.Ssl(
+        TlsConfig(
+          truststore = Some(TrustStoreRef(StoreSource.Inline(Secret("YmFzZTY0")), None, StoreType.Jks)),
+          keystore = Some(
+            KeyStoreRef(
+              StoreSource.Inline(Secret("a2V5")),
+              Some(Secret("store")),
+              Some(Secret("key")),
+              StoreType.Pem
+            )
+          ),
+          verifyHostname = false,
+          enabledProtocols = Some(List("TLSv1.3")),
+          cipherSuites = Some(List("TLS_AES_256_GCM_SHA384"))
+        )
       )
-    )
+    ).foreach { security =>
+      val candidate = profile.copy(security = security)
+      assertEquals(candidate.asJson.as[ClusterProfileDto], Right(candidate), security.toString)
+    }
+  }
+
+  test("aPropertyOverrideKeepsItsSensitivityAcrossTheWire") {
+    // Losing the flag would mean the consuming service redacts nothing, which is how `sasl.jaas.config`
+    // reaches a log line two services away from the one that was careful about it.
+    val decoded = profile.asJson.as[ClusterProfileDto].fold(failure => fail(failure.message), identity)
+
+    assertEquals(decoded.properties.redactedValues("ssl.truststore.password"), "***")
+    assertEquals(decoded.properties.redactedValues("ssl.endpoint.identification.algorithm"), "https")
+    assertEquals(decoded.properties.unsafeValues("ssl.truststore.password"), "truststore-pass")
+  }
+
+  test("theConnectionRebuiltFromTheProfileIsTheOneKafkaNeeds") {
+    val connection = ClusterProfileDto.connectionOf(profile)
+
+    assertEquals(connection.id, profile.id)
+    assertEquals(connection.bootstrapServers, profile.bootstrapServers)
+    assertEquals(connection.security.securityProtocol, "SASL_SSL")
+    assertEquals(connection.security.saslMechanism.map(_.wireName), Some("SCRAM-SHA-512"))
+    // And it still refuses to print itself.
+    assert(!connection.toString.contains("hunter2"), connection.toString)
   }
 
   test("theProfilePathIsUnderInternalV1AndCarriesTheSignedPrincipal") {

@@ -149,18 +149,23 @@ object ClusterMapping {
   /** The profile another KUI service fetches, with every credential removed and the override map reduced to
     * its keys (CLAPI-003 explains why the values do not travel in M1).
     */
+  /** The internal profile, credentials and all (ADR-046).
+    *
+    * This is the one mapping in the cluster service that does not redact. `ClusterRowDto` and its friends
+    * still map through `security` below, which produces the four-field shape with nothing secret in it, and
+    * `SecretLeakSuite` asserts that the two cannot be confused: the sentinel it plants reaches exactly one
+    * response body.
+    */
   def profile(profile: ClusterProfile, updatedAt: Instant): ClusterProfileDto =
     ClusterProfileDto(
       id = profile.id,
       name = profile.label,
       version = profile.version.value,
       readOnly = profile.readOnly,
-      bootstrapServers = profile.bootstrap.value,
-      security = security(profile.security),
-      adminTimeoutMs = profile.admin.apiTimeout.toMillis,
-      adminBatchSize = profile.admin.topicChunkSize,
-      adminParallelism = profile.admin.parallelism,
-      propertyKeys = profile.properties.keys.toList.sorted,
+      bootstrapServers = profile.bootstrap,
+      security = profile.security,
+      properties = profile.properties,
+      admin = profile.admin,
       updatedAt = updatedAt
     )
 

@@ -476,7 +476,7 @@
           "cluster"
         ],
         "summary" : "A cluster's resolved connection settings, for another KUI service",
-        "description" : "The ETag is the profile's store version. A caller keeps the last profile it saw and re-fetches with If-None-Match; an unchanged profile answers 304 with no body. Every credential is removed: M1 has no consumer that builds a Kafka client from this.",
+        "description" : "The ETag is the profile's store version. A caller keeps the last profile it saw and re-fetches with If-None-Match; an unchanged profile answers 304 with no body. This document carries the cluster's credentials, because a consuming service builds a Kafka client from it (ADR-046). It is served on /internal/v1 only, to a caller with a signed principal; /internal/v1 must not be exposed outside the deployment network.",
         "operationId" : "cluster.profile",
         "parameters" : [
           {
@@ -698,6 +698,55 @@
   },
   "components" : {
     "schemas" : {
+      "AdminTuningDocument" : {
+        "title" : "AdminTuningDocument",
+        "description" : "Admin client timeouts, chunk sizes and refresh intervals, in whole milliseconds",
+        "type" : "object",
+        "required" : [
+          "requestTimeoutMs",
+          "apiTimeoutMs",
+          "topicChunkSize",
+          "partitionChunkSize",
+          "groupChunkSize",
+          "parallelism",
+          "metadataRefreshMs",
+          "capabilityRefreshMs"
+        ],
+        "properties" : {
+          "requestTimeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "apiTimeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "topicChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitionChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "groupChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "parallelism" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "metadataRefreshMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "capabilityRefreshMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
       "AdminTuningWrite" : {
         "title" : "AdminTuningWrite",
         "description" : "Admin client timeouts, batching and concurrency",
@@ -719,6 +768,36 @@
           "parallelism" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "AwsMskIam" : {
+        "title" : "AwsMskIam",
+        "type" : "object",
+        "properties" : {
+          "profile" : {
+            "type" : "string"
+          },
+          "roleArn" : {
+            "type" : "string"
+          },
+          "stsRegion" : {
+            "type" : "string"
+          }
+        }
+      },
+      "AzureEntra" : {
+        "title" : "AzureEntra",
+        "type" : "object",
+        "required" : [
+          "namespace"
+        ],
+        "properties" : {
+          "namespace" : {
+            "type" : "string"
+          },
+          "tokenEndpoint" : {
+            "type" : "string"
           }
         }
       },
@@ -811,7 +890,7 @@
       },
       "ClusterProfileDto" : {
         "title" : "ClusterProfileDto",
-        "description" : "A cluster's resolved connection settings, with every credential removed",
+        "description" : "A cluster's resolved connection settings, credentials included. Internal channel only",
         "type" : "object",
         "required" : [
           "id",
@@ -820,9 +899,8 @@
           "readOnly",
           "bootstrapServers",
           "security",
-          "adminTimeoutMs",
-          "adminBatchSize",
-          "adminParallelism",
+          "properties",
+          "admin",
           "updatedAt"
         ],
         "properties" : {
@@ -841,28 +919,17 @@
             "type" : "boolean"
           },
           "bootstrapServers" : {
+            "description" : "host:port[,host:port] as Kafka's bootstrap.servers wants it",
             "type" : "string"
           },
           "security" : {
-            "$ref" : "#/components/schemas/ClusterSecurityDto"
+            "$ref" : "#/components/schemas/ClusterSecurity"
           },
-          "adminTimeoutMs" : {
-            "type" : "integer",
-            "format" : "int64"
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_PropertyValue"
           },
-          "adminBatchSize" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "adminParallelism" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "propertyKeys" : {
-            "type" : "array",
-            "items" : {
-              "type" : "string"
-            }
+          "admin" : {
+            "$ref" : "#/components/schemas/AdminTuningDocument"
           },
           "updatedAt" : {
             "description" : "RFC 3339 timestamp in UTC",
@@ -903,6 +970,20 @@
             "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
+      },
+      "ClusterSecurity" : {
+        "title" : "ClusterSecurity",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Plaintext"
+          },
+          {
+            "$ref" : "#/components/schemas/Sasl"
+          },
+          {
+            "$ref" : "#/components/schemas/Ssl"
+          }
+        ]
       },
       "ClusterSecurityDto" : {
         "title" : "ClusterSecurityDto",
@@ -1066,6 +1147,87 @@
           }
         }
       },
+      "FromPath" : {
+        "title" : "FromPath",
+        "type" : "object",
+        "required" : [
+          "path"
+        ],
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          }
+        }
+      },
+      "GcpManagedKafka" : {
+        "title" : "GcpManagedKafka",
+        "type" : "object"
+      },
+      "Gssapi" : {
+        "title" : "Gssapi",
+        "type" : "object",
+        "required" : [
+          "serviceName",
+          "principal",
+          "useTicketCache",
+          "storeKey"
+        ],
+        "properties" : {
+          "serviceName" : {
+            "type" : "string"
+          },
+          "principal" : {
+            "type" : "string"
+          },
+          "keyTab" : {
+            "type" : "string"
+          },
+          "useTicketCache" : {
+            "type" : "boolean"
+          },
+          "storeKey" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "Inline" : {
+        "title" : "Inline",
+        "type" : "object",
+        "required" : [
+          "base64"
+        ],
+        "properties" : {
+          "base64" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "KeyStoreRef" : {
+        "title" : "KeyStoreRef",
+        "type" : "object",
+        "required" : [
+          "source",
+          "storeType"
+        ],
+        "properties" : {
+          "source" : {
+            "$ref" : "#/components/schemas/StoreSource"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "keyPassword" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "storeType" : {
+            "description" : "JKS, PKCS12 or PEM",
+            "type" : "string"
+          }
+        }
+      },
       "LivenessReport" : {
         "title" : "LivenessReport",
         "description" : "Whether the process should be restarted",
@@ -1104,12 +1266,88 @@
           "$ref" : "#/components/schemas/ClusterCapability"
         }
       },
+      "Map_PropertyValue" : {
+        "title" : "Map_PropertyValue",
+        "description" : "Raw Kafka client property overrides",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/PropertyValue"
+        }
+      },
       "Map_String" : {
         "title" : "Map_String",
         "type" : "object",
         "additionalProperties" : {
           "type" : "string"
         }
+      },
+      "OAuthBearer" : {
+        "title" : "OAuthBearer",
+        "type" : "object",
+        "required" : [
+          "tokenEndpoint",
+          "clientId",
+          "clientSecret"
+        ],
+        "properties" : {
+          "tokenEndpoint" : {
+            "type" : "string"
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "clientSecret" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "scope" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Plain" : {
+        "title" : "Plain",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "Plain1" : {
+        "title" : "Plain",
+        "type" : "object",
+        "required" : [
+          "value"
+        ],
+        "properties" : {
+          "value" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Plaintext" : {
+        "title" : "Plaintext",
+        "type" : "object"
+      },
+      "PropertyValue" : {
+        "title" : "PropertyValue",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Plain1"
+          },
+          {
+            "$ref" : "#/components/schemas/Sensitive"
+          }
+        ]
       },
       "ReadinessReport" : {
         "title" : "ReadinessReport",
@@ -1154,6 +1392,102 @@
           }
         }
       },
+      "Sasl" : {
+        "title" : "Sasl",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "mechanism"
+        ],
+        "properties" : {
+          "protocol" : {
+            "description" : "SASL_PLAINTEXT or SASL_SSL",
+            "type" : "string"
+          },
+          "mechanism" : {
+            "$ref" : "#/components/schemas/SaslMechanism"
+          },
+          "tls" : {
+            "$ref" : "#/components/schemas/TlsConfig"
+          }
+        }
+      },
+      "SaslMechanism" : {
+        "title" : "SaslMechanism",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/AwsMskIam"
+          },
+          {
+            "$ref" : "#/components/schemas/AzureEntra"
+          },
+          {
+            "$ref" : "#/components/schemas/GcpManagedKafka"
+          },
+          {
+            "$ref" : "#/components/schemas/Gssapi"
+          },
+          {
+            "$ref" : "#/components/schemas/OAuthBearer"
+          },
+          {
+            "$ref" : "#/components/schemas/Plain"
+          },
+          {
+            "$ref" : "#/components/schemas/ScramSha256"
+          },
+          {
+            "$ref" : "#/components/schemas/ScramSha512"
+          }
+        ]
+      },
+      "ScramSha256" : {
+        "title" : "ScramSha256",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "ScramSha512" : {
+        "title" : "ScramSha512",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "Sensitive" : {
+        "title" : "Sensitive",
+        "type" : "object",
+        "required" : [
+          "value"
+        ],
+        "properties" : {
+          "value" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
       "ServiceCapabilities" : {
         "title" : "ServiceCapabilities",
         "type" : "object",
@@ -1171,6 +1505,18 @@
           }
         }
       },
+      "Ssl" : {
+        "title" : "Ssl",
+        "type" : "object",
+        "required" : [
+          "tls"
+        ],
+        "properties" : {
+          "tls" : {
+            "$ref" : "#/components/schemas/TlsConfig"
+          }
+        }
+      },
       "StoreMaterialWrite" : {
         "title" : "StoreMaterialWrite",
         "description" : "A keystore or truststore, base64 encoded, with its password",
@@ -1185,6 +1531,68 @@
           },
           "password" : {
             "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          }
+        }
+      },
+      "StoreSource" : {
+        "title" : "StoreSource",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/FromPath"
+          },
+          {
+            "$ref" : "#/components/schemas/Inline"
+          }
+        ]
+      },
+      "TlsConfig" : {
+        "title" : "TlsConfig",
+        "type" : "object",
+        "required" : [
+          "verifyHostname"
+        ],
+        "properties" : {
+          "truststore" : {
+            "$ref" : "#/components/schemas/TrustStoreRef"
+          },
+          "keystore" : {
+            "$ref" : "#/components/schemas/KeyStoreRef"
+          },
+          "verifyHostname" : {
+            "type" : "boolean"
+          },
+          "enabledProtocols" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "cipherSuites" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "TrustStoreRef" : {
+        "title" : "TrustStoreRef",
+        "type" : "object",
+        "required" : [
+          "source",
+          "storeType"
+        ],
+        "properties" : {
+          "source" : {
+            "$ref" : "#/components/schemas/StoreSource"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "storeType" : {
+            "description" : "JKS, PKCS12 or PEM",
             "type" : "string"
           }
         }

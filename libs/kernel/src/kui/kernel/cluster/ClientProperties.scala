@@ -111,6 +111,15 @@ object ClientProperties {
 
     def get(key: String): Option[PropertyValue] = p.get(key)
     def keys: Set[String] = p.keySet
+
+    /** The whole map, values and sensitivity flags intact.
+      *
+      * The inverse of [[ClientProperties.fromMap]], and the only way to get one back out without losing the
+      * classification. Named `entries` rather than `toMap` so that it does not read as a cheap conversion: a
+      * caller holding this map holds every sensitive value in it, and `PropertyValue` is what keeps the
+      * redaction attached to each one.
+      */
+    def entries: Map[String, PropertyValue] = p
     def isEmpty: Boolean = p.isEmpty
     def nonEmpty: Boolean = p.nonEmpty
     def size: Int = p.size

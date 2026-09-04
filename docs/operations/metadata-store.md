@@ -254,6 +254,37 @@ new keys coexist:
 Do not skip step 3 and remove the old key: compacted topics keep the *latest* record per key, so
 a cluster nobody has edited since the rotation is still encrypted under the old one.
 
+### 4.3 The profile channel between KUI services
+
+Only the cluster service reads `__kui_config` and only it holds `kui.store.encryptionKey`. Every
+other Kafka-facing KUI service — topics, messages, consumer groups, security — learns how to
+connect to a cluster by asking the cluster service for the **resolved profile**:
+
+```
+GET  /internal/v1/clusters/{clusterId}/profile
+GET  /internal/v1/clusters/stream
+```
+
+**That profile carries the cluster's credentials**: the SASL username and password, the keystore
+and truststore passwords, and the values of any `properties` overrides an operator set. It has to,
+because the service receiving it opens a Kafka connection with them (ADR-046). The alternative —
+giving each service its own copy of `kui.store.encryptionKey` — would put the one key whose loss
+makes every stored secret unrecoverable into four processes instead of one, and would give three
+services write-capable credentials for a topic only one of them owns.
+
+What this means for you, as one instruction:
+
+> **`/internal/v1` must not be reachable from outside the deployment network.** Do not publish it
+> through an ingress, a load balancer or a service mesh gateway that terminates external traffic.
+> `/api/v1` is the browser-facing surface and carries no credential on any endpoint of any service.
+
+Two mechanisms back that up rather than asking you to take it on trust. Every `/internal/v1`
+request must carry a signed principal header minted by the gateway (ADR-020), so an unauthenticated
+caller that reached the port still gets nothing. And each Kafka-facing service's test suite walks
+every endpoint it declares with a profile whose every credential is one distinctive token, and
+fails the build unless that token appears in exactly one response body — the profile's — and in no
+log line and no span attribute (`kui.cluster.api.SecretLeakSuite`).
+
 ## 5. Backup and restore
 
 The store is a Kafka topic, so back it up the way you back up Kafka topics.

@@ -6,6 +6,7 @@ import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
 import kui.cluster.application.SnapshotFreshness
+import kui.cluster.contract.dto.ClusterProfileDto
 import kui.cluster.domain.{ControllerMode, LogDirError}
 import kui.contracts.cluster.ClusterSummaryDto
 import kui.kernel.Secret
@@ -60,13 +61,21 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     assert(!rendered.contains("ssl.truststore.password"), rendered)
   }
 
-  test("theProfileDtoPublishesTheOverrideKeysAndNoneOfTheirValues") {
+  test("theProfileDtoPublishesEverythingAKafkaClientIsBuiltFrom") {
+    // The one mapping in this service that does not redact (ADR-046). It is legitimate because the only
+    // route that uses it is on `/internal/v1`; `SecretLeakSuite` is what turns that from a claim into a
+    // fact, by walking every declared endpoint.
     val dto = ClusterMapping.profile(profile, ClusterFixtures.At)
     val rendered = dto.asJson.noSpaces
 
-    assertEquals(dto.propertyKeys, List("ssl.truststore.password"))
     assertEquals(dto.version, 7L)
-    assert(!rendered.contains(ClusterFixtures.Canary), rendered)
+    assertEquals(dto.properties.keys, Set("ssl.truststore.password"))
+    assert(rendered.contains(ClusterFixtures.Canary), rendered)
+
+    // And the round trip a consumer actually performs: the connection it rebuilds is the one the
+    // cluster service holds, field for field.
+    val decoded = dto.asJson.as[ClusterProfileDto].fold(failure => fail(failure.message), identity)
+    assertEquals(ClusterProfileDto.connectionOf(decoded), profile.connection)
   }
 
   test("aSummaryReportsWhatKafkaSaidAndNothingItDidNot") {

@@ -147,18 +147,48 @@ object GoldenDocuments {
       |  "readOnly" : false,
       |  "bootstrapServers" : "broker-1.example.com:9093,broker-2.example.com:9093",
       |  "security" : {
+      |    "kind" : "sasl",
       |    "protocol" : "SASL_SSL",
-      |    "mechanism" : "SCRAM-SHA-512",
-      |    "truststoreConfigured" : true,
-      |    "keystoreConfigured" : false
+      |    "mechanism" : {
+      |      "kind" : "scram-sha-512",
+      |      "username" : "kui-service",
+      |      "password" : "hunter2"
+      |    },
+      |    "tls" : {
+      |      "truststore" : {
+      |        "source" : {
+      |          "kind" : "path",
+      |          "path" : "/etc/kui/truststore.p12"
+      |        },
+      |        "password" : "truststore-pass",
+      |        "storeType" : "PKCS12"
+      |      },
+      |      "keystore" : null,
+      |      "verifyHostname" : true,
+      |      "enabledProtocols" : null,
+      |      "cipherSuites" : null
+      |    }
       |  },
-      |  "adminTimeoutMs" : 15000,
-      |  "adminBatchSize" : 200,
-      |  "adminParallelism" : 4,
-      |  "propertyKeys" : [
-      |    "sasl.jaas.config",
-      |    "ssl.endpoint.identification.algorithm"
-      |  ],
+      |  "properties" : {
+      |    "ssl.endpoint.identification.algorithm" : {
+      |      "sensitive" : false,
+      |      "value" : "https"
+      |    },
+      |    "ssl.truststore.password" : {
+      |      "sensitive" : true,
+      |      "value" : "truststore-pass"
+      |    }
+      |  },
+      |  "admin" : {
+      |    "requestTimeoutMs" : 30000,
+      |    "apiTimeoutMs" : 60000,
+      |    "topicChunkSize" : 200,
+      |    "partitionChunkSize" : 200,
+      |    "groupChunkSize" : 50,
+      |    "parallelism" : 4,
+      |    "metadataRefreshMs" : 30000,
+      |    "capabilityRefreshMs" : 3600000
+      |  },
       |  "updatedAt" : "2026-09-03T10:11:12.000Z"
       |}""".stripMargin
 
