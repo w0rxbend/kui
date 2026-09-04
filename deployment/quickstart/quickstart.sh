@@ -169,7 +169,8 @@ up() {
     say "    viewer / quickstart-viewer   may look at topics and read records, and nothing else"
     say ""
     say "  Sign in as viewer to see the difference: the create, edit, add-partitions, empty and"
-    say "  delete controls are absent rather than present and refused."
+    say "  delete controls are still on screen, greyed out, and each says why when you point at"
+    say "  it. Nothing is hidden, so you can see what the account cannot do as well as what it can."
   fi
   say ""
 }
