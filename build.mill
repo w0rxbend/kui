@@ -1789,12 +1789,32 @@ object services extends Module {
       */
     object app extends KuiJvmModule {
       def moduleDeps =
-        Seq(api, infrastructure, libs.config, libs.kafka, libs.serde, libs.observability, libs.http)
+        Seq(
+          api,
+          infrastructure,
+          libs.config,
+          libs.kafka,
+          libs.serde,
+          // The one module that turns a configured registry into a working serde. It is a
+          // dependency of the composition root and of nothing else in this service: `application`
+          // and `infrastructure` see `libs/serde`'s SPI, so a deployment that drops this module
+          // still compiles, still browses, and simply has no `SchemaRegistry` row in its picker
+          // (ADR-014).
+          libs.serdeConfluent,
+          libs.cache,
+          libs.observability,
+          libs.http
+        )
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
         mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
         mvn"co.fs2::fs2-io::${Versions.fs2}",
+        // The schema registry is reached over HTTP, so the process that decodes records needs a
+        // real HTTP backend of its own. The gateway opens one for its upstreams; this one is the
+        // message service's, and it is opened only when a cluster actually configures a registry.
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
         mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
         mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
         mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
@@ -1906,13 +1926,18 @@ object services extends Module {
       }
 
       object jvm extends Shared with KuiJvmModule {
-        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+        // The identity service's contract, because the gateway's own `/api/v1/auth` endpoints put its
+        // shapes on the wire: the login request, the login response and the settings document are the
+        // identity service's published types and the gateway forwards them rather than copying them.
+        // Rule A4 admits it — a `contract` is the one layer of another service the gateway may see — and
+        // copying them instead would be two spellings of one wire format with nothing to keep them equal.
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm, identity.contract.jvm)
 
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
       object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
+        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js, identity.contract.js)
         def mvnDeps =
           super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
 
@@ -1945,6 +1970,15 @@ object services extends Module {
         // re-encoded — so `MessageStreamRoutes` names the endpoint value directly. Still rule A11: a
         // published contract and nothing else.
         message.contract.jvm,
+        // The schema service's contract. It is the first *optional* service the gateway routes: every
+        // one of its endpoints answers KUI-UNSUPPORTED for a cluster with no registry, and the
+        // capability document reports that cluster as not_configured. The gateway routes it exactly
+        // like any other service — being optional is a runtime state, not a routing rule.
+        schema.contract.jvm,
+        // The identity service's contract. Alone among them it is *not* proxied: `AuthRoutes` calls its
+        // login, password and OpenID Connect endpoints itself, because a sign-in has to end in a session
+        // cookie and sessions live at the gateway.
+        identity.contract.jvm,
         libs.kernel.jvm,
         libs.contractsCore.jvm,
         libs.securityCore.jvm,
@@ -2760,6 +2794,207 @@ object services extends Module {
       }
     }
   }
+
+  /** `kui-schema-service`: subjects, their versions, the schema behind each one, and compatibility.
+    *
+    * The first **optional** service in KUI, and it is shaped around that rather than around the feature. A
+    * deployment with no `kui.clusters.<n>.schemaRegistry.url` runs this service, reports `not_configured` for
+    * every cluster, and shows no schema screens — which is a different state from a registry that is down,
+    * and the two must never look alike (ADR-032).
+    */
+  object schema extends Module {
+
+    /** The registry's vocabulary and the port it is stated in terms of.
+      *
+      * Rule A1 allows it `libs/kernel` and cats-core, nothing else. What lives here is what has a wrong
+      * answer that reaches a screen: the version selector that must not confuse "latest" with a number, the
+      * compatibility levels whose wire spellings are the registry's and not KUI's, and the subject paging
+      * whose count has to be taken after filtering rather than before it.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The use cases: four reads, the compatibility check, and the one mutation with its audit record.
+      *
+      * `libs/security-core` is here for `AuditSink` and `Principal`: the compatibility write is audited with
+      * the person the gateway signed, which is a fact this layer has to hold rather than one the adapter can
+      * reconstruct.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain, libs.securityCore.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The adapters: the registry's REST API over `libs/http`'s resilient backend, the OAuth token source,
+      * and the configured cluster list.
+      *
+      * There is no Kafka client anywhere in this service's tree. A Schema Registry is an HTTP service, and
+      * the only thing this service reads from `kui.clusters[]` is which registries exist and how to
+      * authenticate to them — which is why `libs.kafka` is absent here and present in every other service.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps =
+        Seq(domain, application, libs.config, libs.http, libs.observability, libs.kernel.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification and
+      * the OpenAPI document. It starts nothing.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.schema.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.schema.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}"
+        )
+      }
+    }
+
+    /** The composition root: the one place in the schema service that constructs anything concrete.
+      *
+      * It starts no listener, exactly like every other service's, which is what lets `apps/allinone` take
+      * its routes and serve them beside the rest over one port (ADR-010).
+      */
+    object app extends KuiJvmModule {
+      def moduleDeps = Seq(api, infrastructure, libs.config, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code, and all are needed by a process with a `main`.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The published wire shape of `kui-schema-service`, cross-compiled so the browser decodes exactly what
+      * this service encodes, from one source (ADR-003).
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+      object js extends Shared with KuiJsModule {
+        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
+        def mvnDeps =
+          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+      }
+    }
+  }
+
 }
 
 /** Deployable processes assembled out of the modules above.
@@ -2799,6 +3034,11 @@ object apps extends Module {
       services.consumer.api,
       services.message.app,
       services.message.api,
+      // The identity service, so that a deployment on one port can still be one somebody signs in to.
+      services.identity.app,
+      services.identity.api,
+      services.schema.app,
+      services.schema.api,
       libs.config,
       libs.observability,
       libs.http
@@ -2841,7 +3081,10 @@ object apps extends Module {
     )
 
     object test extends ScalaTests with KuiTests {
-      def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      // The identity service's `infrastructure`, for one thing only: `SignInSeamSuite` needs a real
+      // password hash to configure an account with, and hashing one with the product's own key
+      // derivation function is more honest than pasting a constant that could drift from the format.
+      def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, services.identity.infrastructure)
 
       def mvnDeps = super.mvnDeps() ++ Seq(
         mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
@@ -3279,6 +3522,21 @@ object deployment extends Module {
       def entryClass       = "kui.consumer.app.Main"
       def livenessPath     = "/health/live"
       def imageDescription = "KUI consumer group and offset service"
+    }
+
+    /** The Schema service: subjects, versions, schemas and compatibility.
+      *
+      * It is packaged like every other service even though it is optional, and a deployment that
+      * configures no registry can simply not run it. Running it anyway is also correct and is what the
+      * all-in-one image does: it answers "not configured" for every cluster, which is the fact the
+      * browser needs in order to hide the feature rather than show a broken screen.
+      */
+    object schema extends KuiImage {
+      def deployable       = services.schema.app
+      def imageName        = "kui-schema"
+      def entryClass       = "kui.schema.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI schema registry service"
     }
 
     /** The whole product in one process (ADR-005). */

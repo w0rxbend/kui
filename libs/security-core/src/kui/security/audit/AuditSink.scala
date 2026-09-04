@@ -57,6 +57,17 @@ enum MutationKind(val operation: String) {
 
   /** A consumer group removed outright (`CG-007`). */
   case DeleteGroup extends MutationKind("consumer.group.delete")
+
+  /** The Schema Registry's registry-wide compatibility level changed (`SR-005`).
+    *
+    * It writes nothing to Kafka and deletes nothing, and it is still one of the more consequential things KUI
+    * can do: lowering the global level to `NONE` removes the check that stops a producer from publishing a
+    * schema no existing consumer can read, for every subject that has not overridden it.
+    */
+  case SetGlobalCompatibility extends MutationKind("schema.compatibility.global.set")
+
+  /** One subject's compatibility level set, overriding the global one from now on (`SR-005`). */
+  case SetSubjectCompatibility extends MutationKind("schema.compatibility.subject.set")
 }
 
 object MutationKind {

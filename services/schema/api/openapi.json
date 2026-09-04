@@ -1,0 +1,1100 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI Schema service",
+    "version" : "1.0.0"
+  },
+  "paths" : {
+    "/internal/v1/clusters/{clusterId}/schemas/compatibility" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The compatibility level every subject without its own follows",
+        "description" : "A registry that has never had a global level set reports its own default, BACKWARD, because that is what it will actually apply to the next registration.",
+        "operationId" : "schema.compatibility.global",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Set the registry-wide compatibility level",
+        "description" : "Part of the schema.compatibility.global.set flow. This call changes nothing. It applies to every subject that has no level of its own, so lowering it to NONE removes the compatibility check for all of them at once. Refused on a read-only cluster, and audited either way with the level that was in force before the change.",
+        "operationId" : "schema.compatibility.global.set",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCompatibilityRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/schemas/subjects" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The subjects registered on this cluster's Schema Registry",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.",
+        "operationId" : "schema.subjects",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "Case-insensitive substring match over the subject name. Not a regular expression",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "direction",
+            "in" : "query",
+            "description" : "Which way to sort by name",
+            "required" : false,
+            "schema" : {
+              "default" : "asc",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "page",
+            "in" : "query",
+            "description" : "Which page, numbered from one",
+            "required" : false,
+            "schema" : {
+              "default" : 1,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "pageSize",
+            "in" : "query",
+            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "required" : false,
+            "schema" : {
+              "default" : 25,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageDto_A"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: query parameter page, Invalid value for: query parameter pageSize",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/schemas/subjects/{subject}/compatibility" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The compatibility level in force for one subject",
+        "description" : "Reports inheritedFromGlobal when the subject has no level of its own. Without that flag a client cannot tell a subject that is governed globally from one that has been pinned, and 'confirming' the value it displays would silently create an override.",
+        "operationId" : "schema.compatibility.subject",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Set one subject's compatibility level",
+        "description" : "Part of the schema.compatibility.subject.set flow. This call changes nothing. The subject stops following the global level from this point on, which the answer reports as inheritedFromGlobal: false. Refused on a read-only cluster.",
+        "operationId" : "schema.compatibility.subject.set",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCompatibilityRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The version numbers of one subject",
+        "description" : "A subject the registry does not hold answers 404 KUI-SCHEMA-NOT-FOUND, so a stale link says so rather than showing an empty version list that reads as a subject with no schemas.",
+        "operationId" : "schema.versions",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SubjectVersionsDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The schema behind one version of a subject",
+        "description" : "The schema text is returned exactly as the registry stores it, so that it can be compared and diffed against the registry's own screen.",
+        "operationId" : "schema.version",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "version",
+            "in" : "path",
+            "description" : "A version number, or 'latest' for whichever version is current",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SchemaDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}/compatibility" : {
+      "post" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Whether a proposed schema would be accepted for this subject",
+        "description" : "Registers nothing. The check runs inside the registry, because the verdict that matters is the one the registry will give when the schema is really registered; KUI does not reimplement the compatibility rules of three schema languages. Answered on a read-only cluster like any other read.",
+        "operationId" : "schema.compatibility.check",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "version",
+            "in" : "path",
+            "description" : "The version to check against: a number, or 'latest' for the current one",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CompatibilityCheckRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityCheckDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: body",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live" : {
+      "get" : {
+        "description" : "Whether the process should be restarted. Never depends on an upstream.",
+        "operationId" : "health.live",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LivenessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready" : {
+      "get" : {
+        "description" : "Whether the service can serve requests now, and which checks say otherwise.",
+        "operationId" : "health.ready",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities" : {
+      "get" : {
+        "description" : "What this service can currently do, per cluster.",
+        "operationId" : "capabilities",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceCapabilities"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CheckResult" : {
+        "title" : "CheckResult",
+        "description" : "One readiness check and its result",
+        "type" : "object",
+        "required" : [
+          "name",
+          "healthy"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "healthy" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterCapability" : {
+        "title" : "ClusterCapability",
+        "type" : "object",
+        "required" : [
+          "configured",
+          "status"
+        ],
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "features" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CompatibilityCheckDto" : {
+        "title" : "CompatibilityCheckDto",
+        "description" : "Whether the registry would accept the proposed schema, and why not when it would not",
+        "type" : "object",
+        "required" : [
+          "compatible"
+        ],
+        "properties" : {
+          "compatible" : {
+            "type" : "boolean"
+          },
+          "messages" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "CompatibilityCheckRequest" : {
+        "title" : "CompatibilityCheckRequest",
+        "description" : "A proposed schema to check against a subject. Nothing is registered",
+        "type" : "object",
+        "required" : [
+          "schemaType",
+          "definition"
+        ],
+        "properties" : {
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "CompatibilityDto" : {
+        "title" : "CompatibilityDto",
+        "description" : "The compatibility level in force, and whether the subject inherits it from the global one",
+        "type" : "object",
+        "required" : [
+          "level",
+          "inheritedFromGlobal"
+        ],
+        "properties" : {
+          "level" : {
+            "type" : "string"
+          },
+          "inheritedFromGlobal" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "LivenessReport" : {
+        "title" : "LivenessReport",
+        "description" : "Whether the process should be restarted",
+        "type" : "object",
+        "required" : [
+          "alive",
+          "at"
+        ],
+        "properties" : {
+          "alive" : {
+            "type" : "boolean"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "Map_ClusterId_ClusterCapability" : {
+        "title" : "Map_ClusterId_ClusterCapability",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/ClusterCapability"
+        }
+      },
+      "PageDto_A" : {
+        "title" : "PageDto_A",
+        "description" : "One page of a list: the items, and where the page sits in the whole",
+        "type" : "object",
+        "required" : [
+          "page"
+        ],
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a schema registry subject",
+              "type" : "string"
+            }
+          },
+          "page" : {
+            "$ref" : "#/components/schemas/PageInfo"
+          }
+        }
+      },
+      "PageInfo" : {
+        "title" : "PageInfo",
+        "description" : "Where this page sits in the list; pageCount is derived from totalItems and pageSize",
+        "type" : "object",
+        "required" : [
+          "page",
+          "pageSize"
+        ],
+        "properties" : {
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalItems" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "nextPageToken" : {
+            "description" : "An opaque continuation token",
+            "type" : "string"
+          }
+        }
+      },
+      "ReadinessReport" : {
+        "title" : "ReadinessReport",
+        "description" : "Whether the service can serve requests now",
+        "type" : "object",
+        "required" : [
+          "ready",
+          "at"
+        ],
+        "properties" : {
+          "ready" : {
+            "type" : "boolean"
+          },
+          "checks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CheckResult"
+            }
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "SchemaDto" : {
+        "title" : "SchemaDto",
+        "description" : "One registered version of a subject, with its schema text",
+        "type" : "object",
+        "required" : [
+          "subject",
+          "version",
+          "id",
+          "schemaType",
+          "definition"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "SchemaReferenceDto" : {
+        "title" : "SchemaReferenceDto",
+        "description" : "A schema this schema refers to, by the name it uses for it and the version it pins",
+        "type" : "object",
+        "required" : [
+          "name",
+          "subject",
+          "version"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ServiceCapabilities" : {
+        "title" : "ServiceCapabilities",
+        "type" : "object",
+        "required" : [
+          "service",
+          "clusters"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "clusters" : {
+            "$ref" : "#/components/schemas/Map_ClusterId_ClusterCapability"
+          }
+        }
+      },
+      "SetCompatibilityRequest" : {
+        "title" : "SetCompatibilityRequest",
+        "description" : "The level to set: BACKWARD, BACKWARD_TRANSITIVE, FORWARD, FORWARD_TRANSITIVE, FULL, FULL_TRANSITIVE or NONE",
+        "type" : "object",
+        "required" : [
+          "level"
+        ],
+        "properties" : {
+          "level" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SubjectVersionsDto" : {
+        "title" : "SubjectVersionsDto",
+        "description" : "A subject's version numbers, ascending",
+        "type" : "object",
+        "required" : [
+          "subject"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "versions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        }
+      }
+    }
+  }
+}
