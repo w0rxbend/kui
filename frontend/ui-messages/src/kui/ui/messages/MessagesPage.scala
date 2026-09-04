@@ -533,18 +533,22 @@ object MessagesPage {
       )
     )
 
-  /** What the stream is doing, in words.
-    *
-    * The scanned count is on it whenever the service has sent one, and it is the number that makes a filtered
-    * browse interpretable: without it, "read a million records and matched none of them" and "the topic is
-    * empty" are the same screen.
-    */
+  /** What the stream is doing: a state chip, the counts beside it, the current phase, and any failure. */
   private def statusLine(session: BrowseSession, running: Signal[Boolean]): HtmlElement =
     div(
       cls := MessagesCss.Status,
       dataAttr("testid") := "messages-status",
       // `role="status"`, so a screen reader hears the browse finish rather than having to go and look.
       role := "status",
+      // The state is a chip and the counts are text beside it. Three states — connecting, reading,
+      // finished — used to be three words in one grey sentence, so the screen looked the same whether the
+      // stream was alive, stalling or done. The design's answer to "what is this thing doing right now" is a
+      // filled chip in a container colour, and `live` marks the two states that are still moving.
+      child.maybe <-- session.progress.map(progress =>
+        state(progress).map((label, tone) =>
+          Tag(label = Val(label), tone = tone, live = true, testId = Some("messages-state"))
+        )
+      ),
       child.text <-- session.progress
         .combineWith(running, session.held)
         .map((progress, isRunning, held) => summary(progress, isRunning, held)),
@@ -557,15 +561,28 @@ object MessagesPage {
       )
     )
 
-  private[messages] def summary(progress: browse.BrowseProgress, running: Boolean, held: Int = 0): String = {
-    val state =
-      progress.connection match {
-        case SseConnection.Connecting => Messages.Connecting
-        case SseConnection.Open => Messages.Streaming
-        case SseConnection.Reconnecting(_) => Messages.Connecting
-        case SseConnection.Closed(_) => if progress.records > 0 then Messages.Finished else ""
-      }
+  /** What the stream is doing, as a chip label and the tone to fill it with.
+    *
+    * `None` for a closed stream that never delivered anything: there is nothing to report a state about, and
+    * the empty state below already says which of the three "nothing here" situations this is.
+    */
+  private[messages] def state(progress: browse.BrowseProgress): Option[(String, Tone)] =
+    progress.connection match {
+      case SseConnection.Connecting => Some(Messages.Connecting -> Tone.Info)
+      // Reconnecting is not the same as connecting for the first time — the stream had worked and stopped —
+      // so it carries the warning colour while reusing the word, which is what the reader needs to do next.
+      case SseConnection.Reconnecting(_) => Some(Messages.Connecting -> Tone.Warning)
+      case SseConnection.Open => Some(Messages.Streaming -> Tone.Success)
+      case SseConnection.Closed(_) => Option.when(progress.records > 0)(Messages.Finished -> Tone.Neutral)
+    }
 
+  /** The counts beside the chip: delivered, held and scanned.
+    *
+    * The scanned count is on it whenever the service has sent one, and it is the number that makes a filtered
+    * browse interpretable: without it, "read a million records and matched none of them" and "the topic is
+    * empty" are the same screen.
+    */
+  private[messages] def summary(progress: browse.BrowseProgress, running: Boolean, held: Int = 0): String = {
     val counts =
       List(
         Option.when(progress.records > 0 || running)(Messages.delivered(progress.records)),
@@ -575,7 +592,7 @@ object MessagesPage {
         progress.consumed.map(consumed => Messages.scanned(consumed.records))
       ).flatten
 
-    (state :: counts).filter(_.nonEmpty).mkString(" · ")
+    counts.filter(_.nonEmpty).mkString(" · ")
   }
 
   /** Which of the empty states to draw, which depends on what has happened and not only on the row count.
