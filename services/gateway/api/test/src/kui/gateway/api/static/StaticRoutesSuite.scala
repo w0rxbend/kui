@@ -151,18 +151,24 @@ final class StaticRoutesSuite extends KuiIOSuite {
     }
   }
 
-  test("indexIsNoCacheAndHashedAssetsAreImmutable") {
+  test("nothingIsCachedWithoutBeingRevalidated") {
+    // Including the hashed-looking names, which is the part that changed. `internal-<hex>.js` is what
+    // Scala.js emits for a bundle-split build, and this route used to serve it `immutable` for a year on
+    // the grounds that such a name is content-addressed. It is not: it identifies the set of classes in
+    // the chunk, and the linker's short member names can shift underneath an unchanged set. Two builds
+    // of KUI produced the same `internal-…` filename with different bytes, and a browser holding the
+    // year-old copy combined it with the new `main.js` and rendered nothing at all.
+    //
+    // So the assertion is about every kind of name at once: there is no name whose bytes a browser is
+    // told it may keep without asking.
+    val everyKindOfName =
+      List("/ui/", "/ui/main-a1b2c3d4.js", "/ui/main.js", "/ui/styles.css", "/ui/font.woff2")
+
     server().use { running =>
-      for {
-        index <- running.get("/ui/")
-        hashed <- running.get("/ui/main-a1b2c3d4.js")
-        plain <- running.get("/ui/main.js")
-      } yield {
-        assertEquals(index.header("Cache-Control"), Some("no-cache"))
-        assertEquals(hashed.header("Cache-Control"), Some("public, max-age=31536000, immutable"))
-        // An unhashed name has to be re-checked on every load: the next deploy can change its bytes
-        // without changing its name, and a browser that cached it forever would never see the update.
-        assertEquals(plain.header("Cache-Control"), Some("no-cache"))
+      everyKindOfName.traverse { path =>
+        running.get(path).map { response =>
+          assertEquals(response.header("Cache-Control"), Some("no-cache"), path)
+        }
       }
     }
   }

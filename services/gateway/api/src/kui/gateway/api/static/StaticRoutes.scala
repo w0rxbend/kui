@@ -56,16 +56,6 @@ object StaticRoutes {
 
   private val DefaultContentType: String = "application/octet-stream"
 
-  /** A year, in seconds. What `Cache-Control: max-age` on an immutable asset is written in. */
-  private val ImmutableMaxAgeSeconds: Long = 31_536_000L
-
-  /** A hashed KUI asset name: something, a dash, at least eight hexadecimal characters, an extension.
-    * `main-a1b2c3d4.js` matches; `main.js` and `index.html` do not. Scala.js's linker names bundle-split
-    * chunks this way, which is what makes them safe to cache forever — a new build is a new name, never the
-    * same name with different bytes.
-    */
-  private val HashedName = raw"^.+-[0-9a-fA-F]{8,}\.[A-Za-z0-9]+$$".r
-
   /** The plain-text HTML a developer sees when the linked frontend was never bundled in.
     *
     * Not a stack trace and not a bare empty `200`: a backend-only build is an ordinary way to run the gateway
@@ -290,13 +280,43 @@ object StaticRoutes {
       Option(URLConnection.guessContentTypeFromName(name)).getOrElse(DefaultContentType)
     }
 
-  /** `no-cache` for anything the SPA fallback could serve — `index.html` above all, so that a deploy is
-    * visible on the very next request — and a year of `immutable` caching for a name the linker hashed,
-    * because a hashed name and a new set of bytes never occur together (ADR-012).
+  /** `no-cache` for everything KUI serves, so that a deploy is visible on the very next request.
+    *
+    * ## The assumption this used to make, and why it was false
+    *
+    * Until 2026-09-04 a name matching [[HashedName]] — the `internal-<40 hex>.js` files Scala.js emits for
+    * a bundle-split build — was served `public, max-age=31536000, immutable`, on the stated grounds that
+    * "a hashed name and a new set of bytes never occur together".
+    *
+    * They do. Two consecutive builds of KUI both produced a file named
+    * `internal-3ebfae0cba70adf981029a0da5b1e4b5ab5d02c6.js`, and the two files differed: a method the first
+    * one defined as `Vv` the second defined as `Vw`. That name is not a hash of the emitted JavaScript. It
+    * identifies the *module* — the set of classes the linker decided to put in that chunk — and that set can
+    * be unchanged while the code inside it is not, because the linker assigns short member names across the
+    * whole program at once. Change any Scala file anywhere and the short names can shift under every chunk
+    * that survived with its old name.
+    *
+    * The consequence was as bad as a caching bug gets. A browser that had opened KUI before an upgrade kept
+    * the year-long copy of that chunk and combined it with the new `main.js`, which is served `no-cache` and
+    * so was current. The new `main.js` called `Vw`; the year-old chunk had only `Vv`; the shell threw
+    * `TypeError: ... is not a function` before it rendered anything, and the user saw a blank page that a
+    * reload would not fix. Reproduced twice against the quickstart on 2026-09-04.
+    *
+    * ## What this costs, and what should replace it
+    *
+    * Correctness first: every asset is revalidated, so no browser can assemble a page out of two builds.
+    * The price is real — with no validator on the response there is nothing to answer a conditional request
+    * with, so each page load refetches the bundle in full, and the largest chunk alone is about 6 MB.
+    *
+    * The right end state is `no-cache` *plus* a strong `ETag` derived from the bytes, with `If-None-Match`
+    * answered `304`: same correctness, and a revalidation that costs a round trip instead of a download.
+    * That needs conditional-request handling this route does not have yet, and it is recorded as
+    * outstanding rather than half-built here.
     */
-  private def cacheControlOf(name: String): String =
-    if name == "index.html" || HashedName.findFirstIn(name).isEmpty then "no-cache"
-    else s"public, max-age=$ImmutableMaxAgeSeconds, immutable"
+  private def cacheControlOf(name: String): String = {
+    val _ = name // every name gets the same answer; the parameter is kept so the call site still reads well
+    "no-cache"
+  }
 
   private def extensionOf(name: String): Option[String] =
     Option.when(name.contains('.'))(name.substring(name.lastIndexOf('.') + 1).toLowerCase)
