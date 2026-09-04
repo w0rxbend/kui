@@ -55,6 +55,13 @@ final class StaticRoutesSuite extends KuiIOSuite {
         .response(asStringAlways)
         .followRedirects(false)
         .send(backend)
+
+    def head(path: String): IO[Response[String]] =
+      basicRequest
+        .head(Uri.unsafeParse(s"http://localhost:${binding.port}$path"))
+        .response(asStringAlways)
+        .followRedirects(false)
+        .send(backend)
   }
 
   test("servesIndexForAnUnknownUiPath") {
@@ -177,6 +184,38 @@ final class StaticRoutesSuite extends KuiIOSuite {
         assertEquals(bareRootUnderBasePath.code.code, 404)
         assertEquals(bareUiUnderBasePath.code.code, 404)
       }
+    }
+  }
+
+  test("headAnswersTheSameStatusAndHeadersAsGetWithNoBody") {
+    // A health checker, an uptime monitor and a link checker all ask with `HEAD` before they ask with
+    // anything else. Declaring only the `GET` route left every one of them reading `400 invalid path`
+    // for a file the gateway serves perfectly well over `GET`, which is a wrong answer to a question
+    // whose whole purpose is to be believed.
+    val paths = List("/ui/main.js", "/ui/main-a1b2c3d4.js", "/ui/", "/ui/clusters/deep/link")
+
+    server().use { running =>
+      paths.traverse { path =>
+        for {
+          got <- running.get(path)
+          headed <- running.head(path)
+        } yield {
+          assertEquals(headed.code.code, got.code.code, s"$path: ${headed.body}")
+          assertEquals(headed.header("Content-Type"), got.header("Content-Type"), path)
+          assertEquals(headed.header("Cache-Control"), got.header("Cache-Control"), path)
+          // RFC 9110: the headers describe what a `GET` would return, and the body is empty.
+          assertEquals(headed.header("Content-Length"), Some(got.body.getBytes("UTF-8").length.toString), path)
+          assertEquals(headed.body, "", path)
+        }
+      }
+    }.void
+  }
+
+  test("headOnARefusedPathStillRefusesIt") {
+    // The safety rule has to hold for both methods, or `HEAD` becomes a way to ask questions about the
+    // filesystem that `GET` refuses to answer.
+    server().use(_.head("/ui/%2e%2e/%2e%2e/etc/passwd")).map { response =>
+      assert(response.code.code == 400 || response.code.code == 404, s"${response.code.code}")
     }
   }
 

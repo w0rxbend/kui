@@ -159,9 +159,19 @@ object ErrorInterceptor {
     *
     * A path segment that is present and *malformed* is different: nothing else could have matched it, so
     * answering `KUI-VALIDATION` is both correct and far more useful than a bare 404.
+    *
+    * The **method** is the same routing question as the path, and it used to be treated as the second kind.
+    * An endpoint declared for `GET` that was asked for `HEAD` answered `400 KUI-VALIDATION` immediately, so
+    * no later endpoint — including one declared for `HEAD` on the very same path — was ever tried.
+    * `HEAD /ui/main.js` came back `400` while `GET /ui/main.js` came back `200`: nothing a browser does,
+    * because a browser fetches a script with `GET`, but a wrong answer to every health checker, uptime
+    * monitor and link checker, which ask with `HEAD` precisely because it is cheap. Letting the router move
+    * on means a path served for one method and not another now falls through to the reject handler and
+    * answers `404`, and a path served for both reaches the endpoint that serves it.
     */
   private def shouldRespond(ctx: sttp.tapir.server.interceptor.DecodeFailureContext): Boolean =
     ctx.failingInput match {
+      case _: EndpointInput.FixedMethod[?] => false
       case _: EndpointInput.PathCapture[?] | _: EndpointInput.PathsCapture[?] =>
         ctx.failure match {
           case _: DecodeResult.Error | _: DecodeResult.InvalidValue => true

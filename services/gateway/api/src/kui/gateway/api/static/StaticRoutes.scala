@@ -95,7 +95,11 @@ object StaticRoutes {
       bootstrap: BootstrapConfig,
       resourcePrefix: String = "/web"
   ): List[ServerEndpoint[Any, F]] =
-    List(redirectToUi[F](basePath), serveUi[F](bootstrap, resourcePrefix))
+    List(
+      redirectToUi[F](basePath),
+      serveUi[F](bootstrap, resourcePrefix),
+      headUi[F](bootstrap, resourcePrefix)
+    )
 
   /** Matches only the exact root path, `GET /`.
     *
@@ -136,6 +140,42 @@ object StaticRoutes {
       .errorOut(stringBody)
       .name("gateway.static.ui")
       .serverLogic[F](segments => respond[F](bootstrap, resourcePrefix, segments))
+
+  /** The same route for `HEAD`, answering the headers a `GET` would answer and no body.
+    *
+    * It exists because tapir matches a method exactly. With only the `GET` route declared, a `HEAD` for a
+    * file the gateway serves perfectly well reached no endpoint at all and came back `400 invalid path` — a
+    * wrong answer given to exactly the clients that ask with `HEAD` and believe what they are told: health
+    * checkers, uptime monitors and link checkers. Browsers were never affected, because a browser fetches a
+    * script with `GET`, which is why nothing looked broken on screen.
+    *
+    * `Content-Length` is set from the bytes the `GET` would have produced, which is what RFC 9110 requires of
+    * a `HEAD`: the headers describe the representation, the body is omitted. The bytes themselves are read
+    * and discarded rather than guessed at, so the length cannot drift from the file. There is no error body
+    * either, for the same reason — a `HEAD` carries no body even when it fails.
+    */
+  private def headUi[F[_]: Async](
+      bootstrap: BootstrapConfig,
+      resourcePrefix: String
+  ): ServerEndpoint[Any, F] =
+    endpoint.head
+      .in("ui")
+      .in(paths)
+      .out(statusCode)
+      .out(header[String]("Content-Type"))
+      .out(header[String]("Cache-Control"))
+      .out(header[String]("Content-Length"))
+      .errorOut(statusCode)
+      .name("gateway.static.uiHead")
+      .serverLogic[F](segments =>
+        respond[F](bootstrap, resourcePrefix, segments).map(
+          _.bimap(
+            (status, _) => status,
+            (status, bytes, contentType, cacheControl) =>
+              (status, contentType, cacheControl, bytes.length.toString)
+          )
+        )
+      )
 
   /** The body of the route: turns a path into a status, bytes, a content type and a cache policy.
     *

@@ -103,17 +103,23 @@ final class SessionMiddlewareSuite extends KuiIOSuite {
     }
   }
 
-  test("getLogoutIsFourOhFive") {
-    // `/auth/logout` is declared `.post` only. A `GET` against it is a decode failure on the endpoint's
-    // method — not a `PathCapture` or `PathsCapture` — so `libs/http`'s `ErrorInterceptor.shouldRespond`
-    // treats it the same as a malformed path segment: it answers immediately, as `KUI-VALIDATION`, rather
-    // than falling through to try another endpoint or reaching the reject handler's `KUI-ROUTE-NOT-FOUND`.
-    // That is KUI's one error shape doing its job — a caller that mis-spells a method still gets the
-    // envelope every other failure uses, not a bare `405` with no explanation.
+  test("getLogoutIsRouteNotFoundAndStillTheKuiEnvelope") {
+    // `/auth/logout` is declared `.post` only, so a `GET` against it is a decode failure on the endpoint's
+    // *method*. `libs/http`'s `ErrorInterceptor.shouldRespond` treats that as a routing question and lets
+    // the router try the next endpoint, exactly as it does for a path that does not match; when no
+    // endpoint claims the method either, the request reaches the reject handler and comes back as
+    // `KUI-ROUTE-NOT-FOUND`, naming the method and the path.
+    //
+    // It used to answer `400 KUI-VALIDATION` from the first endpoint that declared this path, which meant
+    // no *later* endpoint was ever tried — including one declared for a different method on the same path.
+    // That is what made `HEAD /ui/main.js` answer `400` while `GET /ui/main.js` answered `200`. The error
+    // shape a caller sees is still KUI's own envelope, which was the point of answering here at all; only
+    // the code and the status changed, and 404 is the honest one for "nothing serves this".
     GatewayTestServer.resource().use { server =>
       server.get(logoutUri).map { response =>
-        assertEquals(response.code.code, 400, response.body)
-        assert(response.body.contains("KUI-VALIDATION"), response.body)
+        assertEquals(response.code.code, 404, response.body)
+        assert(response.body.contains("KUI-ROUTE-NOT-FOUND"), response.body)
+        assert(response.body.contains("GET"), response.body)
       }
     }
   }
