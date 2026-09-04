@@ -15,8 +15,22 @@ enum VersionSource {
   /** `describeFeatures().finalizedFeatures()["metadata.version"]`, mapped through the level table. */
   case MetadataVersion
 
-  /** The `inter.broker.protocol.version` broker configuration entry: the ZooKeeper-mode fallback. */
+  /** The same feature level, but one newer than KUI's table. The number is the highest release KUI knows and
+    * is therefore a **lower bound**: the cluster is at least this new. The UI must render it as "4.4 or
+    * newer", never as a plain "4.4".
+    */
+  case MetadataVersionAtLeast
+
+  /** The `inter.broker.protocol.version` broker configuration entry: the ZooKeeper-mode fallback. Kafka 4.0
+    * removed the setting along with ZooKeeper mode, so this source only appears on 2.8-to-3.x clusters.
+    */
   case InterBrokerProtocol
+
+  /** Whether the release number is exact or only a floor. */
+  def isExact: Boolean = this match {
+    case MetadataVersion | InterBrokerProtocol => true
+    case MetadataVersionAtLeast => false
+  }
 }
 
 object VersionSource {
@@ -39,6 +53,9 @@ final case class KafkaVersion private (major: Int, minor: Int, raw: String, sour
 
   /** `3.9`, for a heading. The raw string is for the detail panel. */
   def short: String = s"$major.$minor"
+
+  /** What a version cell should say: `3.9`, or `4.4 or newer` when the number is only a lower bound. */
+  def display: String = if source.isExact then short else s"$short or newer"
 }
 
 object KafkaVersion {
@@ -63,6 +80,28 @@ object KafkaVersion {
         }
       case _ => Left(refusal(raw))
     }
+
+  /** A version KUI resolved rather than parsed: the level table produced the numbers, and `raw` is whatever
+    * the broker actually said (`level 30`).
+    *
+    * It exists because the numbers and the broker's own words are not the same string here, and re-parsing
+    * the words is how the version cell used to come out empty even when the table had resolved the level:
+    * `parse("level 30")` cannot succeed, and it was the only route the adapter had.
+    */
+  def resolved(
+      major: Int,
+      minor: Int,
+      raw: String,
+      source: VersionSource
+  ): Either[DomainError, KafkaVersion] =
+    if major < 0 || minor < 0 then
+      Left(
+        DomainError.InvariantViolation(
+          s"'$major.$minor' is not a Kafka version",
+          List(FieldError.of("version", "major and minor must not be negative"))
+        )
+      )
+    else Right(KafkaVersion(major, minor, raw, source))
 
   private def refusal(raw: String): DomainError =
     DomainError.InvariantViolation(

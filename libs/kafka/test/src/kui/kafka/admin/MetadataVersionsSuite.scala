@@ -50,4 +50,29 @@ final class MetadataVersionsSuite extends KuiSuite {
 
     assertEquals(levels, (levels.min.toInt to levels.max.toInt).map(_.toShort).toList)
   }
+
+  test("resolveIsExactForAKnownLevel") {
+    assertEquals(MetadataVersions.resolve(30), Some(KafkaVersion(4, 3, 0) -> true))
+  }
+
+  test("resolveFloorsALevelNewerThanTheTable") {
+    val newer = (MetadataVersions.highestKnownLevel + 7).toShort
+
+    assertEquals(
+      MetadataVersions.resolve(newer),
+      MetadataVersions.release(MetadataVersions.highestKnownLevel).map(_ -> false)
+    )
+  }
+
+  test("resolveDoesNotGuessDownwards") {
+    assertEquals(MetadataVersions.resolve(0), None)
+    assertEquals(MetadataVersions.resolve(-1), None)
+  }
+
+  test("theTableCoversTheBrokerThisProjectPins") {
+    // `deployment/*` pin apache/kafka:4.3.1, whose LATEST_PRODUCTION metadata version is IBP_4_3_IV0,
+    // level 30. A table that stops below it makes every cluster in every KUI deployment report no
+    // version at all, which is exactly what it did.
+    assertEquals(MetadataVersions.release(30), Some(KafkaVersion(4, 3, 0)))
+  }
 }

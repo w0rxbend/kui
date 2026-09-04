@@ -100,12 +100,18 @@ object KafkaToDomain {
   def version(raw: adm.BrokerVersion): Option[dom.KafkaVersion] =
     for {
       source <- versionSource(raw.source)
-      text <- raw.raw
-      parsed <- dom.KafkaVersion.parse(text, source).toOption
+      // The numbers come from the value `libs/kafka` already resolved, never from re-parsing `raw.raw`.
+      // For the feature-level sources those two are different strings — the numbers are `4.3` and the
+      // broker's own words are `level 30` — and re-parsing the words is why a correctly detected version
+      // still arrived at the browser as null.
+      resolved <- raw.version
+      text = raw.raw.getOrElse(resolved.render)
+      parsed <- dom.KafkaVersion.resolved(resolved.major, resolved.minor, text, source).toOption
     } yield parsed
 
   def versionSource(raw: adm.VersionSource): Option[dom.VersionSource] = raw match {
     case adm.VersionSource.Features => Some(dom.VersionSource.MetadataVersion)
+    case adm.VersionSource.FeaturesAtLeast => Some(dom.VersionSource.MetadataVersionAtLeast)
     case adm.VersionSource.InterBrokerProtocol => Some(dom.VersionSource.InterBrokerProtocol)
     case adm.VersionSource.Unknown => None
   }

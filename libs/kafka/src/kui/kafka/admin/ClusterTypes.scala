@@ -51,8 +51,22 @@ final case class ClusterDescription(
 /** How KUI learned the broker version, so that an operator can tell a detected number from a guessed one.
   */
 enum VersionSource {
+
+  /** The finalized `metadata.version` feature level, resolved exactly through KUI's level table. */
   case Features
+
+  /** The same feature level, but a level higher than any this build knows. The release number is the highest
+    * one the table holds and is therefore a *lower bound*: the cluster is at least that new. It is a separate
+    * case rather than a flag so that no caller can render an approximate number as an exact one by forgetting
+    * to look at a boolean.
+    */
+  case FeaturesAtLeast
+
+  /** The `inter.broker.protocol.version` broker setting. Kafka 4.0 removed it with ZooKeeper mode, so this
+    * source only ever appears on a 2.8-to-3.x cluster.
+    */
   case InterBrokerProtocol
+
   case Unknown
 }
 

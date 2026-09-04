@@ -84,7 +84,10 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     assertEquals(summary.brokerCount, 1)
     assertEquals(summary.controllerKind, ClusterSummaryDto.KRaft)
     assertEquals(summary.controllerId.map(_.value), Some(1))
-    assertEquals(summary.version, Some("4.0.0"))
+    // The release number, not the broker's own words. The words for the feature-level source are
+    // `level 30`, which is not a thing any version cell should show; the raw string stays on the domain
+    // value for the detail panel.
+    assertEquals(summary.version, Some("4.0"))
     assertEquals(summary.features, List("log-dirs"))
     // The three numbers M1 cannot produce. `None` renders as an em dash; a 0 would read as a fact.
     assertEquals(summary.onlinePartitionCount, None)

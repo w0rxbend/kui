@@ -94,17 +94,25 @@ object KafkaClusterAdmin {
         case Left(failure) if isReconnect(failure) =>
           Async[F].pure(Left(KafkaErrorMapper.map("describeFeatures", failure, apiTimeout(connection))))
         case Left(_) => fromBrokerConfig(connection)
-        case Right(detected) if detected.version.isDefined => announce(connection, detected).map(Right(_))
-        // The level resolved to nothing — KUI's table is older than the cluster. Falling through to
-        // the config is strictly better than reporting no version at all, and the WARN says why.
-        case Right(unresolved) =>
+        // A level newer than KUI's table still yields a version — the highest release the table knows,
+        // as a lower bound. The WARN says so, and the fallback below is not taken: since Kafka 4.0
+        // removed `inter.broker.protocol.version` it would answer nothing on exactly the clusters that
+        // reach this branch.
+        case Right(detected) if detected.source == VersionSource.FeaturesAtLeast =>
           logged(
             _.warn(
               s"cluster ${connection.id.value} reports metadata.version " +
-                s"${unresolved.raw.getOrElse("?")}, which is newer than this build of KUI knows " +
-                s"about (highest known level ${MetadataVersions.highestKnownLevel})"
+                s"${detected.raw.getOrElse("?")}, which is newer than this build of KUI knows about " +
+                s"(highest known level ${MetadataVersions.highestKnownLevel}); reporting " +
+                s"${detected.version.fold("?")(_.render)} as a lower bound"
             )
-          ) >> fromBrokerConfig(connection)
+          ) >> announce(connection, detected).map(Right(_))
+
+        case Right(detected) if detected.version.isDefined => announce(connection, detected).map(Right(_))
+
+        // No finalized `metadata.version` at all: a pre-3.0 cluster, where the broker config is the
+        // only source there has ever been.
+        case Right(_) => fromBrokerConfig(connection)
       }
 
     private def fromFeatures(connection: ClusterConnection): F[Either[Throwable, BrokerVersion]] =
@@ -115,11 +123,18 @@ object KafkaClusterAdmin {
             .map { metadata =>
               Option(metadata.finalizedFeatures.get(MetadataVersionFeature)) match {
                 case Some(range) =>
-                  BrokerVersion(
-                    MetadataVersions.release(range.maxVersionLevel),
-                    Some(s"level ${range.maxVersionLevel}"),
-                    VersionSource.Features
-                  )
+                  val level = range.maxVersionLevel
+
+                  MetadataVersions.resolve(level) match {
+                    case Some((release, true)) =>
+                      BrokerVersion(Some(release), Some(s"level $level"), VersionSource.Features)
+                    // A level above everything this build knows. The highest release the table holds is a
+                    // true lower bound, and saying "at least 4.4" beats an empty cell; the raw string keeps
+                    // the level itself so an operator can look it up.
+                    case Some((floor, false)) =>
+                      BrokerVersion(Some(floor), Some(s"level $level"), VersionSource.FeaturesAtLeast)
+                    case None => BrokerVersion(None, Some(s"level $level"), VersionSource.Unknown)
+                  }
                 case None => BrokerVersion(None, None, VersionSource.Unknown)
               }
             }

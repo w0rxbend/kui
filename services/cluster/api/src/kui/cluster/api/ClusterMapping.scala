@@ -56,7 +56,11 @@ object ClusterMapping {
   def summary(topology: ClusterTopology, scrapedAt: Instant): ClusterSummaryDto =
     ClusterSummaryDto(
       kafkaClusterId = topology.description.kafkaClusterId,
-      version = topology.version.map(_.raw),
+      // `display`, not `raw`. `raw` is the broker's own words, and for the feature-level source those
+      // words are `level 30` — a string no version cell should ever show. `display` is the release
+      // number, with "or newer" appended when KUI's level table is older than the cluster and the
+      // number is therefore only a lower bound.
+      version = topology.version.map(_.display),
       controllerId = topology.description.controller.map(_.id),
       controllerKind = controllerKind(topology.description.controllerMode),
       brokerCount = topology.brokerCount,

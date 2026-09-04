@@ -112,10 +112,34 @@ final class KafkaToDomainSuite extends KuiSuite {
     )
   }
 
+  test("aResolvedLevelSurvivesEvenThoughItsRawStringIsNotAVersion") {
+    // The regression this asserts: `libs/kafka` resolves `level 30` to Kafka 4.3 and reports both, and the
+    // mapper used to throw the numbers away and re-parse the words. `level 30` does not parse, so a
+    // correctly detected version arrived at the browser as null on every modern broker.
+    val detected =
+      adm.BrokerVersion(Some(adm.KafkaVersion(4, 3, 0)), Some("level 30"), adm.VersionSource.Features)
+
+    assertEquals(KafkaToDomain.version(detected).map(_.short), Some("4.3"))
+    assertEquals(KafkaToDomain.version(detected).map(_.raw), Some("level 30"))
+    assertEquals(KafkaToDomain.version(detected).map(_.display), Some("4.3"))
+  }
+
+  test("aLevelNewerThanKuisTableBecomesALowerBound") {
+    val detected =
+      adm.BrokerVersion(Some(adm.KafkaVersion(4, 4, 0)), Some("level 45"), adm.VersionSource.FeaturesAtLeast)
+
+    assertEquals(KafkaToDomain.version(detected).map(_.source), Some(dom.VersionSource.MetadataVersionAtLeast))
+    assertEquals(KafkaToDomain.version(detected).map(_.display), Some("4.4 or newer"))
+  }
+
   property("aVersionStringIsNeverAnException") {
     forAll { (raw: String) =>
-      val parsed = KafkaToDomain.version(adm.BrokerVersion(None, Some(raw), adm.VersionSource.Features))
-      parsed.forall(_.raw == raw)
+      val parsed =
+        KafkaToDomain.version(
+          adm.BrokerVersion(Some(adm.KafkaVersion(3, 9, 0)), Some(raw), adm.VersionSource.Features)
+        )
+
+      parsed.exists(_.raw == raw)
     }
   }
 

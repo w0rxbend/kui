@@ -42,7 +42,13 @@ object MetadataVersions {
     22.toShort -> KafkaVersion(4, 0, 0), // IBP_4_0_IV0
     23.toShort -> KafkaVersion(4, 0, 0), // IBP_4_0_IV1
     24.toShort -> KafkaVersion(4, 0, 0), // IBP_4_0_IV2
-    25.toShort -> KafkaVersion(4, 0, 0) // IBP_4_0_IV3
+    25.toShort -> KafkaVersion(4, 0, 0), // IBP_4_0_IV3
+    26.toShort -> KafkaVersion(4, 1, 0), // IBP_4_1_IV0
+    27.toShort -> KafkaVersion(4, 1, 0), // IBP_4_1_IV1
+    28.toShort -> KafkaVersion(4, 2, 0), // IBP_4_2_IV0
+    29.toShort -> KafkaVersion(4, 2, 0), // IBP_4_2_IV1
+    30.toShort -> KafkaVersion(4, 3, 0), // IBP_4_3_IV0
+    31.toShort -> KafkaVersion(4, 4, 0) // IBP_4_4_IV0
   )
 
   /** The highest level the table knows, so a log line can say "level 31 is newer than this build of KUI knows
@@ -51,4 +57,27 @@ object MetadataVersions {
   val highestKnownLevel: Short = table.keys.max
 
   def release(featureLevel: Short): Option[KafkaVersion] = table.get(featureLevel)
+
+  /** The best release number this build can state for a level, and whether it is exact.
+    *
+    * The exact answer when the table knows the level. When the level is *above* everything the table knows —
+    * a cluster newer than this build of KUI — the answer is the highest release the table does know, flagged
+    * inexact, because "at least 4.4" is a true and useful sentence and an empty version cell is not.
+    *
+    * This is the whole reason the version cell used to be empty on a current broker. The only other source
+    * Kafka ever offered was the `inter.broker.protocol.version` broker setting, and Kafka 4.0 removed it
+    * along with ZooKeeper mode, so on any broker released after March 2025 the fallback answers nothing. A
+    * floor over the level table is what keeps the answer non-empty without inventing a number: it never
+    * reports a release higher than the cluster actually runs.
+    *
+    * A level *below* the lowest known one is still `None`: that is not a newer cluster, it is a level this
+    * table never had, and guessing downwards would report a version older than anything that has ever
+    * existed.
+    */
+  def resolve(featureLevel: Short): Option[(KafkaVersion, Boolean)] =
+    table.get(featureLevel) match {
+      case Some(exact) => Some(exact -> true)
+      case None if featureLevel > highestKnownLevel => table.get(highestKnownLevel).map(_ -> false)
+      case None => None
+    }
 }
