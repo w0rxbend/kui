@@ -47,7 +47,10 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
   private val down = TopologyView(
     profile.ref,
     None,
-    SnapshotFreshness.Unavailable("connection refused", ClusterFixtures.At)
+    SnapshotFreshness.Unavailable(
+      InfrastructureError.Unreachable("kafka", "connection refused"),
+      ClusterFixtures.At
+    )
   )
 
   /** The service, over whatever use cases the case under test wants. */
@@ -160,7 +163,13 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
         assertEquals(response.code.code, 200, response.body)
         assertEquals(summary.get[String]("status"), Right("unavailable"))
         assertEquals(summary.get[String]("reason"), Right("UPSTREAM_UNAVAILABLE"))
-        assertEquals(summary.get[String]("message"), Right("connection refused"))
+        // The failing error's own message, and its own reason code with it: the freshness carries the
+        // `KuiError` now rather than a flattened sentence, so a timeout on this same route reports
+        // `UPSTREAM_TIMEOUT` and an authentication failure `UPSTREAM_AUTH`.
+        assertEquals(
+          summary.get[String]("message"),
+          Right(InfrastructureError.Unreachable("kafka", "connection refused").message)
+        )
         // Identity survives the failure, which is what makes the row clickable.
         assertEquals(
           body(response).hcursor.downField("items").downN(0).get[String]("name"),

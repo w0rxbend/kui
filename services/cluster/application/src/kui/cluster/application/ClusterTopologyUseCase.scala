@@ -49,9 +49,9 @@ object ClusterTopologyUseCase {
   def freshnessOf[A](snapshot: Snapshot[A]): SnapshotFreshness =
     (snapshot.value, snapshot.status, snapshot.scrapedAt) match {
       case (Some(_), SnapshotStatus.Offline(error, since), Some(at)) =>
-        SnapshotFreshness.Stale(at, error.message, since)
+        SnapshotFreshness.Stale(at, error, since)
       case (_, SnapshotStatus.Offline(error, since), _) =>
-        SnapshotFreshness.Unavailable(error.message, since)
+        SnapshotFreshness.Unavailable(error, since)
       case (Some(_), _, Some(at)) => SnapshotFreshness.Fresh(at)
       case _ => SnapshotFreshness.Loading
     }

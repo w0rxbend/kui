@@ -13,14 +13,14 @@ import kui.kernel.error.*
   * section states. This is the whole translation between them, written once so that the brokers page, the
   * dashboard and the log-directories tab cannot disagree about what a greyed-out row means.
   *
-  * | Freshness                    | Data    | Section                                                      |
-  * |:-----------------------------|:--------|:-------------------------------------------------------------|
-  * | `Fresh(at)`                  | present | `Ok(data, at)`                                               |
-  * | `Stale(at, reason, since)`   | present | `Stale(data, at, reason)`                                    |
-  * | `Stale(...)`                 | absent  | `Unavailable(reason, message, since)`                        |
-  * | `Unavailable(reason, since)` | either  | `Unavailable(reason, message, since)`                        |
-  * | `Loading`                    | absent  | `Unavailable(Starting, ..., now)`                            |
-  * | `Loading`                    | present | `Stale(data, now, Starting)` — a forced refresh is in flight |
+  * | Freshness                   | Data    | Section                                                      |
+  * |:----------------------------|:--------|:-------------------------------------------------------------|
+  * | `Fresh(at)`                 | present | `Ok(data, at)`                                               |
+  * | `Stale(at, error, since)`   | present | `Stale(data, at, reasonOf(error))`                           |
+  * | `Stale(...)`                | absent  | `Unavailable(reasonOf(error), message, since)`               |
+  * | `Unavailable(error, since)` | either  | `Unavailable(reasonOf(error), message, since)`               |
+  * | `Loading`                   | absent  | `Unavailable(Starting, ..., now)`                            |
+  * | `Loading`                   | present | `Stale(data, now, Starting)` — a forced refresh is in flight |
   *
   * **Age is deliberately not an input.** A snapshot older than the refresh interval is not stale; it is a
   * snapshot from a service whose refresh loop is working exactly as designed. Only a failing upstream makes
@@ -42,18 +42,18 @@ object SectionMapping {
   def of[A, B](data: Option[A], freshness: SnapshotFreshness, at: Instant)(render: A => B): Section[B] =
     (data, freshness) match {
       case (Some(value), SnapshotFreshness.Fresh(scrapedAt)) => Section.Ok(render(value), scrapedAt)
-      case (Some(value), SnapshotFreshness.Stale(scrapedAt, reason, _)) =>
-        Section.Stale(render(value), scrapedAt, ScrapeFailureReason)
+      case (Some(value), SnapshotFreshness.Stale(scrapedAt, error, _)) =>
+        Section.Stale(render(value), scrapedAt, reasonOf(error))
       case (Some(value), SnapshotFreshness.Loading) =>
         Section.Stale(render(value), at, ReasonCode.Starting)
-      case (Some(value), SnapshotFreshness.Unavailable(_, _)) =>
+      case (Some(value), SnapshotFreshness.Unavailable(error, _)) =>
         // Data with an "unavailable" freshness cannot be produced by the use cases - `Unavailable` means
         // nothing was ever fetched. Showing the data is still the better of the two answers if it ever is.
-        Section.Stale(render(value), at, ReasonCode.UpstreamUnavailable)
-      case (None, SnapshotFreshness.Unavailable(reason, since)) =>
-        Section.Unavailable(ScrapeFailureReason, reason, Some(since))
-      case (None, SnapshotFreshness.Stale(_, reason, since)) =>
-        Section.Unavailable(ScrapeFailureReason, reason, Some(since))
+        Section.Stale(render(value), at, reasonOf(error))
+      case (None, SnapshotFreshness.Unavailable(error, since)) =>
+        Section.Unavailable(reasonOf(error), error.message, Some(since))
+      case (None, SnapshotFreshness.Stale(_, error, since)) =>
+        Section.Unavailable(reasonOf(error), error.message, Some(since))
       case (None, SnapshotFreshness.Fresh(scrapedAt)) =>
         // A successful scrape that produced nothing is not something the domain can express; treat it as
         // "not there yet" rather than inventing an empty value the caller would render as fact.
@@ -79,14 +79,14 @@ object SectionMapping {
     case _ => ReasonCode.Unknown
   }
 
-  /** The reason reported when all that is known about a failure is the message it left behind.
+  /** The reason reported for a failure whose cause is not known at all.
     *
-    * `SnapshotFreshness` flattens the `KuiError` that caused it into a human-readable message before this
-    * layer sees it, so the difference between a timeout and an authentication failure is not recoverable
-    * here. Every failing upstream is therefore reported as `UPSTREAM_UNAVAILABLE`, which is true of all of
-    * them, rather than guessed from the wording of a sentence written for a person. Recovering the
-    * distinction means `SnapshotFreshness` carrying the error's code, which is another area's type; the
-    * message itself still reaches the client, so nothing is lost to an operator, only to a `switch`.
+    * It used to be the reason reported for *every* failing scrape, because `SnapshotFreshness` flattened the
+    * `KuiError` that caused it into a sentence written for a person before this layer ever saw it. A timeout
+    * and a rejected credential both arrived here as prose and both left as `UPSTREAM_UNAVAILABLE`, so the one
+    * field a screen or a script can switch on could not tell an operator whether to look at the network or at
+    * the credentials. The freshness carries the error itself now and [[reasonOf]] classifies it; this
+    * constant remains as the honest answer where there is genuinely nothing to classify.
     */
   val ScrapeFailureReason: ReasonCode = ReasonCode.UpstreamUnavailable
 }

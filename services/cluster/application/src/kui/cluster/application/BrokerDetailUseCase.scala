@@ -97,7 +97,7 @@ object BrokerDetailUseCase {
               // The snapshot already holds this broker's directories from the last successful
               // refresh, so a live failure greys the panel rather than emptying the page. Only a
               // cluster that has never answered at all produces a `Left` here.
-              fallbackDirs(view, broker) match {
+              fallbackDirs(view, broker, error) match {
                 case Some((dirs, freshness)) =>
                   logger
                     .warn(
@@ -194,23 +194,32 @@ object BrokerDetailUseCase {
 
       private def fallbackDirs(
           view: TopologyView,
-          broker: BrokerId
+          broker: BrokerId,
+          liveFailure: KuiError
       ): Option[(List[LogDir], SnapshotFreshness)] =
         for {
           topology <- view.topology
           load <- topology.load.get(broker)
           if load.logDirs.nonEmpty
           at <- view.freshness.scrapedAtOption
-        } yield (load.logDirs, staleOf(view.freshness, at))
+        } yield (load.logDirs, staleOf(view.freshness, at, liveFailure))
 
       /** A fallback read is stale whatever the snapshot's own freshness says: the live call is the thing that
         * failed, and labelling the answer `Fresh` because the snapshot happens to be current would tell the
         * user the directories were read a moment ago when they were not.
+        *
+        * The error carried is the snapshot's when the snapshot was already failing — that outage is the older
+        * and more informative of the two — and otherwise the live call's own, so that a page greyed out by a
+        * timeout says `UPSTREAM_TIMEOUT` and one greyed out by a rejected credential says `UPSTREAM_AUTH`.
         */
-      private def staleOf(freshness: SnapshotFreshness, at: java.time.Instant): SnapshotFreshness =
+      private def staleOf(
+          freshness: SnapshotFreshness,
+          at: java.time.Instant,
+          liveFailure: KuiError
+      ): SnapshotFreshness =
         freshness match {
-          case SnapshotFreshness.Stale(_, reason, since) => SnapshotFreshness.Stale(at, reason, since)
-          case _ => SnapshotFreshness.Stale(at, "the live read failed", at)
+          case SnapshotFreshness.Stale(_, error, since) => SnapshotFreshness.Stale(at, error, since)
+          case _ => SnapshotFreshness.Stale(at, liveFailure, at)
         }
 
       /** Both shapes of one set of directories, carrying the same freshness.
@@ -249,8 +258,8 @@ object BrokerDetailUseCase {
 
       private def unreachable(view: TopologyView): KuiError =
         view.freshness match {
-          case SnapshotFreshness.Unavailable(reason, _) =>
-            InfrastructureError.Unreachable(view.cluster.displayName, reason)
+          case SnapshotFreshness.Unavailable(error, _) =>
+            InfrastructureError.Unreachable(view.cluster.displayName, error.message)
           case _ =>
             InfrastructureError.Unreachable(
               view.cluster.displayName,

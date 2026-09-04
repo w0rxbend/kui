@@ -3,6 +3,7 @@ package kui.cluster.application
 import java.time.Instant
 
 import kui.cluster.domain.{ClusterRef, ClusterTopology}
+import kui.kernel.error.KuiError
 
 /** How old the data in a view is, and why it is not newer.
   *
@@ -22,16 +23,31 @@ enum SnapshotFreshness {
   /** Data is present and the last refresh failed. `since` is when the failures started and is sticky across a
     * changing reason: a user asks "how long has this been broken", not "how long has it been broken in this
     * particular way".
+    *
+    * It carries the whole `KuiError` and not just its message. Flattening the failure into a sentence written
+    * for a person threw away the only machine-readable thing about it: `services/cluster/api` then had
+    * nothing left to classify with and reported every failing scrape as `UPSTREAM_UNAVAILABLE`, so an
+    * operator could not tell a timeout from an authentication failure — a network problem from a credentials
+    * problem — from the reason code on the screen.
     */
-  case Stale(scrapedAt: Instant, reason: String, since: Instant)
+  case Stale(scrapedAt: Instant, error: KuiError, since: Instant)
 
   /** Nothing has ever been fetched successfully and the last attempt failed. */
-  case Unavailable(reason: String, since: Instant)
+  case Unavailable(error: KuiError, since: Instant)
 
   /** True only for `Fresh`. The one derived question every caller asks. */
   def isCurrent: Boolean = this match {
     case Fresh(_) => true
     case Loading | Stale(_, _, _) | Unavailable(_, _) => false
+  }
+
+  /** The failure's own message, for the callers that only want prose. The code stays reachable through
+    * `error` for the one caller — the API layer's `SectionMapping` — whose whole job is to classify it.
+    */
+  def reason: String = this match {
+    case Stale(_, error, _) => error.message
+    case Unavailable(error, _) => error.message
+    case Loading | Fresh(_) => ""
   }
 
   /** When the data was produced, for the "as of" label. `None` when there is no data. */

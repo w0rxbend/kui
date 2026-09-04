@@ -21,6 +21,9 @@ final class SectionMappingSuite extends FunSuite {
   private val since = Instant.parse("2026-09-03T10:00:00Z")
   private val now = Instant.parse("2026-09-03T10:30:00Z")
 
+  /** The failure every row that is not about one specific error uses. */
+  private val refused = InfrastructureError.Unreachable("kafka", "connection refused")
+
   private def of(data: Option[String], freshness: SnapshotFreshness): Section[String] =
     SectionMapping.of(data, freshness, now)(identity)
 
@@ -32,7 +35,7 @@ final class SectionMappingSuite extends FunSuite {
   }
 
   test("aStaleSectionAlwaysCarriesAReason") {
-    val section = of(Some("v"), SnapshotFreshness.Stale(scrapedAt, "connection refused", since))
+    val section = of(Some("v"), SnapshotFreshness.Stale(scrapedAt, refused, since))
 
     section match {
       case Section.Stale(data, fetchedAt, reason) =>
@@ -45,16 +48,44 @@ final class SectionMappingSuite extends FunSuite {
 
   test("aFailingUpstreamWithNothingEverFetchedIsUnavailableWithTheReasonAndTheTimeItStarted") {
     assertEquals(
-      of(None, SnapshotFreshness.Unavailable("connection refused", since)),
-      Section.Unavailable(ReasonCode.UpstreamUnavailable, "connection refused", Some(since))
+      of(None, SnapshotFreshness.Unavailable(refused, since)),
+      Section.Unavailable(ReasonCode.UpstreamUnavailable, refused.message, Some(since))
     )
   }
 
   test("aFailingUpstreamWhoseDataHasGoneIsAlsoUnavailable, and keeps the sticky since") {
     assertEquals(
-      of(None, SnapshotFreshness.Stale(scrapedAt, "connection refused", since)),
-      Section.Unavailable(ReasonCode.UpstreamUnavailable, "connection refused", Some(since))
+      of(None, SnapshotFreshness.Stale(scrapedAt, refused, since)),
+      Section.Unavailable(ReasonCode.UpstreamUnavailable, refused.message, Some(since))
     )
+  }
+
+  test("theReasonCodeDistinguishesATimeoutFromAnAuthFailureFromARefusedConnection") {
+    // An operator reading `UPSTREAM_UNAVAILABLE` cannot tell a network problem from a credentials
+    // problem, and the two have nothing in common to do about them. The snapshot's freshness used to
+    // flatten the `KuiError` that caused it into a sentence written for a person, so by the time this
+    // mapping saw it the only honest answer left was "something upstream". It carries the error itself
+    // now, and this is the table that proves the distinction survives.
+    val cases = List(
+      InfrastructureError.Timeout("kafka", 5000L) -> ReasonCode.UpstreamTimeout,
+      InfrastructureError.AuthFailed("bad credentials") -> ReasonCode.UpstreamAuth,
+      InfrastructureError.CircuitOpen("kafka", since) -> ReasonCode.CircuitOpen,
+      InfrastructureError.Unreachable("kafka", "connection refused") -> ReasonCode.UpstreamUnavailable,
+      ApplicationError.Forbidden("no DESCRIBE_CONFIGS") -> ReasonCode.Forbidden
+    )
+
+    cases.foreach { (error, expected) =>
+      assertEquals(
+        of(None, SnapshotFreshness.Unavailable(error, since)),
+        Section.Unavailable(expected, error.message, Some(since)),
+        s"nothing ever fetched: ${error.code.wire}"
+      )
+
+      of(Some("v"), SnapshotFreshness.Stale(scrapedAt, error, since)) match {
+        case Section.Stale(_, _, reason) => assertEquals(reason, expected, s"stale: ${error.code.wire}")
+        case other => fail(s"expected a stale section for ${error.code.wire}, got $other")
+      }
+    }
   }
 
   test("aServiceThatHasNotFinishedItsFirstScrapeIsStarting, not an error") {

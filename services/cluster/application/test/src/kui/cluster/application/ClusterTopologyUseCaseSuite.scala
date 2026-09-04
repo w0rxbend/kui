@@ -57,7 +57,7 @@ final class ClusterTopologyUseCaseSuite extends munit.CatsEffectSuite {
 
     assertEquals(
       ClusterTopologyUseCase.freshnessOf(snapshot),
-      SnapshotFreshness.Stale(at, timedOut.message, since)
+      SnapshotFreshness.Stale(at, timedOut, since)
     )
   }
 
@@ -66,7 +66,7 @@ final class ClusterTopologyUseCaseSuite extends munit.CatsEffectSuite {
 
     assertEquals(
       ClusterTopologyUseCase.freshnessOf(snapshot),
-      SnapshotFreshness.Unavailable(timedOut.message, since)
+      SnapshotFreshness.Unavailable(timedOut, since)
     )
   }
 
@@ -127,7 +127,7 @@ final class ClusterTopologyUseCaseSuite extends munit.CatsEffectSuite {
           assertEquals(view.freshness.scrapedAtOption, None)
           assert(
             view.freshness match {
-              case SnapshotFreshness.Unavailable(reason, _) => reason == unreachable.message
+              case SnapshotFreshness.Unavailable(error, _) => error == unreachable
               case _ => false
             },
             s"expected Unavailable carrying the KuiError message, got ${view.freshness}"
