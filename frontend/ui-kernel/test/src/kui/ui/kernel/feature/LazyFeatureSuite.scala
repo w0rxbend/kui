@@ -28,6 +28,46 @@ final class LazyFeatureSuite extends FunSuite {
     }
   }
 
+  /** A thunk whose promise never settles: the hung request, which is a different failure from a rejected
+    * one and the one the timeout exists for.
+    */
+  private final class NeverSettlingThunk {
+    var calls: Int = 0
+
+    def apply(): js.Promise[KuiFeature] = {
+      calls += 1
+      new js.Promise[KuiFeature]((_, _) => ())
+    }
+  }
+
+  /** A thunk the test resolves by hand, so "the module arrived, but late" can be staged exactly. */
+  private final class SettlableThunk(feature: KuiFeature) {
+    private var resolve: js.Function1[KuiFeature, ?] = _ => ()
+
+    def apply(): js.Promise[KuiFeature] =
+      new js.Promise[KuiFeature]((onResolve, _) => resolve = onResolve)
+
+    def succeed(): Unit = resolve(feature): Unit
+  }
+
+  /** A stand-in for `setTimeout` that hands the test the deadline instead of waiting for it. */
+  private final class DeferredTimer {
+    private var pending: List[() => Unit] = Nil
+    var lastDelay: Option[Double]         = None
+
+    def schedule(millis: Double, run: () => Unit): Unit = {
+      lastDelay = Some(millis)
+      pending = pending :+ run
+    }
+
+    /** Runs every timer that has been scheduled, as the browser would when the delay is up. */
+    def elapse(): Unit = {
+      val due = pending
+      pending = Nil
+      due.foreach(_())
+    }
+  }
+
   private def stubFeature: KuiFeature = new KuiFeature {
     def id: FeatureId   = FeatureId.Clusters
     def nav: NavEntry   = NavEntry(FeatureId.Clusters, "Clusters", () => Icons.dot, 0, requiresCluster = false)
@@ -107,6 +147,50 @@ final class LazyFeatureSuite extends FunSuite {
     feature.load()
     feature.retry()
     assertEquals(thunk.calls, 1)
+  }
+
+  test("a module that never arrives becomes a failure instead of a spinner with no end") {
+    // Seen in a real browser: a navigation left "Loading Messages…" on screen permanently. A dynamic
+    // import is an HTTP request, and a request can hang rather than fail -- a proxy holding the
+    // connection open, a chunk that starts and stalls. The promise then never settles, so nothing
+    // ever moved this state machine out of `Loading` and the user had a spinner for the life of the
+    // tab, with nothing to press.
+    val never   = new NeverSettlingThunk
+    val fire    = new DeferredTimer
+    val feature = new ImportedFeature(FeatureId.Clusters, () => never(), 20000, fire.schedule)
+    val state   = feature.state.observe(using owner)
+
+    feature.load()
+    assertEquals(state.now(), LoadState.Loading)
+
+    // The deadline passes with the promise still outstanding.
+    fire.elapse()
+
+    assert(isFailed(state.now()), state.now().toString)
+    assertEquals(fire.lastDelay, Some(20000d))
+
+    // And the failure is recoverable the same way a rejected import is, so the fallback panel's
+    // retry button is a real offer rather than decoration.
+    feature.retry()
+    assertEquals(state.now(), LoadState.Loading)
+    assertEquals(never.calls, 2)
+  }
+
+  test("an import that arrives after the deadline does not overwrite the failure on screen") {
+    // By the time the timeout fires the user is looking at a panel saying what did not load, with a
+    // retry. A late arrival must not silently swap that for a feature the user did not ask for again.
+    val slow    = new SettlableThunk(stubFeature)
+    val fire    = new DeferredTimer
+    val feature = new ImportedFeature(FeatureId.Clusters, () => slow(), 20000, fire.schedule)
+    val state   = feature.state.observe(using owner)
+
+    feature.load()
+    fire.elapse()
+    assert(isFailed(state.now()), state.now().toString)
+
+    slow.succeed()
+
+    settled().map(_ => assert(isFailed(state.now()), state.now().toString))
   }
 
   test("an unregistered feature reports a definite failure rather than waiting for ever") {

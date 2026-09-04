@@ -56,10 +56,19 @@ trait LazyFeature {
   * call the thunk again while a call is outstanding or has succeeded". Remembering only the promise would
   * make a failed import permanent, which is exactly the case `retry` exists for.
   */
-final class ImportedFeature(val id: FeatureId, importFeature: () => js.Promise[KuiFeature])
-    extends LazyFeature {
+final class ImportedFeature(
+    val id: FeatureId,
+    importFeature: () => js.Promise[KuiFeature],
+    timeoutMillis: Double = ImportedFeature.DefaultTimeoutMillis,
+    schedule: (Double, () => Unit) => Unit = ImportedFeature.browserTimer
+) extends LazyFeature {
 
   private val current = Var[LoadState[KuiFeature]](LoadState.NotLoaded)
+
+  /** Which attempt is outstanding. Incremented by every `start`, so a timer left over from an abandoned
+    * attempt cannot fail the attempt that replaced it.
+    */
+  private var attempt: Int = 0
 
   val state: Signal[LoadState[KuiFeature]] = current.signal
 
@@ -82,15 +91,67 @@ final class ImportedFeature(val id: FeatureId, importFeature: () => js.Promise[K
     }
 
   private def start(): Unit = {
+    attempt += 1
+    val thisAttempt = attempt
+
     current.set(LoadState.Loading)
 
+    // The bound on `Loading`. A dynamic import is an HTTP request, and a request does not only
+    // succeed or fail: it can also hang. A captive portal, a proxy holding the connection open, a
+    // chunk that 200s and then stalls mid-body -- in every one of those the promise never settles,
+    // `onComplete` never runs, and without this timer the state stays `Loading` for the life of the
+    // tab. That is the permanent "Loading Messages…" spinner seen in the browser: not a rendering
+    // fault, a state machine with no exit from its middle state.
+    schedule(timeoutMillis, () => timeOut(thisAttempt))
+
     importFeature().toFuture.onComplete {
-      case Success(feature) => current.set(LoadState.Loaded(feature))
+      // `settle` and not `current.set`: an import that finally arrives after we gave up on it must
+      // not overwrite the failure the user is now looking at with a retry button, because the
+      // element the feature would render was never built and the panel would vanish into nothing.
+      case Success(feature) => settle(thisAttempt, LoadState.Loaded(feature))
       case Failure(cause) =>
         // The message reaches the user through the feature's fallback panel, so it has to be a
         // sentence rather than a stack trace.
-        current.set(LoadState.Failed(Option(cause.getMessage).getOrElse(cause.toString)))
+        settle(thisAttempt, LoadState.Failed(Option(cause.getMessage).getOrElse(cause.toString)))
     }
+  }
+
+  /** Records an outcome, unless the attempt it belongs to has already been superseded or given up on. */
+  private def settle(thisAttempt: Int, outcome: LoadState[KuiFeature]): Unit =
+    if attempt == thisAttempt && isLoading then current.set(outcome)
+
+  private def timeOut(thisAttempt: Int): Unit =
+    if attempt == thisAttempt && isLoading then
+      current.set(LoadState.Failed(ImportedFeature.timedOut(timeoutMillis)))
+
+  private def isLoading: Boolean =
+    current.now() match {
+      case LoadState.Loading => true
+      case LoadState.NotLoaded | LoadState.Loaded(_) | LoadState.Failed(_) => false
+    }
+}
+
+object ImportedFeature {
+
+  /** How long a feature's module may take to arrive before the shell calls it a failure.
+    *
+    * Twenty seconds, and the number is a judgement rather than a measurement: a feature module is tens of
+    * kilobytes, so on any connection that is working at all it arrives in well under a second, and a wait
+    * this long has almost certainly not got a download at the end of it. Erring long is the safe direction —
+    * a spinner replaced by a retry button one second too early is a worse experience than one second of extra
+    * patience, because pressing retry starts the download again from nothing.
+    */
+  val DefaultTimeoutMillis: Double = 20000
+
+  /** What the fallback panel says when the wait ran out. A sentence, because it is shown to a person. */
+  def timedOut(millis: Double): String =
+    s"it did not arrive within ${(millis / 1000).round} seconds"
+
+  /** The real timer. A parameter on the class rather than a call to `setTimeout` in the body, so a test can
+    * decide when the deadline passes instead of waiting out a real one.
+    */
+  def browserTimer(millis: Double, run: () => Unit): Unit = {
+    js.timers.setTimeout(millis)(run()): Unit
   }
 }
 
