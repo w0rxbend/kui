@@ -17,6 +17,18 @@ object MessagesCss {
 
   val Table = "kui-messages__table"
 
+  /** The table view (MS-004): the flattened grid, its scroll box, its column picker and its cells. */
+  val Grid = "kui-messages__grid"
+  val GridScroll = "kui-messages__grid-scroll"
+  val GridTable = "kui-messages__grid-table"
+  val GridFixed = "kui-messages__grid-fixed"
+  val GridPath = "kui-messages__grid-path"
+  val GridCell = "kui-messages__grid-cell"
+  val GridPicker = "kui-messages__grid-picker"
+  val GridPickerList = "kui-messages__grid-picker-list"
+  val GridNote = "kui-messages__grid-note"
+  val ViewSwitch = "kui-messages__view-switch"
+
   /** The cell the empty state sits in: one cell spanning every column of the table. */
   val EmptyCell = "kui-messages__empty-cell"
   val Row = "kui-messages__row"

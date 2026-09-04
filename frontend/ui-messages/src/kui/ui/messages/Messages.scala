@@ -85,6 +85,32 @@ object Messages {
   def scanned(records: Long): String =
     if records == 1L then "1 record read from Kafka" else s"$records records read from Kafka"
 
+  // --- The table view (MS-004) -----------------------------------------------------------------
+
+  /** The query parameter that remembers which view is on screen.
+    *
+    * In the URL, like every other choice this screen makes, so that "look at this topic as a table" is a link
+    * somebody can be sent. It is not a browse parameter — the server neither sees nor needs it — so it is
+    * named here rather than in the contract.
+    */
+  val ViewParam: String = "view"
+
+  val ViewList: String = "list"
+  val ViewTable: String = "table"
+
+  val ViewListLabel: String = "List"
+  val ViewTableLabel: String = "Table"
+  val ViewHint: String =
+    "The table view spreads each record's JSON across columns, so a field can be scanned down the page " +
+      "instead of read out of every record in turn."
+
+  def columnCount(shown: Int, all: Int): String =
+    if shown == all then s"Columns ($all)" else s"Columns ($shown of $all)"
+
+  def rowCap(cap: Int, held: Int): String =
+    s"Showing the newest $cap of $held records. The table view is capped so that a wide topic cannot " +
+      "freeze the tab; the list view shows them all."
+
   val EmptyTitle: String = "No records yet"
   val EmptyDescription: String =
     "Choose where to start and press Read. Nothing is fetched until you ask, because a topic can hold " +

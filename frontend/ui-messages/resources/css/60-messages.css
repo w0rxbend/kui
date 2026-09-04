@@ -250,3 +250,88 @@
   padding: var(--kui-space-6, 1.5rem) var(--kui-space-4, 1rem);
   text-align: center;
 }
+
+/* --- The table view (MS-004) ---------------------------------------------------------------
+   A record's JSON spread across columns. Everything here is about one problem: a flattened
+   record is arbitrarily wide, and a wide table must not take the page's layout with it. */
+
+.kui-messages__grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2, 0.5rem);
+}
+
+/* The table scrolls inside this box. Without it the page itself scrolls sideways, which takes the
+   navigation and the browse controls off the screen along with the table. */
+.kui-messages__grid-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md, 8px);
+}
+
+/* `auto` rather than the list view's `fixed`: there, one long value must not widen its column, and
+   here every column is one value and the natural widths are what makes the grid readable. */
+.kui-messages__grid-table {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* Partition, offset and timestamp: the three columns that are not flattened from the payload. They
+   are what a reader uses to place a row, so they stay narrow and do not wrap. */
+.kui-messages__grid-fixed {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A column header is a path — `V.order.lines[0].sku` — and is monospace for the same reason the
+   payload is: the dots and brackets are structure, not prose. */
+.kui-messages__grid-path {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  white-space: nowrap;
+}
+
+/* One line per cell, clipped, with the whole value in the tooltip. Rows all the same height is what
+   makes a grid scannable, and a cell that wrapped a two-kilobyte string would make one row taller
+   than the viewport. */
+.kui-messages__grid-cell {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-messages__grid-picker {
+  align-self: flex-start;
+}
+
+.kui-messages__grid-picker summary {
+  cursor: pointer;
+  color: var(--kui-color-accent);
+}
+
+/* Up to a hundred and twenty checkboxes, so: columns, scrollable, and bounded in height. A picker
+   that pushed the table off the screen when opened would be worse than no picker. */
+.kui-messages__grid-picker-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--kui-space-1, 0.25rem) var(--kui-space-4, 1rem);
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: var(--kui-space-2, 0.5rem) 0;
+}
+
+.kui-messages__grid-note {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The two view buttons sit together as one control rather than as two buttons that happen to be
+   adjacent, so that which one is on is legible at a glance. */
+.kui-messages__view-switch {
+  display: inline-flex;
+  gap: var(--kui-space-1, 0.25rem);
+}

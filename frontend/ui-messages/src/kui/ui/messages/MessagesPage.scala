@@ -12,6 +12,7 @@ import kui.ui.kernel.sse.{SseConnection, SseError}
 import kui.ui.messages.browse.{BrowseQuery, BrowseSession}
 import kui.ui.messages.produce.{ProduceDraft, ProduceDrawer, ResendDrawer, ResendTarget}
 import kui.ui.messages.row.RecordTable
+import kui.ui.messages.table.FlatTable
 
 /** The message browser: the screen the product is used on more than any other.
   *
@@ -133,6 +134,16 @@ object MessagesPage {
           )
         )
 
+    /** Which view is on screen, read out of the URL like everything else this screen chooses.
+      *
+      * Anything that is not `table` is the list, including a value from a link written by a future version —
+      * an unreadable setting should cost the recipient that setting and not the page.
+      */
+    val view: Signal[String] =
+      UrlParams
+        .signal(Messages.ViewParam)
+        .map(raw => if raw.contains(Messages.ViewTable) then Messages.ViewTable else Messages.ViewList)
+
     val startKind: Signal[String] = query.map(current => BrowseQuery.startKind(current.seek))
     val running: Signal[Boolean] = session.running
 
@@ -160,20 +171,34 @@ object MessagesPage {
       // The topic is the heading, not the word "Messages": the reader knows what screen they are on and what
       // they need to be sure of is which topic they are reading.
       h1(topic.value),
-      controls(query, startKind, running, rewrite, session, pressed, draft, topic),
+      controls(query, startKind, running, rewrite, session, pressed, draft, topic, view),
       // The Read button's subscription. `session.start` returns the browse's own events and binding them to
       // this element is what gives them a lifetime — a stream nothing is subscribed to is a request opened
       // and then ignored.
       pressed.events.sample(query).flatMapSwitch(session.start) --> Observer[Unit](_ => ()),
       more.events.flatMapSwitch(_ => session.loadMore()) --> Observer[Unit](_ => ()),
       statusLine(session, running),
-      RecordTable(
-        records = session.rows,
-        zone = zone,
-        empty = emptyState(session, running),
-        testId = Some("messages-table"),
-        actions = record => recordActions(topic, record, draft, resendTarget)
-      ),
+      // One set of rows, two renderings of it. The view switch does not touch the browse — the records
+      // already on screen are the same records either way — which is why it writes the URL directly
+      // instead of going through `rewrite`, whose job is to stop a browse that no longer matches its
+      // controls.
+      child <-- view.map {
+        case Messages.ViewTable =>
+          FlatTable(
+            records = session.rows,
+            zone = zone,
+            empty = emptyState(session, running),
+            testId = Some("messages-grid")
+          )
+        case _ =>
+          RecordTable(
+            records = session.rows,
+            zone = zone,
+            empty = emptyState(session, running),
+            testId = Some("messages-table"),
+            actions = record => recordActions(topic, record, draft, resendTarget)
+          )
+      },
       ProduceDrawer(cluster, draft, api),
       ResendDrawer(cluster, resendTarget, api),
       // Only after a browse has finished, and only when the *server* sent a continuation with it. It omits
@@ -205,7 +230,8 @@ object MessagesPage {
       session: BrowseSession,
       pressed: EventBus[Unit],
       draft: Var[Option[ProduceDraft]],
-      topic: TopicName
+      topic: TopicName,
+      view: Signal[String]
   ): HtmlElement =
     div(
       cls := MessagesCss.Controls,
@@ -348,6 +374,15 @@ object MessagesPage {
             ).amend(title := Messages.PauseHint)
           )
         ),
+      // The view switch. It is on the control bar with everything else that decides what is on screen,
+      // and it is a pair of buttons rather than a menu because there are two of them and which one is on
+      // has to be legible without opening anything.
+      div(
+        cls := MessagesCss.ViewSwitch,
+        title := Messages.ViewHint,
+        viewButton(Messages.ViewList, Messages.ViewListLabel, view, "messages-view-list"),
+        viewButton(Messages.ViewTable, Messages.ViewTableLabel, view, "messages-view-table")
+      ),
       // Publish is on the control bar and not beside Read, because it is the screen's other job rather
       // than a variant of its first one. Secondary, so that the primary action on a reading screen stays
       // the one that reads.
@@ -386,6 +421,32 @@ object MessagesPage {
         size = Size.Sm,
         testId = Some(s"record-${record.partition.value}-${record.offset.value}-resend")
       ).amend(title := Messages.ResendHint)
+    )
+
+  /** One of the two view buttons. The one that is already on is drawn as the primary, which is how the rest
+    * of KUI shows a chosen option, and pressing it again is harmless.
+    *
+    * It writes the URL directly rather than through `rewrite`: switching view does not change what was asked
+    * of Kafka, and stopping a running tail because somebody wanted to look at the same records in columns
+    * would be a control with a hidden cost.
+    */
+  private def viewButton(
+      value: String,
+      label: String,
+      view: Signal[String],
+      testId: String
+  ): HtmlElement =
+    div(
+      child <-- view.map(current =>
+        Button(
+          label = Val(label),
+          onClick = Observer[Unit](_ => UrlParams.set(Map(Messages.ViewParam -> Some(value)))),
+          // The view that is on is the primary one. KUI has no "pressed" button variant, and a pair in
+          // which neither is emphasised is a pair whose state has to be worked out from the screen.
+          variant = if current == value then ButtonVariant.Primary else ButtonVariant.Secondary,
+          testId = Some(testId)
+        )
+      )
     )
 
   /** What the stream is doing, in words.
