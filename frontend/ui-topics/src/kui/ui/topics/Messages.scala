@@ -175,4 +175,133 @@ object Messages {
 
   val TopicForbiddenDescription: String =
     "Your account can see the cluster but not this topic. An administrator can grant TOPIC:VIEW."
+
+  // --- Administration (M5) ---------------------------------------------------------------------
+  //
+  // The wording rule for everything below: say what will happen to the operator's cluster, in their words,
+  // before it happens. Nothing here paraphrases a server warning — those arrive as sentences and are shown
+  // whole, so that an operator reading the API and an operator reading the screen are told the same thing.
+
+  val Cancel: String = "Cancel"
+  val Remove: String = "Remove"
+  val Preview: String = "Preview"
+
+  // Creating a topic
+
+  val CreateTopic: String = "New topic"
+  val CreateTopicTitle: String = "Create a topic"
+  val CreateSubmit: String = "Create topic"
+
+  val CreateHint: String =
+    "Leave partitions or replication factor blank to use this cluster's own defaults. The topic is created " +
+      "immediately and the result below reports what the brokers actually made."
+
+  val CreateNameLabel: String = "Name"
+  val CreateNameHint: String =
+    "Letters, digits, dots, underscores and hyphens, up to 249 characters. Dots and underscores collide in " +
+      "Kafka's own metrics, so a name should not mix them."
+  val CreateNameInvalid: String =
+    "that is not a name Kafka accepts: use letters, digits, '.', '_' and '-', up to 249 characters"
+
+  val CreateBrokerDefault: String = "broker default"
+
+  val CreatePartitionsLabel: String = "Partitions"
+  val CreatePartitionsHint: String =
+    "How many partitions the topic is split into. It can be raised later but never lowered, and raising it " +
+      "changes which partition a given key lands on."
+  val CreatePartitionsInvalid: String = "partitions must be a whole number of one or more, or left blank"
+
+  val CreateReplicationLabel: String = "Replication factor"
+  val CreateReplicationHint: String =
+    "How many brokers hold a copy of each partition. It cannot exceed the number of brokers in the cluster."
+  val CreateReplicationInvalid: String =
+    "the replication factor must be a whole number of one or more, or left blank"
+
+  val CreateConfigTitle: String = "Configuration"
+  val CreateConfigHint: String =
+    "Optional. Kafka's own setting names, such as retention.ms or cleanup.policy. Anything the brokers do " +
+      "not recognise is refused by them, and their refusal is shown here."
+  val CreateAddSetting: String = "Add a setting"
+  val CreateSettingKey: String = "Setting"
+  val CreateSettingValue: String = "Value"
+  val CreateSettingNoKey: String = "a setting has a value but no name"
+
+  def created(topic: String, partitions: Option[Int], replication: Option[Int]): String = {
+    val shape = (partitions, replication) match {
+      case (Some(count), Some(factor)) => s" with $count partitions and a replication factor of $factor"
+      case (Some(count), None) => s" with $count partitions"
+      case _ => ""
+    }
+    s"'$topic' was created$shape."
+  }
+
+  // Editing a setting
+
+  val EditSetting: String = "Edit"
+  val AddSetting: String = "Add a setting"
+  val EditSettingTitle: String = "Change a setting"
+  val EditSettingSubmit: String = "Save"
+  val EditSettingKey: String = "Setting"
+  val EditSettingValue: String = "Value"
+  val EditSettingNoKey: String = "type the name of the setting to change"
+
+  val EditSettingHint: String =
+    "Only this setting is changed. Every other setting on the topic is left exactly as it is."
+
+  val EditSettingReset: String = "Put this setting back to the broker's default"
+
+  // Adding partitions
+
+  val DangerTitle: String = "Changes that cannot be undone"
+  val DangerHint: String =
+    "Both of these are shown to you in full before anything happens, and both are applied against exactly " +
+      "what you were shown."
+
+  val DangerGone: String =
+    "This topic has been deleted. What it held is gone; the record of what was destroyed is below."
+
+  val AddPartitionsTitle: String = "Add partitions"
+  val AddPartitionsLabel: String = "New partition count"
+  val AddPartitionsConfirm: String = "Add the partitions"
+  val AddPartitionsInvalid: String = "the new partition count must be a whole number greater than zero"
+  val AddPartitionsUnknown: String = "KUI could not read how many partitions this topic currently has."
+
+  def addPartitionsNow(current: Int): String =
+    s"This topic has $current partition${if current == 1 then "" else "s"}. Kafka can add partitions and " +
+      "can never remove one."
+
+  def partitionPlan(current: Int, target: Int): String =
+    s"$current partitions become $target: ${target - current} added."
+
+  def partitionsApplied(current: Int, target: Int): String =
+    s"$target partitions, up from $current. Records written from now on are routed across all $target."
+
+  // Deleting a topic
+
+  val DeleteTitle: String = "Delete this topic"
+  val DeleteHint: String =
+    "The topic and every record in it are removed. Preview it first: the preview counts what is there now " +
+      "and checks whether this cluster will recreate the topic by itself."
+  val DeleteConfirm: String = "Delete the topic"
+  val DeleteConfirmTitle: String = "Delete this topic?"
+
+  def deleteConfirmMessage(topic: String): String =
+    s"'$topic' and every record in it will be deleted. This cannot be undone."
+
+  def deletionPlan(topic: String, partitions: Int, records: Option[Long]): String = {
+    val counted = records match {
+      case Some(1L) => "1 record"
+      case Some(count) => s"$count records"
+      // Never a zero. At least one partition could not be counted, and a number smaller than the truth is
+      // worse than no number to somebody deciding whether to delete.
+      case None => "an unknown number of records"
+    }
+    s"'$topic' holds $counted across $partitions partition${if partitions == 1 then "" else "s"}."
+  }
+
+  def deleted(topic: String, records: Option[Long]): String =
+    records match {
+      case Some(count) => s"'$topic' was deleted, with $count record${if count == 1L then "" else "s"}."
+      case None => s"'$topic' was deleted."
+    }
 }

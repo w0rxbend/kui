@@ -27,7 +27,18 @@ import kui.ui.topics.{Messages, TopicsCss}
   */
 object SettingsTab {
 
-  def apply(config: Signal[Option[Section[TopicConfigViewDto]]]): HtmlElement = {
+  /** @param onEdit
+    *   what the Edit button on a row does, given the key and its current value. `None` when this deployment
+    *   cannot change the topic — there is then no button at all rather than a disabled one, because a control
+    *   that is always disabled teaches the reader to stop looking at it.
+    * @param onAdd
+    *   the same for a setting the topic does not have yet, which is the same dialog with an empty key.
+    */
+  def apply(
+      config: Signal[Option[Section[TopicConfigViewDto]]],
+      onEdit: Option[(String, Option[String]) => Unit] = None,
+      onAdd: Option[() => Unit] = None
+  ): HtmlElement = {
     val view: Signal[Option[TopicConfigViewDto]] = config.map(_.flatMap(_.toOption))
 
     val entries: Signal[List[TopicConfigEntryDto]] =
@@ -45,6 +56,19 @@ object SettingsTab {
     div(
       cls := TopicsCss.Settings,
       dataAttr("testid") := "topic-settings",
+      // Above the table rather than below it: the table is long, and a control under a hundred rows of
+      // configuration is a control nobody scrolls to.
+      onAdd.map(add =>
+        div(
+          cls := TopicsCss.SettingsActions,
+          Button(
+            label = Val(Messages.AddSetting),
+            onClick = Observer[Unit](_ => add()),
+            icon = Some(() => Icon.plus),
+            testId = Some("topic-settings-add")
+          )
+        )
+      ),
       child.maybe <-- notPermitted.map(
         _.map(detail =>
           EmptyState(
@@ -59,7 +83,7 @@ object SettingsTab {
       child.maybe <-- notPermitted.map(refused =>
         Option.when(refused.isEmpty)(
           DataTable[TopicConfigEntryDto](
-            columns = columns,
+            columns = columns ++ onEdit.map(editColumn).toList,
             rows = entries,
             rowKey = _.name,
             empty = () => EmptyState(Messages.NoOverridesTitle, description = Some(Messages.NoOverrides)),
@@ -69,6 +93,26 @@ object SettingsTab {
       )
     )
   }
+
+  /** The Edit button, as a column, so it lines up with the value it changes.
+    *
+    * A read-only key — one the broker reports as `isReadOnly` — gets no button. Kafka refuses to alter it,
+    * and offering a control whose only outcome is a refusal is worse than not offering one.
+    */
+  private def editColumn(onEdit: (String, Option[String]) => Unit): Column[TopicConfigEntryDto] =
+    Column[TopicConfigEntryDto](
+      id = "edit",
+      header = "",
+      render = entry =>
+        if entry.readOnly then span()
+        else
+          Button(
+            label = Val(Messages.EditSetting),
+            onClick = Observer[Unit](_ => onEdit(entry.name, entry.value)),
+            size = Size.Sm,
+            testId = Some(s"topic-setting-edit-${entry.name}")
+          )
+    )
 
   private val columns: List[Column[TopicConfigEntryDto]] = List(
     Column[TopicConfigEntryDto](

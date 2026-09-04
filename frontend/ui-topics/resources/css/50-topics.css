@@ -224,3 +224,173 @@
   margin-bottom: var(--kui-space-3);
   font-size: var(--kui-font-size-sm);
 }
+
+/* --- Administration (M5) ----------------------------------------------------------------------- */
+
+/* The heading and "New topic" on one line. Creating a topic is not a filter, so it does not belong
+ * in the control bar underneath, which is entirely about narrowing what is on screen. */
+.kui-topics__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-4);
+  flex-wrap: wrap;
+}
+
+/* --- Forms ------------------------------------------------------------------------------------- */
+
+.kui-topics__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-topics__form-hint {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* A refusal — the form's or the cluster's — reads as one thing, because from the operator's side it
+ * is one question: what do I do now. */
+.kui-topics__form-error {
+  margin: 0;
+  padding: var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-topics__form-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding-top: var(--kui-space-3);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+.kui-topics__form-section-title {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-topics__config-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+/* Key, value and Remove on one line, with the value taking the slack: values are longer than keys
+ * and are the half being typed. */
+.kui-topics__config-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: var(--kui-space-3);
+}
+
+.kui-topics__settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--kui-space-3);
+}
+
+/* --- The changes that cannot be undone ---------------------------------------------------------- */
+
+/* Bordered in the danger colour and set apart from the tabs above it. The border is the whole point:
+ * these two controls have no undo, and an operator should be able to see where they are without
+ * reading a word. */
+.kui-topics__danger {
+  margin-top: var(--kui-space-6);
+  padding: var(--kui-space-4);
+  border: 1px solid var(--kui-color-danger);
+  border-radius: var(--kui-radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-topics__danger-title {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-danger);
+}
+
+.kui-topics__danger-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding-top: var(--kui-space-3);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+.kui-topics__danger-section-title {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-topics__danger-controls {
+  display: flex;
+  align-items: end;
+  gap: var(--kui-space-3);
+  flex-wrap: wrap;
+}
+
+/* --- A plan, and the receipt it becomes --------------------------------------------------------- */
+
+/* The plan is the thing being confirmed, so it is a panel of its own rather than a line of text: the
+ * operator has to be able to tell what they are agreeing to from what they typed. */
+.kui-topics__plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-topics__plan-summary {
+  margin: 0;
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-topics__plan-warnings {
+  margin: 0;
+  padding-left: var(--kui-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+/* The server's own sentence, whole. It is computed on the server precisely so that an API user and a
+ * browser user are warned about the same thing, and it is coloured rather than shortened. */
+.kui-topics__plan-warning {
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The record of what happened, which for an irreversible action is the only one the operator gets. */
+.kui-topics__receipt {
+  margin: 0;
+  padding: var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-success-container);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* A button in a column flexbox stretches to the container's width unless it is told not to. Left
+ * alone, "Preview" spanned the whole danger panel and read as its primary action — which is exactly
+ * backwards for a control whose job is to slow somebody down. */
+.kui-topics__danger-section > button,
+.kui-topics__form-section > button {
+  align-self: flex-start;
+}
+
+/* Hidden, not removed: an element that is taken out of the tree loses the state it was holding, and
+ * the one thing this panel must not lose is the receipt of a delete. */
+.kui-topics__hidden {
+  display: none;
+}

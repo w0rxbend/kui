@@ -9,7 +9,7 @@ import kui.gateway.contract.TopicOverviewEndpoints
 import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{ClusterId, TopicName}
 import kui.topic.contract.dto.*
-import kui.topic.contract.{TopicEndpoints, TopicListParams, TopicQueryCodecs}
+import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints, TopicListParams, TopicQueryCodecs}
 
 /** The topic service's endpoints as the *browser* calls them.
   *
@@ -111,6 +111,93 @@ object TopicsApi {
       .out(jsonBody[RefreshAcceptedDto])
       .name("topics.refresh")
 
-  /** Every client this module has. The suite walks it, so a sixth endpoint cannot be added untested. */
-  val all: List[AnyEndpoint] = List(list, topic, overview, config, partitions, refresh)
+  // --- Administration (M5) ---------------------------------------------------------------------
+  //
+  // The CSRF header every one of these endpoints declares on the service side is deliberately absent
+  // here. `ApiClient` puts it on every request that is not a `GET`, so declaring it would put a second,
+  // empty one on the wire — and a header declared in two places is a header that stops agreeing.
+  //
+  // The two destructive operations are two calls each, and the browser cannot shortcut them: the apply
+  // endpoints take a plan token and there is nothing else to send. So "the button is disabled until a
+  // plan has been read" is not a rule written on a screen; it is the shape of the client.
+
+  /** `POST /api/v1/clusters/{clusterId}/topics` — create a topic. */
+  val create: PublicEndpoint[(ClusterId, CreateTopicRequest), ErrorEnvelope, CreatedTopicDto, Any] =
+    KuiEndpoint.base.post
+      .in(topicsBase)
+      .in(jsonBody[CreateTopicRequest])
+      .out(jsonBody[CreatedTopicDto])
+      .name("topics.create")
+
+  /** `PATCH …/topics/{topicName}/config` — set and reset configuration keys.
+    *
+    * A change and not a replacement: keys it does not name are left alone. The response is the whole
+    * configuration read back, so the Settings table can be redrawn from what the broker now reports rather
+    * than from what the form asked for — a value Kafka normalised would otherwise show wrong until a reload.
+    */
+  val updateConfig: PublicEndpoint[
+    (ClusterId, TopicName, UpdateTopicConfigRequest),
+    ErrorEnvelope,
+    TopicConfigResponse,
+    Any
+  ] =
+    KuiEndpoint.base.patch
+      .in(oneTopic / TopicEndpoints.ConfigSegment)
+      .in(jsonBody[UpdateTopicConfigRequest])
+      .out(jsonBody[TopicConfigResponse])
+      .name("topics.config.update")
+
+  /** `POST …/topics/{topicName}/partitions/plan` — what growing the topic would do. Changes nothing. */
+  val planPartitions: PublicEndpoint[
+    (ClusterId, TopicName, PartitionIncreaseRequest),
+    ErrorEnvelope,
+    PartitionPlanDto,
+    Any
+  ] =
+    KuiEndpoint.base.post
+      .in(oneTopic / TopicEndpoints.PartitionsSegment / TopicAdminEndpoints.PlanSegment)
+      .in(jsonBody[PartitionIncreaseRequest])
+      .out(jsonBody[PartitionPlanDto])
+      .name("topics.partitions.plan")
+
+  /** `POST …/topics/{topicName}/partitions` — grow the topic to what the token names. */
+  val increasePartitions
+      : PublicEndpoint[(ClusterId, TopicName, ConfirmRequest), ErrorEnvelope, PartitionPlanDto, Any] =
+    KuiEndpoint.base.post
+      .in(oneTopic / TopicEndpoints.PartitionsSegment)
+      .in(jsonBody[ConfirmRequest])
+      .out(jsonBody[PartitionPlanDto])
+      .name("topics.partitions.increase")
+
+  /** `POST …/topics/{topicName}/deletion/plan` — what deleting would destroy. Changes nothing. */
+  val planDeletion: PublicEndpoint[(ClusterId, TopicName), ErrorEnvelope, DeletionPlanDto, Any] =
+    KuiEndpoint.base.post
+      .in(oneTopic / TopicAdminEndpoints.DeletionSegment / TopicAdminEndpoints.PlanSegment)
+      .out(jsonBody[DeletionPlanDto])
+      .name("topics.deletion.plan")
+
+  /** `DELETE …/topics/{topicName}?token=…` — delete exactly the topic the token names. */
+  val deleteTopic: PublicEndpoint[(ClusterId, TopicName, String), ErrorEnvelope, DeletionPlanDto, Any] =
+    KuiEndpoint.base.delete
+      .in(oneTopic)
+      .in(query[String](TopicAdminEndpoints.TokenParam))
+      .out(jsonBody[DeletionPlanDto])
+      .name("topics.delete")
+
+  /** Every client this module has. The suite walks it, so a twelfth endpoint cannot be added untested. */
+  val all: List[AnyEndpoint] =
+    List(
+      list,
+      topic,
+      overview,
+      config,
+      partitions,
+      refresh,
+      create,
+      updateConfig,
+      planPartitions,
+      increasePartitions,
+      planDeletion,
+      deleteTopic
+    )
 }

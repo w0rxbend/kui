@@ -13,6 +13,7 @@ import kui.message.contract.BrowseAddress
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
 import kui.ui.kernel.feature.{FeatureId, FeatureSlots, GuestTabs, PanelContext}
+import kui.ui.topics.admin.{EditSettingDialog, TopicAdminPanel}
 import kui.ui.topics.{Messages, TopicTab, TopicsCss, TopicsQueries}
 
 /** One topic: what it is made of, how its partitions are laid out, and every setting it carries.
@@ -89,6 +90,35 @@ object TopicDetailPage {
       */
     val selected: Var[String] = Var(TopicTab.Default.toString)
 
+    /** Whether this page's topic has been deleted from under it.
+      *
+      * The page has to know, because everything else about it becomes wrong at once: the overview refetches
+      * and answers 404, and the "no such topic" screen that would produce is a worse answer than the receipt
+      * saying what was just destroyed. So the deletion receipt wins, and the not-found screen is suppressed
+      * while it is on show.
+      */
+    val deleted: Var[Boolean] = Var(false)
+
+    /** Which setting the edit dialog is holding. The dialog is built once, here, rather than inside the
+      * Settings tab's thunk: a dialog rebuilt every time the tab is opened would lose a save in flight.
+      */
+    val editing: Var[(String, Option[String])] = Var(("", None))
+    val editOpen: Var[Boolean] = Var(false)
+
+    /** Built once, for the reason `ResetWizard` records: this element holds the operator's only record of an
+      * irreversible action, and an element rebuilt from each new snapshot is one that can be replaced in the
+      * same instant its receipt arrives.
+      */
+    val adminPanel: HtmlElement = TopicAdminPanel(
+      topic = topic,
+      partitionCount = detail.map(_.map(_.row.partitionCount)),
+      planPartitions = count => queries.planPartitions(cluster, topic, count),
+      applyPartitions = token => queries.increasePartitions(cluster, topic, token),
+      planDeletion = () => queries.planDeletion(cluster, topic),
+      applyDeletion = token => queries.deleteTopic(cluster, topic, token),
+      onDeleted = () => deleted.set(true)
+    )
+
     val ownTabs: Signal[List[Tab]] =
       // A thunk per tab, so the Settings tab's query is not issued until somebody opens it. That laziness is
       // `Tabs`' own, and it is the reason the tab is in the URL rather than in a local `Var`.
@@ -102,7 +132,18 @@ object TopicDetailPage {
           Tab(
             TopicTab.Settings.toString,
             Messages.TabSettings,
-            () => SettingsTab(queries.config.state(key).map(_.lastGood.map(_.config)))
+            () =>
+              SettingsTab(
+                queries.config.state(key).map(_.lastGood.map(_.config)),
+                onEdit = Some { (name, value) =>
+                  editing.set((name, value))
+                  editOpen.set(true)
+                },
+                onAdd = Some { () =>
+                  editing.set(("", None))
+                  editOpen.set(true)
+                }
+              )
           )
         )
       )
@@ -132,6 +173,9 @@ object TopicDetailPage {
       // for this purpose, so a renamed segment breaks the build rather than the link.
       a(
         cls := TopicsCss.BrowseLink,
+        // Hidden once the topic has been deleted from this page: the browser it points at would open on a
+        // topic that no longer exists, and a link that is certain to fail is worse than no link.
+        cls(TopicsCss.Hidden) <-- deleted.signal,
         dataAttr("testid") := "topic-browse-messages",
         href := browseHref(backHref, cluster, topic),
         Messages.BrowseMessages
@@ -147,14 +191,24 @@ object TopicDetailPage {
         .collect { case (id, current) if id != current.toString => id } --> { id =>
         TopicTab.values.find(_.toString == id).foreach(onTab)
       },
-      child.maybe <-- notFound.map(Option.when(_)(missing(topic))),
       child.maybe <-- Signal
-        .combine(notFound, topicSection)
-        .map((missingTopic, section) =>
-          Option.when(!missingTopic)(
+        .combine(notFound, deleted.signal)
+        .map((missingTopic, wasDeleted) => Option.when(missingTopic && !wasDeleted)(missing(topic))),
+      child.maybe <-- Signal
+        .combine(notFound, topicSection, deleted.signal)
+        .map((missingTopic, section, wasDeleted) =>
+          Option.when(!missingTopic && !wasDeleted)(
             section.flatMap(refusal).getOrElse(body(detail, topicSection, tabs, selected, zone, now))
           )
         ),
+      EditSettingDialog(
+        open = editOpen,
+        editing = editing,
+        update = request => queries.updateConfig(cluster, topic, request)
+      ),
+      // The irreversible changes, last on the page and after the tabs, because that is where a reader
+      // expects to find the controls they should meet deliberately rather than by accident.
+      adminPanel,
       // KU-013's slots. Empty in M2, and present so that a registration is visible the moment it lands.
       div(
         cls := TopicsCss.Panels,

@@ -50,17 +50,28 @@ final class TopicsApiSuite extends FunSuite {
 
   private val defaultParams = TopicListParams.Default
 
+  private val createRequest: CreateTopicRequest = CreateTopicRequest(topic, Some(3), Some(1), Map.empty)
+
+  private val configChange: UpdateTopicConfigRequest =
+    UpdateTopicConfigRequest(Map("retention.ms" -> "1000"), Nil)
+
   private val calls: List[(String, String)] = List(
     "list" -> pathOf(TopicsApi.list, (cluster, defaultParams)),
     "topic" -> pathOf(TopicsApi.topic, (cluster, topic)),
     "overview" -> pathOf(TopicsApi.overview, (cluster, topic)),
     "config" -> pathOf(TopicsApi.config, (cluster, topic)),
     "partitions" -> pathOf(TopicsApi.partitions, (cluster, topic)),
-    "refresh" -> pathOf(TopicsApi.refresh, cluster)
+    "refresh" -> pathOf(TopicsApi.refresh, cluster),
+    "create" -> pathOf(TopicsApi.create, (cluster, createRequest)),
+    "updateConfig" -> pathOf(TopicsApi.updateConfig, (cluster, topic, configChange)),
+    "planPartitions" -> pathOf(TopicsApi.planPartitions, (cluster, topic, PartitionIncreaseRequest(6))),
+    "increasePartitions" -> pathOf(TopicsApi.increasePartitions, (cluster, topic, ConfirmRequest("t"))),
+    "planDeletion" -> pathOf(TopicsApi.planDeletion, (cluster, topic)),
+    "deleteTopic" -> pathOf(TopicsApi.deleteTopic, (cluster, topic, "t"))
   )
 
   test("everyClientTargetsThePublicPrefix") {
-    // Every endpoint, not a hand-written list of them: adding a sixth without a test is not possible.
+    // Every endpoint, not a hand-written list of them: adding a thirteenth without a test is not possible.
     assertEquals(calls.length, TopicsApi.all.length)
     calls.foreach { (name, path) =>
       assert(path.startsWith(PublicApi.Prefix), s"$name calls $path")

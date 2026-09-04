@@ -412,9 +412,11 @@ final class TopicDetailPageSuite extends FunSuite {
         TopicConfigViewDto.Entries(List(entry("cleanup.policy", Some("delete"), Some("delete"))))
       )
       val cells = root.querySelectorAll("tbody td").toList.map(_.textContent.trim)
-      // Three columns; the third is the default and is blank because the value is the default. Repeating
-      // it in both columns doubles the reading and says nothing.
-      assertEquals(cells.lastOption, Some(""))
+      // Four columns since M5 — setting, value, default, and the Edit button. The *third* is the default,
+      // and it is blank because the value is the default: repeating it in both columns doubles the reading
+      // and says nothing. Indexed rather than taken from the end, so the assertion keeps naming the column
+      // it is about now that it is no longer the last one.
+      assertEquals(cells.lift(2), Some(""))
     }
   }
 

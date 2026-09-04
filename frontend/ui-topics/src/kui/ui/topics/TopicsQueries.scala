@@ -99,6 +99,72 @@ final class TopicsQueries(api: ApiClient) {
     partitions.invalidateWhere((id, _) => id == cluster)
   }
 
+  // --- Administration (M5) ---------------------------------------------------------------------
+  //
+  // None of these is a cache, and none of them may become one. A plan is a statement about the cluster
+  // *now*, carrying a token that expires in five minutes; serving a cached one would let an operator
+  // confirm a plan computed against a topic that has since changed, which is the exact failure the
+  // two-phase flow exists to prevent. The four writes are not idempotent, so a cache would at best be
+  // useless and at worst would replay one.
+  //
+  // Every one of them drops this cluster's cached answers on success, because after a create, an edit, a
+  // partition increase or a delete, everything on screen about that cluster's topics is suspect.
+
+  /** Create a topic. Answers with the topic as the cluster reports it afterwards. */
+  def createTopic(
+      cluster: ClusterId,
+      request: CreateTopicRequest
+  ): EventStream[Either[ApiError, CreatedTopicDto]] =
+    invalidatingOnSuccess(cluster, call(TopicsApi.create, (cluster, request)))
+
+  /** Set and reset a topic's configuration keys, and answer with the configuration read back. */
+  def updateConfig(
+      cluster: ClusterId,
+      topic: TopicName,
+      request: UpdateTopicConfigRequest
+  ): EventStream[Either[ApiError, TopicConfigResponse]] =
+    invalidatingOnSuccess(cluster, call(TopicsApi.updateConfig, (cluster, topic, request)))
+
+  /** What growing this topic would do. Reads; changes nothing. */
+  def planPartitions(
+      cluster: ClusterId,
+      topic: TopicName,
+      partitions: Int
+  ): EventStream[Either[ApiError, PartitionPlanDto]] =
+    call(TopicsApi.planPartitions, (cluster, topic, PartitionIncreaseRequest(partitions)))
+
+  /** Grow the topic to exactly what the plan token names. */
+  def increasePartitions(
+      cluster: ClusterId,
+      topic: TopicName,
+      token: String
+  ): EventStream[Either[ApiError, PartitionPlanDto]] =
+    invalidatingOnSuccess(
+      cluster,
+      call(TopicsApi.increasePartitions, (cluster, topic, ConfirmRequest(token)))
+    )
+
+  /** What deleting this topic would destroy. Reads; changes nothing. */
+  def planDeletion(cluster: ClusterId, topic: TopicName): EventStream[Either[ApiError, DeletionPlanDto]] =
+    call(TopicsApi.planDeletion, (cluster, topic))
+
+  /** Delete exactly the topic the plan token names. */
+  def deleteTopic(
+      cluster: ClusterId,
+      topic: TopicName,
+      token: String
+  ): EventStream[Either[ApiError, DeletionPlanDto]] =
+    invalidatingOnSuccess(cluster, call(TopicsApi.deleteTopic, (cluster, topic, token)))
+
+  private def invalidatingOnSuccess[A](
+      cluster: ClusterId,
+      stream: EventStream[Either[ApiError, A]]
+  ): EventStream[Either[ApiError, A]] =
+    stream.map { outcome =>
+      if outcome.isRight then invalidateCluster(cluster)
+      outcome
+    }
+
   /** Every request this feature makes, with its health report attached.
     *
     * `CallScope.Feature`, never `CallScope.Shell`. A failure here means this feature cannot show its data; it

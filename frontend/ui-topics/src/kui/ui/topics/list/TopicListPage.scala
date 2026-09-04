@@ -13,6 +13,7 @@ import kui.topic.contract.{TopicListParams, TopicQueryCodecs, TopicSortField}
 import kui.ui.kernel.component.*
 import kui.ui.kernel.prefs.{Favourites, PreferenceStore}
 import kui.ui.kernel.query.UrlParams
+import kui.ui.topics.admin.CreateTopicDialog
 import kui.ui.topics.{Messages, TopicsCss, TopicsQueries}
 
 /** The topic list: the screen this milestone is judged on.
@@ -205,7 +206,19 @@ object TopicListPage {
     div(
       cls := TopicsCss.Page,
       dataAttr("testid") := "page-topics-list",
-      h1(Messages.Title),
+      div(
+        cls := TopicsCss.Heading,
+        h1(Messages.Title),
+        // Beside the heading rather than in the control bar below: the bar is about narrowing what is on
+        // screen, and creating a topic is not a filter.
+        CreateTopicDialog(
+          create = request => queries.createTopic(cluster, request),
+          // Straight to the new topic. The list is invalidated by the call itself, but a list is not what
+          // somebody who has just created a topic wants to look at — and landing on the topic is also the
+          // proof that it exists.
+          onCreated = created => navigate(cluster, created.value)
+        )
+      ),
       // The URL is authoritative, so the table's sort is pushed *into* it whenever the URL changes, and the
       // table's own writes are turned back into URL updates. Both directions pass through here.
       sort --> { current => tableSort.set(current.map(s => Sort(s.field.wire, s.order))) },
