@@ -1,58 +1,50 @@
 # KUI status
 
-**Date:** 2026-09-04 (full audit; nine auditors, one area each, against the tree at `HEAD` and the
-two running deployments).
-**Phase:** M0–M4 are delivered and usable. M5 landed early in part (topic administration, purge).
-M6, M7 and M8 are **not started**: there is no authentication, no authorization, no schema
-registry, no Kafka Connect, no ksqlDB, no ACLs, no quotas and no broker metrics.
-**Position:** **53 of 177 in-scope capabilities are delivered — 30%.** The remaining 124 are
-enumerated, sized and ordered in `docs/BACKLOG.md`.
-**Read next:** `docs/FEATURE_MATRIX.md` (every state re-set by the audit) and `docs/BACKLOG.md`
-(what is left, in waves, with a recommended next build).
+**Date:** 2026-09-04 (closing integration pass)
+**Phase:** M0 through M4 are implemented, integrated and used from a browser against a real broker,
+and M5's topic administration with them: create a topic, change a setting, add partitions, empty it
+and delete it, the last three confirmed against a server-computed plan and applied against a signed
+token. No row of the delivery bar is outstanding.
+**Repository:** on `main`; every gate the CI runs is green — `__.checkFormat`, `__.fix --check`,
+`checkArchitecture`, `__.openApiCheck`, `__.checkBundleShape` and `__.test`.
+**Read next:** `docs/DELIVERY.md`, whose *closing integration pass* section is the honest account of
+what works, what does not, and what was never tested.
 
-## What this replaces
+## What the closing pass changed
 
-The previous header of this file said M0–M4 were complete, that no delivery-bar item was
-outstanding, and that `./mill __.test` was green at 8226/8226. Three corrections:
+**The one gate that had been red on `main` is green.** `__.openApiCheck` compares the gateway's Tapir
+endpoints against the committed `docs/api/openapi.json` byte for byte, and three passes in a row had
+added endpoints without regenerating it, each deferring because doing so would sweep in another
+pass's in-flight work. `20f7e35` regenerates it; the whole topic-administration surface and the
+message resend endpoint are in the published document for the first time.
 
-1. **8226 is Mill's task count, not a test count.** Summing every cached suite result gives about
-   **3 915 test cases** across 60 modules. The M1 section of this file gets this right; later
-   passes lost the distinction.
-2. **CI does not run those suites.** The `test` job runs three commands over two modules. The
-   repository has 47 test source trees, and no service suite runs in CI at all. A change to any
-   service can land red.
-3. **Two headline claims were false.** Live tailing (`MS-005`) was reported `COMPLETE`; the server
-   validates the `live` flag and no code consumes it — a record produced into an open stream never
-   arrives, and the `Follow live` checkbox is inert. The user menu (`AU-005`) was reported
-   `COMPLETE`; it is a theme toggle, with no logout control and no timezone control anywhere.
+**Six defects were found by using the product and fixed.** All six were invisible to a green
+`./mill __.test`:
 
-## The real position, by area
+- both "Disk" columns reported the host filesystem rather than Kafka — 468.8 GiB and 184.2 GiB for a
+  broker holding a hundred records, now 78.9 KiB and correct (`147461d`);
+- the topic page's Consumers tab, contributed by another feature, had no URL: clicking it left the
+  address bar on Overview and typing its obvious address gave "That page does not exist" (`6e42c8c`);
+- the dashboard's first tile said `1 of 1 Clusters online` above three panels saying the cluster was
+  not responding (`feb8655`);
+- a stale topic page read `IN SYNC REPLICAS 0 of 0`, which says every replica has fallen out of sync,
+  computed from an empty list (`4d3b0ce`);
+- a request to a dead broker was answered by **Netty** with a bodyless `503` — no code, no
+  correlation id, not KUI's envelope — because the all-in-one's service client had no call timeout at
+  all while the distributed one has had one all along; it is now `KUI-TIMEOUT` with a sentence on
+  screen (`33c438a`, `165707d`);
+- four confirmation sentences on irreversible operations began in lower case (`feb8655`).
 
-| Area | Delivered | Honest summary |
-| --- | --- | --- |
-| Clusters, brokers, store | Most of M1 | Registry, stats with a real freshness envelope, broker list and configs, log dirs, encrypted Kafka-backed store. Kafka **version is never detected** (the release table stops at Kafka 4.0). The KRaft quorum is fetched every 30 s and rendered nowhere. Cluster CRUD is written and deliberately unreachable. |
-| Topics, partitions | M2 **and most of M5** | List, detail, config, partitions, create, alter, delete, partition increase and purge all work from a browser, plan-gated and audited. Recreate, clone, replication-factor change, analysis, active producers, CSV and batch actions do not exist. |
-| Messages | M3 read and write, minus tailing | Browse with every seek mode, cursor paging, contains filter, produce, resend and purge all work. **Tailing, the CEL filter engine, the JSON grid, event tracking, masking and every schema-aware serde are not reachable** — most of them are built and wired into nothing. |
-| Consumer groups | M4 | List, detail, lag polling and the six-mode reset wizard work. Delete-group and delete-offsets are served through the public API with **no control in the interface**. Lag pace is measured and never displayed. |
-| Auth, RBAC, audit, masking | Almost nothing | CSRF, sessions and the signed gateway→service principal work. **There is no authentication of any kind** (`authType` accepts only `disabled`), no role model, no permission gating, and the masking engine has no caller. Read-only mode and the console audit sink do work. |
-| Schema Registry, Connect, ksqlDB | Nothing | No service, no microfrontend, no config key, no container to point at. The topic page's slots for them exist and correctly report `not_configured`. |
-| ACLs, quotas, metrics | Nothing | No security or metrics service. ACL and quota capability flags are probed correctly and then discarded before they reach the wire. KUI's own telemetry is partly wired and has never been scraped. |
-| Deployment and DX | Strong, with holes | Three reproducible images, a one-command quickstart and a three-cluster demo that all work. But only `cluster` has a `Main` — **`topic`, `message` and `consumer` cannot be deployed separately**, so the README's "one process or eleven" is false today; `deployment/compose/smoke.sh` fails on a clean run against an endpoint deleted in M1. |
-| Tests and debt | Honest but thin | Two suites run against a real broker, both owned by `cluster` and `config`. The topic, message and consumer adapters are asserted only against fakes, and the port contract that was meant to bind fake to adapter is run by the fake alone. Three promised test fixtures (TOP-007, MSG-042, GRP-036) were never built. Three architecture rules (A12–A14) were allocated by an Accepted ADR and never implemented. M3 and M4 shipped 88 tasks with **no Implementation Reports at all**. |
+**Point 6 of the delivery bar was re-checked against a stopped broker and holds.** Every screen kept
+its numbers behind its own freshness marker, each section of the dashboard card marked separately,
+and the consumer-group list — the gap that stopped point 6 being met two passes ago — carries the
+envelope and says `Stale: the cluster is not answering`.
 
-## What to build next
-
-`docs/BACKLOG.md` argues it in full. The short version: **authentication and authorization
-(Wave 1) and Schema Registry serdes (Wave 2)**, ahead of everything the roadmap put before them.
-Nobody can expose this product to a team without a login, and a Kafka interface that cannot read
-Avro cannot read most production traffic. The audit's own finding that the CEL filter, masking and
-tracking engines are built and unwired makes Wave 2 cheaper than its milestone number suggests.
-
----
-
-**Everything below this line is the historical log**, kept as written. It records what was believed
-at each pass, including the two claims the 2026-09-04 audit overturned. Where it disagrees with the
-sections above, the sections above are current.
+**What is still wrong is written down** rather than left to be rediscovered: the dashboard and the
+topic list count topics differently, `/ui/clusters/{id}` is a 404, the capability registry's reason
+still carries `kafka answered with status 502` under the code `UNKNOWN`, Kafka's own configuration
+documentation renders as escaped HTML, a group detail page is blank for its first ten seconds against
+a dead broker, and there is still no authentication of any kind. `docs/DELIVERY.md` has the detail.
 
 ## Grooming progress
 

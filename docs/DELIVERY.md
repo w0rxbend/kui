@@ -1311,3 +1311,286 @@ viewport=500   old-one-card=[500]   new-one-card=[500]
 - Two source files this pass edited — `JsonSerde.scala` and `StaticRoutes.scala` — were swept into
   another concurrent pass's commit (`4d3b0ce`) before they could be committed here; their content is
   intact in the tree, and the two commits from this pass carry the tests and fixtures.
+
+## The closing integration pass — 2026-09-04 (evening)
+
+This is the record the project owner asked for: what one command gets a newcomer, a verdict on each
+of the six bar points, every defect and missing feature still there, and what was not tested. It was
+written after tearing the quickstart down to nothing, rebuilding the image from this tree, bringing
+it up from clean and driving every screen in a browser — first against a healthy broker, then
+against a stopped one — not after reading the code.
+
+Its value is entirely in its honesty, so the failures get as much room as the successes.
+
+### What one command gets you
+
+```
+$ deployment/quickstart/quickstart.sh
+Starting Kafka, seeding it, and starting KUI.
+...
+  KUI is running:  http://localhost:8080/ui/
+
+deployment/quickstart/quickstart.sh  0.15s user 0.09s system 0% cpu 26.591 total
+```
+
+Docker is the only thing that has to be installed. **26.6 seconds** from a full `down` to a working
+URL with the image already built, most of it the broker's readiness check — which is a real metadata
+request over the client protocol, not a port check, so nothing starts against a broker that has
+opened its socket and cannot yet answer. Port 8080 was taken on this machine by an unrelated
+program; the script detected it before starting anything, named the environment variable to
+override, and printed the exact command to run. Everything below was driven on
+`KUI_PORT=28080 KUI_QUICKSTART_KAFKA_PORT=29092`.
+
+The caveat that belongs to developers rather than newcomers is unchanged and is in `README.md`: the
+script reuses whatever `kui-allinone` image is on the machine and builds one only when none is
+there. After changing code, run `./mill deployment.docker.allinone.docker.build` first.
+
+### The six-point bar
+
+| # | The bar | Verdict |
+| --- | --- | --- |
+| 1 | Clone it, run one command, have KUI and a Kafka broker both running | **Met** |
+| 2 | See clusters, brokers and topics with no configuration beyond a bootstrap address | **Met** |
+| 3 | Read messages including the JSON inside them, and publish one | **Met** |
+| 4 | See consumer groups and how far behind they are | **Met** |
+| 5 | Point it at your own cluster with a documented example, including a secured one | **Met**, not re-driven this pass |
+| 6 | Have any part of it fail without the rest becoming unusable | **Met**, with one caveat below |
+
+**Point 1 — met.** Timed above.
+
+**Point 2 — met.** The dashboard showed the cluster online with one broker, its controller, 9 topics,
+83 partitions and 3 consumer groups; the brokers page named node 1 as the controller; the topic list
+showed the seven seeded topics (nine with internal ones shown). Every figure was checked against the
+broker: `kafka-topics.sh --list | wc -l` = 9, and the largest-by-partitions list
+(`__consumer_offsets` 50, `analytics.pageviews` 12, `orders.v1` 6, `inventory.stock-levels` 4,
+`customers.profiles` 3) matches `--describe`.
+
+**Point 3 — met, end to end, in a browser.** `orders.v1` browsed 16 records with the JSON rendered as
+JSON, ending `Finished · 16 records · 16 records read from Kafka` with the button back to *Read*.
+Publishing a keyed JSON record answered `Published 1 record. partition 3, offset 3`, and the broker
+agreed:
+
+```
+$ kafka-console-consumer.sh --topic orders.v1 --partition 3 --offset 3 --max-messages 1 --property print.key=true
+ORD-INTEGRATION-1	{"orderId":"ORD-INTEGRATION-1","note":"final integration pass"}
+```
+
+**Point 4 — met, including the wizard.** Three groups with their states and lag, matching
+`kafka-consumer-groups.sh --describe --all-groups --state`. The offset-reset wizard was driven whole
+on `order-fulfilment`: *The beginning of each partition* → *Show me what this would do* → a plan
+naming each partition's from, to and change, with two partitions marked "already at that offset;
+nothing will change" → *Apply this plan* → a receipt that stayed on screen through the refresh the
+apply itself caused. The broker confirmed every offset written.
+
+**Point 5 — met on the record of the earlier pass, and not re-driven here.** `deployment/secured/`
+was not brought up in this pass. Nothing was found that would change the earlier verdict, and
+nothing here re-confirms it either.
+
+**Point 6 — met.** With `docker stop kui-quickstart-kafka`, every screen stayed navigable, kept its
+last-known numbers, and said why they were old — and each said it about *itself*:
+
+```
+CLUSTER          Last read 2 minutes ago — cluster not responding
+TOPICS           Last read 2 minutes ago — cluster not responding
+CONSUMER GROUPS  Last read 2 minutes ago — cluster not responding
+```
+
+Three sections of one dashboard card, each with its own marker over its own numbers. The topic list
+and the **consumer-group list** both showed `Last updated 5 minutes ago · Stale: the cluster is not
+answering` over intact rows — the group list being the gap the previous pass recorded as what stopped
+point 6 being met, and the API confirms it now carries the envelope:
+
+```
+$ curl -s .../api/v1/clusters/quickstart/topics | jq '.topics | {status, reason}'
+{"status": "stale", "reason": "UPSTREAM_UNAVAILABLE"}
+```
+
+A browse pressed *Read* and failed with a sentence — *"KUI cannot reach the cluster. It is
+unreachable, or it is not accepting connections."* — and creating a topic left the form open with
+its values intact under *"The cluster did not answer in time. It may be overloaded."*
+
+The caveat is that "unusable" was tested by stopping the *broker*, not by stopping one of KUI's own
+services. This pass drove the all-in-one process, where fault isolation is at the code level and not
+the process level; `deployment/compose` and the e2e suites cover the other shape and were not driven
+by hand here.
+
+### Six defects found by using the product, and fixed
+
+Every one was invisible to `./mill __.test`, which was green before and after.
+
+**`147461d` — both "Disk" columns reported the host's filesystem, not Kafka.** The cluster list read
+**468.8 GiB** and the broker list **184.2 GiB** for a single broker holding about a hundred records.
+`totalDiskUsageBytes` — a field named for *usage* — carried the filesystem's capacity, and the
+broker's `diskUsageBytes` carried `totalBytes - usableBytes`, which is how full the laptop's disk is.
+The domain already drew the distinction and already had the right value: `LogDir.usedByKafkaBytes`
+sums the replica sizes, and its scaladoc says in so many words that the subtraction "is the
+*filesystem's* view and includes everything on the disk that is not Kafka". Nothing called it. Both
+columns now read **78.9 KiB**, and both agree. How full the underlying disk is remains worth showing
+and is now shown nowhere; that is a column somebody should add.
+
+**`6e42c8c` — a third of the topic page's tab strip had no URL.** Overview and Settings belong to the
+topics feature; Consumers is contributed by the consumers feature through the `topic.tabs` slot.
+`TopicTab` was an enum of the page's own two, so clicking Consumers left the address bar saying
+`…/topics/orders.v1` — the Overview address — while the Consumers panel was on screen; reloading lost
+the tab; a copied link sent the recipient to the wrong screen; and typing the obvious
+`…/topics/orders.v1/consumers` produced "That page does not exist" beside a `/settings` that worked.
+The tab id is now the URL segment, and which segments are routable is asked of the feature registry.
+The property the previous pass fixed is kept: an unrecognised fifth segment is still refused, so
+`/topics/{t}/messages` is still the message browser's.
+
+**`feb8655` — the dashboard called a dead cluster online.** With the broker stopped the first tile
+read `1 of 1 Clusters online`, directly above three panels saying "cluster not responding" and one
+click from a cluster list saying `0 online, 1 not online`. `clustersOnline` counted anything
+`Section.toOption` produced a value for, and `toOption` deliberately keeps `Stale`.
+
+**`4d3b0ce` — a stale topic page said every replica was out of sync.** `IN SYNC REPLICAS 0 of 0`,
+summed from a partition list that is empty while the cluster is unreachable, two lines above a table
+correctly saying "Partitions not available". It is an em dash now.
+
+**`33c438a` + `165707d` — a dead broker produced a bodyless 503 that the browser blamed on itself.**
+The worst of the six. `GET /api/v1/clusters/quickstart/consumer-groups/order-fulfilment` with the
+broker stopped answered:
+
+```
+HTTP/1.1 503 Service Unavailable
+content-length: 0
+connection: close
+```
+
+No `server:` header, no `X-Kui-Correlation-Id`, no error code — not KUI's envelope at all. The group
+detail page showed *"The server sent something KUI could not read"*, which blames KUI's own decoder
+for a broker being switched off, and gives an operator nothing to quote. The server log named it:
+
+```
+ERROR s.t.s.n.i.NettyServerHandler - Closing connection due to exceeded response timeout of 20 seconds
+```
+
+The cause is a gap in an argument that is otherwise right. `SttpServiceClient.over` — the all-in-one's
+client — deliberately drops the bulkhead, the circuit breaker and the retry policy, because the far
+side is an object in this JVM and there is no connection to refuse. It dropped the **call timeout**
+too, and that one is not about the network: the object on the far side talks to Kafka, and an
+`AdminClient` whose broker has vanished takes its own thirty-second budget to give up, while the HTTP
+server in front gives up at twenty. So the shape almost everybody runs had no bound on a request at
+all, while the distributed shape has had one all along. `over` now takes a call timeout, and a call
+that overruns it becomes `InfrastructureError.Timeout` — the same error, envelope, status and
+capability signal the networked shape produces, which is what ADR-005 asks of the two deployments:
+
+```
+HTTP/1.1 408 Request Timeout
+X-Kui-Correlation-Id: cc77753e148471e5
+
+{"code":"KUI-TIMEOUT","message":"consumer did not finish within 10000ms",…,"retryable":true}
+```
+
+and on screen: *"The cluster did not answer in time. It may be overloaded."* with a *Try again*
+button. `KuiServer` now sets Netty's response timeout explicitly at thirty seconds rather than
+inheriting Tapir's twenty, so the ten-second call bound has headroom: two browser requests for the
+same unreachable cluster queue behind one Kafka client, and one measured end to end at **20.008
+seconds** — a coin toss at the old value.
+
+**`feb8655` (second half) — four confirmation sentences began in lower case.** "records are routed by
+hash(key) % partitions…", "committed consumer offsets are not moved by a purge…", "this cluster has
+auto.create.topics.enable=true…" and "this cluster has delete.topic.enable=false…" are each rendered
+as their own paragraph, not appended to a lead-in, so each read as a fragment on the last screen an
+operator sees before destroying something.
+
+### Topic administration, driven whole
+
+Create, publish, browse, configure, grow, delete — in a browser, checked against the broker at each
+step.
+
+```
+New topic → kui.integration.pass, 2 partitions, rf 1
+  broker:  PartitionCount: 2  ReplicationFactor: 1
+publish 3 records                       Published 3 records. partition 1, offsets 0, 1, 2
+browse                                  3 rows, {"hello":"world"}, key k1
+Settings → Edit retention.ms → 120000
+  broker:  retention.ms=120000 sensitive=false synonyms={DYNAMIC_TOPIC_CONFIG:retention.ms=120000}
+Add partitions → 4 → Preview           "2 partitions become 4: 2 added." + KEY_ROUTING warning
+             → Add the partitions      broker: PartitionCount: 4
+Empty this topic → Preview             "holds 3 records across 1 partition" + RECORDS_LOST
+                                        + CONSUMER_OFFSETS_UNCHANGED
+Delete this topic → Preview            "holds 3 records across 4 partitions" + RECORDS_LOST
+                                        + auto.create.topics.enable=true warning
+             → Delete the topic
+             → confirm                 broker: the topic is gone
+```
+
+The delete is behind a second confirmation inside the panel, which the first attempt in this pass
+walked straight past — pressing "Delete the topic" once opens a confirmation and destroys nothing.
+Afterwards the receipt — *"'kui.integration.pass' was deleted, with 3 records."* — stayed on screen
+while every control that had stopped applying was hidden, including the link into the message
+browser.
+
+### Defects still present
+
+**1. Two screens count topics differently, and the dashboard counts Kafka's own.** The dashboard says
+`Topics 9` and leads its "largest by partitions" with `__consumer_offsets` at 50; the topic list says
+`7 topics`, because `kui.topics.internalPrefix` hides the internal ones behind a switch. Both numbers
+are defensible and the product shows them a click apart without saying they mean different things.
+The dashboard's largest-topics bar is the visible cost: on a quiet cluster it is dominated by a topic
+the operator did not create.
+
+**2. `/ui/clusters/{id}` is a 404.** Nothing links to it — the cluster row links to `…/brokers` — but
+deleting one segment from the address bar produces "That page does not exist" rather than the
+cluster's own page. The 404 screen itself is good: it names the address and says the rest of KUI is
+working.
+
+**3. The capability registry's reason still carries a wire sentence.** `/api/v1/capabilities` reports
+`{"code":"UNKNOWN","message":"kafka answered with status 502"}` for a cluster whose broker is off.
+Every *screen* renders a proper sentence, so this is below the waterline today; it is the same class
+of defect the previous pass fixed for `ApiError.userMessage`, one layer further back, and the code
+should be `UPSTREAM_UNAVAILABLE` rather than `UNKNOWN`.
+
+**4. Kafka's configuration documentation is shown as escaped HTML.** The Settings tab renders
+`The "compact" policy will enable <a href="#compaction">log compaction</a>` as literal text, on every
+row that has a link or a `<code>` in it, which is most of them. Known and recorded against `TP-004`;
+still the least polished screen in the product.
+
+**5. A group detail page shows nothing at all for its first ten seconds against a dead broker.** The
+failure is now correct and well worded, but it takes a full call timeout to arrive and there is no
+loading state under the heading in the meantime — an empty page where every other screen shows
+either data or a marker.
+
+**6. The quickstart's broker does not stay stopped.** `docker stop kui-quickstart-kafka` was undone
+by Docker about seven minutes later on this machine, with the container's `unless-stopped` policy;
+`docker update --restart=no` first made it stick. Anyone demonstrating a failure needs to know that.
+
+### Missing features, stated plainly
+
+- **No authentication of any kind.** `authType` is `disabled` and it is the only accepted value.
+  Anything that can reach the port can read every record and delete every topic. This is the largest
+  gap in the product and it is M6.
+- **Replication-factor change, clone and recreate** (`TP-008`, `TP-009`, `TP-011`) — unbuilt, and
+  deliberately not declared anywhere.
+- **Topic and partition sizes** — the SIZE column on the topic page and on every partition row is
+  always `—`. The data exists in the cluster service's log directories and does not reach the topic
+  service (`TD-017`, `PA-003`).
+- **Serde parameters and schema validation before send** (`MP-004`) — the publish form can choose a
+  serde; it cannot configure one.
+- **Everything from M6 onwards** — schema registry, Kafka Connect, ksqlDB, ACLs, quotas, metrics.
+
+### What was not tested
+
+Stated so nobody reads a silence as a pass.
+
+- **Any browser but headless Chromium 152**, driven over the DevTools protocol. No Firefox, no
+  Safari, no mobile, no real Chrome with an extension attached.
+- **Keyboard-only navigation, screen readers and contrast.** Untouched.
+- **More than one broker.** Every run was single-node, so replication, under-replicated partitions,
+  leader election and rack awareness were not observed, and several columns are `—` for that reason.
+- **Scale.** Seven topics and about a hundred records. Nothing here says how the topic list behaves
+  at ten thousand topics, or a browse against a partition holding millions.
+- **The secured stack and the three-cluster demonstration.** Both were torn down at the start of this
+  pass to get a clean quickstart and were not brought back up.
+- **The multi-container deployment under failure.** All-in-one only, by hand.
+- **`deployment/compose`'s observability stack.**
+
+### One thing about how this pass was run
+
+Another agent was committing to `main` throughout it. Two of this pass's commits — `feb8655` and
+`4d3b0ce` — were staged with `git add -A` and therefore carry that agent's in-flight files as well as
+the ones their messages describe, and one of this pass's own edits was committed by that agent under
+`33c438a` and `656c036`. Nothing was lost and every gate below was run on the merged result, but the
+commit boundaries in that window do not correspond to the work their messages describe, and anybody
+bisecting through them should know it.

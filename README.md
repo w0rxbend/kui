@@ -2,11 +2,15 @@
 
 A Kafka management and observability interface, written entirely in Scala 3.
 
-> **Status: milestones 0 to 4.** KUI connects to real Kafka clusters and is usable from a browser:
-> clusters and brokers, topics and their configuration, browsing and publishing records, consumer
-> groups with their lag, and an offset-reset wizard. What is *not* built is named plainly in
-> [docs/DELIVERY.md](docs/DELIVERY.md) — topic and message deletion, schema registry, connectors,
-> authentication and metrics among them. See [ROADMAP.md](docs/ROADMAP.md) for what lands when.
+> **Status: milestones 0 to 4, plus topic administration from milestone 5.** KUI connects to real
+> Kafka clusters and is usable from a browser: a dashboard, clusters and brokers, topics and their
+> configuration, browsing and publishing records, consumer groups with their lag, and an offset-reset
+> wizard. It can also create a topic, change a setting, add partitions, empty a topic and delete one
+> — the three that cannot be undone are confirmed against a plan the server computed and applied
+> against a token naming exactly what you were shown. What is *not* built is named plainly in
+> [docs/DELIVERY.md](docs/DELIVERY.md) — schema registry, connectors, ksqlDB, authentication and
+> metrics among them, and there is no authentication of any kind, so do not put this on a network
+> you do not control. See [ROADMAP.md](docs/ROADMAP.md) for what lands when.
 
 ## What it is
 
