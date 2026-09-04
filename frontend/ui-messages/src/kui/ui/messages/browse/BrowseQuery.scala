@@ -32,7 +32,15 @@ final case class BrowseQuery(
     contains: Option[String],
     keySerde: Option[SerdeName],
     valueSerde: Option[SerdeName],
-    live: Boolean
+    live: Boolean,
+    /** The signed continuation of a finished browse (ADR-026).
+      *
+      * It is never read out of a URL and never written into one: a cursor is a five-minute-old statement
+      * about offsets, and a link carrying one would take the recipient to a page that no longer exists or,
+      * worse, quietly to a different one. It is set for exactly one request — the "load more" — and
+      * discarded.
+      */
+    cursor: Option[String] = None
 )
 
 object BrowseQuery {
@@ -52,7 +60,8 @@ object BrowseQuery {
       contains = None,
       keySerde = None,
       valueSerde = None,
-      live = false
+      live = false,
+      cursor = None
     )
 
   given CanEqual[BrowseQuery, BrowseQuery] = CanEqual.derived
@@ -66,7 +75,12 @@ object BrowseQuery {
     * would do, and which nothing on either side would catch.
     */
   def queryString(query: BrowseQuery): String = {
-    val seekValues = BrowseParams.seekModeCodec.encode(query.seek).map(BrowseAddress.SeekParam -> _)
+    // A cursor already says where to start, and the server refuses the two together rather than picking one
+    // — which is right, and means the screen must send one or the other. Following is dropped for the same
+    // reason: a continuation is not a tail.
+    val seekValues =
+      if query.cursor.isDefined then Nil
+      else BrowseParams.seekModeCodec.encode(query.seek).map(BrowseAddress.SeekParam -> _)
 
     val partitionValues =
       query.partitions
@@ -83,7 +97,8 @@ object BrowseQuery {
         query.valueSerde.map(BrowseAddress.ValueSerdeParam -> _.value),
         // Sent only when it is on. `live=false` and no `live` at all mean the same thing to the server, and
         // the shorter URL is the one a person can read.
-        Option.when(query.live)(BrowseAddress.LiveParam -> "true")
+        Option.when(query.live && query.cursor.isEmpty)(BrowseAddress.LiveParam -> "true"),
+        query.cursor.map(BrowseAddress.CursorParam -> _)
       ).flatten
 
     (seekValues ++ partitionValues ++ rest)

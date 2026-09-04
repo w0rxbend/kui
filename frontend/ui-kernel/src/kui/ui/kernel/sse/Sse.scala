@@ -57,7 +57,8 @@ object SseError {
   given CanEqual[SseError, SseError] = CanEqual.derived
 }
 
-/** A live stream, and the two things a caller does with one: read it, and stop it.
+/** A live stream, and the three things a caller does with one: read it, stop it, and find out where it
+  * stopped.
   *
   * @param events
   *   every decoded event, and every event that failed to decode. It does not end on a decode failure.
@@ -65,11 +66,21 @@ object SseError {
   *   what the transport is doing, for the indicator.
   * @param close
   *   stops the stream and releases the server's resources. Idempotent.
+  * @param endMarker
+  *   the `id:` on the terminal `done` event, when there was one. KUI puts the signed continuation cursor
+  *   there (ADR-026, ADR-035), and it is what "load more" sends back — so a stream that ended with one can be
+  *   continued and a stream that ended without one cannot, which is exactly what the server means by omitting
+  *   it. It reads `None` until the stream finishes, and for [[Sse.eventSource]] it is always `None`: the
+  *   native `EventSource` keeps the last id to itself for its own reconnection and does not hand it over.
+  *
+  * A function rather than a `Signal` because nothing renders it: it is read once, by whatever handles the end
+  * of the stream, and a signal would have to be subscribed to in order to be read at all.
   */
 final case class SseHandle[A](
     events: EventStream[Either[SseError, A]],
     connection: Signal[SseConnection],
-    close: () => Unit
+    close: () => Unit,
+    endMarker: () => Option[String] = () => None
 )
 
 /** The slice of the browser's `EventSource` the kernel actually uses.
@@ -375,13 +386,19 @@ object Sse {
   )(decode: (String, String) => Either[SseError, A]): SseHandle[A] = {
     val events = new EventBus[Either[SseError, A]]
     val connection = Var[SseConnection](SseConnection.Connecting)
+    val marker = Var[Option[String]](None)
 
     def emit(value: Either[SseError, A]): Unit = events.writer.onNext(value)
 
     def handle(raw: RawSseEvent): Unit =
       raw.name match {
         case SseEventName.Heartbeat => ()
-        case SseEventName.Done => connection.set(SseConnection.Closed("the stream finished"))
+        case SseEventName.Done =>
+          // The cursor rides on the event's `id:`, which the parser has already carried forward. It is
+          // recorded before the connection is closed, so a caller watching `connection` for the end finds
+          // the marker already there rather than a tick later.
+          marker.set(raw.id)
+          connection.set(SseConnection.Closed("the stream finished"))
         case SseEventName.Error =>
           emit(Left(decodeEnvelope(raw.data)))
           connection.set(SseConnection.Closed("the server sent an error event"))
@@ -443,7 +460,8 @@ object Sse {
       close = () => {
         connection.set(SseConnection.Closed("closed by the client"))
         abort()
-      }
+      },
+      endMarker = () => marker.now()
     )
   }
 
