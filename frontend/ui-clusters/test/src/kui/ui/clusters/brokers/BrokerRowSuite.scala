@@ -14,7 +14,6 @@ class BrokerRowSuite extends FunSuite {
       disk: Option[Long] = Some(1024L),
       segments: Option[Int] = Some(12),
       replicas: Option[Int] = Some(30),
-      inSync: Option[Int] = Some(30),
       leaders: Option[Int] = Some(10),
       replicaSkew: Option[Double] = None,
       leaderSkew: Option[Double] = None
@@ -25,9 +24,9 @@ class BrokerRowSuite extends FunSuite {
       port = 9092,
       rack = rack,
       isController = isController,
-      partitionCount = replicas,
+      partitionCount = None,
       leaderCount = leaders,
-      inSyncReplicaCount = inSync,
+      replicaCount = replicas,
       replicaSkewPercent = replicaSkew,
       leaderSkewPercent = leaderSkew,
       diskUsageBytes = disk,
@@ -76,7 +75,7 @@ class BrokerSummarySuite extends FunSuite {
   private def summary(
       controller: Boolean = true,
       offline: Option[Int] = Some(0),
-      inSync: Option[Int] = Some(30),
+      underReplicated: Option[Int] = Some(0),
       replicas: Option[Int] = Some(30)
   ): BrokerSummary = {
     val dto = BrokerDto(
@@ -85,9 +84,9 @@ class BrokerSummarySuite extends FunSuite {
       port = 9092,
       rack = None,
       isController = controller,
-      partitionCount = replicas,
+      partitionCount = None,
       leaderCount = Some(10),
-      inSyncReplicaCount = inSync,
+      replicaCount = replicas,
       replicaSkewPercent = None,
       leaderSkewPercent = None,
       diskUsageBytes = Some(1024L),
@@ -101,7 +100,7 @@ class BrokerSummarySuite extends FunSuite {
       brokerCount = 1,
       onlinePartitionCount = Some(10),
       offlinePartitionCount = offline,
-      underReplicatedPartitionCount = Some(0),
+      underReplicatedPartitionCount = underReplicated,
       totalDiskUsageBytes = Some(1024L),
       features = Nil,
       scrapedAt = ClusterFixtures.scrapedAt
@@ -121,11 +120,13 @@ class BrokerSummarySuite extends FunSuite {
     assert(!BrokerSummary.hasAlarm(summary()))
   }
 
-  test("inSyncBelowTotalIsReportedAndIsNotAnAlarm") {
-    // Less redundancy than the cluster asked for is a warning colour. It is still serving every partition,
-    // which is what separates it from an offline one.
-    val current = summary(inSync = Some(28), replicas = Some(30))
-    assertEquals(current.inSyncReplicas, Some(28))
+  test("underReplicationIsReportedAndIsNotAnAlarm") {
+    // Less redundancy than the cluster asked for is a warning, not an alarm: it is still serving every
+    // partition, which is what separates it from an offline one. The figure comes from the cluster's own
+    // under-replicated count, not from comparing two broker replica counts - the brokers report one count
+    // each, the total they hold, and nothing there says which of those replicas are caught up.
+    val current = summary(underReplicated = Some(2), replicas = Some(30))
+    assertEquals(current.underReplicatedPartitions, Some(2))
     assertEquals(current.totalReplicas, Some(30))
     assert(!BrokerSummary.hasAlarm(current))
   }
@@ -145,7 +146,7 @@ class BrokerSummarySuite extends FunSuite {
           isController = true,
           partitionCount = None,
           leaderCount = None,
-          inSyncReplicaCount = None,
+          replicaCount = None,
           replicaSkewPercent = None,
           leaderSkewPercent = None,
           diskUsageBytes = None,
@@ -154,7 +155,6 @@ class BrokerSummarySuite extends FunSuite {
       ),
       None
     )
-    assertEquals(current.inSyncReplicas, None)
     assertEquals(current.totalReplicas, None)
   }
 }

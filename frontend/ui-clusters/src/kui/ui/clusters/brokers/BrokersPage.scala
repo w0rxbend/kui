@@ -201,8 +201,8 @@ object BrokersPage {
       ),
       figure(
         "broker-summary-replicas",
-        summary.map(current => ratio(current.inSyncReplicas, current.totalReplicas)),
-        Messages.SummaryInSync
+        summary.map(current => current.totalReplicas.fold(DataTable.missing)(_.toString)),
+        Messages.SummaryReplicas
       )
     )
 
@@ -218,12 +218,6 @@ object BrokersPage {
     (summary.onlinePartitions, summary.offlinePartitions) match {
       case (None, None) => DataTable.missing
       case (online, offline) => s"${online.getOrElse(0)} / ${online.getOrElse(0) + offline.getOrElse(0)}"
-    }
-
-  private def ratio(part: Option[Int], whole: Option[Int]): String =
-    (part, whole) match {
-      case (Some(a), Some(b)) => s"$a / $b"
-      case _ => DataTable.missing
     }
 
   private def sorted(rows: List[BrokerRow], order: Option[Sort[String]]): List[BrokerRow] =
@@ -245,7 +239,6 @@ object BrokersPage {
       case "leaders" => row.leaderCount.map("" -> _.toDouble)
       case "leaderSkew" => row.leaderSkewPercent.map("" -> _)
       case "replicas" => row.replicaCount.map("" -> _.toDouble)
-      case "inSync" => row.inSyncReplicaCount.map("" -> _.toDouble)
       case "replicaSkew" => row.replicaSkewPercent.map("" -> _)
       case _ => None
     }
@@ -305,28 +298,18 @@ object BrokersPage {
         render = _.leaderCount.fold(DataTable.missing)(_.toString)
       ),
       skewColumn("leaderSkew", Messages.ColumnLeaderSkew, _.leaderSkewPercent),
+      // Every replica this broker holds, in-sync or not. There used to be an "In sync" column beside this
+      // one; it was drawn from the same total under a different name, so it told an operator that every
+      // replica was caught up at exactly the moment one was not. The cluster service cannot know the in-sync
+      // count without sweeping topics, so the column is gone rather than guessed. Under-replication for the
+      // cluster as a whole is still on this page, in the partitions line, where it comes from a figure the
+      // broker actually reports.
       Column(
         "replicas",
         Messages.ColumnReplicas,
         sortable = true,
         align = ColumnAlign.Numeric,
         render = _.replicaCount.fold(DataTable.missing)(_.toString)
-      ),
-      Column(
-        id = "inSync",
-        header = Messages.ColumnInSync,
-        sortable = true,
-        align = ColumnAlign.Numeric,
-        // Below the replica count means the cluster is running with less redundancy than it asked for: a
-        // warning colour, not an alarm, because it is still serving every partition.
-        render = row =>
-          row.inSyncReplicaCount.fold[Modifier[HtmlElement]](DataTable.missing)(inSync =>
-            ThresholdValue(
-              Val(inSync.toString),
-              Val(if row.replicaCount.exists(_ > inSync) then ThresholdLevel.Warning
-              else ThresholdLevel.Normal)
-            )
-          )
       ),
       skewColumn("replicaSkew", Messages.ColumnReplicaSkew, _.replicaSkewPercent)
     )

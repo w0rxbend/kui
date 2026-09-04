@@ -64,7 +64,7 @@ object Messages {
 
   val SummaryPartitions: String = "online / total partitions"
 
-  val SummaryInSync: String = "in-sync / total replicas"
+  val SummaryReplicas: String = "replicas held"
 
   val NoActiveController: String = "No active controller"
 
@@ -83,8 +83,6 @@ object Messages {
   val ColumnLeaderSkew: String = "Leader skew"
 
   val ColumnReplicas: String = "Replicas"
-
-  val ColumnInSync: String = "In sync"
 
   val ColumnReplicaSkew: String = "Replica skew"
 

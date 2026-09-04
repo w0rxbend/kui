@@ -65,9 +65,19 @@
   color: var(--kui-color-text-muted);
 }
 
+/* One card per cluster, at least 22rem wide and never more than 34rem.
+ *
+ * The maximum is the part that is easy to leave out. `auto-fit` with only a minimum lets a single
+ * column absorb the whole window, so a one-cluster deployment - the commonest one, and the first
+ * thing anybody sees after the quickstart - got one card stretched across a 2560px screen, with a
+ * few short figures marooned at either end of a very long line. The cap is roughly the width at
+ * which a card stops reading as a card. Above it the row keeps its cards at 34rem and grows the gap
+ * instead of the cards, and `justify-content: start` keeps the first one aligned with the fleet
+ * strip above rather than drifting into the middle of the screen. */
 .kui-shell__dashboard-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 34rem));
+  justify-content: start;
   gap: var(--kui-space-4);
 }
 

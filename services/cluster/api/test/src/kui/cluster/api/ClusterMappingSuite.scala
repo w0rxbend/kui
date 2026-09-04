@@ -5,9 +5,9 @@ import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
-import kui.cluster.application.SnapshotFreshness
+import kui.cluster.application.{BrokerListRow, SnapshotFreshness}
 import kui.cluster.contract.dto.ClusterProfileDto
-import kui.cluster.domain.{ControllerMode, LogDirError}
+import kui.cluster.domain.{ControllerMode, LogDirError, PartitionSummary}
 import kui.contracts.cluster.ClusterSummaryDto
 import kui.kernel.Secret
 import kui.kernel.cluster.*
@@ -90,6 +90,52 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     assertEquals(summary.onlinePartitionCount, None)
     assertEquals(summary.offlinePartitionCount, None)
     assertEquals(summary.underReplicatedPartitionCount, None)
+  }
+
+  test("aBrokerReportsTheReplicasItHoldsAndClaimsNothingAboutWhichAreInSync") {
+    // The case every other test in this repository misses, because every other one describes a healthy
+    // cluster where the total replica count and the in-sync count are the same number.
+    //
+    // Here they differ: the broker holds 147 replicas and only 96 of them are caught up, which is what a
+    // three-broker cluster with one broker stopped looks like from a survivor. Until 2026-09-04 the wire
+    // field was called `inSyncReplicaCount` and was filled from `row.replicas` - this same 147 - so the
+    // response said "147 replicas in sync" at the exact moment 51 of them were not, and kept saying it for
+    // as long as the outage lasted.
+    //
+    // Nothing in `describeCluster` or `describeLogDirs` carries the ISR: a log directory lists the replicas
+    // stored on this disk, in sync or not (`research/kafka/admin-capabilities.md`). Only `describeTopics`
+    // knows, and the cluster service does not sweep topics. So the assertion is in two halves - the number
+    // is the total, and no field on the wire offers an in-sync count for anyone to read the total as.
+    val hosted = 147
+    val actuallyInSync = 96
+    assertNotEquals(hosted, actuallyInSync)
+
+    val row = BrokerListRow(
+      broker = ClusterFixtures.broker(1),
+      isController = true,
+      replicas = Some(hosted),
+      leaders = Some(50),
+      skewPercent = Some(0.0d),
+      totalBytes = None,
+      usableBytes = None,
+      usedByKafkaBytes = Some(1024L),
+      offlineDirCount = 0
+    )
+
+    val dto = ClusterMapping.broker(row)
+    assertEquals(dto.replicaCount, Some(hosted))
+
+    val rendered = dto.asJson.noSpaces
+    assert(rendered.contains(""""replicaCount":147"""), rendered)
+    assert(!rendered.toLowerCase.contains("insync"), rendered)
+
+    // Where under-replication *is* honestly reported: the cluster summary, from a count Kafka gives us.
+    val topology = ClusterFixtures.topology()
+    val summary = ClusterMapping.summary(
+      topology.copy(partitions = Some(PartitionSummary(online = 200, offline = 0, underReplicated = 51))),
+      ClusterFixtures.At
+    )
+    assertEquals(summary.underReplicatedPartitionCount, Some(hosted - actuallyInSync))
   }
 
   test("controllerKindIsTheWireWordAndNotTheEnumName") {

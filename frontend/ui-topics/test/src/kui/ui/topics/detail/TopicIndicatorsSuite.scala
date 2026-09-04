@@ -73,6 +73,18 @@ final class TopicIndicatorsSuite extends FunSuite {
     assertEquals(toneOf(detail(offlinePartitions = 2), "Offline partitions"), Tone.Danger)
   }
 
+  test("inSyncReplicasIsUnknownWhenThePartitionListIsMissingRatherThanZeroOfZero") {
+    // What a topic page looks like while the cluster is unreachable: the last scrape's row survives, and the
+    // partition assignment does not, because it is not part of what the topic service keeps between scrapes.
+    // Both halves of this figure are summed from that list, so an empty one used to read "0 of 0" — which
+    // says every replica of this topic is out of sync, the most alarming statement the strip can make, made
+    // from no data, two lines above a table correctly saying the partitions are not available.
+    val unreachable = detail(partitions = Nil)
+
+    assertEquals(unreachable.row.partitionCount, 1)
+    assertEquals(valueOf(unreachable, "In sync replicas"), DataTable.missing)
+  }
+
   test("inSyncReplicasReadsNOfMAndIsWarningWhenFewer") {
     val healthy = detail(partitions =
       List(partition(0, List(replica(1, leader = true), replica(2))), partition(1, List(replica(3))))

@@ -34,11 +34,73 @@ object JsonSerde {
       case None => Left("the payload is not valid UTF-8, so it cannot be JSON")
       case Some(text) =>
         parser.parse(text) match {
-          case Left(failure) => Left(failure.message)
+          case Left(failure) => Left(explain(text, failure))
           case Right(json) =>
             if json.isObject || json.isArray then Right(json)
-            else Left("the payload is valid JSON but is neither an object nor an array")
+            else
+              Left(
+                "this is valid JSON but not a JSON document: it is a single value, and this serde accepts " +
+                  "only an object (starting with `{`) or an array (starting with `[`). To send a bare " +
+                  "number or a bare piece of text, choose a different serde - String, or one of the number " +
+                  "formats"
+              )
         }
+    }
+
+  /** What to tell a person when their text is not JSON.
+    *
+    * The parser's own message is written for whoever is debugging the parser: `expected null got 'not js...'
+    * (line 1, column 1)` describes one branch the parser tried on its way to giving up, and it reads as
+    * though KUI wanted `null`. It does not. Somebody looking at a publish form needs to know what is wrong
+    * with what they typed and what to do instead, so this says that in a sentence and keeps the parser's
+    * *position* - the one genuinely useful thing in its message - when there is one.
+    *
+    * Three shapes cover essentially everything a form produces:
+    *
+    *   - nothing at all, usually a field left empty by accident;
+    *   - text that never even starts like JSON, which is nearly always plain text typed into a JSON field -
+    *     so the sentence names the serde to pick instead rather than only saying no;
+    *   - text that starts correctly and breaks somewhere inside, where the actionable advice is the short
+    *     list of things that are actually wrong with hand-typed JSON, plus the position to look at.
+    */
+  private def explain(text: String, failure: io.circe.ParsingFailure): String = {
+    val trimmed = text.trim
+    val at = positionIn(failure.message).fold("")(where => s" $where")
+
+    if trimmed.isEmpty then "there is nothing here to send: a JSON document is at least `{}` or `[]`"
+    else if trimmed.startsWith("{") || trimmed.startsWith("[") then
+      s"this starts like JSON but does not parse$at. Check for a quote, comma or closing bracket that is " +
+        "missing, a comma left before a `}` or `]`, or single quotes where JSON requires double ones"
+    else
+      s"this is not JSON: a JSON document has to start with `{` or `[`, and this one starts with " +
+        s"${describeFirst(trimmed)}. If you meant to send it as plain text, choose the String serde instead"
+  }
+
+  /** The `(line L, column C)` circe puts at the end of its message, if it is there.
+    *
+    * Taken from the message rather than recomputed, because the parser is the only thing that knows where it
+    * stopped. Nothing here depends on finding it: a message in some other shape simply yields no position,
+    * and the sentence above is still a sentence.
+    */
+  private def positionIn(message: String): Option[String] =
+    PositionPattern
+      .findFirstMatchIn(message)
+      .map(found => s"at line ${found.group(1)}, column ${found.group(2)}")
+
+  private val PositionPattern: scala.util.matching.Regex = """\(line (\d+), column (\d+)\)""".r
+
+  /** The offending first character, named in a way a reader can match against their own screen.
+    *
+    * The character itself for anything printable, and a description for the ones that would print as nothing
+    * or would mislead: "starts with " followed by an invisible character is a puzzle rather than a message,
+    * and a leading `<` is worth naming because it means somebody pasted XML or HTML.
+    */
+  private def describeFirst(trimmed: String): String =
+    trimmed.head match {
+      case '\'' => "a single quote"
+      case '<' => "`<`, which looks like XML or HTML rather than JSON"
+      case first if first.isControl => "a control character"
+      case first => s"`$first`"
     }
 
   final private class Impl[F[_]: Applicative] extends SimpleSerde[F] {

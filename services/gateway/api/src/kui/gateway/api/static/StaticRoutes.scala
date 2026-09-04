@@ -15,8 +15,8 @@ import sttp.tapir.server.ServerEndpoint
   * keep in sync, no separate deployment step for the UI. `GET /ui/…` is one route, matched after every other
   * route the gateway serves, and it does three things depending on what the path names:
   *
-  *   - a path that names a real file under the linked assets serves that file, with a `Cache-Control` that
-  *     depends on whether the name looks hashed;
+  *   - a path that names a real file under the linked assets serves that file, `no-cache` with a strong
+  *     `ETag` over its bytes, so a browser that already has it is answered `304` (see [[CachePolicy]]);
   *   - a path that does not — `/ui/clusters/some/deep/link` — serves `index.html`, because Waypoint owns
   *     routing once the page has loaded and a deep link has to reach the shell before the shell can look at
   *     it (the SPA fallback rule, `research/scala/frontend-research.md` §3.4);
@@ -213,8 +213,7 @@ object StaticRoutes {
             case nonEmpty =>
               resourceBytes(resourcePrefix, nonEmpty) match {
                 case Some(bytes) =>
-                  val (contentType, cacheControl) = asset(nonEmpty.last)
-                  Right(revalidated(bytes, contentType, cacheControl, ifNoneMatch))
+                  Right(revalidated(bytes, contentTypeOf(nonEmpty.last), CachePolicy, ifNoneMatch))
                 case None if namesAnAsset(nonEmpty.last) =>
                   // A miss on something that is unmistakably a static asset is a real 404, not a route
                   // into the single-page application. See [[namesAnAsset]] for why that distinction
@@ -234,8 +233,9 @@ object StaticRoutes {
     * and status `200`, and that is the difference between a page that reports a problem and a page that is
     * silently blank.
     *
-    * That is not hypothetical. `main.js` is served `no-cache`, but the per-feature module files it imports
-    * are named by content hash and served `immutable` for a year. After a redeploy, a browser still holding
+    * That is not hypothetical. When this was found, `main.js` was served `no-cache` while the per-feature
+    * module files it imports were served `immutable` for a year on the strength of their names (see
+    * [[CachePolicy]] for why that was wrong and what replaced it). After a redeploy, a browser still holding
     * the previous build's `main.js` asks for the previous build's chunk names. Those files are gone. With the
     * fallback applied, each of those requests succeeded with an HTML document that the browser then tried to
     * evaluate as an ES module, and the application never started — with nothing in the network log marked as
@@ -279,9 +279,6 @@ object StaticRoutes {
     }
   }
 
-  private def asset(name: String): (String, String) =
-    (contentTypeOf(name), cacheControlOf(name))
-
   private def contentTypeOf(name: String): String =
     extensionOf(name).flatMap(ContentTypes.get).getOrElse {
       // A name this table has never heard of. `URLConnection`'s platform-dependent guess is still better
@@ -294,9 +291,9 @@ object StaticRoutes {
     *
     * ## The assumption this used to make, and why it was false
     *
-    * Until 2026-09-04 a name matching [[HashedName]] — the `internal-<40 hex>.js` files Scala.js emits for a
-    * bundle-split build — was served `public, max-age=31536000, immutable`, on the stated grounds that "a
-    * hashed name and a new set of bytes never occur together".
+    * Until 2026-09-04 an `internal-<40 hex>.js` file — the names Scala.js emits for a bundle-split build —
+    * was served `public, max-age=31536000, immutable`, on the stated grounds that "a hashed name and a new
+    * set of bytes never occur together".
     *
     * They do. Two consecutive builds of KUI both produced a file named
     * `internal-3ebfae0cba70adf981029a0da5b1e4b5ab5d02c6.js`, and the two files differed: a method the first
@@ -324,10 +321,7 @@ object StaticRoutes {
     * The validator is derived from the content and never from the name, which is exactly the mistake above
     * not repeated: the same name really can carry different bytes, and only the bytes can say so.
     */
-  private def cacheControlOf(name: String): String = {
-    val _ = name // every name gets the same answer; the parameter is kept so the call site still reads well
-    "no-cache"
-  }
+  private val CachePolicy: String = "no-cache"
 
   /** A strong validator for exactly these bytes.
     *
@@ -408,20 +402,21 @@ object StaticRoutes {
           revalidated(
             rendered.getBytes(StandardCharsets.UTF_8),
             ContentTypes("html"),
-            "no-cache",
+            CachePolicy,
             ifNoneMatch
           )
         )
       case None =>
-        // No `ETag` worth having: this is an error page standing in for a build that has no UI in it, and
-        // letting a browser cache a "not bundled" page against a validator would be the wrong kind of
-        // efficient.
+        // The page is still given a validator, because every response on this route carries one, but this
+        // is the one place a `304` is never answered: a browser must not be able to keep serving "the UI is
+        // not bundled" out of its cache once a build with the UI in it is deployed. `revalidated` is
+        // therefore deliberately not used here, and the status stays `503`.
         Right(
           (
             StatusCode.ServiceUnavailable,
             AssetsMissingPage.getBytes(StandardCharsets.UTF_8),
             ContentTypes("html"),
-            "no-cache",
+            CachePolicy,
             etagOf(AssetsMissingPage.getBytes(StandardCharsets.UTF_8))
           )
         )

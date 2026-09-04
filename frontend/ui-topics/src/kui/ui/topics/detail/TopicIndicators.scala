@@ -52,9 +52,17 @@ object TopicIndicators {
         if row.offlinePartitions > 0 then Tone.Danger else Tone.Neutral
       ),
       // "82 of 84". Fewer in sync than there are replicas is the thing an operator is looking for.
+      //
+      // Both halves are summed from the partition list, so an *empty* list on a topic that has partitions
+      // means the figure is unknown, not zero. That case is not hypothetical: it is what a topic page looks
+      // like while the cluster is unreachable, when the last scrape's row survives and the partition
+      // assignment does not. It used to read "0 of 0", which on the one screen an operator opens during an
+      // outage says every replica is out of sync - the most alarming statement the strip can make, made from
+      // no data at all, two lines above a table that correctly says the partitions are not available.
       Indicator(
         Messages.IndicatorInSyncReplicas,
-        Messages.nOfM(inSyncReplicas, replicas),
+        if detail.partitions.isEmpty && row.partitionCount > 0 then DataTable.missing
+        else Messages.nOfM(inSyncReplicas, replicas),
         if replicas > 0 && inSyncReplicas < replicas then Tone.Warning else Tone.Neutral
       ),
       Indicator(Messages.IndicatorType, if row.internal then Messages.TypeInternal else Messages.TypeNormal),

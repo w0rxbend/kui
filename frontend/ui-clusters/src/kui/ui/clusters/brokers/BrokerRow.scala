@@ -21,8 +21,11 @@ final case class BrokerRow(
     diskUsageBytes: Option[Long],
     segmentCount: Option[Int],
     leaderCount: Option[Int],
+    /** Every replica this broker holds, in-sync or not. The service has no source for an in-sync count - only
+      * `describeTopics` carries the ISR and the cluster service does not sweep topics - so no column claims
+      * one.
+      */
     replicaCount: Option[Int],
-    inSyncReplicaCount: Option[Int],
     leaderSkewPercent: Option[Double],
     replicaSkewPercent: Option[Double]
 )
@@ -40,7 +43,7 @@ object BrokerRow {
     */
   def of(brokers: List[BrokerDto]): List[BrokerRow] = {
     val leaderSkews = Skew.percentages(brokers.map(_.leaderCount))
-    val replicaSkews = Skew.percentages(brokers.map(_.partitionCount))
+    val replicaSkews = Skew.percentages(brokers.map(_.replicaCount))
 
     brokers.zip(leaderSkews.zip(replicaSkews)).map { case (dto, (leaderSkew, replicaSkew)) =>
       BrokerRow(
@@ -54,8 +57,7 @@ object BrokerRow {
         diskUsageBytes = dto.diskUsageBytes,
         segmentCount = dto.segmentCount,
         leaderCount = dto.leaderCount,
-        replicaCount = dto.partitionCount,
-        inSyncReplicaCount = dto.inSyncReplicaCount,
+        replicaCount = dto.replicaCount,
         leaderSkewPercent = dto.leaderSkewPercent.orElse(leaderSkew),
         replicaSkewPercent = dto.replicaSkewPercent.orElse(replicaSkew)
       )
@@ -77,7 +79,6 @@ final case class BrokerSummary(
     onlinePartitions: Option[Int],
     offlinePartitions: Option[Int],
     underReplicatedPartitions: Option[Int],
-    inSyncReplicas: Option[Int],
     totalReplicas: Option[Int]
 )
 
@@ -102,8 +103,7 @@ object BrokerSummary {
       underReplicatedPartitions = cluster.flatMap(_.underReplicatedPartitionCount),
       // Summed only over the brokers that reported one: adding a zero for a broker whose disks could not be
       // read would understate the cluster's replication and read as a problem that is not there.
-      inSyncReplicas = sum(brokers.map(_.inSyncReplicaCount)),
-      totalReplicas = sum(brokers.map(_.partitionCount))
+      totalReplicas = sum(brokers.map(_.replicaCount))
     )
 
   /** Whether the strip has to shout.

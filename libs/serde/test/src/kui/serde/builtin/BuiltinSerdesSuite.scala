@@ -118,6 +118,38 @@ final class BuiltinSerdesSuite extends KuiSuite {
     assert(encode(JsonSerde[IO], "123").isLeft)
   }
 
+  // The refusal a person reads. The publish drawer shows `cause` verbatim beside the field, and it used to
+  // show circe's own words — `expected null got 'not js...' (line 1, column 1)`, which describes one branch
+  // the parser tried and reads as though KUI had wanted `null`. These four cases pin the sentences instead.
+
+  private def refusal(text: String): String =
+    encode(JsonSerde[IO], text).fold(_.cause, bytes => fail(s"expected a refusal, got ${bytes.length} bytes"))
+
+  test("plain text typed into a JSON field is refused in words, and names the serde to use instead") {
+    val cause = refusal("not json at all")
+    assert(cause.contains("has to start with `{` or `[`"), cause)
+    assert(cause.contains("starts with `n`"), cause)
+    assert(cause.contains("choose the String serde instead"), cause)
+    assert(!cause.contains("expected null"), s"the parser's own wording leaked through: $cause")
+  }
+
+  test("JSON that starts right and breaks inside keeps the parser's position and suggests what to look for") {
+    val cause = refusal("""{"a": 1,}""")
+    assert(cause.startsWith("this starts like JSON but does not parse"), cause)
+    assert(cause.contains("line 1, column"), cause)
+    assert(cause.contains("comma left before"), cause)
+  }
+
+  test("an empty payload says it is empty rather than reporting a parse error at column 1") {
+    assert(refusal("   ").contains("nothing here to send"), refusal("   "))
+  }
+
+  test("a bare value is refused with what this serde accepts and where else to send it") {
+    val cause = refusal("123")
+    assert(cause.contains("only an object"), cause)
+    assert(cause.contains("choose a different serde"), cause)
+  }
+
   // ---------------------------------------------------------------- UUID
 
   test("sixteen bytes with no RFC 4122 version and variant are refused") {
