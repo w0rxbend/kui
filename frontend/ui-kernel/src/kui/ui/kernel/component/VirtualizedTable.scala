@@ -1,5 +1,7 @@
 package kui.ui.kernel.component
 
+import scala.scalajs.js
+
 import com.raquo.laminar.api.L.*
 import com.raquo.laminar.codecs.IntAsStringCodec
 import org.scalajs.dom
@@ -163,6 +165,33 @@ object VirtualizedTable {
     // written directly alongside it; the two are only ever set together, here.
     var scroller: Option[dom.Element] = None
 
+    /** Watches the scroller so the window arithmetic keeps up with the element's real height.
+      *
+      * Measuring once on mount is not enough, and the way it fails is quiet rather than loud. The scroller is
+      * laid out by the stylesheet, and at the moment Laminar mounts it the browser has often not yet given it
+      * the height it will settle at — the element is a few dozen pixels tall, the arithmetic concludes that
+      * two rows fit, and the table then renders five rows for the rest of its life inside a container that
+      * has since grown to hold eighteen. Nothing errors: the user simply sees a twelve-partition topic
+      * showing five partitions above a large blank area, with a scrollbar that does not scroll because the
+      * component believes the whole list is already on screen. A resize observer turns the height from
+      * something guessed once into something that is always the truth.
+      *
+      * It is created behind a feature test because jsdom, which the frontend suites run in, does not
+      * implement `ResizeObserver` at all; there the mount measurement and the `viewportHeight` parameter
+      * remain the only sources, which is exactly what those suites already drive.
+      */
+    var sizeWatch: Option[dom.ResizeObserver] = None
+
+    def observeSize(element: dom.Element): Unit =
+      if js.typeOf(js.Dynamic.global.ResizeObserver) != "undefined" then {
+        val observer = new dom.ResizeObserver((_, _) => {
+          val measured = element.clientHeight
+          if measured > 0 && measured != viewportHeight.now() then viewportHeight.set(measured)
+        })
+        observer.observe(element)
+        sizeWatch = Some(observer)
+      }
+
     def scrollTo(px: Int): Unit = {
       val clamped = px.max(0)
       scroller.foreach(_.scrollTop = clamped.toDouble)
@@ -254,8 +283,13 @@ object VirtualizedTable {
           scroller = Some(context.thisNode.ref)
           val measured = context.thisNode.ref.clientHeight
           if measured > 0 then viewportHeight.set(measured)
+          observeSize(context.thisNode.ref)
         },
-        onUnmountCallback(_ => scroller = None),
+        onUnmountCallback { _ =>
+          scroller = None
+          sizeWatch.foreach(_.disconnect())
+          sizeWatch = None
+        },
         onScroll.mapTo(()) --> { _ => scroller.foreach(element => scrollTop.set(element.scrollTop.toInt)) },
         onKeyDown.compose(_.withCurrentValueOf(total, focused.signal, viewportHeight.signal, rowHeightOf)) -->
           { (event, count, current, height, rowPx) => handleKey(event, count, current, height, rowPx) },
