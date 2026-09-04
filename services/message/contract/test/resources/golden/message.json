@@ -1,0 +1,29 @@
+{
+  "partition" : 3,
+  "offset" : 41284,
+  "timestamp" : "2026-09-03T10:11:12.000Z",
+  "timestampType" : "CreateTime",
+  "key" : {
+    "text" : "A-1",
+    "kind" : "string",
+    "serde" : "String",
+    "properties" : {
+    }
+  },
+  "value" : {
+    "text" : "{\"orderId\":\"A-1\"}",
+    "kind" : "json",
+    "serde" : "Avro",
+    "properties" : {
+      "schemaId" : "42"
+    }
+  },
+  "headers" : {
+    "traceparent" : "00-0af7651916cd43dd-b7ad6b7169203331-01"
+  },
+  "keySize" : 3,
+  "valueSize" : 128,
+  "headersSize" : 66,
+  "deserializeErrors" : [
+  ]
+}

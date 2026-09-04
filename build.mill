@@ -1373,6 +1373,52 @@ object services extends Module {
     }
   }
 
+  /** The message service: browsing, producing, resending and tracking records (M3).
+    *
+    * It is the milestone's headline service and the first one whose primary response is a *stream*
+    * rather than a document, which is why its layers are the ones ADR-035 was written for.
+    */
+  object message extends Module {
+
+    /** The published wire shape of `kui-message-service`.
+      *
+      * Cross-compiled for the reason every KUI contract is: the browser decodes exactly what the
+      * service encodes, from one file (ADR-003). This module matters more than most, because the
+      * documents it declares are the ones that arrive inside a stream — and a stream is the one
+      * place where a mismatched decoder shows an empty screen with no error anywhere, which is
+      * exactly M1's second integration defect.
+      *
+      * Rule A2 forbids it an edge into `domain` or `application`, which is why every value it names
+      * comes from `libs/kernel` or `libs/contracts-core`.
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+      object js extends Shared with KuiJsModule {
+        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
+        def mvnDeps =
+          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
+
+        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
+      }
+    }
+  }
+
   /** The one process a browser ever talks to (ADR-004 §3).
     *
     * The gateway owns no domain and holds no Kafka client. It is edge concerns only: the header policy, the

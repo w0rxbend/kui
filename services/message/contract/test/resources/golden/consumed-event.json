@@ -1,0 +1,11 @@
+{
+  "bytes" : 1048576,
+  "records" : 4096,
+  "elapsedMs" : 2310,
+  "filterErrors" : 0,
+  "budget" : {
+    "recordsLeft" : 96,
+    "bytesLeft" : 51380224,
+    "millisLeft" : 57690
+  }
+}

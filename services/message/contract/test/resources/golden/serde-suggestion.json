@@ -1,0 +1,6 @@
+{
+  "name" : "Avro",
+  "target" : "value",
+  "preferred" : true,
+  "reason" : "the schema registry has a subject named orders-value"
+}

@@ -1,0 +1,14 @@
+{
+  "purged" : [
+    {
+      "partition" : 0,
+      "deletedBefore" : 1024
+    }
+  ],
+  "failed" : [
+    {
+      "partition" : 1,
+      "reason" : "the partition has no leader"
+    }
+  ]
+}

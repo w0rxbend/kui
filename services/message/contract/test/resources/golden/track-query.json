@@ -1,0 +1,16 @@
+{
+  "topics" : [
+    "orders",
+    "payments",
+    "shipments"
+  ],
+  "match" : {
+    "source" : "header",
+    "header" : "correlationId",
+    "operator" : "equals",
+    "value" : "A-1"
+  },
+  "from" : "2026-09-03T10:11:12.000Z",
+  "to" : "2026-09-03T11:11:12.000Z",
+  "limit" : 100
+}

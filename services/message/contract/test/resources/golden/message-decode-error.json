@@ -1,0 +1,32 @@
+{
+  "partition" : 0,
+  "offset" : 7,
+  "timestamp" : "2026-09-03T10:11:12.000Z",
+  "timestampType" : "LogAppendTime",
+  "key" : {
+    "text" : "",
+    "kind" : "null",
+    "serde" : "String",
+    "properties" : {
+    }
+  },
+  "value" : {
+    "text" : "7b 22 6f 72 64",
+    "kind" : "binary",
+    "serde" : "Hex",
+    "properties" : {
+    }
+  },
+  "headers" : {
+  },
+  "keySize" : 0,
+  "valueSize" : 5,
+  "headersSize" : 0,
+  "deserializeErrors" : [
+    {
+      "target" : "value",
+      "serde" : "Avro",
+      "cause" : "Unknown magic byte 0x7b at position 0"
+    }
+  ]
+}
