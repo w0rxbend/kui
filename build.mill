@@ -967,6 +967,27 @@ object frontend extends Module {
     }
   }
 
+  /** The message explorer (M3).
+    *
+    * It starts life holding only the parts of the table view that are pure — the JSON flattener and its
+    * path syntax — because those are the piece of M3's frontend that depends on nothing at all and can be
+    * proved correct on their own. The typed clients, the screens and the dependency on
+    * `services.message.contract.js` arrive with MSG-034, once that contract exists; like `uiClusters`, this
+    * module will decode exactly what the message service encodes, from the same source, and will depend on
+    * the shell not at all.
+    */
+  object uiMessages extends KuiFrontendModule {
+
+    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
+    def moduleDir = super.moduleDir / os.up / "ui-messages"
+
+    def moduleDeps = Seq(uiKernel)
+
+    object test extends ScalaJSTests with KuiJsDomTests {
+      def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
+    }
+  }
+
   /** Every frontend module whose `resources/css` directory contributes to `kui.css`, in no
     * particular order — `CssPipeline` decides the cascade, not this list.
     */
