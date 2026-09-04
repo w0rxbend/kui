@@ -1,7 +1,7 @@
 package kui.gateway.contract
 
-import sttp.model.headers.CookieValueWithMeta
 import sttp.model.StatusCode
+import sttp.model.headers.CookieValueWithMeta
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
@@ -87,23 +87,43 @@ object AuthEndpoints {
       .summary("Which kind of sign-in this deployment uses")
       .tag("auth")
 
-  /** Signing in with a username and a password.
+  /** Signing in with a username and a password, **as a client sees it**.
     *
-    * The response carries a `Set-Cookie` because this is the moment the browser is given a session. The
-    * cookie is declared as an output rather than left to the session middleware for one reason: signing in
-    * **replaces** the session, id and CSRF secret and all (ADR-019's session-fixation defence), so the cookie
-    * that has to reach the browser is not the one the request arrived with.
+    * ==Why the `Set-Cookie` is not on this value==
+    *
+    * The response really does carry one — signing in *replaces* the session, id and CSRF secret and all
+    * (ADR-019's session-fixation defence), so the cookie that has to reach the browser is not the one the
+    * request arrived with, and the server therefore has to declare it rather than leave it to the session
+    * middleware. It is declared on [[loginWithSession]] below, which is what the server is built from.
+    *
+    * It is not on the value a *client* is built from, because a browser can never satisfy it. `Set-Cookie` is
+    * a forbidden response header: `fetch` strips it before any script can see it, on purpose, since a script
+    * that could read one could read an `HttpOnly` session cookie. A Tapir client built from an endpoint that
+    * declares a `Set-Cookie` output therefore fails to decode **every** response, including the successful
+    * ones.
+    *
+    * That is not hypothetical. The sign-in screen was built against the cookie-bearing value, and a correct
+    * sign-in — `200`, session issued, cookie stored by the browser exactly as it should be — was reported to
+    * the user as "The server sent something KUI could not read", with no way in. The browser was already
+    * holding the cookie it was complaining it could not see.
     */
-  val login
-      : PublicEndpoint[LoginRequest, (ErrorEnvelope, StatusCode), (LoginResponse, CookieValueWithMeta), Any] =
+  val login: PublicEndpoint[LoginRequest, (ErrorEnvelope, StatusCode), LoginResponse, Any] =
     failing.post
       .in("auth" / "login")
       .in(jsonBody[LoginRequest])
       .out(jsonBody[LoginResponse])
-      .out(setCookie(SessionCookie))
       .name("gateway.auth.login")
       .summary("Sign in with a username and a password")
       .tag("auth")
+
+  /** [[login]] with the session cookie the server actually emits. Server-side and documentation only.
+    *
+    * Derived from [[login]] rather than written out again, so the path, the body and the error shape have
+    * exactly one definition and cannot drift apart.
+    */
+  val loginWithSession
+      : PublicEndpoint[LoginRequest, (ErrorEnvelope, StatusCode), (LoginResponse, CookieValueWithMeta), Any] =
+    login.out(setCookie(SessionCookie))
 
   /** Completing a required password change. It grants no session on its own: the caller signs in again with
     * the new password, which is one flow rather than two ways to obtain a session.
@@ -158,6 +178,10 @@ object AuthEndpoints {
       .summary("Clears the session cookie")
       .tag("auth")
 
+  /** For the published OpenAPI document, which describes what the *server* sends — so the cookie-bearing
+    * value is the one listed. `oidcCallback` keeps its cookie output on the single value it has, because
+    * nothing decodes that response in a script: it is a redirect the browser follows.
+    */
   val all: List[AnyEndpoint] =
-    List(me, settings, login, changePassword, oidcStart, oidcCallback, logout)
+    List(me, settings, loginWithSession, changePassword, oidcStart, oidcCallback, logout)
 }

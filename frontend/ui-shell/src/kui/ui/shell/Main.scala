@@ -274,6 +274,17 @@ object Shell {
         }
     }
 
+    // The sign-in screen, built at most once — and that is not an optimisation.
+    //
+    // `fullScreen` is a signal that re-emits whenever *any* of its inputs does, and one of its inputs is
+    // the connectivity ticker, which emits on a timer. Building the screen inside that `map` therefore
+    // replaced it with a brand-new element every few seconds, taking its `Var`s with it, and a half-typed
+    // password vanished from the field on the next tick. Observed in a browser: the fields emptied
+    // themselves while nothing had been submitted. Deriving it from `authSettings` alone — which emits
+    // exactly once, when the answer arrives — gives one element that survives every later tick.
+    val loginScreen: Signal[Option[HtmlElement]] =
+      authSettings.signal.map(_.map(settings => LoginPage(settings, api, signedIn)))
+
     Layout(
       sidebar = Sidebar(
         router = router,
@@ -299,22 +310,20 @@ object Shell {
       // and the unreachable screen is the one that says why and retries. Only when KUI *is* reachable is
       // the sign-in question asked at all.
       fullScreen = ShellHealth.connectivity
-        .combineWith(authSettings.signal, AuthState.principal.signal)
-        .map((connectivity, settings, principal) =>
+        .combineWith(loginScreen, authSettings.signal, AuthState.principal.signal)
+        .map((connectivity, screen, settings, principal) =>
           connectivity match {
             case ShellConnectivity.Lost(_, _, _) => Some(unreachable)
             case ShellConnectivity.Connected(_) =>
-              Option.when(mustSignIn(settings, principal))(
-                LoginPage(settings.getOrElse(AuthSettingsDto(AuthDisabled, None, false)), api, signedIn)
-              )
+              if mustSignIn(settings, principal) then screen else None
           }
         )
     )
   }
 
   /** The wire value `AuthType.Disabled` serialises to, and therefore the one string that means "this
-    * deployment asks nobody to sign in". It is spelled out here rather than imported from
-    * `libs/config`, which is a JVM module the browser cannot see.
+    * deployment asks nobody to sign in". It is spelled out here rather than imported from `libs/config`,
+    * which is a JVM module the browser cannot see.
     */
   private[shell] val AuthDisabled: String = "disabled"
 
@@ -322,16 +331,15 @@ object Shell {
     *
     * Both halves have to be true, and each guards against a different, serious failure.
     *
-    *   - The **settings must have arrived and must not say `disabled`.** While the answer is still in
-    *     flight, or if it never comes, this is `false`: a deployment with no authentication configured —
-    *     the default, and what every demonstration environment runs — must never meet a login screen,
-    *     because that is the product's front door and a locked door there is worse than any other bug on
-    *     this screen.
-    *   - The **principal must be anonymous.** A signed-in user reloading the page has a session cookie
-    *     and gets their identity back from `/auth/me`; asking them to sign in again would be a loop.
+    *   - The **settings must have arrived and must not say `disabled`.** While the answer is still in flight,
+    *     or if it never comes, this is `false`: a deployment with no authentication configured — the default,
+    *     and what every demonstration environment runs — must never meet a login screen, because that is the
+    *     product's front door and a locked door there is worse than any other bug on this screen.
+    *   - The **principal must be anonymous.** A signed-in user reloading the page has a session cookie and
+    *     gets their identity back from `/auth/me`; asking them to sign in again would be a loop.
     *
-    * `None` for the principal means `/auth/me` has not answered yet, which is also not a reason to
-    * demand a sign-in.
+    * `None` for the principal means `/auth/me` has not answered yet, which is also not a reason to demand a
+    * sign-in.
     */
   private[shell] def mustSignIn(
       settings: Option[AuthSettingsDto],

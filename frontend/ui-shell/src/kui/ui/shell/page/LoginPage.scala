@@ -24,15 +24,15 @@ import kui.ui.shell.ShellCss
   *
   * Every server-side half of authentication was built before this: `POST /api/v1/auth/login` works,
   * `/auth/settings` says which kind of sign-in a deployment uses, the session cookie is issued and rotated,
-  * roles are resolved and permissions are returned on `/auth/me`. None of it was reachable from a browser.
-  * A deployment configured with `kui.auth.type: form` served its interface to anybody who asked, as the
+  * roles are resolved and permissions are returned on `/auth/me`. None of it was reachable from a browser. A
+  * deployment configured with `kui.auth.type: form` served its interface to anybody who asked, as the
   * anonymous principal, with no way to become anybody else — so the whole authentication feature was, from a
   * user's point of view, a set of endpoints and no product. This is the missing half.
   *
   * ==When it is shown, and when it must never be==
   *
-  * Exactly one condition, decided in `Shell.app`: the deployment says it uses a sign-in
-  * (`authType != "disabled"`) **and** the browser's current principal is anonymous. Both halves matter.
+  * Exactly one condition, decided in `Shell.app`: the deployment says it uses a sign-in (`authType !=
+  * "disabled"`) **and** the browser's current principal is anonymous. Both halves matter.
   *
   *   - Without the first, a deployment that has deliberately configured no authentication — which is the
   *     default, and what the quickstart and every demonstration run — would meet a login screen with no
@@ -103,9 +103,9 @@ object LoginPage {
     *   the honest shape for a screen with no server: it is better than a suite standing up a gateway, and it
     *   is why `submit` checks for it rather than asserting.
     * @param onSignedIn
-    *   what to do once the server has issued a session. In the application it reloads the page, because
-    *   every store in the shell — permissions, capabilities, the cluster list — was populated as the
-    *   anonymous principal and a reload is the one way to be sure none of it survives.
+    *   what to do once the server has issued a session. In the application it reloads the page, because every
+    *   store in the shell — permissions, capabilities, the cluster list — was populated as the anonymous
+    *   principal and a reload is the one way to be sure none of it survives.
     */
   def apply(
       settings: AuthSettingsDto,
@@ -141,17 +141,14 @@ object LoginPage {
           val _ = client
             .call(login, LoginRequest(name, secret))
             .foreach {
-              // The second half of the pair is the `Set-Cookie` the endpoint declares. The browser has
-              // already stored it by the time this runs — a script may not read a `HttpOnly` cookie and
-              // must not try — so it is named and discarded.
-              case Right((LoginResponse.SignedIn(_), _)) =>
+              case Right(LoginResponse.SignedIn(_)) =>
                 // The password is dropped from the page's memory the moment it is no longer needed.
                 // It buys little against a determined attacker with the machine, and it costs nothing.
                 password.set("")
                 busy.set(false)
                 onSignedIn.onNext(())
 
-              case Right((LoginResponse.PasswordChangeRequired(challenge), _)) =>
+              case Right(LoginResponse.PasswordChangeRequired(challenge)) =>
                 password.set("")
                 busy.set(false)
                 notice.set(
@@ -221,11 +218,25 @@ object LoginPage {
         // A real `<form>`, so that Enter in either field submits. Without this the only way in is the
         // mouse, which is the wrong answer on the one screen every user types on.
         onSubmit.preventDefault --> Observer[org.scalajs.dom.Event] { _ =>
-          stage.now() match {
-            case Stage.Credentials => submitCredentials.onNext(())
-            case Stage.ChangingPassword(challenge) => submitNewPassword(challenge).onNext(())
-          }
+          // Ignored while a request is in flight, so holding Enter down cannot send three sign-ins.
+          if !busy.now() then
+            stage.now() match {
+              case Stage.Credentials => submitCredentials.onNext(())
+              case Stage.ChangingPassword(challenge) => submitNewPassword(challenge).onNext(())
+            }
         },
+        // A hidden submit button, and it is not decoration.
+        //
+        // A browser only submits a form on Enter — "implicit submission" — when the form has a submit
+        // button, unless it has exactly one text field. This form has two, and the visible "Sign in"
+        // control is the kernel's `Button`, which is a `type="button"` with a click handler. So without
+        // this, pressing Enter after typing a password did nothing at all: the only way in was the mouse,
+        // on the one screen in the product that every user types on. Observed, and this is the fix.
+        //
+        // `hidden` rather than off-screen: the spec's default button need only exist and not be disabled,
+        // and a hidden button is skipped by the keyboard and by screen readers, so it adds no control
+        // anybody can find.
+        button(tpe := "submit", hidden := true, aria.hidden := true, tabIndex := -1),
         h1(idAttr := titleId, cls := ShellCss.LoginTitle, "Sign in to KUI"),
         child.maybe <-- notice.signal.map(
           _.map(message => p(cls := ShellCss.LoginNotice, role := "status", message))

@@ -88,9 +88,17 @@ class LoginPageSuite extends FunSuite {
     }
   }
 
-  test("the form is a real form, so Enter submits it") {
-    // Without a `<form>` the only way in is the mouse, on the one screen every user types on.
-    mounted(page("form"))(root => assert(root.querySelector("form") != null, "no form element"))
+  test("Enter submits the form") {
+    // Two things are needed and only the first is obvious. A `<form>` — and a submit button, because a
+    // browser performs implicit submission only when the form has one, unless it has exactly one text
+    // field. This form has two, and the visible control is the kernel's `Button`, which is a
+    // `type="button"`. Without the hidden submit button, Enter did nothing and the only way in was the
+    // mouse. That was observed in a browser before it was written down here.
+    mounted(page("form")) { root =>
+      assert(root.querySelector("form") != null, "no form element")
+      val submit = root.querySelector("button[type='submit']")
+      assert(submit != null, "no submit button, so Enter will not submit this form")
+    }
   }
 
   test("the provider flow offers no password field at all") {

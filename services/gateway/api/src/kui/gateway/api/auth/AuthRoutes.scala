@@ -123,7 +123,7 @@ object AuthRoutes {
       basePath: String,
       secureCookies: Boolean
   ): ServerEndpoint[Any, F] =
-    AuthEndpoints.login
+    AuthEndpoints.loginWithSession
       .in(request)
       .serverLogic[F] { (credentials, req) =>
         answering[F, (LoginResponse, CookieValueWithMeta)](req) {
