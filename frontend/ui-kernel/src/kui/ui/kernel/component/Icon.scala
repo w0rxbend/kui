@@ -116,6 +116,14 @@ object Icon {
 
   def dot: SvgElement = icon(s.circle(s.cx := "12", s.cy := "12", s.r := "4", s.fill := "currentColor"))
 
+  /** The favourite marker.
+    *
+    * Drawn as an outline, and filled by the stylesheet when the row is a favourite, so that "on" and "off"
+    * differ in shape as well as in colour. `Favourites` is kernel state, so its icon belongs here too.
+    */
+  def star: SvgElement =
+    icon(draw("M12 2.5l2.9 5.9 6.6.9-4.8 4.6 1.2 6.5-5.9-3.1-5.9 3.1 1.2-6.5L2.5 9.3l6.6-.9z"))
+
   /** The busy indicator. Its rotation lives in CSS, so the reset's `prefers-reduced-motion` rule can stop it
     * for users who asked for that.
     */
@@ -136,6 +144,7 @@ object Icon {
     "plus" -> (() => plus),
     "warning" -> (() => warning),
     "info" -> (() => info),
+    "star" -> (() => star),
     "refresh" -> (() => refresh),
     "external" -> (() => external),
     "search" -> (() => search),

@@ -25,3 +25,94 @@
   margin: 0;
   color: var(--kui-color-text-muted);
 }
+
+/* --- The list screen's control bar ------------------------------------------------------------ */
+
+/* Search, the internal-topic switch, the count and refresh, on one line that wraps rather than
+ * scrolls: a control that has slid off the right edge of a bar is a control nobody finds. */
+.kui-topics__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-4);
+}
+
+.kui-topics__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Pushed to the right of the bar, beside the refresh button, because it is a statement about what
+ * the controls to its left have produced. */
+.kui-topics__count {
+  margin-left: auto;
+  color: var(--kui-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Cells ------------------------------------------------------------------------------------ */
+
+/* The star. Outline when off, filled when on, so the two states differ in shape as well as colour —
+ * about one man in twelve cannot rely on the colour alone. */
+.kui-topics__star {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+}
+
+.kui-topics__star:hover {
+  color: var(--kui-color-text);
+}
+
+.kui-topics__star--on {
+  color: var(--kui-color-primary);
+}
+
+.kui-topics__star--on svg {
+  fill: currentColor;
+}
+
+.kui-topics__name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-topics__name-link {
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The em dash and its chip sit on one line at the right edge of a numeric column, where the number
+ * they replace would have been. */
+.kui-topics__messages {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+}
+
+/* The rendering for a section with nothing under it: a sentence and a retry, never an empty table.
+ * A table with no rows in it is a claim that the cluster has no topics. */
+.kui-topics__error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-5);
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-surface-elevated);
+}
+
+.kui-topics__error p {
+  margin: 0;
+}

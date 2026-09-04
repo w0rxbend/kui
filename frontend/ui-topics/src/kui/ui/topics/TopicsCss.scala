@@ -7,4 +7,16 @@ package kui.ui.topics
 object TopicsCss {
   val Page = "kui-topics"
   val Fallback = "kui-topics__fallback"
+  val Error = "kui-topics__error"
+
+  val Controls = "kui-topics__controls"
+  val Toggle = "kui-topics__toggle"
+  val Count = "kui-topics__count"
+
+  val Star = "kui-topics__star"
+  val StarOn = "kui-topics__star--on"
+
+  val NameCell = "kui-topics__name"
+  val NameLink = "kui-topics__name-link"
+  val MessagesCell = "kui-topics__messages"
 }

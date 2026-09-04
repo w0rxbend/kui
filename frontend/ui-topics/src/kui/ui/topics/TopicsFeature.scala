@@ -7,7 +7,9 @@ import org.scalajs.dom
 import kui.kernel.ClusterId
 import kui.ui.kernel.api.{ApiClient, Bootstrap}
 import kui.ui.kernel.feature.*
+import kui.ui.kernel.prefs.{Favourites, Timezone}
 import kui.ui.kernel.state.AuthState
+import kui.ui.topics.list.TopicListPage
 
 /** The topics microfrontend.
   *
@@ -43,6 +45,11 @@ final class TopicsFeature extends KuiFeature {
 
   private val queries = new TopicsQueries(TopicsFeature.api)
 
+  /** Starred topics, per cluster, in `localStorage`. Namespaced so that this feature's favourites cannot
+    * collide with another feature's (PLAN §21).
+    */
+  private val favourites = new Favourites("kui.topics.favourites")
+
   /** Which of this feature's pages is on screen.
     *
     * The shell calls `render` with the page its router decoded, and a row click inside the list sets this
@@ -73,13 +80,23 @@ final class TopicsFeature extends KuiFeature {
 
   /** The topic list for one cluster.
     *
-    * The screen itself is TOP-029; until it lands this is an empty container with the page's `data-testid`,
-    * so that the routing, the registration and the bundle split can be asserted before there is anything to
-    * draw. It is deliberately not a "coming soon" panel: a placeholder that looks like a feature is a
-    * promise, and an empty container is not.
+    * A cluster id the URL held but that will not parse renders the page's own empty container rather than
+    * failing: the id came from something a user typed or a bookmark kept, and a blank screen with no
+    * explanation is the worst possible answer to it.
     */
   private def listing(cluster: Option[ClusterId]): HtmlElement =
-    div(cls := TopicsCss.Page, dataAttr("testid") := "page-topics-list", cluster.map(_ => emptyMod))
+    cluster match {
+      case Some(id) =>
+        TopicListPage(
+          cluster = id,
+          queries = queries,
+          favourites = favourites,
+          navigate = (clusterId, topic) => goTo(TopicsPageId.Detail(clusterId.value, topic)),
+          hrefFor = (clusterId, topic) => hrefOf(TopicsPageId.Detail(clusterId.value, topic)),
+          zone = Timezone.choice.signal
+        )
+      case None => div(cls := TopicsCss.Page, dataAttr("testid") := "page-topics-list")
+    }
 
   /** One topic. The screen is TOP-030; see `listing` for why this is empty rather than a placeholder. */
   private def detail(cluster: Option[ClusterId], topic: String): HtmlElement =
