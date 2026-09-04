@@ -118,6 +118,33 @@ object ApplicationError {
     val code: ErrorCode = ErrorCode.InvalidState
   }
 
+  /** A refusal whose *code* the caller chooses, the way [[NotFound]] already lets it choose one.
+    *
+    * `InvalidState` covers "the target is not in a state where this is allowed", which is true of a dozen
+    * refusals and actionable for none of them. Some refusals have an obvious remedy and deserve a code the UI
+    * can switch on to say what it is: `KUI-GROUP-NOT-EMPTY` means "stop the consumers and try again", and a
+    * screen that renders that sentence is worth more than one that renders "invalid state".
+    *
+    * The code is a parameter rather than a case per refusal because the alternative is a case in the kernel
+    * for every adapter's vocabulary, and the kernel does not know what a consumer group is.
+    */
+  final case class Refused(code: ErrorCode, message: String) extends ApplicationError
+
+  /** A smart-filter expression the user typed could not be compiled (ADR-017).
+    *
+    * It is separate from [[Invalid]] because it carries its own code, `KUI-FILTER-COMPILE`, which the browser
+    * switches on to underline the expression in the editor rather than to show a form error. `fields` carries
+    * one entry per compile issue, each naming a line and a column: an error that says only "syntax error"
+    * sends the user back to re-read a line they have already read three times.
+    *
+    * It lives in the kernel rather than in `libs/filter` because `ApplicationError` is sealed, and it is
+    * sealed so that `ErrorEnvelope.statusOf` can be exhaustive.
+    */
+  final case class FilterCompile(message: String, fields: List[FieldError]) extends ApplicationError {
+    val code: ErrorCode = ErrorCode.FilterCompile
+    override val details: List[FieldError] = fields
+  }
+
   /** The request itself is malformed. `fields` becomes the `details` array of the envelope. */
   final case class Invalid(message: String, fields: List[FieldError]) extends ApplicationError {
     val code: ErrorCode = ErrorCode.Validation
