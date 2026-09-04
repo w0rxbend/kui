@@ -36,6 +36,9 @@ object TopicsCss {
   val SettingMasked = "kui-topics__setting-masked"
   val SettingHint = "kui-topics__setting-hint"
 
+  /** The link from a topic's heading into the message browser. */
+  val BrowseLink = "kui-topics__browse-link"
+
   val Panels = "kui-topics__panels"
   val Panel = "kui-topics__panel"
 }

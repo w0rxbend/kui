@@ -1078,7 +1078,13 @@ object frontend extends Module {
     // while the other five endpoints are proxied through untouched and keep the service's. Decoding
     // an aggregation against the owning service's type is what made the M1 dashboard render "No
     // clusters yet" against a working broker.
-    def moduleDeps = Seq(uiKernel, services.topic.contract.js, services.gateway.contract.js)
+    // `services.message.contract.js` for `BrowseAddress` alone: the topic page carries the one link
+    // into the message browser, and that URL has to be built from the same constants the message
+    // service's endpoint is declared with. It is a contract module — shared source, no fs2, no
+    // screens — so this pulls in path segments and parameter names and no feature code, which is what
+    // `checkBundleShape` goes on asserting.
+    def moduleDeps =
+      Seq(uiKernel, services.topic.contract.js, services.gateway.contract.js, services.message.contract.js)
 
     object test extends ScalaJSTests with KuiJsDomTests {
       def moduleDeps = super.moduleDeps ++ Seq(services.topic.contract.js.test)

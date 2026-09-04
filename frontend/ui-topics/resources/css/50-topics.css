@@ -213,3 +213,14 @@
 .kui-topics__panel:empty {
   display: none;
 }
+
+/* --- The way into the message browser --------------------------------------------------------- */
+
+/* Under the topic's heading and above the tab strip: the reading order a person follows when they
+ * have just opened a topic and want to see what is in it. Styled as a link and not as a button
+ * because it navigates and changes nothing. */
+.kui-topics__browse-link {
+  display: inline-block;
+  margin-bottom: var(--kui-space-3);
+  font-size: var(--kui-font-size-sm);
+}

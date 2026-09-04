@@ -9,6 +9,7 @@ import kui.contracts.topic.TopicDetailDto
 import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.error.ErrorCode
 import kui.kernel.{ClusterId, TopicName}
+import kui.message.contract.BrowseAddress
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
 import kui.ui.kernel.feature.{FeatureId, FeatureSlots, GuestTabs, KuiFeature, PanelContext}
@@ -119,6 +120,21 @@ object TopicDetailPage {
       // error still knows which topic they were looking at.
       Breadcrumbs(Val(List(Crumb(Messages.Title, Some(backHref)), Crumb(topic.value, None)))),
       h1(dataAttr("testid") := "topic-heading", topic.value),
+      // The one way into the message browser.
+      //
+      // The browser is a separate microfrontend that is downloaded only when its route is opened, and its
+      // route needs a topic — so it has no sidebar entry it could point at, and until this link existed the
+      // screen could be reached only by typing its address. A plain `a` and not a router link because the
+      // destination belongs to another feature: naming that feature's `Page` class here would pull its whole
+      // module into `main.js` for every user, which is exactly what `checkBundleShape` forbids. The URL is
+      // built from `BrowseAddress`, the cross-compiled constants the message service's contract publishes
+      // for this purpose, so a renamed segment breaks the build rather than the link.
+      a(
+        cls := TopicsCss.BrowseLink,
+        dataAttr("testid") := "topic-browse-messages",
+        href := browseHref(backHref, cluster, topic),
+        Messages.BrowseMessages
+      ),
       tab --> { current => selected.set(current.toString) },
       // Only a *real* change is reported. `Tabs` writes its selection on mount and again whenever the URL
       // pushes one in, and reporting those back would push a history entry for a navigation nobody made —
@@ -146,6 +162,20 @@ object TopicDetailPage {
           .map(section => div(cls := TopicsCss.Panel, dataAttr("testid") := slotTestId(section)))
       )
     )
+  }
+
+  /** The message browser's address for one topic.
+    *
+    * Derived from `backHref` — the topic list's own URL, which the shell handed in already carrying the
+    * deployment prefix — rather than from a `/ui` literal, so a KUI mounted under `/kafka/ui` links
+    * correctly.
+    */
+  private[detail] def browseHref(backHref: String, cluster: ClusterId, topic: TopicName): String = {
+    val root = backHref
+      .stripSuffix("/")
+      .stripSuffix(s"/${BrowseAddress.ClustersSegment}/${cluster.value}/${BrowseAddress.TopicsSegment}")
+    s"$root/${BrowseAddress.ClustersSegment}/${cluster.value}/${BrowseAddress.TopicsSegment}/" +
+      s"${topic.value}/${BrowseAddress.MessagesSegment}"
   }
 
   /** `topic-panel-consumer-groups` from `consumerGroups`. The section names are the gateway contract's; the

@@ -95,6 +95,9 @@ object Messages {
   val TabOverview: String = "Overview"
   val TabSettings: String = "Settings"
 
+  /** The link from a topic to its records. */
+  val BrowseMessages: String = "Browse messages"
+
   val IndicatorPartitions: String = "Partitions"
   val IndicatorReplicationFactor: String = "Replication factor"
   val IndicatorOutOfSync: String = "Out of sync replicas"

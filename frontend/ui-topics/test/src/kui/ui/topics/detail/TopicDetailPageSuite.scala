@@ -429,4 +429,25 @@ final class TopicDetailPageSuite extends FunSuite {
       assertEquals(optionalTestId(root, "topic-settings-table"), None)
     }
   }
+
+  // --- The way into the message browser ---------------------------------------------------------
+
+  test("theTopicPageLinksToItsMessages") {
+    // The message browser is a separate microfrontend whose route needs a topic, so it has no sidebar entry
+    // and this link is the only way a person reaches it by clicking. It was missing, and the screen was
+    // reachable only by typing its address.
+    mounted(new Fixture) { root =>
+      val link = byTestId(root, "topic-browse-messages")
+      assertEquals(link.getAttribute("href"), "/ui/clusters/prod-eu/topics/orders/messages")
+    }
+  }
+
+  test("theLinkIsBuiltFromTheDeploymentsOwnPrefix") {
+    // A KUI mounted under `/kafka/ui` must link under `/kafka/ui`. The prefix is taken from the topic
+    // list's own href rather than from a `/ui` literal, which is why this is checked rather than assumed.
+    assertEquals(
+      TopicDetailPage.browseHref("/kafka/ui/clusters/prod-eu/topics", cluster, topic),
+      "/kafka/ui/clusters/prod-eu/topics/orders/messages"
+    )
+  }
 }
