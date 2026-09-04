@@ -32,6 +32,11 @@ import sttp.tapir.server.ServerEndpoint
   */
 object StaticRoutes {
 
+  /** What one served representation is: a status, the bytes, the content type, the cache policy and the
+    * validator. Named because it is now five things and a five-tuple in three signatures is unreadable.
+    */
+  private type Served = (StatusCode, Array[Byte], String, String, String)
+
   /** Extensions this deployment never sends compressed and never varies by request — everything KUI itself
     * ships. The table is deliberately explicit rather than delegated to
     * `URLConnection.guessContentTypeFromName`, whose guesses are platform-dependent: the same `.js` file has
@@ -122,14 +127,16 @@ object StaticRoutes {
     endpoint.get
       .in("ui")
       .in(paths)
+      .in(header[Option[String]]("If-None-Match"))
       .out(statusCode)
       .out(byteArrayBody)
       .out(header[String]("Content-Type"))
       .out(header[String]("Cache-Control"))
+      .out(header[String]("ETag"))
       .errorOut(statusCode)
       .errorOut(stringBody)
       .name("gateway.static.ui")
-      .serverLogic[F](segments => respond[F](bootstrap, resourcePrefix, segments))
+      .serverLogic[F]((segments, ifNoneMatch) => respond[F](bootstrap, resourcePrefix, segments, ifNoneMatch))
 
   /** The same route for `HEAD`, answering the headers a `GET` would answer and no body.
     *
@@ -151,18 +158,20 @@ object StaticRoutes {
     endpoint.head
       .in("ui")
       .in(paths)
+      .in(header[Option[String]]("If-None-Match"))
       .out(statusCode)
       .out(header[String]("Content-Type"))
       .out(header[String]("Cache-Control"))
+      .out(header[String]("ETag"))
       .out(header[String]("Content-Length"))
       .errorOut(statusCode)
       .name("gateway.static.uiHead")
-      .serverLogic[F](segments =>
-        respond[F](bootstrap, resourcePrefix, segments).map(
+      .serverLogic[F]((segments, ifNoneMatch) =>
+        respond[F](bootstrap, resourcePrefix, segments, ifNoneMatch).map(
           _.bimap(
             (status, _) => status,
-            (status, bytes, contentType, cacheControl) =>
-              (status, contentType, cacheControl, bytes.length.toString)
+            (status, bytes, contentType, cacheControl, etag) =>
+              (status, contentType, cacheControl, etag, bytes.length.toString)
           )
         )
       )
@@ -178,8 +187,9 @@ object StaticRoutes {
   private def respond[F[_]: Sync](
       bootstrap: BootstrapConfig,
       resourcePrefix: String,
-      segments: List[String]
-  ): F[Either[(StatusCode, String), (StatusCode, Array[Byte], String, String)]] =
+      segments: List[String],
+      ifNoneMatch: Option[String]
+  ): F[Either[(StatusCode, String), Served]] =
     Sync[F].delay {
       sanitize(segments) match {
         case None =>
@@ -199,18 +209,18 @@ object StaticRoutes {
           }
 
           fileSegments match {
-            case Nil => indexOrMissing(bootstrap, resourcePrefix)
+            case Nil => indexOrMissing(bootstrap, resourcePrefix, ifNoneMatch)
             case nonEmpty =>
               resourceBytes(resourcePrefix, nonEmpty) match {
                 case Some(bytes) =>
                   val (contentType, cacheControl) = asset(nonEmpty.last)
-                  Right((StatusCode.Ok, bytes, contentType, cacheControl))
+                  Right(revalidated(bytes, contentType, cacheControl, ifNoneMatch))
                 case None if namesAnAsset(nonEmpty.last) =>
                   // A miss on something that is unmistakably a static asset is a real 404, not a route
                   // into the single-page application. See [[namesAnAsset]] for why that distinction
                   // has to be made here.
                   Left((StatusCode.NotFound, s"no such asset: ${nonEmpty.last}"))
-                case None => indexOrMissing(bootstrap, resourcePrefix)
+                case None => indexOrMissing(bootstrap, resourcePrefix, ifNoneMatch)
               }
           }
       }
@@ -302,21 +312,83 @@ object StaticRoutes {
     * `TypeError: ... is not a function` before it rendered anything, and the user saw a blank page that a
     * reload would not fix. Reproduced twice against the quickstart on 2026-09-04.
     *
-    * ## What this costs, and what should replace it
+    * ## What it costs now
     *
-    * Correctness first: every asset is revalidated, so no browser can assemble a page out of two builds. The
-    * price is real — with no validator on the response there is nothing to answer a conditional request with,
-    * so each page load refetches the bundle in full, and the largest chunk alone is about 6 MB.
+    * Correctness first: every asset is revalidated, so no browser can assemble a page out of two builds.
     *
-    * The right end state is `no-cache` *plus* a strong `ETag` derived from the bytes, with `If-None-Match`
-    * answered `304`: same correctness, and a revalidation that costs a round trip instead of a download. That
-    * needs conditional-request handling this route does not have yet, and it is recorded as outstanding
-    * rather than half-built here.
+    * The revalidation is cheap, because `no-cache` is paired with a strong `ETag` computed from the bytes
+    * ([[etagOf]]) and `If-None-Match` is answered `304` ([[revalidated]]). A browser that already has the
+    * current file spends a round trip rather than a download, and the largest chunk is about 6 MB, so that is
+    * the difference between a page load and a page load with a wait in it.
+    *
+    * The validator is derived from the content and never from the name, which is exactly the mistake above
+    * not repeated: the same name really can carry different bytes, and only the bytes can say so.
     */
   private def cacheControlOf(name: String): String = {
     val _ = name // every name gets the same answer; the parameter is kept so the call site still reads well
     "no-cache"
   }
+
+  /** A strong validator for exactly these bytes.
+    *
+    * SHA-256 over the content, truncated to sixteen bytes and hex-encoded. It is a validator and not a
+    * security boundary — the question it answers is "are these the bytes the browser already has?" — and 128
+    * bits is far more than enough for that while keeping the header short.
+    *
+    * Derived from the *bytes* and never from the file name, which is the whole lesson of the caching defect
+    * this replaces: Scala.js's `internal-<40 hex>.js` names identify the set of classes in a chunk, not the
+    * JavaScript emitted for them, so two different builds really do produce different bytes under the same
+    * name. A validator computed from the content cannot make that mistake.
+    *
+    * `index.html` is hashed *after* the bootstrap block has been rendered into it, so a deployment that
+    * changes only its configuration still invalidates the page that carries it.
+    */
+  private def etagOf(bytes: Array[Byte]): String = {
+    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+    digest.take(16).map(byte => f"${byte & 0xff}%02x").mkString("\"", "", "\"")
+  }
+
+  /** The response, answered `304` when the browser already has these exact bytes.
+    *
+    * ## Why this is the fix and `immutable` was not
+    *
+    * Every asset KUI serves is `no-cache`, which means "you may keep it, but ask before you use it". Without
+    * a validator there is nothing to ask *with*, so every page load refetched the whole bundle — about 6 MB
+    * for the largest chunk. With one, the ask costs a round trip and the answer is usually 304 and empty.
+    *
+    * The correctness that matters is unchanged and is the reason it is done this way round: a browser can
+    * never assemble a page out of two builds, because it revalidates every asset every time and the server
+    * decides, from the bytes it currently has, whether the copy in the cache is still that file.
+    *
+    * ## What counts as a match
+    *
+    * `If-None-Match` may carry a list, and each entry may be weak (`W/"…"`). The comparison a `304` needs is
+    * RFC 9110's *weak* comparison, which ignores the `W/` prefix, so it is stripped before comparing. `*`
+    * matches anything the server has, which for a route that always has a representation means always.
+    */
+  private def revalidated(
+      bytes: Array[Byte],
+      contentType: String,
+      cacheControl: String,
+      ifNoneMatch: Option[String]
+  ): Served = {
+    val etag = etagOf(bytes)
+
+    if matches(ifNoneMatch, etag) then
+      // No body. RFC 9110 requires a `304` to carry none, and the headers that describe the representation
+      // are still sent so a cache can refresh what it holds about it.
+      (StatusCode.NotModified, Array.emptyByteArray, contentType, cacheControl, etag)
+    else (StatusCode.Ok, bytes, contentType, cacheControl, etag)
+  }
+
+  private def matches(ifNoneMatch: Option[String], etag: String): Boolean =
+    ifNoneMatch.exists { header =>
+      val candidates = header.split(',').map(_.trim).filter(_.nonEmpty)
+      candidates.contains("*") || candidates.map(stripWeak).contains(etag)
+    }
+
+  private def stripWeak(candidate: String): String =
+    if candidate.startsWith("W/") then candidate.substring(2) else candidate
 
   private def extensionOf(name: String): Option[String] =
     Option.when(name.contains('.'))(name.substring(name.lastIndexOf('.') + 1).toLowerCase)
@@ -326,19 +398,31 @@ object StaticRoutes {
     */
   private def indexOrMissing(
       bootstrap: BootstrapConfig,
-      resourcePrefix: String
-  ): Either[(StatusCode, String), (StatusCode, Array[Byte], String, String)] =
+      resourcePrefix: String,
+      ifNoneMatch: Option[String]
+  ): Either[(StatusCode, String), Served] =
     resourceBytes(resourcePrefix, List("index.html")) match {
       case Some(template) =>
         val rendered = IndexHtml.render(new String(template, StandardCharsets.UTF_8), bootstrap)
-        Right((StatusCode.Ok, rendered.getBytes(StandardCharsets.UTF_8), ContentTypes("html"), "no-cache"))
+        Right(
+          revalidated(
+            rendered.getBytes(StandardCharsets.UTF_8),
+            ContentTypes("html"),
+            "no-cache",
+            ifNoneMatch
+          )
+        )
       case None =>
+        // No `ETag` worth having: this is an error page standing in for a build that has no UI in it, and
+        // letting a browser cache a "not bundled" page against a validator would be the wrong kind of
+        // efficient.
         Right(
           (
             StatusCode.ServiceUnavailable,
             AssetsMissingPage.getBytes(StandardCharsets.UTF_8),
             ContentTypes("html"),
-            "no-cache"
+            "no-cache",
+            etagOf(AssetsMissingPage.getBytes(StandardCharsets.UTF_8))
           )
         )
     }

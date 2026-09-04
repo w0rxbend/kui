@@ -56,6 +56,14 @@ final class StaticRoutesSuite extends KuiIOSuite {
         .followRedirects(false)
         .send(backend)
 
+    def getIfNoneMatch(path: String, etag: String): IO[Response[String]] =
+      basicRequest
+        .get(Uri.unsafeParse(s"http://localhost:${binding.port}$path"))
+        .header("If-None-Match", etag)
+        .response(asStringAlways)
+        .followRedirects(false)
+        .send(backend)
+
     def head(path: String): IO[Response[String]] =
       basicRequest
         .head(Uri.unsafeParse(s"http://localhost:${binding.port}$path"))
@@ -170,6 +178,82 @@ final class StaticRoutesSuite extends KuiIOSuite {
           assertEquals(response.header("Cache-Control"), Some("no-cache"), path)
         }
       }
+    }
+  }
+
+  test("everyServedAssetCarriesAStrongValidator") {
+    // The other half of `no-cache`. "You may keep it, but ask before you use it" is only affordable if
+    // there is something to ask *with*; without a validator every page load refetched the whole bundle,
+    // and the largest chunk is about 6 MB.
+    val everyKindOfName =
+      List("/ui/", "/ui/main-a1b2c3d4.js", "/ui/main.js", "/ui/styles.css", "/ui/font.woff2")
+
+    server().use { running =>
+      everyKindOfName.traverse { path =>
+        running.get(path).map { response =>
+          val etag = response.header("ETag").getOrElse(fail(s"$path was served with no ETag"))
+          assert(etag.startsWith("\"") && etag.endsWith("\""), s"$path: $etag is not a quoted strong tag")
+          assert(!etag.startsWith("W/"), s"$path: a weak tag cannot support a byte-range or a strong match")
+        }
+      }
+    }
+  }
+
+  test("aBrowserThatAlreadyHasTheseBytesIsAnswered304WithNoBody") {
+    server().use { running =>
+      for {
+        first <- running.get("/ui/main.js")
+        etag = first.header("ETag").getOrElse(fail("no ETag on the first response"))
+        second <- running.getIfNoneMatch("/ui/main.js", etag)
+      } yield {
+        assertEquals(first.code.code, 200, first.body)
+        assertEquals(second.code.code, 304, second.body)
+        assertEquals(second.body, "", "a 304 must carry no body")
+        assertEquals(second.header("ETag"), Some(etag))
+        assertEquals(second.header("Cache-Control"), Some("no-cache"))
+      }
+    }
+  }
+
+  test("aBrowserHoldingAnOldValidatorIsSentTheCurrentBytes") {
+    // The case the whole mechanism exists for, and the one `immutable` got wrong: a browser that has *a*
+    // copy is not a browser that has *this* copy. The server decides, from the bytes it has now.
+    server().use { running =>
+      running.getIfNoneMatch("/ui/main.js", "\"0123456789abcdef0123456789abcdef\"").map { response =>
+        assertEquals(response.code.code, 200, response.body)
+        assert(response.body.nonEmpty, "the current bytes must be sent to a browser holding a stale tag")
+      }
+    }
+  }
+
+  test("aWeakTagAndAListOfTagsAreBothMatchedTheWayRfc9110Says") {
+    // `If-None-Match` carries a list, and a cache may have weakened the tag on the way. The comparison a
+    // 304 needs is the weak one, so `W/"x"` matches `"x"` — otherwise a perfectly valid cached copy is
+    // refetched in full every time an intermediary touches the header.
+    server().use { running =>
+      for {
+        first <- running.get("/ui/styles.css")
+        etag = first.header("ETag").getOrElse(fail("no ETag"))
+        weak <- running.getIfNoneMatch("/ui/styles.css", s"W/$etag")
+        listed <- running.getIfNoneMatch("/ui/styles.css", s"\"something-else\", $etag")
+        star <- running.getIfNoneMatch("/ui/styles.css", "*")
+      } yield {
+        assertEquals(weak.code.code, 304, weak.body)
+        assertEquals(listed.code.code, 304, listed.body)
+        assertEquals(star.code.code, 304, star.body)
+      }
+    }
+  }
+
+  test("twoDifferentFilesDoNotShareAValidator") {
+    // The validator is over the bytes, never over the name. That is the whole lesson of the defect this
+    // replaces: `internal-<40 hex>.js` names the set of classes in a chunk, not the JavaScript emitted for
+    // them, so two builds really did ship different bytes under one name.
+    server().use { running =>
+      for {
+        script <- running.get("/ui/main.js")
+        styles <- running.get("/ui/styles.css")
+      } yield assertNotEquals(script.header("ETag"), styles.header("ETag"))
     }
   }
 
