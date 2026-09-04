@@ -1,0 +1,209 @@
+package kui.consumer.application
+
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.time.Instant
+import java.util.Base64
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
+
+import scala.util.control.NonFatal
+
+import cats.effect.kernel.Sync
+import cats.syntax.all.*
+
+import kui.consumer.domain.{PlannedPartition, ResetPlan, ResetScope, ResetSpec}
+import kui.kernel.error.{ApplicationError, KuiError}
+import kui.kernel.{ClusterId, GroupId, Offset, PartitionId, Secret, TopicName}
+
+/** The token that says "apply exactly the offsets the operator was shown" (ADR-045).
+  *
+  * It authorises nothing an operator could not do anyway. What it prevents is applying a *different* set of
+  * offsets from the ones on screen — because the client edited them, because the cluster moved underneath the
+  * plan, or because a second tab planned something else five minutes ago. The apply endpoint takes only a
+  * token and never a raw spec, so there is no path by which an unshown offset can be written.
+  *
+  * The wire form is `base64url(payload) "." base64url(HMAC-SHA256(payload))`, and the payload is a
+  * hand-written delimited line rather than a derived encoding, for the same reason the browse cursor's is: it
+  * is a compatibility surface, and a renamed field must not silently invalidate every token in flight.
+  *
+  * The signature is verified before the payload is parsed. A codec that parses first is one an attacker can
+  * drive with a payload they never had to sign.
+  */
+trait PlanToken[F[_]] {
+
+  def mint(cluster: ClusterId, plan: ResetPlan, expiresAt: Instant): F[String]
+
+  /** `Left(KUI-VALIDATION)` for a bad signature, an expired token, or one minted for another cluster or
+    * group.
+    *
+    * The three are deliberately not distinguished in the message: telling a caller which part of a forged
+    * token was wrong is an oracle. The log line distinguishes them; the response does not.
+    */
+  def verify(cluster: ClusterId, group: GroupId, token: String, now: Instant): F[Either[KuiError, ResetPlan]]
+}
+
+object PlanToken {
+
+  private val Algorithm: String = "HmacSHA256"
+  private val Version: String = "v1"
+  private val Separator: Char = '.'
+  private val Field: Char = '|'
+  private val Entry: Char = ','
+  private val Pair: Char = ':'
+
+  /** Uses the existing cursor key (ADR-026): no new secret, and no new configuration for an operator to get
+    * wrong. The two uses are separated by the payload's own version prefix and by the binding it carries.
+    */
+  def make[F[_]: Sync](key: Secret[Array[Byte]]): PlanToken[F] = new Impl[F](key)
+
+  final private class Impl[F[_]: Sync](key: Secret[Array[Byte]]) extends PlanToken[F] {
+
+    def mint(cluster: ClusterId, plan: ResetPlan, expiresAt: Instant): F[String] =
+      Sync[F].delay {
+        val payload = render(plan, cluster, expiresAt)
+        val encoded = encode(payload.getBytes(StandardCharsets.UTF_8))
+        s"$encoded$Separator${encode(sign(payload))}"
+      }
+
+    def verify(
+        cluster: ClusterId,
+        group: GroupId,
+        token: String,
+        now: Instant
+    ): F[Either[KuiError, ResetPlan]] =
+      Sync[F].delay {
+        token.split(Separator) match {
+          case Array(payloadPart, signaturePart) =>
+            val payloadBytes = decode(payloadPart)
+            val signature = decode(signaturePart)
+
+            payloadBytes.zip(signature) match {
+              case Some((bytes, mac)) =>
+                val payload = new String(bytes, StandardCharsets.UTF_8)
+
+                // Constant-time, and before any parsing.
+                if !MessageDigest.isEqual(sign(payload), mac) then Left(invalid)
+                else
+                  parse(payload) match {
+                    case Some((plan, expiresAt))
+                        if plan.group == group && plan.scope.topic.value.nonEmpty && !now.isAfter(
+                          expiresAt
+                        ) =>
+                      // The cluster is bound through the payload too: a token minted for another
+                      // cluster's group of the same name must not apply here.
+                      if boundTo(payload, cluster) then Right(plan)
+                      else Left(invalid)
+                    case _ => Left(invalid)
+                  }
+              case None => Left(invalid)
+            }
+
+          case _ => Left(invalid)
+        }
+      }
+
+    private def sign(payload: String): Array[Byte] = {
+      val mac = Mac.getInstance(Algorithm)
+      mac.init(new SecretKeySpec(key.value, Algorithm))
+      mac.doFinal(payload.getBytes(StandardCharsets.UTF_8))
+    }
+  }
+
+  private val invalid: KuiError =
+    ApplicationError.Invalid(
+      "the reset plan token is not valid; plan the reset again and confirm the plan it returns",
+      Nil
+    )
+
+  private def encode(bytes: Array[Byte]): String = Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
+
+  private def decode(raw: String): Option[Array[Byte]] =
+    try Some(Base64.getUrlDecoder.decode(raw))
+    catch { case NonFatal(_) => None }
+
+  /** The canonical rendering. Partitions are already sorted by the planner, and re-sorted here, because the
+    * token is only as good as the guarantee that the same plan renders to the same bytes.
+    */
+  private def render(plan: ResetPlan, cluster: ClusterId, expiresAt: Instant): String = {
+    val offsets = plan.partitions
+      .sortBy(_.partition.partition.value)
+      .map(one => s"${one.partition.partition.value}$Pair${one.proposed.value}")
+      .mkString(Entry.toString)
+
+    List(
+      Version,
+      qualify(cluster, plan.group),
+      plan.scope.topic.value,
+      plan.spec.target.wire,
+      offsets,
+      expiresAt.toEpochMilli.toString
+    ).mkString(Field.toString)
+  }
+
+  /** The cluster this token was minted for is carried in the group field's prefix, so that a plan for
+    * `orders` on staging cannot be applied to `orders` on production.
+    */
+  private def boundTo(payload: String, cluster: ClusterId): Boolean =
+    payload
+      .split(java.util.regex.Pattern.quote(Field.toString), -1)
+      .lift(1)
+      .exists(_.startsWith(s"${cluster.value}/"))
+
+  private def parse(payload: String): Option[(ResetPlan, Instant)] =
+    // `split(String)` is a regex split and `|` is alternation, so the delimiter is quoted. Quoting
+    // rather than using the `Char` overload keeps the `-1` limit, which is what preserves an empty
+    // offsets field for a plan over no partitions.
+    payload.split(java.util.regex.Pattern.quote(Field.toString), -1).toList match {
+      case version :: qualified :: topic :: target :: offsets :: expiry :: Nil if version == Version =>
+        for {
+          groupId <- qualified.split('/').lastOption
+          group <- GroupId.from(groupId).toOption
+          topicName <- TopicName.from(topic).toOption
+          expiresAt <- expiry.toLongOption.map(Instant.ofEpochMilli)
+          planned <- parseOffsets(topicName, offsets)
+        } yield (
+          ResetPlan(
+            group = group,
+            scope = ResetScope(topicName, planned.map(_.partition).toSet),
+            // The spec is carried by name only: what is applied is the offsets, and re-resolving a
+            // spec at apply time is precisely the thing this token exists to prevent.
+            spec = specOf(target),
+            partitions = planned,
+            warnings = Nil,
+            computedAt = Instant.EPOCH
+          ),
+          expiresAt
+        )
+      case _ => None
+    }
+
+  private def parseOffsets(topic: TopicName, raw: String): Option[List[PlannedPartition]] =
+    if raw.isEmpty then Some(Nil)
+    else
+      raw
+        .split(Entry)
+        .toList
+        .traverse { entry =>
+          entry.split(Pair) match {
+            case Array(partition, offset) =>
+              for {
+                number <- partition.toIntOption
+                at <- offset.toLongOption
+                id <- PartitionId.from(number).toOption
+                value <- Offset.from(at).toOption
+              } yield PlannedPartition(kui.kernel.TopicPartition(topic, id), None, value, None)
+            case _ => None
+          }
+        }
+
+  private def specOf(wire: String): ResetSpec = wire match {
+    case "EARLIEST" => ResetSpec.ToEarliest
+    case "LATEST" => ResetSpec.ToLatest
+    case "OFFSET" => ResetSpec.ToOffsets(Map.empty)
+    case _ => ResetSpec.ToOffsets(Map.empty)
+  }
+
+  /** The value the token binds to a cluster: the id and the group, joined. */
+  def qualify(cluster: ClusterId, group: GroupId): String = s"${cluster.value}/${group.value}"
+}
