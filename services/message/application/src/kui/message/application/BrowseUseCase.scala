@@ -8,13 +8,13 @@ import cats.effect.kernel.{Clock, Concurrent, Ref}
 import cats.syntax.all.*
 import fs2.{Chunk, Stream}
 
-import kui.kernel.browse.{Direction, PollBudget}
+import kui.kernel.browse.{Direction, PollBudget, SeekMode}
 import kui.kernel.error.KuiError
 import kui.kernel.serde.Target
-import kui.kernel.{Offset, PartitionId}
+import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 import kui.message.application.cursor.{BrowseCursor, CursorCodec}
 import kui.message.domain.ports.{ClusterProfileSource, SerdeSource}
-import kui.message.domain.{BrowseRequest, DecodeError, DecodedRecord, RenderedHeader}
+import kui.message.domain.{BrowseLimits, BrowseRequest, DecodeError, DecodedRecord, FilterRef, RenderedHeader}
 
 /** Why a browse stopped. */
 enum BrowseEnd {
@@ -82,6 +82,31 @@ object BrowseEvent {
   */
 trait BrowseUseCase[F[_]] {
   def browse(request: BrowseRequest, budget: PollBudget): Stream[F, BrowseEvent]
+
+  /** The browse that continues where a finished one stopped (ADR-026).
+    *
+    * A browse ends by emitting a signed cursor naming, per partition, the offset the next page starts at.
+    * Handing that cursor back is what "load more" is: the client does not compute the next offsets, and
+    * cannot, because forward and backward boundaries are different numbers for the same place and getting
+    * that arithmetic wrong duplicates or skips exactly one record per page.
+    *
+    * It lives on the use case rather than in the API layer because the cursor is verified and decoded by the
+    * `CursorCodec` this object already holds. A route that decoded one itself would need the signing key,
+    * which is precisely the thing the API layer must not have.
+    *
+    * `stringFilter` is *not* carried by the cursor and is taken again here. The cursor names a position, a
+    * direction, a page size, the serdes and the saved filter — the things that decide which records exist in
+    * the next page. A plain substring is applied to the records after they are decoded, so it can be changed
+    * between pages without invalidating the position, and a client that narrows its filter while paging gets
+    * what it asked for rather than a rejected cursor.
+    */
+  def resume(
+      cluster: ClusterId,
+      topic: TopicName,
+      cursor: String,
+      stringFilter: Option[String],
+      limits: BrowseLimits
+  ): F[Either[KuiError, BrowseRequest]]
 }
 
 object BrowseUseCase {
@@ -103,6 +128,50 @@ object BrowseUseCase {
       cursors: CursorCodec[F]
   ): BrowseUseCase[F] =
     new BrowseUseCase[F] {
+
+      def resume(
+          cluster: ClusterId,
+          topic: TopicName,
+          cursor: String,
+          stringFilter: Option[String],
+          limits: BrowseLimits
+      ): F[Either[KuiError, BrowseRequest]] =
+        Clock[F].realTimeInstant
+          .flatMap(now => cursors.decode(cursor, (cluster, topic), now))
+          .map(_.flatMap(decoded => requestOf(decoded, stringFilter, limits)))
+
+      /** The cursor, as the browse it describes.
+        *
+        * Every partition resumes at its own offset, which is what `AtOffsets` is for and why the seek grammar
+        * keeps a per-partition form the reference product dropped: a continuation that could only express one
+        * offset for every partition could not express what a cursor already means.
+        *
+        * The partition subset is the cursor's own key set rather than "all of them". A partition added to the
+        * topic since the first page must not appear halfway through a paged read with no start position of
+        * its own — it would arrive from wherever the consumer happened to land.
+        */
+      private def requestOf(
+          cursor: BrowseCursor,
+          stringFilter: Option[String],
+          limits: BrowseLimits
+      ): Either[KuiError, BrowseRequest] =
+        BrowseRequest.of(
+          cluster = cursor.cluster,
+          topic = cursor.topic,
+          seek = SeekMode.AtOffsets(cursor.perPartitionNext),
+          direction = Some(cursor.direction),
+          partitions = Some(cursor.perPartitionNext.keySet),
+          limit = Some(cursor.limit),
+          isolation = Some(cursor.isolation),
+          keySerde = cursor.keySerde,
+          valueSerde = cursor.valueSerde,
+          stringFilter = stringFilter,
+          filter = cursor.filterId.flatMap(id => FilterRef.of(id, None).toOption),
+          // A continuation is never a tail: `live` and a start position are mutually exclusive, and a cursor
+          // is nothing but a start position.
+          live = false,
+          limits = limits
+        )
 
       def browse(request: BrowseRequest, budget: PollBudget): Stream[F, BrowseEvent] =
         Stream.emit(BrowseEvent.Phase(ResolvingCluster)) ++

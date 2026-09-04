@@ -36,7 +36,9 @@ final case class BrowseStreamParams(
     keySerde: Option[SerdeName],
     valueSerde: Option[SerdeName],
     stringFilter: Option[String],
-    live: Option[Boolean]
+    live: Option[Boolean],
+    /** The signed continuation of a previous browse. Exclusive with `seek`: it *is* a start position. */
+    cursor: Option[String]
 )
 
 /** The message service's addresses.
@@ -74,7 +76,8 @@ object MessageEndpoints {
     KeySerdeParam,
     ValueSerdeParam,
     QueryParam,
-    LiveParam
+    LiveParam,
+    CursorParam
   }
 
   /** `FORWARD`/`BACKWARD` and `READ_COMMITTED`/`READ_UNCOMMITTED`, parsed by the contract's own codecs so
@@ -123,7 +126,8 @@ object MessageEndpoints {
         Option[SerdeName],
         Option[SerdeName],
         Option[String],
-        Option[Boolean]
+        Option[Boolean],
+        Option[String]
     )
   ] =
     query[Option[SeekMode]](SeekParam)(using BrowseParams.optionalSeekModeCodec)
@@ -145,6 +149,13 @@ object MessageEndpoints {
       .and(query[Option[SerdeName]](ValueSerdeParam).description("The serde to read values with"))
       .and(query[Option[String]](QueryParam).description("A plain substring the decoded record must contain"))
       .and(query[Option[Boolean]](LiveParam).description("Tail: start at the end and stay open"))
+      .and(
+        query[Option[String]](CursorParam)
+          .description(
+            "The signed cursor a finished browse ended with. Carry on from where that one stopped. " +
+              "Refused together with seekTo, because a cursor is itself a start position"
+          )
+      )
 
   /** The event-stream body, declared here rather than taken from `libs/http`.
     *
@@ -196,7 +207,8 @@ object MessageEndpoints {
       Option[SerdeName],
       Option[SerdeName],
       Option[String],
-      Option[Boolean]
+      Option[Boolean],
+      Option[String]
   )
 
   private def intoParams(raw: Flat): BrowseStreamParams =
@@ -211,7 +223,8 @@ object MessageEndpoints {
       keySerde = raw._8,
       valueSerde = raw._9,
       stringFilter = raw._10,
-      live = raw._11
+      live = raw._11,
+      cursor = raw._12
     )
 
   private def fromParams(params: BrowseStreamParams): Flat =
@@ -226,7 +239,8 @@ object MessageEndpoints {
       params.keySerde,
       params.valueSerde,
       params.stringFilter,
-      params.live
+      params.live,
+      params.cursor
     )
 
   /** The public path this endpoint answers on, once the gateway has rewritten the prefix.

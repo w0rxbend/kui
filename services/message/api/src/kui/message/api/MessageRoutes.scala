@@ -10,7 +10,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.http.sse.{Sse, SseConfig, SseEvent}
 import kui.kernel.browse.PollBudget
-import kui.kernel.error.KuiError
+import kui.kernel.error.{DomainError, FieldError, KuiError}
 import kui.message.application.{BrowseEvent, BrowseUseCase}
 import kui.message.contract.{BrowseStreamParams, MessageEndpoints}
 import kui.message.domain.{BrowseLimits, BrowseRequest}
@@ -67,7 +67,9 @@ object MessageRoutes {
 
     List(
       secured.stream(MessageEndpoints.browseStream[F]) { _ => ctx => params =>
-        requestOf(params, limits) match {
+        // A cursor is resolved by the use case, not here: verifying its signature needs the cursor key,
+        // which is exactly the thing the API layer must not hold.
+        resolve(browse, params, limits).flatMap {
           case Left(error) => error.asLeft[Stream[F, Byte]].pure[F]
           case Right(request) =>
             ctx.correlationId
@@ -111,6 +113,32 @@ object MessageRoutes {
     * The validation is `BrowseRequest.of` and not a check written here, because the page endpoint will need
     * the same rules and two validations of one rule is how they stop agreeing.
     */
+  /** The browse this request describes: a continuation, or a start position.
+    *
+    * The two are refused together rather than resolved by a precedence rule. A caller who sent a cursor *and*
+    * a `seekTo` means one of them, and picking one silently means half of those callers get a page from
+    * somewhere they did not ask for — with a 200 and a well-formed body, which is the shape of failure nobody
+    * notices.
+    */
+  private def resolve[F[_]: Async](
+      browse: BrowseUseCase[F],
+      params: BrowseStreamParams,
+      limits: BrowseLimits
+  ): F[Either[KuiError, BrowseRequest]] =
+    params.cursor match {
+      case None => requestOf(params, limits).pure[F]
+      case Some(_) if params.seek.isDefined || params.live.contains(true) =>
+        DomainError
+          .InvariantViolation(
+            "a cursor already says where to start, so it cannot be combined with seekTo or live",
+            List(FieldError.of(MessageEndpoints.CursorParam, "on its own"))
+          )
+          .asLeft[BrowseRequest]
+          .pure[F]
+      case Some(cursor) =>
+        browse.resume(params.cluster, params.topic, cursor, params.stringFilter, limits)
+    }
+
   private def requestOf(
       params: BrowseStreamParams,
       limits: BrowseLimits

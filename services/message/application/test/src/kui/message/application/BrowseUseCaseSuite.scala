@@ -14,7 +14,7 @@ import kui.kernel.serde.{PayloadKind, SerdeName, SerdeUse, Target}
 import kui.kernel.{ClusterId, Offset, PartitionId, Secret, TopicName}
 import kui.message.application.cursor.{BrowseCursor, CursorCodec}
 import kui.message.domain.ports.{BrowseCluster, ClusterProfileSource, SerdeChoice, SerdeSource}
-import kui.message.domain.{BrowseRequest, Decoded, TimestampType}
+import kui.message.domain.{BrowseLimits, BrowseRequest, Decoded, TimestampType}
 import kui.testkit.KuiIOSuite
 
 /** The browse use case's promises: a record that cannot be decoded is still delivered, a browse accounts for
@@ -127,6 +127,88 @@ final class BrowseUseCaseSuite extends KuiIOSuite {
 
   private def delivered(events: List[BrowseEvent]): List[String] =
     events.collect { case BrowseEvent.Record(record) => record.value.text }
+
+  // ------------------------------------------------------------------------------ resuming a browse
+
+  private def cursorFor(
+      offsets: Map[PartitionId, Offset],
+      direction: Direction = Direction.Forward,
+      limit: Int = 50
+  ): IO[String] =
+    CursorCodec
+      .hmacSha256[IO](key)
+      .encode(
+        BrowseCursor(
+          v = BrowseCursor.Version,
+          cluster = cluster,
+          topic = topic,
+          direction = direction,
+          perPartitionNext = offsets,
+          filterId = None,
+          keySerde = Some(SerdeName.String),
+          valueSerde = None,
+          limit = limit,
+          isolation = kui.kernel.browse.IsolationLevel.Default,
+          expiresAt = Instant.now().plusSeconds(600)
+        )
+      )
+      .map(_.getOrElse(fail("the cursor under test could not be signed")))
+
+  test("a cursor resumes every partition at its own offset") {
+    // The reason the seek grammar keeps a per-partition form: a continuation that could only express one
+    // offset for every partition could not express what a cursor already means.
+    val offsets = Map(PartitionId.unsafe(0) -> Offset.unsafe(100L), PartitionId.unsafe(3) -> Offset.unsafe(250L))
+
+    for {
+      cursor <- cursorFor(offsets)
+      resumed <- useCase(Nil).resume(cluster, topic, cursor, None, BrowseLimits.Default)
+    } yield {
+      val request = resumed.getOrElse(fail(s"the cursor did not resume: $resumed"))
+      assertEquals(request.seek, SeekMode.AtOffsets(offsets))
+      // The subset is the cursor's own keys and not "all of them": a partition added to the topic since the
+      // first page has no start position of its own and would arrive from wherever the consumer landed.
+      assertEquals(request.partitions.map(_.toSortedSet.toSet), Some(offsets.keySet))
+      assertEquals(request.live, false)
+    }
+  }
+
+  test("the cursor carries the page size, the direction and the serdes so the next page matches the last") {
+    val offsets = Map(PartitionId.unsafe(0) -> Offset.unsafe(7L))
+
+    for {
+      cursor <- cursorFor(offsets, direction = Direction.Backward, limit = 17)
+      resumed <- useCase(Nil).resume(cluster, topic, cursor, None, BrowseLimits.Default)
+    } yield {
+      val request = resumed.getOrElse(fail(s"the cursor did not resume: $resumed"))
+      assertEquals(request.direction, Direction.Backward)
+      assertEquals(request.limit, 17)
+      assertEquals(request.keySerde, Some(SerdeName.String))
+    }
+  }
+
+  test("a plain substring filter may change between pages, because it is applied after decoding") {
+    val offsets = Map(PartitionId.unsafe(0) -> Offset.unsafe(7L))
+
+    for {
+      cursor <- cursorFor(offsets)
+      resumed <- useCase(Nil).resume(cluster, topic, cursor, Some("order-42"), BrowseLimits.Default)
+    } yield assertEquals(resumed.map(_.stringFilter), Right(Some("order-42")))
+  }
+
+  test("a cursor minted for another topic does not resume here") {
+    for {
+      cursor <- cursorFor(Map(PartitionId.unsafe(0) -> Offset.unsafe(1L)))
+      resumed <- useCase(Nil)
+        .resume(cluster, TopicName.unsafe("somewhere.else"), cursor, None, BrowseLimits.Default)
+    } yield assert(resumed.isLeft, "a cursor for another topic was accepted")
+  }
+
+  test("a tampered cursor is refused rather than read as if the change were absent") {
+    for {
+      cursor <- cursorFor(Map(PartitionId.unsafe(0) -> Offset.unsafe(1L)))
+      resumed <- useCase(Nil).resume(cluster, topic, cursor.dropRight(3) + "aaa", None, BrowseLimits.Default)
+    } yield assert(resumed.isLeft, "a tampered cursor was accepted")
+  }
 
   // -------------------------------------------------------------------------- decoding never fails
 

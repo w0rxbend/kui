@@ -54,6 +54,19 @@ object BrowseAddress {
   /** Tail mode: start at the end and keep the stream open. */
   val LiveParam: String = "live"
 
+  /** The signed continuation from a finished browse (ADR-026): "carry on from where that stopped".
+    *
+    * It replaces the start position rather than adding to one, so it is refused alongside `seekTo` rather
+    * than resolved by a precedence rule — a caller who sent both means one of them, and a rule about which
+    * wins is a thing they would have to know instead of be told.
+    *
+    * Everything the next page needs is inside it: the per-partition offsets, the direction, the page size,
+    * the serdes and the saved filter. That is deliberate and is why paging works behind a load balancer: the
+    * reference product keeps paging state in a process-local cache, so the id one replica hands out means
+    * nothing to its neighbour, and "next page" stops working the moment a request is routed elsewhere.
+    */
+  val CursorParam: String = "cursor"
+
   // --- The events -------------------------------------------------------------------------------
 
   /** The names of the events a browse emits, over and above the shared ones every KUI stream sends.
