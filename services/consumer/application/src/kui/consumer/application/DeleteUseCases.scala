@@ -7,6 +7,8 @@ import org.typelevel.log4cats.StructuredLogger
 import kui.consumer.domain.*
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{ClusterId, GroupId, Offset, TopicName, TopicPartition}
+import kui.security.Principal
+import kui.security.audit.MutationKind
 
 /** What a delete-offsets actually removed. */
 final case class DeletedOffsets(topic: TopicName, partitions: Set[TopicPartition])
@@ -19,7 +21,10 @@ trait DeleteGroupUseCase[F[_]] {
     * `KUI-GROUP-NOT-EMPTY` for one that still has members. `KUI-READ-ONLY` on a read-only cluster, refused
     * before any Kafka client is touched.
     */
-  def delete(cluster: ClusterId, group: GroupId): F[Either[KuiError, Unit]]
+  /** @param principal
+    *   who is deleting the group, so the audit record names them. Verified by the route.
+    */
+  def delete(principal: Principal, cluster: ClusterId, group: GroupId): F[Either[KuiError, Unit]]
 }
 
 trait DeleteOffsetsUseCase[F[_]] {
@@ -31,7 +36,15 @@ trait DeleteOffsetsUseCase[F[_]] {
     * for a partition count would put a second service on this path and make this operation fail whenever that
     * one is down.
     */
-  def delete(cluster: ClusterId, group: GroupId, topic: TopicName): F[Either[KuiError, DeletedOffsets]]
+  /** @param principal
+    *   who is deleting the offsets, so the audit record names them. Verified by the route.
+    */
+  def delete(
+      principal: Principal,
+      cluster: ClusterId,
+      group: GroupId,
+      topic: TopicName
+  ): F[Either[KuiError, DeletedOffsets]]
 }
 
 object DeleteGroupUseCase {
@@ -45,7 +58,7 @@ object DeleteGroupUseCase {
   ): DeleteGroupUseCase[F] =
     new DeleteGroupUseCase[F] {
 
-      def delete(cluster: ClusterId, group: GroupId): F[Either[KuiError, Unit]] = {
+      def delete(principal: Principal, cluster: ClusterId, group: GroupId): F[Either[KuiError, Unit]] = {
         val port = admin(cluster)
 
         GroupPreconditions.existsAndEmpty(port, group).flatMap {
@@ -57,10 +70,11 @@ object DeleteGroupUseCase {
                 Map("cluster.id" -> cluster.value, "group.id" -> group.value, "operation" -> Operation)
               )(s"deleting consumer group ${group.value}")
               result <- guard.guard(
+                principal,
                 cluster,
                 MutationKind.DeleteGroup,
                 group.value,
-                MutationRecord.offsetsOf(before),
+                AuditOffsets.of(before),
                 Map.empty
               )(port.deleteGroup(group))
             } yield result
@@ -81,6 +95,7 @@ object DeleteOffsetsUseCase {
     new DeleteOffsetsUseCase[F] {
 
       def delete(
+          principal: Principal,
           cluster: ClusterId,
           group: GroupId,
           topic: TopicName
@@ -103,10 +118,11 @@ object DeleteOffsetsUseCase {
                 )(s"deleting ${partitions.size} committed offset(s) of ${group.value} for ${topic.value}") >>
                   guard
                     .guard(
+                      principal,
                       cluster,
                       MutationKind.DeleteOffsets,
                       s"${group.value}/${topic.value}",
-                      MutationRecord.offsetsOf(committed.view.filterKeys(partitions.contains).toMap),
+                      AuditOffsets.of(committed.view.filterKeys(partitions.contains).toMap),
                       Map.empty
                     )(port.deleteOffsets(group, partitions))
                     .map(_.map(_ => DeletedOffsets(topic, partitions)))

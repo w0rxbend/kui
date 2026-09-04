@@ -12,6 +12,7 @@ import kui.kernel.{ClusterId, TopicName}
 import kui.message.application.produce.MutationGuard
 import kui.message.domain.ports.{ClusterProfileSource, RecordDeleter}
 import kui.message.domain.{PurgePlan, PurgeResult}
+import kui.security.Principal
 import kui.security.audit.MutationKind
 
 /** A plan, and the token that authorises applying exactly it (ADR-045).
@@ -47,8 +48,13 @@ trait PurgeUseCase[F[_]] {
   /** What emptying this topic would destroy. Reads; changes nothing. */
   def plan(cluster: ClusterId, topic: TopicName): F[Either[KuiError, PurgeOffer]]
 
-  /** Delete exactly the records the token names, and answer with what the broker reported per partition. */
+  /** Delete exactly the records the token names, and answer with what the broker reported per partition.
+    *
+    * @param principal
+    *   who is emptying the topic, so the audit record names them. Verified by the route.
+    */
   def apply(
+      principal: Principal,
       cluster: ClusterId,
       topic: TopicName,
       token: String
@@ -88,6 +94,7 @@ object PurgeUseCase {
         } yield PurgeOffer(plan, token, expiresAt)).value
 
       def apply(
+          principal: Principal,
           cluster: ClusterId,
           topic: TopicName,
           token: String
@@ -110,6 +117,7 @@ object PurgeUseCase {
           )
           result <- EitherT(
             guard.guard(
+              principal = principal,
               cluster = cluster,
               kind = MutationKind.Purge,
               resource = topic.value,

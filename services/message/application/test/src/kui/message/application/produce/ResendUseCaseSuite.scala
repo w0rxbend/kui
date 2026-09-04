@@ -86,7 +86,7 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
   test("copiesTheBytesExactly") {
     for {
       (resend, producers, _, _) <- rig()
-      answer <- resend.resend(requestOf())
+      answer <- resend.resend(ProduceRig.Caller, requestOf())
       written <- producers.sent.get
     } yield {
       assertEquals(answer.map(_.produced), Right(3L))
@@ -106,7 +106,7 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
   test("headersTravelWithTheRecord") {
     for {
       (resend, producers, _, _) <- rig()
-      _ <- resend.resend(requestOf())
+      _ <- resend.resend(ProduceRig.Caller, requestOf())
       written <- producers.sent.get
     } yield {
       assertEquals(written.head.headers.map(_.key), List("trace"))
@@ -119,7 +119,7 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
     // stamps of the machinery that failed it, and feeding those back in is how a record loops forever.
     for {
       (resend, producers, _, _) <- rig()
-      _ <- resend.resend(requestOf(keepHeaders = false))
+      _ <- resend.resend(ProduceRig.Caller, requestOf(keepHeaders = false))
       written <- producers.sent.get
     } yield assertEquals(written.head.headers, Nil)
   }
@@ -129,7 +129,7 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
     // still copyable, and it is what makes masking structurally impossible on this path (ADR-023).
     for {
       (resend, _, _, serdes) <- rig()
-      _ <- resend.resend(requestOf())
+      _ <- resend.resend(ProduceRig.Caller, requestOf())
       decodes <- serdes.decodes.get
     } yield assertEquals(decodes, 0)
   }
@@ -139,7 +139,7 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
     // more than was asked for. Copying those would replay records the operator did not name.
     for {
       (resend, producers, _, _) <- rig(source = List(record(9L), record(10L), record(11L), record(99L)))
-      answer <- resend.resend(requestOf(from = 10L, until = 12L))
+      answer <- resend.resend(ProduceRig.Caller, requestOf(from = 10L, until = 12L))
       written <- producers.sent.get
     } yield {
       assertEquals(answer.map(_.produced), Right(2L))
@@ -152,14 +152,14 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
     // would make "there was nothing left to copy" and "the copy did nothing" the same sentence.
     for {
       (resend, _, _, _) <- rig(source = Nil)
-      answer <- resend.resend(requestOf())
+      answer <- resend.resend(ProduceRig.Caller, requestOf())
     } yield assertEquals(answer, Right(kui.message.domain.ResendResult(0L, 0L, Nil)))
   }
 
   test("aRangeAboveTheCeilingIsRefusedAndSaysTheNumber") {
     for {
       (resend, producers, _, _) <- rig(limits = ResendLimits(maxRecords = 2L))
-      answer <- resend.resend(requestOf(from = 0L, until = 500L))
+      answer <- resend.resend(ProduceRig.Caller, requestOf(from = 0L, until = 500L))
       opened <- producers.opened.get
     } yield {
       assertEquals(answer.left.map(_.code), Left(ErrorCode.Validation))
@@ -172,7 +172,7 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
   test("readOnlyClusterIsRefusedBeforeAnythingIsReadOrOpened") {
     for {
       (resend, producers, audit, _) <- rig(readOnly = true)
-      answer <- resend.resend(requestOf())
+      answer <- resend.resend(ProduceRig.Caller, requestOf())
       opened <- producers.opened.get
       written <- producers.sent.get
       entries <- audit.entries.get
@@ -188,7 +188,7 @@ final class ResendUseCaseSuite extends CatsEffectSuite {
   test("theAuditRecordNamesTheSourcePartitionAndTheDestination") {
     for {
       (resend, _, audit, _) <- rig()
-      _ <- resend.resend(requestOf())
+      _ <- resend.resend(ProduceRig.Caller, requestOf())
       entries <- audit.entries.get
     } yield {
       assertEquals(entries.length, 1)

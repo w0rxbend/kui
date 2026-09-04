@@ -58,12 +58,12 @@ object TopicAdminRoutes {
       secured: TopicApi.Securing[F]
   ): ServerEndpoint[Any, F] =
     secured.withBody(TopicAdminEndpoints.create)((_, _, request) => SecuredRoutes.bodyBytes(request)) {
-      _ => (_, cluster, request) =>
+      principal => (_, cluster, request) =>
         NewTopicSpec.of(request.name, request.partitions, request.replicationFactor, request.config) match {
           case Left(error) => error.asLeft[CreatedTopicDto].pure[F]
           case Right(spec) =>
             admin
-              .create(cluster, spec)
+              .create(principal, cluster, spec)
               .map(
                 _.map(created =>
                   CreatedTopicDto(
@@ -84,12 +84,12 @@ object TopicAdminRoutes {
   ): ServerEndpoint[Any, F] =
     secured.withBody(TopicAdminEndpoints.updateConfig)((_, _, _, request) =>
       SecuredRoutes.bodyBytes(request)
-    ) { _ => (_, cluster, topic, request) =>
+    ) { principal => (_, cluster, topic, request) =>
       TopicConfigChange.of(request.set, request.remove.toSet) match {
         case Left(error) => error.asLeft[TopicConfigResponse].pure[F]
         case Right(change) =>
           for {
-            answer <- admin.alterConfig(cluster, topic, change)
+            answer <- admin.alterConfig(principal, cluster, topic, change)
             now <- Clock[F].realTimeInstant
           } yield answer.map(view => TopicConfigResponse(Section.Ok(TopicMapping.configView(view), now)))
       }
@@ -113,8 +113,8 @@ object TopicAdminRoutes {
   ): ServerEndpoint[Any, F] =
     secured.withBody(TopicAdminEndpoints.increasePartitions)((_, _, _, request) =>
       SecuredRoutes.bodyBytes(request)
-    ) { _ => (_, cluster, topic, request) =>
-      admin.applyPartitions(cluster, topic, request.token).map(_.map(receipt))
+    ) { principal => (_, cluster, topic, request) =>
+      admin.applyPartitions(principal, cluster, topic, request.token).map(_.map(receipt))
     }
 
   /** What deleting this topic would destroy. Changes nothing. */
@@ -131,8 +131,8 @@ object TopicAdminRoutes {
       admin: TopicAdminUseCase[F],
       secured: TopicApi.Securing[F]
   ): ServerEndpoint[Any, F] =
-    secured(TopicAdminEndpoints.deleteTopic) { _ => (_, cluster, topic, token) =>
-      admin.applyDelete(cluster, topic, token).map(_.map(receipt))
+    secured(TopicAdminEndpoints.deleteTopic) { principal => (_, cluster, topic, token) =>
+      admin.applyDelete(principal, cluster, topic, token).map(_.map(receipt))
     }
 
   // -----------------------------------------------------------------------------------------------

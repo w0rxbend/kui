@@ -7,6 +7,7 @@ import org.typelevel.log4cats.StructuredLogger
 
 import kui.kernel.ClusterId
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
+import kui.security.Principal
 import kui.security.audit.{AuditSink, MutationKind, MutationOutcome, MutationRecord}
 import kui.topic.domain.{ClusterProfiles, TopicError, TopicMutation}
 
@@ -48,6 +49,11 @@ trait MutationGuard[F[_]] {
     *   1. record the outcome — always, including on failure and on cancellation;
     *   1. on success, ask for the cluster's topics to be re-scraped.
     *
+    * @param principal
+    *   who is doing this, as the gateway signed it and this service verified it. It is a parameter of the
+    *   call rather than of [[MutationGuard.make]] because it is a property of the request in flight, and a
+    *   guard built once at start-up cannot know it. Until authentication exists every request arrives as
+    *   `Principal.Anonymous`, which is an honest record of a deployment with no login.
     * @param resource
     *   what was operated on, in the shape an operator recognises: `orders.v1`.
     * @param detail
@@ -56,6 +62,7 @@ trait MutationGuard[F[_]] {
     *   describes.
     */
   def guard[A](
+      principal: Principal,
       cluster: ClusterId,
       kind: TopicMutation,
       resource: String,
@@ -88,11 +95,6 @@ object MutationGuard {
       snapshots: TopicSnapshots[F],
       audit: AuditSink[F],
       logger: StructuredLogger[F],
-      /** Who is doing this. `MutationRecord.SystemPrincipal` until M6 gives this service a real identity; an
-        * effect rather than a value because that is the shape it will have when it comes from the verified
-        * principal of the request in flight.
-        */
-      principal: F[String],
       /** How a `TopicError` reaches the wire. Passed in rather than imported: `TopicErrors` lives in the api
         * module and rule A3 forbids this layer from seeing it.
         */
@@ -101,6 +103,7 @@ object MutationGuard {
     new MutationGuard[F] {
 
       def guard[A](
+          principal: Principal,
           cluster: ClusterId,
           kind: TopicMutation,
           resource: String,
@@ -116,12 +119,11 @@ object MutationGuard {
         def write(outcome: MutationOutcome, extra: Map[String, String]): F[Unit] =
           for {
             at <- Temporal[F].realTimeInstant
-            subject <- principal
             _ <- audit
               .record(
                 MutationRecord(
                   at = at,
-                  principal = subject,
+                  principal = principal,
                   cluster = cluster,
                   kind = kindOf(kind),
                   resource = resource,

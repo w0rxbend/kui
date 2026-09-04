@@ -1,64 +1,38 @@
 package kui.consumer.domain
 
-import java.time.Instant
-
 import kui.kernel.{ClusterId, GroupId}
 
-/** How a mutation ended. */
-enum MutationOutcome {
-  case Succeeded
-  case Refused(code: String, reason: String)
-  case Failed(code: String, reason: String)
-
-  /** The operation was cancelled, or timed out after the request had been sent.
-    *
-    * Kafka gives no guarantee that it was *not* applied, so a record claiming either would be a lie. An
-    * operator who sees this knows to go and look, which is the only honest thing this case can offer.
-    */
-  case Unknown(reason: String)
-}
-
-object MutationOutcome {
-  given CanEqual[MutationOutcome, MutationOutcome] = CanEqual.derived
-}
-
-/** One line in the audit trail.
+/** Rendering a group's committed offsets for an audit record.
   *
-  * Deliberately flat, and deliberately free of anything that could carry a credential: no profile, no
-  * connection, no properties map. Offsets are not credentials, and an audit record of an offset reset that
-  * did not say which offsets were written would answer none of the questions it exists for.
+  * The shared record (`kui.security.audit.MutationRecord`) carries `before` and `after` as optional strings,
+  * because most mutations have no scalar before and after at all — what a topic create replaces is nothing. A
+  * consumer-group offset reset is the one operation that genuinely does, so this is where the map becomes the
+  * string, once, in the shape every reader of the trail already expects.
+  *
+  * There used to be a second `MutationRecord`, a second `MutationOutcome` and a second `AuditSink` in this
+  * package: this service had forked the port that `libs/security-core` declares. Three services writing one
+  * audit trail through two different records is why "everything that changed this cluster today" could not be
+  * answered, and E2 in `docs/BACKLOG.md` is the correction. What survives the fork is this function.
   */
-final case class MutationRecord(
-    at: Instant,
-    cluster: ClusterId,
-    /** `consumer.group.offsets.reset`, `consumer.group.offsets.delete`, `consumer.group.delete`. */
-    operation: String,
-    /** The group id. A string rather than a typed id because M5's sink is generic over resources. */
-    resource: String,
-    /** Anonymous until M6 gives this service a real principal. */
-    principal: String,
-    before: Map[String, Long],
-    after: Map[String, Long],
-    outcome: MutationOutcome,
-    /** The trace id, so a record can be joined to the request that produced it. */
-    traceId: Option[String]
-)
+object AuditOffsets {
 
-object MutationRecord {
-
-  val AnonymousPrincipal: String = "anonymous"
-
-  /** The `partition -> offset` shape the record's `before` and `after` maps use.
+  /** The `partition -> offset` shape a record's `before` and `after` use.
     *
-    * A string key because the sink is generic; the topic is included, because a group consuming two topics
-    * with a partition 0 each would otherwise produce a record with one of them silently overwritten.
+    * The topic is part of the key, because a group consuming two topics with a partition 0 each would
+    * otherwise produce a record with one of them silently overwritten.
     */
-  def offsetsOf(offsets: Map[kui.kernel.TopicPartition, kui.kernel.Offset]): Map[String, Long] =
+  def of(offsets: Map[kui.kernel.TopicPartition, kui.kernel.Offset]): Map[String, Long] =
     offsets.map((partition, offset) =>
       s"${partition.topic.value}-${partition.partition.value}" -> offset.value
     )
 
-  given CanEqual[MutationRecord, MutationRecord] = CanEqual.derived
+  /** `topic-partition=offset`, sorted, so two records of the same change render identically and a diff
+    * between them means something. `None` for an empty map: a mutation with nothing before it is different
+    * from one whose before was the empty string.
+    */
+  def render(offsets: Map[String, Long]): Option[String] =
+    if offsets.isEmpty then None
+    else Some(offsets.toList.sortBy(_._1).map((partition, offset) => s"$partition=$offset").mkString(","))
 }
 
 /** What the consumer service needs to know about a cluster, and nothing more.

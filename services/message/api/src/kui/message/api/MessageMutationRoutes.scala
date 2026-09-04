@@ -73,8 +73,8 @@ object MessageMutationRoutes {
       secured: MessageApi.Securing[F]
   ): ServerEndpoint[Any, F] =
     secured.withBody(MessageMutationEndpoints.purge)((_, _, _, request) => SecuredRoutes.bodyBytes(request)) {
-      _ => (_, cluster, topic, request) =>
-        purge.apply(cluster, topic, request.token).map(_.map(receipt))
+      principal => (_, cluster, topic, request) =>
+        purge.apply(principal, cluster, topic, request.token).map(_.map(receipt))
     }
 
   /** A plan that has not been applied: the numbers, the token, and when the token stops being accepted. */
@@ -122,12 +122,12 @@ object MessageMutationRoutes {
   ): ServerEndpoint[Any, F] =
     secured.withBody(MessageMutationEndpoints.produce)((_, _, _, request) =>
       SecuredRoutes.bodyBytes(request)
-    ) { _ => (_, cluster, topic, request) =>
+    ) { principal => (_, cluster, topic, request) =>
       requestOf(cluster, topic, request, maxCount) match {
         case Left(error) => error.asLeft[ProduceResultDto].pure[F]
         case Right(valid) =>
           produce
-            .produce(valid)
+            .produce(principal, valid)
             .map(_.map(records => ProduceResultDto(records.map(produced))))
       }
     }
@@ -147,7 +147,7 @@ object MessageMutationRoutes {
       secured: MessageApi.Securing[F]
   ): ServerEndpoint[Any, F] =
     secured.withBody(MessageMutationEndpoints.resend)((_, _, _, request) => SecuredRoutes.bodyBytes(request)) {
-      _ => (_, cluster, topic, request) =>
+      principal => (_, cluster, topic, request) =>
         resendRequests(cluster, topic, request) match {
           case Left(error) => error.asLeft[ResendResultDto].pure[F]
           case Right(requests) =>
@@ -155,7 +155,7 @@ object MessageMutationRoutes {
               .foldLeftM(ResendResult(0L, 0L, Nil).asRight[(KuiError, ResendResult)]) {
                 case (Left(stopped), _) => stopped.asLeft[ResendResult].pure[F]
                 case (Right(sofar), one) =>
-                  resend.resend(one).map {
+                  resend.resend(principal, one).map {
                     case Right(result) =>
                       ResendResult(
                         read = sofar.read + result.read,

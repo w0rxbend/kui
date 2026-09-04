@@ -11,6 +11,8 @@ import org.typelevel.log4cats.StructuredLogger
 import kui.consumer.domain.*
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{ClusterId, GroupId, Offset, TopicPartition}
+import kui.security.Principal
+import kui.security.audit.MutationKind
 
 /** A plan, and the token that authorises applying exactly it. */
 final case class PlannedReset(plan: ResetPlan, token: String, expiresAt: Instant)
@@ -45,7 +47,12 @@ trait OffsetResetUseCase[F[_]] {
     * checked at plan time and again here because the two-phase flow makes the window between them wider, not
     * narrower, and the broker's own rejection is a third line of defence rather than the first.
     */
-  def apply(cluster: ClusterId, group: GroupId, token: String): F[Either[KuiError, ResetPlan]]
+  def apply(
+      principal: Principal,
+      cluster: ClusterId,
+      group: GroupId,
+      token: String
+  ): F[Either[KuiError, ResetPlan]]
 }
 
 object OffsetResetUseCase {
@@ -118,7 +125,12 @@ object OffsetResetUseCase {
         } yield PlannedReset(planned, token, expiresAt)).value
       }
 
-      def apply(cluster: ClusterId, group: GroupId, token: String): F[Either[KuiError, ResetPlan]] = {
+      def apply(
+          principal: Principal,
+          cluster: ClusterId,
+          group: GroupId,
+          token: String
+      ): F[Either[KuiError, ResetPlan]] = {
         val port = admin(cluster)
 
         (for {
@@ -131,11 +143,12 @@ object OffsetResetUseCase {
           before <- EitherTLike(currentOffsets(port, group, plan.offsets.keySet))
           _ <- EitherTLike(
             guard.guard(
+              principal,
               cluster,
               MutationKind.ResetOffsets,
               group.value,
-              MutationRecord.offsetsOf(before),
-              MutationRecord.offsetsOf(plan.offsets)
+              AuditOffsets.of(before),
+              AuditOffsets.of(plan.offsets)
             )(port.applyOffsets(group, plan.offsets))
           )
           // The receipt says what each partition's offset *was*, and this is the only place that

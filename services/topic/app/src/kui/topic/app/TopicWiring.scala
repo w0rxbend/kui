@@ -22,8 +22,8 @@ import kui.http.principal.PrincipalVerification
 import kui.kafka.{AdminClientPool, AdminMetrics}
 import kui.kernel.Secret
 import kui.observability.Telemetry
+import kui.observability.audit.LoggingAuditSink
 import kui.security.PrincipalCodec
-import kui.security.audit.MutationRecord
 import kui.topic.api.{TopicApi, TopicErrors}
 import kui.topic.application.{
   MutationGuard,
@@ -38,8 +38,7 @@ import kui.topic.infrastructure.{
   ConfiguredClusterProfiles,
   KafkaTopicAdmin,
   KafkaTopicWriter,
-  LiveTopicSnapshots,
-  LoggingAuditSink
+  LiveTopicSnapshots
 }
 
 /** Everything the topic service needs in order to be served, with no listener started.
@@ -118,14 +117,10 @@ object TopicWiring {
       key <- Resource.eval(signingKey[F](cursorKey, logger))
       tokens = TopicPlanToken.make[F](key)
       audit = LoggingAuditSink.make[F](logger)
-      guard = MutationGuard.make[F](
-        profiles,
-        snapshots,
-        audit,
-        logger,
-        Async[F].pure(AuditPrincipal),
-        TopicErrors.toKui
-      )
+      // Who did it is not wired here. It is a parameter of every `guard` call, threaded from the
+      // principal the gateway signed and the route verified (ADR-020), so an audit record names the
+      // person who made the request rather than a constant this file chose.
+      guard = MutationGuard.make[F](profiles, snapshots, audit, logger, TopicErrors.toKui)
       topicAdmin = TopicAdminUseCase
         .make[F](admin, writer, profiles, guard, tokens, logger, TopicErrors.toKui)
       capabilities = TopicCapabilityUseCase.make[F](profiles, snapshots)
@@ -152,15 +147,6 @@ object TopicWiring {
       readiness = readiness,
       capabilities = TopicApi.capabilityDocument[F](capabilities, logger)
     )
-
-  /** Who an audit record names while KUI has no authentication.
-    *
-    * A literal rather than a blank, because a record whose actor field is empty reads as a bug in the audit
-    * trail rather than as a fact about the deployment. Authentication is M6; when it arrives, this is the
-    * value the route's verified `Principal` replaces. It is `MutationRecord.SystemPrincipal`'s neighbour and
-    * says the same thing in a sentence an operator reading an audit line can act on.
-    */
-  val AuditPrincipal: String = s"${MutationRecord.SystemPrincipal} (authentication is not enabled)"
 
   /** The key plan tokens are signed with: the configured one, or a fresh one for this process.
     *

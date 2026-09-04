@@ -19,6 +19,7 @@ import kui.consumer.application.*
 import kui.consumer.domain.*
 import kui.contracts.capability.ClusterCapability
 import kui.http.principal.PrincipalVerification
+import kui.security.Principal
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError, KuiError}
 import kui.kernel.group.{GroupProtocol, GroupState}
 import kui.kernel.Page
@@ -169,16 +170,23 @@ object ConsumerTestServer {
         Right(PlannedReset(emptyPlan(group, scope), "a-plan-token", At.plusSeconds(300)))
       )
 
-    def apply(cluster: ClusterId, group: GroupId, token: String): IO[Either[KuiError, ResetPlan]] =
+    def apply(
+        principal: Principal,
+        cluster: ClusterId,
+        group: GroupId,
+        token: String
+    ): IO[Either[KuiError, ResetPlan]] =
       applied.update(_ :+ (group -> token)).as(Right(emptyPlan(group, ResetScope(Topic, Set.empty))))
   }
 
   final class StubDeleteGroup extends DeleteGroupUseCase[IO] {
-    def delete(cluster: ClusterId, group: GroupId): IO[Either[KuiError, Unit]] = IO.pure(Right(()))
+    def delete(principal: Principal, cluster: ClusterId, group: GroupId): IO[Either[KuiError, Unit]] =
+      IO.pure(Right(()))
   }
 
   final class StubDeleteOffsets extends DeleteOffsetsUseCase[IO] {
     def delete(
+        principal: Principal,
         cluster: ClusterId,
         group: GroupId,
         topic: TopicName

@@ -14,6 +14,7 @@ import kui.kernel.{ClusterId, Offset, PartitionId, TopicName}
 import kui.message.application.{RawRecord, RecordSource}
 import kui.message.domain.ports.{BrowseCluster, ClusterProfileSource, SerdeChoice, SerdeSource}
 import kui.message.domain.{BrowseRequest, Decoded, ProducedAt}
+import kui.security.Principal
 import kui.security.audit.{AuditSink, MutationRecord}
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -148,6 +149,11 @@ object ProduceRig {
       Ref.of[IO, Int](0).map(new FakeSerdes(_, refuse))
   }
 
+  /** The verified principal these mutations are made by: the anonymous one a deployment without
+    * authentication produces.
+    */
+  val Caller: Principal = Principal.Anonymous
+
   /** A record source that answers with a fixed log, whatever is asked of it. */
   final class FakeRecords(records: List[RawRecord]) extends RecordSource[IO] {
     def browse(request: BrowseRequest, budget: PollBudget): Stream[IO, Either[KuiError, RawRecord]] =
@@ -156,6 +162,6 @@ object ProduceRig {
 
   def guardFor(profiles: ClusterProfileSource[IO], audit: AuditSink[IO]): IO[MutationGuard[IO]] =
     FakeStructuredLogger[IO].map(logger =>
-      MutationGuard.make[IO](profiles, audit, logger, IO.pure(MutationRecord.SystemPrincipal))
+      MutationGuard.make[IO](profiles, audit, logger)
     )
 }

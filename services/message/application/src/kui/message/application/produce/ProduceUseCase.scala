@@ -11,6 +11,7 @@ import kui.kernel.{PartitionId, TopicName}
 import kui.message.application.RawHeader
 import kui.message.domain.ports.SerdeSource
 import kui.message.domain.{ProduceRequest, ProducedAt}
+import kui.security.Principal
 import kui.security.audit.MutationKind
 
 /** Publishing a record to a topic (MP-001, MP-002).
@@ -44,7 +45,11 @@ import kui.security.audit.MutationKind
   * (ADR-029), so that what a user sees in the form is exactly what lands in the topic.
   */
 trait ProduceUseCase[F[_]] {
-  def produce(request: ProduceRequest): F[Either[KuiError, List[ProducedAt]]]
+
+  /** @param principal
+    *   who is publishing, so the audit record names them. Verified by the route before this is called.
+    */
+  def produce(principal: Principal, request: ProduceRequest): F[Either[KuiError, List[ProducedAt]]]
 }
 
 object ProduceUseCase {
@@ -56,8 +61,9 @@ object ProduceUseCase {
   ): ProduceUseCase[F] =
     new ProduceUseCase[F] {
 
-      def produce(request: ProduceRequest): F[Either[KuiError, List[ProducedAt]]] =
+      def produce(principal: Principal, request: ProduceRequest): F[Either[KuiError, List[ProducedAt]]] =
         guard.guard(
+          principal = principal,
           cluster = request.cluster,
           kind = MutationKind.Produce,
           resource = request.topic.value,

@@ -16,6 +16,7 @@ import sttp.tapir.server.stub4.TapirStubInterpreter
 
 import kui.cache.{Snapshot, SnapshotCell, SnapshotStatus}
 import kui.http.principal.PrincipalVerification
+import kui.security.Principal
 import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, Secret, ServiceId, TopicName, UserName}
 import kui.observability.Telemetry
@@ -182,10 +183,14 @@ object TopicTestServer {
       deleted: Either[KuiError, DeletionPlan]
   ) extends TopicAdminUseCase[IO] {
 
-    def create(cluster: ClusterId, spec: NewTopicSpec): IO[Either[KuiError, CreatedTopic]] =
-      IO.pure(created)
+    def create(
+        principal: Principal,
+        cluster: ClusterId,
+        spec: NewTopicSpec
+    ): IO[Either[KuiError, CreatedTopic]] = IO.pure(created)
 
     def alterConfig(
+        principal: Principal,
         cluster: ClusterId,
         topic: TopicName,
         change: TopicConfigChange
@@ -198,6 +203,7 @@ object TopicTestServer {
     ): IO[Either[KuiError, Planned[PartitionPlan]]] = IO.pure(partitionPlan)
 
     def applyPartitions(
+        principal: Principal,
         cluster: ClusterId,
         topic: TopicName,
         token: String
@@ -207,6 +213,7 @@ object TopicTestServer {
       IO.pure(deletionPlan)
 
     def applyDelete(
+        principal: Principal,
         cluster: ClusterId,
         topic: TopicName,
         token: String

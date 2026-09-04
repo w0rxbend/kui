@@ -66,7 +66,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
   test("aRecordIsPublishedAndTheBrokersOffsetIsReported") {
     for {
       (produce, producers, _, _) <- rig()
-      answer <- produce.produce(requestOf())
+      answer <- produce.produce(ProduceRig.Caller, requestOf())
       written <- producers.sent.get
     } yield {
       // The offset is the point. "Published successfully" leaves an operator searching their own topic
@@ -84,7 +84,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
     // the key, which is what the operator asked for.
     for {
       (produce, producers, _, _) <- rig()
-      _ <- produce.produce(requestOf(value = None))
+      _ <- produce.produce(ProduceRig.Caller, requestOf(value = None))
       written <- producers.sent.get
     } yield {
       assertEquals(written.head.value, None)
@@ -95,7 +95,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
   test("aRecordWithNoKeyIsNotARecordWithAnEmptyKey") {
     for {
       (produce, producers, _, _) <- rig()
-      _ <- produce.produce(requestOf(key = None))
+      _ <- produce.produce(ProduceRig.Caller, requestOf(key = None))
       written <- producers.sent.get
     } yield assertEquals(written.head.key, None)
   }
@@ -105,7 +105,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
     // the port exists in the shape it does to make the wrong version awkward to write.
     for {
       (produce, producers, _, _) <- rig()
-      answer <- produce.produce(requestOf(count = Some(5)))
+      answer <- produce.produce(ProduceRig.Caller, requestOf(count = Some(5)))
       written <- producers.sent.get
       opened <- producers.opened.get
     } yield {
@@ -118,7 +118,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
   test("readOnlyClusterIsRefusedBeforeAProducerIsEvenAskedFor") {
     for {
       (produce, producers, audit, serdes) <- rig(readOnly = true)
-      answer <- produce.produce(requestOf())
+      answer <- produce.produce(ProduceRig.Caller, requestOf())
       opened <- producers.opened.get
       serialised <- serdes.decodes.get
       entries <- audit.entries.get
@@ -139,7 +139,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
     // partitions, numbered 0 to 3" sends them to look at their form, which is where the mistake is.
     for {
       (produce, producers, _, _) <- rig(partitions = Right(4))
-      answer <- produce.produce(requestOf(partition = Some(PartitionId.unsafe(7))))
+      answer <- produce.produce(ProduceRig.Caller, requestOf(partition = Some(PartitionId.unsafe(7))))
       written <- producers.sent.get
     } yield {
       assertEquals(answer.left.map(_.code), Left(ErrorCode.Validation))
@@ -158,7 +158,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
 
     for {
       (produce, producers, audit, _) <- rig(serdeRefusal = Some(refusal))
-      answer <- produce.produce(requestOf())
+      answer <- produce.produce(ProduceRig.Caller, requestOf())
       written <- producers.sent.get
       entries <- audit.entries.get
     } yield {
@@ -174,7 +174,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
     // up with eight.
     for {
       (produce, producers, _, _) <- rig(failFrom = Some(3))
-      answer <- produce.produce(requestOf(count = Some(5)))
+      answer <- produce.produce(ProduceRig.Caller, requestOf(count = Some(5)))
       written <- producers.sent.get
     } yield {
       assertEquals(answer.map(_.length), Right(3))
@@ -185,14 +185,14 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
   test("aBatchWhereNothingLandedIsAFailureAndNotAnEmptyList") {
     for {
       (produce, _, _, _) <- rig(failFrom = Some(0))
-      answer <- produce.produce(requestOf())
+      answer <- produce.produce(ProduceRig.Caller, requestOf())
     } yield assert(answer.isLeft, s"a produce that wrote nothing must not look like a success: $answer")
   }
 
   test("aSuccessWritesExactlyOneAuditRecordNamingTheTopicAndTheCount") {
     for {
       (produce, _, audit, _) <- rig()
-      _ <- produce.produce(requestOf(count = Some(3)))
+      _ <- produce.produce(ProduceRig.Caller, requestOf(count = Some(3)))
       entries <- audit.entries.get
     } yield {
       assertEquals(entries.length, 1)
@@ -215,7 +215,7 @@ final class ProduceUseCaseSuite extends CatsEffectSuite {
       serdes <- FakeSerdes.make()
       guard <- guardFor(new Profiles(readOnly = false, known = false), audit)
       produce = ProduceUseCase.make[IO](producers, serdes, guard)
-      answer <- produce.produce(requestOf())
+      answer <- produce.produce(ProduceRig.Caller, requestOf())
       entries <- audit.entries.get
       opened <- producers.opened.get
     } yield {

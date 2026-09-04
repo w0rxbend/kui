@@ -27,12 +27,11 @@ import kui.message.infrastructure.{
   KafkaBrowseConsumer,
   KafkaRecordDeleter,
   KafkaRecordProducer,
-  KafkaRecordSource,
-  LoggingAuditSink
+  KafkaRecordSource
 }
 import kui.observability.Telemetry
+import kui.observability.audit.LoggingAuditSink
 import kui.security.PrincipalCodec
-import kui.security.audit.MutationRecord
 import kui.serde.{ClusterSerdes, SerdeProfile}
 
 /** Everything the message service needs in order to be served, with no listener started.
@@ -115,16 +114,10 @@ object MessageWiring {
       // service changes a cluster: it holds the read-only refusal and the audit record, and it is what
       // returns the result, so a use case cannot be added that writes without going through them.
       //
-      // The principal is `system` until M6 gives this service an identity to record. It is an effect
-      // rather than a constant because that is the shape it takes when it comes from the verified
-      // principal of the request in flight, and a field added later would leave every record written
-      // before then indistinguishable from every record written after.
-      guard = MutationGuard.make[F](
-        profiles,
-        LoggingAuditSink.make[F](logger),
-        logger,
-        MutationRecord.SystemPrincipal.pure[F]
-      )
+      // Who did it is not wired here. It is a parameter of every `guard` call, threaded from the
+      // principal the gateway signed and the route verified (ADR-020), so an audit record names the
+      // person who made the request rather than a constant this file chose.
+      guard = MutationGuard.make[F](profiles, LoggingAuditSink.make[F](logger), logger)
       producers = KafkaRecordProducer.resource[F](profiles.connectionFor, logger)
       produce = ProduceUseCase.make[F](producers, serdeSource, guard)
       // A resend reads through the same record source a browse does, so the seek arithmetic has one

@@ -15,6 +15,7 @@ import kui.consumer.domain.fixtures.GroupFixtures
 import kui.kernel.error.KuiError
 import kui.kernel.group.GroupState
 import kui.kernel.{ClusterId, GroupId, Offset, TopicName, TopicPartition}
+import kui.security.audit.{AuditSink, MutationRecord}
 import kui.testkit.fakes.FakeStructuredLogger
 
 /** The fakes every application suite here builds on.

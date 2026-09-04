@@ -7,6 +7,7 @@ import kui.kernel.browse.{Direction, PollBudget, SeekMode}
 import kui.kernel.error.{ApplicationError, FieldError, KuiError}
 import kui.message.application.{RawRecord, RecordSource}
 import kui.message.domain.*
+import kui.security.Principal
 import kui.security.audit.MutationKind
 
 /** How much one resend may copy, and why there is a ceiling at all.
@@ -50,7 +51,11 @@ object ResendLimits {
   * assumption impossible to hold: there is no `Boolean` anywhere in it.
   */
 trait ResendUseCase[F[_]] {
-  def resend(request: ResendRequest): F[Either[KuiError, ResendResult]]
+
+  /** @param principal
+    *   who is copying the records, so the audit record names them. Verified by the route.
+    */
+  def resend(principal: Principal, request: ResendRequest): F[Either[KuiError, ResendResult]]
 }
 
 object ResendUseCase {
@@ -64,8 +69,9 @@ object ResendUseCase {
   ): ResendUseCase[F] =
     new ResendUseCase[F] {
 
-      def resend(request: ResendRequest): F[Either[KuiError, ResendResult]] =
+      def resend(principal: Principal, request: ResendRequest): F[Either[KuiError, ResendResult]] =
         guard.guard(
+          principal = principal,
           cluster = request.cluster,
           kind = MutationKind.Resend,
           resource = s"${request.source.topic.value}:${request.source.partition.value}",

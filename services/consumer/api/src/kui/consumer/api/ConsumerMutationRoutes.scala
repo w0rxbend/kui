@@ -93,9 +93,9 @@ object ConsumerMutationRoutes {
   ): ServerEndpoint[Any, F] =
     secured.withBody(ConsumerMutationEndpoints.applyReset)((_, _, _, request) =>
       SecuredRoutes.bodyBytes(request)
-    ) { _ => (_, cluster, group, request) =>
+    ) { principal => (_, cluster, group, request) =>
       for {
-        answer <- reset.apply(cluster, group, request.token)
+        answer <- reset.apply(principal, cluster, group, request.token)
         now <- Clock[F].realTimeInstant
       } yield answer.map(plan => ConsumerMapping.appliedPlan(plan, request.token, expiryOf(now)))
     }
@@ -105,8 +105,8 @@ object ConsumerMutationRoutes {
       deleteGroup: DeleteGroupUseCase[F],
       secured: ConsumerApi.Securing[F]
   ): ServerEndpoint[Any, F] =
-    secured(ConsumerMutationEndpoints.deleteGroup) { _ => (_, cluster, group) =>
-      deleteGroup.delete(cluster, group)
+    secured(ConsumerMutationEndpoints.deleteGroup) { principal => (_, cluster, group) =>
+      deleteGroup.delete(principal, cluster, group)
     }
 
   /** Delete a group's committed offsets for one topic.
@@ -118,8 +118,10 @@ object ConsumerMutationRoutes {
       deleteOffsets: DeleteOffsetsUseCase[F],
       secured: ConsumerApi.Securing[F]
   ): ServerEndpoint[Any, F] =
-    secured(ConsumerMutationEndpoints.deleteOffsets) { _ => (_, cluster, group, topic) =>
-      deleteOffsets.delete(cluster, group, topic).map(_.map(ConsumerMapping.deletedOffsets(_, group)))
+    secured(ConsumerMutationEndpoints.deleteOffsets) { principal => (_, cluster, group, topic) =>
+      deleteOffsets
+        .delete(principal, cluster, group, topic)
+        .map(_.map(ConsumerMapping.deletedOffsets(_, group)))
     }
 
   // -----------------------------------------------------------------------------------------------

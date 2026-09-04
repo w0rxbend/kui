@@ -5,25 +5,25 @@ import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
-import kui.consumer.domain.{AuditSink, MutationOutcome, MutationRecord}
+import kui.consumer.domain.AuditOffsets
 import kui.kernel.ClusterId
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
+import kui.security.Principal
+import kui.security.audit.{AuditSink, MutationKind, MutationOutcome, MutationRecord}
 
-/** Every mutation this service can perform.
+/** This service's three mutations, out of the shared vocabulary.
   *
-  * M5's "enumerate every endpoint and assert each one is classified" test reads this set. A mutation added
-  * without a case here does not compile, because `MutationGuard.guard` takes one — which is the enforcement
-  * that stops the classification from being a documented rule nothing checks.
+  * `kui.security.audit.MutationKind` is the whole of KUI's classification, across every service, and these
+  * are the three cases that belong to consumer groups. There used to be a second enum here with the same
+  * three names and the same three operation strings; E2 in `docs/BACKLOG.md` removed it, because two enums
+  * spelling one classification is how an audit trail comes to have two vocabularies.
+  *
+  * The list is still declared, because the contract suite's "enumerate every endpoint and assert each one is
+  * classified" test reads it.
   */
-enum MutationKind(val operation: String) {
-  case ResetOffsets extends MutationKind("consumer.group.offsets.reset")
-  case DeleteOffsets extends MutationKind("consumer.group.offsets.delete")
-  case DeleteGroup extends MutationKind("consumer.group.delete")
-}
-
-object MutationKind {
-  val All: List[MutationKind] = values.toList
-  given CanEqual[MutationKind, MutationKind] = CanEqual.derived
+object ConsumerMutations {
+  val All: List[MutationKind] =
+    List(MutationKind.ResetOffsets, MutationKind.DeleteOffsets, MutationKind.DeleteGroup)
 }
 
 /** The only way a mutation happens in this service (ADR-047).
@@ -48,6 +48,7 @@ trait MutationGuard[F[_]] {
     *   5. invalidate the snapshot on success.
     */
   def guard[A](
+      principal: Principal,
       cluster: ClusterId,
       kind: MutationKind,
       resource: String,
@@ -62,12 +63,12 @@ object MutationGuard {
       profiles: ClusterProfileSource[F],
       audit: AuditSink[F],
       snapshots: GroupSnapshots[F],
-      logger: StructuredLogger[F],
-      principal: F[String]
+      logger: StructuredLogger[F]
   ): MutationGuard[F] =
     new MutationGuard[F] {
 
       def guard[A](
+          principal: Principal,
           cluster: ClusterId,
           kind: MutationKind,
           resource: String,
@@ -81,13 +82,24 @@ object MutationGuard {
           "resource" -> resource
         )
 
-        def write(outcome: MutationOutcome): F[Unit] =
+        def write(outcome: MutationOutcome, reason: Option[String]): F[Unit] =
           for {
             at <- Temporal[F].realTimeInstant
-            who <- principal
             _ <- audit
               .record(
-                MutationRecord(at, cluster, kind.operation, resource, who, before, after, outcome, None)
+                MutationRecord(
+                  at = at,
+                  principal = principal,
+                  cluster = cluster,
+                  kind = kind,
+                  resource = resource,
+                  // The one operation in KUI with a real scalar before and after: the offsets a group
+                  // was committed at, and the offsets it is committed at now.
+                  before = AuditOffsets.render(before),
+                  after = AuditOffsets.render(after),
+                  outcome = outcome,
+                  detail = reason.map("reason" -> _).toMap
+                )
               )
               // The sink never fails the operation it is recording. A sink that could would one day
               // refuse an offset reset because a log disk was full, and the operator's cluster
@@ -99,7 +111,7 @@ object MutationGuard {
 
         profiles.profileOf(cluster).flatMap {
           case Left(error) =>
-            write(MutationOutcome.Failed(error.code.wire, error.message)).as(error.asLeft[A])
+            write(MutationOutcome.Failed, Some(s"${error.code.wire}: ${error.message}")).as(error.asLeft[A])
 
           case Right(profile) if profile.readOnly =>
             val refusal = ApplicationError.Refused(
@@ -108,7 +120,8 @@ object MutationGuard {
             )
 
             logger.info(context)("refused: the cluster is read-only") >>
-              write(MutationOutcome.Refused(refusal.code.wire, refusal.message)).as(refusal.asLeft[A])
+              write(MutationOutcome.Refused, Some(s"${refusal.code.wire}: ${refusal.message}"))
+                .as(refusal.asLeft[A])
 
           case Right(_) =>
             op.guaranteeCase {
@@ -117,19 +130,24 @@ object MutationGuard {
               // would be a lie; `Unknown` tells an operator to go and look.
               case cats.effect.kernel.Outcome.Succeeded(_) => Temporal[F].unit
               case cats.effect.kernel.Outcome.Errored(failure) =>
-                write(MutationOutcome.Failed(ErrorCode.Internal.wire, failure.getMessage))
+                write(
+                  MutationOutcome.Failed,
+                  Some(s"${ErrorCode.Internal.wire}: ${Option(failure.getMessage).getOrElse("")}")
+                )
               case cats.effect.kernel.Outcome.Canceled() =>
-                write(MutationOutcome.Unknown("the operation was cancelled after the request was sent"))
+                write(
+                  MutationOutcome.Unknown,
+                  Some("the operation was cancelled after the request was sent")
+                )
             }.flatMap {
               case Right(value) =>
-                write(MutationOutcome.Succeeded) >>
+                write(MutationOutcome.Succeeded, None) >>
                   snapshots.invalidate(cluster, s"${kind.operation} on $resource").as(value.asRight[KuiError])
               case Left(error) =>
                 val outcome =
-                  if error.code.httpStatus < 500 then MutationOutcome.Refused(error.code.wire, error.message)
-                  else MutationOutcome.Failed(error.code.wire, error.message)
+                  if error.code.httpStatus < 500 then MutationOutcome.Refused else MutationOutcome.Failed
 
-                write(outcome).as(error.asLeft[A])
+                write(outcome, Some(s"${error.code.wire}: ${error.message}")).as(error.asLeft[A])
             }
         }
       }

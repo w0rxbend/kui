@@ -5,6 +5,7 @@ import java.time.Instant
 import cats.Applicative
 
 import kui.kernel.ClusterId
+import kui.security.{Principal, PrincipalKind}
 
 /** What kind of change an operation makes to a cluster.
   *
@@ -45,6 +46,17 @@ enum MutationKind(val operation: String) {
 
   /** A topic and every record in it (`MT-004`). **Irreversible.** */
   case DeleteTopic extends MutationKind("topic.delete")
+
+  /** A consumer group's committed offsets moved (`CG-006`). The group reads from somewhere else next time it
+    * polls, which is either exactly what the operator wanted or a replay of a week of traffic.
+    */
+  case ResetOffsets extends MutationKind("consumer.group.offsets.reset")
+
+  /** A consumer group's committed offsets removed for one topic (`CG-008`). */
+  case DeleteOffsets extends MutationKind("consumer.group.offsets.delete")
+
+  /** A consumer group removed outright (`CG-007`). */
+  case DeleteGroup extends MutationKind("consumer.group.delete")
 }
 
 object MutationKind {
@@ -57,10 +69,18 @@ object MutationKind {
 enum MutationOutcome {
   case Succeeded, Failed, Refused
 
+  /** The operation was cancelled, or timed out, after the request had already gone to the broker.
+    *
+    * Kafka gives no guarantee that it was *not* applied, so a record claiming either would be a lie. An
+    * operator who reads this knows to go and look, which is the only honest thing this case can offer.
+    */
+  case Unknown
+
   def label: String = this match {
     case Succeeded => "succeeded"
     case Failed => "failed"
     case Refused => "refused"
+    case Unknown => "unknown"
   }
 }
 
@@ -71,8 +91,12 @@ object MutationOutcome {
 /** One thing that was done, or attempted, to a cluster.
   *
   * @param principal
-  *   who did it. `system` until identity exists (M6). It is a field now rather than later because adding it
-  *   later would leave every record written before then indistinguishable from every record written after.
+  *   who did it, as the gateway signed it and this service verified it (ADR-020). A `Principal` and not a
+  *   string, because the two facts an audit reader needs — the name, and whether anybody was actually signed
+  *   in — are exactly the two the type carries, and a string that flattened them would have to spell the
+  *   second one out in prose that every sink then renders slightly differently. Until authentication exists
+  *   (M6) every request arrives as [[kui.security.Principal.Anonymous]], and that is an honest record of a
+  *   deployment with no login rather than a placeholder somebody invented.
   * @param resource
   *   what was operated on, in the shape an operator recognises: a topic name, a group id, `orders:3`.
   * @param before
@@ -86,7 +110,7 @@ object MutationOutcome {
   */
 final case class MutationRecord(
     at: Instant,
-    principal: String,
+    principal: Principal,
     cluster: ClusterId,
     kind: MutationKind,
     resource: String,
@@ -98,12 +122,33 @@ final case class MutationRecord(
 
 object MutationRecord {
 
-  /** The principal recorded until KUI has identities to record. Spelled out rather than left empty so that a
-    * reader of an old record can tell "nobody was signed in" from "the field was not populated".
-    */
-  val SystemPrincipal: String = "system"
-
   given CanEqual[MutationRecord, MutationRecord] = CanEqual.derived
+}
+
+/** How a principal is written into an audit trail, in one place.
+  *
+  * It exists because three services write the same trail. Two of them used to spell "nobody was signed in"
+  * differently — one said `system (authentication is not enabled)`, the other `anonymous (authentication is
+  * not enabled)` — and a trail that answers "who changed this cluster today" with two names for one absence
+  * is a trail nobody can query. E2 in `docs/BACKLOG.md` is that consolidation; this object is where it lands.
+  */
+object AuditPrincipal {
+
+  /** The sentence a log line or a viewer shows.
+    *
+    * An anonymous principal is rendered with the reason attached, because a bare `anonymous` in an audit
+    * record reads like a bug in the audit trail rather than like a fact about the deployment. Every other
+    * kind renders as the name alone: once there is a login, the name is the answer.
+    */
+  def render(principal: Principal): String = principal.kind match {
+    case PrincipalKind.Anonymous => s"${principal.name.value} (authentication is not enabled)"
+    case _ => principal.name.value
+  }
+
+  /** The machine-readable half: which way KUI came to believe this identity. Kept beside [[render]] so a sink
+    * writes both or neither.
+    */
+  def kindOf(principal: Principal): String = principal.kind.wire
 }
 
 /** Where mutation records go.

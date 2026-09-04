@@ -46,14 +46,3 @@ trait GroupAdminPort[F[_]] {
 
   def deleteGroup(id: GroupId): F[Either[KuiError, Unit]]
 }
-
-/** Where a record of every mutation goes.
-  *
-  * `record` returns `F[Unit]` and never fails the operation it is recording. A sink that can fail a mutation
-  * is a sink that will one day refuse an offset reset because a log disk was full, and the operator's cluster
-  * matters more than KUI's bookkeeping. M4 ships the structured-log sink; M5 adds the `__kui_audit` topic
-  * behind this same port.
-  */
-trait AuditSink[F[_]] {
-  def record(record: MutationRecord): F[Unit]
-}

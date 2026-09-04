@@ -8,6 +8,7 @@ import fs2.Stream
 import kui.cache.{Snapshot, SnapshotCell}
 import kui.kernel.error.{ErrorCode, KuiError}
 import kui.kernel.{ClusterId, PartitionId, Secret, TopicName}
+import kui.security.Principal
 import kui.security.audit.{AuditSink, MutationKind, MutationOutcome, MutationRecord}
 import kui.testkit.fakes.FakeStructuredLogger
 import kui.topic.domain.*
@@ -76,6 +77,11 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
     def requestRefresh(id: ClusterId): IO[Boolean] = refreshes.update(_ :+ id).as(true)
   }
 
+  /** The verified principal these mutations are made by: the anonymous one a deployment without
+    * authentication produces.
+    */
+  private val Caller: Principal = Principal.Anonymous
+
   private def sink(records: Ref[IO, List[MutationRecord]]): AuditSink[IO] = new AuditSink[IO] {
     def record(entry: MutationRecord): IO[Unit] = records.update(_ :+ entry)
   }
@@ -121,14 +127,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       refreshes <- Ref.of[IO, List[ClusterId]](Nil)
       writer = new FakeWriter(calls, writeAnswer, autoCreate)
       profileSource = profiles(readOnly)
-      guard = MutationGuard.make[IO](
-        profileSource,
-        snapshots(refreshes),
-        sink(records),
-        logger,
-        IO.pure("test"),
-        toKui
-      )
+      guard = MutationGuard.make[IO](profileSource, snapshots(refreshes), sink(records), logger, toKui)
       tokens = TopicPlanToken.make[IO](Secret("a key long enough for HMAC-SHA256".getBytes("UTF-8")))
     } yield Fixture(
       TopicAdminUseCase.make[IO](reads, writer, profileSource, guard, tokens, logger, toKui),
@@ -150,7 +149,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
     for {
       f <- fixture(readOnly = true)
       spec = NewTopicSpec.of(orders, Some(3), Some(1), Map.empty).getOrElse(fail("spec"))
-      answer <- f.admin.create(cluster, spec)
+      answer <- f.admin.create(Caller, cluster, spec)
       calls <- f.writer.calls.get
     } yield {
       assertEquals(answer.left.map(_.code), Left(ErrorCode.ReadOnly))
@@ -165,6 +164,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
     for {
       f <- fixture(readOnly = true)
       _ <- f.admin.alterConfig(
+        Caller,
         cluster,
         orders,
         TopicConfigChange.of(Map("retention.ms" -> "1000"), Set.empty).getOrElse(fail("change"))
@@ -199,7 +199,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       f <- fixture()
       spec = NewTopicSpec.of(TopicName.unsafe("new.topic"), Some(3), Some(1), Map.empty)
         .getOrElse(fail("spec"))
-      answer <- f.admin.create(cluster, spec)
+      answer <- f.admin.create(Caller, cluster, spec)
       records <- f.records.get
       refreshes <- f.refreshes.get
     } yield {
@@ -217,7 +217,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       change = TopicConfigChange
         .of(Map("retention.ms" -> "604800000", "ssl.keystore.password" -> "hunter2"), Set("cleanup.policy"))
         .getOrElse(fail("change"))
-      _ <- f.admin.alterConfig(cluster, orders, change)
+      _ <- f.admin.alterConfig(Caller, cluster, orders, change)
       records <- f.records.get
     } yield {
       val detail = records.flatMap(_.detail.values).mkString(" ")
@@ -232,7 +232,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
   test("aPartitionIncreaseCannotBeAppliedWithoutAPlan") {
     for {
       f <- fixture()
-      answer <- f.admin.applyPartitions(cluster, orders, "not-a-token")
+      answer <- f.admin.applyPartitions(Caller, cluster, orders, "not-a-token")
       calls <- f.writer.calls.get
     } yield {
       assertEquals(answer.left.map(_.code), Left(ErrorCode.Validation))
@@ -247,7 +247,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       f <- fixture()
       planned <- f.admin.planPartitions(cluster, orders, 6)
       token = planned.getOrElse(fail("plan")).token
-      elsewhere <- f.admin.applyPartitions(cluster, TopicName.unsafe("payments.v1"), token)
+      elsewhere <- f.admin.applyPartitions(Caller, cluster, TopicName.unsafe("payments.v1"), token)
       calls <- f.writer.calls.get
     } yield {
       assert(elsewhere.isLeft, elsewhere.toString)
@@ -261,7 +261,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       f <- fixture()
       planned <- f.admin.planDelete(cluster, orders)
       token = planned.getOrElse(fail("plan")).token
-      crossed <- f.admin.applyPartitions(cluster, orders, token)
+      crossed <- f.admin.applyPartitions(Caller, cluster, orders, token)
       calls <- f.writer.calls.get
     } yield {
       assert(crossed.isLeft, crossed.toString)
@@ -277,7 +277,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       planned <- planning.admin.planPartitions(cluster, orders, 6)
       token = planned.getOrElse(fail("plan")).token
       grown <- fixture(topics = List(topicOf(6, 5L)))
-      answer <- grown.admin.applyPartitions(cluster, orders, token)
+      answer <- grown.admin.applyPartitions(Caller, cluster, orders, token)
       calls <- grown.writer.calls.get
     } yield {
       assertEquals(answer.left.map(_.code), Left(ErrorCode.Validation))
@@ -289,7 +289,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
     for {
       f <- fixture()
       planned <- f.admin.planPartitions(cluster, orders, 12)
-      answer <- f.admin.applyPartitions(cluster, orders, planned.getOrElse(fail("plan")).token)
+      answer <- f.admin.applyPartitions(Caller, cluster, orders, planned.getOrElse(fail("plan")).token)
       calls <- f.writer.calls.get
       records <- f.records.get
     } yield {
@@ -306,7 +306,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
       f <- fixture(topics = List(topicOf(3, 7L)), autoCreate = Some(true))
       planned <- f.admin.planDelete(cluster, orders)
       plan = planned.getOrElse(fail("plan")).plan
-      answer <- f.admin.applyDelete(cluster, orders, planned.getOrElse(fail("plan")).token)
+      answer <- f.admin.applyDelete(Caller, cluster, orders, planned.getOrElse(fail("plan")).token)
       calls <- f.writer.calls.get
     } yield {
       assertEquals(plan.records, Some(21L))
@@ -324,7 +324,7 @@ final class TopicAdministrationSuite extends munit.CatsEffectSuite {
     for {
       f <- fixture()
       spec = NewTopicSpec.of(orders, None, None, Map.empty).getOrElse(fail("spec"))
-      answer <- f.admin.create(ClusterId.unsafe("elsewhere"), spec)
+      answer <- f.admin.create(Caller, ClusterId.unsafe("elsewhere"), spec)
       records <- f.records.get
       calls <- f.writer.calls.get
     } yield {

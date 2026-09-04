@@ -18,7 +18,7 @@ import kui.config.{ClusterConfig, ConsumersConfig}
 import kui.consumer.api.{ConsumerApi, ConsumerCapabilities}
 import kui.consumer.application.*
 import kui.consumer.domain.{ConsumerGroup, GroupAdminPort, GroupListingPage, OffsetWindow, ResetScope}
-import kui.consumer.infrastructure.{ConfiguredProfileSource, KafkaGroupAdminPort, LoggingAuditSink}
+import kui.consumer.infrastructure.{ConfiguredProfileSource, KafkaGroupAdminPort}
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
@@ -28,6 +28,7 @@ import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.group.GroupState
 import kui.kernel.{ClusterId, GroupId, Offset, Secret, TopicPartition}
 import kui.observability.Telemetry
+import kui.observability.audit.LoggingAuditSink
 import kui.security.PrincipalCodec
 
 /** Everything the consumer service needs in order to be served, with no listener started.
@@ -124,7 +125,10 @@ object ConsumerWiring {
       tokens = PlanToken.make[F](key)
 
       audit = LoggingAuditSink.make[F](logger)
-      guard = MutationGuard.make[F](profiles, audit, snapshots, logger, Async[F].pure(AuditPrincipal))
+      // Who did it is not wired here. It is a parameter of every `guard` call, threaded from the
+      // principal the gateway signed and the route verified (ADR-020), so an audit record names the
+      // person who made the request rather than a constant this file chose.
+      guard = MutationGuard.make[F](profiles, audit, snapshots, logger)
 
       list = GroupListUseCase.make[F](snapshots)
       detail = GroupDetailUseCase.make[F](snapshots, ports, lastSeen, logger)
@@ -163,14 +167,6 @@ object ConsumerWiring {
       readiness = readiness,
       capabilities = ConsumerApi.capabilityDocument[F](capabilities, logger)
     )
-
-  /** Who an audit record names while KUI has no authentication.
-    *
-    * A literal rather than a blank, because a record whose actor field is empty reads as a bug in the audit
-    * trail rather than as a fact about the deployment. Authentication is M6; when it arrives, this is the
-    * value the route's verified `Principal` replaces.
-    */
-  val AuditPrincipal: String = "anonymous (authentication is not enabled)"
 
   /** The cluster label the assignment cache's metrics carry.
     *

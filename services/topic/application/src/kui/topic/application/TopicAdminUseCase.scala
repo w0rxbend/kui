@@ -9,6 +9,7 @@ import org.typelevel.log4cats.StructuredLogger
 
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.{ClusterId, TopicName}
+import kui.security.Principal
 import kui.topic.domain.*
 
 /** A plan, and the token that authorises applying exactly it (ADR-045). */
@@ -43,14 +44,20 @@ final case class Planned[A](plan: A, token: String, expiresAt: Instant)
   */
 trait TopicAdminUseCase[F[_]] {
 
-  /** Create a topic and answer with what the cluster now reports it to be. */
-  def create(cluster: ClusterId, spec: NewTopicSpec): F[Either[KuiError, CreatedTopic]]
+  /** Create a topic and answer with what the cluster now reports it to be.
+    *
+    * Every mutating method here takes the `principal` the route verified, so that the audit record names the
+    * person who asked rather than a constant chosen at wiring time. The planning methods do not: a plan
+    * changes nothing and writes no audit record.
+    */
+  def create(principal: Principal, cluster: ClusterId, spec: NewTopicSpec): F[Either[KuiError, CreatedTopic]]
 
   /** Set and remove entries of a topic's dynamic configuration, and answer with the configuration as it
     * stands afterwards — read back rather than echoed, so a value the broker normalised (`604800000` for
     * `7d`) is the value the screen shows.
     */
   def alterConfig(
+      principal: Principal,
       cluster: ClusterId,
       topic: TopicName,
       change: TopicConfigChange
@@ -64,13 +71,23 @@ trait TopicAdminUseCase[F[_]] {
   ): F[Either[KuiError, Planned[PartitionPlan]]]
 
   /** Raise the partition count to exactly what the token names. */
-  def applyPartitions(cluster: ClusterId, topic: TopicName, token: String): F[Either[KuiError, PartitionPlan]]
+  def applyPartitions(
+      principal: Principal,
+      cluster: ClusterId,
+      topic: TopicName,
+      token: String
+  ): F[Either[KuiError, PartitionPlan]]
 
   /** What deleting this topic would destroy, and whether it would come straight back. Changes nothing. */
   def planDelete(cluster: ClusterId, topic: TopicName): F[Either[KuiError, Planned[DeletionPlan]]]
 
   /** Delete exactly the topic the token names. */
-  def applyDelete(cluster: ClusterId, topic: TopicName, token: String): F[Either[KuiError, DeletionPlan]]
+  def applyDelete(
+      principal: Principal,
+      cluster: ClusterId,
+      topic: TopicName,
+      token: String
+  ): F[Either[KuiError, DeletionPlan]]
 }
 
 object TopicAdminUseCase {
@@ -108,9 +125,14 @@ object TopicAdminUseCase {
 
       // ------------------------------------------------------------------------------------- create
 
-      def create(cluster: ClusterId, spec: NewTopicSpec): F[Either[KuiError, CreatedTopic]] =
+      def create(
+          principal: Principal,
+          cluster: ClusterId,
+          spec: NewTopicSpec
+      ): F[Either[KuiError, CreatedTopic]] =
         guard
           .guard(
+            principal,
             cluster,
             TopicMutation.Create,
             spec.name.value,
@@ -149,12 +171,14 @@ object TopicAdminUseCase {
       // -------------------------------------------------------------------------------- alter config
 
       def alterConfig(
+          principal: Principal,
           cluster: ClusterId,
           topic: TopicName,
           change: TopicConfigChange
       ): F[Either[KuiError, TopicConfigView]] =
         guard
           .guard(
+            principal,
             cluster,
             TopicMutation.AlterConfig,
             topic.value,
@@ -201,6 +225,7 @@ object TopicAdminUseCase {
         } yield Planned(plan, token, expiresAt)).value
 
       def applyPartitions(
+          principal: Principal,
           cluster: ClusterId,
           topic: TopicName,
           token: String
@@ -223,6 +248,7 @@ object TopicAdminUseCase {
           )
           _ <- EitherT(
             guard.guard(
+              principal,
               cluster,
               TopicMutation.IncreasePartitions,
               topic.value,
@@ -259,6 +285,7 @@ object TopicAdminUseCase {
         } yield Planned(plan, token, expiresAt)).value
 
       def applyDelete(
+          principal: Principal,
           cluster: ClusterId,
           topic: TopicName,
           token: String
@@ -269,6 +296,7 @@ object TopicAdminUseCase {
           plan <- EitherT.fromEither[F](parseDeleteDetail(topic, signed, now))
           _ <- EitherT(
             guard.guard(
+              principal,
               cluster,
               TopicMutation.Delete,
               topic.value,

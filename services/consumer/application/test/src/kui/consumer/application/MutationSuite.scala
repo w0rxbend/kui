@@ -10,6 +10,8 @@ import kui.consumer.domain.fixtures.GroupFixtures
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
 import kui.kernel.group.GroupState
 import kui.kernel.{GroupId, Offset, Secret, TopicPartition}
+import kui.security.Principal
+import kui.security.audit.{AuditPrincipal, MutationKind, MutationOutcome}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -52,6 +54,13 @@ final class MutationSuite extends KuiIOSuite {
 
   private val tokens: PlanToken[IO] = PlanToken.make[IO](Secret("a-test-key".getBytes("UTF-8")))
 
+  /** The verified principal every mutation in this suite is made by.
+    *
+    * `Principal.Anonymous` and not an invented name, because that is exactly what a deployment without
+    * authentication produces, and the audit assertions below are about what such a deployment records.
+    */
+  private val Caller: Principal = Principal.Anonymous
+
   /** A guard over a snapshots component that records the invalidations it was asked for. */
   private def rig(
       described: ConsumerGroup,
@@ -70,7 +79,7 @@ final class MutationSuite extends KuiIOSuite {
         def requestRefresh(cluster: kui.kernel.ClusterId) = IO.pure(false)
         def invalidate(cluster: kui.kernel.ClusterId, reason: String) = invalidations.update(_ :+ reason)
       }
-      guard = MutationGuard.make[IO](profiles, audit, snapshots, logger, IO.pure(MutationRecord.AnonymousPrincipal))
+      guard = MutationGuard.make[IO](profiles, audit, snapshots, logger)
     } yield (port, audit, guard, invalidations)
 
   private def resetUseCase(port: GroupAdminPort[IO], guard: MutationGuard[IO], readOnly: Boolean) =
@@ -132,7 +141,7 @@ final class MutationSuite extends KuiIOSuite {
       reset <- resetUseCase(port, guard, readOnly = false)
       planned <- reset.plan(ConsumerRig.Cluster, group, scope, ResetSpec.ToEarliest)
       token = planned.map(_.token).getOrElse(fail("no plan"))
-      applied <- reset.apply(ConsumerRig.Cluster, group, token)
+      applied <- reset.apply(Caller, ConsumerRig.Cluster, group, token)
       state <- port.state.get
       records <- audit.written.get
       invalidated <- invalidations.get
@@ -140,10 +149,10 @@ final class MutationSuite extends KuiIOSuite {
       assert(applied.isRight, s"apply failed: $applied")
       assertEquals(state.applied.map((id, offsets) => id -> offsets.values.map(_.value).toList), List(group -> List(0L)))
       assertEquals(records.size, 1)
-      assertEquals(records.head.operation, MutationKind.ResetOffsets.operation)
+      assertEquals(records.head.kind, MutationKind.ResetOffsets)
       assertEquals(records.head.outcome, MutationOutcome.Succeeded)
-      assertEquals(records.head.before, Map("orders-0" -> 40L))
-      assertEquals(records.head.after, Map("orders-0" -> 0L))
+      assertEquals(records.head.before, Some("orders-0=40"))
+      assertEquals(records.head.after, Some("orders-0=0"))
       assertEquals(invalidated.size, 1)
     }
   }
@@ -159,7 +168,7 @@ final class MutationSuite extends KuiIOSuite {
       reset <- resetUseCase(port, guard, readOnly = false)
       planned <- reset.plan(ConsumerRig.Cluster, group, scope, ResetSpec.ToEarliest)
       token = planned.map(_.token).getOrElse(fail("no plan"))
-      applied <- reset.apply(ConsumerRig.Cluster, group, token)
+      applied <- reset.apply(Caller, ConsumerRig.Cluster, group, token)
     } yield {
       val partitions = applied.map(_.partitions).getOrElse(fail(s"apply failed: $applied"))
       assertEquals(partitions.map(_.current.map(_.value)), List(Some(40L)))
@@ -177,7 +186,7 @@ final class MutationSuite extends KuiIOSuite {
       token = planned.map(_.token).getOrElse(fail("no plan"))
       // The race the two-phase flow widens, and the reason the precondition is checked twice.
       _ <- port.state.update(_.copy(described = Right(Map(group -> liveGroup))))
-      applied <- reset.apply(ConsumerRig.Cluster, group, token)
+      applied <- reset.apply(Caller, ConsumerRig.Cluster, group, token)
       state <- port.state.get
     } yield {
       assertEquals(applied.left.map(_.code), Left(ErrorCode.GroupNotEmpty))
@@ -192,7 +201,7 @@ final class MutationSuite extends KuiIOSuite {
       reset <- resetUseCase(port, guard, readOnly = false)
       planned <- reset.plan(ConsumerRig.Cluster, group, scope, ResetSpec.ToEarliest)
       token = planned.map(_.token).getOrElse(fail("no plan"))
-      applied <- reset.apply(ConsumerRig.Cluster, GroupId.unsafe("someone-else"), token)
+      applied <- reset.apply(Caller, ConsumerRig.Cluster, GroupId.unsafe("someone-else"), token)
     } yield {
       assertEquals(applied.left.map(_.code), Left(ErrorCode.Validation))
       // The message must not say which half was wrong: that is an oracle.
@@ -255,14 +264,14 @@ final class MutationSuite extends KuiIOSuite {
       (port, audit, guard, _) = rigged
       logger <- FakeStructuredLogger[IO]
       deleteGroup = DeleteGroupUseCase.make[IO](_ => port, guard, logger)
-      result <- deleteGroup.delete(ConsumerRig.Cluster, group)
+      result <- deleteGroup.delete(Caller, ConsumerRig.Cluster, group)
       state <- port.state.get
       records <- audit.written.get
     } yield {
       assertEquals(result.left.map(_.code), Left(ErrorCode.ReadOnly))
       assertEquals(state.deletedGroups, Nil, clue = "a read-only cluster was asked to delete a group")
       assertEquals(records.size, 1)
-      assert(records.head.outcome.isInstanceOf[MutationOutcome.Refused])
+      assertEquals(records.head.outcome, MutationOutcome.Refused)
     }
   }
 
@@ -272,14 +281,14 @@ final class MutationSuite extends KuiIOSuite {
       (port, audit, guard, _) = rigged
       logger <- FakeStructuredLogger[IO]
       deleteGroup = DeleteGroupUseCase.make[IO](_ => port, guard, logger)
-      result <- deleteGroup.delete(ConsumerRig.Cluster, group)
+      result <- deleteGroup.delete(Caller, ConsumerRig.Cluster, group)
       state <- port.state.get
       records <- audit.written.get
     } yield {
       assert(result.isRight)
       assertEquals(state.deletedGroups, List(group))
-      assertEquals(records.head.before, Map("orders-0" -> 40L))
-      assertEquals(records.head.after, Map.empty[String, Long])
+      assertEquals(records.head.before, Some("orders-0=40"))
+      assertEquals(records.head.after, None)
     }
   }
 
@@ -289,7 +298,7 @@ final class MutationSuite extends KuiIOSuite {
       (port, _, guard, _) = rigged
       logger <- FakeStructuredLogger[IO]
       deleteOffsets = DeleteOffsetsUseCase.make[IO](_ => port, guard, logger)
-      result <- deleteOffsets.delete(ConsumerRig.Cluster, group, GroupFixtures.Orders)
+      result <- deleteOffsets.delete(Caller, ConsumerRig.Cluster, group, GroupFixtures.Orders)
       state <- port.state.get
     } yield {
       assertEquals(result.map(_.partitions), Right(Set(GroupFixtures.partition(0))))
@@ -303,7 +312,7 @@ final class MutationSuite extends KuiIOSuite {
       (port, _, guard, _) = rigged
       logger <- FakeStructuredLogger[IO]
       deleteOffsets = DeleteOffsetsUseCase.make[IO](_ => port, guard, logger)
-      result <- deleteOffsets.delete(ConsumerRig.Cluster, group, kui.kernel.TopicName.unsafe("untouched"))
+      result <- deleteOffsets.delete(Caller, ConsumerRig.Cluster, group, kui.kernel.TopicName.unsafe("untouched"))
       state <- port.state.get
     } yield {
       assertEquals(result.map(_.partitions), Right(Set.empty[TopicPartition]))
@@ -328,12 +337,12 @@ final class MutationSuite extends KuiIOSuite {
       }
       logger <- FakeStructuredLogger[IO]
       deleteGroup = DeleteGroupUseCase.make[IO](_ => failing, guard, logger)
-      result <- deleteGroup.delete(ConsumerRig.Cluster, group)
+      result <- deleteGroup.delete(Caller, ConsumerRig.Cluster, group)
       records <- audit.written.get
     } yield {
       assertEquals(result.left.map(_.code), Left(ErrorCode.GroupNotEmpty))
       assertEquals(records.size, 1)
-      assert(records.head.outcome.isInstanceOf[MutationOutcome.Refused])
+      assertEquals(records.head.outcome, MutationOutcome.Refused)
     }
   }
 
@@ -343,16 +352,19 @@ final class MutationSuite extends KuiIOSuite {
       (port, audit, guard, _) = rigged
       logger <- FakeStructuredLogger[IO]
       deleteGroup = DeleteGroupUseCase.make[IO](_ => port, guard, logger)
-      _ <- deleteGroup.delete(ConsumerRig.Cluster, group)
+      _ <- deleteGroup.delete(Caller, ConsumerRig.Cluster, group)
       records <- audit.written.get
     } yield {
       val record = records.head
       assertEquals(record.cluster, ConsumerRig.Cluster)
       assertEquals(record.resource, group.value)
-      assertEquals(record.principal, MutationRecord.AnonymousPrincipal)
-      // The record is a flat set of scalars and offset maps; there is no field on it that could
-      // hold a connection, a property map or a secret.
-      assert(record.before.values.forall(_ >= 0L))
+      // The one placeholder principal, and the only one: E2 consolidated the two different strings
+      // the topic and consumer services used to invent for "nobody was signed in".
+      assertEquals(record.principal, Principal.Anonymous)
+      assertEquals(AuditPrincipal.render(record.principal), "anonymous (authentication is not enabled)")
+      // The record is a flat set of scalars; there is no field on it that could hold a connection, a
+      // property map or a secret.
+      assertEquals(record.detail, Map.empty[String, String])
     }
   }
 }
