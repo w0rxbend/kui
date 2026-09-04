@@ -82,7 +82,17 @@ object TopicAdminPanel {
         * `ActionPermissionWrapper`, so a user who both lacks permission and has a service down is told both,
         * rather than fixing one and discovering the other.
         */
-      deleteCapability: Signal[FeatureState] = Val(FeatureState.Ready)
+      deleteCapability: Signal[FeatureState] = Val(FeatureState.Ready),
+      /** Whether this user may change this topic — `TOPIC.EDIT`, which is what raising the partition count
+        * needs. Gated for the same reason the delete is: growing a topic cannot be undone, and finding that
+        * out from a 403 after composing the change is the experience E4 exists to remove.
+        */
+      editPermitted: Signal[Boolean] = Val(true),
+      /** Whether this user may empty this topic — `TOPIC.MESSAGES_DELETE`, which is a different permission
+        * from deleting the topic itself. An operator may well be trusted to purge a queue and not to remove
+        * it, so the two controls are gated separately rather than on one "may administer" flag.
+        */
+      purgePermitted: Signal[Boolean] = Val(true)
   ): HtmlElement = {
 
     /** Whether the topic has been deleted from under this panel.
@@ -102,9 +112,10 @@ object TopicAdminPanel {
         cls := TopicsCss.FormHint,
         child.text <-- gone.signal.map(if _ then Messages.DangerGone else Messages.DangerHint)
       ),
-      partitionsSection(partitionCount, planPartitions, applyPartitions)
+      partitionsSection(partitionCount, planPartitions, applyPartitions, editPermitted, deleteCapability)
         .amend(cls(TopicsCss.Hidden) <-- gone.signal),
-      purgeSection(topic, planPurge, applyPurge).amend(cls(TopicsCss.Hidden) <-- gone.signal),
+      purgeSection(topic, planPurge, applyPurge, purgePermitted, deleteCapability)
+        .amend(cls(TopicsCss.Hidden) <-- gone.signal),
       deleteSection(
         topic,
         planDeletion,
@@ -124,7 +135,9 @@ object TopicAdminPanel {
   private def partitionsSection(
       partitionCount: Signal[Option[Int]],
       plan: Int => EventStream[Either[ApiError, PartitionPlanDto]],
-      applyPlan: String => EventStream[Either[ApiError, PartitionPlanDto]]
+      applyPlan: String => EventStream[Either[ApiError, PartitionPlanDto]],
+      permitted: Signal[Boolean],
+      capability: Signal[FeatureState]
   ): HtmlElement = {
     val target: Var[String] = Var("")
     val step: Var[ChangeStep[PartitionPlanDto]] = Var(ChangeStep.Idle)
@@ -148,19 +161,27 @@ object TopicAdminPanel {
           placeholder = "12",
           testId = Some("topic-partitions-target")
         ),
-        Button(
-          label = Val(Messages.Preview),
-          onClick = Observer[Unit] { _ =>
-            target.now().trim.toIntOption.filter(_ > 0) match {
-              case None => problem.set(Some(Messages.AddPartitionsInvalid))
-              case Some(count) =>
-                problem.set(None)
-                step.set(ChangeStep.Planning)
-                planning.set(Some(count))
-            }
-          },
-          disabled = step.signal.map(isBusy),
-          testId = Some("topic-partitions-plan")
+        // Both halves are gated, the preview as well as the confirmation: composing a change the server
+        // will refuse is the failure mode, and it happens at the first click, not the last.
+        ActionPermissionWrapper(
+          action =
+            Button(
+              label = Val(Messages.Preview),
+              onClick = Observer[Unit] { _ =>
+                target.now().trim.toIntOption.filter(_ > 0) match {
+                  case None => problem.set(Some(Messages.AddPartitionsInvalid))
+                  case Some(count) =>
+                    problem.set(None)
+                    step.set(ChangeStep.Planning)
+                    planning.set(Some(count))
+                }
+              },
+              disabled = step.signal.map(isBusy),
+              testId = Some("topic-partitions-plan")
+            ),
+          capability = capability,
+          permitted = permitted,
+          testId = Some("topic-partitions-plan-gate")
         )
       ),
       // The plan, the receipt and the failure, each rendered from the one state value.
@@ -172,15 +193,20 @@ object TopicAdminPanel {
               dataAttr("testid") := "topic-partitions-plan-result",
               p(cls := TopicsCss.PlanSummary, Messages.partitionPlan(plan.current, plan.target)),
               warnings(plan.warnings),
-              Button(
-                label = Val(Messages.AddPartitionsConfirm),
-                onClick = Observer[Unit] { _ =>
-                  step.set(ChangeStep.Applying(plan))
-                  // The token and nothing else. There is no path here that sends the number again.
-                  plan.token.foreach(token => applying.set(Some(token)))
-                },
-                variant = ButtonVariant.Danger,
-                testId = Some("topic-partitions-apply")
+              ActionPermissionWrapper(
+                action = Button(
+                  label = Val(Messages.AddPartitionsConfirm),
+                  onClick = Observer[Unit] { _ =>
+                    step.set(ChangeStep.Applying(plan))
+                    // The token and nothing else. There is no path here that sends the number again.
+                    plan.token.foreach(token => applying.set(Some(token)))
+                  },
+                  variant = ButtonVariant.Danger,
+                  testId = Some("topic-partitions-apply")
+                ),
+                capability = capability,
+                permitted = permitted,
+                testId = Some("topic-partitions-apply-gate")
               )
             )
           )
@@ -238,7 +264,9 @@ object TopicAdminPanel {
   private def purgeSection(
       topic: TopicName,
       plan: () => EventStream[Either[ApiError, PurgePlanDto]],
-      applyPlan: String => EventStream[Either[ApiError, PurgeReceiptDto]]
+      applyPlan: String => EventStream[Either[ApiError, PurgeReceiptDto]],
+      permitted: Signal[Boolean],
+      capability: Signal[FeatureState]
   ): HtmlElement = {
     val step: Var[ChangeStep[PurgePlanDto]] = Var(ChangeStep.Idle)
     val receipt: Var[Option[PurgeReceiptDto]] = Var(None)
@@ -252,16 +280,21 @@ object TopicAdminPanel {
       dataAttr("testid") := "topic-purge-section",
       h3(cls := TopicsCss.DangerSectionTitle, Messages.PurgeTitle),
       p(cls := TopicsCss.FormHint, Messages.PurgeHint),
-      Button(
-        label = Val(Messages.Preview),
-        onClick = Observer[Unit] { _ =>
-          problem.set(None)
-          receipt.set(None)
-          step.set(ChangeStep.Planning)
-          planning.set(true)
-        },
-        disabled = step.signal.map(isBusy),
-        testId = Some("topic-purge-plan")
+      ActionPermissionWrapper(
+        action = Button(
+          label = Val(Messages.Preview),
+          onClick = Observer[Unit] { _ =>
+            problem.set(None)
+            receipt.set(None)
+            step.set(ChangeStep.Planning)
+            planning.set(true)
+          },
+          disabled = step.signal.map(isBusy),
+          testId = Some("topic-purge-plan")
+        ),
+        capability = capability,
+        permitted = permitted,
+        testId = Some("topic-purge-plan-gate")
       ),
       child.maybe <-- step.signal.map {
         case ChangeStep.Planned(plan) =>
@@ -277,11 +310,16 @@ object TopicAdminPanel {
               // Nothing to confirm when there is nothing to delete.
               child.maybe <-- Val(
                 Option.when(!plan.isNoOp)(
-                  Button(
-                    label = Val(Messages.PurgeConfirm),
-                    onClick = Observer[Unit](_ => confirming.set(true)),
-                    variant = ButtonVariant.Danger,
-                    testId = Some("topic-purge-apply")
+                  ActionPermissionWrapper(
+                    action = Button(
+                      label = Val(Messages.PurgeConfirm),
+                      onClick = Observer[Unit](_ => confirming.set(true)),
+                      variant = ButtonVariant.Danger,
+                      testId = Some("topic-purge-apply")
+                    ),
+                    capability = capability,
+                    permitted = permitted,
+                    testId = Some("topic-purge-apply-gate")
                   )
                 )
               )

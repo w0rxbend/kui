@@ -107,6 +107,41 @@ class PermissionStoreSuite extends FunSuite {
     assert(now(store.allowsUnnamed(Production, Resource.Audit, Action.AuditView)))
   }
 
+  test("creatingSomethingAsksWhetherAnyPatternIsHeld") {
+    // A new topic's name does not exist yet, so there is nothing to match a grant's pattern against.
+    // `allows` needs a name and `allowsUnnamed` is for resources that never have one; this is the third
+    // question, and it is deliberately the same weakening the gateway applies to an endpoint whose
+    // resource is named only in the request body.
+    val store = new Permissions
+    store.adopt(List(grant(ClusterScope.Every, Resource.Topic, "payments\\..*", Set(Action.TopicCreate))))
+
+    assert(now(store.allowsAny(Production, Resource.Topic, Action.TopicCreate)))
+  }
+
+  test("creatingIsRefusedWithNoGrantOfThatActionAtAll") {
+    // The case that was shipping a broken control: a reader with VIEW and MESSAGES_READ was offered
+    // "New topic", which opened a form and ended in KUI-FORBIDDEN.
+    val store = new Permissions
+    store.adopt(
+      List(grant(ClusterScope.Every, Resource.Topic, ".*", Set(Action.TopicView, Action.TopicMessagesRead)))
+    )
+
+    assert(!now(store.allowsAny(Production, Resource.Topic, Action.TopicCreate)))
+    assert(now(store.allowsAny(Production, Resource.Topic, Action.TopicView)))
+  }
+
+  test("creatingIsAllowedWhenTheDeploymentConfiguredNoAuthorization") {
+    // A deployment with no roles at all is not an empty grant list here: the gateway answers `/auth/me`
+    // with the whole vocabulary granted over every cluster, which is what keeps every control in place
+    // for the default, no-login deployment. This pins that this store reads that answer the same way
+    // `allows` does, and that a store which has not been filled in yet refuses rather than guesses.
+    val everything = new Permissions
+    everything.adopt(List(grant(ClusterScope.Every, Resource.Topic, ".*", Set(Action.TopicCreate))))
+    assert(now(everything.allowsAny(Production, Resource.Topic, Action.TopicCreate)))
+
+    assert(!now(new Permissions().allowsAny(Production, Resource.Topic, Action.TopicCreate)))
+  }
+
   test("everyPermissionIsWithdrawnWhenTheSessionExpires") {
     // The store is the session's, so an expiry has to take the controls away with it. A delete button
     // left enabled after a logout belongs to a session the server has already forgotten.

@@ -8,6 +8,8 @@ import sttp.tapir.{Endpoint, PublicEndpoint}
 
 import kui.contracts.ErrorEnvelope
 import kui.kernel.{ClusterId, TopicName}
+import kui.security.rbac.{Action, ClusterPermission, ClusterScope, RbacPolicy, Resource, ResourcePattern}
+import kui.ui.kernel.state.Permissions
 import kui.ui.kernel.api.{ApiClient, ApiError}
 import kui.ui.messages.browse.{BrowseEvent, BrowseQuery, BrowseSession}
 import kui.ui.kernel.sse.SseHandle
@@ -63,10 +65,35 @@ final class MessagesPageSuite extends FunSuite {
           .asInstanceOf[SseHandle[BrowseEvent]]
     )
 
-  private def mounted(body: dom.Element => Unit): Unit = {
+  /** A role that may do everything, which is what the gateway hands a deployment with no authorization
+    * configured — the state every other test on this page assumes.
+    */
+  private def everything: Permissions = permissionsFor(Resource.Topic.allActions)
+
+  /** A reader: may look and may read records, and may not write any. */
+  private def reader: Permissions =
+    permissionsFor(Set(Action.TopicView, Action.TopicMessagesRead))
+
+  private def permissionsFor(actions: Set[Action]): Permissions = {
+    val store = new Permissions
+    store.adopt(
+      List(
+        ClusterPermission(
+          ClusterScope.Every,
+          RbacPolicy.permission(Resource.Topic, ResourcePattern.compile(".*").toOption, actions)
+        )
+      )
+    )
+    store
+  }
+
+  private def mounted(body: dom.Element => Unit): Unit = mountedAs(everything)(body)
+
+  private def mountedAs(permissions: Permissions)(body: dom.Element => Unit): Unit = {
     val container = dom.document.createElement("div")
     dom.document.body.appendChild(container): Unit
-    val root = render(container, MessagesPage(topic, cluster, StubApi, Val("UTC"), session))
+    val root =
+      render(container, MessagesPage(topic, cluster, StubApi, Val("UTC"), session, permissions = permissions))
     try body(container)
     finally {
       root.unmount(): Unit
@@ -102,5 +129,20 @@ final class MessagesPageSuite extends FunSuite {
 
   test("theTopicIsTheHeading") {
     mounted(container => assert(container.textContent.contains(topic.value), container.textContent))
+  }
+
+  test("aReaderIsNotOfferedPublish") {
+    // The defect this pins: "Publish" was on this screen for everybody, including a role holding only
+    // TOPIC: [VIEW, MESSAGES_READ], and it opened a form that took a payload and ended in KUI-FORBIDDEN.
+    mountedAs(reader) { container =>
+      val publish = find(container, "messages-publish")
+      assertEquals(publish.getAttribute("disabled"), "")
+    }
+  }
+
+  test("someoneWhoMayProduceStillGetsPublish") {
+    mounted { container =>
+      assertEquals(find(container, "messages-publish").getAttribute("disabled"), null)
+    }
   }
 }

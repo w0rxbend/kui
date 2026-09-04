@@ -6,6 +6,7 @@ import kui.kernel.TopicName
 import kui.topic.contract.dto.{CreateTopicRequest, CreatedTopicDto}
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
+import kui.ui.kernel.state.FeatureState
 import kui.ui.topics.{Messages, TopicsCss}
 
 /** The button that opens "New topic", and the form behind it.
@@ -38,7 +39,8 @@ object CreateTopicDialog {
 
   def apply(
       create: CreateTopicRequest => EventStream[Either[ApiError, CreatedTopicDto]],
-      onCreated: TopicName => Unit
+      onCreated: TopicName => Unit,
+      permitted: Signal[Boolean] = Val(true)
   ): HtmlElement = {
     val open: Var[Boolean] = Var(false)
     val name: Var[String] = Var("")
@@ -106,15 +108,29 @@ object CreateTopicDialog {
 
     div(
       cls := TopicsCss.CreateWrapper,
-      Button(
-        label = Val(Messages.CreateTopic),
-        onClick = Observer[Unit] { _ =>
-          reset()
-          open.set(true)
-        },
-        variant = ButtonVariant.Primary,
-        icon = Some(() => Icon.plus),
-        testId = Some("topic-create-open")
+      // Gated, because it was not, and a `viewer` with `TOPIC: [VIEW, MESSAGES_READ]` was offered a
+      // "New topic" button that opened a form, accepted a name, and ended in `KUI-FORBIDDEN` — the exact
+      // shape of control this product keeps promising not to ship. Every other write on the topic screens
+      // already went through this wrapper; this one had been missed.
+      //
+      // Disabled with the reason on it rather than removed, which is ADR-032's choice throughout: a control
+      // that is simply absent leaves a user unable to tell "I may not" from "KUI cannot".
+      ActionPermissionWrapper(
+        action = Button(
+          label = Val(Messages.CreateTopic),
+          onClick = Observer[Unit] { _ =>
+            reset()
+            open.set(true)
+          },
+          variant = ButtonVariant.Primary,
+          icon = Some(() => Icon.plus),
+          testId = Some("topic-create-open")
+        ),
+        // Not gated on the topic service's health here: the list screen this sits on already tells the
+        // user when the service is unavailable, and the create call itself reports its own failure.
+        capability = Val(FeatureState.Ready),
+        permitted = permitted,
+        testId = Some("topic-create-gate")
       ),
       Dialog(
         open = open,

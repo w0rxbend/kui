@@ -3,8 +3,8 @@ package kui.ui.kernel.state
 import com.raquo.laminar.api.L.*
 
 import kui.kernel.{ClusterId, RoleName, UserName}
-import kui.security.{Principal, PrincipalKind}
 import kui.security.rbac.*
+import kui.security.{Principal, PrincipalKind}
 
 /** What the signed-in user is allowed to do, and the one place a screen asks.
   *
@@ -78,6 +78,30 @@ final class Permissions {
   /** The same question about a resource that has no name: the audit trail, ksqlDB, the ACL list. */
   def allowsUnnamed(cluster: ClusterId, resource: Resource, action: Action): Signal[Boolean] =
     decide(cluster, ResourceAccess.unnamed(resource, action))
+
+  /** Whether the user holds this action on **some** resource of this kind, whatever its name.
+    *
+    * The question a create asks. A new topic's name does not exist yet, so there is nothing to match a
+    * grant's pattern against, and neither [[allows]] (which needs a name) nor [[allowsUnnamed]] (which is for
+    * resources that never have one) answers it.
+    *
+    * This is deliberately the *same* weakening the gateway applies to an endpoint whose resource is named
+    * only in the request body (`EndpointDecision.bodyNamedGate`): somebody with no topic grant at all may not
+    * reach the create endpoint, and somebody whose grant is `payments\..*` may — and is then refused by the
+    * owning service, with the name in hand, if they ask for `orders`. Matching the server's rule exactly is
+    * the point: a stricter browser hides a control the server would have allowed, and a looser one offers a
+    * control the server refuses.
+    */
+  def allowsAny(cluster: ClusterId, resource: Resource, action: Action): Signal[Boolean] =
+    granted.signal.map { permissions =>
+      Rbac
+        .effectivePermissions(policyOf(permissions, cluster), Permissions.Holder, Some(cluster))
+        .exists(permission => permission.resource == resource && permission.actions.contains(action))
+    }
+
+  // A deployment with no authorization configured needs no special case here. The gateway answers
+  // `/auth/me` with the *whole* vocabulary granted over every cluster in that case, so this store is
+  // holding a full grant list rather than an empty one, exactly as `allows` already relies on.
 
   /** The subset of `items` the user may see, for a list a screen renders.
     *
@@ -173,4 +197,7 @@ object PermissionStore {
 
   def allowsUnnamed(cluster: ClusterId, resource: Resource, action: Action): Signal[Boolean] =
     current.allowsUnnamed(cluster, resource, action)
+
+  def allowsAny(cluster: ClusterId, resource: Resource, action: Action): Signal[Boolean] =
+    current.allowsAny(cluster, resource, action)
 }

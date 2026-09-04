@@ -9,10 +9,12 @@ import kui.contracts.paging.PageDto
 import kui.contracts.topic.TopicRowDto
 import kui.kernel.search.SearchMode
 import kui.kernel.{ClusterId, PageRequest, PageSize, PositiveInt, Sort, SortOrder}
+import kui.security.rbac.{Action, Resource}
 import kui.topic.contract.{TopicListParams, TopicQueryCodecs, TopicSortField}
 import kui.ui.kernel.component.*
 import kui.ui.kernel.prefs.{Favourites, PreferenceStore}
 import kui.ui.kernel.query.UrlParams
+import kui.ui.kernel.state.{PermissionStore, Permissions}
 import kui.ui.topics.admin.CreateTopicDialog
 import kui.ui.topics.{Messages, TopicsCss, TopicsQueries}
 
@@ -83,7 +85,11 @@ object TopicListPage {
       zone: Signal[String],
       now: () => Instant = () => Instant.now(),
       store: PreferenceStore = PreferenceStore.browser,
-      tableViewportHeight: Var[Int] = Var(0)
+      tableViewportHeight: Var[Int] = Var(0),
+      /** What this user may do. A parameter with a default, exactly as `TopicDetailPage` takes it, so a suite
+        * can drive the screen with a chosen role instead of the process-wide singleton.
+        */
+      permissions: Permissions = PermissionStore.current
   ): HtmlElement = {
 
     // --- The state, all of it read out of the URL -------------------------------------------------
@@ -216,7 +222,10 @@ object TopicListPage {
           // Straight to the new topic. The list is invalidated by the call itself, but a list is not what
           // somebody who has just created a topic wants to look at — and landing on the topic is also the
           // proof that it exists.
-          onCreated = created => navigate(cluster, created.value)
+          onCreated = created => navigate(cluster, created.value),
+          // "May this person create *some* topic on this cluster?" — the same question the gateway asks
+          // of this endpoint, because the topic's name is in the request body and does not exist yet.
+          permitted = permissions.allowsAny(cluster, Resource.Topic, Action.TopicCreate)
         )
       ),
       // The URL is authoritative, so the table's sort is pushed *into* it whenever the URL changes, and the

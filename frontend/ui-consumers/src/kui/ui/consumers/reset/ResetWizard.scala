@@ -10,6 +10,7 @@ import kui.kernel.group.ResetTarget
 import kui.ui.consumers.{ConsumersCss, Messages, Numbers}
 import kui.ui.kernel.api.ApiError
 import kui.ui.kernel.component.*
+import kui.ui.kernel.state.FeatureState
 import kui.ui.kernel.time.Timestamps
 
 /** Where the wizard is. One value, so that the screen cannot be in two of these at once.
@@ -94,7 +95,12 @@ object ResetWizard {
       plan: ResetPlanRequest => EventStream[Either[ApiError, ResetPlanDto]],
       applyPlan: String => EventStream[Either[ApiError, ResetPlanDto]],
       zone: Signal[String],
-      now: () => Instant = () => Instant.now()
+      now: () => Instant = () => Instant.now(),
+      /** Whether this user may reset this group's offsets. Gates the way *in* rather than the final "Apply":
+        * a wizard somebody may open, fill in and preview, only to be refused at the last step, is three
+        * screens of work thrown away and reads as a fault in KUI rather than as a permission.
+        */
+      permitted: Signal[Boolean] = Val(true)
   ): HtmlElement = {
     val open: Var[Boolean] = Var(false)
     val step: Var[ResetStep] = Var(ResetStep.Composing)
@@ -188,11 +194,16 @@ object ResetWizard {
             testId = Some("group-reset-close")
           )
         else
-          Button(
-            label = Val(Messages.ResetOpen),
-            onClick = Observer[Unit](_ => open.set(true)),
-            variant = ButtonVariant.Secondary,
-            testId = Some("group-reset-open")
+          ActionPermissionWrapper(
+            action = Button(
+              label = Val(Messages.ResetOpen),
+              onClick = Observer[Unit](_ => open.set(true)),
+              variant = ButtonVariant.Secondary,
+              testId = Some("group-reset-open")
+            ),
+            capability = Val(FeatureState.Ready),
+            permitted = permitted,
+            testId = Some("group-reset-open-gate")
           )
       ),
       child.maybe <-- problem.signal.map(

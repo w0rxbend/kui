@@ -7,11 +7,13 @@ import com.raquo.laminar.api.L.*
 
 import kui.kernel.{ClusterId, TopicName}
 import kui.message.contract.{BrowseAddress, MessageDto}
+import kui.security.rbac.{Action, Resource}
 import kui.ui.kernel.api.ApiClient
 import kui.ui.kernel.component.*
 import kui.ui.kernel.file.Download
 import kui.ui.kernel.query.UrlParams
 import kui.ui.kernel.sse.{SseConnection, SseError}
+import kui.ui.kernel.state.{FeatureState, PermissionStore, Permissions}
 import kui.ui.messages.browse.{BrowseQuery, BrowseSession}
 import kui.ui.messages.filter.FilterEditor
 import kui.ui.messages.produce.{ProduceDraft, ProduceDrawer, ResendDrawer, ResendTarget}
@@ -93,8 +95,21 @@ object MessagesPage {
       api: ApiClient,
       zone: Signal[String],
       session: BrowseSession,
-      trackHref: String = ""
+      trackHref: String = "",
+      /** What this user may do. A parameter with a default, as on the topic and group screens, so a suite can
+        * drive this page with a chosen role rather than the process-wide singleton.
+        */
+      permissions: Permissions = PermissionStore.current
   ): HtmlElement = {
+
+    /** Whether this user may write records into this topic.
+      *
+      * Nothing on this screen consulted it. "Publish", "Republish" and "Resend" were offered to every
+      * visitor, including a role holding only `TOPIC: [VIEW, MESSAGES_READ]`, and each of them opened a form,
+      * took a payload and ended in `KUI-FORBIDDEN` from the gateway.
+      */
+    val mayProduce: Signal[Boolean] =
+      permissions.allows(cluster, Resource.Topic, topic.value, Action.TopicMessagesProduce)
 
     /** What the two drawers are showing. `None` is closed.
       *
@@ -196,7 +211,7 @@ object MessagesPage {
           a(href := trackHref, dataAttr("testid") := "messages-track-link", Messages.TrackLink)
         )
       ),
-      controls(query, startKind, running, rewrite, session, pressed, draft, topic, view),
+      controls(query, startKind, running, rewrite, session, pressed, draft, topic, view, mayProduce),
       // The smart filter, under the control bar rather than on it: it is a paragraph of expression with
       // its own help and its own failure, and a multi-line box wedged between two dropdowns would make the
       // bar unreadable for the sake of a control most browses do not use.
@@ -226,7 +241,7 @@ object MessagesPage {
             zone = zone,
             empty = emptyState(session, running),
             testId = Some("messages-table"),
-            actions = record => recordActions(topic, record, draft, resendTarget)
+            actions = record => recordActions(topic, record, draft, resendTarget, mayProduce)
           )
       },
       ProduceDrawer(cluster, draft, api),
@@ -276,7 +291,8 @@ object MessagesPage {
       pressed: EventBus[Unit],
       draft: Var[Option[ProduceDraft]],
       topic: TopicName,
-      view: Signal[String]
+      view: Signal[String],
+      mayProduce: Signal[Boolean]
   ): HtmlElement =
     div(
       cls := MessagesCss.Controls,
@@ -431,11 +447,16 @@ object MessagesPage {
       // Publish is on the control bar and not beside Read, because it is the screen's other job rather
       // than a variant of its first one. Secondary, so that the primary action on a reading screen stays
       // the one that reads.
-      Button(
-        label = Val(Messages.Publish),
-        onClick = Observer[Unit](_ => draft.set(Some(ProduceDraft.empty(topic)))),
-        variant = ButtonVariant.Secondary,
-        testId = Some("messages-publish")
+      ActionPermissionWrapper(
+        action = Button(
+          label = Val(Messages.Publish),
+          onClick = Observer[Unit](_ => draft.set(Some(ProduceDraft.empty(topic)))),
+          variant = ButtonVariant.Secondary,
+          testId = Some("messages-publish")
+        ),
+        capability = Val(FeatureState.Ready),
+        permitted = mayProduce,
+        testId = Some("messages-publish-gate")
       )
     )
 
@@ -449,8 +470,13 @@ object MessagesPage {
       topic: TopicName,
       record: kui.message.contract.MessageDto,
       draft: Var[Option[ProduceDraft]],
-      resendTarget: Var[Option[ResendTarget]]
+      resendTarget: Var[Option[ResendTarget]],
+      mayProduce: Signal[Boolean]
   ): List[HtmlElement] =
+    // Hidden rather than disabled-with-a-reason, which is the one place this screen departs from ADR-032's
+    // usual choice. These two sit on *every* open record: a reader with no write permission would meet the
+    // same tooltip on every row of a thousand-row browse, which is not an explanation, it is noise. The
+    // control bar's "Publish" above carries the explanation once, where it can be read.
     List(
       Button(
         label = Val(Messages.Republish),
@@ -458,14 +484,14 @@ object MessagesPage {
         variant = ButtonVariant.Secondary,
         size = Size.Sm,
         testId = Some(s"record-${record.partition.value}-${record.offset.value}-republish")
-      ).amend(title := Messages.RepublishHint),
+      ).amend(title := Messages.RepublishHint, display <-- mayProduce.map(if _ then "" else "none")),
       Button(
         label = Val(Messages.Resend),
         onClick = Observer[Unit](_ => resendTarget.set(Some(ResendTarget.of(topic, record)))),
         variant = ButtonVariant.Secondary,
         size = Size.Sm,
         testId = Some(s"record-${record.partition.value}-${record.offset.value}-resend")
-      ).amend(title := Messages.ResendHint)
+      ).amend(title := Messages.ResendHint, display <-- mayProduce.map(if _ then "" else "none"))
     )
 
   /** Hands the user the records on screen as a CSV file.

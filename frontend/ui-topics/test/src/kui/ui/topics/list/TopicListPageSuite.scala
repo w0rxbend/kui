@@ -14,12 +14,14 @@ import kui.contracts.paging.{PageDto, PageInfo}
 import kui.contracts.topic.TopicRowDto
 import kui.contracts.{ErrorEnvelope, Section}
 import kui.kernel.{ClusterId, SortOrder, TopicName}
+import kui.security.rbac.{Action, ClusterPermission, ClusterScope, RbacPolicy, Resource, ResourcePattern}
 import kui.topic.contract.TopicSortField
 import kui.topic.contract.dto.TopicsResponse
 import kui.ui.kernel.api.{ApiClient, ApiError}
 import kui.ui.kernel.component.DataTable
 import kui.ui.kernel.prefs.{Favourites, PreferenceStore}
 import kui.ui.kernel.query.UrlParams
+import kui.ui.kernel.state.Permissions
 import kui.ui.topics.TopicsQueries
 
 /** The topic list, in a document.
@@ -78,7 +80,10 @@ final class TopicListPageSuite extends FunSuite {
     def write(key: String, value: String): Unit = values.update(key, value): Unit
   }
 
-  final private class Fixture(store: PreferenceStore = new MemoryStore) {
+  final private class Fixture(
+      store: PreferenceStore = new MemoryStore,
+      permissions: Permissions = everything
+  ) {
     val api = new FakeApi
     val opened: mutable.ListBuffer[(ClusterId, String)] = mutable.ListBuffer.empty
 
@@ -96,8 +101,44 @@ final class TopicListPageSuite extends FunSuite {
       zone = Val("UTC"),
       now = () => Instant.parse("2026-09-03T10:20:00Z"),
       store = store,
-      tableViewportHeight = viewport
+      tableViewportHeight = viewport,
+      permissions = permissions
     )
+  }
+
+  /** A role that may do everything, which is what the gateway hands a deployment with no authorization
+    * configured. Without it every fixture would start with an empty grant list, which is the "not signed
+    * in yet" state and not the default one.
+    */
+  private def everything: Permissions = {
+    val store = new Permissions
+    store.adopt(
+      List(
+        ClusterPermission(
+          ClusterScope.Every,
+          RbacPolicy.permission(Resource.Topic, ResourcePattern.compile(".*").toOption, Resource.Topic.allActions)
+        )
+      )
+    )
+    store
+  }
+
+  /** A reader: may look at topics and read their records, and nothing else. */
+  private def reader: Permissions = {
+    val store = new Permissions
+    store.adopt(
+      List(
+        ClusterPermission(
+          ClusterScope.Every,
+          RbacPolicy.permission(
+            Resource.Topic,
+            ResourcePattern.compile(".*").toOption,
+            Set(Action.TopicView, Action.TopicMessagesRead)
+          )
+        )
+      )
+    )
+    store
   }
 
   private def mounted[A](fixture: Fixture)(check: dom.Element => A): A = {
@@ -362,6 +403,25 @@ final class TopicListPageSuite extends FunSuite {
     mounted(fixture) { root =>
       fixture.api.send(threeTopics)
       assertEquals(rowElements(root), 3)
+    }
+  }
+
+  test("aReaderIsNotOfferedNewTopic") {
+    // The defect this pins: `viewer`, holding TOPIC: [VIEW, MESSAGES_READ], was shown "New topic", which
+    // opened a form, took a name and ended in KUI-FORBIDDEN from the gateway. Observed in a browser
+    // against the quickstart with authentication turned on.
+    mounted(new Fixture(permissions = reader)) { root =>
+      val button = root.querySelector("[data-testid='topic-create-open']")
+      assert(button != null, "the button should still be on the screen, carrying its reason")
+      assertEquals(button.getAttribute("disabled"), "")
+    }
+  }
+
+  test("someoneWhoMayCreateStillGetsTheButton") {
+    mounted(new Fixture()) { root =>
+      val button = root.querySelector("[data-testid='topic-create-open']")
+      assert(button != null, "no create button")
+      assertEquals(button.getAttribute("disabled"), null)
     }
   }
 }
