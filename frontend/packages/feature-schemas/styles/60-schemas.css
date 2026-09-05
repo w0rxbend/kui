@@ -1,0 +1,165 @@
+/* ------------------------------------------------------------------------------------------------
+ * The schema registry screens
+ *
+ * The global compatibility level is the headline of the subject list rather than a line in a
+ * settings page, because it decides what every inheriting subject will accept tomorrow — and `NONE`,
+ * which means the registry checks nothing at all, is the value somebody switches on during an
+ * incident and never switches back. It gets its own band, and the warning beside it is in words as
+ * well as in a colour.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-schemas,
+.kui-subject {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-schemas__title,
+.kui-subject__title {
+  margin: 0;
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* The subject's own name is the heading and is copied into a command line, so it keeps the
+ * registry's exact spelling in a monospaced face. */
+.kui-subject__title {
+  font-family: var(--kui-font-family-mono);
+  overflow-wrap: anywhere;
+}
+
+.kui-schemas__global,
+.kui-subject__compat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3) var(--kui-space-4);
+  background: var(--kui-color-surface-raised);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-schemas__global-label,
+.kui-subject__compat-label,
+.kui-subject__versions-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* Not `--kui-color-text-subtle`: this sentence sits on `surface-raised` and says that nothing is
+ * being checked, which is the one line on the screen that must not be quiet. */
+.kui-schemas__none,
+.kui-subject__compat-source {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-schemas__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-4);
+}
+
+.kui-schemas__count {
+  margin-inline-start: auto;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-schemas__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kui-schemas__item {
+  border-block-end: 1px solid var(--kui-color-border);
+}
+
+/* The whole row is the target. A subject name is the only thing in it, and a link that is exactly
+ * as wide as its text is a link people miss. */
+.kui-schemas__link {
+  display: block;
+  padding: var(--kui-space-3);
+  font-family: var(--kui-font-family-mono);
+  overflow-wrap: anywhere;
+}
+
+.kui-subject__trail {
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-subject__versions,
+.kui-subject__references {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-3);
+}
+
+.kui-subject__version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+}
+
+.kui-subject__version-list a {
+  display: inline-block;
+  padding: var(--kui-space-1) var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The version being read. `aria-current="page"` carries it for a screen reader; this is the same
+ * fact for everyone else, and it is a border rather than only a background so it survives a
+ * high-contrast mode that drops backgrounds. */
+.kui-subject__version-list a[aria-current="page"] {
+  border-color: var(--kui-color-accent);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-subject__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-6);
+  margin: 0;
+}
+
+.kui-subject__facts dt {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-subject__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--kui-font-weight-medium);
+}
+
+/* Exactly as the registry stores it: not reformatted, not wrapped. A schema is compared byte for
+ * byte by the registry and by whatever tooling the operator pastes it into, so it scrolls inside its
+ * own box rather than being made to fit. `tabindex` because a scrolling region that cannot be
+ * reached by keyboard is a region a keyboard user cannot read. */
+.kui-subject__definition {
+  margin: 0;
+  padding: var(--kui-space-3);
+  max-height: 32rem;
+  overflow: auto;
+  background: var(--kui-color-surface-sunken, var(--kui-color-surface-raised));
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  white-space: pre;
+}

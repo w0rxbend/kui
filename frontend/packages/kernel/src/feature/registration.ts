@@ -35,7 +35,7 @@ import type { IconName } from "../icon.jsx";
  * A string union rather than an enum so that a registration table is checked exhaustively and a
  * bookmark naming a feature this build does not have simply fails to match.
  */
-export type FeatureId = "clusters" | "topics" | "messages" | "consumers";
+export type FeatureId = "clusters" | "topics" | "messages" | "consumers" | "schemas";
 
 /**
  * The service that backs a feature.

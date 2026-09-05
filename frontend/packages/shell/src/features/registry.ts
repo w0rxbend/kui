@@ -92,6 +92,22 @@ export const featureRegistry: readonly FeatureRegistration[] = [
     sidebar: true,
     load: () => import("@kui/feature-consumers").then(featureModule),
   },
+  {
+    id: "schemas",
+    serviceId: "schema",
+    viewAction: Actions.SchemaView,
+    label: "Schemas",
+    icon: "schema",
+    group: "Cluster",
+    order: 400,
+    requiresCluster: true,
+    sidebar: true,
+    /* Plenty of clusters have no registry at all, and this is the feature where "not configured" is
+       the ordinary case rather than a fault. The capability fold already draws it as unavailable
+       with the reason, which is the whole point of ADR-039 — the entry stays visible and says why,
+       rather than vanishing and leaving somebody wondering whether KUI supports schemas. */
+    load: () => import("@kui/feature-schemas").then(featureModule),
+  },
 ];
 
 /** The registration for one id, or `undefined` when this build has no such feature. */

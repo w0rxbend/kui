@@ -1,0 +1,12 @@
+{
+    "items": [
+        "orders.avro-value"
+    ],
+    "page": {
+        "page": 1,
+        "pageSize": 25,
+        "totalItems": 1,
+        "pageCount": 1,
+        "nextPageToken": null
+    }
+}

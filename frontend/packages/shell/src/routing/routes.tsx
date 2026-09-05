@@ -125,6 +125,16 @@ export function shellRoutes(views: RouteViews) {
                 { path: "/:groupId", component: gate("consumers") },
               ],
             },
+            {
+              path: "/schemas",
+              children: [
+                { path: "/", component: gate("schemas") },
+                /* The version is a query parameter rather than a segment: a subject's versions are
+                   one resource seen at different points, and `?version=3` keeps the subject's own
+                   address stable while somebody steps through them. */
+                { path: "/:subject", component: gate("schemas") },
+              ],
+            },
           ],
         },
       ],
@@ -175,6 +185,8 @@ export function landingFor(
       return cluster === undefined ? undefined : paths.clusters(cluster).topics();
     case "consumers":
       return cluster === undefined ? undefined : paths.clusters(cluster)["consumer-groups"]();
+    case "schemas":
+      return cluster === undefined ? undefined : paths.clusters(cluster).schemas();
     case "messages":
       // Its URL names a topic as well as a cluster, and the navigation has no topic to name.
       return undefined;

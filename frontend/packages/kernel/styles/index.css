@@ -137,3 +137,7 @@
 @import "../../feature-topics/styles/50-topics.css";
 /* The SolidJS topic list and topic-page frame, for the same reason as `61-message-browser.css`. */
 @import "../../feature-topics/styles/51-topic-screens.css";
+
+/* The schema registry screens: the subject list with the registry's global compatibility level as
+ * its headline, and one subject's versions and schema text. */
+@import "../../feature-schemas/styles/60-schemas.css";

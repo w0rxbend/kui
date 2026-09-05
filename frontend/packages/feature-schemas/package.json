@@ -1,0 +1,19 @@
+{
+  "name": "@kui/feature-schemas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The schema registry feature microfrontend",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@kui/api": "workspace:*",
+    "@kui/kernel": "workspace:*",
+    "@solidjs/router": "2.0.0-next.21",
+    "solid-js": "2.0.0-rc.6",
+    "@solidjs/web": "2.0.0-rc.6"
+  }
+}

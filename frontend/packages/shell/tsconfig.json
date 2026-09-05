@@ -12,6 +12,7 @@
     { "path": "../feature-clusters" },
     { "path": "../feature-topics" },
     { "path": "../feature-messages" },
-    { "path": "../feature-consumers" }
+    { "path": "../feature-consumers" },
+    { "path": "../feature-schemas" }
   ]
 }
