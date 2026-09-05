@@ -1,0 +1,255 @@
+/* The message browser, rebuilt for the SolidJS frontend from screenshots `02` and `03`.
+ *
+ * ## Why this is a second file beside 60-messages.css
+ *
+ * `60-messages.css` styles the pre-migration Laminar screen, which is still shipped and still
+ * reviewed against its own screenshots. The two sheets draw the same ideas from two different
+ * sources and use separate class names (`.kui-messages` there, `.kui-browse` here), so that the old
+ * frontend keeps the appearance it was signed off with until it is retired. Merging them during a
+ * framework migration would be a visual change nobody could bisect.
+ *
+ * Everything measurable below was taken off the screenshots and is recorded beside the rule. Every
+ * colour, space, radius and duration is a token: a value that cannot be expressed as one is a
+ * finding about the token set, not a licence to write a hex code here.
+ *
+ * The record rows themselves are not in this file. They are `27-record-list.css` in the kernel,
+ * because a record row is a design-system component that this screen happens to be the only current
+ * user of — the track/event screens will be the second. */
+
+/* --- The screen ------------------------------------------------------------------------------- */
+
+.kui-browse {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  /* A flex child will not shrink below its content unless told it may, and the record list inside
+   * needs a parent that can shrink or its scroller never scrolls — the page scrolls instead. */
+  min-height: 0;
+}
+
+/* --- The control bar -------------------------------------------------------------------------- */
+
+/* Measured in `02`: the controls span y 182–209, so 27px tall, on `#242930`
+ * (`--kui-color-surface-hover`) — a resting input and a hovered surface share one value in this
+ * palette, which is §2 of the spec rather than a coincidence.
+ *
+ * It **wraps**; it never scrolls sideways. A control that has slid off the right edge of a bar is a
+ * control nobody finds, and the seek modes that reveal a second input are exactly the case that
+ * makes the bar too long. */
+.kui-browse-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+/* Everything after this is pushed to the right edge: the read/pause/stop control and the LIVE
+ * pill. `margin-inline-start: auto` rather than `justify-content: space-between`, so that the group
+ * stays together when the bar wraps instead of one of its members being stranded on a line of its
+ * own. */
+.kui-browse-bar__end {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin-inline-start: auto;
+}
+
+/* The timestamp seek. A native `datetime-local` input, deliberately: it is the one control in this
+ * product where the browser's own is better than anything we would draw — it carries the platform's
+ * calendar, its locale and its keyboard behaviour, and a hand-built date picker is a year of
+ * defects. It is dressed to match the bar rather than replaced. */
+.kui-browse-bar__stamp {
+  display: inline-flex;
+  align-items: center;
+}
+
+.kui-browse-bar__stamp-input {
+  height: 26px;
+  padding-inline: var(--kui-space-3);
+  border: none;
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-strong);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The browser paints its own calendar glyph in the user agent's colour, which on a dark surface is
+ * a black square. Inverting it is the only way to reach it: it is a shadow-DOM part with no colour
+ * property of its own. */
+.kui-browse-bar__stamp-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+/* --- The partition picker --------------------------------------------------------------------- */
+
+/* A custom listbox, not a native `<select multiple>`, for the reason the spec gives for every
+ * control here: the native one cannot be made to look like the rest of the page, and a control that
+ * looks like nothing else on the screen reads as broken. */
+.kui-partition-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.kui-partition-picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  height: 26px;
+  padding-inline: var(--kui-space-3);
+  border: none;
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-hover);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.kui-partition-picker__trigger:disabled {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+/* The prefix is the quiet half of the pair ("Partitions:") and the value is the loud half
+ * ("all 12"). Both are always present: a control reading only `all 12` is a number with no name. */
+.kui-partition-picker__prefix {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-partition-picker__value {
+  color: var(--kui-color-text-strong);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+}
+
+.kui-partition-picker__chevron {
+  color: var(--kui-color-text-muted);
+  transition: transform var(--kui-duration-fast) ease;
+}
+
+.kui-partition-picker__trigger[aria-expanded="true"] .kui-partition-picker__chevron {
+  transform: rotate(180deg);
+}
+
+/* The menu opens **below** its trigger. An explicit `top` rather than none: a positioned element
+ * with no `top` sits at its static position, which put the select's menu on top of the control it
+ * was opened from — hiding the current value exactly when somebody is choosing a new one. That is a
+ * defect this project already found in the kernel's own select, and it is the same mistake twice if
+ * it is repeated here. */
+.kui-partition-picker__menu {
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(100% + var(--kui-space-1));
+  z-index: var(--kui-z-dropdown);
+  min-width: 200px;
+  padding: var(--kui-space-2);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-overlay);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-partition-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-block-end: var(--kui-space-2);
+  border-block-end: 1px solid var(--kui-color-border);
+  margin-block-end: var(--kui-space-2);
+}
+
+.kui-partition-picker__action {
+  border: none;
+  background: none;
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
+  color: var(--kui-color-primary);
+  font-family: inherit;
+  font-size: var(--kui-font-size-xs);
+  cursor: pointer;
+}
+
+.kui-partition-picker__action:hover {
+  background: var(--kui-color-state-layer);
+}
+
+/* Scrolls inside itself. A topic with two hundred partitions would otherwise open a menu taller
+ * than the window, whose bottom half is unreachable because the page behind it does not scroll. */
+.kui-partition-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* --- The status line -------------------------------------------------------------------------- */
+
+/* What the stream is doing, how many records arrived, and how much Kafka was read to find them.
+ * The last figure is the one that makes a filtered browse interpretable — see `BrowseStatus`. */
+.kui-browse__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-3);
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-browse__phase {
+  color: var(--kui-color-text);
+}
+
+.kui-browse__figure {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Held records are the one figure on this line that is a call to action rather than a report: the
+ * screen is deliberately behind, and the number says how far. */
+.kui-browse__figure--held {
+  color: var(--kui-color-warning);
+}
+
+.kui-browse__reading {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: var(--kui-space-5);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The failure sits beside the records rather than replacing them, and is outlined rather than a
+ * filled danger slab: a filled red block above a list is louder than anything in the list, which is
+ * backwards when the list is the evidence and the block is the footnote. */
+.kui-browse__failure {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border: 1px solid color-mix(in srgb, var(--kui-color-danger) 45%, transparent);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-elevated);
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-browse__more,
+.kui-browse__produce {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--kui-space-2);
+}
+
+/* At this width the bar's four controls no longer fit on one line at their natural sizes, and the
+ * filter field is the one that must keep its width — it is the control being typed into. So it
+ * takes the whole of its own line and the rest share the one above. */
+@media (max-width: 900px) {
+  .kui-browse-bar__end {
+    margin-inline-start: 0;
+  }
+}
