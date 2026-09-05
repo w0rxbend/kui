@@ -37,6 +37,7 @@ import {
   EmptyState,
   Icon,
   Pagination,
+  SegmentedControl,
   StatusPill,
   TextField,
   VirtualizedTable,
@@ -44,6 +45,7 @@ import {
   type Sort,
 } from "@kui/kernel";
 import { healthChip } from "./TopicPage.jsx";
+import { TopicCards } from "./TopicCards.jsx";
 import type { TopicRow } from "./types.js";
 
 /**
@@ -65,6 +67,38 @@ export interface TopicListQuery {
   /** One-based, like the buttons. */
   readonly page: number;
   readonly pageSize: number;
+}
+
+/** Table or cards. Persisted per user, for the reason `SCREENS.md` §2.12 gives. */
+export type TopicView = "table" | "cards";
+
+/**
+ * Where the chosen view is remembered.
+ *
+ * The design is explicit that the choice must persist *per user*, not per visit: "an operator who
+ * prefers cards and gets a table on every navigation will conclude the control does not work". It
+ * lives in `localStorage` rather than in the query string, because it is a preference about how this
+ * person likes to read a list and not a property of the list being read — a link somebody sends
+ * should show the recipient the recipient's own preferred view.
+ */
+const VIEW_STORAGE_KEY = "kui.topics.view";
+
+export function storedView(): TopicView {
+  try {
+    return window.localStorage.getItem(VIEW_STORAGE_KEY) === "cards" ? "cards" : "table";
+  } catch {
+    // A private window, or a browser configured to block site data. A preference that cannot be
+    // read is not an error; it is the default.
+    return "table";
+  }
+}
+
+export function rememberView(view: TopicView): void {
+  try {
+    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+  } catch {
+    /* Nothing to do: the view still changes, it just will not be there next time. */
+  }
 }
 
 export const DEFAULT_TOPIC_QUERY: TopicListQuery = {
@@ -122,6 +156,7 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
    * requests, of which seven are already stale when they are sent.
    */
   const [typed, setTyped] = createSignal(props.query.search);
+  const [view, setView] = createSignal<TopicView>(storedView());
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   // A query the operator abandoned by navigating away must not arrive afterwards and re-fetch.
@@ -242,6 +277,19 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
             searchTimer = setTimeout(() => ask({ search: text.trim() }), 300);
           }}
         />
+        <SegmentedControl<TopicView>
+          label="View"
+          size="sm"
+          value={view()}
+          segments={[
+            { value: "table", label: "Table", icon: "table" },
+            { value: "cards", label: "Cards", icon: "cards" },
+          ]}
+          onChange={(next: TopicView) => {
+            setView(next);
+            rememberView(next);
+          }}
+        />
         <Checkbox
           label="Show internal topics"
           checked={showInternal()}
@@ -274,6 +322,11 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
         </p>
       </Show>
 
+      {/* The query, the filtering and the sorting belong to the *view* rather than to the table, so
+          switching between the two shows the same topics in a different shape — it does not reset
+          anything. That is `SCREENS.md` §3.3's rule and it is the difference between a view toggle
+          and a second screen. */}
+      <Show when={view() === "cards"} fallback={
       <VirtualizedTable<TopicRow>
         columns={columns}
         rows={visible()}
@@ -306,6 +359,24 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
           </Show>
         }
       />
+      }>
+        <Show
+          when={visible().length > 0}
+          fallback={
+            <EmptyState
+              kind={search().trim() === "" ? "empty" : "filtered"}
+              title={search().trim() === "" ? "No topics yet." : "No topic matches that text."}
+              description={
+                search().trim() === ""
+                  ? "A topic appears here as soon as one is created, by this page or by anything else that talks to the cluster."
+                  : "No topic on this cluster has that in its name. Clearing the search shows them all."
+              }
+            />
+          }
+        >
+          <TopicCards topics={visible()} onOpen={props.onOpen} formatBytes={formatBytes} />
+        </Show>
+      </Show>
 
       <Pagination
         page={props.query.page}

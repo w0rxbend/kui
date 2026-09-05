@@ -2,6 +2,7 @@ import type { JSX } from "@solidjs/web";
 import { createSignal } from "solid-js";
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { ThresholdValue } from "./ThresholdValue.jsx";
 import { Button } from "./Button.jsx";
 import { DataTable, type Column, type DataTableProps, type Sort } from "./DataTable.jsx";
 import { EmptyState, Missing } from "./EmptyState.jsx";
@@ -54,16 +55,22 @@ function stateChip(state: ConsumerGroup["state"]) {
  */
 function lagCell(lag: number | null) {
   if (lag === null) return <Missing />;
-  const tone =
-    lag === 0
-      ? "var(--kui-color-text-subtle)"
-      : lag >= 1000
-        ? "var(--kui-color-warning)"
-        : "var(--kui-color-text)";
+  /*
+   * `ThresholdValue`, not an inline colour.
+   *
+   * This used to paint `var(--kui-color-warning)` onto a bare span, which looked identical and was
+   * not the same thing: the table's refresh dim then took it to 3.99:1, because the exemption that
+   * keeps state-carrying colours legible while a table reloads is keyed on the component's class.
+   * A story that reimplements a component rather than using it is also a story that stops testing
+   * the component — which is how a contrast rule can pass everywhere it is applied and still fail
+   * on screen.
+   */
   return (
-    <span style={{ color: tone, "font-weight": lag >= 1000 ? "600" : "400" }}>
-      {lag.toLocaleString("en-GB")}
-    </span>
+    <ThresholdValue
+      value={lag.toLocaleString("en-GB")}
+      level={lag >= 1000 ? "warning" : "normal"}
+      announcement={() => "above the lag threshold"}
+    />
   );
 }
 

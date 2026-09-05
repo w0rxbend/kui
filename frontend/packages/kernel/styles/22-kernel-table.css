@@ -153,9 +153,29 @@
 }
 
 /* Loading dims the rows that are already there rather than replacing them. Replacing them would
- * collapse the table to nothing, jump the page, and jump it back a moment later. */
-.kui-table--loading .kui-table__body {
+ * collapse the table to nothing, jump the page, and jump it back a moment later.
+ *
+ * The dim is applied per *cell*, not to the whole body, so that a cell holding a status pill can be
+ * left alone. A pill's text sits on its own coloured container at a contrast the palette tunes to
+ * just above the 4.5:1 floor, so any dimming at all takes it under — refreshing a table dropped the
+ * success pill to 3.17:1 and the warning pill to 3.74:1. Those pills are the point of the row: a
+ * table being refreshed is exactly when somebody is watching to see whether anything has gone
+ * wrong, and the state is the thing they must still be able to read.
+ *
+ * It has to be done this way round. `opacity` establishes a stacking context and composites the
+ * whole subtree, so a descendant cannot opt out of an ancestor's fade — an `opacity: 1` on the pill
+ * would look like it worked and do nothing. */
+.kui-table--loading .kui-table__cell {
   opacity: var(--kui-opacity-stale);
+}
+
+/* A pill, or a figure that has crossed a threshold. Both carry a *state* in their colour, both are
+ * tuned to sit just above the contrast floor, and both are the thing somebody is watching for while
+ * the table refreshes. A dimmed threshold reading measured 3.99:1. */
+.kui-table--loading .kui-table__cell:has(.kui-pill),
+.kui-table--loading .kui-table__cell:has(.kui-threshold--over),
+.kui-table--loading .kui-table__cell:has(.kui-threshold--critical) {
+  opacity: 1;
 }
 
 /* The empty state fills the panel rather than sitting in a padded cell; the cell is only a

@@ -1,0 +1,235 @@
+/* ------------------------------------------------------------------------------------------------
+ * Kafka Connect and ksqlDB
+ *
+ * Neither has a service behind it. These styles exist so the screens can be designed and reviewed
+ * in Storybook before the services are written, which is the only way the product's own rules — a
+ * disabled control states its reason, an unknown state is never drawn as a healthy one, an
+ * unmeasured figure is never a zero — end up built in rather than retrofitted.
+ * ---------------------------------------------------------------------------------------------- */
+
+/* --- TaskBar ---------------------------------------------------------------------------------- */
+
+.kui-taskbar__row {
+  display: flex;
+  gap: 4px;
+}
+
+.kui-taskbar__task,
+.kui-taskbar__track {
+  height: 6px;
+  border-radius: var(--kui-radius-xs);
+}
+
+/* Equal widths whatever the count: the bar is a picture of *proportion*, and a connector with two
+ * tasks and one with twenty should both read at a glance. */
+.kui-taskbar__task {
+  flex: 1 1 0;
+  min-width: 4px;
+}
+
+.kui-taskbar__task--running {
+  background: var(--kui-color-success);
+}
+
+.kui-taskbar__task--failed {
+  background: var(--kui-color-danger);
+}
+
+.kui-taskbar__task--paused {
+  background: var(--kui-color-surface-overlay);
+}
+
+/* Not danger, and not success. A task whose state was not reported is a gap in what KUI knows, and
+ * a border rather than a fill is the shape that says so without claiming anything. */
+.kui-taskbar__task--unknown {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--kui-color-border-strong);
+}
+
+/* No tasks at all: one empty full-width track. Deliberately not a row of red — "there are no tasks"
+ * and "every task has failed" are different problems and must not look alike. */
+.kui-taskbar__track--empty {
+  display: block;
+  width: 100%;
+  background: var(--kui-color-surface-overlay);
+}
+
+/* --- ConnectorCard ---------------------------------------------------------------------------- */
+
+.kui-connector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-elevated);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+}
+
+.kui-connector__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-3);
+}
+
+.kui-connector__identity {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kui-connector__name {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.kui-connector__kind {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* Three facts on one line. They wrap rather than truncate: a truncated topic pattern is the one
+ * piece of this card somebody actually needs to read. */
+.kui-connector__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-1) var(--kui-space-3);
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-connector__topics {
+  font-family: var(--kui-font-family-mono);
+  overflow-wrap: anywhere;
+}
+
+.kui-connector__actions {
+  display: flex;
+  gap: var(--kui-space-2);
+}
+
+/* --- KsqlWorkspace ---------------------------------------------------------------------------- */
+
+.kui-ksql {
+  display: grid;
+  /* 1 : 1.4, from the design. Collapses to one column below the breakpoint rather than squeezing
+   * the editor, which is the pane that has to stay usable. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: var(--kui-space-4);
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .kui-ksql {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.kui-ksql__objects {
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-raised);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+}
+
+.kui-ksql__objects-title {
+  margin: 0 0 var(--kui-space-3);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-ksql__object-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-ksql__object {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-ksql__object-name {
+  font-family: var(--kui-font-family-mono);
+  font-weight: var(--kui-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.kui-ksql__object-kind,
+.kui-ksql__object-topic {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-ksql__object-topic {
+  font-family: var(--kui-font-family-mono);
+}
+
+.kui-ksql__empty {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-ksql__editor-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-ksql__editor {
+  width: 100%;
+  min-height: 14rem;
+  padding: var(--kui-space-3);
+  background: var(--kui-color-surface-elevated);
+  color: var(--kui-color-text);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  /* Vertical only. A horizontally resizable editor inside a grid column fights the layout, and SQL
+   * wants height rather than width. */
+  resize: vertical;
+}
+
+.kui-ksql__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-3);
+}
+
+/* Beside Run, because it decides whether a query reads the topic's history or only what arrives
+ * from now on — and the second, chosen by accident, looks exactly like a query that has hung. */
+.kui-ksql__offset {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-ksql__buttons {
+  display: flex;
+  gap: var(--kui-space-2);
+  margin-inline-start: auto;
+}
+
+.kui-ksql__result {
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  overflow: auto;
+}

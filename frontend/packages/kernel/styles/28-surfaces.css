@@ -368,7 +368,16 @@
  * survive — so it is set apart in mono and made selectable on its own. */
 .kui-stale-badge__code {
   font-family: var(--kui-font-family-mono);
-  color: var(--kui-color-text-subtle);
+  /* `currentColor`, not `--kui-color-text-subtle`.
+   *
+   * The badge sits on `--kui-color-warning-container`, and a *neutral* grey chosen for contrast
+   * against a neutral surface has no relationship to a coloured one: on the dark theme it came out
+   * at 3.27:1, well under the 4.5 this code needs — and this is the string an operator quotes when
+   * they escalate, so it is the last text on the badge that can afford to be hard to read.
+   *
+   * Inheriting the badge's own colour keeps it at whatever contrast the badge was designed for, in
+   * both themes, and cannot drift apart from the container again. */
+  color: currentColor;
   user-select: all;
 }
 
@@ -579,7 +588,11 @@
   flex: 1 1 100%;
   font-family: var(--kui-font-family-mono);
   font-size: var(--kui-font-size-xs);
-  color: var(--kui-color-text-subtle);
+  /* `text-muted`, not `text-subtle`. At eleven pixels on the dark theme's sheet surface, subtle
+   * measures 3.99:1 — and this is the code an operator copies into a support ticket after something
+   * has just failed, which makes it the worst string on the panel to make hard to read. `subtle` is
+   * for text nobody needs to read exactly. */
+  color: var(--kui-color-text-muted);
   user-select: all;
 }
 
@@ -818,7 +831,13 @@
   margin-left: var(--kui-space-2);
   font-family: var(--kui-font-family-mono);
   font-size: var(--kui-font-size-xs);
-  opacity: 0.85;
+  /* No opacity. It was 0.85, which took the danger banner's code from a passing ratio to 4.09:1
+   * against `--kui-color-danger-container` — the eleven-pixel monospace string an operator copies
+   * into a support ticket, made the least readable thing in the banner in order to look secondary.
+   *
+   * It is already set apart by the monospace face and the smaller size; it does not also need to be
+   * faded, and fading text that is already at its contrast floor is how a palette that passes in
+   * isolation fails in place. */
   user-select: all;
 }
 

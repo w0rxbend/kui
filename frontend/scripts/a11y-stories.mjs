@@ -97,6 +97,33 @@ for (const theme of ["dark", "light"]) {
       process.exit(2);
     }
 
+    /*
+     * Wait for the entry animations to finish before measuring anything.
+     *
+     * Contrast is computed from what is actually painted, and a dialog or a drawer fades in — so a
+     * sweep that ran the instant the story loaded measured *semi-transparent* text against the
+     * surface behind it and reported a contrast failure. The tell was that the same element failed
+     * with a different ratio on every run: 4.34, then 3.48, then 3.49. A real contrast failure is
+     * the same number every time.
+     *
+     * It also made the count depend on how many dialog stories the workspace happened to contain,
+     * which is the worst property a regression check can have — adding a story to a component that
+     * was already correct made the number go up.
+     *
+     * `getAnimations` covers both CSS transitions and animations, and the timeout is a bound rather
+     * than a wait: a story with an intentionally infinite animation (a spinner) would otherwise
+     * hang the sweep for ever.
+     */
+    await page
+      .waitForFunction(
+        () => document.getAnimations().every((animation) => animation.playState !== "running"),
+        undefined,
+        { timeout: 2_000 },
+      )
+      .catch(() => {
+        /* A story with a looping animation — a spinner — never settles. Measure it anyway. */
+      });
+
     // The a11y addon already puts an axe on `window`, and it runs itself on every story render.
     // Injecting a second copy gives two axes sharing one internal lock, and the sweep dies partway
     // through with "Axe is already running". So: reuse the addon's instance when it is there, and

@@ -141,3 +141,6 @@
 /* The schema registry screens: the subject list with the registry's global compatibility level as
  * its headline, and one subject's versions and schema text. */
 @import "../../feature-schemas/styles/60-schemas.css";
+
+/* Kafka Connect and ksqlDB. No service behind either; see `29-connect-ksql.css`. */
+@import "./29-connect-ksql.css";

@@ -79,3 +79,18 @@ export {
  * say, including when what they say is "this is not working and here is why".
  */
 export * from "./data/index.js";
+
+/**
+ * Kafka Connect and ksqlDB.
+ *
+ * These have **no service behind them**: KUI has no connect or ksql backend, so nothing routes to
+ * them and nothing fetches for them. They live here, exercised by stories against fixtures, so the
+ * screens are designed and reviewed before the services are written rather than after — and so that
+ * the rules the rest of the product follows (a disabled control states its reason; an unknown state
+ * is never drawn as a healthy one; a figure nobody measured is never a zero) are built in from the
+ * start instead of being retrofitted once.
+ */
+export { ConnectorCard, connectorChip, type ConnectorCardProps, type ConnectorState } from "./components/ConnectorCard.jsx";
+export { TaskBar, describeTasks, type TaskBarProps, type TaskState } from "./components/TaskBar.jsx";
+export { KsqlWorkspace, type KsqlObject, type KsqlWorkspaceProps } from "./components/KsqlWorkspace.jsx";
+

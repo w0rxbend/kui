@@ -225,3 +225,23 @@ export const PageLongName: PageStory = {
     />
   ),
 };
+
+/**
+ * The cards view.
+ *
+ * Not shown in any screenshot; `SCREENS.md` §3.3 fixes its composition rather than leaving it to be
+ * invented. It is the *same page* with the table replaced — same controls, same query, same topics —
+ * and each card carries what a column carries, because a view that drops the out-of-sync figure has
+ * traded information for decoration.
+ *
+ * The toggle itself remembers the choice per user, so opening `Listed` after switching to cards here
+ * will show cards. That is deliberate: a preference that resets on every navigation reads as a
+ * control that does not work.
+ */
+export const Cards: ListStory = {
+  args: { topics: TOPICS, onOpen: () => undefined, onCreate: () => undefined, viewportHeight: 420 },
+  play: async ({ canvasElement }) => {
+    const cards = canvasElement.querySelector<HTMLInputElement>('input[value="cards"]');
+    cards?.click();
+  },
+};

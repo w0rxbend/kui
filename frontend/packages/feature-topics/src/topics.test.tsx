@@ -16,9 +16,12 @@ import {
   TopicListPage,
   formatBytes,
   matchCount,
+  rememberView,
+  storedView,
   type TopicListPageProps,
   type TopicListQuery,
 } from "./TopicListPage.jsx";
+import { TopicCards } from "./TopicCards.jsx";
 import { TopicPage, healthChip } from "./TopicPage.jsx";
 import type { TopicRow } from "./types.js";
 
@@ -305,5 +308,56 @@ describe("the topic page frame", () => {
     await flush();
     expect(dressed.container.querySelector("nav")).not.toBeNull();
     dressed.dispose();
+  });
+});
+
+describe("the view toggle", () => {
+  test("remembers the choice, because a control that forgets reads as broken", async () => {
+    /*
+     * `SCREENS.md` §2.12 is explicit: the choice persists per user, not per visit — "an operator who
+     * prefers cards and gets a table on every navigation will conclude the control does not work".
+     * It is a preference about how this person reads a list, not a property of the list, which is
+     * why it is not in the query string: a link somebody sends should show the recipient their own
+     * preferred view.
+     */
+    window.localStorage.removeItem("kui.topics.view");
+    expect(storedView()).toBe("table");
+
+    rememberView("cards");
+    expect(storedView()).toBe("cards");
+
+    rememberView("table");
+    expect(storedView()).toBe("table");
+  });
+
+  test("falls back to the table when storage cannot be read at all", () => {
+    // A private window, or a browser set to block site data. Both `getItem` and `setItem` can throw
+    // rather than return null, and a preference that cannot be read is not an error — it is the
+    // default. A screen that threw here would fail to render a topic list over a stored preference.
+    const original = window.localStorage.getItem;
+    Object.defineProperty(window.localStorage, "getItem", {
+      configurable: true,
+      value: () => {
+        throw new Error("The operation is insecure.");
+      },
+    });
+    expect(storedView()).toBe("table");
+    Object.defineProperty(window.localStorage, "getItem", { configurable: true, value: original });
+  });
+
+  test("draws every figure the table draws, and a missing one as a dash", async () => {
+    // The constraint that stops the cards view being a prettier, less useful list: an operator who
+    // switches to cards and can no longer see out-of-sync replicas has been given decoration in
+    // exchange for information.
+    const { container, dispose } = mount(() => (
+      <TopicCards topics={rows} onOpen={() => undefined} formatBytes={formatBytes} />
+    ));
+    await flush();
+    for (const label of ["Partitions", "Replicas", "Records", "Size"]) {
+      expect(container.textContent).toContain(label);
+    }
+    // `rows[2]` has no records and no size: a dash with the words beside it, never a zero.
+    expect(container.textContent).toContain("not known");
+    dispose();
   });
 });

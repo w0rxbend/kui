@@ -242,3 +242,80 @@
   font-size: var(--kui-font-size-sm);
   line-height: var(--kui-font-line-height-normal);
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * The cards view
+ *
+ * The same page with the table replaced (SCREENS.md §3.3): the same controls, the same query, the
+ * same topics. Each card carries what a column carries, because an operator who switches to cards
+ * and can no longer see out-of-sync replicas has been given decoration in exchange for information.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-topic-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* `auto-fill` with a minimum rather than a fixed column count: the drawer opens and closes and
+   * the window is whatever width somebody's window is, and a card grid that reflows is the only
+   * kind that stays readable at both. */
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--kui-space-4);
+}
+
+.kui-topic-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  height: 100%;
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-elevated);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+}
+
+.kui-topic-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-topic-card__glyph {
+  flex: none;
+  color: var(--kui-color-text-muted);
+}
+
+/* The topic's real name, never shortened: an operator copies it out of here into a command line.
+ * It wraps rather than being truncated, because a truncated name is a name you cannot copy. */
+.kui-topic-card__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.kui-topic-card__figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--kui-space-2) var(--kui-space-4);
+  margin: 0;
+}
+
+.kui-topic-card__figure dt {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kui-topic-card__figure dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--kui-font-weight-medium);
+}
+
+.kui-topic-card__foot {
+  margin-block-start: auto;
+}
