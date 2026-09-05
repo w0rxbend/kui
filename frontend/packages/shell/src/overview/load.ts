@@ -83,7 +83,7 @@ export function readSection<T>(raw: unknown, noun: string): Reading<T> {
   switch (section.status) {
     case "ok":
     case "stale":
-      return value(section.data);
+      return value(withoutNulls(section.data));
     case "forbidden":
       return unknown(`You do not have permission to read ${noun}.`);
     case "not_configured":
@@ -92,6 +92,82 @@ export function readSection<T>(raw: unknown, noun: string): Reading<T> {
     case "unreadable":
       return unknown(section.reason.message ?? `KUI could not read ${noun} (${section.reason.code}).`);
   }
+}
+
+/**
+ * Rewrites every `null` in a decoded payload to `undefined`.
+ *
+ * ## Why this is not pedantry
+ *
+ * `model.ts` distinguishes "we know this is zero" from "nobody told us" everywhere, and it spells
+ * the second one `undefined` — the interfaces say `readonly offlinePartitionCount?: number |
+ * undefined`, and the checks are written `=== undefined`. JSON has no `undefined`: the gateway
+ * sends `null`, and `null === undefined` is `false`.
+ *
+ * So every one of those careful guards was passed straight through by the value it was written to
+ * catch, and the consequences were not cosmetic. On a cluster reporting `null` for all three
+ * partition counts, `replicationPill` fell past its "not knowing is not the same as being fine"
+ * guard into the final arm and printed **"all in sync"**; `overviewLede` announced **"Zero
+ * under-replicated partitions. You may sip your coffee."**; and `partitionTotal` computed
+ * `null + null` as `0` and captioned the card **"0 partitions"**. A monitoring screen invented
+ * three separate reassurances about data it had never received.
+ *
+ * The fix belongs here, at the one boundary where wire data becomes model data, rather than as
+ * twenty `== null` checks scattered through the judgements — those would work, and the
+ * twenty-first would be forgotten. Converting once means `model.ts` can keep saying `undefined`
+ * and mean it. `null` and `undefined` both mean "absent" to every consumer downstream, so nothing
+ * is lost by collapsing them.
+ */
+export function withoutNulls<T>(input: T): T {
+  if (input === null) return undefined as T;
+  if (Array.isArray(input)) return input.map((item: unknown) => withoutNulls(item)) as T;
+  // Only plain objects are walked. A `Date`, a `Map` or anything else with a prototype of its own
+  // is left exactly as it is rather than being flattened into a bare object.
+  if (typeof input === "object" && Object.getPrototypeOf(input) === Object.prototype) {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(input as Record<string, unknown>)) {
+      const converted = withoutNulls(item);
+      // Dropped rather than set to `undefined`, so `"key" in object` and `Object.keys` agree with
+      // the reading that the field is absent.
+      if (converted !== undefined) out[key] = converted;
+    }
+    return out as T;
+  }
+  return input;
+}
+
+/**
+ * Reads a section whose payload is a *page* rather than a bare list.
+ *
+ * ## Why this is separate from `readSection`
+ *
+ * Three of the overview's four sections carry their data directly — the cluster summary is an
+ * object, the broker list and the log directories are arrays. The consumer groups do not: that
+ * endpoint pages, so its section's `data` is `{ items, pageInfo }`, exactly as the endpoint's own
+ * description says ("the page is wrapped in a freshness section").
+ *
+ * Reading it with `readSection<readonly ConsumerGroup[]>` produced a `Reading` holding the page
+ * object while claiming to hold an array. Nothing complained: `decodeSection<T>` takes `unknown`
+ * and hands back `T`, so the type argument is an assertion the compiler cannot check, and the
+ * generated `schema.d.ts` types this response body as `unknown` and so could not contradict it
+ * either. The mistake surfaced only when `totalLag` ran `for (const group of list)` over the page
+ * and threw `TypeError: ... is not iterable` — *inside a computation*, which Solid 2 answers by
+ * logging `REACTIVITY_HALTED` and stopping the graph. The dashboard's four skeletons then never
+ * resolved and three panels stayed empty for ever, with every request having returned 200.
+ *
+ * So the unwrapping is done here, once, and the shape is *checked* rather than asserted: a payload
+ * that is not a page becomes an `unknown` reading with a sentence, which is a panel that says it
+ * could not read the data — not an exception that takes the screen with it.
+ */
+export function readPagedSection<T>(raw: unknown, noun: string): Reading<readonly T[]> {
+  const section = readSection<unknown>(raw, noun);
+  if (section.kind !== "value") return section;
+
+  const items = (section.value as { items?: unknown } | null)?.items;
+  if (!Array.isArray(items)) {
+    return unknown(`KUI could not read ${noun}: the server sent something other than a page.`);
+  }
+  return value(items as readonly T[]);
 }
 
 function capitalise(text: string): string {
@@ -128,8 +204,9 @@ export async function fetchOverview(api: KuiApiClient, clusterId: string): Promi
     logDirs: logDirs.ok
       ? readSection<readonly LogDir[]>(logDirs.value.logDirs, "the log directories")
       : unknown(userMessage(logDirs.error)),
+    /* A page, not a list — see `readPagedSection`. */
     groups: groups.ok
-      ? readSection<readonly ConsumerGroup[]>(groups.value.groups, "the consumer groups")
+      ? readPagedSection<ConsumerGroup>(groups.value.groups, "the consumer groups")
       : unknown(userMessage(groups.error)),
     /* The topic *count*, not the topic list. The list endpoint pages, and its page info carries the
      * total — so the number on the card is the cluster's topic count and not "how many topics fit
@@ -141,9 +218,25 @@ export async function fetchOverview(api: KuiApiClient, clusterId: string): Promi
   };
 }
 
+/**
+ * The cluster's topic count, taken from the page's own total.
+ *
+ * Two things about this were wrong, and both were invisible because the response is typed
+ * `unknown` in the generated schema. The total was looked for at the top of the response rather
+ * than inside the freshness section's `data`, and it was looked for under the name `pageInfo`
+ * while the gateway calls it `page`. Missing on both counts, the function took its honest-looking
+ * fallback branch and the card showed an em dash — "KUI did not report a topic count" — for a
+ * cluster that had reported one perfectly well. A fallback that is reached by accident is worse
+ * than no fallback, because it looks like the considered answer it was written to be.
+ */
 function topicCountOf(response: unknown): Reading<number> {
-  const pageInfo = (response as { pageInfo?: { totalItems?: number } }).pageInfo;
-  const total = pageInfo?.totalItems;
+  const section = readSection<{ page?: { totalItems?: number } }>(
+    (response as { topics?: unknown }).topics,
+    "the topic list",
+  );
+  if (section.kind !== "value") return section;
+
+  const total = section.value.page?.totalItems;
   return typeof total === "number"
     ? value(total)
     : unknown("this KUI build did not report a total topic count");

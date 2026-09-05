@@ -29,7 +29,7 @@ import {
   topLag,
   totalLag,
 } from "./model.js";
-import { readSection, toOverviewModel, loadingData } from "./load.js";
+import { readPagedSection, readSection, toOverviewModel, loadingData, withoutNulls } from "./load.js";
 import { pending, unknown, value } from "./reading.js";
 
 const healthy: ClusterSummary = {
@@ -269,5 +269,113 @@ describe("the assembled model", () => {
     // should not spend the page's life pretending to load.
     expect(model.throughput.kind).toBe("notCollected");
     expect(model.latency.kind).toBe("notCollected");
+  });
+});
+
+/**
+ * The consumer-group section is a page, and reading it as a list froze the whole dashboard.
+ *
+ * `decodeSection<T>` takes `unknown` and returns `T`, so the type argument is an assertion nothing
+ * can check, and the generated schema types this body as `unknown` and so could not contradict it.
+ * The result was a `Reading` holding `{ items, pageInfo }` while claiming to hold an array; the
+ * first `for…of` over it threw inside a computation, Solid 2 halted the reactive graph, and every
+ * figure on the screen stayed a skeleton for ever with all five requests having returned 200.
+ */
+describe("reading a section whose payload is a page", () => {
+  it("unwraps the page's items", () => {
+    const reading = readPagedSection<{ groupId: string }>(
+      { status: "ok", data: { items: [{ groupId: "a" }, { groupId: "b" }], pageInfo: { totalItems: 2 } } },
+      "the consumer groups",
+    );
+    expect(reading).toEqual(value([{ groupId: "a" }, { groupId: "b" }]));
+  });
+
+  it("yields something iterable, because the callers iterate it", () => {
+    const reading = readPagedSection<number>(
+      { status: "ok", data: { items: [1, 2, 3] } },
+      "the consumer groups",
+    );
+    // The assertion the original defect would have failed: not the shape of the reading, but the
+    // fact that a consumer can walk it without throwing.
+    expect(reading.kind === "value" && [...reading.value]).toEqual([1, 2, 3]);
+  });
+
+  it("reports a payload that is not a page instead of throwing later", () => {
+    // The old code put this straight into the model and let `totalLag` throw. A panel that says it
+    // could not read the data costs one panel; an exception in a computation costs the screen.
+    const reading = readPagedSection({ status: "ok", data: [1, 2] }, "the consumer groups");
+    expect(reading.kind).toBe("unknown");
+  });
+
+  it("passes a failing section through untouched", () => {
+    const reading = readPagedSection({ status: "forbidden" }, "the consumer groups");
+    expect(reading.kind === "unknown" && reading.why).toContain("permission");
+  });
+});
+
+/**
+ * `null` is what the wire actually sends where the model expects `undefined`.
+ *
+ * This is the defect with the worst consequences found in the whole review, because its symptom is
+ * not a blank panel or a crash — it is a monitoring screen stating, in the product's cheerful
+ * voice, that everything is fine about figures it never received.
+ */
+describe("normalising absent values off the wire", () => {
+  it("turns null into an absent field", () => {
+    expect(withoutNulls({ a: 1, b: null })).toEqual({ a: 1 });
+    expect("b" in (withoutNulls({ a: 1, b: null }) as object)).toBe(false);
+  });
+
+  it("keeps zero, which is a value and not an absence", () => {
+    expect(withoutNulls({ lag: 0 })).toEqual({ lag: 0 });
+  });
+
+  it("reaches into nested objects and arrays", () => {
+    expect(withoutNulls({ outer: { inner: null }, list: [{ x: null }, { x: 2 }] })).toEqual({
+      outer: {},
+      list: [{}, { x: 2 }],
+    });
+  });
+
+  it("applies to a decoded section, so the model's undefined checks hold", () => {
+    const reading = readSection<{ offlinePartitionCount?: number }>(
+      { status: "ok", data: { brokerCount: 1, offlinePartitionCount: null } },
+      "the cluster summary",
+    );
+    expect(reading.kind === "value" && reading.value.offlinePartitionCount).toBeUndefined();
+  });
+});
+
+describe("a cluster that reports no partition counts at all", () => {
+  // Exactly what the demonstration environment's single-broker cluster sends: a real summary in
+  // which all three partition counts are null.
+  const silent = () =>
+    readSection<ClusterSummary>(
+      {
+        status: "ok",
+        data: {
+          brokerCount: 1,
+          version: "4.3",
+          controllerId: 1,
+          onlinePartitionCount: null,
+          offlinePartitionCount: null,
+          underReplicatedPartitionCount: null,
+        },
+      },
+      "the cluster summary",
+    );
+
+  it("does not claim the partitions are all in sync", () => {
+    // Before the fix this returned `{ text: "all in sync", tone: "success" }`, because the guard
+    // written to catch exactly this case tested `=== undefined` and was handed `null`.
+    expect(replicationPill(silent())).toBeUndefined();
+  });
+
+  it("does not add two absent counts into a confident zero", () => {
+    expect(partitionTotal(silent()).kind).toBe("unknown");
+  });
+
+  it("does not tell the operator to sip their coffee", () => {
+    expect(overviewLede(silent())).not.toContain("coffee");
   });
 });

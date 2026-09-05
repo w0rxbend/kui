@@ -203,7 +203,11 @@ export function lagPill(lag: Reading<{ total: number; incomplete: number }>): { 
   const v = readingValue(lag);
   if (v === undefined) return undefined;
   if (v.incomplete > 0) {
-    return { text: `${formatCount(v.incomplete)} groups not counted`, tone: "warning" };
+    // "1 groups not counted" is the kind of sentence that makes a reader trust the rest of the
+    // screen slightly less, and it is one word to avoid. The count is still printed with thousands
+    // separators, because the plural rule and the number's formatting are separate concerns.
+    const noun = v.incomplete === 1 ? "group" : "groups";
+    return { text: `${formatCount(v.incomplete)} ${noun} not counted`, tone: "warning" };
   }
   if (v.total === 0) return { text: "fully caught up", tone: "success" };
   if (v.total < LAG_JOKE_CEILING) return { text: "fashionably late", tone: "warning" };
