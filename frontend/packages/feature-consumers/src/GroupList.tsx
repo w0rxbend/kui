@@ -1,0 +1,314 @@
+/**
+ * The consumer-group list — screenshot `04`.
+ *
+ * Six columns, and six is the whole list: GROUP ID, STATE, MEMBERS, TOPICS, COORDINATOR, LAG.
+ *
+ * ## What is deliberately not here, and why that is the point
+ *
+ * The Laminar screen this replaces drew eight columns. Two of them — PARTITIONS and PACE — are gone.
+ * PACE is gone because the design does not draw it; PARTITIONS is gone because it was one of several
+ * columns that showed an em dash on every row of every cluster the team ever looked at. The brief
+ * for this work names the rule: a column that can never be filled teaches people to stop reading
+ * columns, so either fill it or leave it out.
+ *
+ * That is a real loss and it is worth naming. Lag on its own does not answer the operator's actual
+ * question, which is "is this getting better?" — a lag of two million falling at forty thousand a
+ * second needs nothing, and a lag of nine hundred that is not moving needs attention now. The
+ * answer is not to smuggle PACE back into a table the design does not draw it in; it is on the group
+ * detail page, where there is room to print it with the word "per second" beside it.
+ *
+ * ## The row is a link, and it is also a row
+ *
+ * Every row carries a real `<a href>` in its first cell, because copy-link, bookmark and
+ * open-in-new-tab are three gestures a table of names has to support, and none of them survives a
+ * `div` with an `onClick`. The row itself is *also* activatable, so the hit target is the whole
+ * width — `DataTable` handles the keyboard for that. A modified click (⌘, Ctrl, Shift, Alt) is left
+ * alone: it is the user asking their browser for a new tab, and swallowing it breaks the one gesture
+ * that makes a table of links worth having.
+ *
+ * ## The narrow window drops columns rather than hiding them
+ *
+ * SPEC §7.5: below 900px, COORDINATOR goes first and TOPICS second, and GROUP ID, STATE and LAG
+ * never go. They are dropped from the array, not set to `display: none`, because a hidden column is
+ * still in the accessibility tree and still counted in the row — a screen-reader user would hear a
+ * cell nobody can see.
+ */
+
+import { Show, createMemo } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import {
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  MISSING,
+  NARROW_QUERY,
+  PageHeader,
+  StatusPill,
+  ThresholdValue,
+  createMediaQuery,
+  formatCount,
+  type Column,
+  type Sort,
+} from "@kui/kernel";
+import {
+  UNREADABLE_STATE_CHIP,
+  groupsVoice,
+  healthOf,
+  lagAnnouncement,
+  lagLevel,
+  stateChip,
+  type GroupSummary,
+} from "./model.js";
+
+export interface GroupListProps {
+  readonly rows: readonly GroupSummary[];
+  /** How many coordinators did not answer. Drives the voice line and the incomplete chips. */
+  readonly coordinatorsMissing?: number | undefined;
+  readonly loading?: boolean | undefined;
+  /**
+   * Why the table has no rows, when it has none. `null` means "there is genuinely nothing yet".
+   *
+   * The four not-happy renderings of SPEC §7.1 are never interchangeable, and this is where the
+   * caller says which one applies. In particular "no groups on this cluster" and "nothing matched
+   * your filter" are different sentences and one must never be substituted for the other.
+   */
+  readonly failure?:
+    | { readonly kind: "unavailable"; readonly message: string; readonly code: string; readonly onRetry: () => void }
+    | { readonly kind: "forbidden"; readonly message: string; readonly code: string }
+    | { readonly kind: "filtered"; readonly term: string; readonly onClear: () => void }
+    | undefined;
+  readonly sort?: Sort | null | undefined;
+  readonly onSortChange?: ((next: Sort | null) => void) | undefined;
+  /** Where a group's name points. A real URL, so the browser's own gestures work. */
+  readonly hrefFor: (groupId: string) => string;
+  readonly onOpen?: ((groupId: string) => void) | undefined;
+}
+
+export function GroupList(props: GroupListProps): JSX.Element {
+  const narrow = createMediaQuery(NARROW_QUERY);
+  const health = createMemo(() => healthOf(props.rows, props.coordinatorsMissing ?? 0));
+
+  /**
+   * The voice line, chosen from the health of the rows on screen and never assembled from a
+   * template. See `groupsVoice`: SPEC §6.3 rule 3 is that the aside disappears when the state is
+   * not healthy, and only a union of whole sentences can guarantee that.
+   */
+  const voice = createMemo(() =>
+    props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden"
+      ? "Consumer group data is unavailable."
+      : groupsVoice(health()),
+  );
+
+  /*
+   * The widths are percentages taken off screenshot `04`, not rem values.
+   *
+   * The column edges there sit at 235, 710, 975, 1170, 1390 and 1723 in a 1990px frame, which is
+   * roughly 28 / 15 / 11 / 11 / 19 / 16. Fixed rem widths were tried first and were wrong at every
+   * window size but one: they leave the name column with all the slack, so on a wide screen the
+   * group id gets an eighth of the page of empty space and STATE ends up three quarters of the way
+   * across. Percentages keep the design's proportions at any width, and the name column — the only
+   * one with no width — takes what is left.
+   */
+  const columns = createMemo<readonly Column<GroupSummary>[]>(() => {
+    const all: readonly Column<GroupSummary>[] = [
+      {
+        id: "id",
+        header: "Group id",
+        sortable: true,
+        render: (row) => <GroupCell row={row} href={props.hrefFor(row.groupId)} onOpen={props.onOpen} />,
+      },
+      { id: "state", header: "State", sortable: true, width: "15%", render: (row) => <StateCell row={row} /> },
+      {
+        id: "members",
+        header: "Members",
+        sortable: true,
+        align: "numeric",
+        width: "11%",
+        // `null` and not `0`: a member count KUI could not read is not a group with no consumers,
+        // and printing a zero would say exactly that about a healthy group.
+        render: (row) => (row.members === null ? <Unreadable what="member count" /> : formatCount(row.members)),
+      },
+      { id: "topics", header: "Topics", sortable: true, align: "numeric", width: "11%", render: (row) => formatCount(row.topics) },
+      {
+        id: "coordinator",
+        header: "Coordinator",
+        width: "19%",
+        render: (row) =>
+          row.coordinator === null ? (
+            <Unreadable what="coordinator" />
+          ) : (
+            <span class="kui-cg-mono">{row.coordinator}</span>
+          ),
+      },
+      { id: "lag", header: "Lag", sortable: true, align: "numeric", width: "16%", render: (row) => <LagCell row={row} /> },
+    ];
+    if (!narrow()) return all;
+    return all.filter((column) => column.id !== "coordinator" && column.id !== "topics");
+  });
+
+  const failed = (): boolean => props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden";
+
+  return (
+    <section class="kui-cg-page" data-testid="consumer-groups">
+      <PageHeader title="Consumer groups" voice={voice()} testId="consumer-groups-head" />
+
+      {/*
+        A failure gets a titled card and the happy path does not, and that asymmetry is deliberate.
+        Screenshot `04` draws the table as the panel — no heading above it, because the page title
+        four lines up already says what these rows are, and a second "Groups" heading is a word a
+        screen reader reads twice. But SPEC §7.1's rule is that *the frame never disappears*: when
+        the request fails there must still be a named box on the page holding the explanation, the
+        error code and the way out, so that a page can show three healthy panels and one that failed
+        without either lying. So the frame appears exactly when there is nothing else to hold it up.
+      */}
+      <Show
+        when={!failed()}
+        fallback={
+          <Card
+            title="Consumer groups"
+            state={props.failure?.kind === "forbidden" ? "forbidden" : "unavailable"}
+            message={props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden" ? props.failure.message : undefined}
+            description={
+              props.failure?.kind === "forbidden"
+                ? "Ask an administrator for read access to consumer groups on this cluster."
+                : "The consumer service is not responding."
+            }
+            code={props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden" ? props.failure.code : undefined}
+            stateAction={
+              props.failure?.kind === "unavailable" ? (
+                <Button variant="secondary" icon="refresh" onClick={props.failure.onRetry}>
+                  Retry
+                </Button>
+              ) : undefined
+            }
+            testId="consumer-groups-card"
+          />
+        }
+      >
+        <DataTable<GroupSummary>
+          caption="Consumer groups on this cluster"
+          columns={columns()}
+          rows={props.rows}
+          rowKey={(row) => row.groupId}
+          sort={props.sort ?? null}
+          onSortChange={props.onSortChange}
+          onRowClick={props.onOpen === undefined ? undefined : (row) => props.onOpen?.(row.groupId)}
+          loading={props.loading}
+          testId="consumer-groups-table"
+          empty={
+            props.failure?.kind === "filtered" ? (
+              <EmptyState
+                kind="filtered"
+                title={`Nothing matched ${props.failure.term}.`}
+                description="No consumer group on this cluster has a name like that."
+                action={
+                  <Button variant="secondary" onClick={props.failure.onClear}>
+                    Clear filter
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                kind="empty"
+                title="No consumer groups yet."
+                description="A group appears here the first time something consumes from this cluster."
+              />
+            )
+          }
+        />
+      </Show>
+    </section>
+  );
+}
+
+function GroupCell(props: {
+  readonly row: GroupSummary;
+  readonly href: string;
+  readonly onOpen?: ((groupId: string) => void) | undefined;
+}): JSX.Element {
+  return (
+    <span class="kui-cg-name">
+      <a
+        class="kui-cg-name__link"
+        href={props.href}
+        onClick={(event: MouseEvent) => {
+          // Only a plain left click is ours. A modified click is the user asking their browser for
+          // a new tab, and intercepting it breaks the gesture a table of links exists for.
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (props.onOpen === undefined) return;
+          event.preventDefault();
+          // The row is also clickable; without this the row handler fires too and the navigation
+          // happens twice.
+          event.stopPropagation();
+          props.onOpen(props.row.groupId);
+        }}
+      >
+        {props.row.groupId}
+      </a>
+      <Show when={props.row.incomplete}>
+        {(incomplete) => (
+          <StatusPill tone="warning" title={incomplete().note}>
+            partial
+          </StatusPill>
+        )}
+      </Show>
+    </span>
+  );
+}
+
+function StateCell(props: { readonly row: GroupSummary }): JSX.Element {
+  const chip = () => (props.row.state === null ? UNREADABLE_STATE_CHIP : stateChip(props.row.state));
+  return (
+    <StatusPill tone={chip().tone} title={chip().title}>
+      {chip().label}
+    </StatusPill>
+  );
+}
+
+/**
+ * The lag figure, and the em dash that is not a zero.
+ *
+ * **No bar.** The screen this replaces drew a magnitude bar in every lag cell, scaled to the
+ * largest lag on the page. Screenshot `04` does not: the LAG column is a right-aligned tabular
+ * figure and nothing else, and the bars live in the dashboard's "Top consumer lag" panel where
+ * there is room for them. Drawing one in a cell a hundred and fifty pixels wide puts a four-pixel
+ * smudge beside every number, which says nothing and costs the column its scannability.
+ */
+function LagCell(props: { readonly row: GroupSummary }): JSX.Element {
+  return (
+    <Show when={props.row.totalLag !== null} fallback={<Unreadable what="lag" />}>
+      <span class="kui-cg-lag" title={excludedNote(props.row)}>
+        <ThresholdValue
+          value={formatCount(props.row.totalLag ?? 0)}
+          level={lagLevel(props.row.totalLag ?? 0)}
+          announcement={lagAnnouncement}
+          class={props.row.totalLag === 0 ? "kui-cg-lag__zero" : undefined}
+          data-testid={`group-${props.row.groupId}-lag`}
+        />
+      </span>
+    </Show>
+  );
+}
+
+/**
+ * A total computed over fewer partitions than the group holds is smaller than the truth, and
+ * nothing else on the row would say so.
+ */
+function excludedNote(row: GroupSummary): string | undefined {
+  if (row.excludedPartitions === 0) return undefined;
+  return `${formatCount(row.excludedPartitions)} partition${row.excludedPartitions === 1 ? "" : "s"} could not be read, so this total is lower than the real lag.`;
+}
+
+/** An em dash with the reason attached. Never an empty cell, and never a zero. */
+function Unreadable(props: { readonly what: string }): JSX.Element {
+  return (
+    <span class="kui-cg-missing" title={`KUI could not read this group's ${props.what}.`}>
+      <span aria-hidden="true">{MISSING}</span>
+      <span class="kui-visually-hidden">{`${props.what} unavailable`}</span>
+    </span>
+  );
+}
+
+/** Exported for the stories and the tests, which need to draw the pieces without a page around them. */
+export { GroupCell, LagCell, StateCell, excludedNote };

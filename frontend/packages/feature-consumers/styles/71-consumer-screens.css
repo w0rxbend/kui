@@ -1,0 +1,234 @@
+/*
+ * The SolidJS consumer screens: the group list, the group detail and the offset-reset wizard.
+ *
+ * ## Every class here starts `kui-cg-`
+ *
+ * The whole product is one concatenated stylesheet with no module system, so a class name that
+ * already exists somewhere else is silently restyled by whichever block is written later. The
+ * pre-migration sheet in this same directory (`70-consumers.css`) owns `.kui-consumers-*` and the
+ * kernel owns `.kui-table-*`; `kui-cg-` collides with neither. Grep before adding a block.
+ *
+ * ## Nothing here is a raw value
+ *
+ * Every colour, space, radius and size below is a token. Where a design measurement does not reduce
+ * to one, that is a finding about the token scale rather than licence to type a pixel count — see
+ * the header of `29-page-header.css` for the one place that trade is made explicitly.
+ */
+
+.kui-cg-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+  /* The page owns no horizontal scrolling: a table wider than the window scrolls inside its own
+   * box (`.kui-table-scroll`, kernel), and a page that scrolled sideways instead would take the
+   * drawer and the top bar with it. */
+  min-width: 0;
+}
+
+/* --- The group id cell, and the chips that sit beside a value ------------------------------- */
+
+.kui-cg-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-cg-name__link {
+  color: var(--kui-color-text-strong);
+  font-weight: 500;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Underlined on hover and on focus, not by default: a table where every first cell is underlined
+ * reads as a wall of links rather than as a column of names. The row's own hover fill is the other
+ * half of the affordance. */
+.kui-cg-name__link:hover,
+.kui-cg-name__link:focus-visible {
+  text-decoration: underline;
+}
+
+.kui-cg-mono {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  /* Offsets and ids are compared digit by digit down a column, so their digits must line up. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Lag ------------------------------------------------------------------------------------ */
+
+.kui-cg-lag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+  width: 100%;
+}
+
+/* Zero recedes. It is the *absence* of lag, and it stays a digit rather than becoming an em dash,
+ * because "caught up" and "we could not measure it" must not look alike (SPEC §4.18). */
+.kui-cg-lag__zero {
+  color: var(--kui-color-text-subtle);
+}
+
+/* --- The em dash that means "no value" ------------------------------------------------------ */
+
+.kui-cg-missing {
+  color: var(--kui-color-text-muted);
+  /* Carries a `title`, so it gets the cursor that says there is something to read. */
+  cursor: help;
+}
+
+/* --- The facts strip on the detail page ----------------------------------------------------- */
+
+.kui-cg-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-elevated);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+}
+
+.kui-cg-facts__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-cg-facts__label {
+  font-size: var(--kui-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-cg-facts__value {
+  margin: 0;
+  font-size: var(--kui-font-size-lg);
+  color: var(--kui-color-text-strong);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kui-cg-facts__unit {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-cg-pace--stalled {
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-md);
+}
+
+.kui-cg-assigned {
+  display: inline-block;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* --- The offset-reset wizard ---------------------------------------------------------------- */
+
+.kui-cg-reset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-cg-reset__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-4);
+}
+
+.kui-cg-section__title {
+  margin: 0;
+  font-size: var(--kui-font-size-lg);
+  font-weight: 600;
+  color: var(--kui-color-text-strong);
+}
+
+.kui-cg-reset__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-elevated);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+}
+
+.kui-cg-reset__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--kui-space-4);
+  align-items: start;
+}
+
+.kui-cg-reset__note {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-cg-reset__summary {
+  margin: 0 0 var(--kui-space-3);
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text-strong);
+}
+
+/*
+ * The refusal line. Outlined on the neutral surface rather than a filled danger slab: a filled red
+ * block here would be louder than the destructive button beneath it, which is exactly backwards.
+ * The glyph and the rule carry the danger; the words carry the meaning.
+ */
+.kui-cg-reset__problem {
+  margin: 0;
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border: 1px solid var(--kui-color-danger);
+  border-radius: var(--kui-radius-md);
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-md);
+}
+
+.kui-cg-reset__warnings {
+  margin: 0 0 var(--kui-space-4);
+  padding: var(--kui-space-3) var(--kui-space-4) var(--kui-space-3) var(--kui-space-6);
+  list-style: disc;
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+}
+
+.kui-cg-reset__warning {
+  font-size: var(--kui-font-size-md);
+  line-height: 1.5;
+}
+
+.kui-cg-reset__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-cg-reset__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  margin-block-start: var(--kui-space-4);
+}
