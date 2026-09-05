@@ -18,19 +18,23 @@ import { Show, type Component } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { DEFAULT_THRESHOLDS, fraction, formatPercent, levelFor, type MaybeNumber, type Thresholds } from "./format.js";
 
+/* Every optional prop is written `?: T | undefined` rather than `?: T`. Under this workspace's
+ * `exactOptionalPropertyTypes`, `?: T` means "absent, or a T" and specifically *not* `undefined`,
+ * so a caller holding a `T | undefined` cannot forward it — which is every caller that computes a
+ * value that might be missing, i.e. the reason this component takes a `MaybeNumber` at all. */
 export interface ProgressBarProps {
   /** Names the quantity for a screen reader: `broker-3.kyiv disk usage`, not `progress`. */
   readonly label: string;
   /** Shown to the left of the track. Short: `disk`. Omit for a bare bar. */
-  readonly caption?: string;
+  readonly caption?: string | undefined;
   /** `undefined` means "we could not measure it" — see rule 1 above. */
   readonly value: MaybeNumber;
-  readonly max?: number;
-  readonly thresholds?: Thresholds;
+  readonly max?: number | undefined;
+  readonly thresholds?: Thresholds | undefined;
   /** Overrides the printed figure when the caller formats it differently (`3.4 / 4 GB`). */
-  readonly valueText?: string;
+  readonly valueText?: string | undefined;
   /** Rendered after the bar; the broker panel puts its status pill here. */
-  readonly trailing?: JSX.Element;
+  readonly trailing?: JSX.Element | undefined;
 }
 
 export const ProgressBar: Component<ProgressBarProps> = props => {
