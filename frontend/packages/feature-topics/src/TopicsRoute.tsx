@@ -276,6 +276,34 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
    * own state rather than a permission problem, and telling an operator to ask an administrator for
    * a permission they already hold wastes their afternoon.
    */
+  /**
+   * Re-reads the list until the new topic is in it, or until it is time to stop asking.
+   *
+   * Kafka's `createTopics` returns when the *controller has accepted* the create, not when every
+   * broker will list the topic — so a single re-fetch straight afterwards is a race, and losing it
+   * means an operator creates a topic and does not see it. They then create it again, and the second
+   * attempt fails with "topic already exists", which reads as the product being broken twice.
+   *
+   * The row is not spliced in locally instead, because the row this screen would invent is a guess
+   * at what the broker decided about the defaults it was not given — and a guessed partition count
+   * on a topic somebody is about to produce to is worse than a short wait.
+   *
+   * Bounded, and it stops rather than spinning: three seconds is far longer than the controller
+   * takes, and a topic still absent after that is a fact about the cluster rather than a race. The
+   * list then shows what the server actually returned, which is the honest answer.
+   */
+  const settleAfterCreate = async (name: string): Promise<void> => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      reload();
+      // Long enough for the fetch the reload just started to have landed, and short enough that the
+      // list is on screen well before anybody wonders.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      // `result()` is the screen's own view of the answer, with the same fallback the table uses,
+      // so this asks exactly the question the operator is about to ask: is it on the list?
+      if (result().topics.some((one) => one.name === name)) return;
+    }
+  };
+
   const createBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicCreate),
@@ -316,10 +344,7 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
           void create.run(topic).then((outcome) => {
             if (outcome.kind !== "done") return;
             setCreating(false);
-            // Kafka's create is accepted by the controller before the topic is listable, so the
-            // list is re-fetched rather than having the new row spliced in locally — the row this
-            // screen would invent is a guess at what the broker decided about the defaults.
-            reload();
+            void settleAfterCreate(topic.name);
           });
         }}
       />

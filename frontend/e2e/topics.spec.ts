@@ -52,6 +52,16 @@ test.describe("creating a topic", () => {
     await dialog.getByLabel(/^name/i).fill(name);
     await dialog.getByRole("button", { name: /create topic/i }).click();
 
+    /*
+     * The dialog closing is asserted first, and separately, because it is what distinguishes the two
+     * failures. A create the server refused leaves the dialog open with the reason in it — and
+     * asserting only on the list gave "the list does not contain this name" and a screenshot of a
+     * perfectly ordinary topic list, with the actual explanation sitting in a dialog the assertion
+     * never looked at.
+     */
+    await expect(dialog, "the create dialog should close on success; if it is open it carries the reason it did not")
+      .toBeHidden({ timeout: 20_000 });
+
     await expect(page.locator("body")).toContainText(name, { timeout: 20_000 });
     await removeTopic(api, name);
   });
