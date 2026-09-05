@@ -1,0 +1,101 @@
+/* The application frame: the drawer down the left, the top bar across the content column, and the
+ * one region that scrolls.
+ *
+ * ## Why this is not `30-shell.css`
+ *
+ * `30-shell.css` styles `.kui-shell`, the pre-migration Laminar frame, and it declares a 272px
+ * drawer against this design's 196px. Both stylesheets are concatenated into one file with no
+ * module system between them, so a second `.kui-shell` block here would silently restyle the old
+ * frame — the exact collision the chrome components hit when `.kui-search` and `.kui-drawer` turned
+ * out to be taken. This frame therefore owns a different name, `.kui-frame`, and the two coexist
+ * until the Laminar shell is retired.
+ *
+ * ## Geometry
+ *
+ * Every measurement is SPEC §3.2, taken off screenshot `01`: a 196px drawer, a 58px top bar, a 24px
+ * gutter. They are read from tokens rather than written here, so that the drawer's own stylesheet
+ * and this one cannot disagree about how wide the drawer is. */
+
+.kui-frame {
+  display: grid;
+  /* The drawer column is sized from the token the drawer itself reads, so there is exactly one
+   * number. A literal `196px` here would be a second copy that drifts the first time either is
+   * adjusted, and the symptom would be a 1px seam nobody can find. */
+  grid-template-columns: var(--kui-drawer-width) minmax(0, 1fr);
+  grid-template-rows: var(--kui-topbar-height) minmax(0, 1fr);
+  grid-template-areas:
+    "drawer topbar"
+    "drawer content";
+
+  /* Exactly the viewport, and no more. `min-height` here instead of `height` would let the grid
+   * grow with its content and hand the scroll to the document, which is what takes the drawer and
+   * the top bar off the screen when a long page scrolls. `100dvh` so that a mobile browser's
+   * retracting toolbar does not leave a strip of blank page below the frame. */
+  height: 100dvh;
+  overflow: hidden;
+
+  background: var(--kui-color-surface);
+  color: var(--kui-color-text);
+}
+
+.kui-frame__drawer {
+  grid-area: drawer;
+  /* `min-height: 0` on a grid item is what allows its own inner `overflow` to work: without it a
+   * grid item's automatic minimum size is its content, so a drawer with more destinations than fit
+   * would push the frame taller instead of scrolling inside itself. */
+  min-height: 0;
+}
+
+.kui-frame__topbar {
+  grid-area: topbar;
+  min-width: 0;
+}
+
+.kui-frame__content {
+  grid-area: content;
+  min-width: 0;
+  min-height: 0;
+
+  /* The one scrolling box on the screen. `overflow-y: auto` for the page's length; `overflow-x`
+   * is deliberately *not* `auto` — a page that scrolls sideways is the defect the brief names, and
+   * anything too wide (a table, a chart) owns its own horizontal scroll container. Leaving this
+   * `hidden` means a component that forgets to do so is visibly clipped, which gets it fixed,
+   * rather than quietly making the whole page slide. */
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  padding: 0 var(--kui-page-gutter) var(--kui-space-6);
+
+  /* A focus ring on the content region itself would be drawn around the whole page every time a
+   * route change moved focus here, which looks like a rendering fault. The region is focusable for
+   * screen-reader and keyboard navigation, not to be highlighted. */
+  outline: none;
+}
+
+/* --- Narrow windows (SPEC §7.5) ----------------------------------------------------------------
+ *
+ * Below 1000px the drawer stops being a column. It is *not* hidden behind a button here — that
+ * needs a disclosure control, a focus trap and a scrim, which is a component and not a media query,
+ * and half-building it would leave the navigation unreachable. Until that lands the drawer becomes
+ * a horizontal strip above the content: everything stays reachable, which is the property that
+ * matters, and it is visibly a stopgap rather than a silently broken layout. */
+@media (max-width: 999px) {
+  .kui-frame {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto var(--kui-topbar-height) minmax(0, 1fr);
+    grid-template-areas:
+      "drawer"
+      "topbar"
+      "content";
+  }
+
+  .kui-frame__drawer {
+    /* The drawer's own rule sets a fixed width; at this size it must span the window instead. */
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  .kui-frame__drawer > * {
+    width: 100%;
+  }
+}
