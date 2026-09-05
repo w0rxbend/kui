@@ -1,0 +1,57 @@
+# Storybook, in a container.
+#
+#   docker compose -f deployment/storybook/docker-compose.storybook.yml up --build
+#   open http://localhost:6006
+#
+# ## What this is for
+#
+# The component workshop: every control and every screen, in every state, in both themes, without a
+# Kafka cluster anywhere. It is how this frontend is reviewed — the states that matter most are the
+# ones that need something to be broken before the running product will show them, and here they are
+# one click away.
+#
+# It talks to nothing. No backend, no Kafka, no network egress at all: every story renders from
+# fixtures by design, because a story that fetched could only be looked at while the thing it
+# fetched from was healthy.
+#
+# ## Why it is not part of the quickstart stack
+#
+# Different audiences and different lifetimes. The quickstart is "show me the product working
+# against a real cluster"; this is "show me every state the product can be in". Putting them in one
+# file would mean a designer reviewing a disabled button had to wait for Kafka to become healthy
+# first, and an operator trying the product had to build a Storybook they will never open.
+services:
+  storybook:
+    build:
+      # The repository root: the build stage copies `frontend/` and needs the workspace manifests to
+      # resolve the pnpm workspace links between the packages.
+      context: ../..
+      dockerfile: deployment/storybook/Dockerfile
+    image: kui-storybook:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-storybook
+    ports:
+      # 6006 is Storybook's own convention, so the URL is the one everybody already expects. The
+      # container serves on 8081 because nginx runs unprivileged.
+      - "${KUI_STORYBOOK_PORT:-6006}:8081"
+    read_only: true
+    # The unprivileged nginx keeps its pid, its scratch files and every temporary path under `/tmp`,
+    # so one writable mount is all it needs. Stock nginx would also want `/var/cache/nginx` and
+    # `/var/run` — and would still fail, because it chowns them at start-up and `cap_drop: ALL`
+    # forbids that. See the second stage of the Dockerfile.
+    tmpfs:
+      - /tmp
+    # It serves static files and initiates nothing. Saying so here rather than trusting it to behave
+    # is the same rule the rest of this deployment follows.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      # `wget` rather than `curl`: the alpine image has one and not the other, and a healthcheck
+      # that references a binary the image lacks reports unhealthy for ever with no useful message.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/index.html"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped

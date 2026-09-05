@@ -175,6 +175,21 @@ services:
   # ---------------------------------------------------------------------------------------------
   kui:
     image: kui-allinone:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    # Built from source, because KUI's images are not published to a registry yet. Without this
+    # stanza `docker compose up` fails on the very first thing it does: the image name resolves to
+    # nothing, Docker asks the registry, and the registry has never heard of it. The quickstart's
+    # own README said so and the compose file did not act on it, so the documented command could
+    # not work — which is the worst kind of broken, because the reader concludes the product is.
+    #
+    # The context is the repository root, four levels up, because the build stage runs `./mill` over
+    # the whole source tree. `Dockerfile.dockerignore` beside the Dockerfile is what keeps that
+    # context from including `out/`, `.git` and every `node_modules`.
+    #
+    # `docker compose up` reuses an image that already exists; `docker compose up --build` forces a
+    # rebuild. The first run of either builds it.
+    build:
+      context: ../..
+      dockerfile: deployment/quickstart/Dockerfile
     container_name: kui-quickstart-kui
     command: ["--config", "/etc/kui/kui-quickstart.yaml"]
     ports:

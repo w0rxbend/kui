@@ -470,6 +470,14 @@ services:
   # ===============================================================================================
   kui:
     image: kui-allinone:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    # Built from source: KUI's images are not published to a registry, so without a `build:` stanza
+    # `docker compose up` fails immediately — the image name resolves to nothing and the registry
+    # has never heard of it. The context is the repository root because the build stage runs
+    # `./mill` over the whole tree; `deployment/quickstart/Dockerfile.dockerignore` keeps `out/`,
+    # `.git` and every `node_modules` out of that context.
+    build:
+      context: ../..
+      dockerfile: deployment/quickstart/Dockerfile
     container_name: kui-demo-kui
     command: ["--config", "/etc/kui/kui-demo.yaml"]
     ports:

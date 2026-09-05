@@ -1,0 +1,54 @@
+# What must not enter the build context for deployment/storybook/Dockerfile.
+#
+# BuildKit reads `<dockerfile>.dockerignore` beside the Dockerfile in preference to a `.dockerignore`
+# at the root of the context, which is why this lives here.
+#
+# ## `**/node_modules/`, not `node_modules/`
+#
+# The pattern is anchored at the context root. `node_modules/` alone therefore excludes exactly one
+# directory — the repository's own — and lets `frontend/node_modules` through, which is the one that
+# matters: it is the largest directory in the tree, and `COPY frontend/ ./` drops it straight on top
+# of the `node_modules` the image just installed. pnpm's store is content-addressed with absolute
+# symlinks into the developer's home directory, so what lands in the image is thousands of links
+# pointing at paths that do not exist there. The symptom is not a missing file: `pnpm exec` decides
+# the dependency tree is out of date and re-runs `pnpm install`, which fails inside a build that
+# already installed everything correctly.
+#
+# `deployment/quickstart/Dockerfile.dockerignore` has the anchored form and the same latent problem.
+**/node_modules/
+
+# Build output. `out/` is a full Mill tree and is routinely gigabytes; the rest is this build's own
+# product, and copying a previous run's output in is how a stale artefact ships.
+out/
+frontend/dist/
+frontend/storybook-static/
+**/target/
+
+# Version control and editor state: large, and none of it changes what is built.
+.git/
+.github/
+.idea/
+.vscode/
+.bsp/
+.metals/
+.bloop/
+
+# Everything the browser build does not read. Storybook renders from fixtures, so none of the Scala
+# tree, the deployment definitions or the reference clones are inputs to it — and leaving them out
+# means an unrelated backend edit does not invalidate this image's cache.
+libs/
+services/
+apps/
+e2e/
+build-tests/
+deployment/
+docs/
+research/
+frontend/ui-clusters/
+frontend/ui-consumers/
+frontend/ui-kernel/
+frontend/ui-messages/
+frontend/ui-shell/
+frontend/ui-topics/
+
+**/*.log
