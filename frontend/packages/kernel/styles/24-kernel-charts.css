@@ -1,0 +1,542 @@
+/* The chart family: the legend and range selector a chart card's header carries, the two plots,
+ * the donut, the progress bar and the horizontal bar list.
+ *
+ * The card itself is not here: `Card` (`.kui-panel`, in 27-primitives.css) owns the frame and its
+ * six states, and a chart is one of the things that goes inside one.
+ *
+ * Every value here is a token. That is not tidiness — the palette has two themes and four accent
+ * seeds, so a hard-coded hex is correct in one of eight combinations and wrong in seven, and the
+ * one it is correct in is whichever the person who wrote it happened to have selected. The three
+ * geometry values that are not tokens (a 6px track, a 2px line, a 3px stub) are marks whose size
+ * *is* their meaning; each is commented where it appears.
+ *
+ * The measurements come from `.agent/design/SPEC.md`, which took them off the design PNGs by
+ * scanning rows and columns of pixels for the boundary between two fills. Where a number below is
+ * a measurement the coordinates it came from are quoted, so it can be re-checked.
+ */
+
+/* A panel caption that is reporting a failure rather than a pleasantry.
+ *
+ * SPEC §6.3 rule 3: the aside is dropped the moment the state is not healthy, and the line that
+ * replaces it is plain and coloured. "Controller: broker 1. It won the election fair and square."
+ * becomes "No controller. The cluster has not elected one." — same slot, different branch, and
+ * the branch is a discriminated union in the caller rather than an optional suffix, so nobody can
+ * leave the joke attached to the failure. */
+.kui-chart-caption--alarm {
+  color: var(--kui-color-danger);
+}
+
+/* --- Legend ------------------------------------------------------------------------------------
+ *
+ * Not merely a key. The latency card prints the current value in it (`produce 14ms`), which is
+ * what allows the plot to have no y-axis at all: the number the reader wants is already in words.
+ */
+
+.kui-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+}
+
+.kui-chart-legend__item {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  min-width: 0;
+}
+
+/* A rounded square, as the design draws — not a dot. The shape is a consequence of the token
+ * scale: at `--kui-radius-xs` (4px) an 8px box is a circle and a 10px box is a rounded square, so
+ * the swatch is 10px. */
+.kui-chart-legend__swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--kui-radius-xs);
+}
+
+.kui-chart-legend__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-chart-legend__value {
+  font-weight: var(--kui-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-strong);
+}
+
+/* The donut's legend is a column with the counts aligned down the right, so three numbers of
+ * different lengths can be compared without reading them. */
+/* `flex-wrap: nowrap` matters and is not tidying. The row variant wraps, and a *column* flex
+ * container that is allowed to wrap sizes its line to the widest item's min-content width rather
+ * than to the container — so `align-items: stretch` stretches the rows to the longest label
+ * instead of to the card, and the ellipsis that is declared on the label never appears. */
+.kui-chart-legend--block {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: var(--kui-space-2);
+}
+
+.kui-chart-legend--block .kui-chart-legend__item {
+  gap: var(--kui-space-3);
+}
+
+.kui-chart-legend--block .kui-chart-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--kui-radius-xs);
+}
+
+/* `min-width: 0` on both, or the legend cannot shrink below its longest label and pushes the
+ * donut out of its card. A flex item's default `min-width: auto` is exactly the content width,
+ * which is why an ellipsis that is declared never appears. */
+.kui-chart-legend--block .kui-chart-legend__label {
+  flex: 1;
+  min-width: 0;
+}
+
+.kui-donut .kui-chart-legend {
+  flex: 1;
+  min-width: 0;
+}
+
+/* --- Range selector ----------------------------------------------------------------------------
+ *
+ * A group of real radios, clipped rather than hidden, with drawn segments as their labels. The
+ * selected segment carries a fill — `--kui-color-selected`, sampled from the design at (1000,312)
+ * — because a segmented control with no selected-segment fill is one of the three controls this
+ * project has shipped that were perfect in the accessibility tree and invisible to everyone else.
+ */
+
+/* `min-height` and not `height`, and the segments may wrap.
+ *
+ * The design's control holds three two-character ranges and fits in 110px. A caller with six
+ * ranges and words for labels does not, and the failure mode of a fixed height is the worst
+ * available one: the labels wrap inside a box that cannot grow, and the second line is sliced in
+ * half. Text that is cut in half is worse than text that takes two rows, so the box grows, and
+ * `white-space: nowrap` on the label keeps a single range from ever being split across rows. */
+.kui-range {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  min-height: 26px;
+  max-width: 100%;
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-pill);
+  overflow: hidden;
+}
+
+.kui-range__segment {
+  display: flex;
+  position: relative;
+}
+
+.kui-range__segment + .kui-range__segment {
+  border-left: 1px solid var(--kui-color-border);
+}
+
+/* Clipped, not `display: none` and not `visibility: hidden`: both of those would take the input
+ * out of the tab order and out of the accessibility tree, which is the entire reason it is here. */
+.kui-range__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.kui-range__label {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--kui-space-3);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--kui-duration-fast) ease, color var(--kui-duration-fast) ease;
+}
+
+.kui-range__label:hover {
+  color: var(--kui-color-text);
+}
+
+.kui-range__input:checked + .kui-range__label {
+  background-color: var(--kui-color-selected);
+  color: var(--kui-color-selected-contrast);
+}
+
+/* The ring is drawn on the segment, because a focus ring on a clipped 1px input is a focus ring
+ * nobody can see. `:focus-visible` on the input keeps the browser's own heuristic for when a ring
+ * is wanted — a click should not light one up, a Tab should. */
+.kui-range__input:focus-visible + .kui-range__label {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+}
+
+.kui-range__segment--disabled .kui-range__label {
+  color: var(--kui-color-text-subtle);
+  cursor: not-allowed;
+}
+
+.kui-range--disabled {
+  opacity: var(--kui-opacity-disabled);
+}
+
+/* --- Progress bar ------------------------------------------------------------------------------
+ *
+ * One quantity against a limit. The track is 6px — measured off the broker-health panel — and a
+ * stadium at both ends, so a nearly-empty bar still reads as a bar and not as a dot.
+ */
+
+.kui-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+.kui-progress__caption {
+  flex: none;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-progress__track {
+  flex: 1;
+  min-width: var(--kui-space-6);
+  height: 6px;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-overlay);
+  overflow: hidden;
+}
+
+.kui-progress__fill {
+  height: 100%;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-success);
+  transition: width var(--kui-duration-normal) ease;
+}
+
+.kui-progress__track--warning .kui-progress__fill {
+  background-color: var(--kui-color-warning);
+}
+
+.kui-progress__track--critical .kui-progress__fill {
+  background-color: var(--kui-color-danger);
+}
+
+.kui-progress__value {
+  flex: none;
+  min-width: 4ch;
+  text-align: right;
+  font-size: var(--kui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-muted);
+}
+
+/* The figure carries the same three levels as the fill, so the reading survives for anyone who
+ * cannot separate the amber from the green — colour is never the only signal (SPEC §4.0). */
+.kui-progress__value--warning {
+  color: var(--kui-color-warning);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-progress__value--critical {
+  color: var(--kui-color-danger);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* An unmeasurable disk and a 0%-full disk mean opposite things, so they must not look alike. The
+ * unknown case draws no fill at all and prints the em dash; the dash is the difference the reader
+ * is already looking at. */
+.kui-progress__value--unknown {
+  color: var(--kui-color-text-subtle);
+}
+
+/* --- Magnitude bar list ------------------------------------------------------------------------
+ *
+ * Distinct from `.kui-magnitude` in 23-kernel-data.css, which is a single bar beside one figure.
+ * This is the dashboard's ranked list: label and figure on one line, a full-width track beneath.
+ */
+
+.kui-magnitude-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+.kui-magnitude-list__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-magnitude-list__entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--kui-space-1) var(--kui-space-3);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.kui-magnitude-list__label {
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text);
+  /* A group id has no spaces to break at, so it is truncated rather than allowed to wrap and
+   * misalign the figure beside it. The full string stays reachable as the element's text. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.kui-magnitude-list__value {
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-strong);
+  white-space: nowrap;
+}
+
+.kui-magnitude-list__value--absent {
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-regular);
+}
+
+.kui-magnitude-list__track {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-overlay);
+  overflow: hidden;
+}
+
+.kui-magnitude-list__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--kui-radius-pill);
+  transition: width var(--kui-duration-normal) ease;
+}
+
+.kui-magnitude-list__empty {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Donut -------------------------------------------------------------------------------------
+ */
+
+.kui-donut {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-5);
+  min-width: 0;
+}
+
+.kui-donut__ring {
+  position: relative;
+  flex: none;
+}
+
+.kui-donut__svg {
+  display: block;
+}
+
+/* The centre figure is HTML stacked over the ring rather than `<svg:text>`, because the SVG is
+ * `aria-hidden` — everything it draws is in the legend — and text inside it would be hidden too. */
+.kui-donut__centre {
+  position: absolute;
+  /* Inset by the stroke, so the figure is laid out in the hole rather than in the whole circle:
+     a long centre caption then wraps inside the ring instead of running out over the arc. */
+  inset: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  text-align: center;
+  line-height: 1.1;
+  pointer-events: none;
+}
+
+.kui-donut__figure {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-display);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--kui-color-text-strong);
+}
+
+.kui-donut__figure--warning {
+  color: var(--kui-color-warning);
+}
+
+.kui-donut__figure--critical {
+  color: var(--kui-color-danger);
+}
+
+.kui-donut__figure--absent {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-donut__caption {
+  font-size: 9px;
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Plots (bar and line) ----------------------------------------------------------------------
+ */
+
+.kui-plot {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.kui-plot__surface {
+  position: relative;
+  width: 100%;
+  border-radius: var(--kui-radius-md);
+}
+
+/* A chart that answers only a mouse is unreadable to a keyboard user, so the plot is a tab stop —
+ * and a tab stop with no visible ring is the defect this project has shipped three times. */
+.kui-plot__surface:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-plot__svg {
+  display: block;
+  overflow: visible;
+}
+
+/* The hit target is the whole column of a group. A 2px-wide bar is a target nobody can land on. */
+.kui-plot__group {
+  fill: transparent;
+}
+
+.kui-plot__group--active {
+  fill: var(--kui-color-state-layer);
+}
+
+.kui-plot__guide {
+  stroke: var(--kui-color-border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* Pinned to the foot of the surface rather than laid out after the plot. In the empty state the
+ * plot is replaced by a sentence, and an axis in normal flow would ride up to the top of the card
+ * — where it reads as a heading rather than as the range the reader asked for. The axis stays
+ * where an axis goes, in every state. */
+.kui-plot__axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 18px;
+}
+
+.kui-plot__tick {
+  position: absolute;
+  top: var(--kui-space-1);
+  transform: translateX(-50%);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+  white-space: nowrap;
+}
+
+/* The empty plot keeps the axis drawn beneath it, so the reader can still see the range they
+ * asked for — "no data" and "no chart" are different statements (SPEC §4.21). */
+.kui-plot__empty {
+  position: absolute;
+  /* Above the axis, not over it. */
+  inset: 0 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: var(--kui-space-4);
+  text-align: center;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-plot__tooltip {
+  position: absolute;
+  bottom: calc(100% - var(--kui-space-5));
+  transform: translateX(-50%);
+  z-index: var(--kui-z-dropdown);
+  min-width: 120px;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-overlay);
+  box-shadow: var(--kui-shadow-md);
+  pointer-events: none;
+}
+
+.kui-plot__tooltip-title {
+  margin: 0 0 var(--kui-space-1);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-plot__tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-plot__tooltip-swatch {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--kui-radius-xs);
+}
+
+.kui-plot__tooltip-label {
+  flex: 1;
+}
+
+.kui-plot__tooltip-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+/* Under reduced motion the widths change without travelling. Suppressed, not sped up. */
+@media (prefers-reduced-motion: reduce) {
+  .kui-progress__fill,
+  .kui-magnitude-list__fill {
+    transition: none;
+  }
+}
