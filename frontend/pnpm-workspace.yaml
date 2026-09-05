@@ -1,0 +1,18 @@
+# The seven packages of DEVPLAN §6.1. One package per current Mill module, so the module
+# boundary survives the port: pnpm's strict node_modules makes an undeclared import a build
+# failure, which is the closest equivalent to Mill's `moduleDeps` (ADR-048, decision D5/D11).
+packages:
+  - "packages/*"
+
+allowBuilds:
+  # esbuild ships a platform-specific binary that its install script links into place.
+  # Vite's dependency pre-bundler needs it; without it Storybook's dev server cannot start.
+  esbuild: true
+
+# Every runtime dependency is hoisted to exactly one copy. Two copies of the Solid reactive
+# core in one bundle is the framework's classic failure mode (ADR-048 §7 R-7).
+dedupePeerDependents: true
+
+minimumReleaseAgeExclude:
+  - playwright-core@1.63.0
+  - playwright@1.63.0

@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../.tsbuild/api",
+    "tsBuildInfoFile": "../../.tsbuild/api.tsbuildinfo",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"]
+}

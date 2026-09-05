@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../.tsbuild/shell",
+    "tsBuildInfoFile": "../../.tsbuild/shell.tsbuildinfo",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "references": [
+    { "path": "../api" },
+    { "path": "../kernel" },
+    { "path": "../feature-clusters" },
+    { "path": "../feature-topics" },
+    { "path": "../feature-messages" },
+    { "path": "../feature-consumers" }
+  ]
+}

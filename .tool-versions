@@ -1,0 +1,12 @@
+# The toolchain the browser build needs, in the format asdf and mise both read.
+#
+# Until ADR-048 the build needed nothing but a JVM. It now also needs Node and pnpm, and this file
+# is where their versions are stated (ADR-048 §6, R-1). `./mill frontend.solid.toolchain` reads it
+# and fails with an actionable message rather than letting a wrong version produce a confusing
+# build failure a long way from its cause.
+#
+# Node is a *minimum*: Vite 8 requires ^20.19 or >=22.12, and a newer Node is fine. pnpm is exact —
+# `frontend/package.json` carries the same number in `packageManager`, and pnpm installs and runs
+# that exact version itself, so the two must not disagree.
+nodejs 22.12.0
+pnpm 11.25.0

@@ -3983,7 +3983,7 @@ private def devLogFile   = mill.api.BuildCtx.workspaceRoot / "out" / "dev.log"
 def dev(): Task.Command[Unit] = Task.Command {
   val classPath = devClassPath()
   val port = devPortOf(Task.env)
-  println(devBanner(port))
+  println(devBanner(port, devFrontendOf(Task.env)))
   os.proc(devCommand(classPath, port))
     .call(cwd = mill.api.BuildCtx.workspaceRoot, stdout = os.Inherit, stderr = os.Inherit, check = false)
   ()
@@ -4028,7 +4028,7 @@ def devStart(): Task.Command[Unit] = Task.Command {
 
   os.write.over(devPidFile, process.wrapped.pid().toString)
 
-  println(devBanner(port))
+  println(devBanner(port, devFrontendOf(Task.env)))
   println(s"  running in the background as pid ${process.wrapped.pid()}")
   println(s"  logs:  tail -f ${devLogFile.relativeTo(mill.api.BuildCtx.workspaceRoot)}")
   println(s"  watch: ./mill -w frontend.uiShell.fastLinkJS")
@@ -4142,10 +4142,17 @@ private def devCommand(classPath: String, devPort: String): Seq[String] =
     "--kui.server.devInsecureCookies=true"
   )
 
-private def devBanner(devPort: String): String =
+private def devBanner(devPort: String, frontend: String): String = {
+  val assets =
+    if frontend == "solid" then
+      """  assets frontend/dist (served live; ./mill frontend.solid.devWatch rebuilds, then refresh)"""
+    else
+      """  assets out/frontend/uiShell/fastLinkJS.dest (served live; re-link and refresh)"""
+
   s"""kui development server
      |  open   http://localhost:$devPort/ui/
-     |  assets out/frontend/uiShell/fastLinkJS.dest (served live; re-link and refresh)""".stripMargin
+     |$assets""".stripMargin
+}
 
 /** Kills a previously started development server. Answers whether there was one. */
 private def stopDevServer(): Boolean =

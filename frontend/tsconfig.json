@@ -1,0 +1,14 @@
+// The solution file. `tsc --build` here type-checks every package in dependency order, which is
+// what `./mill frontend.typecheck` runs. It holds no sources of its own.
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/api" },
+    { "path": "./packages/kernel" },
+    { "path": "./packages/shell" },
+    { "path": "./packages/feature-clusters" },
+    { "path": "./packages/feature-topics" },
+    { "path": "./packages/feature-messages" },
+    { "path": "./packages/feature-consumers" }
+  ]
+}

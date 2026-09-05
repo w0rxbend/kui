@@ -17,3 +17,6 @@ deployment/secured/certs/
 
 # Scratch directory for a one-off secured-broker run; deployment/secured/ is the committed form.
 .secure-e2e/
+
+# TypeScript project-reference build state (frontend/tsconfig*.json)
+frontend/.tsbuild/

@@ -1,0 +1,43 @@
+// The strictness settings DEVPLAN exit criterion 15 names, in one place every package extends.
+//
+// `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` are the two that catch the mistakes
+// the Scala type system used to catch for free: an array lookup that can be undefined, and an
+// optional field that is present but set to undefined.
+//
+// TypeScript is pinned to 5.9.3 and must not be upgraded to 7.x: openapi-typescript 7.13.0 peers
+// typescript@^5.x and the install fails with ERESOLVE against 7 (ADR-048 §7 R-4).
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    // Vite (through vite-plugin-solid) compiles JSX, not tsc: Solid's JSX is not React's and
+    // tsc's own transform would produce the wrong calls. `preserve` hands it over untouched.
+    "jsx": "preserve",
+    "jsxImportSource": "@solidjs/web",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "useDefineForClassFields": true,
+
+    // Project references: each package is built once and the others consume its .d.ts, so an
+    // illegal edge between packages shows up as a type error rather than as a silent recompile.
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

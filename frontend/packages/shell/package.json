@@ -1,0 +1,33 @@
+{
+  "name": "@kui/shell",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Router, layout, navigation, feature registry and error pages",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@kui/api": "workspace:*",
+    "@kui/kernel": "workspace:*",
+    "@solidjs/router": "2.0.0-next.21",
+    "solid-js": "2.0.0-rc.6",
+    "@solidjs/web": "2.0.0-rc.6",
+    "@kui/feature-clusters": "workspace:*",
+    "@kui/feature-topics": "workspace:*",
+    "@kui/feature-messages": "workspace:*",
+    "@kui/feature-consumers": "workspace:*"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "10.6.0",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/user-event": "14.6.1",
+    "axe-core": "4.11.0",
+    "jsdom": "30.0.1",
+    "storybook": "10.6.0",
+    "storybook-solidjs-vite": "10.7.1",
+    "vitest": "5.0.0"
+  }
+}

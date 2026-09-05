@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../.tsbuild/feature-topics",
+    "tsBuildInfoFile": "../../.tsbuild/feature-topics.tsbuildinfo",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "references": [{ "path": "../api" }, { "path": "../kernel" }]
+}

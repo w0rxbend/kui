@@ -1,0 +1,27 @@
+{
+  "name": "@kui/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Design system, ApiClient, query cache, SSE, capability and permission stores",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@kui/api": "workspace:*",
+    "solid-js": "2.0.0-rc.6",
+    "@solidjs/web": "2.0.0-rc.6"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "10.6.0",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/user-event": "14.6.1",
+    "axe-core": "4.11.0",
+    "jsdom": "30.0.1",
+    "storybook": "10.6.0",
+    "storybook-solidjs-vite": "10.7.1",
+    "vitest": "5.0.0"
+  }
+}

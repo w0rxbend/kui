@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KUI</title>
+  <!--
+    The two markers the gateway substitutes at request time, exactly as they appear in the
+    hand-written template this file replaces (services/gateway/api/resources/web/index.html).
+
+    kui.gateway.api.static.IndexHtml turns KUI_BASE_HREF into `<base href="<basePath>/ui/">` and
+    KUI_BOOTSTRAP into `<script id="kui-bootstrap" type="application/json">…</script>`. Vite copies
+    HTML comments it does not recognise straight through, so nothing on the server side had to
+    change to serve a Vite build — which is the point of keeping them byte-identical (ADR-048 §6).
+
+    Every asset URL Vite writes into this file is relative (`vite.config.ts` sets `base: "./"`), so
+    they resolve against that `<base href>`. That is what lets one built bundle run unmodified
+    whether KUI is mounted at `/` or behind a reverse proxy at `/kui`, and it is also what makes a
+    deep link work: `/ui/clusters/orders` serves this same document, and `./assets/index-abc.js`
+    still resolves to `/ui/assets/index-abc.js` rather than to `/ui/clusters/assets/…`.
+  -->
+  <!--KUI_BASE_HREF-->
+</head>
+<body>
+  <div id="app"></div>
+  <!--KUI_BOOTSTRAP-->
+  <script type="module" src="./packages/shell/src/index.tsx"></script>
+</body>
+</html>

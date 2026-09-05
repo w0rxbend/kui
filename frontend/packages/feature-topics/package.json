@@ -1,0 +1,18 @@
+{
+  "name": "@kui/feature-topics",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The topics feature microfrontend",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@kui/api": "workspace:*",
+    "@kui/kernel": "workspace:*",
+    "solid-js": "2.0.0-rc.6",
+    "@solidjs/web": "2.0.0-rc.6"
+  }
+}
