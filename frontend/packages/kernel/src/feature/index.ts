@@ -22,3 +22,17 @@ export {
   createLazyModule,
   timedOutMessage,
 } from "./lazyFeature.js";
+
+/**
+ * The seam through which a feature reaches the product: the API client, the selected cluster, the
+ * permission answer and the links. A feature's root takes no props, so without this there is no way
+ * for one to fetch anything — which is why every feature in this workspace rendered fixtures until
+ * it existed.
+ */
+export {
+  KuiProvider,
+  useKui,
+  type CallScope,
+  type KuiContextValue,
+  type KuiPaths,
+} from "./context.jsx";

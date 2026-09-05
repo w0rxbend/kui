@@ -82,20 +82,49 @@ export function shellRoutes(views: RouteViews) {
         {
           path: "/:clusterId",
           children: [
-            { path: "/brokers", component: gate("clusters") },
-            { path: "/brokers/:brokerId", component: gate("clusters") },
-
-            { path: "/topics", component: gate("topics") },
-            { path: "/topics/:topicName", component: gate("topics") },
-
-            // The message browser hangs off a topic, which is why it has no navigation entry: the
-            // drawer has no topic to name. Its route is registered all the same, so a link from a
-            // topic page — or a bookmark somebody kept — resolves like any other.
-            { path: "/topics/:topicName/messages", component: gate("messages") },
+            // Every one of these is nested rather than written as a sibling with a longer `path`,
+            // and the note above says why in general. Concretely: two siblings that both begin
+            // `/topics/:topicName` intersect into two call signatures on the proxy, TypeScript
+            // resolves the first, and `paths.clusters(c).topics(name).messages()` then does not
+            // exist as a type — so the only way to link to the message browser is to build the
+            // string by hand, which is exactly what the typed proxy is here to prevent. Nesting
+            // makes the child reachable.
+            //
+            // The parent nodes carry no `component` on purpose: a parent's component is a *layout*
+            // that must render `props.children`, and a feature root has no children slot, so a
+            // component here would draw the feature and swallow the matched child.
+            {
+              path: "/brokers",
+              children: [
+                { path: "/", component: gate("clusters") },
+                { path: "/:brokerId", component: gate("clusters") },
+              ],
+            },
+            {
+              path: "/topics",
+              children: [
+                { path: "/", component: gate("topics") },
+                {
+                  path: "/:topicName",
+                  children: [
+                    { path: "/", component: gate("topics") },
+                    // The message browser hangs off a topic, which is why it has no navigation
+                    // entry: the drawer has no topic to name. Its route is registered all the same,
+                    // so a link from a topic page — or a bookmark somebody kept — resolves like any
+                    // other.
+                    { path: "/messages", component: gate("messages") },
+                  ],
+                },
+              ],
+            },
             { path: "/messages/track", component: gate("messages") },
-
-            { path: "/consumer-groups", component: gate("consumers") },
-            { path: "/consumer-groups/:groupId", component: gate("consumers") },
+            {
+              path: "/consumer-groups",
+              children: [
+                { path: "/", component: gate("consumers") },
+                { path: "/:groupId", component: gate("consumers") },
+              ],
+            },
           ],
         },
       ],

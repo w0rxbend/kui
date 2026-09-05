@@ -44,6 +44,8 @@ import {
   type FeatureId,
   type FeatureRegistration,
   type FeatureState,
+  KuiProvider,
+  type KuiContextValue,
 } from "@kui/kernel";
 import { AppFrame } from "./chrome/AppFrame.jsx";
 import { EnvRail, type RailDestination } from "./chrome/EnvRail.jsx";
@@ -60,6 +62,7 @@ import { degradedBanner, StaleBanner } from "./messages.js";
 import { navigationGroups, stillWorking, degradedLabels, type FeatureStatus } from "./nav/navigation.js";
 import { ForbiddenPage, GatewayUnreachablePage, NotFoundPage } from "./pages/errorPages.jsx";
 import { clusterInUrl, createShellRouter, landingFor, UiPath, type ShellRouter } from "./routing/routes.jsx";
+import { shellPaths } from "./routing/paths.js";
 import type { RouteSectionProps } from "@solidjs/router";
 
 export function App() {
@@ -315,6 +318,30 @@ export function App() {
     }),
   );
 
+  /**
+   * What every feature is handed.
+   *
+   * Built once and shared, but every field that can change is a *function* — `cluster()` and
+   * `permits()` are called at the moment a feature needs them, so switching cluster from the rail
+   * or having the session settle reaches a mounted screen. Handing over values would freeze both at
+   * first render, and the symptom is a screen still showing the previous cluster's topics.
+   *
+   * `report` narrows the shell's three-way health signal to the one bit a feature can honestly
+   * supply: the call failed, or it did not. Deciding whether a failure means "the gateway is down"
+   * or "this upstream is down" needs `ApiError.kind`, which is the shell's job — a feature that
+   * guessed would put the whole product behind the gateway-unreachable screen because one topic
+   * list timed out.
+   */
+  const featureContext: KuiContextValue = {
+    api,
+    cluster: () => cluster.selected(),
+    permits: (action, name) =>
+      session.identity() === undefined ||
+      session.permits(action.resource, action.action, cluster.selected(), name),
+    paths: shellPaths(Router),
+    report: (scope, failed) => health.report(scope, failed ? "answered" : "ok"),
+  };
+
   const banner = createMemo<string | undefined>(() =>
     capabilities.stale() ? StaleBanner : degradedBanner(degradedLabels(statuses())),
   );
@@ -322,7 +349,7 @@ export function App() {
   return (
     <Router>
       {(route: RouteSectionProps) => (
-        <>
+        <KuiProvider value={featureContext}>
         <AppFrame
           rail={
             <EnvRail
@@ -393,7 +420,7 @@ export function App() {
           <Show when={health.connectivity().kind === "connected" && session.mustSignIn()}>
             <SignIn />
           </Show>
-        </>
+        </KuiProvider>
       )}
     </Router>
   );
