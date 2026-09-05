@@ -86,6 +86,10 @@ export const MagnitudeBarList: Component<MagnitudeBarListProps> = props => {
               const isKnown = (): boolean => entry.value !== undefined && Number.isFinite(entry.value);
               const width = (): string => {
                 if (!isKnown() || nothingToCompare()) return "0";
+                // A zero draws nothing at all. The stub below exists to keep a *small* value
+                // visible, and applying it to zero makes "this group has no lag" look exactly like
+                // "this group has a little lag" — the two readings a lag panel exists to separate.
+                if (entry.value === 0) return "0";
                 const pct = fraction(entry.value, max()) * 100;
                 // `max()` of the computed share and the stub keeps a small value visible without
                 // ever letting the stub win against a share that is genuinely larger.

@@ -122,7 +122,12 @@ export const Donut: Component<DonutProps> = props => {
             stroke-width={stroke()}
           />
           <Show when={!empty()}>
-            <For each={arcs()}>
+            {/* Zero-length arcs are dropped rather than rendered with a zero dash. `stroke-linecap`
+                is `round`, and a round cap on a zero-length dash still paints a dot the width of
+                the stroke — so a segment with a value of 0 drew a visible mark on the ring, in its
+                own colour, indistinguishable from a small non-zero segment. On the partition donut
+                that meant a healthy cluster appeared to have offline partitions. */}
+            <For each={arcs().filter(arc => arc.length > 0)}>
               {arc => (
                 <circle
                   cx={diameter() / 2}
