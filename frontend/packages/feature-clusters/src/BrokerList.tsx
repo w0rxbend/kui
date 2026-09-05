@@ -71,15 +71,27 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
     return props.brokers.reduce((sum, broker) => sum + (broker.leaderPartitions ?? 0), 0);
   });
 
+  /**
+   * What the brokers hold, and — where anything says so — what they could hold.
+   *
+   * These are two separate questions and the wire answers only the first. Kafka's admin protocol
+   * reports how much a broker's log directories *hold*; how large the disk beneath them is belongs
+   * to the host and is not exposed. So `total` is almost always absent, and the figure is still
+   * worth printing: "the cluster holds 2.3 MB" is useful on its own.
+   *
+   * This required both to be present at first, so the tile read "log directories could not be
+   * read" on a cluster that had just reported them perfectly. Requiring a denominator that the
+   * protocol does not carry turned a known figure into a reported failure.
+   */
   const disk = createMemo(() => {
-    const known = props.brokers.filter(
-      (broker) => broker.diskUsedBytes !== null && broker.diskTotalBytes !== null && broker.diskTotalBytes > 0,
-    );
-    if (known.length === 0) return undefined;
+    const measured = props.brokers.filter((broker) => broker.diskUsedBytes !== null);
+    if (measured.length === 0) return undefined;
+    const withTotal = measured.filter((broker) => (broker.diskTotalBytes ?? 0) > 0);
     return {
-      used: known.reduce((sum, broker) => sum + (broker.diskUsedBytes ?? 0), 0),
-      total: known.reduce((sum, broker) => sum + (broker.diskTotalBytes ?? 0), 0),
-      partial: known.length !== props.brokers.length,
+      used: measured.reduce((sum, broker) => sum + (broker.diskUsedBytes ?? 0), 0),
+      total: withTotal.length === 0 ? undefined : withTotal.reduce((sum, broker) => sum + (broker.diskTotalBytes ?? 0), 0),
+      measured: measured.length,
+      brokers: props.brokers.length,
     };
   });
 
@@ -136,9 +148,16 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
                 : { kind: "value", text: formatCount(totalLeaders() ?? 0) }
             }
             chip={
-              totalLeaders() === undefined
-                ? { text: "one or more brokers did not answer", tone: "attention" }
-                : undefined
+              totalLeaders() !== undefined
+                ? undefined
+                : /* Two different silences, and the old chip said the wrong one. A broker in this
+                     list *did* answer `describeCluster` — that is how it got here. Kafka simply
+                     does not report a per-broker leader count on every cluster, and saying "one or
+                     more brokers did not answer" about a cluster that answered sends an operator
+                     looking for an outage that is not happening. */
+                  props.brokers.length === 0
+                  ? { text: "no broker answered", tone: "attention" }
+                  : { text: "this cluster does not report leader counts" }
             }
           />
           <StatTile
@@ -150,24 +169,21 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
                 ? { kind: "unknown" }
                 : { kind: "value", text: formatBytes(disk()?.used ?? 0) }
             }
-            chip={
-              disk() === undefined
-                ? { text: "log directories could not be read", tone: "attention" }
-                : {
-                    text:
-                      disk()?.partial === true
-                        ? `of ${formatBytes(disk()?.total ?? 0)} — some brokers did not report`
-                        : `of ${formatBytes(disk()?.total ?? 0)}`,
-                    tone: disk()?.partial === true ? "attention" : "neutral",
-                  }
-            }
+            chip={diskChip(disk(), props.brokers.length)}
           />
           <StatTile
             label="PARTITION SKEW"
             icon="chart-bars"
             tone="success"
             figure={skew() === undefined ? { kind: "unknown" } : { kind: "value", text: `${Math.round((skew() ?? 0) * 100)}`, unit: "%" }}
-            chip={{ text: skewCaption(skew()) }}
+            chip={
+              /* A skew needs at least two brokers to be a skew at all. Saying so is more use than
+                 the general caption, which on a single-broker cluster reads as though something
+                 failed. */
+              skew() === undefined && props.brokers.length < 2
+                ? { text: "needs at least two brokers" }
+                : { text: skewCaption(skew()) }
+            }
           />
         </div>
 
@@ -219,6 +235,31 @@ function skewCaption(skew: number | undefined): string {
   if (skew === undefined) return "Replicas per broker, as a share of the average.";
   if (skew > 0.2) return "Above 20% the load is uneven enough to be worth rebalancing.";
   return "Under 20%. The partitions are spread evenly enough.";
+}
+
+/**
+ * What to say beneath the disk figure.
+ *
+ * Four cases, and the one that matters is the third: a cluster that reported its usage but has no
+ * capacity to report it against. That is the ordinary case — Kafka does not expose the size of the
+ * disk under a log directory — and it must not read as a failure.
+ */
+function diskChip(
+  disk: { readonly used: number; readonly total: number | undefined; readonly measured: number; readonly brokers: number } | undefined,
+  brokerCount: number,
+): { readonly text: string; readonly tone?: "neutral" | "positive" | "attention" } | undefined {
+  if (disk === undefined) {
+    return brokerCount === 0
+      ? { text: "no broker answered", tone: "attention" }
+      : { text: "log directories could not be read", tone: "attention" };
+  }
+  if (disk.measured < disk.brokers) {
+    return { text: `${disk.measured} of ${disk.brokers} brokers reported`, tone: "attention" };
+  }
+  if (disk.total === undefined) {
+    return { text: "Kafka does not report disk capacity" };
+  }
+  return { text: `of ${formatBytes(disk.total)}` };
 }
 
 export { skewCaption };

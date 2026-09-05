@@ -19,15 +19,12 @@ export { ResetWizard, scopeSentence, type ResetStep, type ResetWizardProps } fro
 export * from "./model.js";
 export * from "./detail.js";
 
-import { GroupList } from "./GroupList.jsx";
-import { SAMPLE_GROUPS } from "./fixtures.js";
+export { fetchGroups, stateOf, type GroupListResult } from "./data.js";
 
 /**
- * The feature's route entry — the group list, on the fixtures, until the data layer is wired.
+ * The feature's route entry.
  *
- * It draws the real screen rather than a placeholder sentence so that the loading seam is proved
- * with the thing it will actually load.
+ * It used to render `SAMPLE_GROUPS` — invented groups with invented lag, on a screen an operator
+ * opens to find out whether a consumer is behind. It now fetches, through the `useKui()` seam.
  */
-export default function Consumers() {
-  return <GroupList rows={SAMPLE_GROUPS} hrefFor={(id) => `#/consumer-groups/${encodeURIComponent(id)}`} />;
-}
+export { default } from "./ConsumersRoute.jsx";

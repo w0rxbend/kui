@@ -56,3 +56,12 @@ export { toRecord, LARGE_VALUE_BYTES, type MessageDto } from "./wire.js";
  * assigned on the message service until its budget expired.
  */
 export { createBrowseTransport } from "./transport.js";
+
+/**
+ * The feature's route entry.
+ *
+ * There was no default export, so every `/messages` address rendered the kernel's "this feature
+ * arrived without a screen" panel — the screen, the session, the URL grammar and (since the commit
+ * that added `transport.ts`) the network all existed, and nothing joined them.
+ */
+export { default } from "./MessagesRoute.jsx";

@@ -1,0 +1,60 @@
+{
+    "groups": {
+        "status": "ok",
+        "data": {
+            "items": [
+                {
+                    "groupId": "analytics-indexer",
+                    "state": "STABLE",
+                    "protocol": "CLASSIC",
+                    "isSimple": false,
+                    "members": 1,
+                    "topics": 1,
+                    "partitions": 12,
+                    "coordinatorId": 1,
+                    "totalLag": 0,
+                    "pace": 0.0,
+                    "excludedPartitions": 0,
+                    "incomplete": null
+                },
+                {
+                    "groupId": "order-fulfilment",
+                    "state": "EMPTY",
+                    "protocol": "CLASSIC",
+                    "isSimple": true,
+                    "members": 0,
+                    "topics": 1,
+                    "partitions": 6,
+                    "coordinatorId": 1,
+                    "totalLag": 9,
+                    "pace": 0.0,
+                    "excludedPartitions": 0,
+                    "incomplete": null
+                },
+                {
+                    "groupId": "payments-ledger-sync",
+                    "state": "EMPTY",
+                    "protocol": "CLASSIC",
+                    "isSimple": true,
+                    "members": 0,
+                    "topics": 1,
+                    "partitions": 3,
+                    "coordinatorId": 1,
+                    "totalLag": 0,
+                    "pace": 0.0,
+                    "excludedPartitions": 0,
+                    "incomplete": null
+                }
+            ],
+            "page": {
+                "page": 1,
+                "pageSize": 25,
+                "totalItems": 3,
+                "pageCount": 1,
+                "nextPageToken": null
+            }
+        },
+        "fetchedAt": "2026-09-05T15:59:46.514Z"
+    },
+    "incompleteCoordinators": 0
+}

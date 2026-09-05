@@ -38,6 +38,7 @@ import {
   MISSING,
   ProgressBar,
   Tag,
+  formatBytes,
   formatCount,
 } from "@kui/kernel";
 import { DISK_THRESHOLDS, brokerName, diskPercent, type Broker } from "./model.js";
@@ -108,6 +109,17 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
   const broker = () => props.broker;
   const percent = () => diskPercent(broker().diskUsedBytes, broker().diskTotalBytes);
 
+  /**
+   * The figure beside the bar: a percentage where there is a capacity, the bytes held where there
+   * is not, and nothing at all where neither was reported.
+   */
+  const diskText = (): string | undefined => {
+    const fraction = percent();
+    if (fraction !== undefined) return `${Math.round(fraction)}%`;
+    const used = broker().diskUsedBytes;
+    return used === null ? undefined : formatBytes(used);
+  };
+
   const toggle = (): void => {
     const next = !expanded();
     setOwnExpanded(next);
@@ -168,13 +180,23 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
         </div>
 
         <div class="kui-brkcard__disk">
+          {/* Two different absences, and the bar drew the same dash for both.
+             *
+             * A *percentage* needs a capacity, and Kafka's admin protocol does not expose the size
+             * of the disk under a log directory — so on almost every cluster `percent()` is
+             * undefined while `diskUsedBytes` is perfectly well known. Printing a dash there threw
+             * away a figure the server had just sent.
+             *
+             * So the bar keeps its track empty when there is no denominator to fill it against, and
+             * the text beside it says what *is* known: the bytes held. Only when neither is known
+             * does it read as absent. */}
           <ProgressBar
             label={`${brokerName(broker())} disk usage`}
             caption="disk"
             value={percent()}
             max={100}
             thresholds={DISK_THRESHOLDS}
-            valueText={percent() === undefined ? undefined : `${Math.round(percent() ?? 0)}%`}
+            valueText={diskText()}
           />
         </div>
 
