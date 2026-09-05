@@ -74,6 +74,13 @@
  * the appearance it was reviewed with until it is retired. See the header of the file. */
 @import "./27-primitives.css";
 
+/* Surfaces, and every rendering that is not the happy one: the card, the stat card, the skeleton,
+ * the dialog, the drawer, the toast, the banner, the stale badge and the empty/failure states.
+ * After `27-primitives.css` because it consumes the control metrics declared there, and after
+ * `21-kernel-overlays.css` because it deliberately overrides that sheet's `.kui-empty-state`
+ * treatment for the same markup — see the header of the file. */
+@import "./28-surfaces.css";
+
 /* 4. Screens, in the pre-migration order described above. */
 @import "../../feature-clusters/styles/40-clusters.css";
 @import "../../feature-clusters/styles/41-clusters-brokers.css";
@@ -82,13 +89,6 @@
 @import "../../shell/styles/30-shell.css";
 @import "../../shell/styles/31-shell-nav.css";
 @import "../../shell/styles/32-shell-dashboard.css";
-/* The application chrome, rebuilt for the SolidJS frontend (ADR-048): the navigation drawer, the
- * top bar and the page-level navigation. They are appended after the three pre-migration shell
- * files rather than interleaved with them, because the two sets style different class names and
- * the pre-migration order above is preserved deliberately — see the note at the top of this file. */
-@import "../../shell/styles/33-chrome-drawer.css";
-@import "../../shell/styles/34-chrome-topbar.css";
-@import "../../shell/styles/35-chrome-navigation.css";
 /* The application chrome, rebuilt for the SolidJS frontend (ADR-048): the navigation drawer, the
  * top bar and the page-level navigation. They are appended after the three pre-migration shell
  * files rather than interleaved with them, because the two sets style different class names and

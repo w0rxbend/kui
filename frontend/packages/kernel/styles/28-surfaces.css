@@ -1,0 +1,877 @@
+/* Surfaces: the card, the stat card, the skeleton, the dialog, the drawer, the toast, the banner,
+ * and every rendering a region has that is not the happy one.
+ *
+ * ## Why a separate namespace from `20-kernel-controls.css` and `21-kernel-overlays.css`
+ *
+ * Those two sheets draw the Laminar frontend, which is still the shipping application, and they
+ * were written from the "Kafka UI v2" artboard. The five screenshots in `.agent/design/screens`
+ * are what the owner actually asked for, and where the two disagree the screenshots win. They
+ * disagree about these surfaces in ways that are not cosmetic — the artboard's empty state is a
+ * 64px brand-coloured tile with a 24px display headline, the screenshots' failure surfaces are
+ * quiet; the artboard's card is bordered by nothing in both themes, the screenshots' light card
+ * has to have a border or it disappears.
+ *
+ * Editing the shipping frontend's stylesheet inside a commit about a different frontend would
+ * change that application's appearance for reasons nobody could bisect. So these components own
+ * their own class names — `.kui-panel`, `.kui-modal`, `.kui-sheet`, `.kui-notice` — exactly as
+ * `27-primitives.css` did for `.kui-btn`. When the Laminar frontend is retired, both old sheets
+ * are deleted and these names lose their prefixes in one rename.
+ *
+ * The one exception is `.kui-empty-state`, which the SolidJS `EmptyState` component reuses by
+ * name. This file is imported after `21-kernel-overlays.css`, so the rules at the end of it
+ * override the artboard's treatment for the same markup.
+ *
+ * ## The rule this file obeys without exception
+ *
+ * Every colour, length, radius, weight and duration is a custom property. There is not one literal
+ * hex. The few literal lengths are stroke widths and 1px rules, which have no token because they
+ * are not a scale.
+ */
+
+/* --- Skeleton ---------------------------------------------------------------------------------
+ *
+ * A block drawn at the size of the content it stands in for, so that nothing moves when the real
+ * value lands. A spinner in the same place moves the layout twice — once when it replaces what was
+ * there and once when the content arrives at a different size.
+ *
+ * The shimmer is a moving highlight rather than a pulsing opacity: a block that fades in and out
+ * is easily read as content that is *dimmed*, which is what a stale value looks like, and those
+ * two must stay different pictures.
+ */
+
+.kui-skeleton {
+  display: inline-block;
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface-hover);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--kui-color-state-layer) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: kui-skeleton-sweep 1400ms linear infinite;
+  /* Never a text baseline: a skeleton standing in for a heading must occupy the heading's box. */
+  vertical-align: middle;
+}
+
+@keyframes kui-skeleton-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Suppressed, not slowed. A slow shimmer is still a shimmer, and the request was for no motion.
+ * The block keeps its fill, so "something is coming" is still drawn. */
+@media (prefers-reduced-motion: reduce) {
+  .kui-skeleton {
+    animation: none;
+    background-image: none;
+  }
+}
+
+/* The em dash that means "this field is genuinely empty". Muted, never subtle: it is a value the
+ * reader is meant to take in, unlike an axis tick. */
+.kui-missing {
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Card ------------------------------------------------------------------------------------- */
+
+.kui-panel {
+  display: flex;
+  flex-direction: column;
+  /* The border is a token that is a real rule in light and transparent in dark. In dark the fill
+   * step (#1b1f25 on #0e1013) draws the edge on its own and the design adds nothing; in light the
+   * equivalent step is far weaker and a borderless card vanishes into the page. */
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+  /* Nothing in the five screenshots casts a shadow. Cards are separated by fill, and the two
+   * shadows in the palette are reserved for things that genuinely float — a menu, a dialog, a
+   * drawer, a toast. */
+  box-shadow: none;
+  min-width: 0;
+}
+
+.kui-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-4) var(--kui-space-4) 0;
+}
+
+.kui-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin: 0;
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-strong);
+  min-width: 0;
+}
+
+.kui-panel__icon {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-panel__header-end {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  flex: 0 0 auto;
+}
+
+.kui-panel__body {
+  padding: var(--kui-space-4);
+  /* A card that contains a scroller has to be allowed to shrink, or the scroller grows instead and
+   * the page scrolls. `min-height: 0` is the whole of that fix and it is not optional. */
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The last known value, still readable, plainly not current. Interaction is off because acting on
+ * a stale row acts on a state that may no longer exist. */
+.kui-panel__body--stale {
+  opacity: var(--kui-opacity-stale);
+  pointer-events: none;
+}
+
+.kui-panel__stale {
+  padding: var(--kui-space-2) var(--kui-space-4) 0;
+}
+
+.kui-panel__loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-panel__caption {
+  margin: 0;
+  padding: 0 var(--kui-space-4) var(--kui-space-4);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-panel__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+/* --- Stat card --------------------------------------------------------------------------------
+ *
+ * Three parts in a fixed order: what this is, the number, and whether the number is all right.
+ */
+
+.kui-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-4);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.kui-stat--link:hover {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-stat__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+/* Real uppercase text with tracking, written uppercase in the source. `text-transform` on a
+ * mixed-case string leaves a screen reader reading the original, and on an acronym the two
+ * disagree; `font-variant: small-caps` draws small capitals, which is a different shape from what
+ * the design shows. */
+.kui-stat__label {
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kui-stat__figure {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+  margin: 0;
+  min-height: var(--kui-font-size-3xl);
+}
+
+.kui-stat__value {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-3xl);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-strong);
+  /* Four figures that change every few seconds must not change width, or the row of cards
+   * twitches every time anything updates. */
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-stat__unit {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-muted);
+}
+
+/* "We could not read this". Deliberately drawn at the figure's size so the card does not change
+ * shape between knowing and not knowing — and deliberately not a zero. */
+.kui-stat__unknown {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-3xl);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-muted);
+}
+
+/* The pill sits on its own line, hard against the left edge, so a row of four cards has four
+ * verdicts at the same height regardless of how long each one's text is. */
+.kui-stat__pill-slot {
+  display: flex;
+  min-width: 0;
+}
+
+/* --- Empty and failure surfaces ---------------------------------------------------------------
+ *
+ * These rules override `21-kernel-overlays.css` for the same class names; see the header.
+ *
+ * The artboard drew an empty region as a 64px brand-coloured tile under a 24px display headline,
+ * which is a *celebration* of there being nothing there. Three of the four situations this markup
+ * covers are failures, and a failure drawn as a feature is how a request that did not come back
+ * gets read as a cluster with no topics. So: a quiet glyph, a 16px title, one sentence, and the
+ * error code kept.
+ */
+
+.kui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-6) var(--kui-space-4);
+  text-align: center;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-empty-state__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  margin-bottom: var(--kui-space-1);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-size: var(--kui-font-size-2xl);
+  color: var(--kui-color-text-subtle);
+}
+
+/* The two failures carry their status colour in the glyph — and only in the glyph, because the
+ * sentence below says the same thing in words and colour is never the only signal. */
+.kui-empty-state--unavailable .kui-empty-state__icon {
+  color: var(--kui-color-warning);
+}
+
+.kui-empty-state--forbidden .kui-empty-state__icon {
+  color: var(--kui-color-danger);
+}
+
+.kui-empty-state__title {
+  margin: 0;
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-empty-state__description {
+  margin: 0;
+  max-width: 34ch;
+  font-size: var(--kui-font-size-md);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+/* Present, findable, and not competing with the sentence above it. Selectable as one word, so it
+ * can be copied into a support conversation without catching the prose either side. */
+.kui-empty-state__code {
+  margin: 0;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+  user-select: all;
+}
+
+.kui-empty-state__action {
+  margin-top: var(--kui-space-2);
+}
+
+/* --- Stale badge ------------------------------------------------------------------------------ */
+
+.kui-stale-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: var(--kui-space-1) var(--kui-space-3);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.kui-stale-badge__state {
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-stale-badge__separator {
+  opacity: 0.6;
+}
+
+.kui-stale-badge__age {
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-stale-badge__detail {
+  color: var(--kui-color-text);
+}
+
+/* The machine-readable reason. Not the message — see `StaleBadge.tsx` for why both have to
+ * survive — so it is set apart in mono and made selectable on its own. */
+.kui-stale-badge__code {
+  font-family: var(--kui-font-family-mono);
+  color: var(--kui-color-text-subtle);
+  user-select: all;
+}
+
+/* --- Dialog ----------------------------------------------------------------------------------- */
+
+.kui-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--kui-z-dialog);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--kui-space-5);
+  background-color: var(--kui-color-scrim);
+  animation: kui-fade-in var(--kui-duration-normal) ease;
+}
+
+.kui-modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* Never taller than the window. A dialog whose actions are below the fold cannot be answered,
+   * and `Escape` is not a substitute for an answer. */
+  max-height: calc(100vh - var(--kui-space-7));
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-xl);
+  background-color: var(--kui-color-surface-elevated);
+  /* A dialog genuinely floats, so it takes the one heavy shadow in the palette. */
+  box-shadow: var(--kui-shadow-md);
+  animation: kui-modal-in var(--kui-duration-normal) ease;
+}
+
+.kui-modal--sm {
+  max-width: 26rem;
+}
+
+.kui-modal--md {
+  max-width: 36rem;
+}
+
+.kui-modal--lg {
+  max-width: 52rem;
+}
+
+.kui-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-5) var(--kui-space-5) var(--kui-space-3);
+}
+
+.kui-modal__heading {
+  min-width: 0;
+}
+
+.kui-modal__title {
+  margin: 0;
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-strong);
+  /* A topic name is arbitrary and can be long. It wraps rather than being truncated: a title that
+   * ellipsises the object's name is a confirmation that no longer names the object. */
+  overflow-wrap: anywhere;
+}
+
+.kui-modal__description {
+  margin: var(--kui-space-1) 0 0;
+  font-size: var(--kui-font-size-md);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-modal__close,
+.kui-sheet__close,
+.kui-notice__dismiss,
+.kui-banner__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--kui-control-height-sm);
+  height: var(--kui-control-height-sm);
+  border: 0;
+  border-radius: var(--kui-radius-pill);
+  background: none;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-lg);
+  cursor: pointer;
+  transition:
+    background-color var(--kui-duration-fast) ease,
+    color var(--kui-duration-fast) ease;
+}
+
+.kui-modal__close:hover,
+.kui-sheet__close:hover,
+.kui-notice__dismiss:hover,
+.kui-banner__dismiss:hover {
+  background-color: var(--kui-color-state-layer);
+  color: var(--kui-color-text);
+}
+
+.kui-modal__body {
+  padding: 0 var(--kui-space-5) var(--kui-space-4);
+  /* The body scrolls, not the dialog, so the title and the actions stay put. `min-height: 0` is
+   * what allows this flex child to shrink far enough to become a scroller at all. */
+  min-height: 0;
+  overflow-y: auto;
+  font-size: var(--kui-font-size-md);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text);
+}
+
+.kui-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-3) var(--kui-space-5) var(--kui-space-5);
+}
+
+/* --- Confirmation ----------------------------------------------------------------------------- */
+
+.kui-confirm__consequence {
+  margin: 0;
+  line-height: var(--kui-font-line-height-normal);
+}
+
+.kui-confirm__gate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  margin-top: var(--kui-space-4);
+}
+
+.kui-confirm__label {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* The name the operator has to reproduce. Mono, so that a dot and a dash in a topic name are
+ * distinguishable from each other and from what they typed. */
+.kui-confirm__expected {
+  font-family: var(--kui-font-family-mono);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+  user-select: all;
+}
+
+.kui-confirm__input {
+  height: var(--kui-control-height-lg);
+  padding: 0 var(--kui-space-3);
+  border: 1px solid var(--kui-color-border-strong);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-md);
+}
+
+.kui-confirm__input[aria-invalid="true"] {
+  border-color: var(--kui-color-danger);
+}
+
+/* The failure notice inside a dialog or a drawer.
+ *
+ * Drawn as an outlined box on the neutral input surface, **not** as a filled danger slab. A slab
+ * of --kui-color-danger-container is the loudest thing in the surface, louder than the destructive
+ * button beneath it, which stands the whole "a destructive action must not shout at you" rule on
+ * its head — and it drags the message text and the error code onto a saturated ground where
+ * neither is comfortable to read. The danger reading is carried by the rule and the glyph; the
+ * words stay at the body text colour, because the words are the part that has to be read. */
+.kui-confirm__error,
+.kui-sheet__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  margin: var(--kui-space-4) 0 0;
+  padding: var(--kui-space-3);
+  border: var(--kui-border-danger);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  flex-wrap: wrap;
+}
+
+.kui-confirm__error-glyph,
+.kui-sheet__error-glyph {
+  flex: 0 0 auto;
+  margin-top: 0.125em;
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-md);
+}
+
+/* The sentence sits beside the glyph and takes the rest of the line; the code drops onto its own.
+ * Without a basis the wrap puts the glyph alone on the first line, which reads as a stray icon. */
+.kui-confirm__error > span,
+.kui-sheet__error > span {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.kui-confirm__error-code,
+.kui-sheet__error-code {
+  flex: 1 1 100%;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+  user-select: all;
+}
+
+/* --- Drawer ----------------------------------------------------------------------------------- */
+
+.kui-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--kui-z-drawer);
+  display: flex;
+  background-color: var(--kui-color-scrim);
+  animation: kui-fade-in var(--kui-duration-normal) ease;
+}
+
+.kui-sheet {
+  display: flex;
+  flex-direction: column;
+  /* The design's produce drawer. `min()` so a narrow window gets the whole width rather than a
+   * 560px panel with 60px of it off screen. */
+  width: min(560px, 100%);
+  max-width: 100%;
+  height: 100%;
+  background-color: var(--kui-color-surface-raised);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-sheet--right {
+  margin-left: auto;
+  /* Rounded only on the edge that faces the page; the outer edge is the window. */
+  border-radius: var(--kui-radius-xl) 0 0 var(--kui-radius-xl);
+  animation: kui-sheet-in-right var(--kui-duration-normal) ease;
+}
+
+.kui-sheet--left {
+  margin-right: auto;
+  border-radius: 0 var(--kui-radius-xl) var(--kui-radius-xl) 0;
+  animation: kui-sheet-in-left var(--kui-duration-normal) ease;
+}
+
+.kui-sheet__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-5);
+  border-bottom: 1px solid var(--kui-color-border);
+}
+
+.kui-sheet__heading {
+  min-width: 0;
+}
+
+.kui-sheet__title {
+  margin: 0;
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.kui-sheet__description {
+  margin: var(--kui-space-1) 0 0;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-sheet__body {
+  flex: 1 1 auto;
+  /* See the note in `Drawer.tsx`: without `min-height: 0` this child cannot shrink below its
+   * content, so it never becomes a scroller and the footer is pushed off the bottom instead. */
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--kui-space-5);
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text);
+}
+
+.kui-sheet__error {
+  margin: 0 var(--kui-space-5) var(--kui-space-3);
+}
+
+.kui-sheet__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-4) var(--kui-space-5);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+/* --- Toast ------------------------------------------------------------------------------------ */
+
+.kui-notice-stack {
+  position: fixed;
+  right: var(--kui-space-4);
+  bottom: var(--kui-space-4);
+  z-index: var(--kui-z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--kui-space-2);
+  width: min(24rem, calc(100vw - var(--kui-space-6)));
+  /* The empty region is always in the document, so it must never intercept a click meant for the
+   * page underneath it. The toasts themselves take their clicks back below. */
+  pointer-events: none;
+}
+
+.kui-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  width: 100%;
+  padding: var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-left: 3px solid currentColor;
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-elevated);
+  box-shadow: var(--kui-shadow-md);
+  pointer-events: auto;
+  animation: kui-notice-in var(--kui-duration-normal) ease;
+}
+
+.kui-notice--success {
+  color: var(--kui-color-success);
+}
+
+.kui-notice--info {
+  color: var(--kui-color-info);
+}
+
+.kui-notice--warning {
+  color: var(--kui-color-warning);
+}
+
+.kui-notice--danger {
+  color: var(--kui-color-danger);
+}
+
+.kui-notice__glyph {
+  flex: 0 0 auto;
+  margin-top: 0.125em;
+  font-size: var(--kui-font-size-lg);
+}
+
+.kui-notice__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* The tone tints the rule and the glyph; the words stay at full contrast, because they are the
+   * part that has to be read. */
+  color: var(--kui-color-text);
+}
+
+.kui-notice__title {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-notice__message {
+  margin: var(--kui-space-1) 0 0;
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.kui-notice__code {
+  display: inline-block;
+  margin-top: var(--kui-space-1);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+  user-select: all;
+}
+
+.kui-notice__action {
+  margin-top: var(--kui-space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--kui-color-primary);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.kui-notice-stack__queued {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  pointer-events: auto;
+}
+
+/* --- Banner ----------------------------------------------------------------------------------- */
+
+.kui-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3) var(--kui-space-4);
+  border-radius: var(--kui-radius-md);
+  font-size: var(--kui-font-size-md);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+.kui-banner--danger {
+  background-color: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+}
+
+.kui-banner--warning {
+  background-color: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+}
+
+.kui-banner--info {
+  background-color: var(--kui-color-accent-container);
+  color: var(--kui-color-accent);
+}
+
+.kui-banner__glyph {
+  flex: 0 0 auto;
+  font-size: var(--kui-font-size-lg);
+}
+
+.kui-banner__message {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+}
+
+.kui-banner__code {
+  margin-left: var(--kui-space-2);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  opacity: 0.85;
+  user-select: all;
+}
+
+.kui-banner__action {
+  flex: 0 0 auto;
+}
+
+/* --- Motion -----------------------------------------------------------------------------------
+ *
+ * Two durations, both from tokens, and nothing else animates. Under `prefers-reduced-motion` every
+ * entrance below is removed rather than shortened: the request was for no motion, and a 60ms slide
+ * is still a slide.
+ */
+
+@keyframes kui-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes kui-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--kui-space-2));
+  }
+}
+
+@keyframes kui-sheet-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes kui-sheet-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes kui-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--kui-space-2));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-modal-scrim,
+  .kui-modal,
+  .kui-sheet-scrim,
+  .kui-sheet--right,
+  .kui-sheet--left,
+  .kui-notice {
+    animation: none;
+  }
+}
