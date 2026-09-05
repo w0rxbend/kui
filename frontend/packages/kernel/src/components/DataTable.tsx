@@ -65,6 +65,13 @@ export interface TableSelection {
   readonly rowLabel?: (key: string) => string;
 }
 
+
+/* The optional props below are written `?: T | undefined` rather than `?: T`. Under
+ * `exactOptionalPropertyTypes` the short form means "present with a T, or absent entirely" and
+ * refuses an explicit `undefined` — which makes every one of them impossible to *forward* from a
+ * wrapper whose own value is `T | undefined`, and every screen that wraps this table has one. The
+ * long form keeps the strictness that matters (a misspelt prop is still an error) without making
+ * composition impossible. The same note is on `EmptyStateProps`. */
 export interface DataTableProps<Row> {
   readonly columns: readonly Column<Row>[];
   readonly rows: readonly Row[];
@@ -80,31 +87,31 @@ export interface DataTableProps<Row> {
    */
   readonly caption: string;
 
-  readonly sort?: Sort | null;
+  readonly sort?: Sort | null | undefined;
   /**
    * Sorting is fully controlled. A `sortable` column with no `onSortChange` renders as an ordinary
    * header rather than as a button that does nothing, because a control that looks live and is not
    * is worse than no control.
    */
-  readonly onSortChange?: (next: Sort | null) => void;
+  readonly onSortChange?: ((next: Sort | null) => void) | undefined;
 
-  readonly selection?: TableSelection;
+  readonly selection?: TableSelection | undefined;
 
   /** Makes the whole row a control. See the note on the row element below. */
-  readonly onRowClick?: (row: Row) => void;
+  readonly onRowClick?: ((row: Row) => void) | undefined;
 
-  readonly loading?: boolean;
+  readonly loading?: boolean | undefined;
   /** How many placeholder rows to draw while loading an empty table. Six fills a panel. */
-  readonly skeletonRows?: number;
+  readonly skeletonRows?: number | undefined;
 
   /**
    * What to draw when there are no rows. Compose an `<EmptyState>` here: the table does not decide
    * whether "no rows" means nothing-yet, filtered-out, unavailable or forbidden, because only the
    * caller knows which, and the four are never interchangeable (§4.16).
    */
-  readonly empty?: JSX.Element;
+  readonly empty?: JSX.Element | undefined;
 
-  readonly testId?: string;
+  readonly testId?: string | undefined;
 }
 
 /**

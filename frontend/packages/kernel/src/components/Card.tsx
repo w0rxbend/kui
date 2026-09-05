@@ -53,6 +53,8 @@ import { StaleBadge, type StaleBadgeProps } from "./StaleBadge.jsx";
 
 export type CardState = "ready" | "loading" | "empty" | "filtered" | "unavailable" | "forbidden";
 
+/* `?: T | undefined` rather than `?: T`, so that a screen holding a `T | undefined` can forward it
+ * under `exactOptionalPropertyTypes`. See the same note on `EmptyStateProps`. */
 export interface CardProps {
   /**
    * The card's name. Rendered in every state, including the failing ones.
@@ -60,46 +62,46 @@ export interface CardProps {
    * Omit it only for a card that is a single figure with its own label inside — a `StatCard` —
    * where a second heading above the label would be read twice by a screen reader.
    */
-  readonly title?: string;
+  readonly title?: string | undefined;
   /** A decorative glyph before the title. */
-  readonly icon?: IconName;
+  readonly icon?: IconName | undefined;
   /**
    * The right-hand end of the header: a legend, a range selector, an action.
    *
    * It stays mounted in every state on purpose. When a metrics panel is unavailable, changing the
    * range is a legitimate retry, and removing the control removes the way out.
    */
-  readonly headerEnd?: JSX.Element;
+  readonly headerEnd?: JSX.Element | undefined;
   /** A caption under the body, at the subtle text colour. */
-  readonly caption?: JSX.Element;
-  readonly footer?: JSX.Element;
+  readonly caption?: JSX.Element | undefined;
+  readonly footer?: JSX.Element | undefined;
 
-  readonly state?: CardState;
+  readonly state?: CardState | undefined;
 
   /** The sentence for `empty`, `filtered`, `unavailable` and `forbidden`. */
-  readonly message?: string;
+  readonly message?: string | undefined;
   /** The second line: what it means, or what to do. */
-  readonly description?: string;
+  readonly description?: string | undefined;
   /** The stable failure code. Shown verbatim for `unavailable` and `forbidden`. */
-  readonly code?: string;
+  readonly code?: string | undefined;
   /** The single action offered by the state's body — Retry, Clear filter, Create topic. */
-  readonly stateAction?: JSX.Element;
+  readonly stateAction?: JSX.Element | undefined;
 
   /** Present means "the content below is the last known value". Composes with `ready`. */
-  readonly stale?: StaleBadgeProps;
+  readonly stale?: StaleBadgeProps | undefined;
 
   /**
    * A minimum body height. Set it wherever the content's height is known in advance, so the card
    * does not change size when the data lands and shove the rest of the page down.
    */
-  readonly bodyMinHeight?: string;
+  readonly bodyMinHeight?: string | undefined;
 
   /** What `loading` draws. Defaults to three skeleton lines; pass the real shape where it is known. */
-  readonly loadingBody?: JSX.Element;
+  readonly loadingBody?: JSX.Element | undefined;
 
-  readonly class?: string;
+  readonly class?: string | undefined;
   /** For tests to find this card. Never used for styling. */
-  readonly testId?: string;
+  readonly testId?: string | undefined;
 }
 
 /** The three skeleton lines a card falls back to when the caller has not described its content. */
