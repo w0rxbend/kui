@@ -125,6 +125,13 @@
 /* The frame those chrome components are assembled into, and the first screen built on it. After
  * them because both adjust the layout *around* a chrome component without restyling it, and a
  * screen must be able to win against the primitives it is composed of. */
+/* The environment rail, the drawer's storage meter and the notifications panel, added by the v3
+ * screens (`research/design/SCREENS.md`). After the three chrome sheets and before the frame,
+ * because it is chrome: the rail is a new object beside the drawer, the storage meter replaces the
+ * cluster card at the drawer's foot, and the notifications panel had no styling before. It touches
+ * no class name the earlier sheets own — see the header of the file. */
+@import "../../shell/styles/38-chrome-rail.css";
+
 @import "../../shell/styles/36-frame.css";
 @import "../../shell/styles/37-overview.css";
 @import "../../feature-topics/styles/50-topics.css";

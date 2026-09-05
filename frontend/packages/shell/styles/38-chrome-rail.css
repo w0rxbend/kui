@@ -1,0 +1,452 @@
+/* The environment rail, the drawer's storage meter, and the notifications panel — the three pieces
+ * of chrome the v3 screens added (`research/design/SCREENS.md` §2.1–§2.3, §2.7, §2.9–§2.10).
+ *
+ * ## Why these are here and not in `33-chrome-drawer.css`
+ *
+ * The same rule the rest of this workspace follows: a sheet written from one reading of the design
+ * is not edited by a later reading, because a component built against the first must not change
+ * appearance in a commit that claims to add a second. The rail is a new object, the storage meter
+ * replaces the cluster card rather than restyling it, and the notifications panel had no styling at
+ * all — so all three are additions and none of them touches a name the earlier sheets own.
+ *
+ * ## The rail has no fill, and that is a measurement, not a preference
+ *
+ * Scanning row 700 of `13-topics-list.png` gives `--kui-color-surface` for the first 48 pixels and
+ * `--kui-color-surface-raised` from x=48. The rail is drawn on the page ground; the drawer beside
+ * it is raised. If a background ever appears on `.kui-rail`, the two columns merge into one slab
+ * and the rail stops reading as a separate object.
+ */
+
+/* --- The rail ---------------------------------------------------------------------------------- */
+
+.kui-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kui-space-2);
+  width: var(--kui-rail-width);
+  height: 100%;
+  padding: var(--kui-space-3) 0;
+  /* No background. See the header. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.kui-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.kui-rail__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--kui-radius-md);
+  color: var(--kui-color-primary);
+  text-decoration: none;
+}
+
+/* `--kui-color-text-muted`, not the subtle step below it. The design draws this caption very dim,
+ * and at 9px on the page ground `--kui-color-text-subtle` measures 3.93:1 against a required 4.5:1
+ * — caught by `scripts/a11y-stories.mjs`, not by eye. The subtle step is documented in
+ * `10-tokens.css` as deliberately below the AA threshold and reserved for text that repeats
+ * something available elsewhere, and this word appears nowhere else. It is made quiet by being 9px
+ * and letterspaced, which is enough. */
+.kui-rail__caption {
+  margin: 0;
+  font-size: 9px;
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.08em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-rail__envs,
+.kui-rail__links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kui-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-rail__env {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: var(--kui-rail-tile-size);
+  height: var(--kui-rail-tile-size);
+  padding: 0;
+  border: none;
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--kui-duration-fast) ease, color var(--kui-duration-fast) ease;
+}
+
+.kui-rail__env:hover:not(.kui-rail__env--current) {
+  color: var(--kui-color-text);
+  background-color: var(--kui-color-surface-overlay);
+}
+
+.kui-rail__env--current {
+  background-color: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+}
+
+.kui-rail__letter {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-display);
+  line-height: 1;
+}
+
+/* The health dot, hung off the tile's corner and ringed in the page ground so that it reads as a
+ * separate object rather than as a notch cut out of the tile. The ring colour is the rail's
+ * background, which is the page — the same construction as `BrandBlock`'s dot against the drawer. */
+.kui-rail__dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--kui-color-surface);
+}
+
+.kui-rail__dot--healthy {
+  background-color: var(--kui-color-success);
+}
+
+.kui-rail__dot--degraded {
+  background-color: var(--kui-color-warning);
+}
+
+.kui-rail__dot--unreachable {
+  background-color: var(--kui-color-danger);
+}
+
+/* Not one of the health colours, deliberately: "we have not asked yet" must never be readable as
+ * "it is fine". */
+.kui-rail__dot--unknown {
+  background-color: var(--kui-color-text-subtle);
+}
+
+.kui-rail__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kui-rail-tile-size);
+  height: 24px;
+  padding: 0;
+  border: 1px dashed var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: transparent;
+  color: var(--kui-color-text-subtle);
+  cursor: pointer;
+}
+
+.kui-rail__add:hover {
+  color: var(--kui-color-text);
+  border-color: var(--kui-color-border-strong);
+}
+
+/* A bare glyph on the page ground — no tile. The rail's environments are objects you select; these
+ * are places you go, and the design draws that difference as fill against no fill. */
+.kui-rail__link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--kui-radius-md);
+  color: var(--kui-color-text-muted);
+  text-decoration: none;
+  transition: background-color var(--kui-duration-fast) ease, color var(--kui-duration-fast) ease;
+}
+
+.kui-rail__link:hover {
+  color: var(--kui-color-text);
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-rail__link--current {
+  color: var(--kui-color-primary);
+  background-color: var(--kui-color-surface-hover);
+}
+
+.kui-rail__spacer {
+  flex: 1 1 auto;
+  min-height: var(--kui-space-4);
+}
+
+.kui-rail__account {
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-rail__env,
+  .kui-rail__link {
+    transition: none;
+  }
+}
+
+/* --- The drawer's storage meter ----------------------------------------------------------------- */
+
+.kui-storage {
+  flex: 0 0 auto;
+  margin: var(--kui-space-2);
+  padding: var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-elevated);
+}
+
+.kui-storage__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin-bottom: var(--kui-space-2);
+  color: var(--kui-color-text-muted);
+}
+
+/* Written uppercase in the source, not transformed: a screen reader given a transformed acronym
+ * sometimes spells it out. */
+.kui-storage__title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-storage__percent {
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-storage__percent--unknown {
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-regular);
+}
+
+.kui-storage__caption {
+  margin: var(--kui-space-2) 0 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Notifications ------------------------------------------------------------------------------ */
+
+.kui-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: var(--kui-control-height-md);
+  height: var(--kui-control-height-md);
+  padding: 0;
+  border: none;
+  border-radius: var(--kui-radius-md);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+}
+
+.kui-bell:hover,
+.kui-bell--open {
+  color: var(--kui-color-text);
+  background-color: var(--kui-color-surface-hover);
+}
+
+/* Sits on the bell's shoulder. `--kui-color-danger-container` with its paired ink rather than the
+ * bare danger colour, because a solid danger fill at 14px with text on it is the one place the
+ * palette's ink/fill pairing actually earns its keep. */
+.kui-bell__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-danger);
+  color: var(--kui-color-surface);
+  font-size: 9px;
+  font-weight: var(--kui-font-weight-bold);
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-notices {
+  display: flex;
+  flex-direction: column;
+  width: 278px; /* design; 22 x=1668..1946 */
+  max-height: 420px;
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-overlay);
+  box-shadow: var(--kui-shadow-md);
+  overflow: hidden;
+}
+
+.kui-notices__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3) var(--kui-space-4);
+}
+
+.kui-notices__title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-notices__mark {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-primary);
+  cursor: pointer;
+}
+
+.kui-notices__mark:hover {
+  text-decoration: underline;
+}
+
+.kui-notices__stale {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: var(--kui-space-2) var(--kui-space-4);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-warning);
+}
+
+/* Loading, failed and empty share one box, because all three are "there is no list here and here is
+ * why" and giving them three shapes would suggest they are three different kinds of thing. */
+.kui-notices__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-5) var(--kui-space-4);
+  text-align: center;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-notices__state p {
+  margin: 0;
+}
+
+/* Focusable, because it scrolls. A scrollable region that is not in the tab order cannot be
+ * scrolled by a keyboard user at all — they can tab to the links inside it, but a panel whose
+ * overflow holds non-focusable content becomes unreachable. axe calls this
+ * `scrollable-region-focusable`, and it is the kind of thing no amount of looking at the panel
+ * reveals. */
+.kui-notices__list {
+  margin: 0;
+  padding: 0 0 var(--kui-space-2);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.kui-notices__list:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+}
+
+/* A read notification is marked by *losing emphasis*, not by being dimmed.
+ *
+ * It was `opacity: var(--kui-opacity-stale)` on the whole row first, which is what the design
+ * appears to draw and what the rest of this product uses for stale data. It is wrong here, and
+ * `scripts/a11y-stories.mjs` is what caught it: 0.65 opacity composites 11px muted body text down
+ * to 3.24:1 in dark and 2.82:1 in light, against a required 4.5:1. Dimming is safe on a figure that
+ * is repeated elsewhere; it is not safe on the only copy of a sentence.
+ *
+ * So the row keeps its text colours, the unread marker goes away, the title drops from strong to
+ * muted and from bold to regular, and only the icon tile — which carries no text — is dimmed. The
+ * read and unread rows are still plainly different, and both are still legible. */
+.kui-notices__item--read .kui-icon-tile {
+  opacity: var(--kui-opacity-stale);
+}
+
+.kui-notices__item--read .kui-notices__notice-title {
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-regular);
+}
+
+/* The unread marker. Small, and never the only signal: the accessible name of the row says
+ * "unread" in words. */
+.kui-notices__unread {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--kui-color-primary);
+}
+
+.kui-notices__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-2) var(--kui-space-4);
+  color: inherit;
+  text-decoration: none;
+}
+
+.kui-notices__row--link:hover {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-notices__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kui-notices__notice-title {
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text);
+}
+
+/* Three lines, then an ellipsis. A notification is a summary; the page it links to is the detail,
+ * and a panel that grows to fit one long body pushes the rest of the list off the bottom. */
+.kui-notices__body {
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kui-notices__age {
+  flex: 0 0 auto;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
