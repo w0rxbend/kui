@@ -1,0 +1,6310 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI",
+    "version" : "1.0"
+  },
+  "servers" : [
+    {
+      "url" : "/"
+    }
+  ],
+  "paths" : {
+    "/api/v1/clusters/{clusterId}" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "One configured cluster and its last known state",
+        "description" : "Answers 404 when no cluster with that id is configured; 400 when the id is malformed.",
+        "operationId" : "cluster.get",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClusterDetailResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Register or replace one cluster",
+        "description" : "Part of the cluster.write flow. This call changes nothing. Answers only after the write has been read back from the store, so a 200 means every replica that has caught up can already see it. A version that does not match answers 409 KUI-CONFIG-VERSION-CONFLICT; a deployment with no metadata store answers 501. The response is the redacted profile and never an echo of the request.",
+        "operationId" : "cluster.put",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "If-Match",
+            "in" : "header",
+            "description" : "The version being replaced, quoted; \"0\" to create",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ClusterWriteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClusterProfileDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Remove one cluster from the metadata store",
+        "description" : "Mutation (cluster.delete). This call changes the cluster and cannot be undone. Removes the stored profile and its credentials. A cluster this deployment also declares in its configuration file answers 409: the store record would go and the file would put it straight back, so the refusal names the file instead of pretending to succeed. A deployment with no metadata store answers 501.",
+        "operationId" : "cluster.delete",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "If-Match",
+            "in" : "header",
+            "description" : "The version being replaced, quoted; \"0\" to create",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/brokers" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "The cluster's brokers, with rack, controller flag and replica counts",
+        "description" : "Read from the cluster snapshot, not from a fresh admin call: the response carries the time it was scraped, and a section status saying whether that time is current.",
+        "operationId" : "cluster.brokers",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BrokersResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "One broker's settings, read-only",
+        "description" : "Read-only in M1: BR-002 ships without edits, which arrive in M5 with read-only mode and audit. A setting the broker marks sensitive has no value and says so.",
+        "operationId" : "cluster.broker.configs",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "brokerId",
+            "in" : "path",
+            "description" : "The broker's node id, as the cluster reports it",
+            "required" : true,
+            "schema" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "docs",
+            "in" : "query",
+            "description" : "Ask the broker for each setting's documentation (Kafka 2.6+)",
+            "required" : false,
+            "schema" : {
+              "default" : false,
+              "type" : "boolean"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BrokerConfigsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/log-dirs" : {
+      "get" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Log directories and their sizes, for one broker or for all of them",
+        "description" : "A directory that is offline carries its own error while the rest of the answer is good, which is how Kafka reports a failed disk.",
+        "operationId" : "cluster.logDirs",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "brokerId",
+            "in" : "query",
+            "description" : "Only this broker's directories; omit for every broker in the cluster",
+            "required" : false,
+            "schema" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LogDirsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/refresh" : {
+      "post" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Ask for this cluster to be scraped now",
+        "description" : "Answers 202 with the time the request was taken. The snapshot is not new when this returns; the response exists so a button has something truthful to say.",
+        "operationId" : "cluster.refresh",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "202" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RefreshAcceptedDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/connection-test" : {
+      "post" : {
+        "tags" : [
+          "cluster"
+        ],
+        "summary" : "Can KUI reach this cluster with these settings?",
+        "description" : "Part of the cluster.write flow. This call changes nothing. Opens one bounded connection and describes the cluster, which exercises DNS, TCP, TLS and SASL in one call. It stores nothing. The answer distinguishes 'could not reach it' from 'reached it and it refused our credentials', because those send an operator to two different forms.",
+        "operationId" : "cluster.probe",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ClusterWriteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectivityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/consumer-groups" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "The cluster's consumer groups, with lag and pace",
+        "description" : "Read from the group snapshot rather than from a live describe, so the lag and the end offsets it was computed against come from the same pass. A group whose lag could not be computed reports null, never zero, and says how many partitions were excluded. The page is wrapped in a freshness section: a cluster that has stopped answering is a 200 whose section is stale, never a bare page of figures that have quietly stopped moving.",
+        "operationId" : "consumer.list",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "state",
+            "in" : "query",
+            "description" : "Keep only groups in these states; repeat the parameter for more than one. Empty means all",
+            "required" : false,
+            "schema" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "Substring match over the group id. Not over member hosts or topic names",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "sort",
+            "in" : "query",
+            "description" : "Which column to sort by",
+            "required" : false,
+            "schema" : {
+              "default" : "id",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "direction",
+            "in" : "query",
+            "description" : "Which way to sort",
+            "required" : false,
+            "schema" : {
+              "default" : "asc",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "page",
+            "in" : "query",
+            "description" : "Which page, numbered from one",
+            "required" : false,
+            "schema" : {
+              "default" : 1,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "pageSize",
+            "in" : "query",
+            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "required" : false,
+            "schema" : {
+              "default" : 25,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GroupsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/consumer-groups/lag" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Which groups' lag changed since the given token",
+        "description" : "The token is issued by this service and carries the snapshot version it was cut from. A client clock is not a version: sending the browser's own timestamp back, as the reference product does, silently drops or replays updates whenever the two clocks disagree.",
+        "operationId" : "consumer.lag",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "group",
+            "in" : "query",
+            "description" : "Only these groups; repeat the parameter. Empty means every group on the cluster",
+            "required" : false,
+            "schema" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          {
+            "name" : "since",
+            "in" : "query",
+            "description" : "The opaque token from the previous answer. Absent, unrecognised or expired means send everything",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LagDeltaDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "One consumer group: members, assignments and per-partition lag",
+        "description" : "An unknown group answers 200 with an empty group in state DEAD, not 404: the port fabricates a dead group for a describe of a group that does not exist, and a stale bookmark should show an empty page rather than an error.",
+        "operationId" : "consumer.detail",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id, as Kafka knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GroupDetailDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Delete a consumer group",
+        "description" : "Mutation (consumer.group.delete). This call changes the cluster and cannot be undone. Refused with KUI-GROUP-NOT-EMPTY while the group still has members — the one refusal an operator can act on directly, by stopping the consumers.",
+        "operationId" : "consumer.group.delete",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topic}/consumer-groups" : {
+      "get" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Every consumer group that reads this topic, with its lag on this topic alone",
+        "description" : "Feeds the gateway's topic-overview aggregation. A group's lag here is its lag on this topic, which is not its total lag whenever it consumes more than one.",
+        "operationId" : "consumer.forTopic",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topic",
+            "in" : "path",
+            "description" : "The topic name",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicConsumersDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets/plan" : {
+      "post" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "What resetting this group's offsets would do",
+        "description" : "Part of the consumer.offsets.reset flow. This call changes nothing. Resolves the request against the group's live offsets and returns the exact offsets that would be written, any clamping as a warning, and a token valid for five minutes. Changes nothing. Refused on a read-only cluster, so that the wizard never renders a plan that cannot be applied.",
+        "operationId" : "consumer.offsets.plan",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResetPlanRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResetPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets" : {
+      "post" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Write the offsets a plan token names",
+        "description" : "Mutation (consumer.offsets.reset). This call changes the cluster and cannot be undone. Takes only a plan token. The group's state and member list are re-checked immediately before the write, because the group may have become active since the plan was made. An expired or tampered token is a validation error, never a silent re-plan.",
+        "operationId" : "consumer.offsets.apply",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResetApplyRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResetPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "consumer"
+        ],
+        "summary" : "Delete a group's committed offsets for one topic",
+        "description" : "Mutation (consumer.offsets.delete). This call changes the cluster and cannot be undone. Answers with the partitions whose offsets were removed, so that 'the group had none' and 'they were deleted' are distinguishable — which an empty 204 body cannot do.",
+        "operationId" : "consumer.offsets.delete",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "groupId",
+            "in" : "path",
+            "description" : "The consumer group id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topic",
+            "in" : "query",
+            "description" : "Delete this group's committed offsets for this topic",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeletedOffsetsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/info" : {
+      "get" : {
+        "tags" : [
+          "gateway"
+        ],
+        "summary" : "Which build of KUI is running, and what this deployment enables",
+        "description" : "Unauthenticated. Contains no URL, hostname or key id: it lists configured service ids only.",
+        "operationId" : "gateway.info",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AppInfo"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me" : {
+      "get" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "The caller's identity and the CSRF token to use for mutations",
+        "operationId" : "gateway.auth.me",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AuthMeResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/settings" : {
+      "get" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Which kind of sign-in this deployment uses",
+        "operationId" : "gateway.auth.settings",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AuthSettingsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Sign in with a username and a password",
+        "operationId" : "gateway.auth.login",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "headers" : {
+              "Set-Cookie" : {
+                "required" : false,
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            },
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Set a new password, completing a required change",
+        "operationId" : "gateway.auth.password",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/start" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Begin a sign-in with the configured identity provider",
+        "operationId" : "gateway.auth.oidc.start",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OidcStartResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/callback" : {
+      "get" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Complete a sign-in with the configured identity provider",
+        "operationId" : "gateway.auth.oidc.callback",
+        "parameters" : [
+          {
+            "name" : "code",
+            "in" : "query",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "state",
+            "in" : "query",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "302" : {
+            "description" : "the browser is sent back to the interface",
+            "headers" : {
+              "Location" : {
+                "required" : true,
+                "schema" : {
+                  "type" : "string"
+                }
+              },
+              "Set-Cookie" : {
+                "required" : false,
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout" : {
+      "post" : {
+        "tags" : [
+          "auth",
+          "gateway"
+        ],
+        "summary" : "Clears the session cookie",
+        "operationId" : "gateway.auth.logout",
+        "responses" : {
+          "200" : {
+            "description" : ""
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities" : {
+      "get" : {
+        "tags" : [
+          "capabilities",
+          "gateway"
+        ],
+        "summary" : "Everything KUI can and cannot do right now",
+        "description" : "One entry per configured service. A service that is configured but has not been checked yet appears as degraded with reason STARTING; it is never missing, because 'not asked yet' and 'not deployed' mean different things to whoever is looking.",
+        "operationId" : "gateway.capabilities.snapshot",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CapabilitySnapshot"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/stream" : {
+      "get" : {
+        "tags" : [
+          "capabilities",
+          "gateway"
+        ],
+        "summary" : "A snapshot, then every capability change as it happens",
+        "description" : "The first event is always a full snapshot, so a client that has just connected -- or reconnected -- never has to guess what it missed. There is no cursor and no terminal event: the stream ends when the client disconnects. A heartbeat every fifteen seconds keeps proxies from closing an idle connection.",
+        "operationId" : "gateway.capabilities.stream",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/{service}/probe" : {
+      "post" : {
+        "tags" : [
+          "capabilities",
+          "gateway"
+        ],
+        "summary" : "Re-check one service now and return its recomputed state",
+        "description" : "What the UI's 'Retry now' button calls. It waits for the check to finish, so the entry it returns is the fresh one rather than the one that was on screen.",
+        "operationId" : "gateway.capabilities.probe",
+        "parameters" : [
+          {
+            "name" : "service",
+            "in" : "path",
+            "description" : "The service id to re-check",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "202" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CapabilityEntry"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters" : {
+      "get" : {
+        "tags" : [
+          "clusters",
+          "gateway"
+        ],
+        "summary" : "Every configured cluster, with a status for the list and one for each row",
+        "description" : "Always answers 200. The outer section says whether the cluster service could be reached at all - stale means these rows are the last ones that arrived, with the time they did. Each row's own summary says whether that Kafka cluster could be reached. A cluster that is down costs its own row's data and nothing else.",
+        "operationId" : "gateway.clusters.overview",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClusterOverviewDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/overview" : {
+      "get" : {
+        "tags" : [
+          "topics",
+          "gateway"
+        ],
+        "summary" : "Everything the topic page shows, in one document",
+        "description" : "Answers 200 whenever the topic exists, however many of its five sections could be filled: a section whose service this deployment does not have is not_configured and is hidden, one whose service could not be reached is unavailable and is shown with its reason. A topic that does not exist is a 404, because that is a different fact from a service that could not answer.",
+        "operationId" : "gateway.topic.overview",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicOverviewDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream" : {
+      "get" : {
+        "tags" : [
+          "message",
+          "gateway"
+        ],
+        "summary" : "Browse a topic's records as a stream",
+        "description" : "Records arrive as they are read; nothing is buffered into a page first. A record no serde could decode is still delivered, through the fallback serde, with the failure attached to it — a browse never fails because of one unreadable record. Closing the stream closes the Kafka consumer behind it.",
+        "operationId" : "message.browse.stream",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "seekTo",
+            "in" : "query",
+            "description" : "Where to start: 'beginning', 'latest', 'offset::<n>', 'timestamp::<millis>', or one or more '<partition>::<offset>' pairs. The forms do not mix.",
+            "required" : false,
+            "schema" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          {
+            "name" : "direction",
+            "in" : "query",
+            "description" : "FORWARD or BACKWARD. Absent means whichever the seek implies.",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "partition",
+            "in" : "query",
+            "description" : "Which partitions to read. Absent means all of them.",
+            "required" : false,
+            "schema" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          {
+            "name" : "limit",
+            "in" : "query",
+            "description" : "How many records to deliver, clamped to the ceiling",
+            "required" : false,
+            "schema" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "isolation",
+            "in" : "query",
+            "description" : "READ_UNCOMMITTED or READ_COMMITTED",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "keySerde",
+            "in" : "query",
+            "description" : "The serde to read keys with",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "valueSerde",
+            "in" : "query",
+            "description" : "The serde to read values with",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "A plain substring the decoded record must contain",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "live",
+            "in" : "query",
+            "description" : "Tail: start at the end and stay open",
+            "required" : false,
+            "schema" : {
+              "type" : "boolean"
+            }
+          },
+          {
+            "name" : "filterId",
+            "in" : "query",
+            "description" : "A registered smart filter (MS-007). Only records it matches are delivered",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "filterSource",
+            "in" : "query",
+            "description" : "The expression that id was minted from. Sent alongside the id so that a replica which has never seen it can compile it rather than refusing a filter the caller registered a moment ago on another replica",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "cursor",
+            "in" : "query",
+            "description" : "The signed cursor a finished browse ended with. Carry on from where that one stopped. Refused together with seekTo, because a cursor is itself a start position",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/messages" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Publish a record to a topic",
+        "description" : "Part of the produce flow. This call changes nothing. The key and the value are text, turned into bytes by the named serde — the same serde the browser would read them back with. An absent value is a tombstone and not an empty one. The answer names the partition, offset and timestamp the broker assigned to every record written; a shorter list than the requested count means the batch failed part-way and what landed stayed landed. Refused with KUI-READ-ONLY on a read-only cluster, before a producer is opened.",
+        "operationId" : "message.produce",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ProduceRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProduceResultDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/resend" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Copy a range of records into another topic",
+        "description" : "Part of the resend flow. This call changes nothing. The records are re-written byte for byte, headers included, and are never deserialized — so a topic KUI cannot decode can still be replayed, which is the case a resend is most often needed for. It is not atomic: cancelled or failed halfway it leaves what it already wrote, and the answer reports how many records were read and how many were written, which differ whenever retention removed part of the source under the copy.",
+        "operationId" : "message.resend",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResendRequestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResendResultDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge/plan" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "What emptying this topic would destroy",
+        "description" : "Part of the purge flow. This call changes nothing. Reads each partition's current start and end offset and answers with how many records would go, a warning per thing worth knowing — that committed consumer offsets are not moved, and that a compacted topic will very likely have the purge refused by the broker — and a token valid for five minutes. Changes nothing.",
+        "operationId" : "message.purge.plan",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PurgePlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Delete every record a purge plan named",
+        "description" : "Mutation (purge). This call changes the cluster and cannot be undone. Takes only a plan token. It deletes up to the offsets the plan resolved and not to the topic's end as it stands now, so records produced between the plan and the confirmation survive — they are not what the operator agreed to lose. The topic, its configuration and its partition count are untouched; this empties the log rather than recreating the topic. The answer carries both the plan that was applied and what the broker reported per partition, because after a purge the number of records destroyed cannot be read off the cluster at all.",
+        "operationId" : "message.purge",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PurgeConfirmRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PurgeReceiptDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/messages/filters" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Register a smart filter expression",
+        "description" : "Compiles the expression and answers with its id. The id is sha256(source) truncated, so registering the same expression twice is free and gives the same answer on every replica. A expression that does not compile is refused with KUI-FILTER-COMPILE naming the line and column, which is how the editor knows what to underline. Changes nothing on the cluster.",
+        "operationId" : "message.filter.register",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FilterRegistrationDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FilterIdDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/messages/filters/test" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Try a filter against one record",
+        "description" : "Evaluates the expression against the record in the request and answers whether it matched. No Kafka client is opened: the record is the caller's own, which is what makes this cheap enough to run from an editor as somebody types. An expression that is legal but throws on this particular record answers matched=false with the failure in `error`, which is a different sentence from 'your expression is wrong' and needs to read as one.",
+        "operationId" : "message.filter.test",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FilterTestDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FilterTestResultDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/messages/track" : {
+      "post" : {
+        "tags" : [
+          "message"
+        ],
+        "summary" : "Find a value across several topics inside a time window",
+        "description" : "Reads each named topic forwards from the start of the window and answers with the records that matched, each carrying the topic it came from. Every bound is mandatory: the window is closed and ordered, its width has a ceiling, and the number of hits has a cap — an unbounded scan of a production cluster is not a search. `scanned` is what was read, which is what tells a user whether 'no hits' means the value is absent or the window was empty; `truncated` says the scan stopped at its cap, which a caller cannot work out by counting. Changes nothing.",
+        "operationId" : "message.track",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TrackQueryDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TrackResultDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/compatibility" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The compatibility level every subject without its own follows",
+        "description" : "A registry that has never had a global level set reports its own default, BACKWARD, because that is what it will actually apply to the next registration.",
+        "operationId" : "schema.compatibility.global",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Set the registry-wide compatibility level",
+        "description" : "Part of the schema.compatibility.global.set flow. This call changes nothing. It applies to every subject that has no level of its own, so lowering it to NONE removes the compatibility check for all of them at once. Refused on a read-only cluster, and audited either way with the level that was in force before the change.",
+        "operationId" : "schema.compatibility.global.set",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCompatibilityRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The subjects registered on this cluster's Schema Registry",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.",
+        "operationId" : "schema.subjects",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "Case-insensitive substring match over the subject name. Not a regular expression",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "direction",
+            "in" : "query",
+            "description" : "Which way to sort by name",
+            "required" : false,
+            "schema" : {
+              "default" : "asc",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "page",
+            "in" : "query",
+            "description" : "Which page, numbered from one",
+            "required" : false,
+            "schema" : {
+              "default" : 1,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "pageSize",
+            "in" : "query",
+            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "required" : false,
+            "schema" : {
+              "default" : 25,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageDto_A"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/compatibility" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The compatibility level in force for one subject",
+        "description" : "Reports inheritedFromGlobal when the subject has no level of its own. Without that flag a client cannot tell a subject that is governed globally from one that has been pinned, and 'confirming' the value it displays would silently create an override.",
+        "operationId" : "schema.compatibility.subject",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Set one subject's compatibility level",
+        "description" : "Part of the schema.compatibility.subject.set flow. This call changes nothing. The subject stops following the global level from this point on, which the answer reports as inheritedFromGlobal: false. Refused on a read-only cluster.",
+        "operationId" : "schema.compatibility.subject.set",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCompatibilityRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The version numbers of one subject",
+        "description" : "A subject the registry does not hold answers 404 KUI-SCHEMA-NOT-FOUND, so a stale link says so rather than showing an empty version list that reads as a subject with no schemas.",
+        "operationId" : "schema.versions",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SubjectVersionsDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}" : {
+      "get" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "The schema behind one version of a subject",
+        "description" : "The schema text is returned exactly as the registry stores it, so that it can be compared and diffed against the registry's own screen.",
+        "operationId" : "schema.version",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it, such as orders-value",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "version",
+            "in" : "path",
+            "description" : "A version number, or 'latest' for whichever version is current",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SchemaDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}/compatibility" : {
+      "post" : {
+        "tags" : [
+          "schema"
+        ],
+        "summary" : "Whether a proposed schema would be accepted for this subject",
+        "description" : "Registers nothing. The check runs inside the registry, because the verdict that matters is the one the registry will give when the schema is really registered; KUI does not reimplement the compatibility rules of three schema languages. Answered on a read-only cluster like any other read.",
+        "operationId" : "schema.compatibility.check",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "subject",
+            "in" : "path",
+            "description" : "The subject, as the registry knows it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "version",
+            "in" : "path",
+            "description" : "The version to check against: a number, or 'latest' for the current one",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CompatibilityCheckRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompatibilityCheckDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "One page of a cluster's topics",
+        "description" : "The page's total is counted after every filter, including the internal-topic filter, so the page count always agrees with the rows. Read from a per-cluster snapshot: the response carries when it was taken and whether that is current.",
+        "operationId" : "topic.list",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "Match topic names containing this text (mode=plain) or resembling it (mode=fts)",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "mode",
+            "in" : "query",
+            "description" : "plain for substring matching, fts for trigram matching (ADR-038)",
+            "required" : false,
+            "schema" : {
+              "default" : "plain",
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "showInternal",
+            "in" : "query",
+            "description" : "Include Kafka's internal topics and KUI's own metadata topics",
+            "required" : false,
+            "schema" : {
+              "default" : false,
+              "type" : "boolean"
+            }
+          },
+          {
+            "name" : "sort",
+            "in" : "query",
+            "description" : "<field>:<asc|desc>, with field one of name, partitions, replicationFactor, outOfSyncReplicas, size, messageCount; omit for relevance order under mode=fts and name order otherwise",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "page",
+            "in" : "query",
+            "description" : "Which page, numbered from one",
+            "required" : false,
+            "schema" : {
+              "default" : 1,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          {
+            "name" : "pageSize",
+            "in" : "query",
+            "description" : "How many topics per page, 1 to 500",
+            "required" : false,
+            "schema" : {
+              "default" : 25,
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Create a topic",
+        "description" : "Part of the topic.create flow. This call changes nothing. An absent partitions or replicationFactor is passed to the broker as absent, so its own num.partitions and default.replication.factor apply. A name the cluster already has is refused with KUI-INVALID-STATE and 409, which is a different answer from a malformed request.",
+        "operationId" : "topic.create",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateTopicRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreatedTopicDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "One topic, with the head of its partition table",
+        "description" : "Answers 404 when no such topic exists on the cluster, and a different 404 when no such cluster is configured. The embedded partition list stops at 500 and says so; the partitions endpoint returns them all.",
+        "operationId" : "topic.get",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicDetailResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Delete a topic",
+        "description" : "Mutation (topic.delete). This call changes the cluster and cannot be undone. Takes only a plan token. Kafka's deleteTopics is asynchronous: it answers when the controller has accepted the deletion, and the topic can still appear in a listing for a moment afterwards, so a caller must not read 'still listed' as a failure. A cluster with delete.topic.enable=false refuses, and the refusal names the setting. The response repeats the plan that was applied, so the caller can show what was destroyed without asking about a topic that no longer exists.",
+        "operationId" : "topic.delete",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "token",
+            "in" : "query",
+            "description" : "The token the deletion plan answered with. Nothing else is accepted",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeletionPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/config" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "One topic's configuration keys, read-only",
+        "description" : "Read-only in M2: edits arrive in M5 with read-only mode and audit. A caller who may see the topic but not its configuration gets a not_permitted view rather than a 403, so the rest of the topic page keeps working. A key the broker marks sensitive carries no value at all.",
+        "operationId" : "topic.config",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicConfigResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Set and reset entries of a topic's configuration",
+        "description" : "Part of the topic.config.alter flow. This call changes nothing. Incremental: keys named in neither 'set' nor 'remove' are untouched. A key in 'remove' goes back to the broker's default for it, which is not the same as setting it to that default's current value. The response is the configuration read back afterwards, so a value the broker normalised is the value the caller sees.",
+        "operationId" : "topic.config.update",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateTopicConfigRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicConfigResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/partitions" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Every partition of one topic, with leaders, replicas and offsets",
+        "description" : "A partition with no leader is reported with a null leader and no message count, never with Kafka's node id -1 and never with a count computed from the partitions that did answer.",
+        "operationId" : "topic.partitions",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PartitionsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Raise a topic's partition count to what a plan token names",
+        "description" : "Mutation (topic.partitions.increase). This call changes the cluster and cannot be undone. Takes only a plan token. The current count is re-read immediately before the write, so a token for twelve partitions cannot be applied to a topic somebody else has already grown to sixteen. Kafka has no way to remove a partition afterwards, and key-to-partition routing changes for every record produced from then on.",
+        "operationId" : "topic.partitions.increase",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ConfirmRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PartitionPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/refresh" : {
+      "post" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Ask for this cluster's topics to be read now",
+        "description" : "Answers 202 with the time the request was taken. It changes nothing on the Kafka cluster: it asks KUI to re-scrape it, and the response exists so a button has something truthful to say.",
+        "operationId" : "topic.refresh",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "202" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RefreshAcceptedDto1"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/partitions/plan" : {
+      "post" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "What raising this topic's partition count would do",
+        "description" : "Part of the topic.partitions.increase flow. This call changes nothing. Reads the current partition count and answers with the change, the warning that key-to-partition routing is about to change for every future record, and a token valid for five minutes. A target that is not greater than the current count is refused here rather than by the broker a screen later. Changes nothing.",
+        "operationId" : "topic.partitions.plan",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PartitionIncreaseRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PartitionPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan" : {
+      "post" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "What deleting this topic would destroy",
+        "description" : "Part of the topic.delete flow. This call changes nothing. Answers with the partition count, the record count where every partition could be counted, whether this cluster's auto.create.topics.enable will recreate the topic the moment anything names it, and a token valid for five minutes. A record count of null means at least one partition could not be counted and is never a sum over the ones that could. Changes nothing.",
+        "operationId" : "topic.deletion.plan",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "topicName",
+            "in" : "path",
+            "description" : "The topic's name, as Kafka spells it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeletionPlanDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AdminTuningDocument" : {
+        "title" : "AdminTuningDocument",
+        "description" : "Admin client timeouts, chunk sizes and refresh intervals, in whole milliseconds",
+        "type" : "object",
+        "required" : [
+          "requestTimeoutMs",
+          "apiTimeoutMs",
+          "topicChunkSize",
+          "partitionChunkSize",
+          "groupChunkSize",
+          "parallelism",
+          "metadataRefreshMs",
+          "capabilityRefreshMs"
+        ],
+        "properties" : {
+          "requestTimeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "apiTimeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "topicChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitionChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "groupChunkSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "parallelism" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "metadataRefreshMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "capabilityRefreshMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "AdminTuningWrite" : {
+        "title" : "AdminTuningWrite",
+        "description" : "Admin client timeouts, batching and concurrency",
+        "type" : "object",
+        "required" : [
+          "timeoutMs",
+          "batchSize",
+          "parallelism"
+        ],
+        "properties" : {
+          "timeoutMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "batchSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "parallelism" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "AppInfo" : {
+        "title" : "AppInfo",
+        "description" : "Which build of KUI is running, and what this deployment enables",
+        "type" : "object",
+        "required" : [
+          "build",
+          "authType",
+          "basePath",
+          "features"
+        ],
+        "properties" : {
+          "build" : {
+            "$ref" : "#/components/schemas/BuildInfoDto"
+          },
+          "authType" : {
+            "type" : "string"
+          },
+          "basePath" : {
+            "type" : "string"
+          },
+          "services" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "features" : {
+            "$ref" : "#/components/schemas/Map_Boolean"
+          }
+        }
+      },
+      "AssignmentFreshnessDto" : {
+        "title" : "AssignmentFreshnessDto",
+        "description" : "Whether the assignments are current, and when they were last seen if not",
+        "type" : "object",
+        "required" : [
+          "status"
+        ],
+        "properties" : {
+          "status" : {
+            "description" : "How fresh the assignments are: CURRENT, LAST_SEEN, UNKNOWN",
+            "type" : "string"
+          },
+          "observedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "AuthMeResponse" : {
+        "title" : "AuthMeResponse",
+        "type" : "object",
+        "required" : [
+          "principal",
+          "csrfToken",
+          "authType"
+        ],
+        "properties" : {
+          "principal" : {
+            "$ref" : "#/components/schemas/PrincipalDto"
+          },
+          "csrfToken" : {
+            "type" : "string"
+          },
+          "authType" : {
+            "type" : "string"
+          },
+          "permissions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PermissionDto"
+            }
+          }
+        }
+      },
+      "AuthSettingsDto" : {
+        "title" : "AuthSettingsDto",
+        "type" : "object",
+        "required" : [
+          "authType",
+          "rbacEnabled"
+        ],
+        "properties" : {
+          "authType" : {
+            "type" : "string"
+          },
+          "providerLabel" : {
+            "type" : "string"
+          },
+          "rbacEnabled" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "Available" : {
+        "title" : "Available",
+        "type" : "object"
+      },
+      "AwsMskIam" : {
+        "title" : "AwsMskIam",
+        "type" : "object",
+        "properties" : {
+          "profile" : {
+            "type" : "string"
+          },
+          "roleArn" : {
+            "type" : "string"
+          },
+          "stsRegion" : {
+            "type" : "string"
+          }
+        }
+      },
+      "AzureEntra" : {
+        "title" : "AzureEntra",
+        "type" : "object",
+        "required" : [
+          "namespace"
+        ],
+        "properties" : {
+          "namespace" : {
+            "type" : "string"
+          },
+          "tokenEndpoint" : {
+            "type" : "string"
+          }
+        }
+      },
+      "BrokerConfigsResponse" : {
+        "title" : "BrokerConfigsResponse",
+        "description" : "One broker's settings, or why they could not be read",
+        "type" : "object",
+        "required" : [
+          "configs"
+        ],
+        "properties" : {
+          "configs" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "BrokersResponse" : {
+        "title" : "BrokersResponse",
+        "description" : "The cluster's brokers, or why they could not be read",
+        "type" : "object",
+        "required" : [
+          "brokers"
+        ],
+        "properties" : {
+          "brokers" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "quorum" : {
+            "$ref" : "#/components/schemas/QuorumDto"
+          }
+        }
+      },
+      "BuildInfoDto" : {
+        "title" : "BuildInfoDto",
+        "description" : "The build this process was compiled from",
+        "type" : "object",
+        "required" : [
+          "version",
+          "gitCommit",
+          "gitCommitShort",
+          "gitDirty",
+          "builtAt",
+          "scalaVersion",
+          "jdkVersion"
+        ],
+        "properties" : {
+          "version" : {
+            "type" : "string"
+          },
+          "gitCommit" : {
+            "type" : "string"
+          },
+          "gitCommitShort" : {
+            "type" : "string"
+          },
+          "gitDirty" : {
+            "type" : "boolean"
+          },
+          "builtAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "scalaVersion" : {
+            "type" : "string"
+          },
+          "jdkVersion" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilityEntry" : {
+        "title" : "CapabilityEntry",
+        "type" : "object",
+        "required" : [
+          "key",
+          "state",
+          "updatedAt"
+        ],
+        "properties" : {
+          "key" : {
+            "$ref" : "#/components/schemas/CapabilityKey"
+          },
+          "state" : {
+            "$ref" : "#/components/schemas/CapabilityState"
+          },
+          "updatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilityKey" : {
+        "title" : "CapabilityKey",
+        "type" : "object",
+        "required" : [
+          "service"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilitySnapshot" : {
+        "title" : "CapabilitySnapshot",
+        "type" : "object",
+        "required" : [
+          "generatedAt"
+        ],
+        "properties" : {
+          "entries" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CapabilityEntry"
+            }
+          },
+          "generatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "CapabilityState" : {
+        "title" : "CapabilityState",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Available"
+          },
+          {
+            "$ref" : "#/components/schemas/Degraded"
+          },
+          {
+            "$ref" : "#/components/schemas/NotConfigured"
+          },
+          {
+            "$ref" : "#/components/schemas/Unavailable"
+          }
+        ]
+      },
+      "ChangePasswordRequest" : {
+        "title" : "ChangePasswordRequest",
+        "type" : "object",
+        "required" : [
+          "challenge",
+          "newPassword"
+        ],
+        "properties" : {
+          "challenge" : {
+            "type" : "string"
+          },
+          "newPassword" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterDetailResponse" : {
+        "title" : "ClusterDetailResponse",
+        "description" : "One configured cluster and its last known state",
+        "type" : "object",
+        "required" : [
+          "cluster"
+        ],
+        "properties" : {
+          "cluster" : {
+            "$ref" : "#/components/schemas/ClusterRowDto"
+          }
+        }
+      },
+      "ClusterOverviewDto" : {
+        "title" : "ClusterOverviewDto",
+        "description" : "Every configured cluster, with a status for the list and a status for each row",
+        "type" : "object",
+        "required" : [
+          "clusters",
+          "generatedAt"
+        ],
+        "properties" : {
+          "clusters" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "generatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterProfileDto" : {
+        "title" : "ClusterProfileDto",
+        "description" : "A cluster's resolved connection settings, credentials included. Internal channel only",
+        "type" : "object",
+        "required" : [
+          "id",
+          "name",
+          "version",
+          "readOnly",
+          "bootstrapServers",
+          "security",
+          "properties",
+          "admin",
+          "updatedAt"
+        ],
+        "properties" : {
+          "id" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "bootstrapServers" : {
+            "description" : "host:port[,host:port] as Kafka's bootstrap.servers wants it",
+            "type" : "string"
+          },
+          "security" : {
+            "$ref" : "#/components/schemas/ClusterSecurity"
+          },
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_PropertyValue"
+          },
+          "admin" : {
+            "$ref" : "#/components/schemas/AdminTuningDocument"
+          },
+          "updatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterRowDto" : {
+        "title" : "ClusterRowDto",
+        "description" : "One configured cluster: identity always, live data only when a scrape succeeded",
+        "type" : "object",
+        "required" : [
+          "id",
+          "name",
+          "readOnly",
+          "bootstrapServers",
+          "security",
+          "summary",
+          "origin"
+        ],
+        "properties" : {
+          "id" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "bootstrapServers" : {
+            "type" : "string"
+          },
+          "security" : {
+            "$ref" : "#/components/schemas/ClusterSecurityDto"
+          },
+          "summary" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "origin" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterSecurity" : {
+        "title" : "ClusterSecurity",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Plaintext"
+          },
+          {
+            "$ref" : "#/components/schemas/Sasl"
+          },
+          {
+            "$ref" : "#/components/schemas/Ssl"
+          }
+        ]
+      },
+      "ClusterSecurityDto" : {
+        "title" : "ClusterSecurityDto",
+        "description" : "The shape of a cluster's security settings, with no credential in it",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "truststoreConfigured",
+          "keystoreConfigured"
+        ],
+        "properties" : {
+          "protocol" : {
+            "type" : "string"
+          },
+          "mechanism" : {
+            "type" : "string"
+          },
+          "truststoreConfigured" : {
+            "type" : "boolean"
+          },
+          "keystoreConfigured" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ClusterSecurityWrite" : {
+        "title" : "ClusterSecurityWrite",
+        "description" : "How KUI should authenticate to this cluster",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "verifyHostname"
+        ],
+        "properties" : {
+          "protocol" : {
+            "type" : "string"
+          },
+          "mechanism" : {
+            "type" : "string"
+          },
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          },
+          "truststore" : {
+            "$ref" : "#/components/schemas/StoreMaterialWrite"
+          },
+          "keystore" : {
+            "$ref" : "#/components/schemas/StoreMaterialWrite"
+          },
+          "verifyHostname" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ClusterWriteRequest" : {
+        "title" : "ClusterWriteRequest",
+        "description" : "A cluster to register or replace. Carries credentials; the response does not",
+        "type" : "object",
+        "required" : [
+          "name",
+          "readOnly",
+          "bootstrapServers",
+          "security",
+          "properties",
+          "admin"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "readOnly" : {
+            "type" : "boolean"
+          },
+          "bootstrapServers" : {
+            "type" : "string"
+          },
+          "security" : {
+            "$ref" : "#/components/schemas/ClusterSecurityWrite"
+          },
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_String"
+          },
+          "admin" : {
+            "$ref" : "#/components/schemas/AdminTuningWrite"
+          }
+        }
+      },
+      "CompatibilityCheckDto" : {
+        "title" : "CompatibilityCheckDto",
+        "description" : "Whether the registry would accept the proposed schema, and why not when it would not",
+        "type" : "object",
+        "required" : [
+          "compatible"
+        ],
+        "properties" : {
+          "compatible" : {
+            "type" : "boolean"
+          },
+          "messages" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "CompatibilityCheckRequest" : {
+        "title" : "CompatibilityCheckRequest",
+        "description" : "A proposed schema to check against a subject. Nothing is registered",
+        "type" : "object",
+        "required" : [
+          "schemaType",
+          "definition"
+        ],
+        "properties" : {
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "CompatibilityDto" : {
+        "title" : "CompatibilityDto",
+        "description" : "The compatibility level in force, and whether the subject inherits it from the global one",
+        "type" : "object",
+        "required" : [
+          "level",
+          "inheritedFromGlobal"
+        ],
+        "properties" : {
+          "level" : {
+            "type" : "string"
+          },
+          "inheritedFromGlobal" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ConfirmRequest" : {
+        "title" : "ConfirmRequest",
+        "description" : "The plan token to apply. Nothing else: the plan already fixed what will happen",
+        "type" : "object",
+        "required" : [
+          "token"
+        ],
+        "properties" : {
+          "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ConnectivityDto" : {
+        "title" : "ConnectivityDto",
+        "description" : "Whether KUI can currently talk to a cluster, and if not why",
+        "type" : "object",
+        "required" : [
+          "status",
+          "reachable"
+        ],
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "reachable" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CreateTopicRequest" : {
+        "title" : "CreateTopicRequest",
+        "description" : "A topic to create. An absent partitions or replicationFactor means the broker's own default",
+        "type" : "object",
+        "required" : [
+          "name",
+          "config"
+        ],
+        "properties" : {
+          "name" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "replicationFactor" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "config" : {
+            "$ref" : "#/components/schemas/Map_String"
+          }
+        }
+      },
+      "CreatedTopicDto" : {
+        "title" : "CreatedTopicDto",
+        "description" : "The topic as the cluster reports it after the create",
+        "type" : "object",
+        "required" : [
+          "cluster",
+          "name"
+        ],
+        "properties" : {
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "name" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "replicationFactor" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "DecodeErrorDto" : {
+        "title" : "DecodeErrorDto",
+        "description" : "A serde that failed on this record; the record was delivered by the fallback serde anyway",
+        "type" : "object",
+        "required" : [
+          "target",
+          "serde",
+          "cause"
+        ],
+        "properties" : {
+          "target" : {
+            "type" : "string"
+          },
+          "serde" : {
+            "type" : "string"
+          },
+          "cause" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DecodedPayloadDto" : {
+        "title" : "DecodedPayloadDto",
+        "description" : "One decoded key or value: the text, what it is, and which serde produced it",
+        "type" : "object",
+        "required" : [
+          "text",
+          "kind",
+          "serde",
+          "properties"
+        ],
+        "properties" : {
+          "text" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "serde" : {
+            "type" : "string"
+          },
+          "properties" : {
+            "$ref" : "#/components/schemas/Map_String"
+          }
+        }
+      },
+      "Degraded" : {
+        "title" : "Degraded",
+        "type" : "object",
+        "required" : [
+          "reason"
+        ],
+        "properties" : {
+          "reason" : {
+            "$ref" : "#/components/schemas/DegradedReason"
+          }
+        }
+      },
+      "DegradedReason" : {
+        "title" : "DegradedReason",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message"
+        ],
+        "properties" : {
+          "code" : {
+            "description" : "Why a capability is not available",
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "suggestedPollIntervalMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "p95Ms" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "DeletedOffsetsDto" : {
+        "title" : "DeletedOffsetsDto",
+        "description" : "Which partitions' committed offsets were deleted",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "topic"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        }
+      },
+      "DeletionPlanDto" : {
+        "title" : "DeletionPlanDto",
+        "description" : "What deleting this topic would destroy, and the token that confirms it",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "partitions",
+          "computedAt"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "records" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "autoCreateEnabled" : {
+            "type" : "boolean"
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PlanWarningDto"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "computedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "FilterIdDto" : {
+        "title" : "FilterIdDto",
+        "description" : "An opaque handle for a registered filter expression",
+        "type" : "object",
+        "required" : [
+          "id"
+        ],
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FilterRegistrationDto" : {
+        "title" : "FilterRegistrationDto",
+        "description" : "A filter expression to register for reuse",
+        "type" : "object",
+        "required" : [
+          "source"
+        ],
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FilterTestDto" : {
+        "title" : "FilterTestDto",
+        "description" : "Evaluate a filter expression against one supplied record",
+        "type" : "object",
+        "required" : [
+          "source",
+          "record"
+        ],
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "record" : {
+            "$ref" : "#/components/schemas/MessageDto"
+          }
+        }
+      },
+      "FilterTestResultDto" : {
+        "title" : "FilterTestResultDto",
+        "description" : "Whether the filter matched, or the failure that means it answered neither way",
+        "type" : "object",
+        "required" : [
+          "matched"
+        ],
+        "properties" : {
+          "matched" : {
+            "type" : "boolean"
+          },
+          "error" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FromPath" : {
+        "title" : "FromPath",
+        "type" : "object",
+        "required" : [
+          "path"
+        ],
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          }
+        }
+      },
+      "GcpManagedKafka" : {
+        "title" : "GcpManagedKafka",
+        "type" : "object"
+      },
+      "GroupDetailDto" : {
+        "title" : "GroupDetailDto",
+        "description" : "One consumer group: its members, their assignments, and its lag per partition",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "state",
+          "protocol",
+          "isSimple",
+          "partitionAssignor",
+          "excludedPartitions",
+          "assignments",
+          "observedAt"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "state" : {
+            "description" : "A consumer group's lifecycle state: STABLE, EMPTY, DEAD, PREPARING_REBALANCE, COMPLETING_REBALANCE, UNKNOWN",
+            "type" : "string"
+          },
+          "protocol" : {
+            "description" : "Which group protocol a member speaks: CLASSIC, CONSUMER, UNKNOWN",
+            "type" : "string"
+          },
+          "isSimple" : {
+            "type" : "boolean"
+          },
+          "partitionAssignor" : {
+            "type" : "string"
+          },
+          "coordinatorId" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "members" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MemberDto"
+            }
+          },
+          "topics" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TopicSubscriptionDto"
+            }
+          },
+          "totalLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "excludedPartitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "assignments" : {
+            "$ref" : "#/components/schemas/AssignmentFreshnessDto"
+          },
+          "observedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "stale" : {
+            "$ref" : "#/components/schemas/StaleDto"
+          }
+        }
+      },
+      "GroupSummaryDto" : {
+        "title" : "GroupSummaryDto",
+        "description" : "One consumer group as the list shows it; totalLag is null when it could not be computed",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "state",
+          "protocol",
+          "isSimple",
+          "members",
+          "topics",
+          "partitions",
+          "excludedPartitions"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "state" : {
+            "description" : "A consumer group's lifecycle state: STABLE, EMPTY, DEAD, PREPARING_REBALANCE, COMPLETING_REBALANCE, UNKNOWN",
+            "type" : "string"
+          },
+          "protocol" : {
+            "description" : "Which group protocol a member speaks: CLASSIC, CONSUMER, UNKNOWN",
+            "type" : "string"
+          },
+          "isSimple" : {
+            "type" : "boolean"
+          },
+          "members" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "topics" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "coordinatorId" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "pace" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "excludedPartitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "incomplete" : {
+            "$ref" : "#/components/schemas/IncompleteDto"
+          }
+        }
+      },
+      "GroupsResponse" : {
+        "title" : "GroupsResponse",
+        "description" : "One page of the consumer-group list, plus how many coordinators did not answer",
+        "type" : "object",
+        "required" : [
+          "groups",
+          "incompleteCoordinators"
+        ],
+        "properties" : {
+          "groups" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "incompleteCoordinators" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "Gssapi" : {
+        "title" : "Gssapi",
+        "type" : "object",
+        "required" : [
+          "serviceName",
+          "principal",
+          "useTicketCache",
+          "storeKey"
+        ],
+        "properties" : {
+          "serviceName" : {
+            "type" : "string"
+          },
+          "principal" : {
+            "type" : "string"
+          },
+          "keyTab" : {
+            "type" : "string"
+          },
+          "useTicketCache" : {
+            "type" : "boolean"
+          },
+          "storeKey" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "HeaderDto" : {
+        "title" : "HeaderDto",
+        "description" : "One header to write: a name, and a value that may be explicitly null",
+        "type" : "object",
+        "required" : [
+          "name"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          }
+        }
+      },
+      "IdentityPrincipalDto" : {
+        "title" : "IdentityPrincipalDto",
+        "type" : "object",
+        "required" : [
+          "name",
+          "kind"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "roles" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "kind" : {
+            "type" : "string"
+          }
+        }
+      },
+      "IncompleteDto" : {
+        "title" : "IncompleteDto",
+        "description" : "Which parts of this group's row could not be read, and why",
+        "type" : "object",
+        "required" : [
+          "membersKnown",
+          "offsetsKnown",
+          "endOffsetsKnown",
+          "note"
+        ],
+        "properties" : {
+          "membersKnown" : {
+            "type" : "boolean"
+          },
+          "offsetsKnown" : {
+            "type" : "boolean"
+          },
+          "endOffsetsKnown" : {
+            "type" : "boolean"
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Inline" : {
+        "title" : "Inline",
+        "type" : "object",
+        "required" : [
+          "base64"
+        ],
+        "properties" : {
+          "base64" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "KeyStoreRef" : {
+        "title" : "KeyStoreRef",
+        "type" : "object",
+        "required" : [
+          "source",
+          "storeType"
+        ],
+        "properties" : {
+          "source" : {
+            "$ref" : "#/components/schemas/StoreSource"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "keyPassword" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "storeType" : {
+            "description" : "JKS, PKCS12 or PEM",
+            "type" : "string"
+          }
+        }
+      },
+      "LagDeltaDto" : {
+        "title" : "LagDeltaDto",
+        "description" : "Groups whose lag changed since the given token, the groups that are gone, and a new token",
+        "type" : "object",
+        "required" : [
+          "token",
+          "nextPollMs",
+          "full"
+        ],
+        "properties" : {
+          "changed" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/LagUpdateDto"
+            }
+          },
+          "gone" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a consumer group id",
+              "type" : "string"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "nextPollMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "full" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "LagUpdateDto" : {
+        "title" : "LagUpdateDto",
+        "description" : "One group's changed lag, pace, state and member count",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "state",
+          "members"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "totalLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "pace" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "state" : {
+            "description" : "A consumer group's lifecycle state: STABLE, EMPTY, DEAD, PREPARING_REBALANCE, COMPLETING_REBALANCE, UNKNOWN",
+            "type" : "string"
+          },
+          "members" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "LogDirsResponse" : {
+        "title" : "LogDirsResponse",
+        "description" : "Log directories, with a per-directory error where there is one",
+        "type" : "object",
+        "required" : [
+          "logDirs"
+        ],
+        "properties" : {
+          "logDirs" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "LoginRequest" : {
+        "title" : "LoginRequest",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "type" : "string"
+          }
+        }
+      },
+      "LoginResponse" : {
+        "title" : "LoginResponse",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/PasswordChangeRequired"
+          },
+          {
+            "$ref" : "#/components/schemas/SignedIn"
+          }
+        ]
+      },
+      "Map_Boolean" : {
+        "title" : "Map_Boolean",
+        "type" : "object",
+        "additionalProperties" : {
+          "type" : "boolean"
+        }
+      },
+      "Map_Long" : {
+        "title" : "Map_Long",
+        "type" : "object",
+        "additionalProperties" : {
+          "type" : "integer",
+          "format" : "int64"
+        }
+      },
+      "Map_PropertyValue" : {
+        "title" : "Map_PropertyValue",
+        "description" : "Raw Kafka client property overrides",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/PropertyValue"
+        }
+      },
+      "Map_String" : {
+        "title" : "Map_String",
+        "type" : "object",
+        "additionalProperties" : {
+          "type" : "string"
+        }
+      },
+      "MemberDto" : {
+        "title" : "MemberDto",
+        "description" : "One consumer in the group, with the partitions it holds",
+        "type" : "object",
+        "required" : [
+          "memberId",
+          "clientId",
+          "host",
+          "rebalancing"
+        ],
+        "properties" : {
+          "memberId" : {
+            "type" : "string"
+          },
+          "groupInstanceId" : {
+            "type" : "string"
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "host" : {
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rebalancing" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "MessageDto" : {
+        "title" : "MessageDto",
+        "description" : "One Kafka record, decoded, with every serde failure that happened while decoding it",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "offset",
+          "timestamp",
+          "timestampType",
+          "key",
+          "value",
+          "headers",
+          "keySize",
+          "valueSize",
+          "headersSize"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "timestampType" : {
+            "type" : "string"
+          },
+          "key" : {
+            "$ref" : "#/components/schemas/DecodedPayloadDto"
+          },
+          "value" : {
+            "$ref" : "#/components/schemas/DecodedPayloadDto"
+          },
+          "headers" : {
+            "$ref" : "#/components/schemas/Map_String"
+          },
+          "keySize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "valueSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "headersSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "deserializeErrors" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DecodeErrorDto"
+            }
+          }
+        }
+      },
+      "NotConfigured" : {
+        "title" : "NotConfigured",
+        "type" : "object"
+      },
+      "OAuthBearer" : {
+        "title" : "OAuthBearer",
+        "type" : "object",
+        "required" : [
+          "tokenEndpoint",
+          "clientId",
+          "clientSecret"
+        ],
+        "properties" : {
+          "tokenEndpoint" : {
+            "type" : "string"
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "clientSecret" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "scope" : {
+            "type" : "string"
+          }
+        }
+      },
+      "OffsetRangeDto" : {
+        "title" : "OffsetRangeDto",
+        "description" : "A half-open offset window [from, until) of one partition",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "from",
+          "until"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "from" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "until" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "OidcStartResponse" : {
+        "title" : "OidcStartResponse",
+        "type" : "object",
+        "required" : [
+          "authorizationUrl",
+          "state"
+        ],
+        "properties" : {
+          "authorizationUrl" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PageDto_A" : {
+        "title" : "PageDto_A",
+        "description" : "One page of a list: the items, and where the page sits in the whole",
+        "type" : "object",
+        "required" : [
+          "page"
+        ],
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a schema registry subject",
+              "type" : "string"
+            }
+          },
+          "page" : {
+            "$ref" : "#/components/schemas/PageInfo"
+          }
+        }
+      },
+      "PageInfo" : {
+        "title" : "PageInfo",
+        "description" : "Where this page sits in the list; pageCount is derived from totalItems and pageSize",
+        "type" : "object",
+        "required" : [
+          "page",
+          "pageSize"
+        ],
+        "properties" : {
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalItems" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "nextPageToken" : {
+            "description" : "An opaque continuation token",
+            "type" : "string"
+          }
+        }
+      },
+      "PartitionDto" : {
+        "title" : "PartitionDto",
+        "description" : "One partition's committed offset, end offset and lag, with why the lag is absent",
+        "type" : "object",
+        "required" : [
+          "partition"
+        ],
+        "properties" : {
+          "partition" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "committed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "begin" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "end" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "lag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "anomalies" : {
+            "type" : "array",
+            "items" : {
+              "description" : "Why a partition's lag is not a plain number: NO_COMMIT, COMMITTED_BEYOND_END, COMMITTED_BEFORE_START, NO_LEADER",
+              "type" : "string"
+            }
+          },
+          "memberId" : {
+            "type" : "string"
+          },
+          "host" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PartitionIncreaseRequest" : {
+        "title" : "PartitionIncreaseRequest",
+        "description" : "The partition count the topic should end up with. It must be greater than it has now",
+        "type" : "object",
+        "required" : [
+          "partitions"
+        ],
+        "properties" : {
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PartitionPlanDto" : {
+        "title" : "PartitionPlanDto",
+        "description" : "What raising this topic's partition count would do, and the token that confirms it",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "current",
+          "target",
+          "computedAt"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "current" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "target" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PlanWarningDto"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "computedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "PartitionsResponse" : {
+        "title" : "PartitionsResponse",
+        "description" : "Every partition of one topic, with leaders and replicas",
+        "type" : "object",
+        "required" : [
+          "partitions"
+        ],
+        "properties" : {
+          "partitions" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "PasswordChangeRequired" : {
+        "title" : "PasswordChangeRequired",
+        "type" : "object",
+        "required" : [
+          "challenge"
+        ],
+        "properties" : {
+          "challenge" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PermissionDto" : {
+        "title" : "PermissionDto",
+        "type" : "object",
+        "required" : [
+          "resource"
+        ],
+        "properties" : {
+          "clusters" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "resource" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          },
+          "actions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "Plain" : {
+        "title" : "Plain",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "Plain1" : {
+        "title" : "Plain",
+        "type" : "object",
+        "required" : [
+          "value"
+        ],
+        "properties" : {
+          "value" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Plaintext" : {
+        "title" : "Plaintext",
+        "type" : "object"
+      },
+      "PlanWarningDto" : {
+        "title" : "PlanWarningDto",
+        "description" : "Something about this change the operator should read first",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PlannedPartitionDto" : {
+        "title" : "PlannedPartitionDto",
+        "description" : "What one partition's committed offset is now and what it would become",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "proposed"
+        ],
+        "properties" : {
+          "partition" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "current" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "proposed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "delta" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "PrincipalDto" : {
+        "title" : "PrincipalDto",
+        "type" : "object",
+        "required" : [
+          "name",
+          "kind"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "roles" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "kind" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ProduceRequestDto" : {
+        "title" : "ProduceRequestDto",
+        "description" : "A record to write; an absent value is a tombstone, not an empty one",
+        "type" : "object",
+        "required" : [
+          "count"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          },
+          "headers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/HeaderDto"
+            }
+          },
+          "keySerde" : {
+            "type" : "string"
+          },
+          "valueSerde" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ProduceResultDto" : {
+        "title" : "ProduceResultDto",
+        "description" : "Where every record this request wrote landed",
+        "type" : "object",
+        "properties" : {
+          "records" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ProducedRecordDto"
+            }
+          }
+        }
+      },
+      "ProducedRecordDto" : {
+        "title" : "ProducedRecordDto",
+        "description" : "The broker's acknowledgement of one written record",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "offset",
+          "timestamp"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "PropertyValue" : {
+        "title" : "PropertyValue",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/Plain1"
+          },
+          {
+            "$ref" : "#/components/schemas/Sensitive"
+          }
+        ]
+      },
+      "PurgeConfirmRequest" : {
+        "title" : "PurgeConfirmRequest",
+        "description" : "The plan token to apply. Nothing else: the plan already fixed what will be deleted",
+        "type" : "object",
+        "required" : [
+          "token"
+        ],
+        "properties" : {
+          "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PurgeFailureDto" : {
+        "title" : "PurgeFailureDto",
+        "description" : "A partition the broker refused to purge, and why",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "reason"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PurgePartitionPlanDto" : {
+        "title" : "PurgePartitionPlanDto",
+        "description" : "One partition's current offset window, and how many records a purge would delete from it",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "lowWatermark",
+          "highWatermark"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lowWatermark" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "highWatermark" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "PurgePlanDto" : {
+        "title" : "PurgePlanDto",
+        "description" : "What emptying this topic would destroy, and the token that confirms it",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "computedAt"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PurgePartitionPlanDto"
+            }
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PurgeWarningDto"
+            }
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "computedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "PurgeReceiptDto" : {
+        "title" : "PurgeReceiptDto",
+        "description" : "What a purge was agreed to delete, and what the broker did",
+        "type" : "object",
+        "required" : [
+          "plan",
+          "result"
+        ],
+        "properties" : {
+          "plan" : {
+            "$ref" : "#/components/schemas/PurgePlanDto"
+          },
+          "result" : {
+            "$ref" : "#/components/schemas/PurgeResultDto"
+          }
+        }
+      },
+      "PurgeResultDto" : {
+        "title" : "PurgeResultDto",
+        "description" : "What a purge deleted, and which partitions refused it",
+        "type" : "object",
+        "properties" : {
+          "purged" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PurgedPartitionDto"
+            }
+          },
+          "failed" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PurgeFailureDto"
+            }
+          }
+        }
+      },
+      "PurgeWarningDto" : {
+        "title" : "PurgeWarningDto",
+        "description" : "Something about this purge the operator should read first",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PurgedPartitionDto" : {
+        "title" : "PurgedPartitionDto",
+        "description" : "One partition's new low watermark after a purge",
+        "type" : "object",
+        "required" : [
+          "partition",
+          "deletedBefore"
+        ],
+        "properties" : {
+          "partition" : {
+            "description" : "a partition number, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "deletedBefore" : {
+            "description" : "a record's position in a partition, from 0",
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "QuorumDto" : {
+        "title" : "QuorumDto",
+        "description" : "The KRaft metadata quorum, as the leader last reported it",
+        "type" : "object",
+        "required" : [
+          "leaderId",
+          "leaderEpoch",
+          "highWatermark"
+        ],
+        "properties" : {
+          "leaderId" : {
+            "description" : "a broker node id, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "leaderEpoch" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "highWatermark" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "voters" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/QuorumMemberDto"
+            }
+          },
+          "observers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/QuorumMemberDto"
+            }
+          }
+        }
+      },
+      "QuorumMemberDto" : {
+        "title" : "QuorumMemberDto",
+        "description" : "One voter or observer of the KRaft metadata quorum",
+        "type" : "object",
+        "required" : [
+          "replicaId",
+          "logEndOffset",
+          "lag",
+          "isLeader",
+          "isVoter"
+        ],
+        "properties" : {
+          "replicaId" : {
+            "description" : "a broker node id, from 0",
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "logEndOffset" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "lag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "isLeader" : {
+            "type" : "boolean"
+          },
+          "isVoter" : {
+            "type" : "boolean"
+          },
+          "lastFetch" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastCaughtUp" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "RefreshAcceptedDto" : {
+        "title" : "RefreshAcceptedDto",
+        "description" : "A refresh was accepted; the snapshot is not new yet",
+        "type" : "object",
+        "required" : [
+          "clusterId",
+          "requestedAt"
+        ],
+        "properties" : {
+          "clusterId" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "requestedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "RefreshAcceptedDto1" : {
+        "title" : "RefreshAcceptedDto",
+        "description" : "A topic-snapshot refresh was accepted; the snapshot is not new yet",
+        "type" : "object",
+        "required" : [
+          "clusterId",
+          "requestedAt"
+        ],
+        "properties" : {
+          "clusterId" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "requestedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ResendRequestDto" : {
+        "title" : "ResendRequestDto",
+        "description" : "Copy offset ranges into another topic, byte for byte",
+        "type" : "object",
+        "required" : [
+          "toTopic"
+        ],
+        "properties" : {
+          "toTopic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "ranges" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OffsetRangeDto"
+            }
+          }
+        }
+      },
+      "ResendResultDto" : {
+        "title" : "ResendResultDto",
+        "description" : "A resend's tally; read and written differ when retention removed part of the source",
+        "type" : "object",
+        "required" : [
+          "toTopic",
+          "read",
+          "written"
+        ],
+        "properties" : {
+          "toTopic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "read" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "written" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ResetApplyRequest" : {
+        "title" : "ResetApplyRequest",
+        "description" : "The plan token, and nothing else",
+        "type" : "object",
+        "required" : [
+          "token"
+        ],
+        "properties" : {
+          "token" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ResetPlanDto" : {
+        "title" : "ResetPlanDto",
+        "description" : "Exactly what a reset would write, and the token that applies it unchanged",
+        "type" : "object",
+        "required" : [
+          "groupId",
+          "topic",
+          "target",
+          "noOp",
+          "token",
+          "expiresAt"
+        ],
+        "properties" : {
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          },
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "target" : {
+            "description" : "Where a reset moves the offsets: EARLIEST, LATEST, TIMESTAMP, OFFSET, SHIFT_BY, DURATION",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PlannedPartitionDto"
+            }
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ResetWarningDto"
+            }
+          },
+          "noOp" : {
+            "type" : "boolean"
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ResetPlanRequest" : {
+        "title" : "ResetPlanRequest",
+        "description" : "Ask what a reset would do. TIMESTAMP needs timestamp, OFFSET needs offsets, SHIFT_BY needs shiftBy, DURATION needs durationMs.",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "target"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          "target" : {
+            "description" : "Where a reset moves the offsets: EARLIEST, LATEST, TIMESTAMP, OFFSET, SHIFT_BY, DURATION",
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "offsets" : {
+            "$ref" : "#/components/schemas/Map_Long"
+          },
+          "shiftBy" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ResetWarningDto" : {
+        "title" : "ResetWarningDto",
+        "description" : "Something the operator should see before applying the plan",
+        "type" : "object",
+        "required" : [
+          "kind",
+          "message"
+        ],
+        "properties" : {
+          "kind" : {
+            "type" : "string"
+          },
+          "partition" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Sasl" : {
+        "title" : "Sasl",
+        "type" : "object",
+        "required" : [
+          "protocol",
+          "mechanism"
+        ],
+        "properties" : {
+          "protocol" : {
+            "description" : "SASL_PLAINTEXT or SASL_SSL",
+            "type" : "string"
+          },
+          "mechanism" : {
+            "$ref" : "#/components/schemas/SaslMechanism"
+          },
+          "tls" : {
+            "$ref" : "#/components/schemas/TlsConfig"
+          }
+        }
+      },
+      "SaslMechanism" : {
+        "title" : "SaslMechanism",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/AwsMskIam"
+          },
+          {
+            "$ref" : "#/components/schemas/AzureEntra"
+          },
+          {
+            "$ref" : "#/components/schemas/GcpManagedKafka"
+          },
+          {
+            "$ref" : "#/components/schemas/Gssapi"
+          },
+          {
+            "$ref" : "#/components/schemas/OAuthBearer"
+          },
+          {
+            "$ref" : "#/components/schemas/Plain"
+          },
+          {
+            "$ref" : "#/components/schemas/ScramSha256"
+          },
+          {
+            "$ref" : "#/components/schemas/ScramSha512"
+          }
+        ]
+      },
+      "SchemaDto" : {
+        "title" : "SchemaDto",
+        "description" : "One registered version of a subject, with its schema text",
+        "type" : "object",
+        "required" : [
+          "subject",
+          "version",
+          "id",
+          "schemaType",
+          "definition"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "schemaType" : {
+            "type" : "string"
+          },
+          "definition" : {
+            "type" : "string"
+          },
+          "references" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaReferenceDto"
+            }
+          }
+        }
+      },
+      "SchemaReferenceDto" : {
+        "title" : "SchemaReferenceDto",
+        "description" : "A schema this schema refers to, by the name it uses for it and the version it pins",
+        "type" : "object",
+        "required" : [
+          "name",
+          "subject",
+          "version"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ScramSha256" : {
+        "title" : "ScramSha256",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "ScramSha512" : {
+        "title" : "ScramSha512",
+        "type" : "object",
+        "required" : [
+          "username",
+          "password"
+        ],
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "Sensitive" : {
+        "title" : "Sensitive",
+        "type" : "object",
+        "required" : [
+          "value"
+        ],
+        "properties" : {
+          "value" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          }
+        }
+      },
+      "SetCompatibilityRequest" : {
+        "title" : "SetCompatibilityRequest",
+        "description" : "The level to set: BACKWARD, BACKWARD_TRANSITIVE, FORWARD, FORWARD_TRANSITIVE, FULL, FULL_TRANSITIVE or NONE",
+        "type" : "object",
+        "required" : [
+          "level"
+        ],
+        "properties" : {
+          "level" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SignedIn" : {
+        "title" : "SignedIn",
+        "type" : "object",
+        "required" : [
+          "principal"
+        ],
+        "properties" : {
+          "principal" : {
+            "$ref" : "#/components/schemas/IdentityPrincipalDto"
+          }
+        }
+      },
+      "Ssl" : {
+        "title" : "Ssl",
+        "type" : "object",
+        "required" : [
+          "tls"
+        ],
+        "properties" : {
+          "tls" : {
+            "$ref" : "#/components/schemas/TlsConfig"
+          }
+        }
+      },
+      "StaleDto" : {
+        "title" : "StaleDto",
+        "description" : "This is the last good answer, fetched at this time, for this reason",
+        "type" : "object",
+        "required" : [
+          "fetchedAt",
+          "reason"
+        ],
+        "properties" : {
+          "fetchedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "reason" : {
+            "description" : "Why a capability is not available",
+            "type" : "string"
+          }
+        }
+      },
+      "StoreMaterialWrite" : {
+        "title" : "StoreMaterialWrite",
+        "description" : "A keystore or truststore, base64 encoded, with its password",
+        "type" : "object",
+        "required" : [
+          "base64"
+        ],
+        "properties" : {
+          "base64" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          },
+          "password" : {
+            "description" : "a credential; no endpoint ever returns one",
+            "type" : "string"
+          }
+        }
+      },
+      "StoreSource" : {
+        "title" : "StoreSource",
+        "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/FromPath"
+          },
+          {
+            "$ref" : "#/components/schemas/Inline"
+          }
+        ]
+      },
+      "SubjectVersionsDto" : {
+        "title" : "SubjectVersionsDto",
+        "description" : "A subject's version numbers, ascending",
+        "type" : "object",
+        "required" : [
+          "subject"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "versions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        }
+      },
+      "TlsConfig" : {
+        "title" : "TlsConfig",
+        "type" : "object",
+        "required" : [
+          "verifyHostname"
+        ],
+        "properties" : {
+          "truststore" : {
+            "$ref" : "#/components/schemas/TrustStoreRef"
+          },
+          "keystore" : {
+            "$ref" : "#/components/schemas/KeyStoreRef"
+          },
+          "verifyHostname" : {
+            "type" : "boolean"
+          },
+          "enabledProtocols" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "cipherSuites" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "TopicConfigResponse" : {
+        "title" : "TopicConfigResponse",
+        "description" : "One topic's configuration keys, read-only in M2",
+        "type" : "object",
+        "required" : [
+          "config"
+        ],
+        "properties" : {
+          "config" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "TopicConsumerRowDto" : {
+        "title" : "TopicConsumerRowDto",
+        "description" : "A group that consumes this topic, with its lag on this topic alone",
+        "type" : "object",
+        "required" : [
+          "group",
+          "partitions",
+          "dormant"
+        ],
+        "properties" : {
+          "group" : {
+            "$ref" : "#/components/schemas/GroupSummaryDto"
+          },
+          "topicLag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "partitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dormant" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "TopicConsumersDto" : {
+        "title" : "TopicConsumersDto",
+        "description" : "Every consumer group that reads this topic",
+        "type" : "object",
+        "properties" : {
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TopicConsumerRowDto"
+            }
+          }
+        }
+      },
+      "TopicDetailResponse" : {
+        "title" : "TopicDetailResponse",
+        "description" : "One topic; partitionsTruncated says whether the embedded partition list is the whole table",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "partitionsTruncated"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "partitionsTruncated" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "TopicOverviewDto" : {
+        "title" : "TopicOverviewDto",
+        "description" : "Everything the topic page shows, with each part able to be missing on its own",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "consumerGroups",
+          "connectors",
+          "acls",
+          "schemas",
+          "generatedAt"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "consumerGroups" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "connectors" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "acls" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "schemas" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "generatedAt" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "TopicSubscriptionDto" : {
+        "title" : "TopicSubscriptionDto",
+        "description" : "One subscribed topic and this group's position in each of its partitions",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "excludedPartitions"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "lag" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "excludedPartitions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PartitionDto"
+            }
+          }
+        }
+      },
+      "TopicsResponse" : {
+        "title" : "TopicsResponse",
+        "description" : "One page of the topic list, plus how many topics could not be described",
+        "type" : "object",
+        "required" : [
+          "topics",
+          "incompleteTopics"
+        ],
+        "properties" : {
+          "topics" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          },
+          "incompleteTopics" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "TrackHitDto" : {
+        "title" : "TrackHitDto",
+        "description" : "One record a track found, and which topic it was in",
+        "type" : "object",
+        "required" : [
+          "topic",
+          "record"
+        ],
+        "properties" : {
+          "topic" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
+          },
+          "record" : {
+            "$ref" : "#/components/schemas/MessageDto"
+          }
+        }
+      },
+      "TrackMatchDto" : {
+        "title" : "TrackMatchDto",
+        "description" : "What to look for and where: value, key or a named header, compared three ways",
+        "type" : "object",
+        "required" : [
+          "source",
+          "operator",
+          "value"
+        ],
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "header" : {
+            "type" : "string"
+          },
+          "operator" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TrackQueryDto" : {
+        "title" : "TrackQueryDto",
+        "description" : "Find one value across several topics inside a closed time window",
+        "type" : "object",
+        "required" : [
+          "match",
+          "from",
+          "to"
+        ],
+        "properties" : {
+          "topics" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+              "type" : "string"
+            }
+          },
+          "match" : {
+            "$ref" : "#/components/schemas/TrackMatchDto"
+          },
+          "from" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "to" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "TrackResultDto" : {
+        "title" : "TrackResultDto",
+        "description" : "What a track found, how much it read, and whether it stopped early",
+        "type" : "object",
+        "required" : [
+          "scanned",
+          "matched",
+          "truncated"
+        ],
+        "properties" : {
+          "hits" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TrackHitDto"
+            }
+          },
+          "scanned" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "matched" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "truncated" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "TrustStoreRef" : {
+        "title" : "TrustStoreRef",
+        "type" : "object",
+        "required" : [
+          "source",
+          "storeType"
+        ],
+        "properties" : {
+          "source" : {
+            "$ref" : "#/components/schemas/StoreSource"
+          },
+          "password" : {
+            "description" : "A credential. Internal channel only; never on /api/v1",
+            "type" : "string"
+          },
+          "storeType" : {
+            "description" : "JKS, PKCS12 or PEM",
+            "type" : "string"
+          }
+        }
+      },
+      "Unavailable" : {
+        "title" : "Unavailable",
+        "type" : "object",
+        "required" : [
+          "reason",
+          "message",
+          "since"
+        ],
+        "properties" : {
+          "reason" : {
+            "description" : "Why a capability is not available",
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "since" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "UpdateTopicConfigRequest" : {
+        "title" : "UpdateTopicConfigRequest",
+        "description" : "Keys to set, and keys to reset to the broker default. Anything else is left alone",
+        "type" : "object",
+        "required" : [
+          "set"
+        ],
+        "properties" : {
+          "set" : {
+            "$ref" : "#/components/schemas/Map_String"
+          },
+          "remove" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
