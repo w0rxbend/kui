@@ -29,13 +29,17 @@ import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useLocation, useParams } from "@solidjs/router";
 import { useKui } from "@kui/kernel";
+import { Actions } from "@kui/api";
 import { MessagesTab } from "./MessagesTab.jsx";
 import { createBrowseSession } from "./session.js";
 import { createBrowseTransport } from "./transport.js";
 import { fromParams, queryString, type BrowseQuery } from "./browse.js";
 
 export default function Messages(): JSX.Element {
-  const params = useParams<{ readonly clusterId?: string; readonly topicName?: string }>();
+  const params = useParams<{
+    readonly clusterId?: string;
+    readonly topicName?: string;
+  }>();
 
   return (
     <Show when={params.clusterId} fallback={<NoSubject what="cluster" />}>
@@ -65,7 +69,10 @@ function NoSubject(props: { readonly what: string }): JSX.Element {
   );
 }
 
-function BrowserScreen(props: { readonly clusterId: string; readonly topicName: string }): JSX.Element {
+function BrowserScreen(props: {
+  readonly clusterId: string;
+  readonly topicName: string;
+}): JSX.Element {
   const kui = useKui();
   const location = useLocation();
 
@@ -84,7 +91,10 @@ function BrowserScreen(props: { readonly clusterId: string; readonly topicName: 
 
   // One session for the life of this screen. Changing the *query* restarts the stream inside it;
   // changing the topic unmounts the route, which disposes it.
-  const session = createBrowseSession({ streamUrl: streamUrl(), transport: createBrowseTransport() });
+  const session = createBrowseSession({
+    streamUrl: streamUrl(),
+    transport: createBrowseTransport(),
+  });
 
   onCleanup(() => {
     // Closes the stream, which aborts the request, which releases the consumer. The single most
@@ -112,9 +122,9 @@ function BrowserScreen(props: { readonly clusterId: string; readonly topicName: 
         window.history.replaceState(null, "", url);
       }}
       session={session}
-      mayProduce={kui.permits({ resource: "TOPIC", action: "MESSAGES_PRODUCE" })}
+      mayProduce={kui.permits(Actions.TopicMessagesProduce)}
       produceDisabledReason={
-        kui.permits({ resource: "TOPIC", action: "MESSAGES_PRODUCE" })
+        kui.permits(Actions.TopicMessagesProduce)
           ? undefined
           : "You do not have permission to publish into this topic."
       }

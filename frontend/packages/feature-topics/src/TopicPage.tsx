@@ -55,6 +55,14 @@ export interface TopicPageProps {
   readonly tabs?: JSX.Element | undefined;
   readonly onProduce?: TopicAction | undefined;
   readonly onPurge?: TopicAction | undefined;
+  /**
+   * Deleting the topic itself, as opposed to emptying it.
+   *
+   * Last in the row and last in this list, because it is the only action here that removes something
+   * KUI cannot help the operator get back. Purge leaves the topic, its configuration and its
+   * partition count exactly as they were; delete leaves nothing.
+   */
+  readonly onDelete?: TopicAction | undefined;
   readonly children?: JSX.Element;
 }
 
@@ -66,7 +74,10 @@ export interface TopicPageProps {
  * drawing it in danger colours tells an operator their topic is broken when what is broken is the
  * connection to the broker that would have said.
  */
-export function healthChip(health: TopicHealth): { readonly tone: PillTone; readonly label: string } {
+export function healthChip(health: TopicHealth): {
+  readonly tone: PillTone;
+  readonly label: string;
+} {
   switch (health) {
     case "in-sync":
       return { tone: "success", label: "in sync" };
@@ -119,7 +130,26 @@ export function TopicPage(props: TopicPageProps): JSX.Element {
                 variant="danger"
                 /* `danger` requires an icon in the button's own type — the outline alone is a
                    colour-only distinction, and the type makes forgetting it impossible rather
-                   than merely discouraged. */
+                   than merely discouraged.
+
+                   `minus` rather than `trash`, now that delete sits beside it. Purge and delete are
+                   two different amounts of destruction — one empties the log and leaves the topic,
+                   the other leaves nothing — and two danger buttons wearing the same glyph is the
+                   sort of adjacency that gets the wrong one clicked. */
+                icon="minus"
+                busy={action().busy === true}
+                {...disabledProps(action().disabledReason)}
+                onClick={() => action().onClick()}
+              >
+                {action().label}
+              </Button>
+            )}
+          </Show>
+          <Show when={props.onDelete}>
+            {(action) => (
+              <Button
+                variant="danger"
+                /* The bin is the stronger glyph, and delete is the stronger action. */
                 icon="trash"
                 busy={action().busy === true}
                 {...disabledProps(action().disabledReason)}

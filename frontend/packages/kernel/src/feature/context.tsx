@@ -36,7 +36,7 @@
  */
 import { createContext, useContext } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import type { KuiApiClient, PermissionAction } from "@kui/api";
+import { Actions, type KuiApiClient } from "@kui/api";
 
 /**
  * The links a feature needs to build.
@@ -73,6 +73,14 @@ export interface KuiPaths {
  */
 export type CallScope = "shell" | "feature";
 
+/**
+ * One of the actions the server actually has, as opposed to any `{resource, action}` pair.
+ *
+ * Derived from the generated `Actions` table, so an action the server drops or renames breaks the
+ * call sites that name it rather than silently answering `false` at run time.
+ */
+export type KnownAction = (typeof Actions)[keyof typeof Actions];
+
 export interface KuiContextValue {
   readonly api: KuiApiClient;
   /** The cluster the user has selected, or `undefined` before one is chosen. */
@@ -80,11 +88,17 @@ export interface KuiContextValue {
   /**
    * Whether the signed-in principal may do this.
    *
-   * Takes a whole {@link PermissionAction} — the `{resource, action}` pair from `@kui/api`'s
+   * Takes a whole `{resource, action}` pair from `@kui/api`'s
    * generated `Actions` — rather than two strings, because the pair is the unit: `VIEW` alone is
    * ambiguous, and two loose strings let a call site pair `TOPIC` with an action that belongs to
    * `SCHEMA` and get a confident `false` for a permission the principal actually holds. Call it as
-   * `permits(Actions.TopicEdit)`.
+   * `permits(Actions.TopicEdit)`, and the type now insists on it: the parameter is the *union of
+   * the generated constants* rather than `PermissionAction`, whose `action` is a bare `string`. A
+   * hand-written `{ resource: "TOPIC", action: "MESSAGES_PURGE" }` satisfied `PermissionAction`
+   * perfectly and named an action the server has never heard of — Kafka's purge is
+   * `MESSAGES_DELETE` — so it answered `false` for everyone, for ever, and the button it guarded
+   * was permanently disabled with a message blaming the operator's permissions. Nothing failed;
+   * a control simply never worked. Narrowing the parameter makes that a compile error.
    *
    * `name` narrows it to one object, where the server grants per-object permissions — a single
    * topic, a single connector. Omitted, it asks about the resource as a whole.
@@ -93,7 +107,7 @@ export interface KuiContextValue {
    * start-up would flash a screen full of disabled controls on every load, and the server is the
    * authority in any case — this only decides whether a control explains itself instead of failing.
    */
-  readonly permits: (action: PermissionAction, name?: string) => boolean;
+  readonly permits: (action: KnownAction, name?: string) => boolean;
   readonly paths: KuiPaths;
   /** Report a call's outcome. `undefined` means it succeeded. */
   readonly report: (scope: CallScope, failed: boolean) => void;

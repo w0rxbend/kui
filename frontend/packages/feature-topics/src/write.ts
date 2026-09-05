@@ -54,9 +54,7 @@ export async function createTopic(
       name: topic.name,
       // Omitted rather than sent as null: the contract says an absent field means the broker's
       // default, and `null` is a different statement that the validator rejects.
-      ...(topic.partitions === undefined
-        ? {}
-        : { partitions: topic.partitions }),
+      ...(topic.partitions === undefined ? {} : { partitions: topic.partitions }),
       ...(topic.replicationFactor === undefined
         ? {}
         : { replicationFactor: topic.replicationFactor }),
@@ -97,16 +95,12 @@ export interface PurgePlan {
 }
 
 function warningsOf(
-  raw:
-    | readonly { readonly code?: string; readonly message?: string }[]
-    | undefined,
+  raw: readonly { readonly code?: string; readonly message?: string }[] | undefined,
 ): readonly PlanWarning[] {
   return (raw ?? []).map((warning) => ({
     code: warning.code ?? "WARNING",
     // A warning with no text is worse than no warning: it draws an alarming row that says nothing.
-    message:
-      warning.message ??
-      "This operation carries a warning the server did not describe.",
+    message: warning.message ?? "This operation carries a warning the server did not describe.",
   }));
 }
 
@@ -134,13 +128,11 @@ export async function planPurge(
       // confidence of a complete one — the operator would agree to lose more than the screen said.
       records: partitions.some(
         (partition) =>
-          typeof partition.highWatermark !== "number" ||
-          typeof partition.lowWatermark !== "number",
+          typeof partition.highWatermark !== "number" || typeof partition.lowWatermark !== "number",
       )
         ? null
         : partitions.reduce(
-            (total, partition) =>
-              total + (partition.highWatermark - partition.lowWatermark),
+            (total, partition) => total + (partition.highWatermark - partition.lowWatermark),
             0,
           ),
       partitions: partitions.length,
@@ -157,15 +149,12 @@ export async function confirmPurge(
   topicName: string,
   token: string,
 ): Promise<ApiResult<PurgeOutcome>> {
-  const answer = await api.post(
-    "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge",
-    {
-      params: { path: { clusterId, topicName } },
-      // The token and nothing else. The plan already fixed what will be deleted, so there is no second
-      // place for the two halves to disagree.
-      body: { token },
-    },
-  );
+  const answer = await api.post("/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge", {
+    params: { path: { clusterId, topicName } },
+    // The token and nothing else. The plan already fixed what will be deleted, so there is no second
+    // place for the two halves to disagree.
+    body: { token },
+  });
   if (!answer.ok) return answer;
 
   const failed = answer.value.result?.failed ?? [];
@@ -217,12 +206,9 @@ export async function planDeletion(
   clusterId: string,
   topicName: string,
 ): Promise<ApiResult<DeletionPlan>> {
-  const answer = await api.post(
-    "/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan",
-    {
-      params: { path: { clusterId, topicName } },
-    },
-  );
+  const answer = await api.post("/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan", {
+    params: { path: { clusterId, topicName } },
+  });
   if (!answer.ok) return answer;
   return { ok: true, value: toDeletionPlan(answer.value) };
 }
@@ -243,8 +229,7 @@ function toDeletionPlan(raw: {
     topic: raw.topic,
     partitions: raw.partitions,
     records: typeof raw.records === "number" ? raw.records : null,
-    autoCreateEnabled:
-      typeof raw.autoCreateEnabled === "boolean" ? raw.autoCreateEnabled : null,
+    autoCreateEnabled: typeof raw.autoCreateEnabled === "boolean" ? raw.autoCreateEnabled : null,
     warnings: warningsOf(raw.warnings),
     token: raw.token ?? null,
     expiresAt: raw.expiresAt ?? null,
@@ -268,12 +253,9 @@ export async function deleteTopic(
   topicName: string,
   token: string,
 ): Promise<ApiResult<DeletionPlan>> {
-  const answer = await api.delete(
-    "/api/v1/clusters/{clusterId}/topics/{topicName}",
-    {
-      params: { path: { clusterId, topicName }, query: { token } },
-    },
-  );
+  const answer = await api.delete("/api/v1/clusters/{clusterId}/topics/{topicName}", {
+    params: { path: { clusterId, topicName }, query: { token } },
+  });
   if (!answer.ok) return answer;
   return { ok: true, value: toDeletionPlan(answer.value) };
 }

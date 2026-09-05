@@ -50,9 +50,7 @@ async function callsThatMustCompile(): Promise<void> {
    * the wire and are decoded through hand-written types. This is the first typed array a screen
    * needed.
    */
-  const codes: readonly string[] = (answer.value.warnings ?? []).map(
-    (warning) => warning.code,
-  );
+  const codes: readonly string[] = (answer.value.warnings ?? []).map((warning) => warning.code);
   const partitions: number = (answer.value.partitions ?? []).filter(
     (partition) => partition.highWatermark > partition.lowWatermark,
   ).length;

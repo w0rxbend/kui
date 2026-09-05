@@ -30,12 +30,7 @@
  * call site.
  */
 import { createSignal, type Accessor } from "solid-js";
-import {
-  isForbidden,
-  userMessage,
-  type ApiError,
-  type ApiResult,
-} from "@kui/api";
+import { isForbidden, userMessage, type ApiError, type ApiResult } from "@kui/api";
 
 export type Mutation<T> =
   | { readonly kind: "idle" }
@@ -63,16 +58,25 @@ export interface MutationHandle<A extends readonly unknown[], T> {
 export function createMutation<A extends readonly unknown[], T>(
   call: (...args: A) => Promise<ApiResult<T>>,
 ): MutationHandle<A, T> {
-  const [state, setState] = createSignal<Mutation<T>>(
-    { kind: "idle" },
-    { ownedWrite: true },
-  );
+  const [state, setState] = createSignal<Mutation<T>>({ kind: "idle" }, { ownedWrite: true });
+
+  /**
+   * The re-entry guard, as a plain variable rather than a read of the signal above.
+   *
+   * This started as `if (state().kind === "running")` and did not work. Solid batches signal writes,
+   * so a second `run()` in the same synchronous turn — which is exactly what a double click on a
+   * button produces — still read `idle` and started a second request. The signal is for *rendering*
+   * the state and is subject to the scheduler; the guard is a control-flow decision and has to be
+   * true the instant the first call is made.
+   */
+  let running = false;
 
   const run = async (...args: A): Promise<Mutation<T>> => {
     // The guard that cannot be forgotten. Two clicks is two creates, and the second failure is the
     // first success wearing a red panel.
-    if (state().kind === "running") return state();
+    if (running) return { kind: "running" };
 
+    running = true;
     setState({ kind: "running" });
     const answer = await call(...args);
     const next: Mutation<T> = answer.ok
@@ -80,6 +84,7 @@ export function createMutation<A extends readonly unknown[], T>(
       : failureOf(answer.error);
     // `setState(() => next)` rather than `setState(next)`: a signal setter given a function calls
     // it, and a `done` value that happens to be a function would be invoked instead of stored.
+    running = false;
     setState(() => next);
     return next;
   };
@@ -87,7 +92,12 @@ export function createMutation<A extends readonly unknown[], T>(
   return {
     state,
     run,
-    reset: () => setState({ kind: "idle" }),
+    reset: () => {
+      // Only the *state* is cleared. A running request is still out and its answer is still coming;
+      // clearing the guard here would let a second one start beside it, which is the thing this
+      // type exists to prevent.
+      if (!running) setState({ kind: "idle" });
+    },
     busy: () => state().kind === "running",
   };
 }

@@ -1,12 +1,5 @@
-import createOpenApiClient, {
-  type Client,
-  type MaybeOptionalInit,
-} from "openapi-fetch";
-import type {
-  HttpMethod,
-  PathsWithMethod,
-  SuccessResponseJSON,
-} from "openapi-typescript-helpers";
+import createOpenApiClient, { type Client, type MaybeOptionalInit } from "openapi-fetch";
+import type { HttpMethod, PathsWithMethod, SuccessResponseJSON } from "openapi-typescript-helpers";
 
 import { apiBaseUrl, type Bootstrap } from "./bootstrap.js";
 import { CsrfHeaderName, type CsrfTokens } from "./csrf.js";
@@ -139,9 +132,7 @@ type RequiredKeys<T> = {
 type SuccessBody<Operation> =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the helpers' own constraint;
   // narrowing it to `unknown` makes every path fail to satisfy it. A type-level guard, not a value.
-  Operation extends Record<string | number, any>
-    ? SuccessResponseJSON<Operation>
-    : never;
+  Operation extends Record<string | number, any> ? SuccessResponseJSON<Operation> : never;
 
 /** The shape every `openapi-fetch` method answers with, once its types are erased. */
 type AnyFetchResponse = { data?: unknown; error?: unknown; response: Response };
@@ -227,15 +218,11 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
    * reaches the nearest `<Errored>` boundary and unmounts the page: the blank screen this codebase
    * has already shipped once.
    */
-  const run = async (
-    send: () => Promise<AnyFetchResponse>,
-  ): Promise<ApiResult<unknown>> => {
+  const run = async (send: () => Promise<AnyFetchResponse>): Promise<ApiResult<unknown>> => {
     try {
       const answer = await send();
       if (answer.error !== undefined) {
-        return err(
-          withCorrelation(decodeEnvelope(answer.error), answer.response),
-        );
+        return err(withCorrelation(decodeEnvelope(answer.error), answer.response));
       }
       // `data` is genuinely `undefined` for a `204 No Content`, which is a success and not an
       // absence. The value's real type is the one `ResultMethod` computes for this path.
@@ -256,12 +243,9 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
   const wrap = <Method extends HttpMethod>(
     send: (...args: readonly unknown[]) => Promise<AnyFetchResponse>,
   ): ResultMethod<Method> =>
-    ((...args: readonly unknown[]) =>
-      run(() => send(...args))) as ResultMethod<Method>;
+    ((...args: readonly unknown[]) => run(() => send(...args))) as ResultMethod<Method>;
 
-  const erase = (
-    send: unknown,
-  ): ((...args: readonly unknown[]) => Promise<AnyFetchResponse>) =>
+  const erase = (send: unknown): ((...args: readonly unknown[]) => Promise<AnyFetchResponse>) =>
     send as (...args: readonly unknown[]) => Promise<AnyFetchResponse>;
 
   return {
