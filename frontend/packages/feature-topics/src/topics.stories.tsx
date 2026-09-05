@@ -1,5 +1,12 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
-import { TopicListPage } from "./TopicListPage.jsx";
+import { createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import {
+  DEFAULT_TOPIC_QUERY,
+  TopicListPage,
+  type TopicListPageProps,
+  type TopicListQuery,
+} from "./TopicListPage.jsx";
 import { TopicPage } from "./TopicPage.jsx";
 import type { TopicRow } from "./types.js";
 
@@ -63,11 +70,48 @@ const TOPICS: readonly TopicRow[] = [
   },
 ];
 
+/**
+ * The list is controlled: it draws the rows it is handed and *asks* for a different set rather than
+ * filtering what it holds, because a search that only looks at one page is a search that lies on a
+ * cluster of four thousand topics.
+ *
+ * A story has no server to ask, so this plays one. It keeps the query and applies it to the whole
+ * fixture — which is what makes the search box, the internal-topics switch and the paginator all
+ * work in Storybook without pretending `TopicListPage` does any of it itself.
+ */
+function ControlledList(
+  props: Omit<TopicListPageProps, "query" | "onQueryChange" | "totalItems">,
+): JSX.Element {
+  const [query, setQuery] = createSignal<TopicListQuery>(DEFAULT_TOPIC_QUERY);
+
+  const matching = () =>
+    props.topics.filter(
+      (topic) =>
+        (query().showInternal || !topic.internal) &&
+        (query().search === "" || topic.name.toLowerCase().includes(query().search.toLowerCase())),
+    );
+
+  const page = () => {
+    const start = (query().page - 1) * query().pageSize;
+    return matching().slice(start, start + query().pageSize);
+  };
+
+  return (
+    <TopicListPage
+      {...props}
+      topics={page()}
+      query={query()}
+      onQueryChange={setQuery}
+      totalItems={matching().length}
+    />
+  );
+}
+
 const listMeta = {
   title: "Topics/TopicListPage",
-  component: TopicListPage,
+  component: ControlledList,
   parameters: { layout: "padded" },
-} satisfies Meta<typeof TopicListPage>;
+} satisfies Meta<typeof ControlledList>;
 
 export default listMeta;
 type ListStory = StoryObj<typeof listMeta>;

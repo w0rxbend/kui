@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KuiApiClient } from "@kui/api";
 import { nameProblem } from "./CreateTopicDialog.jsx";
-import { describeDeletion, describePurge } from "./TopicsRoute.jsx";
+import { describeDeletion, describePurge, toTopicQuery } from "./TopicsRoute.jsx";
+import { DEFAULT_TOPIC_QUERY } from "./TopicListPage.jsx";
 import { consequenceOf } from "./PlannedActionDialog.jsx";
 import { planPurge } from "./write.js";
 
@@ -237,5 +238,46 @@ describe("what a destructive confirmation actually says", () => {
     // would happen. The dialog has to say that it will not happen.
     const sentence = consequenceOf({ ...plan, token: null }, describePurge);
     expect(sentence).toMatch(/read-only/);
+  });
+});
+
+describe("the query the topic list sends", () => {
+  /**
+   * The field names are the server's, and they are not the table's. Sending a column id straight
+   * through would have the server reject the request — or, for a name it happens to recognise, sort
+   * by the wrong thing. The list is verified against the running gateway; these pin the mapping so
+   * a renamed column cannot quietly stop sorting.
+   */
+  it("translates the table's column ids into the server's field names", () => {
+    expect(
+      toTopicQuery({ ...DEFAULT_TOPIC_QUERY, sort: { columnId: "records", order: "desc" } }).sort,
+    ).toBe("messageCount:desc");
+    expect(
+      toTopicQuery({ ...DEFAULT_TOPIC_QUERY, sort: { columnId: "replication", order: "asc" } })
+        .sort,
+    ).toBe("replicationFactor:asc");
+  });
+
+  it("sends no sort at all for a column the server cannot order by", () => {
+    // Sending an unknown field is a 400. Sending one the server ignores is worse: an ascending
+    // arrow drawn over rows in the server's own order, which looks like a sort and is not one.
+    expect(
+      toTopicQuery({ ...DEFAULT_TOPIC_QUERY, sort: { columnId: "health", order: "asc" } }).sort,
+    ).toBeUndefined();
+    expect(toTopicQuery({ ...DEFAULT_TOPIC_QUERY, sort: null }).sort).toBeUndefined();
+  });
+
+  it("omits an empty search rather than matching every name against nothing", () => {
+    // `q=""` is not the same request as no `q`. It is harmless on this endpoint today, which is
+    // exactly the sort of accident that stops being harmless when a parameter gains a meaning.
+    expect(toTopicQuery(DEFAULT_TOPIC_QUERY).q).toBeUndefined();
+    expect(toTopicQuery({ ...DEFAULT_TOPIC_QUERY, search: "orders" }).q).toBe("orders");
+  });
+
+  it("always states showInternal, because the server's default is to exclude them", () => {
+    // The checkbox could not do anything while the page filtered locally: the server had already
+    // removed every internal topic before the page saw the list.
+    expect(toTopicQuery(DEFAULT_TOPIC_QUERY).showInternal).toBe(false);
+    expect(toTopicQuery({ ...DEFAULT_TOPIC_QUERY, showInternal: true }).showInternal).toBe(true);
   });
 });

@@ -29,15 +29,18 @@ import {
   writeBlockedReason,
   type Fetched,
 } from "@kui/kernel";
-import { TopicListPage } from "./TopicListPage.jsx";
+import { DEFAULT_TOPIC_QUERY, TopicListPage, type TopicListQuery } from "./TopicListPage.jsx";
 import { TopicPage } from "./TopicPage.jsx";
 import { CreateTopicDialog } from "./CreateTopicDialog.jsx";
 import { PlannedActionDialog } from "./PlannedActionDialog.jsx";
+import { TopicSettings, type ConfigChange } from "./TopicSettings.jsx";
+import { fetchTopicConfig, type TopicConfig } from "./config.js";
 import {
   fetchTopicOverview,
   fetchTopics,
   type TopicListResult,
   type TopicOverview,
+  type TopicQuery,
 } from "./data.js";
 import type { NewTopic } from "./write.js";
 import {
@@ -46,6 +49,7 @@ import {
   deleteTopic,
   planDeletion,
   planPurge,
+  updateTopicConfig,
   type DeletionPlan,
   type PurgePlan,
 } from "./write.js";
@@ -113,24 +117,48 @@ function useFetch<T>(
   return { state, reload: () => setAttempt(attempt() + 1) };
 }
 
+/**
+ * The table's column ids, in the server's spelling.
+ *
+ * A map rather than sending the column id straight through, because the two vocabularies differ and
+ * only some columns can be sorted at all. An unmapped column sorts by nothing, which is the right
+ * answer: the alternative is sending a field the server does not know, having it ignore the
+ * parameter, and drawing an ascending arrow over rows in the server's own order.
+ */
+const SORT_FIELDS: Readonly<Record<string, string>> = {
+  name: "name",
+  partitions: "partitions",
+  replication: "replicationFactor",
+  records: "messageCount",
+  size: "size",
+  // `health` and `policy` are absent on purpose: the server sorts by none of them, and this map is
+  // what stops a column offering an order the cluster cannot produce. The two columns are therefore
+  // not marked sortable in the table either, so the header does not invite the click.
+};
+
+/** The screen's query, as the topics endpoint takes it. */
+export function toTopicQuery(query: TopicListQuery): TopicQuery {
+  const field = query.sort === null ? undefined : SORT_FIELDS[query.sort.columnId];
+  return {
+    showInternal: query.showInternal,
+    ...(query.search === "" ? {} : { q: query.search }),
+    ...(field === undefined ? {} : { sort: `${field}:${query.sort?.order ?? "asc"}` }),
+    page: query.page,
+    pageSize: query.pageSize,
+  };
+}
+
 function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
   const kui = useKui();
+  const [query, setQuery] = createSignal<TopicListQuery>(DEFAULT_TOPIC_QUERY);
   const { state, reload } = useFetch<TopicListResult>(
-    /* `showInternal` is requested so the screen's own checkbox has something to reveal: the server
-       excludes Kafka's bookkeeping topics by default, so the control was filtering data that had
-       never contained one and could not do anything. Filtering them back out is the screen's job.
-
-       `pageSize` is the server's maximum. Server-side paging, sorting and search all exist on this
-       endpoint and the list page does none of them yet — it filters what it holds, which is honest
-       for one page and wrong for a cluster with four thousand topics. Asking for the largest page
-       makes the current behaviour correct for every cluster this product has met; wiring the
-       controls through `TopicQuery` is the next step and the reason that type exists. */
-    () =>
-      fetchTopics(kui.api, props.clusterId, {
-        showInternal: true,
-        pageSize: 500,
-      }),
-    () => props.clusterId,
+    /* Every control on this page is applied by the server. It used to ask for the largest page the
+       endpoint allows and then filter, search and sort what came back, which is honest for one page
+       and wrong for a cluster with four thousand topics: a search that only looks at the rows it was
+       handed is a search that lies, and it lies by finding nothing and saying so. */
+    () => fetchTopics(kui.api, props.clusterId, toTopicQuery(query())),
+    // Re-fetched whenever any part of it changes, which is what makes the controls mean anything.
+    () => `${props.clusterId}|${JSON.stringify(query())}`,
   );
 
   createEffect(
@@ -169,6 +197,9 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
         topics={result().topics}
         loading={state().kind === "loading"}
         incomplete={result().incomplete}
+        query={query()}
+        onQueryChange={setQuery}
+        totalItems={result().page.totalItems}
         onOpen={(topic) => {
           window.location.assign(kui.paths.topic(props.clusterId, topic.name));
         }}
@@ -242,6 +273,39 @@ function TopicScreen(props: {
     return answer.ok ? answer.value : { failure: userMessage(answer.error) };
   };
 
+  /**
+   * Which section of the topic page is on screen.
+   *
+   * Read from the address rather than held in a signal, so that a link to a topic's settings is a
+   * link somebody can send. `?tab=settings` rather than a path segment because the tabs are one
+   * page's sections, not separate resources — the overview and the settings describe the same topic.
+   */
+  const tab = () => new URLSearchParams(location.search).get("tab") ?? "overview";
+
+  const [configAttempt, setConfigAttempt] = createSignal(0);
+  const [config, setConfig] = createSignal<Fetched<TopicConfig>>({ kind: "loading" });
+
+  createEffect(
+    () => [props.clusterId, props.topicName, tab(), configAttempt()] as const,
+    () => {
+      // Fetched when the tab is opened, not with the page. Thirty-three keys per topic is a request
+      // nobody asked for on a page most visitors come to for the partition table.
+      if (tab() !== "settings") return undefined;
+      let cancelled = false;
+      setConfig({ kind: "loading" });
+      void fetchTopicConfig(kui.api, props.clusterId, props.topicName).then((next) => {
+        if (!cancelled) setConfig(() => next);
+      });
+      return () => {
+        cancelled = true;
+      };
+    },
+  );
+
+  const editConfig = createMutation((change: ConfigChange) =>
+    updateTopicConfig(kui.api, props.clusterId, props.topicName, change),
+  );
+
   const purgeBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicMessagesDelete),
@@ -254,6 +318,13 @@ function TopicScreen(props: {
       permitted: kui.permits(Actions.TopicDelete),
       readOnly: false,
       action: "delete this topic",
+    });
+
+  const editBlocked = (): string | undefined =>
+    writeBlockedReason({
+      permitted: kui.permits(Actions.TopicEdit),
+      readOnly: false,
+      action: "change this topic's settings",
     });
 
   return (
@@ -284,7 +355,7 @@ function TopicScreen(props: {
         tabs={
           <TabStrip
             label="Topic sections"
-            currentId="overview"
+            currentId={tab()}
             tabs={[
               {
                 id: "overview",
@@ -298,10 +369,40 @@ function TopicScreen(props: {
                 icon: "messages",
                 href: kui.paths.topicMessages(props.clusterId, props.topicName),
               },
+              {
+                id: "settings",
+                label: "Settings",
+                icon: "sliders",
+                href: `${kui.paths.topic(props.clusterId, props.topicName)}?tab=settings`,
+              },
             ]}
           />
         }
-      />
+      >
+        <Show when={tab() === "settings"}>
+          <TopicSettings
+            config={valueOf(config(), { entries: [], overridden: 0 })}
+            loading={config().kind === "loading"}
+            state={editConfig.state()}
+            onChange={
+              editBlocked() === undefined
+                ? (change) => {
+                    void editConfig.run(change).then((outcome) => {
+                      if (outcome.kind !== "done") return;
+                      /* Re-read rather than patching the row locally. The response is the
+                         configuration as the broker holds it *afterwards*, so a value the broker
+                         normalised — "3600000" for "1h" — is the value the operator sees, and the
+                         `source` of the key they just changed flips to "set on this topic" without
+                         this screen having to work out that it would. */
+                      setConfigAttempt(configAttempt() + 1);
+                    });
+                  }
+                : undefined
+            }
+            changeDisabledReason={editBlocked()}
+          />
+        </Show>
+      </TopicPage>
 
       <PlannedActionDialog<PurgePlan>
         open={purging()}

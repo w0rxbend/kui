@@ -30,23 +30,66 @@
  */
 
 import type { JSX } from "@solidjs/web";
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import {
   Button,
   Checkbox,
   EmptyState,
   Icon,
+  Pagination,
   StatusPill,
   TextField,
   VirtualizedTable,
   type Column,
+  type Sort,
 } from "@kui/kernel";
 import { healthChip } from "./TopicPage.jsx";
 import type { TopicRow } from "./types.js";
 
+/**
+ * What the list is currently showing, and what the operator has asked for.
+ *
+ * The whole of it is the *server's* to apply, and that is the point of this type existing. This page
+ * used to filter, search and sort the rows it happened to hold, which is honest for one page and
+ * wrong for a cluster with four thousand topics: a search that only looks at the twenty-five rows it
+ * was handed is a search that lies, and it lies in the most convincing way — by finding nothing and
+ * saying so.
+ */
+export interface TopicListQuery {
+  /** Substring match on the name. */
+  readonly search: string;
+  /** Kafka's own bookkeeping topics. Excluded by the server unless this is on. */
+  readonly showInternal: boolean;
+  /** `null` is the server's own order. */
+  readonly sort: Sort | null;
+  /** One-based, like the buttons. */
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export const DEFAULT_TOPIC_QUERY: TopicListQuery = {
+  search: "",
+  showInternal: false,
+  sort: null,
+  page: 1,
+  pageSize: 32,
+};
+
 export interface TopicListPageProps {
+  /** This page of rows, exactly as the server sent them. Not filtered again here. */
   readonly topics: readonly TopicRow[];
   readonly loading?: boolean | undefined;
+  readonly query: TopicListQuery;
+  /**
+   * Asks for a different view of the list. The screen owning the fetch decides what to do with it;
+   * this component never mutates the query it was given.
+   */
+  readonly onQueryChange: (query: TopicListQuery) => void;
+  /**
+   * How many topics match, across every page. `undefined` when the server did not count — which is
+   * not zero, and the paginator draws numbered buttons only where there is a known last page.
+   */
+  readonly totalItems?: number | undefined;
   /** Opens one topic. The whole row is the target; see `VirtualizedTable`. */
   readonly onOpen: (topic: TopicRow) => void;
   readonly onCreate?: (() => void) | undefined;
@@ -70,17 +113,42 @@ export interface TopicListPageProps {
 }
 
 export function TopicListPage(props: TopicListPageProps): JSX.Element {
-  const [search, setSearch] = createSignal("");
-  const [showInternal, setShowInternal] = createSignal(false);
+  /**
+   * What is in the search box right now, which is not the same as what has been asked for.
+   *
+   * The box has to keep up with typing, and the server must not be asked once per keystroke. So the
+   * text is local and immediate, and the *query* follows it after a pause. Without the local copy
+   * the caret would jump about as answers arrived; without the pause, typing "payments" is eight
+   * requests, of which seven are already stale when they are sent.
+   */
+  const [typed, setTyped] = createSignal(props.query.search);
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const visible = createMemo(() => {
-    const needle = search().trim().toLowerCase();
-    return props.topics.filter(
-      (topic) =>
-        (showInternal() || !topic.internal) &&
-        (needle === "" || topic.name.toLowerCase().includes(needle)),
-    );
-  });
+  // A query the operator abandoned by navigating away must not arrive afterwards and re-fetch.
+  onCleanup(() => clearTimeout(searchTimer));
+
+  /**
+   * Keeps the box in step when the query changes from somewhere else — a cleared filter, a restored
+   * address. It deliberately does not fire while the operator is mid-word: this only runs when the
+   * *query* changed, and the query changes from typing only after the pause has already elapsed.
+   */
+  createEffect(
+    () => props.query.search,
+    (search: string) => {
+      if (search !== typed().trim()) setTyped(search);
+    },
+  );
+
+  /** Any change to the view resets to the first page. Page 7 of a different filter is not a page. */
+  const ask = (change: Partial<TopicListQuery>): void => {
+    props.onQueryChange({ ...props.query, page: 1, ...change });
+  };
+
+  const search = () => props.query.search;
+  const showInternal = () => props.query.showInternal;
+  /* The rows the server sent, drawn in the order it sent them. The page no longer decides which
+     topics exist — see `TopicListQuery` for why it must not. */
+  const visible = createMemo(() => props.topics);
 
   const columns: readonly Column<TopicRow>[] = [
     {
@@ -125,6 +193,7 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
     },
     {
       id: "replication",
+      sortable: true,
       header: "Replicas",
       align: "numeric",
       render: (topic) => <span class="kui-table__cell-number">{topic.replicationFactor}</span>,
@@ -140,6 +209,7 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
     },
     {
       id: "size",
+      sortable: true,
       header: "Size",
       align: "numeric",
       render: (topic) => <Quantity value={topic.bytes} format={formatBytes} />,
@@ -147,9 +217,7 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
     {
       id: "policy",
       header: "Cleanup",
-      render: (topic) => (
-        <span class="kui-table__cell-muted">{topic.cleanupPolicy ?? "—"}</span>
-      ),
+      render: (topic) => <span class="kui-table__cell-muted">{topic.cleanupPolicy ?? "—"}</span>,
     },
   ];
 
@@ -165,15 +233,21 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
           type="search"
           icon="search"
           placeholder="Search topics…"
-          value={search()}
-          onInput={setSearch}
+          value={typed()}
+          onInput={(text) => {
+            setTyped(text);
+            clearTimeout(searchTimer);
+            // Long enough that a typed word is one request, short enough that the list feels like it
+            // is answering rather than thinking.
+            searchTimer = setTimeout(() => ask({ search: text.trim() }), 300);
+          }}
         />
         <Checkbox
           label="Show internal topics"
           checked={showInternal()}
-          onChange={setShowInternal}
+          onChange={(on) => ask({ showInternal: on })}
         />
-        <span class="kui-topic-list__count">{matchCount(visible().length, props.topics.length)}</span>
+        <span class="kui-topic-list__count">{matchCount(visible().length, props.totalItems)}</span>
         <Show when={props.onCreate}>
           {(create) => (
             <Button
@@ -206,7 +280,10 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
         rowKey={(topic) => topic.name}
         caption="Topics on this cluster"
         onRowClick={props.onOpen}
-        {...(props.viewportHeight === undefined ? {} : { viewportHeight: props.viewportHeight })}
+        /* Sorted by the server, for the same reason it searches: re-sorting one page of a list that
+           the server paginated shows the right rows in an order no page boundary matches. */
+        sort={props.query.sort}
+        onSortChange={(sort) => ask({ sort })}
         {...(props.viewportHeight === undefined ? {} : { viewportHeight: props.viewportHeight })}
         empty={
           <Show
@@ -222,10 +299,26 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
             <EmptyState
               kind="filtered"
               title="No topic matches that text."
-              description="The search narrows the topics already loaded. Clearing it shows them all."
+              /* It searches the whole cluster now, not the rows on screen, so the sentence that
+                 said otherwise would have been telling the operator to distrust a true answer. */
+              description="No topic on this cluster has that in its name. Clearing the search shows them all."
             />
           </Show>
         }
+      />
+
+      <Pagination
+        page={props.query.page}
+        pageSize={props.query.pageSize}
+        total={props.totalItems}
+        shown={visible().length}
+        onPage={(page: number) => props.onQueryChange({ ...props.query, page })}
+        onPageSize={(pageSize: number) => ask({ pageSize })}
+        /* When the server did not count, a full page is the only evidence that another exists. It
+           can be wrong by one — a cluster with exactly two pages' worth offers a third that turns
+           out to be empty — which is a smaller lie than hiding a page that is there. */
+        hasNext={props.totalItems === undefined && visible().length === props.query.pageSize}
+        label="Topic list pages"
       />
     </section>
   );
@@ -238,7 +331,15 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
  * that is really a cluster of four thousand is the most confidently wrong sentence this page could
  * write.
  */
-export function matchCount(shown: number, total: number): string {
+export function matchCount(shown: number, total: number | undefined): string {
+  /*
+   * The server did not count. Saying "25 topics" here would be a claim about the cluster made from
+   * the size of one page — the exact sentence this function exists to avoid — so it says what is
+   * actually known: how many are on screen.
+   */
+  if (total === undefined) {
+    return `${shown.toLocaleString()} ${shown === 1 ? "topic" : "topics"} shown`;
+  }
   if (shown === total) return `${total.toLocaleString()} ${total === 1 ? "topic" : "topics"}`;
   return `${shown.toLocaleString()} of ${total.toLocaleString()} topics`;
 }

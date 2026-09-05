@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { KuiApiClient } from "@kui/api";
 import topicsDocument from "./recorded/topics.json" with { type: "json" };
 import overviewDocument from "./recorded/overview.json" with { type: "json" };
+import configDocument from "./recorded/config.json" with { type: "json" };
+import { fetchTopicConfig, sourceOf } from "./config.js";
 import { fetchTopicOverview, fetchTopics } from "./data.js";
 
 /**
@@ -102,5 +104,62 @@ describe("the recorded topic overview", () => {
 
     // Genuinely null on this cluster — a single broker reports no per-partition size. Not zero.
     expect(first.sizeBytes).toBeNull();
+  });
+});
+
+describe("the recorded topic configuration", () => {
+  it("tells the three settings somebody chose from the thirty that are inherited", async () => {
+    /*
+     * The distinction the whole screen turns on. Kafka reports every key for every topic, and on an
+     * ordinary topic almost all of them hold the broker's default; the handful somebody set are the
+     * reason anybody opens this tab. Drawing all thirty-three the same way is what makes "why is
+     * this topic behaving differently" a twenty-minute job.
+     */
+    const answer = await fetchTopicConfig(client(configDocument), "quickstart", "orders.v1");
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+
+    expect(answer.value.entries).toHaveLength(33);
+    expect(answer.value.overridden).toBe(3);
+
+    const set = answer.value.entries.filter((entry) => entry.source === "topic").map((e) => e.name);
+    expect(set).toEqual(["compression.type", "min.insync.replicas", "retention.ms"]);
+  });
+
+  it("keeps the broker's default beside the value, because reset needs it", async () => {
+    const answer = await fetchTopicConfig(client(configDocument), "quickstart", "orders.v1");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    const retention = answer.value.entries.find((entry) => entry.name === "retention.ms");
+    expect(retention?.value).toBeDefined();
+    expect(retention?.defaultValue).toBeDefined();
+    // The two differ — that is what makes it an override — and the dialog shows both so the
+    // operator can see what "reset" would actually do.
+    expect(retention?.value).not.toBe(retention?.defaultValue);
+  });
+
+  it("carries the broker's own documentation, which is all the operator has", async () => {
+    const answer = await fetchTopicConfig(client(configDocument), "quickstart", "orders.v1");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    const policy = answer.value.entries.find((entry) => entry.name === "cleanup.policy");
+    expect(policy?.documentation).toContain("retention policy");
+  });
+});
+
+describe("reading a configuration entry's source", () => {
+  it("treats only a topic-level setting as an override", () => {
+    expect(sourceOf("dynamic-topic")).toBe("topic");
+  });
+
+  it("treats everything else as inherited, including a word it does not know", () => {
+    /*
+     * Kafka's `source` has six members and only one means "somebody set this here". An unrecognised
+     * word must not become an override: the badge would appear on a key nobody has touched, which is
+     * the same failure as the screen having no badges at all — the operator stops trusting it.
+     */
+    expect(sourceOf("default")).toBe("inherited");
+    expect(sourceOf("static-broker")).toBe("inherited");
+    expect(sourceOf("something-new")).toBe("inherited");
+    expect(sourceOf(null)).toBe("inherited");
+    expect(sourceOf(undefined)).toBe("inherited");
   });
 });

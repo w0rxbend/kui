@@ -150,3 +150,95 @@
     margin-inline-start: 0;
   }
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * The settings tab
+ *
+ * Thirty-three keys, of which three matter. The layout's whole job is to keep that ratio visible:
+ * the overridden ones come first and carry a chip, the rest are behind a switch, and the table is a
+ * real `<table>` rather than a grid of divs — an operator reads down the value column, and a screen
+ * reader announces "Setting: retention.ms, Value: 604800000" only if the row header is a row header.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-topic-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-topic-config__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-4);
+}
+
+.kui-topic-config__count {
+  margin-inline-start: auto;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-topic-config__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-topic-config__table th,
+.kui-topic-config__table td {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  text-align: start;
+  vertical-align: baseline;
+  border-block-end: 1px solid var(--kui-color-border);
+}
+
+.kui-topic-config__table thead th {
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-medium);
+}
+
+/* The key is the row's identity and is copied into a command line, so it is monospaced and never
+ * wrapped mid-token. */
+.kui-topic-config__key {
+  font-family: var(--kui-font-family-mono);
+  font-weight: var(--kui-font-weight-regular);
+  white-space: nowrap;
+}
+
+/* A value can be a five-hundred-character list of brokers. It wraps rather than stretching the
+ * table past the viewport, because a horizontally scrolling settings table hides the column that
+ * says where the value came from. */
+.kui-topic-config__value {
+  font-family: var(--kui-font-family-mono);
+  overflow-wrap: anywhere;
+  max-width: 32rem;
+}
+
+.kui-topic-config__actions {
+  text-align: end;
+  white-space: nowrap;
+}
+
+.kui-topic-config__empty {
+  color: var(--kui-color-text-muted);
+  margin: 0;
+}
+
+.kui-edit-setting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+/* Kafka's own prose, which runs to a paragraph and contains markup rendered as text. Sized down and
+ * given a rule so it reads as quoted documentation rather than as this product's own instruction. */
+.kui-edit-setting__doc {
+  margin: 0;
+  padding-inline-start: var(--kui-space-3);
+  border-inline-start: 2px solid var(--kui-color-border);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+}

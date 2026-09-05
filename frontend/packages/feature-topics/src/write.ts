@@ -272,8 +272,8 @@ export async function updateTopicConfig(
   clusterId: string,
   topicName: string,
   change: {
-    readonly set?: Readonly<Record<string, string>>;
-    readonly remove?: readonly string[];
+    readonly set?: Readonly<Record<string, string>> | undefined;
+    readonly remove?: readonly string[] | undefined;
   },
 ): Promise<ApiResult<unknown>> {
   return api.patch("/api/v1/clusters/{clusterId}/topics/{topicName}/config", {
