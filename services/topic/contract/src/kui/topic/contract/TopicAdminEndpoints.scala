@@ -3,12 +3,12 @@ package kui.topic.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
-import kui.security.rbac.{Action, Resource}
-import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.KernelSchemas.given
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, TopicName}
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, Resource}
 import kui.topic.contract.dto.*
 
 /** Everything `kui-topic-service` does that changes a Kafka cluster (M5).

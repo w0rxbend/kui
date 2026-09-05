@@ -8,8 +8,8 @@ import kui.contracts.KernelSchemas.given
 import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.ClusterId
-import kui.security.rbac.{Action, Resource}
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, Resource}
 
 /** Registering, changing, removing and testing a cluster, from the administration screen.
   *

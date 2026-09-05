@@ -2,7 +2,6 @@ package kui.identity.infrastructure
 
 import java.security.SecureRandom
 import java.util.Base64
-
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 

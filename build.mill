@@ -7,13 +7,11 @@ package build
 import mill.*
 import mill.scalalib.*
 import mill.scalalib.scalafmt.ScalafmtModule
-import mill.scalajslib.*
-import mill.scalajslib.api.{JsEnvConfig, ModuleKind, ModuleSplitStyle}
 import com.goyeau.mill.scalafix.ScalafixModule
 import mill.contrib.docker.DockerModule
 
 // Compiled into the meta-build by `mill-build/build.mill`, and into `build-tests` for its unit tests.
-import kui.build.{ArchitectureRules, BuildFacts, BundleShape, CssPipeline, CssSource, ModuleFacts}
+import kui.build.{ArchitectureRules, BuildFacts, ModuleFacts}
 
 /** Every third-party version KUI pins, in one place.
   *
@@ -24,7 +22,6 @@ import kui.build.{ArchitectureRules, BuildFacts, BundleShape, CssPipeline, CssSo
   */
 object Versions {
   val scala           = "3.9.0"
-  val scalaJs         = "1.22.0"
   val jdk             = "21"
   val cats            = "2.13.0"
   val catsEffect      = "3.7.1"
@@ -44,10 +41,6 @@ object Versions {
   val logstash        = "9.0"
   val otel4s          = "1.1.0"
   val otelSdk         = "1.65.0"
-  val laminar         = "17.2.1"
-  val waypoint        = "9.0.0"
-  val scalajsDom      = "2.8.1"
-  val scalaJavaTime   = "2.7.0"
   val kafkaClients    = "4.3.1"
   val fs2Kafka        = "4.0.0"
   val snappy          = "1.1.10.8"
@@ -79,7 +72,6 @@ object Versions {
   // library only speaks to the browser revision it shipped with, so bumping one means bumping both.
   val playwright        = "1.62.0"
   val playwrightBrowser = "chromium 151.0.7922.34 (playwright build 1234)"
-  val domtestutils    = "19.0.0"
 }
 
 /** Settings every KUI Scala module shares. Modules inherit strictness rather than opting into it.
@@ -120,78 +112,7 @@ trait KuiPureModule extends KuiModule {
 /** A module that runs on the JVM. Its own trait so that JVM-only defaults have somewhere to live. */
 trait KuiJvmModule extends KuiModule
 
-/** A module that is compiled to JavaScript by Scala.js and runs in a browser.
-  *
-  * `ESModule` output is what a modern browser loads natively with `<script type="module">`, and
-  * what ADR-012's lazy microfrontend loading needs: `js.dynamicImport` becomes a real `import()`
-  * the browser can defer, rather than everything being flattened into one file.
-  */
-trait KuiJsModule extends KuiModule with ScalaJSModule {
-  def scalaJSVersion = Versions.scalaJs
-  def moduleKind     = ModuleKind.ESModule
 
-  // WebAssembly output is off: it is still experimental in Scala.js and browser support for it is
-  // narrower than for ES modules. ADR-001 pins the JS backend.
-  def scalaJSUseWebAssembly = false
-
-  // Source maps make a stack trace from a browser point back at Scala source rather than at
-  // generated JavaScript. Worth the extra artefacts.
-  def scalaJSSourceMap = true
-}
-
-/** The JS half of the shipped frontend.
-  *
-  * `SmallModulesFor` tells the Scala.js linker to emit one small JavaScript module per class in the
-  * listed packages, instead of one module for the whole program. That is what lets the shell load a
-  * feature only when the user navigates to it (ADR-012). Every later milestone adds its feature
-  * package to this list; a package that is missing from it still works, it just is not splittable.
-  */
-trait KuiFrontendModule extends KuiJsModule {
-  def moduleSplitStyle =
-    ModuleSplitStyle.SmallModulesFor("kui.ui.clusters", "kui.ui.topics", "kui.ui.messages", "kui.ui.consumers")
-
-  /** The feature microfrontends that must be linked into modules of their own (ADR-012).
-    *
-    * Empty until UI-012 creates the first one. `checkBundleShape` skips on an empty list rather
-    * than passing, so an accidentally emptied list is visible in the build log instead of silently
-    * turning the check off. UI-012 adds
-    * `BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters")` here.
-    */
-  def bundleFeatures: Seq[BundleShape.Feature] = Seq.empty
-
-  /** The largest `main.js` the shell may ship, uncompressed.
-    *
-    * 1.5 MB is a starting budget, not a measurement: it is roughly what a Laminar shell plus its
-    * runtime costs today, with room to grow. Raising it is allowed; raising it without saying why
-    * in the commit body is how a budget stops meaning anything.
-    */
-  def bundleSizeBudgetBytes: T[Long] = Task { 1_500_000L }
-
-  /** Fails the build when the linked frontend is not shaped the way ADR-012 needs.
-    *
-    * Runs `fullLinkJS` first — the shape only exists in the optimised output, because the fast
-    * linker does not do the same module splitting — and then applies `kui.build.BundleShape`'s
-    * rules to what landed in the output directory.
-    */
-  def checkBundleShape(): Task.Command[Unit] = Task.Command {
-    val linked      = fullLinkJS().dest.path
-    val linkedFiles = os.list(linked).filter(os.isFile)
-    val mainJs      = linked / "main.js"
-
-    val output = BundleShape.LinkerOutput(
-      fileNames = linkedFiles.map(_.last).toSeq,
-      mainJsContent = if (os.exists(mainJs)) os.read(mainJs) else "",
-      mainJsSizeBytes = if (os.exists(mainJs)) os.size(mainJs) else 0L
-    )
-
-    BundleShape.check(output, bundleFeatures, bundleSizeBudgetBytes()) match {
-      case BundleShape.Result.Skipped(message) => println(message)
-      case BundleShape.Result.Passed(message)  => println(message)
-      case BundleShape.Result.Failed(problems) =>
-        Task.fail(s"checkBundleShape: ${problems.size} problem(s):\n${problems.map("  " + _).mkString("\n")}")
-    }
-  }
-}
 
 /** JVM tests. MUnit is the only test framework (ADR-018). */
 trait KuiTests extends TestModule.Munit {
@@ -202,19 +123,6 @@ trait KuiTests extends TestModule.Munit {
   )
 }
 
-/** Scala.js tests. Mixed into a module's own `ScalaJSTests`, which is where the linking lives.
-  *
-  * The default JavaScript environment is plain Node: no `document`, so only logic can be tested.
-  * The two traits below swap that environment for one that has a DOM.
-  */
-trait KuiJsTests extends ScalaJSModule with KuiTests {
-  // The shipped frontend is linked as ES modules (`KuiJsModule`), but a test binary is never loaded
-  // by a browser: it is handed to Node by the Scala.js test adapter. Node's ES-module loader cannot
-  // give the adapter's own bootstrap script the `require` function it needs, and the run dies with
-  // "ReferenceError: require is not defined" before a single test starts. Linking test binaries as
-  // CommonJS avoids that entirely and changes nothing about the artefact that ships.
-  override def moduleKind = ModuleKind.CommonJSModule
-}
 
 /** Test sources for one platform of a cross-compiled module.
   *
@@ -233,35 +141,7 @@ trait KuiCrossTests extends JavaModule {
   }
 }
 
-/** Runs the tests against a `document` supplied by the `jsdom` npm package rather than by a real
-  * browser. Fast, but jsdom is not a browser: layout, real event ordering and CSS are approximated.
-  * Requires `jsdom` to be installed (see README).
-  */
-trait KuiJsDomTests extends ScalaJSModule with KuiJsTests {
-  override def jsEnvConfig = Task { JsEnvConfig.JsDom() }
 
-  // jsdom loads the test binary the way a browser loads a classic `<script>` tag, so it accepts
-  // neither the ES modules the shipped frontend is linked as nor the CommonJS that `KuiJsTests`
-  // switches plain Node tests to. `NoModule` is the plain-script output, and it is the only input
-  // this environment supports (`JSDOMNodeJSEnv.validateInput`). Nothing about the artefact that
-  // ships is affected: this is the file handed to jsdom, not the one served to a browser.
-  override def moduleKind = ModuleKind.NoModule
-
-  // A single-file output cannot also be split into one module per feature, and the linker refuses
-  // the combination outright. Splitting is a production concern (ADR-012's lazy feature loading);
-  // `checkBundleShape` asserts it on the real `fullLinkJS` output, so nothing is lost by linking the
-  // test binary as one file.
-  override def moduleSplitStyle = ModuleSplitStyle.FewestModules
-}
-
-/** Runs the tests in a real browser engine, driven by Playwright.
-  *
-  * Reserved for the two SSE wrapper suites, where what is under test is the browser's own
-  * `EventSource` behaviour and jsdom's approximation of it would prove nothing.
-  */
-trait KuiBrowserTests extends ScalaJSModule with KuiJsTests {
-  override def jsEnvConfig = Task { JsEnvConfig.Playwright.chrome(headless = true, showLogs = false) }
-}
 
 object libs extends Module {
 
@@ -291,17 +171,6 @@ object libs extends Module {
       }
     }
 
-    object js extends Shared with KuiJsModule {
-      // A browser has no `java.time`, and the kernel needs `Instant` (an error that records when a
-      // circuit opened, a capability that records when it went away). scala-java-time is a
-      // reimplementation of the java.time API in Scala, so the same source compiles for both
-      // platforms instead of the JS half growing a parallel date type.
-      def mvnDeps = super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests {
-        def moduleDeps = super.moduleDeps ++ Seq(testkit.js)
-      }
-    }
   }
 
   /** Wire shapes shared by every service: the error envelope, the capability and section DTOs, and
@@ -334,13 +203,6 @@ object libs extends Module {
       object test extends ScalaTests with KuiTests with KuiCrossTests
     }
 
-    object js extends Shared with KuiJsModule {
-      def moduleDeps = Seq(kernel.js, securityCore.js)
-      def mvnDeps =
-        super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-    }
   }
 
   /** Test infrastructure every other module's suites share: generators, fakes, stub upstreams and
@@ -394,15 +256,6 @@ object libs extends Module {
       }
     }
 
-    object js extends Shared with KuiJsModule {
-      def moduleDeps = Seq(kernel.js, contractsCore.js)
-      def mvnDeps =
-        super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests {
-        def moduleDeps = super.moduleDeps ++ Seq(testkit.js)
-      }
-    }
   }
 
   /** The typed configuration model and the loader that fills it in.
@@ -834,13 +687,6 @@ object libs extends Module {
       object test extends ScalaTests with KuiTests with KuiCrossTests
     }
 
-    object js extends Shared with KuiJsModule {
-      def moduleDeps = Seq(kernel.js)
-      def mvnDeps =
-        super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-      object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-    }
   }
 }
 
@@ -916,10 +762,11 @@ trait KuiBuildInfoModule extends KuiModule {
 
 /** Everything that runs in a browser.
   *
-  * `ui-kernel` is the design system and the shell's plumbing: tokens, primitives, the feature
-  * loading contract. Feature microfrontends (`ui-clusters`, `ui-topics`, …) arrive in later
-  * milestones as sibling modules; each adds its package to `KuiFrontendModule`'s split list and its
-  * CSS directory to `cssSources` below.
+  * One thing, since the SolidJS cutover: `frontend.solid`, the TypeScript and Vite build, plus the
+  * two code generators that keep it in step with the server's contracts (`apiTypes` reads the
+  * OpenAPI document, `apiConstants` reads the Scala constants). The interface is no longer built by
+  * Mill's own Scala.js linker — it is built by Vite, behind a Mill task with declared inputs, so the
+  * product's build story stays one command (ADR-048 §6).
   */
 object frontend extends Module {
 
@@ -1005,377 +852,14 @@ object frontend extends Module {
     tools.errorCodes.runMain("kui.tools.BrowserConstantsMain", (apiConstantsTarget +: args)*)()
   }
 
-  object uiKernel extends KuiFrontendModule {
 
-    /** Mill names a module's directory after the Scala object, which would put these sources in
-      * `frontend/uiKernel`. Directories in this repository are kebab-case (`libs/kernel`,
-      * `services/gateway`, and `ui-clusters`, `ui-topics` to come), and a Scala identifier cannot
-      * contain a hyphen without backticks — which would then leak into every task name a developer
-      * types. Renaming the directory here keeps `frontend/ui-kernel` on disk and
-      * `frontend.uiKernel.compile` on the command line.
-      */
-    def moduleDir = super.moduleDir / os.up / "ui-kernel"
 
-    // `contracts-core` brings the error envelope and the capability DTOs the `ApiClient` and the
-    // capability store decode (UI-005, UI-008); `security-core` brings `Principal`, which is what
-    // `/auth/me` answers with. Both are cross-compiled, so the browser decodes exactly the shapes
-    // the gateway encodes, from the same source.
-    def moduleDeps = Seq(libs.kernel.js, libs.contractsCore.js, libs.securityCore.js)
 
-    def mvnDeps = Seq(
-      mvn"com.raquo::laminar::${Versions.laminar}",
-      mvn"com.raquo::airstream::${Versions.laminar}",
-      mvn"com.raquo::waypoint::${Versions.waypoint}",
-      mvn"org.scala-js::scalajs-dom::${Versions.scalajsDom}",
-      mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
-      mvn"com.softwaremill.sttp.tapir::tapir-sttp-client4::${Versions.tapir}",
-      // sttp's JS backend decodes timestamps with `java.time`, which the JVM supplies and the
-      // browser does not; this is the Scala.js re-implementation of it.
-      mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}"
-    )
 
-    /** Writes the build's own facts into a Scala source file that is compiled with the module.
-      *
-      * A browser has no filesystem and no environment variables, so the only way for frontend code
-      * to know which build it is, is for the build to hand it the answer as source. Mill's
-      * ready-made `BuildInfo` lives in a contrib plugin; generating one field by hand is smaller
-      * than taking that dependency, and keeps the generated code visible in this file.
-      */
-    def buildInfoSource: T[PathRef] = Task {
-      val file = Task.dest / "KernelBuildInfo.scala"
-      os.write(
-        file,
-        s"""package kui.ui.kernel
-           |
-           |/** Generated by `build.mill`. Do not edit; read it through `Kernel`. */
-           |private[kernel] object KernelBuildInfo {
-           |  val version: String = "${kuiVersion()}"
-           |}
-           |""".stripMargin
-      )
-      PathRef(file)
-    }
 
-    def generatedSources = Task { super.generatedSources() :+ buildInfoSource() }
 
-    /** Runs under jsdom, not plain Node, because almost everything in this module touches
-      * `document`. See `docs/development/toolchain.md` for the `NODE_PATH` jsdom needs.
-      */
-    object test extends ScalaJSTests with KuiJsDomTests {
-      def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
 
-      /** Compiles the gateway's own golden capability snapshot into the test binary.
-        *
-        * `CapabilityStoreSuite` decodes the exact bytes the server's golden test writes, which is what
-        * makes "the browser and the gateway agree about this document" a checked fact rather than a
-        * hope. The file is read from `libs/contracts-core` rather than copied here on purpose: a copy
-        * is a second source of truth, and the day the server's golden file changes the copy would keep
-        * passing while the real contract had moved.
-        *
-        * Code compiled by Scala.js has no filesystem, so the bytes have to arrive as generated source;
-        * declaring the file as a `Task.Source` is what makes Mill re-run this when it changes.
-        */
-      def capabilityFixtureInput: T[Seq[PathRef]] = Task.Sources(
-        mill.api.BuildCtx.workspaceRoot / "libs" / "contracts-core" / "test" / "resources" / "golden" /
-          "capabilities-snapshot.json"
-      )
 
-      def capabilityFixtureSource: T[PathRef] = Task {
-        val contents = os.read(capabilityFixtureInput().head.path)
-        val file     = Task.dest / "CapabilityFixtures.scala"
-        os.write(
-          file,
-          List(
-            "package kui.ui.kernel.state",
-            "",
-            "/** Generated by `build.mill` from the gateway's golden capability snapshot. Do not edit. */",
-            "private[state] object CapabilityFixtures {",
-            s"  val snapshot: String = \"\"\"$contents\"\"\"",
-            "}",
-            ""
-          ).mkString("\n")
-        )
-        PathRef(file)
-      }
-
-      def generatedSources = Task {
-        super.generatedSources() :+ capabilityFixtureSource()
-      }
-    }
-  }
-
-  /** The application: the router, the layout and the shell's own pages.
-    *
-    * It is the Scala.js *entry point* — the one `main` ADR-012 allows — and therefore the module the
-    * linker is run on. Feature microfrontends are reached through `FeatureRegistry`'s dynamic
-    * imports rather than from here, which is what lets the linker put each of them in a JavaScript
-    * module the browser downloads only when it is needed.
-    */
-  object uiShell extends KuiFrontendModule {
-
-    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
-    def moduleDir = super.moduleDir / os.up / "ui-shell"
-
-    // `services.gateway.contract.js` brings the capability endpoints: the snapshot the store polls
-    // with and the probe the "Retry now" button calls (UI-010). They are cross-compiled, so the
-    // browser calls exactly the endpoints the gateway serves, from the same source.
-    // `uiClusters` is a compile-time dependency and a *run-time* one only through
-    // `js.dynamicImport`: the shell names `ClustersRoutes` (static data) directly and
-    // `ClustersFeature` only inside the import thunk, which is what lets the linker put the
-    // feature in a module of its own (ADR-012). `checkBundleShape` fails the build if that line
-    // is ever crossed.
-    def moduleDeps =
-      Seq(uiKernel, uiClusters, uiTopics, uiMessages, uiConsumers, services.gateway.contract.js)
-
-    def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
-
-    /** The feature microfrontends that must end up in JavaScript modules of their own. */
-    def bundleFeatures = Seq(
-      BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters"),
-      BundleShape.Feature("kui.ui.topics.TopicsFeature", "kui.ui.topics"),
-      BundleShape.Feature("kui.ui.messages.MessagesFeature", "kui.ui.messages"),
-      BundleShape.Feature("kui.ui.consumers.ConsumersFeature", "kui.ui.consumers")
-    )
-
-    object test extends ScalaJSTests with KuiJsDomTests {
-      def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
-    }
-  }
-
-  /** The first feature microfrontend, and the shape every later one copies.
-    *
-    * It depends on `ui-kernel` for the design system and on the cluster service's cross-compiled
-    * contract, so the browser decodes exactly what the service encodes, from the same source. It
-    * depends on the shell not at all, and it must not: the shell depends on every feature, and the
-    * reverse edge would be a cycle as well as the end of lazy loading.
-    */
-  object uiClusters extends KuiFrontendModule {
-
-    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
-    def moduleDir = super.moduleDir / os.up / "ui-clusters"
-
-    // `services.gateway.contract.js` alongside the cluster service's own: five of the six endpoints
-    // this module calls are proxied through the gateway unchanged and so keep the service's DTOs,
-    // but `GET /api/v1/clusters` is *aggregated* by the gateway (CLAPI-007) and answers with
-    // `ClusterOverviewDto`, which is the gateway's type. Decoding it against the service's
-    // `ClustersResponse` is what made the dashboard render "No clusters yet" against a working
-    // broker; see `ClustersApi.clusters`.
-    def moduleDeps = Seq(uiKernel, services.cluster.contract.js, services.gateway.contract.js)
-
-    /** jsdom, since M1's dashboard.
-      *
-      * It used to be plain Node, on the grounds that the only suite here was about a state machine.
-      * That stopped being true when this module gained screens: the milestone's headline criterion —
-      * *the row of an unreachable cluster is still focusable and still clickable* — is a statement
-      * about what ends up in the DOM and cannot be asserted anywhere else. Pure suites keep running
-      * unchanged under jsdom.
-      */
-    object test extends ScalaJSTests with KuiJsDomTests {
-      def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
-    }
-  }
-
-  /** The topic explorer (M2), and the second microfrontend.
-    *
-    * It depends on `services.topic.contract.js` so the browser decodes exactly what the topic service
-    * encodes, from the same source (ADR-003), and on the shell not at all: the shell depends on every
-    * feature, and the reverse edge would be a cycle as well as the end of lazy loading.
-    *
-    * Its test module additionally depends on `services.topic.contract.js.test`, which is where the
-    * contract's committed sample documents live as constants. Decoding *those exact bytes* in the browser's
-    * own suite is the seam test M1 lacked: the dashboard decoded `ClustersResponse` while the gateway sent
-    * `ClusterOverviewDto`, every response decoded successfully into zero rows, and the page rendered "No
-    * clusters yet" against a working broker with no error anywhere. Both modules' suites were green because
-    * each tested itself against its own idea of the payload. Copying the documents into this module would
-    * have reproduced exactly that — two beliefs, free to drift — so nothing is copied and the one committed
-    * document is read from both sides.
-    */
-  object uiTopics extends KuiFrontendModule {
-
-    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
-    def moduleDir = super.moduleDir / os.up / "ui-topics"
-
-    // `services.gateway.contract.js` alongside the topic service's own, for the reason `uiClusters`
-    // records: the topic *overview* is a gateway aggregation and answers with the gateway's type,
-    // while the other five endpoints are proxied through untouched and keep the service's. Decoding
-    // an aggregation against the owning service's type is what made the M1 dashboard render "No
-    // clusters yet" against a working broker.
-    // `services.message.contract.js` for `BrowseAddress` alone: the topic page carries the one link
-    // into the message browser, and that URL has to be built from the same constants the message
-    // service's endpoint is declared with. It is a contract module — shared source, no fs2, no
-    // screens — so this pulls in path segments and parameter names and no feature code, which is what
-    // `checkBundleShape` goes on asserting.
-    def moduleDeps =
-      Seq(uiKernel, services.topic.contract.js, services.gateway.contract.js, services.message.contract.js)
-
-    object test extends ScalaJSTests with KuiJsDomTests {
-      def moduleDeps = super.moduleDeps ++ Seq(services.topic.contract.js.test)
-      def mvnDeps    = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
-    }
-  }
-
-  /** The message explorer (M3).
-    *
-    * It starts life holding only the parts of the table view that are pure — the JSON flattener and its
-    * path syntax — because those are the piece of M3's frontend that depends on nothing at all and can be
-    * proved correct on their own. The typed clients, the screens and the dependency on
-    * `services.message.contract.js` arrive with MSG-034, once that contract exists; like `uiClusters`, this
-    * module will decode exactly what the message service encodes, from the same source, and will depend on
-    * the shell not at all.
-    */
-  object uiMessages extends KuiFrontendModule {
-
-    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
-    def moduleDir = super.moduleDir / os.up / "ui-messages"
-
-    def moduleDeps = Seq(uiKernel, services.message.contract.js)
-
-    def mvnDeps = Seq(mvn"com.raquo::waypoint::${Versions.waypoint}")
-
-    object test extends ScalaJSTests with KuiJsDomTests {
-      def moduleDeps = super.moduleDeps ++ Seq(services.message.contract.js.test)
-      def mvnDeps    = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
-    }
-  }
-
-  /** The consumer-group explorer (M4), and the fourth microfrontend.
-    *
-    * It depends on `services.consumer.contract.js` so the browser decodes exactly what the consumer
-    * service encodes, from the same source (ADR-003), and on the shell not at all: the shell depends
-    * on every feature, and the reverse edge would be a cycle as well as the end of lazy loading.
-    *
-    * `frontend.uiTopics` is deliberately **not** a `moduleDep` and must never become one (M4 DEVPLAN
-    * risk R-9). The topic page's Consumers tab is a panel contributed through the kernel's slot, not
-    * an import: a feature that imported another feature would be downloaded whenever that one was,
-    * which is the whole thing the split exists to prevent.
-    */
-  object uiConsumers extends KuiFrontendModule {
-
-    // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
-    def moduleDir = super.moduleDir / os.up / "ui-consumers"
-
-    // `services.gateway.contract.js` for the topic page's Consumers tab. That panel's rows come from
-    // the gateway's topic-overview aggregation and not from this service's own endpoint — the
-    // consumer service's `forTopic` is `/internal/v1` and no browser may call it — so the tab decodes
-    // the gateway's `TopicOverviewDto`. It is a contract module: shared source, no screens, so this
-    // pulls in codecs and no feature code, which is what `checkBundleShape` goes on asserting. It is
-    // emphatically *not* `frontend.uiTopics`; see the note above.
-    def moduleDeps = Seq(uiKernel, services.consumer.contract.js, services.gateway.contract.js)
-
-    object test extends ScalaJSTests with KuiJsDomTests {
-      def moduleDeps =
-        super.moduleDeps ++ Seq(services.consumer.contract.js.test, services.gateway.contract.js.test)
-      def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
-    }
-  }
-
-  /** Where each Mill frontend module's stylesheets now live, and the module name `CssPipeline`
-    * knows it by.
-    *
-    * The stylesheets moved out of the `resources/css` directory of each `frontend/ui-…` module and
-    * into each package's own `styles` directory in the TypeScript workspace (ADR-048 §5). They moved
-    * unchanged, and while both frontends are being built they are shared: this task reads the very
-    * same files the Vite build reads, so there is one copy of the design system on disk and no
-    * chance of the two halves drifting during the migration. `frontend.css` disappears together with
-    * the Scala.js frontend at cutover.
-    */
-  private def cssSources: Seq[(String, os.SubPath)] = Seq(
-    "uiKernel"    -> os.sub / "kernel",
-    "uiShell"     -> os.sub / "shell",
-    "uiClusters"  -> os.sub / "feature-clusters",
-    "uiTopics"    -> os.sub / "feature-topics",
-    "uiMessages"  -> os.sub / "feature-messages",
-    "uiConsumers" -> os.sub / "feature-consumers"
-  )
-
-  /** Concatenates every module's CSS into one `kui.css` (ADR-024).
-    *
-    * The ordering rules, and the reasoning behind them, live in `kui.build.CssPipeline` so that they
-    * can be unit-tested by `build-tests` rather than only observed by running the build.
-    */
-  private def stylesDirectory(directory: os.SubPath): os.Path =
-    mill.api.BuildCtx.workspaceRoot / "frontend" / "packages" / directory / "styles"
-
-  /** The stylesheet directories, declared so that Mill re-runs `css` when one of them changes.
-    *
-    * Not a formality. A task that reads files it has not declared is cached against inputs that do
-    * not include them, so editing a stylesheet would leave the previously built `kui.css` in place
-    * and the change would appear not to work — the kind of defect that is blamed on the browser
-    * cache for an afternoon.
-    */
-  def cssInputs: T[Seq[PathRef]] = Task.Sources(cssSources.map((_, directory) => stylesDirectory(directory))*)
-
-  def css: T[PathRef] = Task {
-    // Consumed for its effect on caching; the directories are re-listed below rather than filtered
-    // out of this value, because `Task.Sources` reports files and the grouping needed here is by
-    // module.
-    cssInputs(): Unit
-
-    val sources = cssSources.flatMap { (moduleName, directory) =>
-      val styles = stylesDirectory(directory)
-      if !os.exists(styles) then Nil
-      else
-        os.list(styles)
-          .filter(file => file.ext == "css" && file.last != "index.css")
-          .sorted
-          .map(file => CssSource(moduleName, file.last, os.read(file)))
-    }.toList
-
-    val stylesheet = Task.dest / "kui.css"
-    os.write(stylesheet, CssPipeline.concatenate(sources))
-    println(s"frontend.css: ${sources.size} source file(s) -> $stylesheet")
-    PathRef(stylesheet)
-  }
-
-  /** The linked frontend, laid out the way the classpath has to see it.
-    *
-    * `StaticRoutes` serves `/ui/...` from the classpath under `/web`, so a browser asking for
-    * `/ui/main.js` makes the server look for the classpath resource `web/main.js`. This task builds
-    * a directory containing exactly that `web` directory — every file the Scala.js linker produced
-    * (`main.js`, one module per split feature, and the source maps) plus `kui.css` — and hands it
-    * back as a resource root.
-    *
-    * A deployable adds it to its own `resources`, which is what puts those files inside the
-    * assembled jar and therefore inside the container image. Without it the images serve
-    * `index.html` and then answer the `main.js` request it points at with `index.html` again — the
-    * single-page fallback doing exactly what it is supposed to do for an unknown path — so the
-    * browser loads an HTML document as a JavaScript module and the application never starts. The
-    * API worked, which is why the Compose smoke test passed and nobody noticed until a real browser
-    * opened the page.
-    *
-    * `fullLinkJS` and not `fastLinkJS`, for two reasons: it is the optimised output a release is
-    * supposed to ship, and it is the only one that is actually split into per-feature modules, which
-    * is the ADR-012 behaviour E2E-001 asserts on. The development loop does not go through here at
-    * all — `devClassPath` puts symbolic links to the fast-linker output in front of everything, so a
-    * developer still gets a re-link and a refresh.
-    */
-  def bundle: T[PathRef] = Task {
-    val web = Task.dest / "web"
-    os.makeDir.all(web)
-
-    val linked = uiShell.fullLinkJS().dest.path
-    val jsFiles = os.list(linked).filter(os.isFile)
-    jsFiles.foreach(file => os.copy.into(file, web, replaceExisting = true))
-    os.copy.into(css().path, web, replaceExisting = true)
-
-    /* The page itself, which used to live in the gateway's own resources.
-     *
-     * It moved here at the SolidJS cutover, and the move is the point rather than tidiness. Both
-     * bundles produce an `index.html` — this one names `main.js`, the Vite one names its hashed
-     * assets — and while the template sat in `services/gateway/api/resources/web/` it was earlier on
-     * the classpath than either, so the gateway served the Scala.js page whatever bundle was wired
-     * in. The interface then failed to start with three 404s and an empty `<div id="app">`.
-     *
-     * With each bundle carrying its own page, swapping which one the gateway depends on is still the
-     * one-line change it was designed to be. */
-    os.copy.into(indexHtml().path, web, replaceExisting = true)
-
-    println(s"frontend.bundle: ${jsFiles.size} linker file(s) + kui.css + index.html -> $web")
-    PathRef(Task.dest)
-  }
-
-  /** The Scala.js `index.html`, with the two markers the gateway substitutes at request time. */
-  def indexHtml: T[PathRef] = Task.Source(mill.api.BuildCtx.workspaceRoot / "frontend" / "ui-shell" / "index.html")
 
   /** The TypeScript, SolidJS 2 and Vite frontend, and the seam between Mill and pnpm (ADR-048 §6).
     *
@@ -1583,18 +1067,27 @@ object frontend extends Module {
       PathRef(out)
     }
 
-    /** The built bundle, laid out the way the classpath has to see it: one `web` directory.
+
+    /** `tsc --build` over every package, with the strictness DEVPLAN exit criterion 15 names.
       *
-      * Identical in shape to `frontend.bundle`, which is the point — a deployable adds this to its
-      * `resources` and the files land inside the jar and therefore inside the container image. The
-      * failure this prevents is a specific one, and it has happened: without the assets in the jar
-      * the gateway answers the request for `index.html`'s script with `index.html` again (the
-      * single-page fallback doing exactly what it should for an unknown path), so the browser loads
+      * Separate from `dist` because Vite does not type-check: `vite-plugin-solid` strips the types
+      * and compiles the JSX, and a program full of type errors bundles perfectly happily. The type
+      * check is the build gate, so it is its own task and CI runs it.
+      */
+    /** The built interface, laid out the way the classpath has to see it.
+      *
+      * `StaticRoutes` serves `/ui/…` from the classpath under `/web`, so this hands back a directory
+      * containing exactly that `web` directory. A deployable adds it to its own `resources` and the
+      * files land inside the jar and therefore inside the container image.
+      *
+      * The failure this prevents is a specific one and it has happened: without the assets in the
+      * jar the gateway answers the request for `index.html`'s script with `index.html` again — the
+      * single-page fallback doing exactly what it should for an unknown path — so the browser loads
       * an HTML document as a JavaScript module and the application never starts, while every API
       * call keeps working and every smoke test stays green.
       *
-      * `.vite/manifest.json` is deliberately left behind. It is a build artefact for
-      * `checkBundleShape` (SOL-010) to read, not something a browser has any business fetching.
+      * `.vite/manifest.json` is deliberately left behind: a build artefact, not something a browser
+      * has any business fetching.
       */
     def bundle: T[PathRef] = Task {
       val built = dist().path
@@ -1607,12 +1100,6 @@ object frontend extends Module {
       PathRef(Task.dest)
     }
 
-    /** `tsc --build` over every package, with the strictness DEVPLAN exit criterion 15 names.
-      *
-      * Separate from `dist` because Vite does not type-check: `vite-plugin-solid` strips the types
-      * and compiles the JSX, and a program full of type errors bundles perfectly happily. The type
-      * check is the build gate, so it is its own task and CI runs it.
-      */
     def typecheck(): Command[Unit] = Task.Command {
       install(): Unit
       run(Seq("pnpm", "exec", "tsc", "--build", "--pretty", "false"), Task.env)
@@ -1643,7 +1130,7 @@ object frontend extends Module {
       * The loop is:
       *
       * {{{
-      * KUI_FRONTEND=solid ./mill devStart   # the whole product, in the background
+      * ./mill devStart                      # the whole product, in the background
       * ./mill frontend.solid.devWatch       # rebuilds on save; refresh the browser
       * ./mill devStop
       * }}}
@@ -1657,7 +1144,7 @@ object frontend extends Module {
 
       println(s"""frontend.solid.devWatch
                  |  building to ${devDistDirectory.relativeTo(mill.api.BuildCtx.workspaceRoot)} on every save
-                 |  serve it with: KUI_FRONTEND=solid ./mill devStart
+                 |  serve it with: ./mill devStart
                  |  then refresh http://localhost:${devPortOf(Task.env)}/ui/""".stripMargin)
 
       run(
@@ -1806,13 +1293,6 @@ object services extends Module {
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
-      object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
-        def mvnDeps =
-          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-      }
     }
 
     /** The shared consumer of this service's profile contract (ADR-046).
@@ -2082,13 +1562,6 @@ object services extends Module {
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
-      object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
-        def mvnDeps =
-          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-      }
     }
 
     /** The adapters: the Kafka consumer behind the browse port, the configured cluster list behind
@@ -2338,13 +1811,6 @@ object services extends Module {
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
-      object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js, identity.contract.js)
-        def mvnDeps =
-          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-      }
     }
 
     /** The edge itself: the header policy, the routes, the static assets and the OpenAPI document.
@@ -2689,13 +2155,6 @@ object services extends Module {
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
-      object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
-        def mvnDeps =
-          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-      }
     }
 
     /** The adapters: the Kafka calls behind `TopicAdmin`, the configured cluster list behind
@@ -2970,13 +2429,6 @@ object services extends Module {
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
-      object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
-        def mvnDeps =
-          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-      }
     }
   }
 
@@ -3207,13 +2659,6 @@ object services extends Module {
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
-      object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
-        def mvnDeps =
-          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-      }
     }
   }
 
@@ -3407,13 +2852,6 @@ object services extends Module {
         object test extends ScalaTests with KuiTests with KuiCrossTests
       }
 
-      object js extends Shared with KuiJsModule {
-        def moduleDeps = Seq(libs.contractsCore.js, libs.securityCore.js)
-        def mvnDeps =
-          super.mvnDeps() ++ Seq(mvn"io.github.cquiroz::scala-java-time::${Versions.scalaJavaTime}")
-
-        object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-      }
     }
   }
 
@@ -3990,20 +3428,17 @@ private def devLogFile   = mill.api.BuildCtx.workspaceRoot / "out" / "dev.log"
   * for development would mean a copy step between "the linker wrote a new main.js" and "the server
   * can see it", and that copy step is exactly the thing that makes a frontend loop feel slow.
   *
-  * So no copying happens at all. Two extra classpath entries are put in *front* of the module
-  * classpath, each a directory whose `web` is a symbolic link to a task's output directory:
+  * So no copying happens at all. One extra classpath entry is put in *front* of the module
+  * classpath: a directory whose `web` is a symbolic link to the Vite build's output.
   *
   * {{{
-  * out/dev-assets/js/web   ->  out/frontend/uiShell/fastLinkJS.dest   (main.js and every chunk)
-  * out/dev-assets/css/web  ->  out/frontend/css.dest                  (kui.css)
+  * out/dev-assets/solid/web  ->  frontend/dist   (index.html, the hashed chunks, the stylesheet)
   * }}}
   *
-  * A classloader searches classpath entries in order and takes the first hit, so `/web/main.js`
-  * resolves through the first link, `/web/kui.css` through the second, and `/web/index.html` — which
-  * is in neither — falls through to the gateway's own resources. Re-running the linker rewrites the
-  * files behind the first link, and a browser refresh is the whole loop: nothing is copied, nothing
-  * is restarted, and no proxy is involved because the assets and the API share an origin (ADR-012
-  * amendment 1).
+  * A classloader searches classpath entries in order and takes the first hit, so every asset — and
+  * `index.html` with it — resolves through that link. Re-running the Vite build rewrites the files
+  * behind it, and a browser refresh is the whole loop: nothing is copied, nothing is restarted, and
+  * no proxy is involved because the assets and the API share an origin (ADR-012 amendment 1).
   *
   * ==The log format==
   *
@@ -4014,7 +3449,7 @@ private def devLogFile   = mill.api.BuildCtx.workspaceRoot / "out" / "dev.log"
 def dev(): Task.Command[Unit] = Task.Command {
   val classPath = devClassPath()
   val port = devPortOf(Task.env)
-  println(devBanner(port, devFrontendOf(Task.env)))
+  println(devBanner(port))
   os.proc(devCommand(classPath, port))
     .call(cwd = mill.api.BuildCtx.workspaceRoot, stdout = os.Inherit, stderr = os.Inherit, check = false)
   ()
@@ -4024,15 +3459,15 @@ def dev(): Task.Command[Unit] = Task.Command {
   *
   * This exists because of a constraint that is not obvious until it bites: Mill serialises
   * invocations on its output directory. A `./mill dev` holding the terminal also holds that lock, so
-  * `./mill frontend.uiShell.fastLinkJS` in a second terminal waits instead of linking, and the loop
-  * the previous paragraph describes never gets to run. Detaching releases the lock.
+  * `./mill frontend.solid.devWatch` in a second terminal waits instead of building, and the loop the
+  * previous paragraph describes never gets to run. Detaching releases the lock.
   *
   * The pair is therefore:
   *
   * {{{
-  * ./mill devStart                            # the server, in the background
-  * ./mill -w frontend.uiShell.fastLinkJS      # re-links on every save; refresh the browser
-  * ./mill devStop                             # when you are done
+  * ./mill devStart                    # the server, in the background
+  * ./mill frontend.solid.devWatch     # rebuilds on every save; refresh the browser
+  * ./mill devStop                     # when you are done
   * }}}
   *
   * `./mill dev` is still the right thing for a first run — it puts the log on the screen and stops
@@ -4059,10 +3494,10 @@ def devStart(): Task.Command[Unit] = Task.Command {
 
   os.write.over(devPidFile, process.wrapped.pid().toString)
 
-  println(devBanner(port, devFrontendOf(Task.env)))
+  println(devBanner(port))
   println(s"  running in the background as pid ${process.wrapped.pid()}")
   println(s"  logs:  tail -f ${devLogFile.relativeTo(mill.api.BuildCtx.workspaceRoot)}")
-  println(s"  watch: ./mill -w frontend.uiShell.fastLinkJS")
+  println(s"  watch: ./mill frontend.solid.devWatch")
   println(s"  stop:  ./mill devStop")
 }
 
@@ -4077,35 +3512,13 @@ def devStop(): Task.Command[Unit] = Task.Command {
   * all-in-one process would normally have.
   */
 private def devClassPath = Task.Anon {
-  val assets =
-    if devFrontendOf(Task.env) == "solid" then Seq(devSolidAssetLink())
-    else {
-      val linked = frontend.uiShell.fastLinkJS().dest.path
-      val stylesheet = frontend.css().path
-
-      Seq(
-        devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "js", linked),
-        devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "css", stylesheet / os.up)
-      )
-    }
-
+  // One asset root. There used to be a `KUI_FRONTEND` switch here, because both frontends built and
+  // the development server had to be able to serve either; the Scala.js one is gone, so there is
+  // nothing left to choose between.
+  val assets = Seq(devSolidAssetLink())
   (assets ++ apps.allinone.runClasspath().map(_.path)).mkString(java.io.File.pathSeparator)
 }
 
-/** Which frontend `./mill dev` serves: `scalajs` (the shipped one) or `solid` (the one being built).
-  *
-  * Both frontends build until the cutover (ADR-048, DEVPLAN decision D12), so during the migration
-  * there has to be a way to run the product with either one, and a switch is the smallest one:
-  *
-  * {{{
-  * ./mill devStart                       # today's Laminar frontend, unchanged
-  * KUI_FRONTEND=solid ./mill devStart    # the TypeScript one, from frontend/dist
-  * }}}
-  *
-  * The variable disappears at SOL-041 together with the branch it selects.
-  */
-private def devFrontendOf(env: Map[String, String]): String =
-  env.getOrElse("KUI_FRONTEND", "scalajs").trim.toLowerCase
 
 /** The classpath entry that puts the Vite build in front of the gateway's own resources.
   *
@@ -4125,7 +3538,7 @@ private def devSolidAssetLink(): os.Path = {
   val dist = frontend.solid.devDistDirectory
   if !os.exists(dist) then
     throw new Exception(
-      s"""KUI_FRONTEND=solid, but ${dist.relativeTo(mill.api.BuildCtx.workspaceRoot)} does not exist yet.
+      s"""${dist.relativeTo(mill.api.BuildCtx.workspaceRoot)} does not exist yet.
          |Build it once, or start the watch that keeps it up to date:
          |
          |  ./mill frontend.solid.devWatch""".stripMargin
@@ -4173,17 +3586,10 @@ private def devCommand(classPath: String, devPort: String): Seq[String] =
     "--kui.server.devInsecureCookies=true"
   )
 
-private def devBanner(devPort: String, frontend: String): String = {
-  val assets =
-    if frontend == "solid" then
-      """  assets frontend/dist (served live; ./mill frontend.solid.devWatch rebuilds, then refresh)"""
-    else
-      """  assets out/frontend/uiShell/fastLinkJS.dest (served live; re-link and refresh)"""
-
+private def devBanner(devPort: String): String =
   s"""kui development server
      |  open   http://localhost:$devPort/ui/
-     |$assets""".stripMargin
-}
+     |  assets frontend/dist (served live; ./mill frontend.solid.devWatch rebuilds, then refresh)""".stripMargin
 
 /** Kills a previously started development server. Answers whether there was one. */
 private def stopDevServer(): Boolean =
@@ -4309,16 +3715,7 @@ object depsSmoke extends KuiModule {
     mvn"org.scalacheck::scalacheck::${Versions.scalacheck}",
     mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
     mvn"org.typelevel::discipline-munit::${Versions.disciplineMunit}",
-    mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}",
-    // Frontend. These are Scala.js artifacts, named in full so a plain JVM resolution can still
-    // prove the coordinates exist without a Scala.js module being declared yet (BUILD-003).
-    mvn"com.raquo:laminar_sjs1_3:${Versions.laminar}",
-    mvn"com.raquo:airstream_sjs1_3:${Versions.laminar}",
-    mvn"com.raquo:waypoint_sjs1_3:${Versions.waypoint}",
-    mvn"org.scala-js:scalajs-dom_sjs1_3:${Versions.scalajsDom}",
-    mvn"org.scala-js:scalajs-library_2.13:${Versions.scalaJs}",
-    mvn"io.github.cquiroz:scala-java-time_sjs1_3:${Versions.scalaJavaTime}",
-    mvn"com.raquo:domtestutils_sjs1_3:${Versions.domtestutils}"
+    mvn"com.dimafeng::testcontainers-scala-munit::${Versions.testcontainers}"
   )
 }
 

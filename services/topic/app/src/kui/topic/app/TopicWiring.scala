@@ -16,15 +16,15 @@ import sttp.tapir.server.interceptor.Interceptor
 
 import kui.cache.CacheMetrics
 import kui.config.ClusterConfig
-import kui.http.principal.RbacGuard
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
-import kui.http.principal.PrincipalVerification
+import kui.http.principal.{PrincipalVerification, RbacGuard}
 import kui.kafka.{AdminClientPool, AdminMetrics}
 import kui.kernel.Secret
 import kui.observability.Telemetry
 import kui.observability.audit.LoggingAuditSink
 import kui.security.PrincipalCodec
+import kui.security.rbac.{ClusterFlags, RbacPolicy}
 import kui.topic.api.{TopicApi, TopicErrors}
 import kui.topic.application.{
   MutationGuard,
@@ -35,7 +35,6 @@ import kui.topic.application.{
   TopicPlanToken
 }
 import kui.topic.domain.ClockPort
-import kui.security.rbac.{ClusterFlags, RbacPolicy}
 import kui.topic.infrastructure.{
   ConfiguredClusterProfiles,
   KafkaTopicAdmin,

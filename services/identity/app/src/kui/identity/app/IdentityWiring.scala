@@ -3,8 +3,8 @@ package kui.identity.app
 import cats.Parallel
 import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
-import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import org.typelevel.log4cats.{LoggerFactory, StructuredLogger}
+import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 

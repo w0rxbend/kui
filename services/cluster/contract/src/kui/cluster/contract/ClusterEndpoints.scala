@@ -3,13 +3,13 @@ package kui.cluster.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
-import kui.security.rbac.{Action, Resource}
-import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.cluster.contract.dto.*
 import kui.contracts.KernelSchemas.given
+import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{BrokerId, ClusterId}
 import kui.security.SignedPrincipal
+import kui.security.rbac.{Action, Resource}
 
 /** Everything `kui-cluster-service` serves, described once.
   *

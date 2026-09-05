@@ -233,7 +233,7 @@ object Tokens {
     val all: List[String] = List(Sm, Md)
   }
 
-  /** Stacking order. Every `z-index` KUI writes is one of these four, so that a popover opened from a dialog
+  /** Stacking order. Every `z-index` KUI writes is one of these five, so that a popover opened from a dialog
     * cannot end up behind it.
     */
   object Z {
@@ -242,7 +242,13 @@ object Tokens {
     val Dialog = "--kui-z-dialog"
     val Toast = "--kui-z-toast"
 
-    val all: List[String] = List(Dropdown, Drawer, Dialog, Toast)
+    /** Above everything, including a toast. The sign-in cover and the gateway-unreachable screen are not
+      * layers over a usable application — nothing behind them works — so nothing may sit on top of them and
+      * invite a click that cannot do anything.
+      */
+    val Cover = "--kui-z-cover"
+
+    val all: List[String] = List(Dropdown, Drawer, Dialog, Toast, Cover)
   }
 
   /** Dimming. Two values, not five: a control that is off, and a figure that is out of date. */
@@ -292,7 +298,14 @@ object Tokens {
     val TopbarHeight = "--kui-topbar-height"
     val PageGutter = "--kui-page-gutter"
 
-    val all: List[String] = List(DrawerWidth, TopbarHeight, PageGutter)
+    /** The environment rail: the narrow strip of cluster tiles to the left of the drawer, and the size of one
+      * tile in it. Both are read by the rail itself and by the offsets everything to its right is positioned
+      * from, which is the same reason the drawer's width is a token.
+      */
+    val RailWidth = "--kui-rail-width"
+    val RailTileSize = "--kui-rail-tile-size"
+
+    val all: List[String] = List(DrawerWidth, TopbarHeight, PageGutter, RailWidth, RailTileSize)
   }
 
   /** Every token KUI defines. `TokensSuite` asserts that this list and the stylesheet agree in both

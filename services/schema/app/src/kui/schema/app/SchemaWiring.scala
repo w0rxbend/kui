@@ -1,5 +1,7 @@
 package kui.schema.app
 
+import cats.Parallel
+import cats.data.NonEmptyList
 import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
@@ -7,9 +9,6 @@ import sttp.client4.Backend
 import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
-
-import cats.Parallel
-import cats.data.NonEmptyList
 
 import kui.config.{ClusterConfig, RegistryAuthConfig, SchemaRegistrySettings, UrlPolicy}
 import kui.contracts.capability.ServiceCapabilities

@@ -8,6 +8,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import kui.cache.Snapshot
 import kui.contracts.Section
+import kui.http.principal.RbacGuard
 import kui.kernel.error.KuiError
 import kui.kernel.{ClusterId, TopicName}
 import kui.security.PrincipalCodec
@@ -15,7 +16,6 @@ import kui.topic.application.*
 import kui.topic.contract.dto.*
 import kui.topic.contract.{TopicEndpoints, TopicListParams}
 import kui.topic.domain.{TopicError, TopicSnapshot}
-import kui.http.principal.RbacGuard
 
 /** The five endpoints, bound to use cases.
   *

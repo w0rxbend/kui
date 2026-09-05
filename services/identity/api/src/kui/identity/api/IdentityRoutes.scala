@@ -4,11 +4,11 @@ import cats.effect.kernel.Async
 import cats.syntax.all.*
 import sttp.tapir.server.ServerEndpoint
 
+import kui.http.principal.SecuredRoutes
 import kui.identity.application.*
 import kui.identity.contract.IdentityEndpoints
 import kui.identity.contract.dto.*
 import kui.identity.domain.Credentials
-import kui.http.principal.SecuredRoutes
 import kui.kernel.Secret
 
 /** Binding the identity contract to the use cases behind it.

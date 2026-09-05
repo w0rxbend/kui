@@ -5,8 +5,8 @@ import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
 import kui.identity.domain.{AuthMode, Identity}
-import kui.kernel.error.{ApplicationError, KuiError}
 import kui.kernel.Secret
+import kui.kernel.error.{ApplicationError, KuiError}
 import kui.security.audit.{AuthAuditSink, AuthenticationEvent, AuthenticationRecord}
 import kui.security.rbac.{IdentityAttributes, Provider, Rbac, SubjectKind}
 import kui.security.{Principal, PrincipalKind}

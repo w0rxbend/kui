@@ -4,9 +4,9 @@ import sttp.model.StatusCode
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
-import kui.contracts.rbac.EndpointAuthorization
 import kui.cluster.contract.dto.{ClusterProfileDto, ProfileResult}
 import kui.contracts.KernelSchemas.given
+import kui.contracts.rbac.EndpointAuthorization
 import kui.contracts.{ErrorEnvelope, KuiEndpoint}
 import kui.kernel.{ClusterId, ServiceId}
 import kui.security.SignedPrincipal
