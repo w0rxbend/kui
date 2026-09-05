@@ -1,9 +1,12 @@
 import createOpenApiClient, {
   type Client,
-  type FetchResponse,
   type MaybeOptionalInit,
 } from "openapi-fetch";
-import type { HttpMethod, MediaType, PathsWithMethod } from "openapi-typescript-helpers";
+import type {
+  HttpMethod,
+  PathsWithMethod,
+  SuccessResponseJSON,
+} from "openapi-typescript-helpers";
 
 import { apiBaseUrl, type Bootstrap } from "./bootstrap.js";
 import { CsrfHeaderName, type CsrfTokens } from "./csrf.js";
@@ -56,40 +59,88 @@ export interface KuiApiClient {
  */
 type ResultMethod<Method extends HttpMethod> = <
   Path extends PathsWithMethod<paths, Method>,
-  Init extends MaybeOptionalInit<paths[Path], Method>,
+  Init extends WithoutCsrf<MaybeOptionalInit<paths[Path], Method>>,
 >(
   path: Path,
   ...init: InitParameter<Init>
-) => Promise<ApiResult<SuccessBody<paths[Path][Method], Init>>>;
+) => Promise<ApiResult<SuccessBody<paths[Path][Method]>>>;
+
+/**
+ * The call's options with the CSRF header removed from what the caller must supply.
+ *
+ * Every mutating endpoint declares `X-Csrf-Token` as a *required* header parameter, because it is
+ * one: the gateway refuses the request without it (ADR-019). But no call site supplies it and none
+ * should — the client adds it on every non-`GET`, waiting for start-up if the token has not arrived
+ * yet, which is the whole point of {@link CsrfTokens}. Leaving the generated requirement in place
+ * would mean every mutation named a header it must not name, and the obvious way to satisfy the
+ * compiler would be to pass a token the call site had to obtain for itself. That is the defect this
+ * package already shipped twice.
+ *
+ * So the requirement is dropped here, at the one boundary that can honour it. A caller may still
+ * pass other headers; only this one is taken off the list, and only because something else
+ * guarantees it.
+ */
+type WithoutCsrf<Init> = Init extends { readonly params: infer Params }
+  ? Omit<Init, "params"> & { readonly params: WithoutCsrfParams<Params> }
+  : Init;
+
+type WithoutCsrfParams<Params> = Params extends {
+  readonly header: infer Header;
+}
+  ? [Exclude<keyof Header, typeof CsrfHeaderName>] extends [never]
+    ? // The CSRF token was the *only* header. Drop `header` entirely rather than leaving an empty
+      // object the caller would have to write out as `header: {}`.
+      Omit<Params, "header">
+    : Omit<Params, "header"> & {
+        readonly header: Omit<Header, typeof CsrfHeaderName>;
+      }
+  : Params;
 
 /**
  * Whether the options argument may be omitted, mirroring `openapi-fetch`'s own rule: a `GET` with no
  * parameters takes no second argument, and one with a required path parameter does.
  */
-type InitParameter<Init> = RequiredKeys<Init> extends never
-  ? [(Init & Record<string, unknown>)?]
-  : [Init & Record<string, unknown>];
+type InitParameter<Init> =
+  RequiredKeys<Init> extends never
+    ? [(Init & Record<string, unknown>)?]
+    : [Init & Record<string, unknown>];
 
 type RequiredKeys<T> = {
   [K in keyof T]-?: Record<string, unknown> extends Pick<T, K> ? never : K;
 }[keyof T];
 
 /**
- * The body of a successful response, taken from `openapi-fetch`'s own return type rather than
- * recomputed from the schema, so the two cannot disagree about what "success" decodes to.
+ * The body of a successful response, computed from the generated schema.
  *
- * `FetchResponse` is a union of a success arm and an error arm; the error arm declares `data?: never`
- * — an optional property — so extracting the arm with a *required* `data` picks exactly the success
- * one.
+ * ## Why not `openapi-fetch`'s own return type
+ *
+ * It used to be `Extract<FetchResponse<…>, { data: unknown }>["data"]`, on the reasoning that taking
+ * the answer's type from the library that produces the answer means the two cannot disagree. Sound
+ * reasoning, wrong in this codebase, and wrong in a way that only a mutation revealed.
+ *
+ * `FetchResponse` passes the body through `openapi-typescript-helpers`' `Readable<T>`, whose job is
+ * to strip `$Write`-marked fields from a response. Its array case is `T extends (infer E)[]` — a
+ * *mutable* array. Our schema is generated with `immutable`, so every array in it is
+ * `readonly E[]`, which does not match. The type therefore falls through to the object case and maps
+ * over the array's own members, turning `map`, `filter` and `reduce` into `{}` — properties with no
+ * call signatures. The result compiles as a type and cannot be used as an array:
+ *
+ *     answer.value.warnings.map(…)   // error: this expression is not callable, type '{}'
+ *
+ * Nothing caught it because every read path in the product decodes an ADR-039 section, whose payload
+ * the server documents as `Schema.any`; those go through `decodeSection<T>` with hand-written types
+ * and never touch this one. The first typed array in a response was a purge plan's warnings.
+ *
+ * `Readable` also has nothing to do here: `$Read` and `$Write` appear nowhere in the generated
+ * schema, so the pass it exists to perform is a no-op with a side effect. Reading the success
+ * response straight off the schema — which is already exactly as `readonly` as it should be — is
+ * both correct and closer to the source of truth than the library's transform of it.
  */
-type SuccessBody<Operation, Init> =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `any` is `FetchResponse`'s own
-  // constraint, and narrowing it to `unknown` here makes every path fail to satisfy it. This is a
-  // type-level guard, not a value: nothing is `any` at a call site.
-  NonNullable<Operation> extends infer Defined
-    ? Defined extends Record<string | number, any>
-      ? Extract<FetchResponse<Defined, Init, MediaType>, { data: unknown }>["data"]
-      : never
+type SuccessBody<Operation> =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the helpers' own constraint;
+  // narrowing it to `unknown` makes every path fail to satisfy it. A type-level guard, not a value.
+  Operation extends Record<string | number, any>
+    ? SuccessResponseJSON<Operation>
     : never;
 
 /** The shape every `openapi-fetch` method answers with, once its types are erased. */
@@ -176,11 +227,15 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
    * reaches the nearest `<Errored>` boundary and unmounts the page: the blank screen this codebase
    * has already shipped once.
    */
-  const run = async (send: () => Promise<AnyFetchResponse>): Promise<ApiResult<unknown>> => {
+  const run = async (
+    send: () => Promise<AnyFetchResponse>,
+  ): Promise<ApiResult<unknown>> => {
     try {
       const answer = await send();
       if (answer.error !== undefined) {
-        return err(withCorrelation(decodeEnvelope(answer.error), answer.response));
+        return err(
+          withCorrelation(decodeEnvelope(answer.error), answer.response),
+        );
       }
       // `data` is genuinely `undefined` for a `204 No Content`, which is a success and not an
       // absence. The value's real type is the one `ResultMethod` computes for this path.
@@ -201,9 +256,12 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
   const wrap = <Method extends HttpMethod>(
     send: (...args: readonly unknown[]) => Promise<AnyFetchResponse>,
   ): ResultMethod<Method> =>
-    ((...args: readonly unknown[]) => run(() => send(...args))) as ResultMethod<Method>;
+    ((...args: readonly unknown[]) =>
+      run(() => send(...args))) as ResultMethod<Method>;
 
-  const erase = (send: unknown): ((...args: readonly unknown[]) => Promise<AnyFetchResponse>) =>
+  const erase = (
+    send: unknown,
+  ): ((...args: readonly unknown[]) => Promise<AnyFetchResponse>) =>
     send as (...args: readonly unknown[]) => Promise<AnyFetchResponse>;
 
   return {
@@ -224,7 +282,8 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
  * `cause` for the console and is never shown to the user.
  */
 export function transportFailure(failure: unknown): ApiError {
-  if (failure instanceof DOMException && failure.name === "TimeoutError") return { kind: "timeout" };
+  if (failure instanceof DOMException && failure.name === "TimeoutError")
+    return { kind: "timeout" };
   if (failure instanceof DOMException && failure.name === "AbortError") {
     // A cancelled request is not an outage: the tab navigated away, or the caller closed the
     // stream. It still has to be a value rather than a rejection, or it takes the page with it.

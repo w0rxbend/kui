@@ -111,3 +111,17 @@ export {
   valueOf,
   type Fetched,
 } from "./fetched.js";
+
+/**
+ * The write side: one shape for every mutation, and the sentence a blocked control shows.
+ *
+ * The read path's `Fetched` and this are deliberately not the same type. A read that fails wants a
+ * retry; a write that fails wants the form kept and the message shown next to the button that
+ * produced it, and a write that a running one would duplicate must not start at all.
+ */
+export {
+  createMutation,
+  writeBlockedReason,
+  type Mutation,
+  type MutationHandle,
+} from "./mutation.js";
