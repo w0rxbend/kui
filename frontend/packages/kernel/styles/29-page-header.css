@@ -1,0 +1,81 @@
+/*
+ * `PageHeader` — the block above every content region (SPEC §4.12).
+ *
+ * Measured from `04-consumer-groups.png`: the title's cap-height spans y 74–92 at 26px/600, the
+ * voice line's baseline sits 27px below the title's, and the whole block ends 26px above the
+ * table's top edge. Those distances are 8px (`--kui-space-2`) and 24px (`--kui-space-5`), so
+ * nothing here is a one-off number.
+ *
+ * One measurement does not reduce to a token and is therefore a finding rather than a literal: the
+ * title is drawn at 26px and the ramp's largest heading, `--kui-font-size-2xl`, is 24px. The token
+ * is used and the 2px is accepted, exactly as SPEC §8's open finding 1 does for the card radius.
+ * Inventing `--kui-font-size-26` for one heading would be the worse of the two.
+ *
+ * The class prefix is `kui-page-head` rather than `kui-page-header` deliberately: the pre-migration
+ * stylesheets already use `.kui-page-header` for the Laminar shell's own header, everything is
+ * concatenated into one stylesheet with no module system, and a name that collides is restyled
+ * silently. Check for a collision before adding a block here.
+ */
+
+.kui-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  margin-block-end: var(--kui-space-5);
+}
+
+.kui-page-head__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kui-space-4);
+  /* The title may be a topic name sixty characters long; the actions must not be pushed off the
+   * right edge by it, so the identity is what shrinks. */
+  min-width: 0;
+}
+
+.kui-page-head__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+.kui-page-head__title {
+  margin: 0;
+  font-size: var(--kui-font-size-2xl);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--kui-color-text-strong);
+  /* A long name truncates rather than wrapping into the actions row. The full text is still the
+   * element's text content, so it is what a screen reader reads and what a copy takes. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-page-head__chip {
+  display: inline-flex;
+  flex: none;
+}
+
+.kui-page-head__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  flex: none;
+}
+
+.kui-page-head__voice {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  line-height: 1.5;
+  color: var(--kui-color-text-muted);
+}
+
+@media (max-width: 899px) {
+  .kui-page-head__row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
