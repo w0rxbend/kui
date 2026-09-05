@@ -1,0 +1,98 @@
+{
+    "topics": {
+        "status": "ok",
+        "data": {
+            "items": [
+                {
+                    "name": "analytics.pageviews",
+                    "internal": false,
+                    "partitionCount": 12,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 36,
+                    "sizeBytes": 2180
+                },
+                {
+                    "name": "audit.log.raw",
+                    "internal": false,
+                    "partitionCount": 1,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 16,
+                    "sizeBytes": 2202
+                },
+                {
+                    "name": "customers.profiles",
+                    "internal": false,
+                    "partitionCount": 3,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 12,
+                    "sizeBytes": 2649
+                },
+                {
+                    "name": "inventory.stock-levels",
+                    "internal": false,
+                    "partitionCount": 4,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 13,
+                    "sizeBytes": 2892
+                },
+                {
+                    "name": "orders.avro",
+                    "internal": false,
+                    "partitionCount": 3,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 5,
+                    "sizeBytes": 627
+                },
+                {
+                    "name": "orders.v1",
+                    "internal": false,
+                    "partitionCount": 6,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 16,
+                    "sizeBytes": 5114
+                },
+                {
+                    "name": "orders.v1.DLQ",
+                    "internal": false,
+                    "partitionCount": 3,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 4,
+                    "sizeBytes": 1491
+                },
+                {
+                    "name": "payments.transactions",
+                    "internal": false,
+                    "partitionCount": 3,
+                    "replicationFactor": 1,
+                    "outOfSyncReplicas": 0,
+                    "offlinePartitions": 0,
+                    "messageCount": 10,
+                    "sizeBytes": 2641
+                }
+            ],
+            "page": {
+                "page": 1,
+                "pageSize": 25,
+                "totalItems": 8,
+                "pageCount": 1,
+                "nextPageToken": null
+            }
+        },
+        "fetchedAt": "2026-09-05T15:44:51.441Z"
+    },
+    "incompleteTopics": 0
+}

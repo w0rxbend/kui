@@ -42,6 +42,14 @@ export interface TopicRow {
   readonly bytes?: number | undefined;
   /** `delete`, `compact`, or `compact,delete`, exactly as Kafka spells it. */
   readonly cleanupPolicy?: string | undefined;
+  /**
+   * Records produced per second, when the cluster has a metrics source that reports it.
+   *
+   * `undefined` is "not measured here" and draws a dash. Most Kafka deployments have no per-topic
+   * rate without an external metrics store, so this is absent far more often than it is present —
+   * which is why it must never render as `0`, the figure a silent topic legitimately has.
+   */
+  readonly messagesPerSecond?: number | undefined;
 }
 
 /** The topic-page tabs, as the page is told about them. */

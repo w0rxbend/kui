@@ -1,6 +1,22 @@
 import { For, Show } from "solid-js";
-import { Icon } from "@kui/kernel";
-import type { Tab } from "./types.js";
+import { Icon, type IconName } from "./Icon.jsx";
+
+/**
+ * One tab: a link, a label, an icon, and optionally a count.
+ *
+ * Declared here rather than imported from the shell because this component moved into the kernel —
+ * a feature needs a tab strip on its own object pages (a topic's Overview/Messages/Consumers), and
+ * a feature may not import the shell. The shell re-exports both from its own barrel, so its call
+ * sites are unchanged.
+ */
+export type Tab = {
+  readonly id: string;
+  readonly label: string;
+  readonly icon: IconName;
+  readonly href: string;
+  /** An optional count beside the label, e.g. the number of consumers on a topic. */
+  readonly count?: number | undefined;
+};
 
 /**
  * The strip of tabs under a page header: Overview, Messages, Consumers, Settings.

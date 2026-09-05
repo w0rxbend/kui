@@ -45,6 +45,21 @@ COPY frontend/ ./
 
 RUN pnpm exec vite build --outDir /ui
 
+# Substitute the two markers the gateway substitutes at request time.
+#
+# `frontend/index.html` carries `<!--KUI_BASE_HREF-->` and `<!--KUI_BOOTSTRAP-->`, and
+# `kui.gateway.api.static.IndexHtml` replaces them per request. Nothing replaces them here, and
+# without the first the application does not load at all past the root: `vite.config.ts` sets
+# `base: "./"`, so every asset URL is relative, and a deep link such as
+# `/ui/clusters/quickstart/topics` resolves `./assets/index-abc.js` against *that* directory —
+# `/ui/clusters/quickstart/assets/index-abc.js`, which is a 404. The page renders blank with three
+# failed requests and no error anybody can act on. Found by opening a deep link.
+#
+# The bootstrap block is left as the comment it is: `readBootstrap()` falls back to `/api/v1` on the
+# current origin when there is none, which is exactly where this nginx proxies. Writing a fake one
+# would be inventing configuration the gateway is the authority on.
+RUN sed -i 's|<!--KUI_BASE_HREF-->|<base href="/ui/">|' /ui/index.html &&     grep -q '<base href="/ui/">' /ui/index.html
+
 # ------------------------------------------------------------------------------------------------
 
 # Unprivileged, for the reason `deployment/storybook/Dockerfile` gives: stock nginx chowns its cache

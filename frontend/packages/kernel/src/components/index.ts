@@ -137,7 +137,16 @@ export * from "./charts/index.js";
  * neighbours, one relative to a limit. All five were ported from the Laminar kernel, comments and
  * all, because the reasoning in them was paid for by defects rather than deduced.
  */
-export { Tabs, tabTarget, type Tab, type TabsProps } from "./Tabs.jsx";
+export { Tabs, tabTarget, type Tab as PanelTab, type TabsProps } from "./Tabs.jsx";
+/**
+ * The other tab shape, and the two are genuinely different things.
+ *
+ * `Tabs` swaps panels that are all present; `TabStrip` is a `<nav>` of links to other addresses.
+ * Adopting the ARIA tab pattern for the second would promise a screen-reader user that Left and
+ * Right move between loaded panels, which is false. It moved here from the shell because a feature
+ * needs one on its own object pages and may not import the shell.
+ */
+export { TabStrip, type Tab, type TabStripProps } from "./TabStrip.jsx";
 export { Breadcrumbs, type Crumb, type BreadcrumbsProps } from "./Breadcrumbs.jsx";
 export { Tag, type TagProps, type TagTone } from "./Tag.jsx";
 export { MagnitudeBar, percentage, type MagnitudeBarProps } from "./MagnitudeBar.jsx";

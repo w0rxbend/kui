@@ -3,8 +3,11 @@
   "compilerOptions": {
     "outDir": "../../.tsbuild/feature-topics",
     "tsBuildInfoFile": "../../.tsbuild/feature-topics.tsbuildinfo",
-    "rootDir": "src"
+    "rootDir": "src",
+    // `src/recorded/*.json` are documents captured from a running gateway, decoded by
+    // `recorded.test.ts` so the mapping is checked against what the server really sends.
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],
   "references": [{ "path": "../api" }, { "path": "../kernel" }]
 }

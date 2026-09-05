@@ -18,7 +18,7 @@ import { EnvRail } from "./EnvRail.jsx";
 import { NavDrawer } from "./NavDrawer.jsx";
 import { NavItem } from "./NavItem.jsx";
 import { SearchField } from "./SearchField.jsx";
-import { TabStrip } from "./TabStrip.jsx";
+import { TabStrip } from "@kui/kernel";
 import { TopBar } from "./TopBar.jsx";
 import { shortcutHint } from "./SearchField.jsx";
 import {

@@ -23,7 +23,7 @@ export {
   type SearchResult,
   type SearchResultGroup,
 } from "./chrome/SearchField.jsx";
-export { TabStrip, type TabStripProps } from "./chrome/TabStrip.jsx";
+export { TabStrip, type TabStripProps } from "@kui/kernel";
 export { TopBar, type ThemeMode, type TopBarProps } from "./chrome/TopBar.jsx";
 export type {
   BadgeTone,

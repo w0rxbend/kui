@@ -1,7 +1,15 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { TabStrip } from "./TabStrip.jsx";
-import { TOPIC_TABS } from "./fixtures.js";
+import type { Tab } from "./TabStrip.jsx";
+
+/** The topic page's own strip, which is where this component is actually used. */
+const TOPIC_TABS: readonly Tab[] = [
+  { id: "overview", label: "Overview", icon: "info", href: "#overview" },
+  { id: "messages", label: "Messages", icon: "messages", href: "#messages" },
+  { id: "consumers", label: "Consumers", icon: "consumers", href: "#consumers", count: 14 },
+  { id: "settings", label: "Settings", icon: "settings", href: "#settings" },
+];
 
 /**
  * The tab strip under a page header.
@@ -34,7 +42,7 @@ export const FirstSelected: Story = {
  * second one.
  */
 export const TabOmitted: Story = {
-  args: { tabs: TOPIC_TABS.filter((t) => t.id !== "settings"), currentId: "messages", label: "Topic sections" },
+  args: { tabs: TOPIC_TABS.filter((t: Tab) => t.id !== "settings"), currentId: "messages", label: "Topic sections" },
 };
 
 /** A single tab. Still a strip, still underlined, so the page does not change shape. */
@@ -48,7 +56,7 @@ export const Empty: Story = { args: { tabs: [], currentId: "", label: "Topic sec
 /** A count of zero is still a count and is still printed: zero consumers is a fact worth knowing. */
 export const ZeroCount: Story = {
   args: {
-    tabs: TOPIC_TABS.map((t) => (t.id === "consumers" ? { ...t, count: 0 } : t)),
+    tabs: TOPIC_TABS.map((t: Tab) => (t.id === "consumers" ? { ...t, count: 0 } : t)),
     currentId: "consumers",
     label: "Topic sections",
   },
