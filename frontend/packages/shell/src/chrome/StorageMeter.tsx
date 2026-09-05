@@ -129,7 +129,9 @@ export function StorageMeter(props: StorageMeterProps) {
 
   return (
     <section class="kui-storage" aria-label={props.label ?? "Cluster storage"} data-testid={props.testId ?? "storage-meter"}>
-      <header class="kui-storage__head">
+      {/* A `div`, not a `header` — see `Notifications.tsx`: there is one banner in this product and
+          it is the top bar. */}
+      <div class="kui-storage__head">
         <Icon name="disk" size="14px" />
         <h2 class="kui-storage__title">STORAGE</h2>
         <Show
@@ -142,7 +144,7 @@ export function StorageMeter(props: StorageMeterProps) {
         >
           {(value) => <span class="kui-storage__percent">{value()}%</span>}
         </Show>
-      </header>
+      </div>
 
       {/* `SegmentBar` is `aria-hidden`; the caption below is what is actually announced, which is why
           the caption is a full sentence rather than a fragment. */}

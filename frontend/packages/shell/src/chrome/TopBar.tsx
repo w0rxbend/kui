@@ -1,12 +1,28 @@
 import { Show } from "solid-js";
-import { Avatar, Icon } from "@kui/kernel";
-import { ClusterSelector } from "./ClusterSelector.js";
+import { Icon } from "@kui/kernel";
+import { Breadcrumb } from "./Breadcrumb.js";
+import { NotificationBell, NotificationPanel, type NoticeFeed } from "./Notifications.js";
 import { SearchField, type SearchFieldProps } from "./SearchField.js";
-import type { ClusterSummary } from "./types.js";
+import type { Crumb } from "./types.js";
 
 /**
- * The bar across the top of the content column: search, cluster, theme, appearance, notifications,
- * account.
+ * The band across the top of the content column: where you are, what you are looking for, and the
+ * controls that are not about any one page.
+ *
+ * ## It is a band, not a bar
+ *
+ * It has no fill. Scanning column 1000 of `13-topics-list.png` from the top returns the page ground
+ * the whole way down (`SCREENS.md` §1.1): what used to be a 58px bar with its own surface is now
+ * 58px of page with three things floating in it — the breadcrumb, the search pill, and the control
+ * cluster. The height is unchanged, so nothing below it moves.
+ *
+ * ## What left, and where it went
+ *
+ * The cluster selector is gone from here. It is the environment rail now, and for a reason worth
+ * stating: a dropdown answers "which cluster am I on?" only when it is asked, and that is the one
+ * question an operator should never have to ask. The account avatar moved to the rail's foot with
+ * it, so that identity and environment — the two things that decide what a destructive action will
+ * actually destroy — sit together.
  *
  * ## Three theme states, not two
  *
@@ -23,30 +39,32 @@ import type { ClusterSummary } from "./types.js";
  * A dot with no number is a colour-only signal. The count goes in the accessible name
  * ("Notifications, 3 unread"), and when there is nothing unread there is no dot at all rather than a
  * grey one — a permanently present marker is a marker nobody looks at.
- *
- * ## An avatar with no identity is not initials
- *
- * If the identity service is unavailable the avatar is a neutral person glyph, not guessed initials.
- * Inventing somebody's initials is worse than admitting we do not know them, and in a product where
- * the avatar is how you check whose credentials are about to purge a topic, it is worse by a lot.
  */
 export type ThemeMode = "auto" | "light" | "dark";
 
 export type TopBarProps = {
+  /**
+   * Where you are, beginning with the cluster: `prod-kyiv-01 › Topics › analytics.clickstream`.
+   *
+   * This is the *installation* trail. Object pages keep a second, shorter breadcrumb in the content
+   * column, and the two are not redundant: this one says where you are in the deployment and stays
+   * put, that one says where you are in the section and scrolls away.
+   */
+  readonly crumbs?: readonly Crumb[] | undefined;
   readonly search: SearchFieldProps;
-  readonly clusters: readonly ClusterSummary[];
-  readonly currentClusterId?: string | undefined;
-  readonly onSelectCluster?: ((id: string) => void) | undefined;
-  readonly onAddCluster?: (() => void) | undefined;
   readonly theme: ThemeMode;
   readonly onCycleTheme?: (() => void) | undefined;
   readonly onOpenAppearance?: (() => void) | undefined;
   /** Unread notifications. Zero means no marker at all. */
   readonly unreadCount?: number | undefined;
-  readonly onOpenNotifications?: (() => void) | undefined;
-  /** The signed-in principal's display name, or `undefined` when identity is unavailable. */
-  readonly accountName?: string | undefined;
-  readonly onOpenAccount?: (() => void) | undefined;
+  /** Whether the notifications panel is showing. Owned by the caller, so that Escape and a click
+   * elsewhere can close it from outside this component. */
+  readonly notificationsOpen?: boolean | undefined;
+  readonly onToggleNotifications?: (() => void) | undefined;
+  /** What the panel shows. Absent means it has not been asked for yet. */
+  readonly notifications?: NoticeFeed | undefined;
+  readonly onMarkAllRead?: (() => void) | undefined;
+  readonly onRetryNotifications?: (() => void) | undefined;
 };
 
 const THEME_LABEL: Record<ThemeMode, string> = {
@@ -62,15 +80,16 @@ export function TopBar(props: TopBarProps) {
 
   return (
     <header class="kui-topbar" data-testid="topbar">
-      <SearchField {...props.search} />
+      {/* The trail sits at the band's left edge and takes the slack, so the search pill and the
+          controls stay hard against the right however long the trail is. */}
+      <div class="kui-topbar__where">
+        <Show when={props.crumbs !== undefined && props.crumbs.length > 0}>
+          <Breadcrumb trail={props.crumbs ?? []} />
+        </Show>
+      </div>
 
       <div class="kui-topbar__actions">
-        <ClusterSelector
-          clusters={props.clusters}
-          currentId={props.currentClusterId}
-          onSelect={props.onSelectCluster}
-          onAdd={props.onAddCluster}
-        />
+        <SearchField {...props.search} />
 
         <button
           type="button"
@@ -92,22 +111,24 @@ export function TopBar(props: TopBarProps) {
           <Icon name="sliders" size="18px" />
         </button>
 
-        <button
-          type="button"
-          class="kui-topbar__icon-button kui-topbar__bell"
-          aria-label={unread() > 0 ? `Notifications, ${unread()} unread` : "Notifications, none unread"}
-          onClick={() => props.onOpenNotifications?.()}
-          data-testid="notifications"
-        >
-          <Icon name="bell" size="18px" />
-          <Show when={unread() > 0}>
-            <span class="kui-topbar__bell-dot" aria-hidden="true" />
+        {/* The panel is anchored to the bell rather than portalled, so that it stays under it when
+            the window is resized and so that Tab moves from the bell straight into it. */}
+        <div class="kui-topbar__bell-anchor">
+          <NotificationBell
+            unreadCount={unread()}
+            open={props.notificationsOpen === true}
+            onToggle={() => props.onToggleNotifications?.()}
+          />
+          <Show when={props.notificationsOpen === true}>
+            <div class="kui-topbar__bell-panel">
+              <NotificationPanel
+                feed={props.notifications ?? { kind: "loading" }}
+                onMarkAllRead={props.onMarkAllRead}
+                onRetry={props.onRetryNotifications}
+              />
+            </div>
           </Show>
-        </button>
-
-        {/* The kernel's own Avatar: it owns the rule that an unknown identity is a neutral person
-            glyph rather than guessed initials, and that rule has to hold in exactly one place. */}
-        <Avatar name={props.accountName} onClick={props.onOpenAccount} />
+        </div>
       </div>
     </header>
   );

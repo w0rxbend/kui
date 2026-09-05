@@ -12,20 +12,25 @@
  *
  * ## Geometry
  *
- * Every measurement is SPEC §3.2, taken off screenshot `01`: a 196px drawer, a 58px top bar, a 24px
- * gutter. They are read from tokens rather than written here, so that the drawer's own stylesheet
- * and this one cannot disagree about how wide the drawer is. */
+ * Every measurement is `research/design/SCREENS.md` §1.1, taken off screenshot `13`: a 48px
+ * environment rail, a 182px drawer, a 58px top bar and a 20px gutter. They are read from tokens
+ * rather than written here, so that a component's own stylesheet and this one cannot disagree about
+ * how wide that component is.
+ *
+ * The rail is a third column rather than something inside the drawer, because it is drawn on the
+ * page ground and the drawer is raised — they are two surfaces, and nesting one in the other would
+ * make the seam between them a matter of padding rather than of layout. */
 
 .kui-frame {
   display: grid;
-  /* The drawer column is sized from the token the drawer itself reads, so there is exactly one
-   * number. A literal `196px` here would be a second copy that drifts the first time either is
-   * adjusted, and the symptom would be a 1px seam nobody can find. */
-  grid-template-columns: var(--kui-drawer-width) minmax(0, 1fr);
+  /* Each column is sized from the token that column's own component reads, so there is exactly one
+   * number per measurement. A literal `182px` here would be a second copy that drifts the first
+   * time either is adjusted, and the symptom would be a 1px seam nobody can find. */
+  grid-template-columns: var(--kui-rail-width) var(--kui-drawer-width) minmax(0, 1fr);
   grid-template-rows: var(--kui-topbar-height) minmax(0, 1fr);
   grid-template-areas:
-    "drawer topbar"
-    "drawer content";
+    "rail drawer topbar"
+    "rail drawer content";
 
   /* Exactly the viewport, and no more. `min-height` here instead of `height` would let the grid
    * grow with its content and hand the scroll to the document, which is what takes the drawer and
@@ -36,6 +41,11 @@
 
   background: var(--kui-color-surface);
   color: var(--kui-color-text);
+}
+
+.kui-frame__rail {
+  grid-area: rail;
+  min-height: 0;
 }
 
 .kui-frame__drawer {
@@ -81,12 +91,15 @@
  * matters, and it is visibly a stopgap rather than a silently broken layout. */
 @media (max-width: 999px) {
   .kui-frame {
-    grid-template-columns: minmax(0, 1fr);
+    /* The rail keeps its column at every width. It is 48px, it is how the cluster is chosen, and a
+     * narrow window is exactly when an operator is most likely to be checking which cluster they
+     * are looking at. The drawer is what folds. */
+    grid-template-columns: var(--kui-rail-width) minmax(0, 1fr);
     grid-template-rows: auto var(--kui-topbar-height) minmax(0, 1fr);
     grid-template-areas:
-      "drawer"
-      "topbar"
-      "content";
+      "rail drawer"
+      "rail topbar"
+      "rail content";
   }
 
   .kui-frame__drawer {

@@ -140,14 +140,19 @@ export function NotificationPanel(props: NotificationPanelProps) {
     // `role="dialog"` rather than a bare div: it is a panel the bell owns, it is dismissed with
     // Escape, and a screen reader needs to be told it opened.
     <div class="kui-notices" role="dialog" aria-label="Notifications" data-testid="notification-panel">
-      <header class="kui-notices__head">
+      {/* A `div`, not a `header`. A `<header>` here is exposed as a `banner` landmark, and a page
+          with the top bar's banner plus this one has two — which axe reports as
+          `landmark-no-duplicate-banner`, and which leaves a screen-reader user with two
+          indistinguishable "banner" entries. There is exactly one banner in this product and it is
+          the top bar. */}
+      <div class="kui-notices__head">
         <h2 class="kui-notices__title">Notifications</h2>
         <Show when={anyUnread() && props.onMarkAllRead !== undefined}>
           <button type="button" class="kui-notices__mark kui-focusable" onClick={() => props.onMarkAllRead?.()}>
             Mark all read
           </button>
         </Show>
-      </header>
+      </div>
 
       <Show when={props.feed.kind === "stale" ? props.feed : undefined}>
         {(stale) => (

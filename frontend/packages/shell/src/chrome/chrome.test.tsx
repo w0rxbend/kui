@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { Breadcrumb } from "./Breadcrumb.jsx";
 import { ClusterSelector } from "./ClusterSelector.jsx";
 import { ClusterStatusCard } from "./ClusterStatusCard.jsx";
+import { EnvRail } from "./EnvRail.jsx";
 import { NavDrawer } from "./NavDrawer.jsx";
 import { NavItem } from "./NavItem.jsx";
 import { SearchField } from "./SearchField.jsx";
@@ -405,9 +406,8 @@ describe("TabStrip", () => {
 
 describe("TopBar", () => {
   const base = {
+    crumbs: [{ label: "prod-kyiv-01", href: "#c" }, { label: "Topics" }],
     search: { value: "", onInput: () => {}, platform: "other" as const },
-    clusters: CLUSTERS,
-    currentClusterId: "prod-kyiv-01",
   };
 
   it("says which theme mode is in force, in words, for all three modes", () => {
@@ -423,33 +423,93 @@ describe("TopBar", () => {
     }
   });
 
-  it("puts the unread count in the accessible name rather than only in a dot", () => {
+  it("puts the unread count in the accessible name rather than only in a badge", () => {
     const { container, dispose } = mount(() => <TopBar {...base} theme="dark" unreadCount={3} />);
     expect(container.querySelector('[data-testid="notifications"]')!.getAttribute("aria-label")).toBe(
       "Notifications, 3 unread",
     );
-    expect(container.querySelector(".kui-topbar__bell-dot")).not.toBeNull();
+    expect(container.querySelector(".kui-bell__badge")).not.toBeNull();
     dispose();
   });
 
   it("draws no marker at all when nothing is unread", () => {
     const { container, dispose } = mount(() => <TopBar {...base} theme="dark" unreadCount={0} />);
-    expect(container.querySelector(".kui-topbar__bell-dot")).toBeNull();
+    expect(container.querySelector(".kui-bell__badge")).toBeNull();
     dispose();
   });
 
-  it("admits it does not know who is signed in rather than inventing initials", () => {
+  it("opens the panel only when the caller says it is open", () => {
+    // The panel's open state is the caller's, so that Escape and a click elsewhere can close it
+    // from outside the bar. A bar that owned it would be a panel nothing else could dismiss.
+    const closed = mount(() => <TopBar {...base} theme="dark" />);
+    expect(closed.container.querySelector('[data-testid="notification-panel"]')).toBeNull();
+    closed.dispose();
+
+    const open = mount(() => (
+      <TopBar {...base} theme="dark" notificationsOpen notifications={{ kind: "ready", notices: [] }} />
+    ));
+    expect(open.container.querySelector('[data-testid="notification-panel"]')).not.toBeNull();
+    open.dispose();
+  });
+
+  it("says where you are, and does not link the page you are on", () => {
     const { container, dispose } = mount(() => <TopBar {...base} theme="dark" />);
+    const current = container.querySelector('[aria-current="page"]')!;
+    expect(current.textContent).toBe("Topics");
+    expect(current.tagName).not.toBe("A");
+    dispose();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container, dispose } = mount(() => <TopBar {...base} theme="dark" unreadCount={2} />);
+    expect(describeViolations(await findViolations(container))).toBe("");
+    dispose();
+  });
+});
+
+describe("EnvRail", () => {
+  it("admits it does not know who is signed in rather than inventing initials", () => {
+    // Moved here from `TopBar` with the avatar itself. The property is the point, not where it
+    // lives: two invented initials are worse than admitting we do not know, in a product where the
+    // avatar is how you check whose credentials are about to purge a topic.
+    const { container, dispose } = mount(() => <EnvRail environments={CLUSTERS} currentId="prod-kyiv-01" />);
     const avatar = container.querySelector(".kui-avatar")!;
     expect(avatar.getAttribute("aria-label")).toContain("unavailable");
-    // No letters: two invented initials are worse than admitting we do not know.
     expect(avatar.textContent).toBe("");
+    dispose();
+  });
+
+  it("names every environment in full, because a single letter is not an identifier", () => {
+    // `prod-kyiv-01` and `prod-eu-02` are both drawn as "P". The accessible name is the only thing
+    // that distinguishes them, so it is asserted rather than left to the design's discretion.
+    const { container, dispose } = mount(() => (
+      <EnvRail
+        environments={[
+          { id: "1", name: "prod-kyiv-01", health: "healthy" },
+          { id: "2", name: "prod-eu-02", health: "degraded" },
+        ]}
+        currentId="1"
+      />
+    ));
+    const tiles = [...container.querySelectorAll('[data-testid^="env-tile-"]')];
+    expect(tiles.map((tile) => tile.getAttribute("aria-label"))).toEqual([
+      "prod-kyiv-01 — healthy",
+      "prod-eu-02 — degraded",
+    ]);
+    dispose();
+  });
+
+  it("keeps its width when no cluster has arrived yet", () => {
+    // The frame's geometry must not depend on how many clusters exist: a rail that appeared with
+    // the first response would shift the whole page sideways at an arbitrary moment.
+    const { container, dispose } = mount(() => <EnvRail environments={[]} />);
+    expect(container.querySelector('[data-testid="env-rail"]')).not.toBeNull();
     dispose();
   });
 
   it("has no accessibility violations", async () => {
     const { container, dispose } = mount(() => (
-      <TopBar {...base} theme="dark" accountName="Olena Petrenko" unreadCount={2} />
+      <EnvRail environments={CLUSTERS} currentId="prod-kyiv-01" accountName="Olena Petrenko" />
     ));
     expect(describeViolations(await findViolations(container))).toBe("");
     dispose();

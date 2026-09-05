@@ -45,12 +45,14 @@ import {
   type FeatureRegistration,
   type FeatureState,
 } from "@kui/kernel";
+import { AppFrame } from "./chrome/AppFrame.jsx";
+import { EnvRail, type RailDestination } from "./chrome/EnvRail.jsx";
 import { NavDrawer } from "./chrome/NavDrawer.jsx";
 import { installSearchShortcut } from "./chrome/searchShortcut.js";
 import { Overview } from "./overview/Overview.jsx";
 import { fetchOverview, loadingData, toOverviewModel, type OverviewData } from "./overview/load.js";
 import { TopBar, type ThemeMode } from "./chrome/TopBar.jsx";
-import type { ClusterSummary, NavDestination } from "./chrome/types.js";
+import type { ClusterSummary, Crumb, NavDestination } from "./chrome/types.js";
 import { featureRegistry } from "./features/registry.js";
 import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, type CallScope } from "./health.js";
@@ -154,6 +156,15 @@ export function App() {
       };
     },
   );
+
+  /**
+   * Whether the notifications panel is showing.
+   *
+   * Owned here rather than by the top bar, so that Escape and a click elsewhere can close it — a
+   * panel whose open state lives inside the control that opens it is a panel nothing else can
+   * dismiss.
+   */
+  const [noticesOpen, setNoticesOpen] = createSignal(false);
 
   const [probing, setProbing] = createSignal<ReadonlySet<string>>(new Set<string>());
   const [probeErrors, setProbeErrors] = createSignal<ReadonlyMap<string, string>>(new Map());
@@ -311,68 +322,67 @@ export function App() {
   return (
     <Router>
       {(route: RouteSectionProps) => (
-        <div class="kui-frame">
-          {/* The first focusable element in the document. A keyboard user landing on a page
-              otherwise has to tab through every navigation entry before reaching what they came for,
-              on every page, every time. It is visually hidden until it has focus, which is why it
-              costs sighted users nothing and why it must not be moved down "because it is invisible
-              anyway". */}
-          <a class="kui-shell__skip" href="#kui-content">
-            Skip to content
-          </a>
-
-          <div class="kui-frame__drawer">
+        <>
+        <AppFrame
+          rail={
+            <EnvRail
+              environments={clusters()}
+              currentId={cluster.selected()}
+              onSelect={(id) => cluster.select(id)}
+              destinations={railDestinations(Router)}
+              homeHref={Router.paths()}
+              accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
+            />
+          }
+          drawer={
             <NavDrawer
-            groups={groups()}
-            currentId={currentFeatureId(route.location.pathname, uiPrefix)}
-            cluster={clusters().find((entry) => entry.id === cluster.selected())}
+              groups={groups()}
+              currentId={currentFeatureId(route.location.pathname, uiPrefix)}
+              cluster={clusters().find((entry) => entry.id === cluster.selected())}
+              /* Per-broker disk is not on the overview's model yet, so the meter is told nothing and
+                 draws its "not known" rendering — a neutral track and a sentence, never a zero.
+                 Wiring it to real figures is the metrics work, not the chrome's. */
             />
-          </div>
-
-          <div class="kui-frame__topbar">
+          }
+          topbar={
             <TopBar
-            /* What the field *searches* is still the features' to supply, so it stays idle. What it
-               no longer does is advertise a shortcut nobody implements: the `⌘K` hint in its corner
-               is bound below, and `inputRef` is how the binding reaches the element. A hint for a
-               key that does nothing teaches the reader that shortcuts here do not work. */
-            search={{
-              value: "",
-              onInput: () => undefined,
-              status: "idle",
-              inputRef: (el) => {
-                searchInput = el;
-              },
-            }}
-            clusters={clusters()}
-            currentClusterId={cluster.selected()}
-            onSelectCluster={(id) => cluster.select(id)}
-            theme={themeMode()}
-            accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
+              crumbs={topCrumbs(clusters(), cluster.selected(), route.location.pathname, uiPrefix, Router)}
+              /* What the field *searches* is still the features' to supply, so it stays idle. What it
+                 no longer does is advertise a shortcut nobody implements: the `⌘K` hint in its corner
+                 is bound below, and `inputRef` is how the binding reaches the element. A hint for a
+                 key that does nothing teaches the reader that shortcuts here do not work. */
+              search={{
+                value: "",
+                onInput: () => undefined,
+                status: "idle",
+                inputRef: (el) => {
+                  searchInput = el;
+                },
+              }}
+              theme={themeMode()}
+              notificationsOpen={noticesOpen()}
+              onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
+              /* There is no notification service yet. The panel therefore opens and says there is
+                 nothing, which is the honest answer — and is deliberately not the same rendering as a
+                 request that failed. */
+              notifications={{ kind: "ready", notices: [] }}
             />
-          </div>
+          }
+        >
+          <Show when={banner()}>
+            {(message) => (
+              <Banner
+                tone="warning"
+                message={message()}
+                testId="capability-banner"
+                /* A cluster that is not answering must not be dismissible: dismissing it makes every
+                   stale number on the page look current. */
+              />
+            )}
+          </Show>
 
-          <main
-            id="kui-content"
-            class="kui-frame__content"
-            /* `tabindex="-1"` makes the element focusable by the skip link without putting it in the
-               tab order. Without it the browser moves the *scroll* position and leaves focus where it
-               was, so the next Tab goes back into the navigation and the link achieves nothing. */
-            tabindex={-1}
-          >
-            <Show when={banner()}>
-              {(message) => (
-                <Banner
-                  tone="warning"
-                  message={message()}
-                  testId="capability-banner"
-                  /* A cluster that is not answering must not be dismissible: dismissing it makes
-                     every stale number on the page look current. */
-                />
-              )}
-            </Show>
-
-            {route.children}
-          </main>
+          {route.children}
+        </AppFrame>
 
           <ToastRegion />
 
@@ -383,10 +393,55 @@ export function App() {
           <Show when={health.connectivity().kind === "connected" && session.mustSignIn()}>
             <SignIn />
           </Show>
-        </div>
+        </>
       )}
     </Router>
   );
+}
+
+/**
+ * The rail's shortcut glyphs.
+ *
+ * Only destinations the shell itself owns, because a shortcut whose service is not configured must
+ * not be drawn at all — a rail is a set of shortcuts, and a dead shortcut costs the operator the
+ * attention it takes to discover it does nothing. The ecosystem glyphs the design shows there join
+ * this list when their features exist and their capabilities say so.
+ */
+function railDestinations(Router: ShellRouter): readonly RailDestination[] {
+  return [{ id: "settings", label: "Settings", icon: "settings", href: Router.paths.settings(), atFoot: true }];
+}
+
+/**
+ * The top band's trail: the cluster, then the section.
+ *
+ * It always begins with the cluster, because this is the *installation* trail — its job is to say
+ * which deployment and which cluster you are looking at, which is the question the environment rail
+ * answers by colour and this answers in words. An object page adds its own, shorter breadcrumb in
+ * the content column; the two are not redundant.
+ */
+export function topCrumbs(
+  clusters: readonly ClusterSummary[],
+  selected: string | undefined,
+  pathname: string,
+  uiPrefix: string,
+  Router: ShellRouter,
+): readonly Crumb[] {
+  if (selected === undefined) return [];
+  const name = clusters.find((entry) => entry.id === selected)?.name ?? selected;
+  const trail: Crumb[] = [{ label: name, href: Router.paths() }];
+
+  const section = currentFeatureId(pathname, uiPrefix);
+  const LABELS: Record<string, string> = {
+    clusters: "Brokers",
+    topics: "Topics",
+    consumers: "Consumers",
+    settings: "Settings",
+  };
+  // "overview" adds nothing: the cluster crumb already links there, and a trail that repeats itself
+  // is a trail nobody reads.
+  const label = section === undefined ? undefined : LABELS[section];
+  if (label !== undefined) trail.push({ label });
+  return trail;
 }
 
 /**

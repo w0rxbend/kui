@@ -122,15 +122,32 @@
   border-top: 1px solid var(--kui-color-border);
 }
 
+.kui-nav-group__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-4) var(--kui-space-2) var(--kui-space-2);
+}
+
 .kui-nav-group__heading {
   /* Real uppercase text with tracking, written uppercase in the source. `text-transform` on a
    * mixed-case string leaves a screen reader reading the original, and an acronym-shaped string is
    * sometimes spelled out letter by letter. */
-  padding: var(--kui-space-4) var(--kui-space-3) var(--kui-space-2);
   margin: 0;
   font-size: var(--kui-font-size-xs);
   font-weight: var(--kui-font-weight-medium);
   letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+/* How many destinations are in the group (SCREENS.md §2.4). It is deliberately dim and deliberately
+ * separated from the heading's own tracking: it counts *menu entries*, not anything in Kafka, and
+ * mistaking it for a count of brokers or topics would be worse than not showing it at all. Its
+ * accessible name says so in words. */
+.kui-nav-group__count {
+  margin-left: auto;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
   color: var(--kui-color-text-muted);
 }
 
@@ -143,13 +160,20 @@
   list-style: none;
 }
 
+/* 30px and 13px, down from 36px and 14px.
+ *
+ * Not a taste change: the drawer went from 196px to 182px with the environment rail
+ * (`SCREENS.md` §1.1), and at the old metrics "Schema Registry" and "Consumers" both truncated to
+ * an ellipsis — which is the one thing a navigation label must never do, because the label *is* the
+ * destination. The row pitch measured off `13-topics-list.png` column 70 is 30px, so this is the
+ * design's own figure rather than the smallest thing that happened to fit. */
 .kui-nav-item {
   display: flex;
-  gap: var(--kui-space-3);
+  gap: var(--kui-space-2);
   align-items: center;
-  height: 36px;
-  padding: 0 var(--kui-space-3);
-  font-size: var(--kui-font-size-md);
+  height: 30px;
+  padding: 0 var(--kui-space-2);
+  font-size: var(--kui-control-label-size);
   font-weight: var(--kui-font-weight-medium);
   color: var(--kui-color-text-muted);
   text-decoration: none;
