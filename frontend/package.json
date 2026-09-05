@@ -10,7 +10,9 @@
     "build": "vite build",
     "watch": "vite build --watch --mode development",
     "typecheck": "tsc --build --pretty false",
-    "test": "vitest run"
+    "test": "vitest run",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build"
   },
   "devDependencies": {
     "@storybook/addon-a11y": "10.6.0",
