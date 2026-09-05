@@ -81,11 +81,29 @@
  * treatment for the same markup — see the header of the file. */
 @import "./28-surfaces.css";
 
+/* `PageHeader`: the breadcrumb, title, chip, actions and voice line above every content region.
+ * After the surfaces sheet because it is a screen-level block rather than a control, and before the
+ * feature stylesheets because a feature may adjust it inside itself. */
+@import "./29-page-header.css";
+
 /* 4. Screens, in the pre-migration order described above. */
 @import "../../feature-clusters/styles/40-clusters.css";
 @import "../../feature-clusters/styles/41-clusters-brokers.css";
+/* The SolidJS cluster and broker screens (ADR-048). Appended after the pre-migration clusters
+ * sheets rather than interleaved, for the same reason the chrome sheets are appended after the
+ * shell ones: the two sets style different class names (`.kui-brokers-*` and `.kui-brk-*`) and the
+ * pre-migration order above is preserved on purpose. */
+@import "../../feature-clusters/styles/42-cluster-screens.css";
 @import "../../feature-consumers/styles/70-consumers.css";
+/* The SolidJS consumer-group screens (ADR-048): the list, the detail and the offset-reset wizard.
+ * Its class names are prefixed `.kui-cg-` so that nothing here restyles the Laminar screens above,
+ * which keep the appearance they were reviewed with until they are retired. */
+@import "../../feature-consumers/styles/71-consumer-screens.css";
 @import "../../feature-messages/styles/60-messages.css";
+/* The SolidJS message browser (screenshots `02` and `03`). A separate sheet from the one above,
+ * which styles the pre-migration Laminar screen with different class names — see the header of the
+ * file. */
+@import "../../feature-messages/styles/61-message-browser.css";
 @import "../../shell/styles/30-shell.css";
 @import "../../shell/styles/31-shell-nav.css";
 @import "../../shell/styles/32-shell-dashboard.css";
@@ -96,4 +114,11 @@
 @import "../../shell/styles/33-chrome-drawer.css";
 @import "../../shell/styles/34-chrome-topbar.css";
 @import "../../shell/styles/35-chrome-navigation.css";
+/* The frame those chrome components are assembled into, and the first screen built on it. After
+ * them because both adjust the layout *around* a chrome component without restyling it, and a
+ * screen must be able to win against the primitives it is composed of. */
+@import "../../shell/styles/36-frame.css";
+@import "../../shell/styles/37-overview.css";
 @import "../../feature-topics/styles/50-topics.css";
+/* The SolidJS topic list and topic-page frame, for the same reason as `61-message-browser.css`. */
+@import "../../feature-topics/styles/51-topic-screens.css";
