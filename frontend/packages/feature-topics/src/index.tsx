@@ -1,8 +1,11 @@
 /**
- * The topics feature. A placeholder until lane D ports the screens; it exists so that the
- * workspace graph, the project references and the bundle-shape check (SOL-010) have all four
- * feature packages to work with.
+ * The topics feature: the list of every topic on a cluster, and the frame each topic's page sits in.
+ *
+ * Nothing here fetches. Both screens are told what to draw, which is what makes every state they
+ * can be in — including the ones that only happen when a broker stops answering — reachable from a
+ * story and from a test without a cluster.
  */
-export default function Placeholder() {
-  return <p>The topics feature has not been ported yet.</p>;
-}
+
+export { TopicListPage, matchCount, formatBytes, type TopicListPageProps } from "./TopicListPage.jsx";
+export { TopicPage, healthChip, type TopicPageProps, type TopicAction } from "./TopicPage.jsx";
+export type { TopicHealth, TopicRow, TopicTab } from "./types.js";

@@ -1,0 +1,152 @@
+/* The topic screens, rebuilt for the SolidJS frontend from screenshots `02` and `03`.
+ *
+ * A second file beside `50-topics.css` for the same reason `61-message-browser.css` sits beside
+ * `60-messages.css`: that sheet styles the pre-migration Laminar screen, which is still shipped and
+ * still reviewed against its own screenshots, and the two use separate class names (`.kui-topics`
+ * there, `.kui-topic-page` and `.kui-topic-list` here). Merging them mid-migration would be a visual
+ * change nobody could bisect.
+ *
+ * Every measurement below was taken off the screenshots and is recorded beside the rule it produced.
+ * Every value is a token. */
+
+/* --- The topic page frame --------------------------------------------------------------------- */
+
+.kui-topic-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  /* The tabs below hold a scroller; a flex parent that cannot shrink gives them a page that
+   * scrolls sideways instead. */
+  min-height: 0;
+}
+
+/* Measured in `02`: the title's baseline block runs y 96–120 and the two actions sit on the same
+ * line at the right edge (x 1762–1980). They share a line at full width and the actions drop below
+ * the title when there is not room, rather than the title truncating: the name is the one thing on
+ * this page that must be readable in full, because it is what gets copied into a command line. */
+.kui-topic-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-4);
+}
+
+.kui-topic-page__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  /* Lets the title's own overflow rules apply instead of the flex item refusing to shrink. */
+  min-width: 0;
+}
+
+/* `02` draws the name at roughly 28px in the display weight. It wraps rather than ellipsising:
+ * `orders.payments.v2.dead-letter.retry-5m.eu-central-1.reprocessing` is a real Kafka topic name,
+ * and a heading that ended in `…` would be a heading that names a different topic. */
+.kui-topic-page__title {
+  margin: 0;
+  color: var(--kui-color-text-strong);
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-2xl);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  overflow-wrap: anywhere;
+}
+
+.kui-topic-page__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  flex-shrink: 0;
+}
+
+.kui-topic-page__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* --- The topic list ---------------------------------------------------------------------------- */
+
+.kui-topic-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  min-height: 0;
+}
+
+/* Search, the internal-topic switch, the count and Create, on one line that **wraps** rather than
+ * scrolling: a control that has slid off the right edge of a bar is a control nobody finds.
+ *
+ * This bar is a sibling of the table and never a child of anything that re-renders when rows
+ * arrive. That is the whole fix for "the search box lost my caret when the results landed". */
+.kui-topic-list__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-4);
+}
+
+/* Pushed to the right, beside Create, because it is a statement about what the controls to its
+ * left have produced. */
+.kui-topic-list__count {
+  margin-inline-start: auto;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Not a banner and not an error: it is a footnote about completeness, and a page that shouted it
+ * would be a page that cried wolf on every cluster with one slow broker. */
+.kui-topic-list__incomplete {
+  margin: 0;
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* `max-width: 100%` is what makes the ellipsis below actually happen, and it took a browser to
+ * find: the cell clips its content, so an `inline-flex` child inside it is free to lay out wider
+ * than the cell and simply be cut off. Measured, the label reported `scrollWidth === clientWidth`
+ * — it did not believe it was overflowing, so it never drew an ellipsis — while the name was
+ * visibly sliced mid-character. Bounding the row to the cell is what hands the overflow to the
+ * element that knows how to show it. */
+.kui-topic-list__name {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The clip is the cell's, so the ellipsis has to be on the element that overflows. Without it the
+ * longest real topic name — `orders.payments.v2.dead-letter.retry-5m.eu-central-1.reprocessing` —
+ * was cut off mid-character with nothing to say it had been, which reads as a shorter topic that
+ * does not exist. */
+.kui-topic-list__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-topic-list__glyph {
+  color: var(--kui-color-text-subtle);
+  flex-shrink: 0;
+}
+
+/* "internal" is a *word*, not a colour. Kafka's own bookkeeping topics have to be skippable at a
+ * glance by a reader who cannot tell the colour from the one beside it. */
+.kui-topic-list__internal {
+  padding: 1px var(--kui-space-2);
+  border-radius: var(--kui-radius-pill);
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-subtle);
+  font-size: var(--kui-font-size-xs);
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .kui-topic-list__count {
+    margin-inline-start: 0;
+  }
+}
