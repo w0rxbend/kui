@@ -1,0 +1,185 @@
+/* The cluster overview — screenshots `01` and `05`.
+ *
+ * The three grids are SPEC §3.3, measured off `01`: four equal stat cards, two equal chart cards,
+ * three equal panels, all with a 24px gap inside the 1756px content column.
+ *
+ * `.kui-overview` rather than `.kui-dashboard`: `32-shell-dashboard.css` already owns
+ * `.kui-shell__dashboard-*` for the pre-migration cluster list, and everything is concatenated into
+ * one stylesheet with no module boundary. */
+
+.kui-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+  padding-block: var(--kui-space-5);
+}
+
+/* The header is the kernel's `PageHeader` (`29-page-header.css`), not this screen's own markup, so
+ * there are no title or lede rules here. */
+
+/* --- The three grids ---------------------------------------------------------------------------
+ *
+ * `auto-fit` with a `minmax` floor rather than a fixed `repeat(4, 1fr)`. At the design's width the
+ * two are identical — four columns of equal width — and below it the fixed version keeps four
+ * columns and squeezes each stat card until its figure wraps mid-number. The floor makes the row
+ * drop to two columns and then to one, which is what SPEC §7.5 asks for, with no breakpoint to
+ * maintain per row. */
+
+.kui-overview__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--kui-space-5);
+}
+
+.kui-overview__charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(26rem, 1fr));
+  gap: var(--kui-space-5);
+}
+
+.kui-overview__panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: var(--kui-space-5);
+}
+
+/* --- Broker health ------------------------------------------------------------------------------ */
+
+.kui-broker-health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-broker-health__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+/* Name on the left, detail on the right, on one line above the bar — the design's arrangement, and
+ * the reason this screen draws the broker's name itself rather than relying on `ProgressBar`'s
+ * `label`, which reaches `aria-label` and no pixel. */
+.kui-broker-health__head {
+  display: flex;
+  gap: var(--kui-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 0 var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-broker-health__name {
+  overflow: hidden;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text);
+  /* A long broker hostname truncates rather than pushing its detail off the row. `nowrap` alone
+   * says what not to do and nothing about what to do instead, which is how a label grows past its
+   * container. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-broker-health__detail {
+  font-size: var(--kui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-subtle);
+  white-space: nowrap;
+}
+
+.kui-broker-health__why {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-subtle);
+}
+
+/* --- Partition health --------------------------------------------------------------------------- */
+
+.kui-partition-health {
+  display: flex;
+  gap: var(--kui-space-5);
+  align-items: center;
+  /* Wraps rather than shrinking the donut: a donut below about 120px cannot hold its centre
+   * percentage, and a legend squeezed beside it ellipsises "Under-replicated" to "Under-…", which
+   * is the one label a reader most needs to be able to tell from "In sync". */
+  flex-wrap: wrap;
+}
+
+/* --- Not-measured, and the other blank states ----------------------------------------------------
+ *
+ * Quiet on purpose. These panels are reporting the absence of a *feature*, and they sit beside
+ * panels reporting on a live cluster; anything with a tint or a border competes with the panel next
+ * to it that might be showing a partition offline. */
+
+.kui-not-measured {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--kui-space-1) var(--kui-space-3);
+  align-items: start;
+  padding: var(--kui-space-4) 0;
+  max-width: 46ch;
+}
+
+.kui-not-measured__icon {
+  grid-column: 1;
+  margin-top: 0.1em;
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-not-measured__why,
+.kui-not-measured__instead {
+  grid-column: 2;
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-not-measured__instead {
+  color: var(--kui-color-text-subtle);
+}
+
+/* The production card. It is a `.kui-stat` so that it shares the row's surface, padding and head,
+ * and this rule only removes the figure's reserved height — the sentence takes that space instead. */
+.kui-stat--note .kui-not-measured {
+  padding: var(--kui-space-2) 0 0;
+  max-width: none;
+}
+
+.kui-overview__blank {
+  margin: 0;
+  padding: var(--kui-space-4) 0;
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+/* The waiting state. A reserved box the height of the content it is standing in for, so the panel
+ * does not change size when the data lands and shove the rest of the page down. It is deliberately
+ * plain rather than a shimmer: three panels shimmering out of step reads as a fault. */
+.kui-overview__waiting {
+  min-height: 6rem;
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-elevated);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .kui-overview__waiting {
+    animation: kui-overview-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes kui-overview-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
