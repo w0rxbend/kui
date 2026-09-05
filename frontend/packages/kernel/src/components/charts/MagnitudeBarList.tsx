@@ -101,15 +101,26 @@ export const MagnitudeBarList: Component<MagnitudeBarListProps> = props => {
                   <span class={["kui-magnitude-list__value", { "kui-magnitude-list__value--absent": !isKnown() }]}>
                     {isKnown() ? (entry.valueText ?? formatCount(entry.value)) : ABSENT}
                   </span>
-                  {/* aria-hidden: the number above says exactly this, in words. */}
-                  <span class="kui-magnitude-list__track" aria-hidden="true">
-                    <Show when={isKnown()}>
+                  {/* An unknown value draws no bar *at all* — not an empty one.
+
+                      The fill was already omitted here, but the track was still drawn, so a row
+                      whose value could not be read looked exactly like a row whose value is zero:
+                      two identical grey tracks, one meaning "this group is not behind" and the
+                      other meaning "we could not find out". Those are the two readings a lag panel
+                      exists to separate, and SPEC §4.19 asks for them to stay separate pictures —
+                      "an empty track and a zero-length fill are different pictures". The em dash
+                      beside it is now the only mark on the row, which is what makes it read as an
+                      absence rather than a measurement.
+
+                      aria-hidden: the number above says exactly this, in words. */}
+                  <Show when={isKnown()}>
+                    <span class="kui-magnitude-list__track" aria-hidden="true">
                       <span
                         class="kui-magnitude-list__fill"
                         style={{ width: width(), background: toneColor(entry.tone ?? "neutral") }}
                       />
-                    </Show>
-                  </span>
+                    </span>
+                  </Show>
                 </li>
               );
             }}

@@ -84,10 +84,18 @@
   white-space: nowrap;
 }
 
+/* `id 1 · 512 leaders`.
+ *
+ * SPEC §4.20 specifies `--kui-color-text-muted` for this metadata, and the reason is the rule in
+ * §1.3: `--kui-color-text-subtle` is deliberately below the AA threshold and is therefore allowed
+ * only for text that repeats information available elsewhere. A broker's id and its leader count
+ * appear nowhere else on the page — they are the two facts that tell an operator *which* broker
+ * this row is and how much work it is carrying. Axe measured the old value at 3.56:1 against the
+ * light theme's card, which is the theme where the subtle ramp is closest to its surface. */
 .kui-broker-health__detail {
   font-size: var(--kui-font-size-xs);
   font-variant-numeric: tabular-nums;
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
   white-space: nowrap;
 }
 
@@ -140,8 +148,15 @@
   color: var(--kui-color-text-muted);
 }
 
+/* "Per-topic message counts are on each topic's page."
+ *
+ * This is the sentence that tells the reader where the figure they came for actually lives, so it
+ * is the one line in the panel they most need to read. It repeats nothing, which is what §1.3 asks
+ * before the subtle ramp may be used. It is still quieter than the sentence above it by being the
+ * second line rather than by being harder to see. */
 .kui-not-measured__instead {
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
+  opacity: 0.9;
 }
 
 /* The production card. It is a `.kui-stat` so that it shares the row's surface, padding and head,

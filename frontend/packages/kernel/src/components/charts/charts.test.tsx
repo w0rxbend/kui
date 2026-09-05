@@ -309,9 +309,36 @@ describe("MagnitudeBarList", () => {
     ));
     const entries = container.querySelectorAll(".kui-magnitude-list__entry");
     expect(entries[1]!.querySelector(".kui-magnitude-list__fill")).toBeNull();
+    // The *track* too, which is what "no bar at all" means and what this assertion used to miss.
+    // The fill alone being absent still left a grey track on the row, and a grey track is exactly
+    // what a zero draws — so the two states this test exists to separate looked identical on
+    // screen while the test passed.
+    expect(entries[1]!.querySelector(".kui-magnitude-list__track")).toBeNull();
     expect(entries[1]!.querySelector(".kui-magnitude-list__value")!.textContent).toBe(ABSENT);
     // And the known one still draws, so the two are visibly different pictures.
     expect(entries[0]!.querySelector(".kui-magnitude-list__fill")).not.toBeNull();
+    dispose();
+  });
+
+  it("draws a zero differently from an unknown, which is the whole point of the pair", () => {
+    const { container, dispose } = mount(() => (
+      <MagnitudeBarList
+        entries={[
+          { label: "busy", value: 100 },
+          { label: "caught up", value: 0 },
+          { label: "could not ask", value: undefined },
+        ]}
+      />
+    ));
+    const [, zero, unknown] = [...container.querySelectorAll(".kui-magnitude-list__entry")];
+
+    // Zero is a measurement: it keeps its track, and prints a digit.
+    expect(zero!.querySelector(".kui-magnitude-list__track")).not.toBeNull();
+    expect(zero!.querySelector(".kui-magnitude-list__value")!.textContent).toBe("0");
+
+    // Unknown is an absence: no track, and an em dash.
+    expect(unknown!.querySelector(".kui-magnitude-list__track")).toBeNull();
+    expect(unknown!.querySelector(".kui-magnitude-list__value")!.textContent).toBe(ABSENT);
     dispose();
   });
 

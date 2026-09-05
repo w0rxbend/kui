@@ -294,9 +294,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* `CreateTime` / `LogAppendTime`, under the TIMESTAMP box.
+ *
+ * `--kui-color-text-subtle` is deliberately below the AA threshold, and SPEC §1.3 therefore allows
+ * it only for "text that repeats information available elsewhere" — the relative-time column above
+ * is the example it gives. This note repeats nothing. SPEC §4.28 asks for it precisely because an
+ * operator debugging ordering has to know which clock they are reading, and a value the reader must
+ * actually read does not belong in the one colour the palette reserves for values they need not.
+ * `--kui-color-text-muted` meets AA on every surface in both themes. */
 .kui-record__fact-note {
   display: block;
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-xs);
 }
 
