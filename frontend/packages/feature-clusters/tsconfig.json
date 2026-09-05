@@ -3,8 +3,12 @@
   "compilerOptions": {
     "outDir": "../../.tsbuild/feature-clusters",
     "tsBuildInfoFile": "../../.tsbuild/feature-clusters.tsbuildinfo",
-    "rootDir": "src"
+    "rootDir": "src",
+    // `src/recorded/*.json` are documents captured from a running server, imported by
+    // `recorded.test.ts` so the mapping is checked against what the gateway really sends rather
+    // than against a hand-written guess. Without this they are a compile error rather than a value.
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],
   "references": [{ "path": "../api" }, { "path": "../kernel" }]
 }

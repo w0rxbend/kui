@@ -32,8 +32,19 @@ const scrape = {
   scrapedAt: "2026-09-05T12:00:00Z",
 };
 
-function row(id: string, summary: unknown) {
-  return { id, name: id, readOnly: false, bootstrapServers: `${id}:9092`, summary };
+/**
+ * One entry of the cluster list, in the shape the server really sends.
+ *
+ * The row is nested under `cluster`, and the counts come from a sibling `topics` section — not from
+ * the scrape. Both were got wrong here first, and `recorded.test.ts` (which decodes a document
+ * captured from a running gateway) is what found it. A hand-written fixture is only ever as right
+ * as the author's memory of the contract, which is why that suite exists beside this one.
+ */
+function row(id: string, summary: unknown, topics?: unknown) {
+  return {
+    cluster: { id, name: id, readOnly: false, bootstrapServers: `${id}:9092`, summary },
+    ...(topics === undefined ? {} : { topics }),
+  };
 }
 
 describe("fetchClusters", () => {
@@ -66,6 +77,9 @@ describe("fetchClusters", () => {
     const healthy = clusters[0]!;
     expect(healthy.brokersOnline).toBe(3);
     expect(healthy.health).toBe("healthy");
+    // Absent because this fixture carries no `topics` section: the counts live there, not on the
+    // scrape, so a cluster whose topic service did not answer has no topic count — and says so.
+    expect(healthy.topics).toBeNull();
   });
 
   it("shows a stale list rather than hiding it, and says it is stale", async () => {
@@ -138,11 +152,13 @@ describe("fetchBrokers", () => {
               host: "broker-1",
               port: 9092,
               isController: true,
-              leaderPartitions: 512,
-              replicaPartitions: 1536,
-              outOfSyncReplicas: 0,
-              diskUsedBytes: 100,
-              diskTotalBytes: 200,
+              // The server's names, verified against `src/recorded/brokers.json`. Every plausible
+              // guess — `leaderPartitions`, `replicaPartitions`, `diskUsedBytes` — is wrong, and
+              // wrong silently: the card renders as em dashes, which reads as a broker that did not
+              // answer.
+              leaderCount: 512,
+              replicaCount: 1536,
+              diskUsageBytes: 100,
             },
             { id: 2, host: "broker-2", port: 9092 },
           ],
@@ -155,8 +171,13 @@ describe("fetchBrokers", () => {
     const brokers = answer.kind === "ready" ? answer.value : [];
 
     expect(brokers[0]).toMatchObject({ id: 1, isController: true, leaderPartitions: 512, health: "healthy" });
-    // `0` out-of-sync replicas is a real and good answer, and must survive as 0.
-    expect(brokers[0]?.outOfSyncReplicas).toBe(0);
+    expect(brokers[0]?.replicaPartitions).toBe(1536);
+    expect(brokers[0]?.diskUsedBytes).toBe(100);
+    // Neither is on the wire at all: the endpoint carries no per-broker out-of-sync count and no
+    // disk total. `null` says so; a `0` would be a claim nobody made, and a total of `0` would make
+    // every disk bar read as full.
+    expect(brokers[0]?.outOfSyncReplicas).toBeNull();
+    expect(brokers[0]?.diskTotalBytes).toBeNull();
 
     expect(brokers[1]?.diskUsedBytes).toBeNull();
     expect(brokers[1]?.leaderPartitions).toBeNull();

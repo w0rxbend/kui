@@ -55,26 +55,46 @@ interface ClusterSummaryPayload {
   readonly scrapedAt?: string;
 }
 
-interface ClusterRowPayload {
-  readonly id: string;
-  readonly name: string;
-  readonly readOnly: boolean;
-  readonly bootstrapServers: string;
-  readonly summary: unknown;
+/** One entry of the cluster list. The row itself is nested under `cluster`; see `toClusterSummary`. */
+interface ClusterEntryPayload {
+  readonly cluster: {
+    readonly id: string;
+    readonly name: string;
+    readonly readOnly: boolean;
+    readonly bootstrapServers: string;
+    readonly summary: unknown;
+  };
+  /** The topic service's answer for this cluster: counts, and the largest few. Its own section. */
+  readonly topics?: unknown;
 }
 
-/** What the brokers endpoint reports, once decoded. */
+/** The topic counts the list endpoint returns per cluster. */
+interface ClusterTopicsPayload {
+  readonly topicCount?: number | null;
+  readonly partitionCount?: number | null;
+}
+
+/**
+ * What the brokers endpoint reports, once decoded.
+ *
+ * These names are the server's, taken from a recorded response
+ * (`src/recorded/brokers.json`) rather than guessed. They are worth reading carefully, because a
+ * plausible guess is wrong for almost every one of them: it is `leaderCount`, not
+ * `leaderPartitions`; `replicaCount`, not `replicaPartitions`; `diskUsageBytes`, not
+ * `diskUsedBytes`. A mismatch does not fail — every field falls back and the whole card renders as
+ * em dashes, which reads as "this broker did not answer".
+ */
 interface BrokerPayload {
   readonly id: number;
   readonly host: string;
   readonly port: number;
   readonly rack?: string | null;
   readonly isController?: boolean;
-  readonly leaderPartitions?: number | null;
-  readonly replicaPartitions?: number | null;
-  readonly outOfSyncReplicas?: number | null;
-  readonly diskUsedBytes?: number | null;
-  readonly diskTotalBytes?: number | null;
+  readonly leaderCount?: number | null;
+  readonly replicaCount?: number | null;
+  readonly partitionCount?: number | null;
+  readonly diskUsageBytes?: number | null;
+  readonly segmentCount?: number | null;
 }
 
 /**
@@ -91,9 +111,27 @@ export function healthOf(summary: ClusterSummaryPayload | undefined): Health {
   return "healthy";
 }
 
-function toClusterSummary(row: ClusterRowPayload): ClusterSummary {
+/**
+ * One list entry, as the screen's row.
+ *
+ * The entry is *not* the cluster: it is `{ cluster, capability, topics, consumerGroups }`, where
+ * each of the last three is its own section. That shape is the whole design — the cluster's
+ * identity comes from configuration and cannot fail, while its scrape, its topic counts and its
+ * group counts come from three different services and can each fail on their own. A row therefore
+ * draws with whichever of them arrived.
+ *
+ * Two sections are read here. `cluster.summary` carries the scrape; `topics` carries the counts,
+ * and reading it is what puts a topic count on the row at all — taking the partition count from the
+ * scrape instead gives `onlinePartitionCount`, which the quickstart's own broker reports as `null`.
+ */
+function toClusterSummary(entry: ClusterEntryPayload): ClusterSummary {
+  const row = entry.cluster;
   const section = decodeSection<ClusterSummaryPayload>(row.summary);
   const summary = section.status === "ok" || section.status === "stale" ? section.data : undefined;
+
+  const topicsSection = decodeSection<ClusterTopicsPayload>(entry.topics);
+  const topics =
+    topicsSection.status === "ok" || topicsSection.status === "stale" ? topicsSection.data : undefined;
 
   return {
     id: row.id,
@@ -104,8 +142,11 @@ function toClusterSummary(row: ClusterRowPayload): ClusterSummary {
     // only honest reading when a scrape succeeded — and both are absent when it did not.
     brokersOnline: figure(summary?.brokerCount),
     brokersTotal: figure(summary?.brokerCount),
-    topics: null,
-    partitions: figure(summary?.onlinePartitionCount),
+    topics: figure(topics?.topicCount),
+    // The topic service's count, not the scrape's `onlinePartitionCount` — a single-broker cluster
+    // reports the latter as `null`, so taking it from there is a dash on a screen that has the
+    // number a few bytes away.
+    partitions: figure(topics?.partitionCount),
     underReplicatedPartitions: figure(summary?.underReplicatedPartitionCount),
     readOnly: row.readOnly,
     observedAt: summary?.scrapedAt === undefined ? null : new Date(summary.scrapedAt),
@@ -120,14 +161,22 @@ function toBroker(payload: BrokerPayload): Broker {
     rack: payload.rack ?? null,
     isController: payload.isController === true,
     // A broker in the list answered `describeCluster`; whether its own metrics answered is a
-    // separate question, which is why the health is derived from what is missing rather than
-    // assumed from its presence.
-    health: payload.leaderPartitions === null || payload.leaderPartitions === undefined ? "unknown" : "healthy",
-    leaderPartitions: figure(payload.leaderPartitions),
-    replicaPartitions: figure(payload.replicaPartitions),
-    outOfSyncReplicas: figure(payload.outOfSyncReplicas),
-    diskUsedBytes: figure(payload.diskUsedBytes),
-    diskTotalBytes: figure(payload.diskTotalBytes),
+    // separate question, so health is derived from what is missing rather than assumed from its
+    // presence. `replicaCount` is the field that is populated on every cluster KUI has seen —
+    // `leaderCount` is null on a single-broker cluster — so it is the one that decides.
+    health: payload.replicaCount === null || payload.replicaCount === undefined ? "unknown" : "healthy",
+    leaderPartitions: figure(payload.leaderCount),
+    replicaPartitions: figure(payload.replicaCount),
+    // Not on the wire. The brokers endpoint reports no out-of-sync count per broker; it is a
+    // cluster-level figure on the scrape. `null` says so, rather than `0` claiming everything is in
+    // sync on evidence nobody produced.
+    outOfSyncReplicas: null,
+    diskUsedBytes: figure(payload.diskUsageBytes),
+    // Also not on the wire: KUI reports how much a broker's log directories hold, never how large
+    // the disk under them is — that is the host's business and the admin protocol does not expose
+    // it. `ProgressBar` draws a bar with no total as "we cannot measure this", which is exactly
+    // right, and is why this is `null` rather than an invented denominator.
+    diskTotalBytes: null,
   };
 }
 
@@ -135,7 +184,7 @@ function toBroker(payload: BrokerPayload): Broker {
 export async function fetchClusters(api: KuiApiClient): Promise<Fetched<readonly ClusterSummary[]>> {
   const answer = await api.get("/api/v1/clusters", {});
   if (!answer.ok) return apiFailure(answer.error);
-  const section = decodeSection<readonly ClusterRowPayload[]>(answer.value.clusters);
+  const section = decodeSection<readonly ClusterEntryPayload[]>(answer.value.clusters);
   return fromSection(section, (rows) => rows.map(toClusterSummary));
 }
 

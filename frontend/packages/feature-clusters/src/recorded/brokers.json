@@ -1,0 +1,39 @@
+{
+    "brokers": {
+        "status": "ok",
+        "data": [
+            {
+                "id": 1,
+                "host": "kafka",
+                "port": 9092,
+                "rack": null,
+                "isController": true,
+                "partitionCount": null,
+                "leaderCount": null,
+                "replicaCount": 86,
+                "replicaSkewPercent": 0.0,
+                "leaderSkewPercent": null,
+                "diskUsageBytes": 58949,
+                "segmentCount": null
+            }
+        ],
+        "fetchedAt": "2026-09-05T15:35:58.778Z"
+    },
+    "quorum": {
+        "leaderId": 1,
+        "leaderEpoch": 1,
+        "highWatermark": 239,
+        "voters": [
+            {
+                "replicaId": 1,
+                "logEndOffset": 239,
+                "lag": 0,
+                "isLeader": true,
+                "isVoter": true,
+                "lastFetch": "2026-09-05T15:35:58.768Z",
+                "lastCaughtUp": "2026-09-05T15:35:58.768Z"
+            }
+        ],
+        "observers": []
+    }
+}

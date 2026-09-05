@@ -1,0 +1,101 @@
+{
+    "clusters": {
+        "status": "ok",
+        "data": [
+            {
+                "cluster": {
+                    "id": "quickstart",
+                    "name": "Quickstart (local)",
+                    "readOnly": false,
+                    "bootstrapServers": "kafka:9092",
+                    "security": {
+                        "protocol": "PLAINTEXT",
+                        "mechanism": null,
+                        "truststoreConfigured": false,
+                        "keystoreConfigured": false
+                    },
+                    "summary": {
+                        "status": "ok",
+                        "data": {
+                            "kafkaClusterId": "kui-quickstart-0000000001",
+                            "version": "4.3",
+                            "controllerId": 1,
+                            "controllerKind": "kraft",
+                            "brokerCount": 1,
+                            "onlinePartitionCount": null,
+                            "offlinePartitionCount": null,
+                            "underReplicatedPartitionCount": null,
+                            "totalDiskUsageBytes": 58949,
+                            "features": [
+                                "authorized-operations",
+                                "config-documentation",
+                                "incremental-alter-configs",
+                                "kraft-quorum",
+                                "log-dirs"
+                            ],
+                            "scrapedAt": "2026-09-05T15:35:58.778Z"
+                        },
+                        "fetchedAt": "2026-09-05T15:35:58.778Z"
+                    },
+                    "version": null,
+                    "origin": "static"
+                },
+                "capability": {
+                    "status": "available"
+                },
+                "topics": {
+                    "status": "ok",
+                    "data": {
+                        "topicCount": 10,
+                        "countedTopics": 10,
+                        "partitionCount": 86,
+                        "largest": [
+                            {
+                                "name": "__consumer_offsets",
+                                "partitionCount": 50
+                            },
+                            {
+                                "name": "analytics.pageviews",
+                                "partitionCount": 12
+                            },
+                            {
+                                "name": "orders.v1",
+                                "partitionCount": 6
+                            },
+                            {
+                                "name": "inventory.stock-levels",
+                                "partitionCount": 4
+                            },
+                            {
+                                "name": "customers.profiles",
+                                "partitionCount": 3
+                            }
+                        ]
+                    },
+                    "fetchedAt": "2026-09-05T15:35:28.787Z"
+                },
+                "consumerGroups": {
+                    "status": "ok",
+                    "data": {
+                        "groupCount": 3,
+                        "byState": [
+                            {
+                                "state": "STABLE",
+                                "count": 1
+                            },
+                            {
+                                "state": "EMPTY",
+                                "count": 2
+                            }
+                        ],
+                        "totalLag": 9,
+                        "groupsWithoutLag": 0
+                    },
+                    "fetchedAt": "2026-09-05T15:35:59.038Z"
+                }
+            }
+        ],
+        "fetchedAt": "2026-09-05T15:36:20.320Z"
+    },
+    "generatedAt": "2026-09-05T15:36:20.320Z"
+}
