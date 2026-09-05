@@ -38,6 +38,27 @@ final class RegistryHttpSuite extends KuiIOSuite {
     (StatusCode.Ok, "")
   }
 
+  test("requests are built relative to the root, because failover puts the base path back on") {
+    // The defect this pins. `Failover.rebase` replaces the scheme and authority of each request and
+    // *prefixes the base URL's own path*, so a client that also built its requests against the full
+    // configured URL had that path applied twice. Apicurio serves the Confluent-compatible API at
+    // `/apis/ccompat/v7` — it is the registry the quickstart runs — and every schema screen reported
+    // "the configured address does not look like a Schema Registry", because the request had gone to
+    // `/apis/ccompat/v7/apis/ccompat/v7/subjects` and honestly received a 404.
+    //
+    // The suite could not see it: every case here used a base with no path at all.
+    var asked: String = ""
+    val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF { request =>
+        asked = "/" + request.uri.path.mkString("/")
+        IO.pure(ResponseStub.adjust("[]", StatusCode.Ok): sttp.client4.Response[StubBody])
+      }
+    val subPath = SafeUrl.unsafe("http://registry:8081/apis/ccompat/v7")
+
+    new RegistryHttp[IO](backend, subPath, RegistryCredentials.anonymous[IO]).subjects
+      .map(_ => assertEquals(asked, "/subjects"))
+  }
+
   test("the subject list decodes into subjects") {
     registry { case "/subjects" => (StatusCode.Ok, """["orders-value","payments-value"]""") }.subjects
       .map(_.map(_.map(_.value)))

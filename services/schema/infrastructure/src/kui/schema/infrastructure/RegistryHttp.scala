@@ -2,7 +2,7 @@ package kui.schema.infrastructure
 
 import cats.effect.kernel.Async
 import cats.syntax.all.*
-import io.circe.{Json, parser, Decoder, HCursor}
+import io.circe.{parser, Decoder, HCursor, Json}
 import sttp.client4.*
 import sttp.model.{MediaType, StatusCode, Uri}
 
@@ -48,10 +48,25 @@ final class RegistryHttp[F[_]: Async](
 
   import RegistryHttp.*
 
-  /** Only the path and the query of each request are built from this. Which host it actually goes to is the
-    * resilient backend's decision, because failover may send it to the second configured address.
+  /** The address every request below is built against, with the configured **path stripped**.
+    *
+    * Only the path and the query of each request are built from this. Which host it actually goes to is the
+    * resilient backend's decision, because failover may send it to the second configured address — and
+    * `Failover.rebase` does that by replacing the scheme and authority and *prefixing the base URL's own
+    * path*, so that a base of `https://host/api` and a request path of `/subjects` becomes
+    * `https://host/api/subjects`.
+    *
+    * Which means a request built against the full configured URL has that path applied twice. A registry
+    * mounted at a sub-path — Apicurio serves the Confluent-compatible API at `/apis/ccompat/v7`, and it is
+    * the registry the quickstart runs — produced `/apis/ccompat/v7/apis/ccompat/v7/subjects`, answered 404,
+    * and every schema screen reported "the configured address does not look like a Schema Registry". The
+    * message was accurate about the symptom and pointed at the operator's configuration, which was right.
+    *
+    * So the path is dropped here and `rebase` puts it back exactly once. The scheme and host are kept only
+    * so that a logged or failed URI reads sensibly; they are replaced before the request is sent.
     */
-  private val root: Uri = Uri.parse(baseUrl.value).getOrElse(uri"http://schema-registry.invalid")
+  private val root: Uri =
+    Uri.parse(baseUrl.value).getOrElse(uri"http://schema-registry.invalid").withWholePath("")
 
   def subjects: F[Either[KuiError, List[Subject]]] =
     get(root.addPath("subjects")).map(_.flatMap {
