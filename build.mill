@@ -1550,6 +1550,14 @@ object frontend extends Module {
     def dist: T[PathRef] = Task {
       install(): Unit
 
+      // Declaring `sources` is not enough: Mill invalidates a task from the inputs it *reads*, and
+      // without this line `dist` depends only on `install`, so it is computed once and then never
+      // again however much of the frontend changes. That is not a slow build, it is a wrong one —
+      // `bundle` feeds the gateway's resources, so the deployable would carry whichever build
+      // happened to run first while every source file moved on underneath it. Measured: editing a
+      // file under `packages/shell/src` left `dist.log` untouched until this was added.
+      sources(): Unit
+
       val out = Task.dest / "dist"
       run(
         Seq("pnpm", "exec", "vite", "build", "--outDir", out.toString, "--emptyOutDir"),
