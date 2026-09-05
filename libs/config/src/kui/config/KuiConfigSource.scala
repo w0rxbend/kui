@@ -1909,24 +1909,24 @@ object KuiConfigSource {
           auth <- AuthConfigSection.resolve[F](value.auth, env)
         } yield (keys, store, streaming, auth).mapN(
           (principalKeys, storeConfig, streamingConfig, authConfig) =>
-          KuiConfig(
-            value.server,
-            GatewayConfig(
-              value.gateway.services,
-              value.gateway.readinessInterval,
-              principalKeys,
-              value.gateway.cors,
-              value.gateway.devInsecureCookies
-            ),
-            value.telemetry,
-            storeConfig,
-            value.topics,
-            value.consumers,
-            streamingConfig,
-            value.clusters,
-            authConfig,
-            value.rbac
-          )
+            KuiConfig(
+              value.server,
+              GatewayConfig(
+                value.gateway.services,
+                value.gateway.readinessInterval,
+                principalKeys,
+                value.gateway.cors,
+                value.gateway.devInsecureCookies
+              ),
+              value.telemetry,
+              storeConfig,
+              value.topics,
+              value.consumers,
+              streamingConfig,
+              value.clusters,
+              authConfig,
+              value.rbac
+            )
         )
     }
 

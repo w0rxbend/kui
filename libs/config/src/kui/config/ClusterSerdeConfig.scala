@@ -44,8 +44,8 @@ object SerdePatternConfig {
 /** Which serde reads which topic on one cluster, and how much of the registry's answers to remember.
   *
   * This is SD-003: the configuration slice that turns `SerdeResolution.Rules` — built, tested and until now
-  * fed nothing but `Rules.empty` — into something an operator can actually write down. "This cluster is
-  * Avro" is one line:
+  * fed nothing but `Rules.empty` — into something an operator can actually write down. "This cluster is Avro"
+  * is one line:
   *
   * {{{
   * kui:
@@ -63,11 +63,11 @@ object SerdePatternConfig {
   *
   * ==Why the two cache knobs live here and not under `schemaRegistry`==
   *
-  * `kui.clusters.<n>.schemaRegistry` describes the registry as a *service*: where it is, who KUI is, how
-  * long a call may take. These two describe what the decoder keeps in memory, which is a property of the
-  * reader and not of the registry — the schema service reads the same registry and caches nothing of the
-  * kind. Putting them under the section that owns the caches is what keeps a future second reader from
-  * inheriting a limit that was tuned for message browsing.
+  * `kui.clusters.<n>.schemaRegistry` describes the registry as a *service*: where it is, who KUI is, how long
+  * a call may take. These two describe what the decoder keeps in memory, which is a property of the reader
+  * and not of the registry — the schema service reads the same registry and caches nothing of the kind.
+  * Putting them under the section that owns the caches is what keeps a future second reader from inheriting a
+  * limit that was tuned for message browsing.
   */
 final case class ClusterSerdeConfig(
     defaultKey: Option[SerdeName] = None,

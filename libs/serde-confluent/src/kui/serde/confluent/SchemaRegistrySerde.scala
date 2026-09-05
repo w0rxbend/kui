@@ -13,9 +13,10 @@ import kui.serde.*
   *
   * Parsing is the expensive half of decoding — an Avro schema of a few hundred fields costs far more to parse
   * than one record costs to read — and a schema id is immutable, so a parsed schema is valid for as long as
-  * the process runs. The three cases are the three registry schema languages; `Protobuf` carries the field table `ProtoSchema` parsed out of the registry's `.proto` text, which is
-  * where the expense is: the wire format names field *numbers*, so every record has to be read against that
-  * table and none of it can be recovered from the bytes.
+  * the process runs. The three cases are the three registry schema languages; `Protobuf` carries the field
+  * table `ProtoSchema` parsed out of the registry's `.proto` text, which is where the expense is: the wire
+  * format names field *numbers*, so every record has to be read against that table and none of it can be
+  * recovered from the bytes.
   */
 enum ParsedSchema {
   case Avro(schema: org.apache.avro.Schema)
@@ -245,9 +246,9 @@ object SchemaRegistrySerde {
       *
       * Reading is implemented (`ProtoSchema` and `ProtobufPayload`); writing is not. Encoding needs the
       * reverse of the same table plus the canonical-JSON parsing rules for every scalar type, and getting
-      * that subtly wrong writes a malformed record into a topic that outlives the mistake — whereas getting
-      * a decode wrong shows one bad row on a screen. A named refusal before the write is the honest
-      * behaviour until the encoder is written and tested against real producers.
+      * that subtly wrong writes a malformed record into a topic that outlives the mistake — whereas getting a
+      * decode wrong shows one bad row on a screen. A named refusal before the write is the honest behaviour
+      * until the encoder is written and tested against real producers.
       */
     private def protobufWriteUnsupported(id: Int): String =
       s"schema $id is a Protobuf schema, and KUI can read Protobuf records but cannot yet write one. " +

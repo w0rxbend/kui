@@ -7,8 +7,8 @@ import org.typelevel.log4cats.StructuredLogger
 import sttp.tapir.AnyEndpoint
 
 import kui.contracts.rbac.{EndpointAuthorization, EndpointDecision}
-import kui.kernel.error.{ApplicationError, KuiError}
 import kui.kernel.ClusterId
+import kui.kernel.error.{ApplicationError, KuiError}
 import kui.security.Principal
 import kui.security.rbac.{ClusterFlags, Decision, RbacPolicy}
 

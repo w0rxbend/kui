@@ -24,9 +24,9 @@ import kui.config.ServerConfig
   * has learned all of them, and that only stays true if there is one place where it is decided.
   *
   * The server is `tapir-netty-server-cats` (ADR-003). The long-lived streaming that KUI depends on was
-  * measured on exactly this stack before it was committed to: a
-  * connection held open past ten minutes carried 612 events with no drift, each flushed individually, and
-  * the producing fiber was cancelled 8 ms after the client went away.
+  * measured on exactly this stack before it was committed to: a connection held open past ten minutes carried
+  * 612 events with no drift, each flushed individually, and the producing fiber was cancelled 8 ms after the
+  * client went away.
   */
 object KuiServer {
 

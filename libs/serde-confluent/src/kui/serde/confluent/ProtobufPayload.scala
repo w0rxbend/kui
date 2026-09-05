@@ -16,8 +16,7 @@ import io.circe.Json
   * ==Why the JSON looks the way it does==
   *
   * It follows Protobuf's own canonical JSON mapping where that mapping has an opinion, because an operator
-  * comparing KUI's output with `protoc --decode` or with their own service's logs should see the same
-  * values:
+  * comparing KUI's output with `protoc --decode` or with their own service's logs should see the same values:
   *
   *   - field names are the names declared in the `.proto`, not lowerCamelCase, because that is the spelling
   *     in the schema panel next to the record;
@@ -33,14 +32,14 @@ import io.circe.Json
   *
   * A field number the schema does not declare is rendered as `"unknown_7"` with the best reading of its
   * bytes. Protobuf is designed so that a reader tolerates fields it does not know, and in a viewer that
-  * tolerance is exactly wrong to apply silently: the commonest reason for an unknown field is that the
-  * record was written with a newer schema than the subject's latest version, and an operator staring at a
-  * record with a field missing has no way to discover that. Showing it answers the question.
+  * tolerance is exactly wrong to apply silently: the commonest reason for an unknown field is that the record
+  * was written with a newer schema than the subject's latest version, and an operator staring at a record
+  * with a field missing has no way to discover that. Showing it answers the question.
   */
 object ProtobufPayload {
 
-  /** The wire types, as the encoding defines them. Types 3 and 4 are proto2 groups, which are deprecated
-    * and which [[decode]] reports rather than guesses at.
+  /** The wire types, as the encoding defines them. Types 3 and 4 are proto2 groups, which are deprecated and
+    * which [[decode]] reports rather than guesses at.
     */
   private val VarintWire: Int = 0
   private val Fixed64Wire: Int = 1
@@ -49,8 +48,8 @@ object ProtobufPayload {
   private val EndGroupWire: Int = 4
   private val Fixed32Wire: Int = 5
 
-  /** Parses the schema text a registry returned. Separate from decoding because parsing is the expensive
-    * half and the result is reused for every record written with that schema id.
+  /** Parses the schema text a registry returned. Separate from decoding because parsing is the expensive half
+    * and the result is reused for every record written with that schema id.
     */
   def parse(definition: String): Either[String, ProtoFile] = ProtoSchema.parse(definition)
 
@@ -74,9 +73,7 @@ object ProtobufPayload {
               "These bytes were probably not written by a Schema-Registry-aware Protobuf producer"
           )
         else
-          readIndexPath(body, afterCount, count.toInt, Nil).map((path, offset) =>
-            (path, body.drop(offset))
-          )
+          readIndexPath(body, afterCount, count.toInt, Nil).map((path, offset) => (path, body.drop(offset)))
       }
 
   /** Nobody nests messages a hundred deep; a larger count means the bytes are not what they claim. */
@@ -115,9 +112,9 @@ object ProtobufPayload {
   /** Decodes one message body into a JSON object.
     *
     * Fields are collected in the order they appear on the wire and then emitted in the order the *schema*
-    * declares them, with unknown numbers last. Wire order is an encoder's private business — two producers
-    * of the same message may write the same fields in different orders — so rendering in wire order would
-    * make two identical records look different on screen.
+    * declares them, with unknown numbers last. Wire order is an encoder's private business — two producers of
+    * the same message may write the same fields in different orders — so rendering in wire order would make
+    * two identical records look different on screen.
     */
   private def decodeMessage(
       file: ProtoFile,
@@ -198,16 +195,16 @@ object ProtobufPayload {
         }
     }
 
-  /** A map key as an object member name. JSON objects are keyed by strings, and the canonical mapping says
-    * an integer or boolean key is written as its own text.
+  /** A map key as an object member name. JSON objects are keyed by strings, and the canonical mapping says an
+    * integer or boolean key is written as its own text.
     */
   private def keyText(key: Json): String = key.asString.getOrElse(key.noSpaces)
 
   /** One tag's value, and where the next tag starts.
     *
-    * `declared` is `None` for a field the schema does not know. Its bytes are still read — the wire type
-    * says exactly how many to consume, which is why an unknown field never derails the rest of the message —
-    * and rendered as the most useful reading available.
+    * `declared` is `None` for a field the schema does not know. Its bytes are still read — the wire type says
+    * exactly how many to consume, which is why an unknown field never derails the rest of the message — and
+    * rendered as the most useful reading available.
     */
   private def readValue(
       file: ProtoFile,
@@ -363,8 +360,8 @@ object ProtobufPayload {
   /** 64-bit integers as strings, which is Protobuf's canonical JSON mapping.
     *
     * A JSON number is a double to most readers, and a double cannot hold every `int64`: an order id of
-    * 9007199254740993 would render as ...92, which is a wrong value shown with no warning. A quoted string
-    * is exact and is what every other Protobuf tool prints.
+    * 9007199254740993 would render as ...92, which is a wrong value shown with no warning. A quoted string is
+    * exact and is what every other Protobuf tool prints.
     */
   private def longJson(value: Long): Json = Json.fromString(value.toString)
 
@@ -432,9 +429,8 @@ object ProtobufPayload {
     if offset + width > bytes.length then
       Left(s"the record ends in the middle of a $width-byte value; it is truncated or is not Protobuf")
     else {
-      val value = (0 until width).foldLeft(0L)((acc, index) =>
-        acc | ((bytes(offset + index) & 0xffL) << (8 * index))
-      )
+      val value =
+        (0 until width).foldLeft(0L)((acc, index) => acc | ((bytes(offset + index) & 0xffL) << (8 * index)))
       Right((value, offset + width))
     }
 
