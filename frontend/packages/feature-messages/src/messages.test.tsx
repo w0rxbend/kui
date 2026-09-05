@@ -280,9 +280,20 @@ describe("decoding what the stream sends", () => {
       ok: true,
       value: { kind: "phase", name: "seeking" },
     });
-    expect(decodeBrowseEvent("consumed", '{"messages":10,"bytes":40,"elapsedMs":5}')).toEqual({
+    // The field is `records`, verified against `ConsumedDto` in
+    // `services/message/contract/src/kui/message/contract/StreamEventDtos.scala`. This assertion
+    // used to say `messages`, which the server has never sent — so the decoder read the fallback
+    // and the status line reported "scanned 0 records" for every browse that has ever run, while
+    // the test passed against a payload nobody produces.
+    expect(decodeBrowseEvent("consumed", '{"records":10,"bytes":40,"elapsedMs":5,"filterErrors":2}')).toEqual({
       ok: true,
-      value: { kind: "consumed", consumed: { messages: 10, bytes: 40, elapsedMs: 5 } },
+      value: { kind: "consumed", consumed: { records: 10, bytes: 40, elapsedMs: 5, filterErrors: 2 } },
+    });
+
+    // A server that sends no `filterErrors` is not an error; the field is simply absent.
+    expect(decodeBrowseEvent("consumed", '{"records":3,"bytes":9,"elapsedMs":1}')).toEqual({
+      ok: true,
+      value: { kind: "consumed", consumed: { records: 3, bytes: 9, elapsedMs: 1 } },
     });
   });
 });

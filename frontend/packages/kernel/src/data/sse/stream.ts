@@ -102,6 +102,20 @@ export interface SseSubscriber<A> {
    * while `server` and `transport` are terminal and the connection will read `closed`.
    */
   readonly onError: (error: SseError) => void;
+  /**
+   * Called for a `phase` frame, with its raw payload.
+   *
+   * `phase` is one of ADR-035's shared events, so a caller must not list it among `events` — but
+   * unlike the other three it carries *data* the screen needs. The message browser's status line is
+   * built from it: which partition is being scanned, how far through, whether the scan is seeking or
+   * reading. Neither transport delivered it before this callback existed, so the frames arrived and
+   * were dropped on the floor, and the status line was permanently blank with nothing to say why.
+   *
+   * It is separate from `onEvent` rather than folded into it because `decode` is keyed on the
+   * caller's own event names; a shared event has no place in that switch, and callers that do not
+   * care about progress should not have to handle it at all — hence optional.
+   */
+  readonly onPhase?: ((data: string) => void) | undefined;
 }
 
 /**
@@ -210,6 +224,14 @@ export function openEventSourceWith<A>(
 
   source.addEventListener(SseEventNames.Done, () => {
     closeWith("the stream finished");
+  });
+
+  // Forwarded raw: `phase` is shared, so it never goes through `decode`, which is keyed on the
+  // caller's own event names. See `SseSubscriber.onPhase`.
+  source.addEventListener(SseEventNames.Phase, (event: Event) => {
+    if (closed) return;
+    const payload = payloadOf(event);
+    if (payload !== undefined) subscriber.onPhase?.(payload);
   });
 
   // Heartbeats are deliberately not forwarded: they carry `{}` and exist only to keep the
@@ -344,6 +366,12 @@ export function openFetchStreamWith<A>(
     switch (raw.name) {
       case SseEventNames.Heartbeat:
         return;
+      case SseEventNames.Phase:
+        // Shared, and carrying data. Without this case the frame fell to `default`, where
+        // `subscriber.events.includes("phase")` is false by construction — `rejectSharedNames`
+        // forbids listing it — so every phase frame was silently discarded.
+        subscriber.onPhase?.(raw.data);
+        return;
       case SseEventNames.Done:
         // The cursor rides on the event's `id:`, which the parser has already carried forward. It is
         // recorded before the connection is closed, so a caller watching `connection` for the end
@@ -467,7 +495,8 @@ function rejectSharedNames(events: readonly string[]): void {
   );
   if (shared.length > 0) {
     throw new Error(
-      `these event names are handled by every stream and must not be listed: ${shared.join(", ")}`,
+      `these event names are handled by every stream and must not be listed: ${shared.join(", ")}. ` +
+        `A stream that needs the progress payload takes it through the subscriber's onPhase callback.`,
     );
   }
 }

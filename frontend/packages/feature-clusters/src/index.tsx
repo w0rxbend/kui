@@ -16,13 +16,7 @@ export { BrokerList, type BrokerListProps } from "./BrokerList.jsx";
 export { BrokerDetail, type BrokerDetailProps, type BrokerTabKey, type Loaded } from "./BrokerDetail.jsx";
 export * from "./model.js";
 
-export {
-  fetchClusters,
-  fetchBrokers,
-  fromSection,
-  healthOf,
-  type Fetched,
-} from "./data.js";
+export { fetchClusters, fetchBrokers, healthOf } from "./data.js";
 
 /**
  * The feature's route entry.

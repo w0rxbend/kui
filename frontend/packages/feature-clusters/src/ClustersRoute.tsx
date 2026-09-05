@@ -24,11 +24,11 @@
  */
 import { Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { useKui } from "@kui/kernel";
+import { useKui, valueOf, type Fetched } from "@kui/kernel";
 import { useParams } from "@solidjs/router";
 import { ClusterList } from "./ClusterList.jsx";
 import { BrokerList } from "./BrokerList.jsx";
-import { fetchBrokers, fetchClusters, type Fetched } from "./data.js";
+import { fetchBrokers, fetchClusters } from "./data.js";
 import type { Broker, ClusterSummary } from "./model.js";
 
 export default function Clusters(): JSX.Element {
@@ -129,16 +129,6 @@ function BrokersScreen(props: { readonly clusterId: string }): JSX.Element {
       hrefFor={(brokerId) => kui.paths.broker(props.clusterId, brokerId)}
     />
   );
-}
-
-/**
- * The data, or the fallback.
- *
- * `stale` yields its value: out-of-date data with the reason beside it is more use than nothing,
- * and hiding it is how an operator ends up with a blank screen at the moment something is wrong.
- */
-function valueOf<T>(state: Fetched<T>, fallback: T): T {
-  return state.kind === "ready" || state.kind === "stale" ? state.value : fallback;
 }
 
 /**

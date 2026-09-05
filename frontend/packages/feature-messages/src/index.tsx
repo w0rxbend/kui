@@ -49,3 +49,10 @@ export {
   type SerdeName,
 } from "./browse.js";
 export { toRecord, LARGE_VALUE_BYTES, type MessageDto } from "./wire.js";
+
+/**
+ * The real transport, and the reason it is not `openEventSource`: a browse must be cancellable, and
+ * the native `EventSource` cannot be aborted — a stopped browse would leave a Kafka consumer
+ * assigned on the message service until its budget expired.
+ */
+export { createBrowseTransport } from "./transport.js";

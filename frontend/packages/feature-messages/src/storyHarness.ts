@@ -41,7 +41,7 @@ export function scriptedSession(script: ScriptedStream): BrowseSession {
       }
       handlers.onEvent({
         kind: "consumed",
-        consumed: { messages: (script.records?.length ?? 0) * 140, bytes: 2_400_000, elapsedMs: 820 },
+        consumed: { records: (script.records?.length ?? 0) * 140, bytes: 2_400_000, elapsedMs: 820 },
       });
       if (script.failure !== undefined) {
         handlers.onFailure({ kind: "transport", cause: script.failure });

@@ -72,9 +72,21 @@ export type BrowseFailure =
 
 /** How much Kafka was read to find what is on screen. */
 export interface Consumed {
-  readonly messages: number;
+  /**
+   * How many records the *service* read to produce what arrived — not how many matched.
+   *
+   * The field is `records` on the wire (`ConsumedDto` in
+   * `services/message/contract/.../StreamEventDtos.scala`). It was read here as `messages`, which
+   * the server has never sent, so the fallback applied and this figure was `0` for every browse
+   * that has ever run. That is the exact failure the type's own documentation below warns about:
+   * with the scanned count reading zero, a filtered scan over a million records is indistinguishable
+   * from an empty topic.
+   */
+  readonly records: number;
   readonly bytes: number;
   readonly elapsedMs: number;
+  /** Records the filter itself could not evaluate. Reported rather than silently skipped. */
+  readonly filterErrors?: number | undefined;
 }
 
 /**
@@ -381,9 +393,10 @@ export function decodeBrowseEvent(
         value: {
           kind: "consumed",
           consumed: {
-            messages: numberOr(body["messages"], 0),
+            records: numberOr(body["records"], 0),
             bytes: numberOr(body["bytes"], 0),
             elapsedMs: numberOr(body["elapsedMs"], 0),
+            ...(typeof body["filterErrors"] === "number" ? { filterErrors: body["filterErrors"] } : {}),
           },
         },
       };

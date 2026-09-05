@@ -258,7 +258,7 @@ function BrowseStatus(props: { readonly session: BrowseSession }): JSX.Element {
             {/* "Scanned", not "read": the number is how much of the log was examined, which on a
                 filtered browse is a much larger number than the one beside it, and the two being
                 different is the point. */}
-            scanned {plural(consumed().messages, "record")}
+            scanned {plural(consumed().records, "record")}
           </span>
         )}
       </Show>

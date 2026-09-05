@@ -30,7 +30,8 @@
  * a product judgement, and it is made in one place so that the list, the broker page and the
  * environment rail cannot disagree about what a healthy cluster is.
  */
-import { decodeSection, userMessage, type ApiError, type KuiApiClient, type Section } from "@kui/api";
+import { decodeSection, type KuiApiClient } from "@kui/api";
+import { apiFailure, figure, fromSection, type Fetched } from "@kui/kernel";
 import type { Broker, ClusterSummary, Health } from "./model.js";
 
 /**
@@ -74,84 +75,6 @@ interface BrokerPayload {
   readonly outOfSyncReplicas?: number | null;
   readonly diskUsedBytes?: number | null;
   readonly diskTotalBytes?: number | null;
-}
-
-/**
- * What a screen is given: the data, and the honest state of it.
- *
- * A union rather than `{ data, loading, error }`, for the reason the rest of this codebase gives:
- * three independent fields describe eight states of which five are nonsense, and the nonsense is
- * exactly what renders when a request fails halfway.
- *
- * Named `Fetched` rather than `Loaded` because `BrokerDetail` already exports a `Loaded` with four
- * cases and a bound `onRetry`. This one has six — it carries `stale` and `not-configured`, which a
- * section can be and a tab cannot — and two types with one name in one package is how a call site
- * ends up satisfying the wrong one. They should be merged; that is a change to `BrokerDetail`'s
- * public shape and belongs in its own commit.
- */
-export type Fetched<T> =
-  | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly value: T }
-  /** The data is real and out of date. Shown, with the reason — never hidden. */
-  | { readonly kind: "stale"; readonly value: T; readonly reason: string }
-  | { readonly kind: "failed"; readonly message: string; readonly code: string }
-  /** The principal may not see this. Distinct from failed: retrying will never help. */
-  | { readonly kind: "forbidden" }
-  /** This deployment has not configured the thing. Also distinct: nothing is broken. */
-  | { readonly kind: "not-configured" };
-
-/**
- * Turns a decoded section into the screen's state.
- *
- * Exported because it is the part worth testing directly: five statuses in, six states out, and the
- * two that look alike — `forbidden` and `failed` — must never be collapsed, because one has a retry
- * button that would do nothing and the other has one that works.
- */
-export function fromSection<A, B>(section: Section<A>, map: (data: A) => B): Fetched<B> {
-  switch (section.status) {
-    case "ok":
-      return { kind: "ready", value: map(section.data) };
-    case "stale":
-      return {
-        kind: "stale",
-        value: map(section.data),
-        reason: section.reason.message ?? "This is the last answer KUI received.",
-      };
-    case "forbidden":
-      return { kind: "forbidden" };
-    case "not_configured":
-      return { kind: "not-configured" };
-    case "unavailable":
-    case "unreadable":
-      return {
-        kind: "failed",
-        message: section.reason.message ?? "The cluster service did not answer.",
-        code: section.reason.code,
-      };
-  }
-}
-
-/**
- * A transport or envelope failure, as the screens' state.
- *
- * `userMessage` rather than `error.message`: only the `envelope` case has one. An unreachable
- * gateway, a timeout and a body that would not decode each need a sentence of their own, and
- * reaching for `.message` on those is how a screen ends up rendering "undefined" at the exact
- * moment something is wrong.
- */
-function failure(error: ApiError): Fetched<never> {
-  return {
-    kind: "failed",
-    message: userMessage(error),
-    // The code is what somebody quotes when they ask for help. Only an envelope carries one; the
-    // other three kinds are their own code, which is more use than an empty string.
-    code: error.kind === "envelope" ? error.code : error.kind.toUpperCase(),
-  };
-}
-
-/** `null` rather than `0` for every figure that could not be read. See the header. */
-function figure(value: number | null | undefined): number | null {
-  return typeof value === "number" ? value : null;
 }
 
 /**
@@ -211,7 +134,7 @@ function toBroker(payload: BrokerPayload): Broker {
 /** Every configured cluster. Rows whose scrape failed are kept, with their figures absent. */
 export async function fetchClusters(api: KuiApiClient): Promise<Fetched<readonly ClusterSummary[]>> {
   const answer = await api.get("/api/v1/clusters", {});
-  if (!answer.ok) return failure(answer.error);
+  if (!answer.ok) return apiFailure(answer.error);
   const section = decodeSection<readonly ClusterRowPayload[]>(answer.value.clusters);
   return fromSection(section, (rows) => rows.map(toClusterSummary));
 }
@@ -224,7 +147,7 @@ export async function fetchBrokers(
   const answer = await api.get("/api/v1/clusters/{clusterId}/brokers", {
     params: { path: { clusterId } },
   });
-  if (!answer.ok) return failure(answer.error);
+  if (!answer.ok) return apiFailure(answer.error);
   const section = decodeSection<readonly BrokerPayload[]>(answer.value.brokers);
   return fromSection(section, (rows) => rows.map(toBroker));
 }

@@ -96,3 +96,18 @@ export {
   type Permissions,
 } from "./permissions/store.js";
 
+/**
+ * What a screen is given: the data plus an honest account of its state, and the two mappings that
+ * produce it from a section or from a transport failure.
+ *
+ * Six cases rather than three, because `stale`, `forbidden` and `not-configured` each call for a
+ * different sentence and a different next action — and collapsing any of them into `failed` puts a
+ * retry button in front of a user for whom retrying is pointless.
+ */
+export {
+  apiFailure,
+  figure,
+  fromSection,
+  valueOf,
+  type Fetched,
+} from "./fetched.js";

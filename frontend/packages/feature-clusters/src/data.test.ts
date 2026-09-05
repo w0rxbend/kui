@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KuiApiClient } from "@kui/api";
-import { fetchBrokers, fetchClusters, fromSection, healthOf } from "./data.js";
+import { fetchBrokers, fetchClusters, healthOf } from "./data.js";
 
 /**
  * The cluster feature's data layer.
@@ -176,19 +176,5 @@ describe("healthOf", () => {
 
   it("says unknown when there was no scrape, rather than guessing", () => {
     expect(healthOf(undefined)).toBe("unknown");
-  });
-});
-
-describe("fromSection", () => {
-  it("maps all six statuses to distinct states", () => {
-    const id = <T,>(value: T): T => value;
-    expect(fromSection({ status: "ok", data: 1, fetchedAt: "" }, id).kind).toBe("ready");
-    expect(fromSection({ status: "stale", data: 1, fetchedAt: "", reason: { code: "x" } }, id).kind).toBe("stale");
-    // `fromSection` takes an already-decoded `Section`, whose reason IS a `{code, message}` object —
-    // the flattening happens in `decodeSection`, one layer down. The two shapes are easy to confuse.
-    expect(fromSection({ status: "forbidden" }, id).kind).toBe("forbidden");
-    expect(fromSection({ status: "not_configured" }, id).kind).toBe("not-configured");
-    expect(fromSection({ status: "unavailable", reason: { code: "x" } }, id).kind).toBe("failed");
-    expect(fromSection({ status: "unreadable", reason: { code: "x" } }, id).kind).toBe("failed");
   });
 });
