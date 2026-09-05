@@ -79,6 +79,9 @@ importers:
       openapi-typescript:
         specifier: 7.13.0
         version: 7.13.0(typescript@5.9.3)
+      vitest:
+        specifier: 5.0.0
+        version: 5.0.0(@vitest/coverage-v8@5.0.0)(@vitest/ui@5.0.0)(jsdom@30.0.1)(vite@8.2.2(esbuild@0.28.2))
 
   packages/feature-clusters:
     dependencies:

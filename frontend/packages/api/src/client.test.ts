@@ -1,0 +1,226 @@
+import { describe, expect, test } from "vitest";
+
+import { createApiClient } from "./client.js";
+import { CsrfHeaderName, createCsrfTokens } from "./csrf.js";
+import { ErrorCodes } from "./constants.generated.js";
+import { FallbackBootstrap } from "./bootstrap.js";
+
+/**
+ * What the client must do on every request, and what it must never do to the page.
+ *
+ * Every test here corresponds to a defect this product has shipped, and the comment says which. A
+ * test that is only "coverage" would be deleted the first time it was inconvenient; a test that
+ * names the outage it prevents is not.
+ */
+
+/** Records what was sent, and answers with whatever the test asked for. */
+function recordingFetch(reply: (request: Request) => Response): {
+  fetch: (request: Request) => Promise<Response>;
+  sent: Request[];
+} {
+  const sent: Request[] = [];
+  return {
+    sent,
+    fetch: (request: Request) => {
+      sent.push(request);
+      return Promise.resolve(reply(request));
+    },
+  };
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function clientWith(
+  transport: (request: Request) => Promise<Response>,
+  csrf = createCsrfTokens(),
+  onUnauthorized?: () => void,
+) {
+  return createApiClient({
+    bootstrap: FallbackBootstrap,
+    origin: "https://kui.example.com",
+    csrf,
+    fetch: transport,
+    ...(onUnauthorized ? { onUnauthorized } : {}),
+  });
+}
+
+describe("the CSRF header", () => {
+  test("a mutation carries the token under the name the gateway reads", async () => {
+    // The defect: the browser sent `X-Kui-Csrf` while the gateway read `X-Csrf-Token`, so every
+    // mutation came back 403 and looked like a permissions problem.
+    const csrf = createCsrfTokens();
+    csrf.settle("token-abc");
+    const transport = recordingFetch(() => json({}));
+
+    await clientWith(transport.fetch, csrf).post("/api/v1/clusters/{clusterId}/refresh", {
+      params: { path: { clusterId: "local" } },
+    });
+
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]?.headers.get(CsrfHeaderName)).toBe("token-abc");
+    expect(CsrfHeaderName).toBe("X-Csrf-Token");
+  });
+
+  test("a GET carries no token, so a deep link works in a fresh tab", async () => {
+    const csrf = createCsrfTokens();
+    csrf.settle("token-abc");
+    const transport = recordingFetch(() => json({ entries: [] }));
+
+    await clientWith(transport.fetch, csrf).get("/api/v1/capabilities");
+
+    expect(transport.sent[0]?.headers.get(CsrfHeaderName)).toBeNull();
+  });
+
+  test("a mutation issued before start-up finishes waits rather than being sent without a token", async () => {
+    // The defect: nothing called `/auth/me`, the token stayed absent for the life of the page, and
+    // every mutation was refused — including the "Retry now" button in the degraded-feature panel.
+    const csrf = createCsrfTokens();
+    const transport = recordingFetch(() => json({}));
+    const client = clientWith(transport.fetch, csrf);
+
+    const inFlight = client.post("/api/v1/clusters/{clusterId}/refresh", {
+      params: { path: { clusterId: "local" } },
+    });
+
+    // Nothing has been sent: the request is parked on the gate, not on the network.
+    await Promise.resolve();
+    expect(transport.sent).toHaveLength(0);
+
+    csrf.settle("late-token");
+    await inFlight;
+
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]?.headers.get(CsrfHeaderName)).toBe("late-token");
+  });
+
+  test("a session with no token sends the request anyway, so the gateway can say why", async () => {
+    const csrf = createCsrfTokens();
+    csrf.settle(undefined);
+    const transport = recordingFetch(() => json({}));
+
+    await clientWith(transport.fetch, csrf).post("/api/v1/clusters/{clusterId}/refresh", {
+      params: { path: { clusterId: "local" } },
+    });
+
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]?.headers.get(CsrfHeaderName)).toBeNull();
+  });
+
+  test("an empty token is no token", async () => {
+    // `X-Csrf-Token: ` is rejected exactly as a missing header is, but with a far more confusing
+    // message in the gateway's log.
+    const csrf = createCsrfTokens();
+    csrf.settle("");
+    expect(csrf.currentToken()).toBeUndefined();
+  });
+});
+
+describe("failures are values, never exceptions", () => {
+  test("a network failure answers with `unreachable` instead of rejecting", async () => {
+    // The defect: an unhandled failure travelled through the reactive graph and took the
+    // subscription with it, so the page went blank instead of showing "cannot reach the server".
+    const client = clientWith(() => Promise.reject(new TypeError("Failed to fetch")));
+
+    const answer = await client.get("/api/v1/capabilities");
+
+    expect(answer.ok).toBe(false);
+    if (!answer.ok) {
+      expect(answer.error.kind).toBe("unreachable");
+    }
+  });
+
+  test("an error envelope decodes to its stable code", async () => {
+    const client = clientWith(() =>
+      Promise.resolve(
+        json(
+          {
+            code: ErrorCodes.ClusterNotFound,
+            message: "no cluster 'nope'",
+            details: [],
+            correlationId: "cid-1",
+            timestamp: "2026-09-05T10:00:00.000Z",
+            retryable: false,
+          },
+          404,
+        ),
+      ),
+    );
+
+    const answer = await client.get("/api/v1/capabilities");
+
+    expect(answer.ok).toBe(false);
+    if (!answer.ok && answer.error.kind === "envelope") {
+      expect(answer.error.code).toBe(ErrorCodes.ClusterNotFound);
+      expect(answer.error.correlationId).toBe("cid-1");
+      expect(answer.error.retryable).toBe(false);
+    }
+  });
+
+  test("a body that is not an envelope becomes a decoding failure, not a crash", async () => {
+    // A reverse proxy substituting an HTML error page for a JSON one is the usual source.
+    const client = clientWith(() =>
+      Promise.resolve(new Response("<html>502 Bad Gateway</html>", { status: 502 })),
+    );
+
+    const answer = await client.get("/api/v1/capabilities");
+
+    expect(answer.ok).toBe(false);
+    if (!answer.ok) expect(answer.error.kind).toBe("decoding");
+  });
+});
+
+describe("the session", () => {
+  test("a 401 is reported before the caller sees the failure, and clears the token", async () => {
+    let expired = 0;
+    const csrf = createCsrfTokens();
+    csrf.settle("token-abc");
+    const client = clientWith(
+      () => Promise.resolve(json({ code: ErrorCodes.Unauthenticated, message: "gone" }, 401)),
+      csrf,
+      () => {
+        expired += 1;
+      },
+    );
+
+    await client.get("/api/v1/auth/me");
+
+    expect(expired).toBe(1);
+    expect(csrf.currentToken()).toBeUndefined();
+  });
+});
+
+describe("the request itself", () => {
+  test("path parameters are substituted and the deployment prefix is kept", async () => {
+    const csrf = createCsrfTokens();
+    csrf.settle("t");
+    const transport = recordingFetch(() => json({}));
+
+    await createApiClient({
+      bootstrap: { basePath: "/kafka", apiBase: "/kafka/api/v1", buildVersion: "test" },
+      origin: "https://tools.example.com",
+      csrf,
+      fetch: transport.fetch,
+    }).post("/api/v1/clusters/{clusterId}/refresh", { params: { path: { clusterId: "local" } } });
+
+    expect(transport.sent[0]?.url).toBe(
+      "https://tools.example.com/kafka/api/v1/clusters/local/refresh",
+    );
+  });
+
+  test("no X-Kui-* header is ever sent", async () => {
+    // The gateway strips every inbound `X-Kui-*` header at the edge (ADR-040), so one the browser
+    // sent would be discarded and appear in no log. The old client sent `X-Kui-Request-Id` and it
+    // could never have been read.
+    const transport = recordingFetch(() => json({ entries: [] }));
+
+    await clientWith(transport.fetch).get("/api/v1/capabilities");
+
+    const names = [...(transport.sent[0]?.headers.keys() ?? [])];
+    expect(names.filter((name) => name.toLowerCase().startsWith("x-kui-"))).toEqual([]);
+  });
+});

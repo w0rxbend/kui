@@ -17,6 +17,7 @@
     "openapi-typescript-helpers": "0.1.0"
   },
   "devDependencies": {
-    "openapi-typescript": "7.13.0"
+    "openapi-typescript": "7.13.0",
+    "vitest": "5.0.0"
   }
 }
