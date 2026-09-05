@@ -31,7 +31,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "@solidjs/web";
 import { flush } from "solid-js";
 
+import { Actions, Resources } from "@kui/api";
+
 import { App } from "./App.jsx";
+import { featureRegistry } from "./features/registry.js";
 
 /**
  * An `EventSource` that connects to nothing.
@@ -154,5 +157,56 @@ describe("the application, mounted", () => {
     expect(drawer?.textContent).toContain("Overview");
 
     app.dispose();
+  });
+});
+
+/**
+ * Every feature's view permission must be spelled the way the server spells it.
+ *
+ * The shell used to ask `permits(serviceId, "view", …)`, which compared `"topic"` against `TOPIC`
+ * and `"view"` against `VIEW` by exact string, and asked for a resource called `"cluster"` that
+ * does not exist at all — the cluster feature is gated on `CLUSTERCONFIG`. Every question answered
+ * "no" the instant `/auth/me` replied, so on the demonstration environment, where authentication is
+ * *disabled* and the principal holds a grant on every resource and every cluster, the whole drawer
+ * went dim and each page read "You do not have permission to view …".
+ *
+ * Checking the registrations against the generated vocabulary is cheap and catches the reappearance
+ * of that whole class: a value not drawn from `Actions` cannot match, and a hand-written string can
+ * no longer be one.
+ */
+describe("the permissions the features ask for", () => {
+  it("names only actions from the generated vocabulary", () => {
+    const known = new Set(Object.values(Actions).map((a) => `${a.resource}:${a.action}`));
+    for (const registration of featureRegistry) {
+      expect(known).toContain(`${registration.viewAction.resource}:${registration.viewAction.action}`);
+    }
+  });
+
+  it("asks about a resource the server's own enum contains", () => {
+    const resources = new Set<string>(Object.values(Resources));
+    for (const registration of featureRegistry) {
+      expect(resources).toContain(registration.viewAction.resource);
+    }
+  });
+
+  it("lets a principal holding a wildcard grant see every feature", () => {
+    // This is the shape `/auth/me` really returns when authentication is disabled: one grant per
+    // resource, scoped to every cluster. Under the old spelling this expectation failed for all
+    // four features at once.
+    const grants = featureRegistry.map((registration) => ({
+      clusters: ["*"],
+      resource: registration.viewAction.resource,
+      value: ".*",
+      actions: [registration.viewAction.action],
+    }));
+
+    for (const registration of featureRegistry) {
+      const covering = grants.filter(
+        (grant) =>
+          grant.resource === registration.viewAction.resource &&
+          grant.actions.includes(registration.viewAction.action),
+      );
+      expect(covering.length).toBeGreaterThan(0);
+    }
   });
 });

@@ -241,7 +241,12 @@ export function App() {
       // A control the caller may not use is disabled and explains itself rather than failing at the
       // server. Until the session has answered, permission is assumed: refusing everything while
       // `/auth/me` is in flight would flash a forbidden navigation on every load.
-      session.identity() === undefined || session.permits(registration.serviceId, "view", cluster.selected()),
+      session.identity() === undefined ||
+        session.permits(
+          registration.viewAction.resource,
+          registration.viewAction.action,
+          cluster.selected(),
+        ),
     );
 
   /** Every feature's registration paired with what the shell currently knows about it. */

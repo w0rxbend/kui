@@ -26,6 +26,7 @@
  * it leaks into the entry chunk's static imports.
  */
 import type { Component } from "solid-js";
+import type { PermissionAction } from "@kui/api";
 import type { IconName } from "../icon.jsx";
 
 /**
@@ -80,6 +81,22 @@ export function featureModule(chunk: unknown): FeatureModule {
 export type FeatureRegistration = {
   readonly id: FeatureId;
   readonly serviceId: ServiceId;
+  /**
+   * The permission a user needs to see this feature at all, from the generated RBAC vocabulary.
+   *
+   * It is stated rather than derived from {@link serviceId}, and that is the entire point. The
+   * shell used to ask `permits(serviceId, "view", …)` — passing `"topic"` and `"view"` where the
+   * server's vocabulary spells them `TOPIC` and `VIEW`, and where the cluster feature's resource is
+   * not `"cluster"` at all but `CLUSTERCONFIG`. Matching is by exact string, so every question
+   * answered "no" the moment `/auth/me` replied, and every destination in the drawer went dim with
+   * "You do not have permission to view Topics." on a deployment with authentication *disabled* and
+   * a principal holding a grant on every resource and every cluster.
+   *
+   * Typing it as `PermissionAction` is what stops that returning: the values come from `Actions`,
+   * which the build emits from the server's own enums, so a rename on the server fails this file's
+   * compilation instead of silently locking every operator out of the product.
+   */
+  readonly viewAction: PermissionAction;
   /** The words on the navigation entry, and the subject of every sentence written about it. */
   readonly label: string;
   readonly icon: IconName;

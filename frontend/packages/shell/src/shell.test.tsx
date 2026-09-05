@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { render } from "@solidjs/web";
 import { flush, type Accessor } from "solid-js";
 import { createSignal } from "solid-js";
-import { ReasonCodes } from "@kui/api";
+import { Actions, ReasonCodes } from "@kui/api";
 import { deriveFeatureState, type FeatureRegistration, type FeatureState } from "@kui/kernel";
 
 import { FeatureGate } from "./features/FeatureGate.jsx";
@@ -21,6 +21,7 @@ import { clusterSummaries, currentFeatureId } from "./App.jsx";
 const topics: FeatureRegistration = {
   id: "topics",
   serviceId: "topic",
+  viewAction: Actions.TopicView,
   label: "Topics",
   icon: "topics",
   group: "Cluster",
@@ -34,6 +35,7 @@ const clusters: FeatureRegistration = {
   ...topics,
   id: "clusters",
   serviceId: "cluster",
+  viewAction: Actions.ClusterConfigView,
   label: "Clusters",
   icon: "brokers",
   order: 100,

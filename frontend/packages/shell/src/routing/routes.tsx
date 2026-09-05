@@ -63,8 +63,19 @@ export function shellRoutes(views: RouteViews) {
     // `path` produce two separate branches of which only the first is reachable through `paths`. The
     // nesting is what makes `paths.clusters("prod").topics()` and `.brokers()` both exist.
     {
+      // No `component` on this node, and that is deliberate. A parent route's component is a
+      // *layout*: the router renders it and passes the matched child as `props.children`, so a
+      // layout that does not render its children replaces them. `gate("clusters")` renders one
+      // feature and has no children slot, so with it here every address below `/clusters` drew the
+      // cluster list — `/clusters/development/topics` and `/clusters/development/consumer-groups`
+      // both showed it, while the drawer correctly highlighted Topics and Consumers and the address
+      // bar said what the user had actually asked for. Three separate signals agreed and the page
+      // disagreed with all of them.
+      //
+      // The index child below is what renders the cluster list at `/clusters` itself; this node
+      // exists only to group the tree, which is what makes `paths.clusters("prod").topics()`
+      // resolve.
       path: "/clusters",
-      component: gate("clusters"),
       children: [
         { path: "/", component: gate("clusters") },
         { path: "/manage", component: gate("clusters") },

@@ -21,6 +21,7 @@
  * not here: they live in `routing/routes.tsx` as literals, so that every link is built through the
  * router's typed path proxy rather than assembled out of string fragments.
  */
+import { Actions } from "@kui/api";
 import { featureModule, type FeatureRegistration } from "@kui/kernel";
 
 /**
@@ -36,6 +37,9 @@ export const featureRegistry: readonly FeatureRegistration[] = [
     // The feature is `clusters` and the service behind it is `cluster`, singular. The two are not
     // the same word, which is exactly why neither is guessed from the other.
     serviceId: "cluster",
+    // A cluster is administered through its configuration resource, which is why this is not
+    // `Resources.Topic`-style guessable from the service name.
+    viewAction: Actions.ClusterConfigView,
     label: "Clusters",
     icon: "brokers",
     group: "Cluster",
@@ -47,6 +51,7 @@ export const featureRegistry: readonly FeatureRegistration[] = [
   {
     id: "topics",
     serviceId: "topic",
+    viewAction: Actions.TopicView,
     label: "Topics",
     icon: "topics",
     group: "Cluster",
@@ -58,6 +63,10 @@ export const featureRegistry: readonly FeatureRegistration[] = [
   {
     id: "messages",
     serviceId: "message",
+    // Records live inside a topic, so reading them is a topic permission and a distinct action from
+    // viewing the topic itself: an operator may be allowed to see that a topic exists without being
+    // allowed to read what is in it.
+    viewAction: Actions.TopicMessagesRead,
     label: "Messages",
     icon: "messages",
     group: "Cluster",
@@ -74,6 +83,7 @@ export const featureRegistry: readonly FeatureRegistration[] = [
   {
     id: "consumers",
     serviceId: "consumer",
+    viewAction: Actions.ConsumerGroupView,
     label: "Consumers",
     icon: "consumers",
     group: "Cluster",
