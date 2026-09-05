@@ -2,8 +2,8 @@
  * The clusters feature: the cluster list, the broker list, and one broker's log directories and
  * configuration.
  *
- * Presentational, like the consumers feature. Nothing here fetches; the data layer maps the wire
- * onto the view models in `model.ts` and hands them down, which is what makes every failing
+ * The screens are presentational: none of them fetches. `data.ts` maps the wire onto the view
+ * models in `model.ts` and `ClustersRoute.tsx` hands them down, which is what makes every failing
  * rendering reachable from a story without a broken cluster to hand.
  *
  * The module has a default export because the shell reaches it through
@@ -16,15 +16,19 @@ export { BrokerList, type BrokerListProps } from "./BrokerList.jsx";
 export { BrokerDetail, type BrokerDetailProps, type BrokerTabKey, type Loaded } from "./BrokerDetail.jsx";
 export * from "./model.js";
 
-import { ClusterList } from "./ClusterList.jsx";
-import { SAMPLE_CLUSTERS } from "./fixtures.js";
+export {
+  fetchClusters,
+  fetchBrokers,
+  fromSection,
+  healthOf,
+  type Fetched,
+} from "./data.js";
 
 /**
- * The feature's route entry — the cluster list, on the fixtures, until the data layer is wired.
+ * The feature's route entry.
  *
- * It draws the real screen rather than a placeholder sentence, so the lazy-loading seam is proved
- * with the thing it will actually load.
+ * It used to render `SAMPLE_CLUSTERS` — a screen that looked like it worked and showed invented
+ * data, which is the most dangerous state this product can be in. It now fetches, through the
+ * `useKui()` seam the shell provides.
  */
-export default function Clusters() {
-  return <ClusterList clusters={SAMPLE_CLUSTERS} hrefFor={(id) => `#/clusters/${encodeURIComponent(id)}`} />;
-}
+export { default } from "./ClustersRoute.jsx";
