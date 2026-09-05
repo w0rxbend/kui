@@ -1,0 +1,70 @@
+# The KUI interface, added to whichever backend stack you are running.
+#
+#   docker compose \
+#     -f deployment/quickstart/docker-compose.quickstart.yml \
+#     -f deployment/frontend/docker-compose.frontend.yml \
+#     up --build
+#
+#   open http://localhost:8090/ui/
+#
+# ## Why this is a separate file rather than a service in the quickstart
+#
+# The two halves are built and released independently — that is the point of the frontend having its
+# own image — and a compose file per half is what makes that visible. A deployment that runs its own
+# interface, or none, drops this file; one that pins a frontend version pins it here without touching
+# the backend stack.
+#
+# ## Why nginx and not the browser calling the gateway directly
+#
+# Same origin. The session is a cookie and every mutation carries a CSRF header (ADR-019); a second
+# origin means CORS, `SameSite` decisions and a preflight on every mutation, all to avoid one
+# `proxy_pass`. See `Dockerfile`.
+services:
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deployment/frontend/Dockerfile
+    image: kui-frontend:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-frontend
+    ports:
+      - "${KUI_FRONTEND_PORT:-8090}:8082"
+    environment:
+      # Where the API is. A service name on this network, not a published port: the browser never
+      # talks to the gateway directly, so the gateway does not have to be reachable from the host at
+      # all for the interface to work.
+      KUI_GATEWAY_URL: ${KUI_GATEWAY_URL:-http://kui:8080}
+      # Empty unless KUI is mounted under a path by an outer proxy. `/kui` would serve the interface
+      # at `/kui/ui/` and proxy `/kui/api/`.
+      KUI_BASE_PATH: ${KUI_BASE_PATH:-}
+      # Shown on the settings page and quoted in bug reports. "unknown" is what an unset one says,
+      # which is at least honest — a report naming no build is a report nobody can place.
+      KUI_BUILD_VERSION: ${KUI_VERSION:-0.1.0-SNAPSHOT}
+    depends_on:
+      kui:
+        # nginx resolves `kui` at start-up, so a gateway that is not there yet is a 502 on the first
+        # request with nothing to say that waiting would have fixed it.
+        condition: service_healthy
+    networks:
+      - kui-quickstart
+    read_only: true
+    tmpfs:
+      # nginx-unprivileged writes its pid, its client bodies and its caches under /tmp; the
+      # entrypoint renders the page's two markers into /tmp/kui.
+      - /tmp
+    volumes:
+      # The server configuration is written at start from the environment, and the image's own
+      # filesystem is read-only. A tmpfs here is what lets both be true — the alternative is dropping
+      # `read_only`, which gives up a real containment property to save one mount.
+      #
+      # The long form rather than the `tmpfs:` list above, because this one needs a mode: a tmpfs is
+      # mounted root-owned, this image runs as uid 101, and the entrypoint's write would otherwise
+      # fail with "Permission denied" on a directory that plainly exists.
+      - type: tmpfs
+        target: /etc/nginx/conf.d
+        tmpfs:
+          mode: 0777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped

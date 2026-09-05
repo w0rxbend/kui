@@ -1,4 +1,4 @@
-# What must not enter the build context for deployment/solid-preview/Dockerfile.
+# What must not enter the build context for deployment/frontend/Dockerfile.
 #
 # BuildKit reads `<dockerfile>.dockerignore` beside the Dockerfile in preference to a `.dockerignore`
 # at the root of the context, which is why this lives here.
@@ -14,7 +14,9 @@
 # the dependency tree is out of date and re-runs `pnpm install`, which fails inside a build that
 # already installed everything correctly.
 #
-# `deployment/quickstart/Dockerfile.dockerignore` has the anchored form and the same latent problem.
+# `deployment/quickstart/Dockerfile.dockerignore` used to have the anchored form and the same latent
+# problem; it was fixed when the release image started building the interface, and again when it
+# stopped.
 **/node_modules/
 
 # Build output. `out/` is a full Mill tree and is routinely gigabytes; the rest is this build's own
@@ -41,14 +43,16 @@ services/
 apps/
 e2e/
 build-tests/
-deployment/
 docs/
 research/
-frontend/ui-clusters/
-frontend/ui-consumers/
-frontend/ui-kernel/
-frontend/ui-messages/
-frontend/ui-shell/
-frontend/ui-topics/
+
+# `deployment/` is *not* excluded wholesale any more: this image copies its own entrypoint out of
+# it. Excluding the directory and then `COPY deployment/frontend/entrypoint.sh` is a build that
+# fails with "not found" on a file that is plainly there, which is a confusing ten minutes.
+deployment/compose/
+deployment/demo/
+deployment/quickstart/
+deployment/secured/
+deployment/storybook/
 
 **/*.log
