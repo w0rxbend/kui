@@ -101,7 +101,7 @@ the build on any of these edges:
 | A4 | `services.gateway.*` → any `services.<other>.{domain,application,infrastructure,api,app}` (only `contract` is allowed) |
 | A5 | `libs/*` → any `services/*` or `frontend/*` module |
 | A6 | `libs.kernel`, `libs.contractsCore`, `libs.securityCore` → any JVM-only dependency, checked on the shared and `.js` halves; the `.jvm` half is exempt (Amendment 2) |
-| A7 | `frontend/ui-shell` → a *static* reference to a `kui.ui.<feature>` class (checked by the bundle-shape assertion, not by this task) |
+| A7 | *(withdrawn by ADR-048)* The shell must not statically reference a feature's implementation. The rule is unchanged as a property but no longer belongs here: the frontend is not a Mill module, so `checkArchitecture` cannot see it. It is checked on the frontend's own side, against the Vite build manifest's module graph — ADR-012 as amended by ADR-048 §4 |
 | A8 | `services.gateway.*` → `libs.kafka`, `libs.kafka-auth`, `fs2-kafka` or `kafka-clients` (ADR-004 §3: the gateway holds no Kafka client) |
 
 A3 names `libs.contractsCore` explicitly, and scopes itself to services that own a domain;

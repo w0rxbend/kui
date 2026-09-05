@@ -6,16 +6,19 @@ to one. **Nothing here is a hand-written mirror of a server type, and nothing ou
 
 That rule is what replaces the guarantee ADR-011 got for free. Under Scala.js the browser and the
 server compiled against the same Tapir endpoint values, so renaming a field broke both halves at
-once. ADR-048 gives that up and buys it back with generation plus three build gates.
+once. ADR-048 gave that up and buys it back with generation plus three gates — one on each side of
+the seam, because there are now two builds and neither can fail the other's.
 
 ## The chain, end to end
 
 ```
 a Tapir endpoint changes shape
-  └─ ./mill __.openApiCheck                fails until docs/api/openapi.json and
-     │                                     docs/api/openapi.browser.json are regenerated
-     └─ ./mill frontend.apiTypes --check   fails until src/schema.d.ts is regenerated
-        └─ ./mill frontend.typecheck       fails at every call site that used the old shape
+  └─ ./mill __.openApiCheck                     fails until docs/api/openapi.json and
+     │              (Mill, backend)             docs/api/openapi.browser.json are regenerated
+     └─ pnpm --filter @kui/api run generate     rewrites src/schema.d.ts from the browser document;
+        │           (pnpm, frontend)            a stale committed file shows up as a diff
+        └─ pnpm typecheck                       fails at every call site that used the old shape
+                    (pnpm, frontend)
 ```
 
 Three build failures, and a browser never enters into it. Measured, not asserted: renaming
@@ -39,13 +42,19 @@ and the types should force it to. It is computed, never maintained: `BrowserProj
 ## Regenerating
 
 ```
-./mill services.gateway.api.openApi     # both documents, from the Tapir endpoints
-./mill frontend.apiTypes                # src/schema.d.ts, from the browser document
-./mill frontend.apiConstants            # src/constants.generated.ts, from the Scala constants
+./mill services.gateway.api.openApi              # both documents, from the Tapir endpoints
+./mill frontend.apiConstants                     # src/constants.generated.ts, from the Scala constants
+pnpm --filter @kui/api run generate              # src/schema.d.ts, from the browser document
 ```
 
-Each has a `--check` mode that CI runs. Two files in `src/` are generated and must not be edited:
-`schema.d.ts` and `constants.generated.ts`.
+The two Mill commands take `--check`, which fails when the committed file no longer matches the
+Scala it came from. `schema.d.ts` has no `--check`: regenerate it and let a non-empty `git diff` be
+the failure. Both generated files live in `src/` and must not be edited by hand.
+
+The split is deliberate. `apiConstants` runs on the backend's side because it reads Scala
+definitions and writes a TypeScript file, and it needs no Node; `generate` runs on the frontend's
+side because it reads a committed JSON document and needs no JVM. Neither build depends on the
+other's toolchain, which is the whole arrangement ADR-048 describes.
 
 `constants.generated.ts` exists because two strings never appear in an OpenAPI document and have
 both caused shipped defects: the CSRF header's name (the browser once sent `X-Kui-Csrf` while the

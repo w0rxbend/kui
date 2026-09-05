@@ -4,11 +4,18 @@ This document is written for somebody who has never seen this project. It descri
 microfrontend is in KUI, the seven steps that add one, and the five rules that were each learned by
 getting something wrong in a way nobody could see.
 
-It describes **what `ui-topics` does**. `ui-clusters` came first, is nearly the same shape, and is
-described here as the earlier approximation: where the two disagree, `ui-topics` is the pattern,
-because it was written with `ui-clusters`' recorded deviations in front of it. A third feature (M3's
-message explorer) will be the one that discovers whether any of this fits badly, which is why
-nothing here has been extracted into a base class — an abstraction over two data points is a guess.
+It describes **what `@kui/feature-topics` does**. `@kui/feature-clusters` came first, is nearly the
+same shape, and is described here as the earlier approximation: where the two disagree,
+`feature-topics` is the pattern, because it was written with `feature-clusters`' recorded deviations
+in front of it. Nothing here has been extracted into a base component — an abstraction over two data
+points is a guess.
+
+> **A note on this document.** KUI's browser code was Scala.js and Laminar until 2026-09-05
+> (ADR-048). The *policy* below — the two-halves registration, the split border, the four failure
+> states, the five rules — was ported rather than redesigned, which is why it is still here. Sections
+> 1 to 4 and section 8's harness facts have been reconciled against the TypeScript. Later sections
+> still show Scala in their examples: read the rule and not the syntax, and check the package for the
+> current spelling.
 
 Its sibling is [`components.md`](components.md), which is about the shared *components* a feature
 draws with. Neither document repeats the other.
@@ -23,9 +30,11 @@ and connectors will be.
 
 Concretely, a feature is:
 
-- a **Scala.js class** implementing `kui.ui.kernel.feature.KuiFeature`,
-- in a **Mill module of its own** (`frontend/ui-topics`),
-- which the Scala.js linker emits as **its own JavaScript file**, separate from `main.js`,
+- a **package of its own** in the pnpm workspace (`frontend/packages/feature-topics`, published to
+  the workspace as `@kui/feature-topics`),
+- whose **default export** is the root SolidJS component the shell renders for every one of its
+  routes,
+- which **Vite emits as its own chunk**, separate from the entry chunk,
 - fetched by the browser **the first time somebody navigates to it**,
 - and named in **exactly one place** in the whole application.
 
@@ -35,15 +44,15 @@ that installation should not download the schema screens. A user who only ever l
 dashboard should not download the topic explorer either. So the code is split at the feature
 boundary and fetched on demand.
 
-The mechanism is one expression, in `kui.ui.shell.FeatureRegistryImpl`:
+The mechanism is one expression, in `frontend/packages/shell/src/features/registry.ts`:
 
-```scala
-FeatureId.Topics -> (() => js.dynamicImport(new kui.ui.topics.TopicsFeature()))
+```ts
+load: () => import("@kui/feature-topics").then(featureModule),
 ```
 
-`js.dynamicImport` is a **split border** to the Scala.js linker. Everything reachable *only* through
-it is put into a separate JavaScript module. Read §4 before you write one, because the border is
-easy to destroy by accident and destroying it looks like nothing at all.
+A dynamic `import()` with a literal specifier is a **split border** to the bundler. Everything
+reachable *only* through it goes into a chunk of its own. Read §4 before you write one, because the
+border is easy to destroy by accident and destroying it looks like nothing at all.
 
 ---
 
@@ -53,98 +62,91 @@ Seven steps. Each one names the file. The exercise that produced this list was p
 throwaway feature and deleting it again, because a checklist nobody has followed is a checklist with
 a missing step — and the first draft of this list was missing step 7.
 
-### 1. The Mill module — `build.mill`
+### 1. The package — `frontend/packages/feature-topics/`
 
-```scala
-object uiTopics extends KuiFrontendModule {
+A `package.json` naming it `@kui/feature-topics`, a `tsconfig.json` extending the workspace's, a
+`src/` and a `styles/`. Copy `feature-clusters`; there is nothing bespoke in the scaffolding.
 
-  // Kebab-case on disk, camelCase on the command line, for the same reason as `uiKernel`.
-  def moduleDir = super.moduleDir / os.up / "ui-topics"
+Depend on `@kui/kernel` and `@kui/api`. Depend on the **shell** not at all: the shell depends on
+every feature, and the reverse edge would be a cycle as well as the end of lazy loading. Depend on
+another *feature* not at all either — if you need something a feature has, it belongs in the kernel
+(§5, rule 5).
 
-  def moduleDeps = Seq(uiKernel, services.topic.contract.js, services.gateway.contract.js)
+`pnpm install` after adding the package, so the workspace links it.
 
-  object test extends ScalaJSTests with KuiJsDomTests {
-    def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
-  }
+### 2. The stylesheet — `frontend/packages/feature-topics/styles/`, and `index.css`
+
+Files numbered so the cascade is decided by file order rather than by who nested their selectors more
+deeply. The kernel owns 00–29; features start at 40.
+
+Then add each file to the `@import` list in `frontend/packages/kernel/styles/index.css`, which is
+what Vite inlines. A hand-written list can be forgotten, so `kui.build.CssReferences` (in
+`build-tests/`) fails the build if a `styles/*.css` file in the workspace is missing from that list
+or named by it twice.
+
+### 3. The feature id — `frontend/packages/kernel/src/feature/registration.ts`
+
+```ts
+export type FeatureId = "clusters" | "topics" | "messages" | "consumers" | "schemas";
+```
+
+A string union rather than an enum, so a registration table is checked exhaustively and a bookmark
+naming a feature this build does not have simply fails to match.
+
+### 4. The routes — `frontend/packages/shell/src/routing/routes.tsx`
+
+The patterns are literals in the shell's one route table, not in the feature. That is what makes the
+router's typed `paths` proxy work — `paths.clusters("prod").topics()` exists and a renamed segment is
+a compile error — and it is what lets a deep link resolve before the feature's chunk exists. See §3.
+
+### 5. The root component — `frontend/packages/feature-topics/src/index.ts(x)`
+
+A `default` export: the component the shell renders for every one of that feature's routes.
+Everything else in the package is reachable only from there.
+
+### 6. Registration — `frontend/packages/shell/src/features/registry.ts`
+
+One entry in `featureRegistry`, and its two halves follow opposite rules:
+
+```ts
+{
+  id: "topics",
+  serviceId: "topic",          // the service the capability registry reports health under
+  viewAction: Actions.TopicView,  // from the generated RBAC vocabulary, never a hand-typed string
+  label: "Topics",
+  icon: "topics",
+  group: "Cluster",
+  order: 200,
+  requiresCluster: true,
+  sidebar: true,
+  // The dynamic half. The body is a bare `import()` with a literal specifier — see §4.
+  load: () => import("@kui/feature-topics").then(featureModule),
 }
 ```
 
-Depend on `ui-kernel` and on the **cross-compiled contract of every service whose documents you
-decode**. Depend on the shell not at all: the shell depends on every feature, and the reverse edge
-would be a cycle as well as the end of lazy loading. Depend on another *feature* not at all either —
-if you need something a feature has, it belongs in the kernel (§5, rule 5).
+`serviceId` is carried rather than guessed from `id`, because the two are not always the same word:
+`topics` is a feature and `topic` is the service behind it. `viewAction` is likewise stated rather
+than derived — the shell once asked `permits("topic", "view", …)` against a server whose vocabulary
+spells them `TOPIC` and `VIEW`, matching is by exact string, and every entry in the drawer went dim
+on a deployment with authentication disabled. Typing it as `PermissionAction` from `Actions` is what
+stops that returning.
 
-### 2. The stylesheet directory — `frontend/packages/feature-topics/styles/`, and `cssModules`
+### 7. The bundle-shape check
 
-One directory, files numbered so the cascade is decided by the file order rather than by who nested
-their selectors more deeply. The kernel owns 00–29, features start at 40. Add the module to
-`cssModules` in `build.mill` or the stylesheet is silently not concatenated — `./mill frontend.css`
-prints how many source files it found, which is how you check.
+Nothing needs registering for the split itself — Vite splits at every dynamic `import()` — but the
+check that the split *survived* has to know about the new feature. It reads the build manifest's
+module graph and asks whether the feature's module is in the entry chunk's `imports` (static, and
+therefore downloaded by everyone) or its `dynamicImports` (split, and therefore downloaded on
+demand). See §4 for why that is a fact about the emitted graph rather than something a review can
+see.
 
-### 3. The feature id — `frontend/ui-kernel/src/kui/ui/kernel/feature/FeatureId.scala`
+Finish with the whole set, from `frontend/`:
 
-```scala
-case Topics extends FeatureId("topics", "topic")
-```
-
-Two strings: the **feature** id, which appears in URLs and preferences, and the **service** id, which
-is what the gateway's capability registry reports health under. They are not always the same word —
-`topics` is a feature, `topic` is the service behind it — which is exactly why one is not derived
-from the other.
-
-### 4. The static half — `TopicsRoutes`
-
-An `object` extending `FeatureRoutes`: the sidebar entry, the URL patterns, and the `history.state`
-codec. See §3 for why these are separate from the feature class.
-
-### 5. The dynamic half — `TopicsFeature`
-
-A `final class` extending `KuiFeature`. Everything else in the module is reachable only from here.
-
-### 6. Registration — `frontend/ui-shell/src/kui/ui/shell/FeatureRegistryImpl.scala`
-
-Two lines, and they follow opposite rules:
-
-```scala
-// The thunk. Its body is `js.dynamicImport(new …)` and NOTHING else — see §4.
-FeatureId.Topics -> (() => js.dynamicImport(new kui.ui.topics.TopicsFeature()))
-
-// The static half, named directly, which is correct and not an inconsistency.
-def staticRoutes: List[FeatureRoutes] = List(ClustersRoutes, TopicsRoutes)
-```
-
-### 7. The linker and the check — `build.mill`, twice more
-
-```scala
-// KuiFrontendModule: the packages the linker emits one small module per class for.
-def moduleSplitStyle = ModuleSplitStyle.SmallModulesFor("kui.ui.clusters", "kui.ui.topics")
-
-// uiShell: what checkBundleShape asserts is actually split out.
-def bundleFeatures = Seq(
-  BundleShape.Feature("kui.ui.clusters.ClustersFeature", "kui.ui.clusters"),
-  BundleShape.Feature("kui.ui.topics.TopicsFeature", "kui.ui.topics")
-)
-```
-
-**This is the step that is easy to miss**, and it was missing from the first version of this list. A
-package absent from `moduleSplitStyle` still works perfectly — it is simply not splittable, and the
-whole feature ends up in `main.js`. `checkBundleShape` is what catches it:
-
-```
-$ ./mill frontend.uiShell.checkBundleShape
-checkBundleShape: 1 problem(s):
-  no module file matching kui.ui.topics*.js was linked, so kui.ui.topics.TopicsFeature cannot be
-  loaded lazily
-```
-
-Finish with the whole set. Each frontend command is its own line for the reason in §8.
-
-```
-$ ./mill frontend.uiTopics.compile
-$ ./mill frontend.uiTopics.test
-$ ./mill frontend.uiShell.checkBundleShape     # must report one more feature module than before
-$ ./mill frontend.css                          # must report one more source file than before
-$ ./mill checkArchitecture
+```bash
+$ pnpm install
+$ pnpm typecheck
+$ pnpm test
+$ pnpm build          # must emit one more feature chunk than before
 ```
 
 ---
@@ -164,7 +166,7 @@ each misbehaves visibly without it:
   a feature page decodes to "not found".
 
 All three are **data** — a label, a sort order, path shapes, a JSON tag — so linking against them
-from the shell costs a few bytes in `main.js` and pulls no feature code with them.
+from the shell costs a few bytes in the entry chunk and pulls no feature code with them.
 
 A **page** is data too. `TopicsPageId.Detail(clusterId, topic, tab)` carries what the URL is built
 from and parsed into, and nothing about how anything is drawn. That is what lets the shell hold a
@@ -176,9 +178,10 @@ Two details worth copying:
   `history.state`, and a URL can hold anything a user types. It is validated where it is *used*, so a
   value that will not parse renders the page's own fallback rather than failing to decode the whole
   history entry — which would strand the Back button.
-- **Every pattern ends with `endOfSegments`.** Without it a pattern claims its own sub-paths, so
-  `/ui/clusters/x/topics` also matches `/ui/clusters/x/topics/anything` and a mistyped URL never
-  404s: it silently resolves to the page above it.
+- **A pattern matches a whole path, never a prefix.** A pattern that claimed its own sub-paths would
+  make `/ui/clusters/x/topics` also match `/ui/clusters/x/topics/anything`, and a mistyped URL would
+  never 404: it would silently resolve to the page above it. Add the catch-all `*` route deliberately
+  or not at all.
 
 ---
 
@@ -186,27 +189,36 @@ Two details worth copying:
 
 The thunk's body must be
 
-```scala
-() => js.dynamicImport(new kui.ui.topics.TopicsFeature())
+```ts
+() => import("@kui/feature-topics").then(featureModule)
 ```
 
-and nothing else. Assigning the constructor to a `val`, naming the feature's type in a signature, or
-so much as mentioning the class anywhere outside that import makes it reachable from the shell, and
-the linker then puts the whole feature into `main.js` — where every user downloads it on first
-paint, including users whose deployment has no topic service at all.
+and nothing else that *statically* names the feature. A top-level `import` of the package, a type
+annotation naming its root component, a value pulled out "for convenience" — any of them makes the
+feature reachable from the entry chunk, and the bundler then ships it to every user on first paint,
+including users whose deployment has no topic service at all. The specifier must stay a literal:
+`import(somePath)` cannot be split, because the bundler cannot know at build time what it names.
 
-**Nothing about the source looks different when that happens.** That is why `checkBundleShape`
-asserts the shape of the *linked output* rather than trusting a reviewer to spot it.
+Chaining `featureModule` onto the import is safe — it names no feature and the specifier stays
+literal. It exists because TypeScript synthesises a `default` for a module that has none, so "does
+this chunk export a root component" cannot be asked of the type, only of the value.
 
-### And the check passes today while the promise is broken
+**Nothing about the source looks different when the split is destroyed.** That is why the check reads
+the *build manifest's module graph* rather than trusting a reviewer to spot it.
 
-Read this before concluding from a green build that a feature is lazily loaded. **TD-016**: the
-clusters microfrontend *is* linked into a module of its own, and `main.js` then **statically
-imports** that module — so the browser downloads it during the first paint anyway. `checkBundleShape`
-is not wrong: it checks that the feature's code is not *copied into* `main.js*`, which is true.
-Nothing yet checks that `main.js` does not *import the split file eagerly*, which is what a browser
-acts on. The debt is open, it names its own exit condition, and until it is closed "the module is
-split out" and "the module is not downloaded" are two different statements.
+### "Split out" and "not downloaded" are two different statements
+
+Read this before concluding from a green build that a feature is lazily loaded. Under Scala.js the
+two came apart: the clusters feature *was* linked into a module of its own, and `main.js` then
+statically imported it, so the browser fetched it during first paint anyway (**TD-016**). The check
+of the day was not wrong — it asked whether the feature's code had been *copied into* the entry, and
+it had not — it simply asked a question a browser does not act on.
+
+The lesson survived the rewrite even though the mechanism did not. A Vite manifest distinguishes an
+entry chunk's `imports` from its `dynamicImports`, and only the second is a download deferred to
+first navigation. Assert against `dynamicImports`; a feature that appears under `imports` is shipped
+to everybody, including users whose deployment has no such service. TD-016 is marked superseded in
+`TECH_DEBT.md` with re-checking it against a real manifest as its exit condition.
 
 ---
 
@@ -214,8 +226,8 @@ split out" and "the module is not downloaded" are two different statements.
 
 ### The feature builds its own client and its own state
 
-`js.dynamicImport` cannot pass constructor arguments, so a feature takes none. It reaches for the
-kernel's singletons — the bootstrap block the gateway injected, the session — exactly as the shell
+A dynamic `import()` fetches a module, not a configured object, so a feature is handed nothing at
+import time. It reaches for the kernel's singletons — the bootstrap block the gateway injected, the session — exactly as the shell
 does, and constructs its own `Queries` object:
 
 ```scala
@@ -287,11 +299,11 @@ in a feature and expect a router, this is why.
 
 ### Rule 5: a feature never depends on another feature
 
-If two features need the same thing, it goes in `ui-kernel`. `Bytes` — the byte formatter — lived in
-`ui-clusters` until the topic list became its fourth caller, at which point the choice was to promote
-it or to copy it, and two copies of a rounding rule are two answers to "is this 1.0 MiB". It was
-promoted, and `ui-clusters` keeps a two-line re-export at the old path so that its call sites and its
-suite are untouched — which is the evidence that it was a move and not a rewrite.
+If two features need the same thing, it goes in `@kui/kernel`. The byte formatter lived in the
+clusters feature until the topic list became its fourth caller, at which point the choice was to
+promote it or to copy it, and two copies of a rounding rule are two answers to "is this 1.0 MiB". It
+was promoted, and the clusters feature kept a re-export at the old path so that its call sites and
+its suite were untouched — which is the evidence that it was a move and not a rewrite.
 
 The exception is not an exception: one feature's *panel* on another feature's page goes through
 `FeatureSlots` and `GuestTabs`, where neither side can see the other and the slot id is a kernel
@@ -371,9 +383,9 @@ Two behaviours that surprise people:
 
 ## 8. Testing
 
-jsdom by default (`KuiJsDomTests`), because a feature's sharpest claims are claims about what ends up
-in the DOM. Pure suites for row models and formatters — they need no DOM and should not pay for one.
-`domtestutils` for the rest.
+Vitest under jsdom by default (`environment: "jsdom"` in `frontend/vitest.config.ts`), because a
+feature's sharpest claims are claims about what ends up in the DOM. Plain `.test.ts` suites for row
+models and formatters — they need no DOM and should not pay for one.
 
 **Recorded responses, never hand-written fixtures, for anything that crosses a process boundary.**
 Here is why, stated as it happened:
@@ -386,8 +398,11 @@ Here is why, stated as it happened:
 
 A hand-written fixture is a description of what the author *believed* the server sends, which is the
 belief that was wrong. So `TopicsApiSuite` decodes `GoldenDocuments` — the topic contract's own
-committed sample documents — by depending on `services.topic.contract.js.test` rather than by copying
-them. One artefact, read from both sides, cannot drift. Test modules are exempt from the architecture
+committed sample documents — rather than by copying them. One artefact, read from both sides, cannot
+drift. Since ADR-048 the browser cannot depend on a Scala test module for them, so the same property
+is carried by the generated types: `@kui/api`'s `schema.d.ts` comes from
+`docs/api/openapi.browser.json`, which the Scala build regenerates from the gateway's own endpoints,
+and a suite that decodes a shape the server does not send fails to typecheck. Test modules are exempt from the architecture
 rules (`ArchitectureRules.isTestModule`), so that dependency is legal.
 
 Assert the paths too. A segment renamed in a contract while a feature keeps calling the old address
@@ -401,16 +416,18 @@ Two harness facts:
   while asserting nothing. `VirtualizedTable` and the pages that use it therefore take a
   `viewportHeight: Var[Int]` which the component fills in from the real element in a browser and a
   suite sets by hand.
-- **Two Scala.js test modules cannot be named in one Mill invocation.** That is why every frontend
-  command in this repository, and in CI, is on its own line.
+- **Mill runs none of this.** The suites are Vitest, run with `pnpm test` from `frontend/`, and the
+  backend's `./mill __.test` neither builds nor runs them. The two builds share no lock, so they can
+  run at the same time.
 
 ---
 
 ## 9. The five rules, and the incident behind each
 
-1. **The thunk body is `js.dynamicImport(new …)` and nothing else.** Naming a feature class anywhere
-   else in the shell puts the whole feature in `main.js`, and nothing about the source looks
-   different. (ADR-012; `checkBundleShape` exists for this.)
+1. **The thunk body is a bare `import("@kui/feature-…")` and nothing else.** Naming a feature's
+   module anywhere else in the shell puts the whole feature in the entry chunk, and nothing about the
+   source looks different. (ADR-012 as amended by ADR-048 §4; the bundle-shape check exists for
+   this.)
 2. **A decoder must not default a missing list to empty.** M1's dashboard rendered "No clusters yet"
    against a working broker because a wrong document decoded successfully into no rows.
 3. **One string typed in two files will drift.** Slot ids, class names, path segments, row heights:
@@ -426,9 +443,10 @@ Two harness facts:
 
 ## 10. What is still owed
 
-- **TD-016** — `main.js` statically imports the split feature module, so ADR-012's promise is not yet
-  kept for any user. Open. §4.
-- **TD-020** — `KuiFeature` has no navigation port, so features call `history.pushState` directly and
-  Back is resolved from the URL rather than from stored state. Open. §5.
+- **TD-016** — the entry statically imported the split feature module, so ADR-012's promise was not
+  kept for any user. Superseded by ADR-048; re-check it against a Vite build manifest. §4.
+- **TD-020** — a feature had no navigation port and called `history.pushState` directly, so Back was
+  resolved from the URL rather than from stored state. Superseded by ADR-048; re-check whether any
+  feature package still touches `history` directly. §5.
 - **TD-015** — "the microfrontend pattern is decided against a real screen and this document records
   it" — is **closed** by this document.

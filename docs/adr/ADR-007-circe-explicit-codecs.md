@@ -19,8 +19,11 @@ payloads and structured log values. The project's data-modeling rules forbid `Js
   structural (non-empty, ranges); domain invariants stay in domain smart constructors.
 - Circe `Json` is the only dynamic payload type: serde results, masking, config wizard
   payloads, connector configs. It is forbidden in `domain` modules.
-- Numbers keep 64-bit precision on Scala.js because Circe's `JsonNumber` is string-backed;
-  the frontend never uses `JSON.parse` for message payloads.
+- Numbers keep 64-bit precision on the server, because Circe's `JsonNumber` is string-backed.
+  This guarantee stopped at the browser with ADR-048: the browser is TypeScript, it parses with
+  `JSON.parse`, and a `Long` therefore arrives as a double. Offsets are typed `number` in the
+  generated schema, so a value above 2^53 would lose precision. This is recorded rather than
+  resolved: whether any KUI field can reach that magnitude has not been audited since the change.
 
 ## Evidence
 

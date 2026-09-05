@@ -1,6 +1,17 @@
 # KUI roadmap
 
-**Last revised:** 2026-09-03. Feature IDs refer to `docs/FEATURE_MATRIX.md`. Every milestone also
+**Last revised:** 2026-09-03. Feature IDs refer to `docs/FEATURE_MATRIX.md`.
+
+> **This is a record of what each milestone set out to deliver, in the words used at the time.**
+> ADR-048 replaced the Scala.js and Laminar frontend with TypeScript, SolidJS and Vite on
+> 2026-09-05, after M0 to M4 had been planned and largely executed. Where a milestone below names
+> `frontend/ui-kernel`, `frontend/ui-shell`, a `ui-<feature>` module, `fullLinkJS`, `main.js`, or a
+> Laminar or Waypoint version, read it as the deliverable that milestone *did* deliver, under its
+> then-current names. The equivalents today are `frontend/packages/{kernel,shell,feature-*}`, built
+> by Vite in a pnpm workspace — see `docs/frontend/README.md`. The milestone *goals* are unchanged;
+> the module names in them have not been rewritten, because rewriting a delivered plan's history
+> would make it useless as a record. Milestones from M5 onward should be written against the
+> current names. Every milestone also
 inherits the same exit criteria: the tree compiles with `-Werror`, every kind of test is green,
 every service introduced has a fault-isolation test, formatting and scalafix are clean, the OpenAPI
 document is regenerated, the documentation and the feature matrix are updated, and every decision

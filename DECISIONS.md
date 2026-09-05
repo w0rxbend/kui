@@ -5,7 +5,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 
 | ID | Title | Status | Date |
 | --- | --- | --- | --- |
-| [ADR-001](docs/adr/ADR-001-build-toolchain.md) | Build toolchain: Scala 3.9.0 LTS, JDK 21, Mill 1.1.8, Scala.js 1.22.0 | Accepted | 2026-09-03 |
+| [ADR-001](docs/adr/ADR-001-build-toolchain.md) | Build toolchain: Scala 3.9.0 LTS, JDK 21, Mill 1.1.8 | Accepted; amended by ADR-048 | 2026-09-03 |
 | [ADR-002](docs/adr/ADR-002-cats-effect-fs2-runtime.md) | Cats Effect 3 and FS2 as the single runtime | Accepted | 2026-09-03 |
 | [ADR-003](docs/adr/ADR-003-tapir-netty-sttp4-http.md) | Tapir 1.13.31 with Netty (cats) server and sttp 4 clients | Accepted | 2026-09-03 |
 | [ADR-004](docs/adr/ADR-004-service-decomposition-and-gateway.md) | Service decomposition, service catalog and the BFF gateway | Accepted | 2026-09-03 |
@@ -16,7 +16,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 | [ADR-009](docs/adr/ADR-009-otel4s-oteljava-telemetry.md) | otel4s (oteljava backend) for traces and metrics | Accepted | 2026-09-03 |
 | [ADR-010](docs/adr/ADR-010-macwire-composition-roots.md) | MacWire composition roots | Accepted | 2026-09-03 |
 | [ADR-011](docs/adr/ADR-011-laminar-waypoint-frontend.md) | Laminar 17.2.1, Airstream 17.2.1, Waypoint 9.0.0 frontend | Superseded by ADR-048 | 2026-09-03 |
-| [ADR-012](docs/adr/ADR-012-microfrontend-loading-strategy.md) | Microfrontend loading: single link with module splitting and dynamic import | Accepted | 2026-09-03 |
+| [ADR-012](docs/adr/ADR-012-microfrontend-loading-strategy.md) | Microfrontend loading: code splitting and dynamic import | Accepted; amended by ADR-048 | 2026-09-03 |
 | [ADR-013](docs/adr/ADR-013-ciris-configuration.md) | Configuration with Ciris (over PureConfig) | Accepted | 2026-09-03 |
 | [ADR-014](docs/adr/ADR-014-schema-registry-client-strategy.md) | Schema Registry: own REST client for management, Confluent serializers for wire format | Accepted | 2026-09-03 |
 | [ADR-015](docs/adr/ADR-015-application-authentication.md) | Application authentication: form, OIDC and LDAP in the identity service | Accepted | 2026-09-03 |
@@ -85,4 +85,4 @@ were renumbered to ADR-019..025 above to avoid collisions.
 | Shared session store adapter (Kafka compacted topic) | single gateway replica acceptable until M6; ADR-042 now fixes the shape it would take | M6 |
 | Internal events topic `kui.internal.events` | polling suffices for M0–M5 | M6 |
 | Persisting topic analysis results | memory only, as Kafbat; ADR-042 gives it a home if the need appears | when a store need appears |
-| `ui-clusters` page composition and feature-local state shape | one trivial page in M0; the pattern is worth deciding against a real screen | before M2 planning |
+| ~~Clusters feature page composition and feature-local state shape~~ | **Answered.** Decided against the real M2 screens and written down in `docs/frontend/features.md`; TD-015 is closed | done |

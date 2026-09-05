@@ -18,7 +18,7 @@ Terms come from `docs/domain/kafka-glossary.md`; one concept has one name inside
 | Kafka Observability | `kui-metrics-service` | Supporting | `MetricSnapshot`, `Scraper`, `InferredMetric`, `GraphDescription`, `PromQuery` | broker metrics collection, inferred metrics, graphs, exposition |
 | Application Identity and Access | `kui-identity-service` | Generic (buy-like, but owns policy) | `Principal`, `Session`, `Role`, `Subject`, `Permission`, `Action`, `AuditRecord` | who the user is, which roles they hold, what was done |
 | Edge (BFF) | `kui-gateway` | Application layer, not a domain context | `Capability`, `Section`, `Aggregation` | routing, aggregation, capability registry, session cache; no business rules |
-| Frontend shell | `frontend/ui-shell` + kernel | Presentation | `Feature`, `FeatureState`, `NavEntry` | rendering, navigation, client state |
+| Frontend shell | `@kui/shell` + `@kui/kernel` | Presentation | `Feature`, `FeatureState`, `NavEntry` | rendering, navigation, client state |
 
 Core investment goes to Message Exploration, Topic Management, Consumer Group Management
 and Cluster Registry. Supporting contexts are kept close to their upstream REST vocabulary
@@ -38,7 +38,7 @@ ACL = Anticorruption Layer, CF = Conformist, SK = Shared Kernel, C/S = Customer/
 | Application Identity (U) | Edge (D) | OHS + PL | `/internal/v1/auth/*`, `Principal`, expanded `Permission` list, role reload stream | gateway caches `sessionId → Principal`; runs `Rbac.decide` from `libs/security-core` |
 | Application Identity (U) | every service (D) | PL via `libs/security-core` | `PrincipalClaims` JWS, `RbacPolicy` | services verify and re-decide; identity owns the vocabulary |
 | Each service (U) | Edge (D) | CF | the service's `contract` module | none: the gateway conforms to each contract and composes `Section`s |
-| Edge (U) | Frontend (D) | CF | `/api/v1` contracts cross-compiled to Scala.js | none: typed clients derived from contracts |
+| Edge (U) | Frontend (D) | CF | `/api/v1` contracts, via the committed `docs/api/openapi.browser.json` the browser's types are generated from (ADR-048) | the generated types are committed, so drift is caught by `./mill __.openApiCheck` and by regenerating, not by construction |
 | Schema Registry (external U) | Schema Registry Management (D) | ACL | own sttp client, sealed `UpstreamError` | error code table → `KuiError`; `schemaType` default → `Avro` |
 | Schema Registry (external U) | Message Exploration (D) | ACL (separate ways from the schema-service) | `libs/serde-confluent` wire-format serdes with own registry client cache | schema-by-id decoding; does not go through `kui-schema-service` (ADR-014, research/kafbat/architecture.md D7) |
 | Kafka Connect (external U) | Connect Management (D) | ACL | sttp client with 409/rebalance retry | Connect error bodies → `KuiError` |

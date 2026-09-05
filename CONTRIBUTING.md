@@ -5,12 +5,18 @@ Thank you for considering a contribution. This guide assumes no prior knowledge 
 ## Getting it running first
 
 ```
+(cd frontend && pnpm install && pnpm build)
 ./mill dev
 ```
 
-builds everything and starts the whole product on <http://localhost:8080/ui/>. See the quick start
-in [README.md](README.md) for the edit-and-refresh loop and for the fault-isolation demonstration,
-which is the fastest way to understand what this project is actually for.
+The backend and the interface are two builds — Mill needs only a JDK, the interface is a pnpm
+workspace under `frontend/` and needs only Node — so the first line builds the interface and the
+second builds the backend and starts the whole product on <http://localhost:8080/ui/>. Skipping the
+first line is not an error: `/ui/` then answers 503 and everything else works.
+
+See the quick start in [README.md](README.md) for the edit-and-refresh loop and for the
+fault-isolation demonstration, which is the fastest way to understand what this project is actually
+for.
 
 ## Before you write code
 

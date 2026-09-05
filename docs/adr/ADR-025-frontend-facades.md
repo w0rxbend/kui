@@ -1,7 +1,15 @@
 # ADR-025 — Frontend facades: CodeMirror 6, circe JSON viewer, uPlot, kernel virtualized table
 
-- Status: Accepted
+- Status: Accepted; **amended by [ADR-048](ADR-048-solidjs-typescript-vite-frontend.md)** (2026-09-05)
 - Date: 2026-09-03
+
+> **Amended by ADR-048.** The libraries chosen below — CodeMirror 6, uPlot, a hand-written JSON
+> viewer, a hand-written virtualized table — are unchanged, and so are the reasons for choosing
+> them. What disappears is the facade problem itself: the frontend is TypeScript, so CodeMirror
+> and uPlot are used through their own published types and there is nothing to hand-write or
+> vendor. Where a rejection below is argued from "it fights Laminar" or "it brings bespoke DOM
+> management", read the argument as spent: it was about a Scala.js binding layer that no longer
+> exists. See ADR-048 §7.
 
 ## Context
 

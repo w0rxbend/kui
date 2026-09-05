@@ -16,6 +16,17 @@ small, reviewable diff instead of a rewrite. Reconciling the two is task
 [UI-013](../plans/M0/tasks/UI-013.md); until that task runs, every value below is the shipped value
 and none of it has been superseded in the product.
 
+> **Reconcile before you trust the second half of this document.** It was written against the
+> Scala.js and Laminar frontend, which ADR-048 replaced on 2026-09-05. Two parts have been
+> reconciled and are current: the CSS file inventory (§3.1) and the ordering rules (§3.2), because
+> the stylesheets themselves were carried across unchanged and are still the shipped ones. Everything
+> that links to a `.scala` file — the token accessor, the theme machinery, the component inventory
+> and its class-name and token columns, the literal-value audit's line references into Scala — is an
+> inventory of code that has been deleted. The *class names and tokens* in those tables are still
+> the ones the stylesheets define, which is what makes the tables useful; the *components and files
+> they are attributed to* are not. Re-taking that inventory against `frontend/packages/` is
+> outstanding work and is not recorded as done anywhere.
+
 **The rule this document encodes.** The design project decides **how KUI looks**. The original plan
 and the researched behaviour of the two reference products — Kafbat Kafka UI and Provectus Kafka UI,
 analysed in [`research/`](../../research/) — decide **what KUI does**. Where the design implies a
@@ -278,26 +289,35 @@ files, 1 471 lines total.
 ### 3.2 The ordering rules
 
 Plain CSS has no module system: when two rules match the same element with the same specificity, the
-one written **later** wins. So the concatenation order *is* the cascade. It is decided by
-[`build-tests/src/kui/build/CssPipeline.scala`](../../build-tests/src/kui/build/CssPipeline.scala),
-invoked from the `frontend.css` task in `build.mill`, which produces a single `kui.css`.
+one written **later** wins. So the assembly order *is* the cascade. It is written out as an explicit
+`@import` list in
+[`frontend/packages/kernel/styles/index.css`](../../frontend/packages/kernel/styles/index.css), which
+**Vite** inlines at build time into the single stylesheet it emits into `frontend/dist/assets/`.
 
-Four groups, in this order (ADR-024):
+Until ADR-048 the order was computed instead, by
+[`build-tests/src/kui/build/CssPipeline.scala`](../../build-tests/src/kui/build/CssPipeline.scala)
+driven from a Mill task. That task is gone with the Scala.js build; `CssPipeline` survives only as
+the record of the grouping rule the list is written to obey. What a scan could not do is forget a
+file, so [`CssReferences.scala`](../../build-tests/src/kui/build/CssReferences.scala) fails the build
+if any `styles/*.css` file in the workspace is missing from the list or named by it twice.
 
-1. **tokens** — first, so a reader opening `kui.css` sees the palette before the rules consuming it.
+Four groups, in this order (ADR-024 as amended by ADR-048 §6):
+
+1. **tokens** — first, so a reader opening the built stylesheet sees the palette before the rules
+   consuming it.
 2. **reset** — next, because its job is to overwrite browser defaults and everything KUI writes
    afterwards must be able to overwrite the reset in turn.
-3. **kernel** — the shared primitives every screen is built from (any file from the `uiKernel`
-   module that is not tokens or reset).
+3. **kernel** — the shared primitives every screen is built from (any file in
+   `packages/kernel/styles/` that is not tokens or reset).
 4. **features** — last, so a feature can adjust a kernel primitive on its own page without winning a
    specificity war. This is why `40-clusters.css` can dim a table without `!important`.
 
 Two details worth knowing before you move a file:
 
-- **The numeric filename prefixes do not decide the order.** `cascadeGroup` classifies by *role*
-  (file name with the digits stripped: `tokens…`, `reset…`) and by owning module. The prefixes are
-  there so a directory listing reads in cascade order for a human; sorting by them would let a new
-  module insert itself mid-cascade by picking a low number.
+- **The numeric filename prefixes do not decide the order.** The `@import` list does. The prefixes
+  are there so a directory listing reads in cascade order for a human; a file called
+  `00-anything.css` in a feature package still lands after every kernel file, because that is where
+  the list puts it.
 - **Within a group, files sort by module then file name**, so the output is byte-identical for
   identical inputs. That determinism is what lets Mill and the browser cache it.
 
@@ -312,8 +332,9 @@ small enough for that to remain true.
 
 ### 3.3 Where the stylesheet is loaded
 
-[`services/gateway/api/resources/web/index.html`](../../services/gateway/api/resources/web/index.html):
-a single `<link rel="stylesheet" href="kui.css">`. There is no other stylesheet, no inline
+[`frontend/index.html`](../../frontend/index.html):
+a single stylesheet link, which Vite writes into `index.html` with a content hash in its name.
+There is no other stylesheet, no inline
 `<style>`, and no web-font link (see remediation R7).
 
 ### 3.4 Class naming
@@ -766,7 +787,7 @@ arrives with per-component tokens must be *flattened into* this set, not adopted
   disabling it.
 - **The skip link stays first in the document and stays reachable.** Moving it down, on the grounds
   that it is invisible anyway, makes every page start with a walk through the navigation.
-- **Degraded rendering: no component may *need* its CSS.** If `kui.css` fails to load, every screen
+- **Degraded rendering: no component may *need* its CSS.** If the stylesheet fails to load, every screen
   must still be operable — a `<button>` is still a button, a disabled control still refuses input, an
   unselected tab panel is simply not in the document. A redesign that moves function into CSS
   (`display: none` used to gate interaction, a `::after` carrying meaning, a click target that only

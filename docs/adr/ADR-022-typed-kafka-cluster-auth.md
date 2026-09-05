@@ -74,9 +74,9 @@ the duplication ADR-041 exists to prevent, and it would mean the redaction rule 
 implemented twice, in two files, exactly the defect the M0 review recorded.
 
 `libs/kernel` is already the shared-kernel home of `Secret[A]` and every id type
-(`ARCHITECTURE.md` §4.1). The ADT is pure data with no dependencies, so it cross-compiles to
-Scala.js unchanged and `libs/contracts-core` can derive the redacted DTO from the same
-definition the renderer consumes.
+(`ARCHITECTURE.md` §4.1). The ADT is pure data with no dependencies, so `libs/contracts-core` can
+derive the redacted DTO from the same definition the renderer consumes — and that DTO is what
+reaches the browser's generated types, one definition end to end.
 
 **Consequences for the rest of this ADR.** `libs/config` decodes the ADT with Ciris rather than
 declaring it; `libs/kafka-auth` renders it to `security.*` / `sasl.*` / `ssl.*` properties and

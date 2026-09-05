@@ -1,7 +1,16 @@
 # ADR-024 — CSS strategy and design-system implementation
 
-- Status: Accepted
+- Status: Accepted; **amended by [ADR-048](ADR-048-solidjs-typescript-vite-frontend.md)** (2026-09-05)
 - Date: 2026-09-03
+
+> **Amended by ADR-048 for the assembly mechanism only.** The decision this ADR makes — plain CSS
+> with custom properties, no CSS-in-JS, one numbered file per concern, tokens owned in one place —
+> is unchanged and was ported rather than redesigned. What changes is who assembles it. The files
+> live at `frontend/packages/<name>/styles/NN-*.css` rather than beside Scala sources, the numeric
+> prefix still fixes cascade order, and **Vite** emits the stylesheet in place of the Mill `css`
+> task, which no longer exists. Class names are written directly in TSX rather than reached through
+> a `Css` object of string constants, and the components below are SolidJS components rather than
+> Laminar ones. See ADR-048 §6.
 
 ## Context
 

@@ -4,9 +4,14 @@ Finalized 2026-09-03 from `research/scala/ecosystem-mapping.md` (versions verifi
 Maven Central metadata and GitHub on that date). Every row cites the ADR that admits it.
 Adding a dependency requires the review procedure in [CONTRIBUTING.md](CONTRIBUTING.md) and a row here.
 
-Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js only),
-`shared` (cross-compiled JVM+JS). Modules use the ids in `ARCHITECTURE.md` §16
-(`libs/<name>`, `services/<name>/<layer>`, `frontend/<name>`, `apps/allinone`).
+This file covers **two builds**. The JVM half is Maven coordinates resolved by Mill; the browser
+half is npm packages resolved by pnpm, and its versions live in `frontend/package.json` and the
+per-package manifests, with `frontend/pnpm-lock.yaml` as the lock. ADR-048 removed Scala.js, so no
+row here is scoped to it any more.
+
+Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `npm` (the browser workspace).
+Modules use the ids in `ARCHITECTURE.md` §16 (`libs/<name>`, `services/<name>/<layer>`,
+`frontend/packages/<name>`, `apps/allinone`).
 
 ## Platform and build
 
@@ -18,7 +23,6 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | org.scalameta | scalafmt-core_2.13 | 3.11.5 | build | root | ADR-001 |
 | ch.epfl.scala | scalafix-core_2.13 | 0.14.7 | build | root | ADR-001 |
 | com.goyeau | mill-scalafix_mill1_3 | 0.6.2 | build | root | ADR-001 (BUILD-002: Mill 1.1.8 has no built-in scalafix support, so the scalafix gate needs this plugin) |
-| org.scala-js | scalajs-library_2.13 | 1.22.0 | js | frontend/* | ADR-001, ADR-011 |
 
 ## Runtime core
 
@@ -43,14 +47,14 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 | com.softwaremill.sttp.tapir | tapir-cats-effect_3 | 1.13.31 | main | services/*/api, services/gateway | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-netty-server-cats_3 | 1.13.31 | main | libs/http, services/*/app, apps/allinone | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-files_3 | 1.13.31 | main | services/gateway | ADR-003, ADR-012 |
-| com.softwaremill.sttp.tapir | tapir-sttp-client4_3 | 1.13.31 | shared | libs/http, services/gateway, frontend/ui-kernel | ADR-003 |
+| com.softwaremill.sttp.tapir | tapir-sttp-client4_3 | 1.13.31 | main | libs/http, services/gateway | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-openapi-docs_3 | 1.13.31 | main | services/*/api, services/gateway | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-swagger-ui-bundle_3 | 1.13.31 | main | services/gateway | ADR-003 |
 | com.softwaremill.sttp.tapir | tapir-apispec-docs_3 | 1.13.31 | main | services/message/infrastructure | ADR-014 |
 | com.softwaremill.sttp.tapir | tapir-otel4s-tracing_3 | 1.13.31 | main | libs/observability | ADR-009 |
 | com.softwaremill.sttp.tapir | tapir-opentelemetry-metrics_3 | 1.13.31 | main | libs/observability | ADR-009 |
 | com.softwaremill.sttp.tapir | tapir-sttp-stub4-server_3 | 1.13.31 | test | libs/testkit | ADR-018 |
-| com.softwaremill.sttp.client4 | core_3 | 4.0.26 | shared | libs/http, frontend/ui-kernel | ADR-003 |
+| com.softwaremill.sttp.client4 | core_3 | 4.0.26 | main | libs/http | ADR-003 |
 | com.softwaremill.sttp.client4 | fs2_3 | 4.0.26 | main | libs/http | ADR-003 |
 | com.softwaremill.sttp.client4 | circe_3 | 4.0.26 | shared | libs/http | ADR-007 |
 | com.softwaremill.sttp.apispec | jsonschema-circe_3 | 0.11.10 | main | services/message/infrastructure | ADR-014 |
@@ -126,18 +130,55 @@ Scopes: `main`, `runtime`, `test`, `build` (Mill plugin/tool), `js` (Scala.js on
 
 ## Frontend
 
-| Group | Artifact | Version | Scope | Modules | ADR |
-| --- | --- | --- | --- | --- | --- |
-| com.raquo | laminar_sjs1_3 | 17.2.1 | js | frontend/* | ADR-011 |
-| com.raquo | airstream_sjs1_3 | 17.2.1 | js | frontend/* | ADR-011 |
-| com.raquo | waypoint_sjs1_3 | 9.0.0 | js | frontend/ui-shell, frontend/ui-kernel | ADR-011 |
-| be.doeraene | url-dsl_sjs1_3 | 0.7.0 | js | frontend/ui-shell (transitive) | ADR-011 |
-| org.scala-js | scalajs-dom_sjs1_3 | 2.8.1 | js | frontend/* | ADR-011 |
-| io.github.cquiroz | scala-java-time_sjs1_3 | 2.7.0 | js | libs/contracts-core (JS side), services/*/contract (JS side), frontend/ui-kernel | ADR-011 |
-| com.raquo | domtestutils_sjs1_3 | 19.0.0 | test | frontend/* | ADR-018 |
-| npm: codemirror (@codemirror/state, view, lang-json, lang-sql, legacy-modes, lint, search) | — | 6.x, pinned in `frontend/package.json` | js (static ESM via import map) | frontend/ui-kernel | ADR-025 |
-| npm: uplot | — | pinned in `frontend/package.json` | js (static ESM) | frontend/ui-kernel | ADR-025 |
-| com.github.lolgab | mill-scalablytyped_mill1_3 | 0.4.1 | build (one-off, not routine) | facade generation only | ADR-025 (BUILD-006 spike 2 verified it generates and compiles under Mill 1.1.8 / Scala 3.9 / Scala.js 1.22; needs an npm `typescript` install, and generation runs through `compile`, not a named task) |
+Resolved by **pnpm**, not Mill. Versions are pinned exactly in `frontend/package.json` (the
+workspace root) and in each package's own manifest; `frontend/pnpm-lock.yaml` is the lock and is
+committed. Nothing here is on the backend's classpath and none of it is needed to build or test the
+backend — see `docs/development/toolchain.md`.
+
+Several of these are pre-release. That is a recorded consequence of ADR-048 choosing SolidJS 2,
+which had not reached a final release when it was chosen; the upgrade row below tracks it.
+
+### Toolchain
+
+| Package | Version | Scope | Where | ADR |
+| --- | --- | --- | --- | --- |
+| node | 22.13.0 (floor) | npm | `.tool-versions` | ADR-048 |
+| pnpm | 11.25.0 (exact) | npm | `.tool-versions`, `frontend/package.json` `packageManager` | ADR-048 |
+| typescript | 5.9.3 | npm (dev) | workspace root | ADR-048 |
+| vite | 8.2.2 | npm (dev) | workspace root | ADR-048 |
+| vite-plugin-solid | 3.0.0-next.27 | npm (dev) | workspace root | ADR-048 |
+
+### Runtime
+
+| Package | Version | Scope | Where | ADR |
+| --- | --- | --- | --- | --- |
+| solid-js | 2.0.0-rc.6 | npm | every package | ADR-048 |
+| @solidjs/web | 2.0.0-rc.6 | npm | every package | ADR-048 |
+| @solidjs/router | 2.0.0-next.21 | npm | shell, every feature | ADR-048, ADR-012 |
+| openapi-fetch | 0.17.0 | npm | `frontend/packages/api` | ADR-048 §3 |
+| openapi-typescript-helpers | 0.1.0 | npm | `frontend/packages/api` | ADR-048 §3 |
+
+### Build-time and test
+
+| Package | Version | Scope | Where | ADR |
+| --- | --- | --- | --- | --- |
+| openapi-typescript | 7.13.0 | npm (dev) | `frontend/packages/api` — generates `schema.d.ts` from `docs/api/openapi.browser.json` | ADR-048 §3 |
+| vitest | 5.0.0 | npm (dev) | workspace root, kernel, shell, api | ADR-018 as amended by ADR-048 |
+| @vitest/coverage-v8 | 5.0.0 | npm (dev) | workspace root | ADR-018 |
+| @vitest/browser | 5.0.0 | npm (dev) | workspace root | ADR-018 |
+| jsdom | 30.0.1 | npm (dev) | the default Vitest environment | ADR-018 |
+| @testing-library/dom | 10.4.1 | npm (dev) | workspace root, kernel, shell | ADR-018 |
+| @testing-library/jest-dom | 7.0.1 | npm (dev) | workspace root | ADR-018 |
+| @testing-library/user-event | 14.6.1 | npm (dev) | workspace root, kernel, shell | ADR-018 |
+| axe-core | 4.13.0 (root), 4.11.0 (kernel, shell) | npm (dev) | accessibility assertions | ADR-018 |
+| playwright | 1.63.0 | npm (dev) | workspace root | ADR-018 |
+| storybook | 10.6.0 | npm (dev) | workspace root, kernel, shell | ADR-024 |
+| storybook-solidjs-vite | 10.7.1 | npm (dev) | workspace root, kernel, shell | ADR-024 |
+| @storybook/addon-a11y | 10.6.0 | npm (dev) | workspace root, kernel, shell | ADR-024 |
+| @storybook/addon-docs | 10.6.0 | npm (dev) | workspace root | ADR-024 |
+
+ADR-025 admits CodeMirror 6 and uPlot for the editor and the charts. **Neither is in the workspace
+yet** — no row above claims a version — and they are to be added here when a screen first needs one.
 
 ## Tests
 
@@ -175,7 +216,7 @@ WireMock, Mockito, Groovy, the official Java MCP SDK, datasketches 9.0.0, Chimne
 | io.kafbat.ui:serde-api | Exact published version and Maven coordinates for the bridge module (ADR-028). | Kafka Specialist | M6 |
 | at.favre.lib:bcrypt | Latest version and Java 21 compatibility (ADR-015). | Security Engineer | M6 |
 | Mill 1.2.0 | Stay on 1.1.8 until 1.2.0 final; re-check `mill-contrib-docker` API then. | Infrastructure Lead | ongoing |
-| Laminar 18 / Waypoint 10 | Upgrade task once both are final (ADR-011). | Frontend Architect | after release |
+| solid-js 2 / @solidjs/web / @solidjs/router | Pinned to a release candidate and a pre-release (`2.0.0-rc.6`, `2.0.0-next.21`), because ADR-048 chose SolidJS 2 before it was final. Move to the final releases together — the three are versioned as a set — and re-run the whole workspace suite. | Frontend Architect | after release |
 | opentelemetry-exporter-prometheus | Alpha status; fallback to `otel4s-sdk-exporter-prometheus 0.19.x` if unstable (ADR-009). | Infrastructure Lead | M1 |
 
 ### Closed by measurement
@@ -187,5 +228,5 @@ against the exact versions this repository pins.
 | Item | Answer |
 | --- | --- |
 | tapir-netty-server-cats | Netty keeps a `serverSentEventsBody` open past 10 minutes, flushes each event within ~2 ms, and cancels the fs2 stream within 8 ms of the client leaving. Netty stays; the http4s-ember fallback is not taken. |
-| mill-scalablytyped | 0.4.1 generates and compiles a `@codemirror/state` facade under Mill 1.1.8, Scala 3.9 and Scala.js 1.22. Stays as ADR-025's one-off generator. |
+| mill-scalablytyped | Was ADR-025's one-off generator of Scala.js facades. **Removed by ADR-048**: the frontend is TypeScript, so a library's own published types are used directly and there is no facade to generate. |
 | com.microsoft.playwright | 1.62.0, which downloads Chromium build 1234 (Chrome for Testing 151.0.7922.34). Both pinned in `build.mill`. |

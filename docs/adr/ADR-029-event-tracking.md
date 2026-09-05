@@ -30,7 +30,7 @@ project's streaming rules forbid unbounded consumption and standardize on SSE.
   returns `{items, partitionOffsets, partitionEndOffsets, totalItems}` computed newest-first
   from current end offsets (Kouncil semantics), non-streaming, no server state. JSON
   flattening (`H[]/K[]/V[]`, depth 3, collapse thresholds, 1 000-row cap) is client-side in
-  `frontend/ui-messages`.
+  `@kui/feature-messages`.
 - Resend (`POST /topics/{topic}/messages/resend`) copies an offset range of one partition to a
   destination topic with header filtering, validated against begin/end offsets; placeholder
   templating for bulk produce is a frontend feature.

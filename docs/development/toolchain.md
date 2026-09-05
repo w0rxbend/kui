@@ -1,87 +1,85 @@
 # Toolchain
 
-What you need installed to build KUI, and how the build finds it.
+What you need installed to build KUI, and how each build finds it.
 
-## Required
+There are **two builds**, and that is the first thing to know. The backend is Scala 3 built with
+Mill and it needs **nothing but a JDK** — no Node, no pnpm, no toolchain check. The interface is a
+separate pnpm workspace under `frontend/`, built by Vite, and it needs **nothing but Node** — no
+JDK. They are shipped as two container images and talk to each other over HTTP (ADR-048).
+
+So the tools you install depend on which half you are working on, and neither half's setup can
+break the other's.
+
+## Required for the backend
 
 | Tool | Version | Why |
 | --- | --- | --- |
 | JDK | 21 | The runtime every service targets. Newer versions are not tested; some libraries pin their own floor, recorded in `DEPENDENCY_MATRIX.md`. |
 | Mill | see `.mill-version` | The build tool. The `./mill` script in the repository root downloads the pinned version on first use, so you do not have to install it yourself. |
 | Docker | any recent | Integration tests start real Kafka and friends in containers, and the development environment runs from Compose. |
-| Node.js | 20 or newer | Only for the browser-facing modules: Scala.js compiles to JavaScript, and its tests run under Node. Nothing on the server side needs it. |
 
-## Node is not on the default path
+`./mill __.compile`, `./mill __.test`, `./mill checkArchitecture` and every other Mill task run with
+those three and nothing else. If a Mill task ever asks for Node, that is a bug in the build file, not
+a missing step here.
 
-Mill runs Scala.js tests by invoking `node`, and it looks for it on the `PATH` of the process
-that started the build. If you manage Node through a version manager, a plain shell will not
-have it, and the failure looks like a missing binary rather than a missing setup step.
+## Required for the frontend
 
-Load your version manager before building, or point the build at a specific binary:
+| Tool | Version | Why |
+| --- | --- | --- |
+| Node.js | 22.13.0 or newer | Runs Vite, Vitest and pnpm itself. |
+| pnpm | 11.25.0 exactly | The package manager the lockfile was written by. |
+
+Both numbers are pinned in `.tool-versions`, in the format [asdf](https://asdf-vm.com) and
+[mise](https://mise.jdx.dev) both read, and `frontend/package.json` repeats the pnpm one in its
+`packageManager` field so pnpm fetches that exact version itself.
+
+The floor is 22.13 rather than a rounder number for a specific reason recorded in `.tool-versions`:
+pnpm 11.25 refuses to start on anything below it, with `This version of pnpm requires at least
+Node.js v22.13`. That is above what Vite itself requires, so one number satisfies both.
+
+Install pnpm with `npm install --global pnpm@11.25.0` rather than through corepack. The corepack
+bundled with these Node builds carries signing keys npm no longer matches and fails with
+`Cannot find matching keyid`, which is a message that sends people looking at their registry
+configuration for a problem that is not there.
+
+Then, from `frontend/`:
+
+```bash
+pnpm install          # once, and after a dependency change
+pnpm build            # writes frontend/dist
+pnpm test             # Vitest
+pnpm typecheck        # tsc --build
+```
+
+### The DOM tests need no separate setup
+
+Component suites render real elements and therefore need a `document`. Vitest provides one through
+its `jsdom` environment, which is an ordinary dependency in the workspace and arrives with
+`pnpm install`. There is nothing to install globally, nothing to place at the repository root, and
+no `NODE_PATH` to export.
+
+## Which half is a version manager's problem
+
+If you manage Node through a version manager, a plain shell will not have it, and the failure looks
+like a missing binary rather than a missing setup step:
 
 ```bash
 # with nvm
-. "$NVM_DIR/nvm.sh" && nvm use --lts
+. "$NVM_DIR/nvm.sh" && nvm use
 
-# or, without changing your shell
-export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"
+# with mise, which reads .tool-versions directly
+mise install && mise use
 ```
 
-Verify with `node --version` before running any task whose name contains `js`.
-
-### It is the daemon's path that counts, not your shell's
-
-Exporting `PATH` in a shell that already has a Mill daemon running does nothing, because the daemon
-was started with the old environment and it is the daemon that spawns `node`. The symptom is
-confusing in a specific way: `node --version` works in your terminal and the very next
-`./mill libs.kernel.js.test` still fails with `Cannot run program "node"`.
-
-```bash
-export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"
-./mill shutdown        # the daemon restarts with the environment you just set
-./mill __.test
-```
-
-The same applies to `NODE_PATH`, and to anything else read out of the environment by a *tool the
-build launches* rather than by a task itself. A task that reads `Task.env` — `./mill dev` and
-`./mill devStart` read `KUI_PORT` that way — sees the environment you typed the command in and needs
-no shutdown.
-
-## The DOM test suites need jsdom
-
-Some frontend suites render real elements and therefore need a `document`. Plain Node has none, so
-those suites run under [jsdom](https://github.com/jsdom/jsdom), a `document` implemented in
-JavaScript. It is an npm package, and it is not something Mill can download for you.
-
-Install it into a `node_modules` directory at the repository root:
-
-```bash
-cd <repository root>
-npm install --no-save jsdom
-```
-
-The root is where it has to be. Mill runs the test binary from a sandbox directory underneath the
-repository, and Node finds a package by walking up from there looking for `node_modules`, so a
-package installed at the root is found and one installed anywhere else is not. `node_modules/` is
-git-ignored, so this is a per-checkout setup step and nothing to commit.
-
-A global install (`npm install -g jsdom`) is not enough on its own, because a global package is not
-on Node's lookup path. Exporting `NODE_PATH="$(npm root -g)"` does make it work, but only if the
-variable is set *before Mill's background daemon starts* — the daemon passes its own environment to
-the `node` process it forks, so exporting it and then running a task against an already-running
-daemon has no effect. The local install avoids the whole question.
-
-The symptom of getting this wrong is `Error: Cannot find module 'jsdom'` from inside
-`codeWithJSDOMContext.js`, with the run exiting before any test starts.
-
-Server-side work needs none of this. `./mill libs.kernel.jvm.test` and everything else on the
-JVM runs without Node present.
+This only ever affects `pnpm` commands. Mill launches no Node process, so a Node that is invisible
+to your shell cannot affect a Mill task, and there is no daemon environment to think about.
 
 ## Checking your setup
 
 ```bash
-java -version      # expect 21
+java -version      # expect 21          — backend
 ./mill --version   # expect the version in .mill-version
 docker info        # expect a running daemon
-node --version     # only needed for browser modules
+node --version     # expect 22.13.0 or newer — frontend only
+pnpm --version     # expect 11.25.0            — frontend only
 ```

@@ -6,17 +6,20 @@
 ## Context
 
 Every service, the gateway and the browser share one HTTP contract. Kafbat generates server
-stubs and a TypeScript client from TypeSpec; KUI wants the contract to be Scala code that is
-compiled for both the JVM and Scala.js.
+stubs and a TypeScript client from TypeSpec; KUI wants the contract to be Scala code, written
+once and used by every JVM caller directly. (When this was decided the browser was Scala.js and
+read the same code; since ADR-048 the browser is TypeScript and gets its types generated from the
+committed OpenAPI documents these same endpoint definitions produce.)
 
 ## Decision
 
-- **Tapir 1.13.31**: `tapir-core` + `tapir-json-circe` + `tapir-iron` in every cross-compiled
+- **Tapir 1.13.31**: `tapir-core` + `tapir-json-circe` + `tapir-iron` in every
   `contract` module; `tapir-netty-server-cats` in every `app`; `tapir-openapi-docs` per
   service and merged at the gateway with `tapir-swagger-ui-bundle`; `tapir-otel4s-tracing` and
   `tapir-opentelemetry-metrics` as server interceptors; `tapir-files` for static assets.
 - **sttp client 4.0.26** with `tapir-sttp-client4` (not the sttp 3 binding): `HttpClientFs2Backend`
-  on the JVM (gateway → services, services → registries), `FetchBackend` on Scala.js.
+  on the JVM (gateway → services, services → registries). There is no browser-side sttp backend
+  any more: since ADR-048 the browser calls the API with `fetch` through `@kui/api`.
 - One `contract` module per service, one Tapir endpoint group per resource family, mirroring
   Kafbat's TypeSpec file organisation; an OpenAPI style check (camelCase, naming rules) runs
   on the merged document in CI.

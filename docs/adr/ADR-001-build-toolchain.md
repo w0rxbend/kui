@@ -1,7 +1,14 @@
-# ADR-001 — Build toolchain: Scala 3.9.0 LTS, JDK 21, Mill 1.1.8, Scala.js 1.22.0
+# ADR-001 — Build toolchain: Scala 3.9.0 LTS, JDK 21, Mill 1.1.8
 
-- Status: Accepted
+- Status: Accepted; **amended by [ADR-048](ADR-048-solidjs-typescript-vite-frontend.md)** (2026-09-05)
 - Date: 2026-09-03
+
+> **Amended by ADR-048.** Scala 3.9.0 LTS, JDK 21 and Mill 1.1.8 are unchanged. Scala.js is gone:
+> this build compiles no JavaScript, declares no `ScalaJSModule`, and needs **nothing but a JDK** —
+> no Node, no pnpm, no toolchain check. The interface is a pnpm workspace under `frontend/` with its
+> own Vite build and its own container image, and it reaches the backend over HTTP. Every mention of
+> Scala.js, `ModuleKind.ESModule` and a `frontend/<name>` Mill module below describes the build as it
+> was until 2026-09-05.
 
 ## Context
 

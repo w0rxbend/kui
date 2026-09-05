@@ -35,8 +35,9 @@ day one across several processes.
 - Two Prometheus-format endpoints exist with different purposes: application telemetry
   (otel exporter, `/telemetry/prometheus` on each process) and Kafka cluster metrics
   (`/metrics`, metrics-service).
-- The pure-Scala `otel4s-sdk` (0.19.x) is not used on the JVM; it may be reconsidered for
-  the Scala.js frontend later.
+- The pure-Scala `otel4s-sdk` (0.19.x) is not used on the JVM. The reason once given for keeping
+  it in view — a Scala.js frontend that could share it — is gone with ADR-048; browser telemetry,
+  if it is ever wanted, would be a JavaScript OpenTelemetry SDK.
 
 ## Alternatives rejected
 

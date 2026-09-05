@@ -1,7 +1,14 @@
 # ADR-018 — Test frameworks: MUnit only, ScalaCheck, Testcontainers, JVM Playwright
 
-- Status: Accepted
+- Status: Accepted; **amended by [ADR-048](ADR-048-solidjs-typescript-vite-frontend.md)** (2026-09-05)
 - Date: 2026-09-03
+
+> **Amended by ADR-048 for the frontend only.** MUnit, ScalaCheck, Testcontainers and the JVM
+> Playwright driver are unchanged, and so is every JVM decision below. What changes is that there
+> are no browser-side Scala tests any more: the frontend is TypeScript and its unit and component
+> suites run under **Vitest** in the pnpm workspace (`pnpm test` in `frontend/`). References below
+> to a Scala.js test runner, to MUnit covering "JVM and Scala.js modules", and to a Scala.js
+> Playwright facade describe a build that no longer exists. See ADR-048 §5.
 
 ## Context
 

@@ -1,6 +1,7 @@
 # KUI
 
-A Kafka management and observability interface, written entirely in Scala 3.
+A Kafka management and observability interface. Scala 3 on the server, TypeScript and SolidJS in
+the browser, built and shipped as two independent halves that talk over HTTP.
 
 > **Status: milestones 0 to 4, plus topic administration from milestone 5.** KUI connects to real
 > Kafka clusters and is usable from a browser: a dashboard, clusters and brokers, topics and their
@@ -33,9 +34,11 @@ schema registry access fails, or consumer group inspection becomes unreachable, 
 interface carries on. The navigation entry for the affected area stays clickable and tells you
 what is wrong instead of disappearing or greying out.
 
-**It is Scala from the browser down.** The user interface is Scala.js and Laminar, not JavaScript.
-The same endpoint definitions generate the server, its documentation, and the client the browser
-uses, so a change to a contract cannot silently break one side.
+**The two halves are one contract.** The backend is Scala 3 built with Mill; the user interface is
+TypeScript and SolidJS, built with Vite in its own pnpm workspace under `frontend/`, and shipped as
+its own container image. They talk over HTTP. The same endpoint definitions generate the server, its
+documentation, and — through the committed OpenAPI documents the browser's types are generated from
+— the client the browser uses, so a change to a contract cannot silently break one side (ADR-048).
 
 **It streams instead of accumulating.** Browsing records, following a query, watching metrics: all
 of it flows from Kafka to the browser without buffering whole topics in memory.
@@ -157,25 +160,30 @@ Kafka itself reports for the same moment.
 
 ### See the interface, and change it
 
+The two halves build separately, because they are two builds. The backend is Mill and needs only a
+JDK; the interface is a pnpm workspace and needs only Node.
+
 ```
 git clone <this repository> && cd kui
+(cd frontend && pnpm install && pnpm build)   # writes frontend/dist
 ./mill dev
 ```
 
-That builds everything, links the browser code, and starts the whole product — the gateway and every
-service — as one process on one port. Open <http://localhost:8080/ui/>. Stop it with Ctrl-C.
+`./mill dev` builds the backend and starts the whole product — the gateway and every service — as one
+process on one port, with `frontend/dist` on its classpath so the interface is served from the same
+origin as the API. Open <http://localhost:8080/ui/>. Stop it with Ctrl-C. Skipping the first line is
+not an error: the gateway then answers `/ui/` with a 503 and everything else works.
 
 To change something and see it:
 
 ```
-./mill devStart                            # the same server, in the background
-./mill -w frontend.uiShell.fastLinkJS      # re-links every time you save
+./mill devStart                # the same server, in the background
+(cd frontend && pnpm watch)    # `vite build --watch`: rebuilds every time you save
 ```
 
-Now edit, say, `frontend/ui-shell/src/kui/ui/shell/layout/Header.scala`, save it, and refresh the
-browser. A re-link takes a few seconds and nothing restarts: the server reads the linker's output
-directory directly, so there is no copy step and no proxy in the way. `./mill devStop` when you are
-done.
+Now edit, say, `frontend/packages/shell/src/chrome/AppFrame.tsx`, save it, and refresh the browser. A
+rebuild takes about a second and nothing restarts: the server reads `frontend/dist` through a symlink,
+so there is no copy step and no proxy in the way. `./mill devStop` when you are done.
 
 The port is 8080 unless you set `KUI_PORT`.
 
@@ -214,7 +222,7 @@ answer. [`deployment/compose/README.md`](deployment/compose/README.md) explains 
 
 | You want to | Look in |
 | --- | --- |
-| Change the interface | `frontend/ui-shell` (pages, layout) and `frontend/ui-kernel` (the design system) |
+| Change the interface | `frontend/packages/shell` (pages, layout) and `frontend/packages/kernel` (the design system) |
 | Change what the gateway serves | `services/gateway` |
 | Add a service endpoint | `services/cluster/contract`, then `services/cluster/api` |
 | Run one test | `./mill libs.kernel.jvm.test`, or `./mill <module>.test.testOnly <SuiteName>` |
@@ -277,8 +285,8 @@ which forbids `null`, `throw`, `return` and `asInstanceOf` everywhere. `libs/` a
 
 ### Adding a module
 
-The build file decides once how modules are compiled, cross-compiled and tested, so declaring a new
-one is short. A JVM-only module:
+The build file decides once how modules are compiled and tested, so declaring a new one is short.
+Every module in this build is a JVM module — the interface is not built here at all (see below):
 
 ```scala
 object config extends KuiJvmModule {
@@ -286,13 +294,7 @@ object config extends KuiJvmModule {
 }
 ```
 
-A browser-only module (compiled to JavaScript by Scala.js):
-
-```scala
-object uiShell extends KuiFrontendModule
-```
-
-A module compiled for *both*, sharing one set of sources:
+Modules that used to be shared with the browser keep a `Shared` trait and a nested `jvm` object:
 
 ```scala
 object contractsCore extends Module {
@@ -300,27 +302,40 @@ object contractsCore extends Module {
   object jvm extends Shared with KuiJvmModule {
     object test extends ScalaTests with KuiTests with KuiCrossTests
   }
-  object js extends Shared with KuiJsModule {
-    object test extends ScalaJSTests with KuiJsTests with KuiCrossTests
-  }
 }
 ```
 
-The cross layout puts shared code in `libs/<name>/src` and anything platform-specific in
-`src-jvm` or `src-js`; tests are written once in `test/src`, with `test/src-jvm` and `test/src-js`
-for the rare assertion that only holds on one platform. Swap `KuiModule` for `KuiPureModule` when
-the module must also be free of `var`.
+That shape is left over from when the same sources were also compiled to JavaScript, and the `.jvm`
+suffix in a target name (`./mill libs.kernel.jvm.test`) is where you meet it. Shared code lives in
+`libs/<name>/src` and anything platform-specific in `src-jvm`. Swap `KuiModule` for `KuiPureModule`
+when the module must also be free of `var`.
 
-### A note on frontend tests
+### A note on the frontend
 
-Running Scala.js tests needs a JavaScript engine. Install **Node.js** (20 or newer) for the plain
-suites, and additionally `npm install --no-save jsdom` **in the repository root** for the suites
-that need a `document` — a global install is not enough, because the generated test script resolves
-`jsdom` by walking up from its own directory. Without Node
-the frontend still compiles and links — only `./mill <module>.js.test` fails, with
-`failed to start command List(node)`. See
-[docs/development/toolchain.md](docs/development/toolchain.md) for the full setup, including the
-version-manager trap that makes Node invisible to the build.
+The interface is **not built by Mill**. It is a pnpm workspace under `frontend/` — TypeScript,
+SolidJS and Vite (ADR-048) — with its own `package.json`, its own tests and its own container image,
+and it reaches the backend over HTTP like any other client. That is deliberate: this build needs
+**nothing but a JDK**, so somebody working on a Kafka adapter never installs Node to run a suite,
+and the interface can be rebuilt or rolled back without reassembling a jar.
+
+Its commands are pnpm commands, run from `frontend/`:
+
+```
+pnpm install          # once, and after a dependency change
+pnpm build            # writes frontend/dist
+pnpm watch            # the same build, rebuilding on save
+pnpm test             # Vitest
+pnpm typecheck        # tsc --build
+```
+
+The one direction that still runs backend-to-frontend is `./mill frontend.apiConstants`, which
+writes the error codes, the RBAC vocabulary and the CSRF header name into
+`frontend/packages/api/src/constants.generated.ts` so a rename on the Scala side becomes a compile
+error on the TypeScript side. `--check` fails when the committed file has drifted. The browser's
+*types* are generated on the frontend's own side, from the committed `docs/api/openapi.browser.json`,
+with `pnpm --filter @kui/api run generate`.
+
+See [docs/frontend/README.md](docs/frontend/README.md) for the whole workspace.
 
 `resolveAll` is worth knowing about: it exists purely to fail fast. It asks the build to download
 every library version listed in [DEPENDENCY_MATRIX.md](DEPENDENCY_MATRIX.md), even ones no module
@@ -339,14 +354,12 @@ rather than saying "build failed". Every one of them is a command you can run yo
 | `style` | Formatting and lint rules are clean | `./mill __.checkFormat` then `./mill __.fix --check` |
 | `architecture` | No module dependency breaks the layering rules of ADR-041 | `./mill checkArchitecture` |
 | `generated` | The committed OpenAPI documents and error-code table still match the code they were generated from | `./mill __.openApiCheck` then `./mill docs.errorCodes --check` |
-| `test` | Every unit, property and contract suite passes, on the JVM and in JavaScript | `./scripts/run-tests.sh` |
-| `frontend` | The frontend links with the optimising linker and has the bundle shape ADR-012 needs | `./mill frontend.__.fullLinkJS` then `./mill frontend.uiShell.checkBundleShape` |
-| `e2e` | The five container images build, the Compose stack survives one service dying, and a real browser can drive the product | `./mill e2e.test` |
+| `test` | Every unit, property and contract suite passes on the JVM | `./scripts/run-tests.sh` |
+| `frontend` | The interface's own build, with no JDK and no Mill: `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and a check that the committed browser types have not drifted from the OpenAPI document they are generated from | — |
+| `compose` | The five container images build and the Compose stack survives one service dying | `./deployment/compose/smoke.sh` |
+| — | ⚠️ **There is no browser end-to-end gate.** The Scala Playwright suite in `e2e/` selects on `data-testid` attributes the deleted Laminar components carried, and points the browser at the gateway, which no longer serves an interface. It fails structurally on every commit, so it is not run rather than left red — a red build that is always red means nothing, and `continue-on-error` would be worse. `docs/ROADMAP-SOLID.md` M2 replaces it with a TypeScript Playwright suite beside the frontend | — |
 
-Two things about the `test` stage are worth knowing before you are surprised by them.
-
-It needs **Node** on your `PATH` (see the note on frontend tests above) and `jsdom` installed into a
-`node_modules` directory at the repository root. CI does both for you; a laptop does not.
+One thing about the `test` stage is worth knowing before you are surprised by it.
 
 It runs through `./scripts/run-tests.sh` rather than a list of Mill commands, and the reason is worth
 one paragraph. Mill's `.test` is a *command*, so `./mill a.test b.test` does not run two modules: it
@@ -446,24 +459,20 @@ that, `KUI_ALLOW_UNSIGNED=true` accepts unsigned headers and says so in the log 
 `docs/operations/configuration.md` has the whole configuration surface;
 `services/cluster/app/resources/reference.yaml` is a commented file to copy from.
 
-## Running the gateway with a locally linked frontend
+## Running the gateway with a locally built frontend
 
-The gateway serves the shell from its own classpath at `GET /ui/**`, and the browser and the API
-share one origin — no CORS, no second server, no separate deployment step (ADR-011, ADR-012).
-`services/gateway/api/resources/web/index.html` is the committed template, and it references
-`main.js` and `kui.css`. Where those two come from depends on how you started the process:
+In a **release** the two halves are two images. The interface is built by Vite and served by the
+nginx in `deployment/frontend/`, which proxies `/api/…` through to the gateway so that the browser
+still sees one origin — no CORS, no `SameSite` decisions, no preflight on every mutation (ADR-019,
+ADR-048). The gateway's jar contains no interface at all.
 
-- **`./mill dev` and `./mill devStart`** put the Scala.js linker's output directory and the CSS
-  pipeline's output directory on the classpath in front of everything else, so the server reads
-  whatever the linker most recently wrote. Nothing is copied, which is what makes "save, re-link,
-  refresh" the whole loop.
-- **A release build** has the assets bundled into the gateway's own resources beside `index.html`.
+In **development** one process is more convenient than two, so the gateway can still serve the
+build. `StaticRoutes` serves `GET /ui/**` from the classpath under `/web`, and `./mill dev` and
+`./mill devStart` put one extra entry at the front of that classpath: a directory whose `web` is a
+symbolic link to `frontend/dist`, the Vite build's output. Nothing is copied, which is what makes
+"save, rebuild, refresh" the whole loop — see the comment on `dev` in `build.mill`.
 
-Running the gateway with neither is not an error: it serves the template, and any file the template
-asks for that is not there falls through to `index.html`, so the page loads unstyled and without a
-shell rather than failing.
-
-Running the gateway without a linked frontend at all is not an error:
+Running the gateway without having built the interface is not an error:
 
 ```
 $ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ui/

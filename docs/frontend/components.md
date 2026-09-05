@@ -1,9 +1,17 @@
 # Kernel components
 
 The primitives every KUI screen is built from. They live in
-`frontend/ui-kernel/src/kui/ui/kernel/component/` and are hand-written Laminar components: ADR-024
-rejected a third-party widget library for M0, because the design system is KUI's own and a
-third-party component set would fight it.
+`frontend/packages/kernel/src/components/` and are hand-written SolidJS components: ADR-024 rejected
+a third-party widget library, because the design system is KUI's own and a third-party component set
+would fight it.
+
+> **A note on this document.** It was written against the Laminar implementation that ADR-048
+> replaced on 2026-09-05. The *rules* below — the accessibility contracts, the focus and keyboard
+> behaviour, the degraded-rendering rule, the class names and the tokens — were ported and are
+> current. The *signatures* are not: where an entry shows a Scala type such as
+> `Option[() => SvgElement]` or a Laminar `Signal`, read the obligation and check the component's own
+> `.tsx` for the current props. The set of components has also moved on since this inventory was
+> taken. Re-taking it is outstanding work.
 
 ## Rules that apply to every primitive
 
@@ -51,7 +59,7 @@ Button(
 | `variant` | `Primary` (the one action a screen exists for, at most one per view), `Secondary` (the default), `Danger` (destructive; always behind a `ConfirmDialog`), `Ghost` (reads as text until hovered — toolbar and row actions) |
 | `size` | `Sm`, `Md`, `Lg` |
 | `disabled`, `loading` | both set the DOM `disabled` attribute |
-| `icon` | `Option[() => SvgElement]` — a thunk, because a DOM node can only be in one place at a time |
+| `icon` | a *function* returning the element, never an element — under Laminar because a DOM node can only be in one place at a time, and under Solid because a JSX expression evaluated once cannot be rendered in two places either |
 
 **Accessibility contract.** A real `<button type="button">`: reachable by Tab, activated by Enter and
 Space, with no JavaScript of ours involved. While `loading` it carries `aria-busy="true"`, is
@@ -326,7 +334,7 @@ brokers, consumer groups, schema versions, connectors. For thousands of rows use
 below; `DataTable` keeps its callers and is not going away, because a list of thirty brokers does not
 need a window and paying for one buys nothing.
 
-**Rows are keyed.** Laminar's `split` matches each item to its existing element by `rowKey`, so a
+**Rows are keyed.** The list is rendered with a keyed mapping that matches each item to its existing element by `rowKey`, so a
 list that arrives reordered moves the elements instead of rebuilding them. That is not only faster: a
 rebuilt row loses focus, loses a text selection, and closes whatever the user had expanded.
 
@@ -398,9 +406,9 @@ window, and it is reapplied when the row comes back. The spacer rows are `role="
 
 **Testing it outside a browser.** jsdom performs no layout and reports every element as zero pixels
 tall, so a component that could only measure itself would render an empty window in every test and
-the tests would pass while asserting nothing. The `viewportHeight` parameter is the `Var` the
+the tests would pass while asserting nothing. The `viewportHeight` parameter is the value the
 component normally fills in from the real element; a suite (and the benchmark harness) sets it
-directly.
+directly. This is still true under Vitest, which runs in jsdom for the same reasons.
 
 ## `SearchBox`
 

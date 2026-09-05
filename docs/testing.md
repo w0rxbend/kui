@@ -159,7 +159,7 @@ Then hang it off `ShellPage`, which is the entry point every suite already has:
 def topics: TopicsPage = new TopicsPage(page)
 ```
 
-If the screen has no test id for the thing you need, add one to the Laminar element (`dataAttr("testid") := "…"`).
+If the screen has no test id for the thing you need, add one to the element in its `.tsx` (`data-testid="…"`).
 That is a legitimate frontend change; changing a test to read a class name is not.
 
 ---
@@ -209,8 +209,8 @@ differ:
 
 ```scala
 private val scenario = FaultIsolationScenario(
-  serviceContainer = "kui-topics",   // the container to stop
-  serviceId = "topics",              // as /api/v1/capabilities names it
+  serviceContainer = "kui-topic",    // the container to stop (the image name, singular)
+  serviceId = "topic",               // as /api/v1/capabilities names it (the service, singular)
   featureId = "topics",              // as the nav test id ends: data-testid="nav-topics"
   featureLabel = "Topics",           // as the sidebar shows it
   unaffectedCheck = checkSettingsStillWorks,

@@ -36,8 +36,9 @@ background refresh and cancellation that propagates from the browser to a Kafka 
 - All Kafka, HTTP and telemetry libraries must be CE3-native or wrapped once in `libs/kafka`,
   `libs/http`, `libs/observability`.
 - Testing uses `munit-cats-effect` (ADR-018).
-- The Scala.js side does not use Cats Effect for UI state (Airstream, ADR-011); the shared
-  `contract` modules depend only on Tapir core and Circe, not on CE.
+- The browser does not use Cats Effect for UI state — it is TypeScript and SolidJS signals
+  (ADR-048, superseding ADR-011); the shared `contract` modules depend only on Tapir core and
+  Circe, not on CE.
 
 ## Alternatives rejected
 

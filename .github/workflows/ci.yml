@@ -88,18 +88,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
-      # Scala.js tests are run by handing the linked JavaScript to a JavaScript engine, and the
-      # engine is Node (blocker B-002). Without Node the JS half of every cross-compiled module
-      # fails with `failed to start command List(node)`.
-      #
-      # The DOM suites additionally need the `jsdom` npm package, and it has to be installed into a
-      # `node_modules` directory at the repository root rather than globally: the generated test
-      # script `require`s it, and Node finds a module by walking up from the script's own directory.
-      # A global install plus NODE_PATH does not work here — that combination was tried and the run
-      # still failed with `Cannot find module 'jsdom'`. `--no-save` keeps CI from inventing a
-      # package.json the repository does not have.
-      - name: Install jsdom for the DOM test suites
-        run: npm install --no-save jsdom@30.0.1
 
       # This step used to be three commands, and the first of them was
       # `./mill libs.kernel.jvm.test build-tests.test`, which ran no tests at all. Mill's `.test` is
@@ -108,10 +96,6 @@ jobs:
       # The script below names modules with Mill's selector syntax instead, which really does run
       # them all, and it prints the number of test cases it executed rather than Mill's task count.
       #
-      # Blocker B-003 — "a Scala.js test module and any other test module in one invocation kills
-      # the Scala.js side" — was the same argument-parsing confusion seen from the other end, and
-      # does not reproduce with the selector form. A run of all 58 modules in one invocation is what
-      # the script does.
       #
       # A task that adds a test module no longer has to remember to add a line here: the script asks
       # Mill what exists.
@@ -126,77 +110,95 @@ jobs:
           path: out/**/test-report.xml
           if-no-files-found: ignore
 
+  # The interface, which is a build of its own.
+  #
+  # It runs without a JDK and without Mill, which is the arrangement working rather than an
+  # oversight: the two halves are separate builds and each stage proves its half stands alone. A
+  # frontend change that breaks nothing on the server does not wait for the Scala suites, and a
+  # server change does not rebuild a browser bundle.
   frontend:
-    name: frontend link + bundle shape
+    name: frontend typecheck + tests + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-build
-      - name: Link the frontend with the optimising linker
-        run: ./mill frontend.__.fullLinkJS
-      # ADR-012's lazy feature loading only exists if the linker actually emitted separate modules.
-      # `uiShell` is the module that is checked, because it is the one with an entry point and
-      # therefore the one the linker produces a `main.js` for; `uiKernel` is a library and has no
-      # feature list of its own, so its check would skip and prove nothing.
-      - name: Check the bundle shape
-        run: ./mill frontend.uiShell.checkBundleShape
-
-  e2e:
-    name: end-to-end (browser)
-    runs-on: ubuntu-latest
-    # The slowest stage by a wide margin: it links the frontend with the optimising linker, assembles
-    # five jars, builds five container images, runs the Compose fault-isolation script and drives a
-    # real browser through two deployment shapes. Thirty-five minutes is a backstop against a hung
-    # browser, not a budget.
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-build
-
-      # The browser Playwright drives is not in the runner image, and the library only speaks to the
-      # revision it shipped with, so this installs *the* browser rather than *a* browser. Caching it
-      # separately from the Mill caches, keyed on the Playwright version, is what stops every run
-      # paying a 300 MB download; `versions.playwright` is the same number `build.mill` pins.
-      - name: Read the pinned Playwright version
-        id: playwright
-        run: echo "version=$(./mill show versions.playwright | tr -d '\"')" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the Playwright browser cache
-        uses: actions/cache@v4
+      - uses: actions/setup-node@v4
         with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+          # The versions in `.tool-versions`, and pnpm is exact: `frontend/package.json` names the
+          # same number in `packageManager`, and pnpm 11.25 refuses to start on a Node below 22.13.
+          node-version: "22.13.0"
+      - name: Install pnpm
+        # `npm install -g` and not corepack: the corepack bundled with this Node carries signing
+        # keys npm no longer matches, and it fails with "Cannot find matching keyid" — a message
+        # that sends people looking at their registry.
+        run: npm install --global --no-fund --no-audit pnpm@11.25.0
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      # Before the tests, because a type error is cheaper to read than the runtime failure it turns
+      # into. `vite build` transpiles without checking types, so nothing else in this job would
+      # catch one.
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+      # The generated files are committed so that the browser's types can be read without running
+      # the backend build. `--check` fails when the committed copy has drifted from the OpenAPI
+      # document it is generated from, which is the only way a contract change that nobody
+      # regenerated gets noticed.
+      - name: The generated types are up to date
+        run: |
+          pnpm --filter @kui/api run generate
+          git diff --exit-code packages/api/src/schema.d.ts
 
-      # `--with-deps` installs the shared libraries a browser needs, which a fresh runner image does
-      # not have. It needs root, which the GitHub-hosted runner grants through passwordless sudo;
-      # Playwright escalates internally.
-      - name: Install the pinned Chromium build
-        run: ./mill e2e.installBrowser --with-deps
+  # The distributed stack, and what happens to it when one service stops.
+  #
+  # ## The browser half of this stage is currently absent, and that is stated rather than faked
+  #
+  # `./mill e2e.test` is not run here. Its page objects select on `data-testid` attributes the
+  # deleted Laminar components carried, and its fixtures point the browser at the gateway — which no
+  # longer serves an interface, because the frontend is its own image now. It fails structurally, on
+  # its first selector, and it would fail for every commit regardless of what the commit did.
+  #
+  # The alternatives were: leave it red, which makes a red build mean nothing and teaches people to
+  # ignore it; mark it `continue-on-error`, which is worse — a green tick that checks nothing; or
+  # say plainly that this gate does not exist yet. `docs/ROADMAP-SOLID.md` M2 is where it comes
+  # back, as a TypeScript Playwright suite beside the frontend, and the reasoning for replacing
+  # rather than repairing is recorded there.
+  #
+  # What remains here is the half that never depended on the browser: the images build, the
+  # distributed stack comes up, and stopping one service degrades the others in the documented way.
+  compose:
+    name: distributed stack + fault isolation
+    runs-on: ubuntu-latest
+    # Assembles five jars and builds five container images before it runs anything. Twenty-five
+    # minutes is a backstop against a hung build, not a budget.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
 
-      # E2E-002 and the Compose smoke test both stop one container of the distributed stack, so all
-      # five images have to exist. They are built here rather than pulled: the point of the suite is
-      # to check the artefacts this commit produces, and a pulled image would be somebody else's
-      # commit. Note the braces — `./mill a b` passes `b` as an argument to `a` rather than running
-      # both, which is the same trap that made the test job run no tests.
+      # The smoke test stops one container of the distributed stack, so all five images have to
+      # exist. They are built here rather than pulled: the point is to check the artefacts this
+      # commit produces, and a pulled image would be somebody else's commit. Note the braces —
+      # `./mill a b` passes `b` as an argument to `a` rather than running both, which is the same
+      # trap that once made the test job run no tests.
       - name: Build the container images the distributed stack runs
         run: ./mill '{deployment.docker.gateway,deployment.docker.cluster,deployment.docker.topic,deployment.docker.message,deployment.docker.consumer}.docker.build'
 
-      # The compose topology, checked before the browser suite runs. It is faster than the browser
-      # suite and it fails for a different reason — a broken compose file rather than a broken
-      # screen — so running it first means the log says which of the two is wrong.
       - name: Run the Compose fault-isolation smoke test
         run: ./deployment/compose/smoke.sh
 
-      - name: Run the end-to-end suites
-        run: ./mill e2e.test -v
-
-      # The four things that explain a browser failure without anyone reproducing it: the screenshot,
-      # the console, the failed requests and the server or container logs. Uploaded on failure only,
-      # because on success they are noise.
+      # The container logs, which are the only thing that explains a compose failure without
+      # somebody reproducing it locally. On failure only; on success they are noise.
       - name: Upload the failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts
+          name: compose-artifacts
           path: out/e2e-artifacts/**
           if-no-files-found: ignore

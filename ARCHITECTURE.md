@@ -32,11 +32,13 @@ Sections:
 ## 1. Topology and deployment shapes
 
 ```
- Browser: Scala.js shell + lazily loaded feature modules (ADR-011, ADR-012)
+ Browser: SolidJS / TypeScript shell + lazily loaded feature chunks (ADR-048, ADR-012)
+   │  served by its own nginx image, which proxies /api to the gateway (same origin)
    │  HTTPS, session cookie or bearer token, SSE for streams
    ▼
  kui-gateway  (BFF: edge auth, RBAC pre-check, routing from contracts, screen aggregations,
-               SSE fan-in, capability registry, OpenAPI merge, static assets)
+               SSE fan-in, capability registry, OpenAPI merge; in development it also serves
+               the built interface off its classpath, in a release it does not)
    │  HTTP over Tapir contracts, signed principal header, W3C trace context
    ├── kui-cluster-service     Core        cluster registry, topology, broker config, log dirs,
    │                                       cluster capability probing, cluster config wizard
@@ -129,7 +131,8 @@ services/<name>/
                    snapshot/refresh logic. Depends on domain, cats-effect, fs2, log4cats, otel4s-core.
   infrastructure/  adapters implementing the domain ports: kui-kafka, sttp clients, caches,
                    file stores. Java SDKs live only here. Exceptions become KuiError here.
-  contract/        Tapir endpoints + DTOs + Circe codecs, cross-compiled JVM/JS.
+  contract/        Tapir endpoints + DTOs + Circe codecs. JVM only since ADR-048; the browser's
+                   types are generated from the OpenAPI these produce.
                    Depends on tapir-core, circe, kui-contracts-core. Never on domain.
   api/             server logic: contract -> application, KuiError -> HTTP envelope,
                    principal verification, OpenAPI document.
@@ -156,7 +159,7 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 | metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `BrokerMetricsScraper[F]`, `MetricsStore[F]`, `TopicSnapshotSource[F]`, `GroupSnapshotSource[F]` | JMX, Prometheus HTTP, contract clients |
 | identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `IdentityProviderPort[F]`, `OidcProviderPort[F]`, `SessionStore[F]`, `RolePolicySource[F]`, `AuditSink[F]` | UnboundID LDAP, nimbus OIDC, bcrypt users, in-memory/Kafka session and audit sinks |
 
-The gateway has `contract` (its own `/api/v1` endpoint definitions, cross-compiled JVM/JS so
+The gateway has `contract` (its own `/api/v1` endpoint definitions, so
 the frontend derives typed clients from them), `application` (aggregations, capability
 registry, session cache), `api` and `app`. It depends on every service's `contract` module and
 on nothing else from a service. It has no `domain` and no `infrastructure`: it holds no
@@ -173,7 +176,7 @@ a forbidden edge, naming the rule, both modules and the reason the rule exists:
 | A3 | the `application` of a service **that owns a `domain`** depending on `libs/http`, `libs/contracts-core`, Tapir, Circe or an `infrastructure` module |
 | A4 | the gateway reaching into any module of another service other than its `contract` |
 | A5 | anything under `libs/` depending on a service or on the frontend |
-| A6 | a cross-compiled core module (`kernel`, `contracts-core`, `security-core`) depending on a JVM-only library in its shared source set |
+| A6 | a core module (`kernel`, `contracts-core`, `security-core`) depending on a JVM-only library in its shared source set. The rule outlived the Scala.js build it was written for: the shared source set is still where a dependency that does not belong in a portable core gets in |
 | A8 | the gateway depending on `libs/kafka`, `libs/kafka-auth`, fs2-kafka or kafka-clients |
 | A9 | a service's `application`, `contract` or `api` depending on that service's own `infrastructure` module |
 | A10 | `libs/kafka`, `libs/kafka-auth`, fs2-kafka or kafka-clients on the classpath of any module that is not a service's `infrastructure` or `app`, `libs/kafka*` itself, `libs/config` or `libs/testkit` |
@@ -213,7 +216,7 @@ the *shape*; exact signatures are finalized in the M0 tasks. Scala 3, opaque typ
 
 | Module | Content | ADR |
 | --- | --- | --- |
-| `libs/kernel` (`kui-kernel`) | shared-kernel types below, `KuiError` hierarchy, paging/sorting primitives, `Validated` helpers. Pure, cross-compiled JVM/JS. | ADR-004, ADR-034 |
+| `libs/kernel` (`kui-kernel`) | shared-kernel types below, `KuiError` hierarchy, paging/sorting primitives, `Validated` helpers. Pure. | ADR-004, ADR-034 |
 | `libs/contracts-core` | error envelope DTO, `Page` DTOs, `Section[A]` envelope, SSE event DTOs, capability DTOs, Tapir codecs for kernel types. JVM/JS. | ADR-003, ADR-007, ADR-034, ADR-035 |
 | `libs/kafka` (+ `libs/kafka-auth`) | `KafkaAdminPort` family over fs2-kafka `KafkaAdminClient`, consumer/producer factories, `KafkaErrorMapper`, batching, client property assembly from `ClusterProfile`; cloud SASL handlers as optional runtime modules | ADR-006, ADR-022, ADR-030 |
 | `libs/serde` (+ `libs/serde-confluent`) | `Serde[F]` SPI, built-ins, registry/resolution, Kafbat bridge; Confluent wire-format serializers isolated | ADR-028, ADR-014 |
@@ -452,7 +455,7 @@ enum Decision { case Allowed; case Denied(reason: DenyReason) }
 object Rbac:
   def resolveRoles(attributes: IdentityAttributes, roles: List[Role]): Set[RoleName]              // login time
   def effectivePermissions(policy: RbacPolicy, p: Principal, cluster: Option[ClusterId]): List[Permission]
-  def decide(policy: RbacPolicy, p: Principal, req: AccessRequest): Decision                    // pure, shared with Scala.js
+  def decide(policy: RbacPolicy, p: Principal, req: AccessRequest): Decision                    // pure; every JVM caller decides from this one function
   def visible[A](policy: RbacPolicy, p: Principal, cluster: ClusterId, resource: Resource)(name: A => String): List[A] => List[A]
 
 final case class PrincipalClaims(subject: UserName, roles: Set[RoleName], kind: PrincipalKind, sessionRef: Option[SessionRef],
@@ -478,8 +481,8 @@ part of it is implemented.
 
 Two details differ from the sketch above and are decided by KERN-006. `RequestDigest` travels in
 the claims as an object (`req: {m, p, b}`) rather than as one further hash, because hashing the
-triple would put a SHA-256 implementation in the cross-compiled source set for the benefit of a
-caller — the browser — that never signs anything; comparing the three fields binds a token to a
+triple would put a SHA-256 implementation in the shared source set for the benefit of a caller — the
+browser, which shared this code at the time — that never signs anything; comparing the three fields binds a token to a
 call exactly as tightly. And building a digest from a body is `RequestDigests.of` in the JVM
 source set for the same reason, while `RequestDigest.ofRequestLine` (the streaming case, which
 hashes no body) stays shared.
@@ -633,8 +636,8 @@ of this: heartbeat discipline, the at-most-one-terminal-event rule, a bounded dr
 cancellation, and the `kui.stream.active`/`kui.stream.events` metrics. The normative example of the
 wire format — byte for byte, including field order (`event`, then `id`, then `data` last) — is
 `SseSuite.goldenWireFormat` in `libs/http/test/src/kui/http/sse/SseSuite.scala`; the browser-side
-parser in `frontend/ui-kernel` is tested against the same bytes, so the two halves cannot drift
-apart. `phase`, `message` and `consumed` are domain events added by the services that own them
+parser in `@kui/kernel` (`packages/kernel/src/data/sse/`) is tested against the same bytes, so the
+two halves cannot drift apart. `phase`, `message` and `consumed` are domain events added by the services that own them
 (M3); this module only guarantees that whatever a caller emits behaves the way every stream must.
 
 ## 8. Paging: offset pages and signed cursors
@@ -874,13 +877,15 @@ the graceful degradation in this shape as evidence of more than that.
 
 ## 12. Frontend shell and microfrontends
 
-`frontend/ui-kernel` (design tokens, primitives, `QueryCache`, `Sse`, `ApiClient`, kernel
-`Var`s), `frontend/ui-shell` (Waypoint router, layout, `FeatureGate`, capability banner,
-lazy feature loader) and one module per feature. Loading is a single Scala.js
-link with `ModuleKind.ESModule` and `ModuleSplitStyle.SmallModulesFor(feature packages)`;
-the shell references features only through `js.dynamicImport` thunks keyed by `FeatureId`
-(ADR-012). Cross-feature panels (topic page → consumers tab) go through the kernel
-`FeaturePanel` slot, never a direct import (`research/kafbat/ui-analysis.md` DC-H6).
+`@kui/api` (the generated contract seam: schema types, `createApiClient`, `ApiError`, `Section`),
+`@kui/kernel` (design tokens, primitives, the query cache, the SSE wrappers, kernel signals),
+`@kui/shell` (Solid Router route table, layout, `FeatureGate`, capability banner, lazy feature
+loader) and one package per feature. It is a pnpm workspace built by Vite, and it is **not built by
+Mill**: it ships as its own container image and reaches the gateway over HTTP (ADR-048). Vite splits
+at each feature's dynamic `import()`; the shell references a feature only through the `load` thunk in
+`packages/shell/src/features/registry.ts`, keyed by `FeatureId` (ADR-012 as amended). Cross-feature
+panels (topic page → consumers tab) go through a kernel slot, never a direct import
+(`research/kafbat/ui-analysis.md` DC-H6).
 
 Navigation state per feature and cluster (ADR-032):
 
@@ -988,8 +993,9 @@ kui/
 │              cache/ observability/ security-core/ http/ config/ testkit/
 ├── services/  gateway/ cluster/ topic/ message/ consumer/ security/ schema/ connect/ ksql/
 │              metrics/ identity/       (each: domain application infrastructure contract api app)
-├── frontend/  ui-kernel/ ui-shell/ ui-clusters/ ui-topics/ ui-messages/ ui-consumers/
-│              ui-schemas/ ui-connect/ ui-ksql/ ui-security/ ui-metrics/ ui-admin/
+├── frontend/  packages/ api/ kernel/ shell/ feature-clusters/ feature-topics/
+│              feature-messages/ feature-consumers/ feature-schemas/
+│              (a pnpm/TypeScript/Vite workspace — its own build, its own image)
 ├── apps/allinone/
 ├── deployment/ docker/ compose/ helm/
 ├── e2e/        JVM Playwright + Testcontainers suites, fault-injection scenarios
@@ -1008,10 +1014,9 @@ The same thing has a different form in different places; each form has one job.
 | `kui-<name>` | Docker image and Compose service name | `kui-topic` |
 | `<name>` | `ServiceId` values, capability keys, metric and log labels, OpenAPI tags | `topic` |
 | `services/<name>/<layer>` | directory path | `services/topic/api` |
-| `services.<name>.<layer>` | Mill module id (`.` for directory nesting; a cross-compiled module adds `.jvm` / `.js`) | `services.topic.api` |
+| `services.<name>.<layer>` | Mill module id (`.` for directory nesting; a module that used to cross-compile keeps a `.jvm` suffix) | `services.topic.api` |
 | `libs/<name>` … `libs.<name>` | same rule for libraries; `kui-<name>` appears in prose only | `libs/kernel`, `libs.kernel.jvm`, "kui-kernel" |
-| `frontend/ui-<name>` … `frontend.ui<Name>` | frontend modules; `kui-ui-<name>` is prose | `frontend/ui-topics`, `frontend.uiTopics` |
-| `kui.ui.<name>` | Scala package, and the `ModuleSplitStyle.SmallModulesFor` entry | `kui.ui.topics` |
+| `frontend/packages/<name>` … `@kui/<name>` | frontend packages. Directory and package name agree; there is no Mill module | `frontend/packages/feature-topics`, `@kui/feature-topics` |
 
 The `<name>` form is the identifier of record: a `ServiceId` in code, the `service` label in
 every metric and log line, and the key the capability registry and the frontend `FeatureId`
