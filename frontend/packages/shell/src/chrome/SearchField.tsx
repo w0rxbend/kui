@@ -60,6 +60,15 @@ export type SearchFieldProps = {
   readonly onRetry?: (() => void) | undefined;
   /** Overrides platform detection. Stories set it; the product does not. */
   readonly platform?: "apple" | "other" | undefined;
+  /**
+   * Hands the input element to the caller, so that something outside this component can focus it.
+   *
+   * This exists for exactly one caller: the application frame, which binds the `⌘K` the hint above
+   * advertises. Focusing by `document.querySelector` instead would work and would also mean the
+   * shortcut silently stops working the day this markup changes, with no test and no compile error
+   * to notice — a shortcut that fails quietly is the thing this prop is here to prevent.
+   */
+  readonly inputRef?: ((el: HTMLInputElement) => void) | undefined;
 };
 
 /** `⌘K` on Apple platforms, `Ctrl K` everywhere else. */
@@ -98,6 +107,9 @@ export function SearchField(props: SearchFieldProps) {
       <div class="kui-global-search__field">
         <Icon name="search" size="16px" class="kui-global-search__icon" />
         <input
+          /* A ref callback, which is the only ref shape Solid 2 has. It is passed straight through
+             and is allowed to be absent, so a story or a test that does not care omits it. */
+          ref={(el: HTMLInputElement) => props.inputRef?.(el)}
           id={`kui-global-search-input-${id}`}
           class="kui-global-search__input"
           type="search"

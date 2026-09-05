@@ -23,7 +23,7 @@
  * answer to it is no, because authentication is disabled in every deployment until somebody
  * configures an identity provider.
  */
-import { Show, createEffect, createMemo, createSignal, onSettled } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, createStore, onSettled } from "solid-js";
 import {
   createApiClient,
   createCsrfTokens,
@@ -46,6 +46,9 @@ import {
   type FeatureState,
 } from "@kui/kernel";
 import { NavDrawer } from "./chrome/NavDrawer.jsx";
+import { installSearchShortcut } from "./chrome/searchShortcut.js";
+import { Overview } from "./overview/Overview.jsx";
+import { fetchOverview, loadingData, toOverviewModel, type OverviewData } from "./overview/load.js";
 import { TopBar, type ThemeMode } from "./chrome/TopBar.jsx";
 import type { ClusterSummary, NavDestination } from "./chrome/types.js";
 import { featureRegistry } from "./features/registry.js";
@@ -103,6 +106,54 @@ export function App() {
   // it: a pasted link has to show the recipient what the sender saw.
   const fromUrl = clusterInUrl(window.location.pathname, uiPrefix);
   if (fromUrl !== undefined) cluster.select(fromUrl);
+
+  /**
+   * The search input, once it exists, and the `⌘K` that focuses it.
+   *
+   * A plain binding rather than a signal: nothing renders from it, it is only read inside a key
+   * handler, and making it reactive would add a dependency edge no computation wants. The listener
+   * goes on `document` rather than on the frame, because the shortcut has to work with focus
+   * anywhere — including inside a dialog rendered through a portal.
+   */
+  let searchInput: HTMLInputElement | undefined;
+  onSettled(() =>
+    installSearchShortcut(() => {
+      // `select()` as well as `focus()`: pressing the shortcut with a query already in the box means
+      // "search for something else", and leaving the old text with the caret at its end makes the
+      // user delete it first. Every command palette and address bar selects.
+      searchInput?.focus();
+      searchInput?.select();
+    }),
+  );
+
+  /**
+   * The cluster overview's data.
+   *
+   * It is fetched here rather than in the screen so that `Overview` takes a finished view model and
+   * fetches nothing — which is what lets every state of that screen, including the ones that only
+   * happen when a service is down, be rendered in a story and a test with no server.
+   */
+  const [overview, setOverview] = createStore<{ data: OverviewData }>({ data: loadingData() });
+
+  createEffect(
+    () => cluster.selected(),
+    (selected) => {
+      if (selected === undefined) return undefined;
+      let cancelled = false;
+      void (async () => {
+        const next = await fetchOverview(api, selected);
+        if (cancelled) return;
+        setOverview((draft) => {
+          draft.data = next;
+        });
+      })();
+      // Switching cluster while five requests are in flight must not let the old cluster's answers
+      // land on the new cluster's screen — the most convincing kind of wrong number there is.
+      return () => {
+        cancelled = true;
+      };
+    },
+  );
 
   const [probing, setProbing] = createSignal<ReadonlySet<string>>(new Set<string>());
   const [probeErrors, setProbeErrors] = createSignal<ReadonlyMap<string, string>>(new Map());
@@ -180,7 +231,7 @@ export function App() {
     statuses().find((status) => status.registration.id === id);
 
   const Router: ShellRouter = createShellRouter(bootstrap.basePath, {
-    home: () => <Overview />,
+    home: () => <Overview model={toOverviewModel(overview.data)} />,
     settings: () => <Settings />,
     forbidden: () => <ForbiddenPage subject="this page" homeHref={Router.paths()} />,
     notFound: () => <NotFoundPage attempted={window.location.pathname} homeHref={Router.paths()} />,
@@ -250,10 +301,18 @@ export function App() {
 
           <div class="kui-frame__topbar">
             <TopBar
-            /* The search field is wired to nothing yet: it is the chrome's, and what it searches
-               belongs to the features. It is drawn in its idle state rather than left out, because
-               the top bar's layout is designed around it. */
-            search={{ value: "", onInput: () => undefined, status: "idle" }}
+            /* What the field *searches* is still the features' to supply, so it stays idle. What it
+               no longer does is advertise a shortcut nobody implements: the `⌘K` hint in its corner
+               is bound below, and `inputRef` is how the binding reaches the element. A hint for a
+               key that does nothing teaches the reader that shortcuts here do not work. */
+            search={{
+              value: "",
+              onInput: () => undefined,
+              status: "idle",
+              inputRef: (el) => {
+                searchInput = el;
+              },
+            }}
             clusters={clusters()}
             currentClusterId={cluster.selected()}
             onSelectCluster={(id) => cluster.select(id)}
@@ -398,17 +457,10 @@ function themeMode(): ThemeMode {
   return attribute === "light" || attribute === "dark" ? attribute : "auto";
 }
 
-/* Placeholders for the two shell-owned screens that are not part of this task. They render something
- * honest rather than nothing, because a route that renders nothing is a blank content area and users
- * read a blank page as a broken page. */
+/* A placeholder for the one shell-owned screen that is still to come. It renders something honest
+ * rather than nothing, because a route that renders nothing is a blank content area and users read a
+ * blank page as a broken page. (The overview is no longer among these: it is the real screen now.) */
 
-function Overview() {
-  return (
-    <div class="kui-shell__page" data-testid="page-overview">
-      <h1>Overview</h1>
-    </div>
-  );
-}
 
 function Settings() {
   return (
