@@ -234,3 +234,190 @@
 .kui-brk-config__value {
   overflow-wrap: anywhere;
 }
+
+/* --- The brokers screen, rebuilt to the v3 design (research/design/SCREENS.md §2.16, §3.2) -------
+ *
+ * The screen was a health panel, a skew card and a table. It is now four figures and a card per
+ * broker, because the table could not draw a disk bar — a stadium track in a table cell is four
+ * pixels wide — so the same three brokers had to be read twice, in two places, to answer one
+ * question.
+ *
+ * These names are new (`.kui-brk-tiles`, `.kui-brkcard`) rather than a restyle of the old ones, so
+ * that the rules the old screen is still described by remain readable beside them until they go.
+ */
+
+.kui-brk-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--kui-space-4);
+  margin-bottom: var(--kui-space-4);
+}
+
+.kui-brk-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-brkcard {
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+  overflow: hidden;
+}
+
+/* A grid rather than flex, so that the figure columns line up down the stack. Cards that each size
+ * their own columns turn a list of brokers into a ragged edge, and the whole reason for keeping the
+ * figures on the collapsed card is that they can be compared at a glance. */
+.kui-brkcard__head {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1.6fr) minmax(280px, 3fr) minmax(200px, 2fr) auto;
+  align-items: center;
+  gap: var(--kui-space-4);
+  padding: var(--kui-space-3) var(--kui-space-4);
+}
+
+.kui-brkcard__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kui-brkcard__name {
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.kui-brkcard__name:hover {
+  text-decoration: underline;
+}
+
+.kui-brkcard__address {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The three figures travel together: one grid cell at full width, one row of their own when the
+ * card narrows. Laying them out as three separate grid columns made the responsive rule have to
+ * re-place each of them by name, which is the sort of thing that silently loses one. */
+.kui-brkcard__figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kui-space-4);
+  min-width: 0;
+}
+
+.kui-brkcard__figures--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.kui-brkcard__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kui-brkcard__figure-label {
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-brkcard__figure-value {
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-brkcard__disk {
+  min-width: 0;
+}
+
+.kui-brkcard__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kui-control-height-sm);
+  height: var(--kui-control-height-sm);
+  border: none;
+  border-radius: var(--kui-radius-sm);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+}
+
+.kui-brkcard__toggle:hover {
+  color: var(--kui-color-text);
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-brkcard__body {
+  padding: 0 var(--kui-space-4) var(--kui-space-4);
+}
+
+.kui-brkcard__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+  margin-bottom: var(--kui-space-4);
+}
+
+.kui-brkcard__section {
+  margin: 0 0 var(--kui-space-2);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-brkcard__config-state {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* Below this the seven columns cannot each hold a label and a figure, so the head becomes two rows:
+ * identity and disk on the first, the three figures on the second. Nothing is hidden — a broker's
+ * rack is not less important on a laptop. */
+@media (max-width: 1100px) {
+  .kui-brkcard__head {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "tile identity toggle"
+      "figures figures figures"
+      "disk disk disk";
+    row-gap: var(--kui-space-3);
+  }
+
+  .kui-brkcard__head > .kui-icon-tile {
+    grid-area: tile;
+  }
+
+  .kui-brkcard__identity {
+    grid-area: identity;
+  }
+
+  .kui-brkcard__toggle {
+    grid-area: toggle;
+  }
+
+  .kui-brkcard__figures {
+    grid-area: figures;
+  }
+
+  .kui-brkcard__disk {
+    grid-area: disk;
+  }
+}

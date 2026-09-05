@@ -153,10 +153,13 @@ describe("the broker list", () => {
     ));
   }
 
-  it("draws one health row per broker, each naming its own metric for a screen reader", async () => {
+  it("draws one card per broker, each naming its own disk bar for a screen reader", async () => {
+    // Was one health *row* per broker; the screen is cards now. The property is unchanged and is
+    // the one that matters: every bar names the broker it belongs to, so a screen reader user hears
+    // "broker-3.kyiv:9092 disk usage" rather than three bars called "disk".
     const { container, dispose } = list(SAMPLE_BROKERS);
     await flush();
-    expect(container.querySelectorAll(".kui-brk-health__row")).toHaveLength(3);
+    expect(container.querySelectorAll(".kui-brkcard")).toHaveLength(3);
     const bars = [...container.querySelectorAll('[role="progressbar"]')];
     expect(bars.map((bar) => bar.getAttribute("aria-label"))).toContain("broker-3.kyiv:9092 disk usage");
     dispose();
@@ -165,29 +168,47 @@ describe("the broker list", () => {
   it("prints an em dash, not a percentage, for a disk it could not measure", async () => {
     const { container, dispose } = list(DEGRADED_BROKERS, 47);
     await flush();
-    const offline = container.querySelector('[data-testid="broker-health-2"]');
+    const offline = container.querySelector('[data-testid="broker-2"]');
     expect(offline?.textContent).toContain("—");
     expect(offline?.textContent).not.toContain("0%");
     dispose();
   });
 
-  it("drops the rack column when the cluster is not rack-aware, and keeps it when it is", async () => {
+  it("drops the rack figure when the cluster is not rack-aware, and keeps it when it is", async () => {
+    // The table's rack *column* became the card's rack *figure*, and the rule survived the move: a
+    // figure that is an em dash on every card is what teaches people to stop reading figures.
     const plain = list(SAMPLE_BROKERS);
     await flush();
-    const plainHeaders = headers(plain.container, "brokers-table");
-    expect(plainHeaders).not.toContain("Rack");
+    expect(plain.container.textContent).not.toContain("RACK");
     plain.dispose();
 
     const racked = list(RACKED_BROKERS);
     await flush();
-    expect(headers(racked.container, "brokers-table")).toContain("Rack");
+    expect(racked.container.textContent).toContain("RACK");
     racked.dispose();
   });
 
-  it("says who the controller is under the panel", async () => {
+  it("says who the controller is", async () => {
     const { container, dispose } = list(SAMPLE_BROKERS);
     await flush();
-    expect(container.textContent).toContain("Controller: broker 1");
+    const tile = container.querySelector(".kui-brk-tiles")!;
+    expect(tile.textContent).toContain("ACTIVE CONTROLLER");
+    expect(tile.textContent).toContain("broker 1");
+    dispose();
+  });
+
+  it("opens a broker's configuration rather than showing it always", async () => {
+    // A broker has around two hundred settings. Collapsed the card answers "is this all right?";
+    // expanded it answers "why is it behaving like that?". Those are asked at different moments.
+    const { container, dispose } = list(SAMPLE_BROKERS);
+    await flush();
+    expect(container.textContent).not.toContain("CONFIGURATION");
+    const toggle = container.querySelector('[data-testid="broker-1"] .kui-brkcard__toggle') as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    toggle.click();
+    await flush();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(container.textContent).toContain("CONFIGURATION");
     dispose();
   });
 
@@ -341,6 +362,3 @@ function detail(overrides: DetailOverrides, tab: "logdirs" | "configuration") {
   ));
 }
 
-function headers(root: ParentNode, testId: string): string[] {
-  return [...root.querySelectorAll(`[data-testid="${testId}"] th`)].map((th) => th.textContent ?? "");
-}

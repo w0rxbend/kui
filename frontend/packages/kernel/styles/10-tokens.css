@@ -87,12 +87,27 @@
    * rather than #000000: pure black on an off-white page is harsher than pure white is on a
    * near-black one, so the two themes are not mirror images here.
    *
-   * `text-subtle` deliberately does NOT meet the AA body threshold, which is why it is only ever
-   * allowed on text that repeats information available elsewhere — an axis tick beside a labelled
-   * bar, the relative time beside an absolute timestamp, the word on a destination that is also
-   * marked disabled. Never a value the operator has to read. */
+   * `text-subtle` was originally set below the AA body threshold, on the rule that it would only
+   * ever carry text repeating information available elsewhere — an axis tick beside a labelled bar,
+   * a relative time beside an absolute one.
+   *
+   * That rule did not hold, and it was never going to. Running axe over every story in both themes
+   * (`frontend/scripts/a11y-stories.mjs`) found this step carrying error codes, panel captions, the
+   * "no value" dash in a record and a confirmation dialog's statement of consequences — none of
+   * which repeats anything, all of which an operator has to read, at ratios between 2.59:1 and
+   * 3.56:1. A reservation that has to be re-checked by hand in two hundred places is not a
+   * reservation; it is a hope.
+   *
+   * So both values were raised until they clear 4.5:1 on the three surfaces text is actually drawn
+   * on — `surface`, `surface-raised`, `surface-elevated`. The step stays visibly dimmer than
+   * `text-muted` (dark 4.51:1 against muted's 5.51:1; light 4.61:1 against 5.82:1), so the ramp
+   * still has four distinguishable levels and every one of them is legible.
+   *
+   * The one surface it does *not* clear is `surface-overlay`, the lightest neutral in dark, which
+   * would need a value indistinguishable from `text-muted`. Do not put this step on an overlay —
+   * the notifications panel learned that the expensive way. */
   --kui-color-text-strong: #0a0e13; /* kui */
-  --kui-color-text-subtle: #757d8a; /* design */
+  --kui-color-text-subtle: #59616e; /* design-adjusted; design #757d8a — see the note above */
   --kui-color-border: #cbd2dc; /* design */
   --kui-color-border-strong: #727b88; /* design */
   --kui-color-selected: #dce5f5; /* design */
@@ -357,7 +372,7 @@
     --kui-color-text: #e3e6eb; /* design */
     --kui-color-text-muted: #a6acb8; /* design */
     --kui-color-text-strong: #ffffff; /* kui */
-    --kui-color-text-subtle: #6b727e; /* design */
+    --kui-color-text-subtle: #7f8692; /* design-adjusted; design #6b727e — see the note above */
     --kui-color-border: #2a3038; /* design */
     --kui-color-border-strong: #666d79; /* design */
     --kui-color-selected: #3a4657; /* design */
@@ -426,7 +441,7 @@
   --kui-color-text: #e3e6eb; /* design */
   --kui-color-text-muted: #a6acb8; /* design */
   --kui-color-text-strong: #ffffff; /* kui */
-  --kui-color-text-subtle: #6b727e; /* design */
+  --kui-color-text-subtle: #7f8692; /* design-adjusted; design #6b727e — see the note above */
   --kui-color-border: #2a3038; /* design */
   --kui-color-border-strong: #666d79; /* design */
   --kui-color-selected: #3a4657; /* design */

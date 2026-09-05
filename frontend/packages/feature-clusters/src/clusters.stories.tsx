@@ -66,7 +66,52 @@ export const BrokersDegraded: Story = {
   ),
 };
 
-/** A rack-aware cluster, which is the only case where the RACK column is drawn at all. */
+/**
+ * The design's own screen: every card open, with tags and settings.
+ *
+ * This is the state to hold beside `14-brokers.png`. It is also where the configuration block's
+ * three renderings are visible together — settings present, settings still being fetched, and
+ * settings the cluster refused — because a managed service that authenticates but authorizes
+ * nothing refuses `describeConfigs` outright, and an empty block would read as "this broker has no
+ * settings".
+ */
+export const BrokersExpanded: Story = {
+  render: () => (
+    <BrokerList
+      clusterName="prod-kyiv-01"
+      brokers={SAMPLE_BROKERS}
+      underReplicatedPartitions={0}
+      observedAgo="2s ago"
+      clustersHref="#/clusters"
+      hrefFor={brokerHref}
+      onOpen={noop}
+      versionFor={() => "v3.7.0 · KRaft"}
+      uptimeFor={() => "uptime 41d"}
+      configsFor={(id) =>
+        id === 2
+          ? undefined
+          : [
+              { name: "num.network.threads", value: "8" },
+              { name: "num.io.threads", value: "16" },
+              { name: "log.retention.hours", value: "168", overridden: true },
+              { name: "log.segment.bytes", value: "1 GB" },
+              { name: "num.partitions", value: "12" },
+              { name: "default.replication.factor", value: "3" },
+              { name: "min.insync.replicas", value: "2" },
+              { name: "compression.type", value: "producer" },
+            ]
+      }
+      configsErrorFor={(id) => (id === 3 ? "The cluster refused describeConfigs" : undefined)}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    for (const toggle of canvasElement.querySelectorAll(".kui-brkcard__toggle")) {
+      (toggle as HTMLButtonElement).click();
+    }
+  },
+};
+
+/** A rack-aware cluster, which is the only case where the RACK figure is drawn at all. */
 export const BrokersRacked: Story = {
   render: () => (
     <BrokerList clusterName="prod-fra-02" brokers={RACKED_BROKERS} underReplicatedPartitions={0} observedAgo="2s ago" clustersHref="#/clusters" hrefFor={brokerHref} onOpen={noop} />
