@@ -42,7 +42,8 @@ docker run --rm \
   kui-allinone:0.1.0-SNAPSHOT
 ```
 
-Then open <http://localhost:8080/ui/>, or check it from the shell:
+This is the backend. The interface is a separate image (`deployment/frontend/`) and this one
+contains none of it, so there is no `/ui/` to open here — check it from the shell:
 
 ```
 curl -s localhost:8080/api/v1/info | jq -r .build.gitCommit

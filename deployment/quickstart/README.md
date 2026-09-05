@@ -7,11 +7,18 @@ it. The only thing you need installed is Docker.
 deployment/quickstart/quickstart.sh
 ```
 
-It prints one line you have to act on:
+It prints two lines, and the first is the one you act on:
 
 ```
-  KUI is running:  http://localhost:8080/ui/
+  KUI is running:  http://localhost:8090/ui/
+  the API is at:   http://localhost:8080/api/v1
 ```
+
+Two ports because there are two containers. The interface is its own image
+(`deployment/frontend/`), built from the pnpm workspace under `frontend/` and served by an nginx
+that proxies `/api/` through to the gateway, so the browser still sees one origin. The gateway's own
+image contains no interface at all since ADR-048 — `http://localhost:8080/ui/` is not where KUI is.
+`KUI_FRONTEND_PORT` and `KUI_PORT` move them.
 
 To remove everything again:
 

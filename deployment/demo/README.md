@@ -13,6 +13,12 @@ It prints one line you have to act on:
   KUI is running:  http://localhost:18080/ui/
 ```
 
+**That URL does not currently serve an interface.** ADR-048 made the frontend a separate image and
+the gateway's jar contains none of it, but `demo.sh` and `docker-compose.demo.yml` still start the
+backend alone — unlike `deployment/quickstart/`, which was updated to start the frontend container
+too. Until they are, the demo below is exercised through the API. The walkthrough's value is the
+fault-isolation behaviour it demonstrates, which is observable either way.
+
 And when you have finished:
 
 ```

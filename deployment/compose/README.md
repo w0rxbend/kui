@@ -26,9 +26,16 @@ failure domain, so it can show you a *feature* degrading but it cannot show you 
 
 ```
 docker compose -f deployment/compose/docker-compose.allinone.yml up -d
-open http://localhost:8080/ui/
+curl -s localhost:8080/api/v1/capabilities | jq
 docker compose -f deployment/compose/docker-compose.allinone.yml down -v
 ```
+
+**These stacks start the backend only.** Since ADR-048 the interface is a separate image built from
+the pnpm workspace under `frontend/`, and the gateway's jar contains none of it, so
+`http://localhost:8080/ui/` answers 503 here. Both compose files in this directory are about
+process topology and fault isolation, which is what they are worth reading for, and every claim
+below is made against the API rather than a screen. For a stack with a working interface use
+`deployment/quickstart/quickstart.sh`, which starts the frontend container alongside the backend.
 
 ## The distributed environment
 
@@ -133,13 +140,13 @@ You can check that claim directly by starting the stack with no service at all:
 
 ```
 $ docker compose -f deployment/compose/docker-compose.yml up -d --scale kui-cluster=0
-$ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ui/
+$ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/api/v1/capabilities
 200
 $ curl -s localhost:8080/api/v1/capabilities | jq -c '.entries[] | select(.key.service == "cluster") | {service:.key.service, status:.state.status, reason:.state.reason}'
 {"service":"cluster","status":"unavailable","reason":"UPSTREAM_UNAVAILABLE"}
 ```
 
-The UI is served and the capability document says the truth. This is why `depends_on` in
+The gateway answers and the capability document says the truth. This is why `depends_on` in
 `docker-compose.yml` uses `required: false`: it orders startup when the service is there and does
 not gate the gateway when it is not.
 

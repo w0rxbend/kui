@@ -13,9 +13,10 @@
 # every current Docker Engine package include). No Java, no Mill, no Scala: if the KUI image is not
 # on the machine, this script builds it inside a container.
 #
-# Ports, when 8080 or 9092 are already taken on your machine:
+# Ports, when 8090, 8080 or 9092 are already taken on your machine:
 #
-#   KUI_PORT=18080 KUI_QUICKSTART_KAFKA_PORT=19092 deployment/quickstart/quickstart.sh
+#   KUI_FRONTEND_PORT=18090 KUI_PORT=18080 KUI_QUICKSTART_KAFKA_PORT=19092 \
+#     deployment/quickstart/quickstart.sh
 #
 # Pass the same variables to `down`, or not — teardown does not care which ports were used.
 
@@ -24,6 +25,12 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/../.." && pwd)"
 COMPOSE_FILE="${HERE}/docker-compose.quickstart.yml"
+
+# The interface, which is a separate image and a separate compose file (deployment/frontend). The
+# quickstart brings up both, because "run KUI" means the whole product to somebody trying it for the
+# first time — the split matters to whoever releases the two halves, not to whoever is opening a
+# browser.
+FRONTEND_FILE="${HERE}/../frontend/docker-compose.frontend.yml"
 AUTH_FILE="${HERE}/docker-compose.auth.yml"
 
 # `--with-auth` swaps KUI's configuration file for one that has `kui.auth` and `kui.rbac` filled in.
@@ -39,6 +46,12 @@ fi
 KUI_VERSION="${KUI_VERSION:-0.1.0-SNAPSHOT}"
 KUI_IMAGE="kui-allinone:${KUI_VERSION}"
 KUI_PORT="${KUI_PORT:-8080}"
+
+# The interface's port. It is what a person opens; the gateway's port above is the API, and is
+# published only so that a `curl` against it is possible — the browser reaches it through the
+# frontend container, which proxies `/api` so that the two share an origin (ADR-019 and the cookie).
+KUI_FRONTEND_PORT="${KUI_FRONTEND_PORT:-8090}"
+export KUI_FRONTEND_PORT
 KAFKA_PORT="${KUI_QUICKSTART_KAFKA_PORT:-9092}"
 
 export KUI_VERSION KUI_PORT
@@ -46,9 +59,9 @@ export KUI_QUICKSTART_KAFKA_PORT="${KAFKA_PORT}"
 
 compose() {
   if [ "${WITH_AUTH}" = true ]; then
-    docker compose --project-directory "${HERE}" -f "${COMPOSE_FILE}" -f "${AUTH_FILE}" "$@"
+    docker compose --project-directory "${HERE}" -f "${COMPOSE_FILE}" -f "${FRONTEND_FILE}" -f "${AUTH_FILE}" "$@"
   else
-    docker compose --project-directory "${HERE}" -f "${COMPOSE_FILE}" "$@"
+    docker compose --project-directory "${HERE}" -f "${COMPOSE_FILE}" -f "${FRONTEND_FILE}" "$@"
   fi
 }
 
@@ -123,6 +136,23 @@ ensure_image() {
   say ""
 }
 
+wait_for_frontend() {
+  local url="http://localhost:${KUI_FRONTEND_PORT}/healthz"
+  local deadline=$((SECONDS + 120))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if curl -fsS -o /dev/null "${url}" 2>/dev/null; then
+      return 0
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+      case "$(docker inspect -f '{{.State.Health.Status}}' kui-frontend 2>/dev/null || echo none)" in
+        healthy) return 0 ;;
+      esac
+    fi
+    sleep 2
+  done
+  return 1
+}
+
 wait_for_kui() {
   local url="http://localhost:${KUI_PORT}/api/v1/health/ready"
   local deadline=$((SECONDS + 180))
@@ -152,15 +182,31 @@ up() {
   say "  so this pauses for around half a minute before the seed step runs."
   say ""
 
-  compose up -d --wait --wait-timeout 300 \
+  # No `--wait`. It looks like the right flag and it races the seeders: `avro-seed` is a one-shot
+  # container that does its work and exits 0, and `--wait` reports an exited container as a failure
+  # unless its health check happened to pass first. Which of the two wins depends on how long
+  # everything else took, so adding one service to this stack was enough to turn a green start-up
+  # into "container kui-quickstart-avro-seed exited (0)" and a script that stopped.
+  #
+  # The two waits below are the ones that mean something anyway: the API answering `health/ready`,
+  # and the interface answering. Both say what they were waiting for when they give up.
+  compose up -d \
     || die "Startup failed. 'deployment/quickstart/quickstart.sh logs' shows what happened."
 
   if ! wait_for_kui; then
     die "KUI started but never became ready. 'deployment/quickstart/quickstart.sh logs' shows why."
   fi
 
+  # And the interface, which is a second container. Reporting the gateway as ready and then handing
+  # over a URL that answers nothing is the worst moment to be imprecise: somebody trying KUI for the
+  # first time reads a blank page as the product being broken.
+  if ! wait_for_frontend; then
+    die "The interface did not come up. 'deployment/quickstart/quickstart.sh logs' shows why."
+  fi
+
   say ""
-  say "  KUI is running:  http://localhost:${KUI_PORT}/ui/"
+  say "  KUI is running:  http://localhost:${KUI_FRONTEND_PORT}/ui/"
+  say "  the API is at:   http://localhost:${KUI_PORT}/api/v1"
   if [ "${WITH_AUTH}" = true ]; then
     say ""
     say "  It asks you to sign in. Two accounts, both spelled out in kui-quickstart-auth.yaml:"
