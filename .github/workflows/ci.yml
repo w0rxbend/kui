@@ -155,23 +155,61 @@ jobs:
           pnpm --filter @kui/api run generate
           git diff --exit-code packages/api/src/schema.d.ts
 
-  # The distributed stack, and what happens to it when one service stops.
+  # The product, in a browser, deployed the way it ships.
   #
-  # ## The browser half of this stage is currently absent, and that is stated rather than faked
+  # It starts the quickstart — Kafka, the seeders, the gateway and the frontend image — and drives
+  # the real thing. `deployment/quickstart/quickstart.sh` is the same command a person runs, which
+  # is the point: a suite that started its own bespoke stack would pass against a deployment nobody
+  # else can reproduce.
   #
-  # `./mill e2e.test` is not run here. Its page objects select on `data-testid` attributes the
-  # deleted Laminar components carried, and its fixtures point the browser at the gateway — which no
-  # longer serves an interface, because the frontend is its own image now. It fails structurally, on
-  # its first selector, and it would fail for every commit regardless of what the commit did.
-  #
-  # The alternatives were: leave it red, which makes a red build mean nothing and teaches people to
-  # ignore it; mark it `continue-on-error`, which is worse — a green tick that checks nothing; or
-  # say plainly that this gate does not exist yet. `docs/ROADMAP-SOLID.md` M2 is where it comes
-  # back, as a TypeScript Playwright suite beside the frontend, and the reasoning for replacing
-  # rather than repairing is recorded there.
-  #
-  # What remains here is the half that never depended on the browser: the images build, the
-  # distributed stack comes up, and stopping one service degrades the others in the documented way.
+  # This replaced a Scala Playwright suite. The reasoning is in `frontend/playwright.config.ts`, and
+  # the decisive part is that repairing the old one meant adding a browser-bundle build to the Mill
+  # build — putting Node and pnpm back into the half that the split exists to keep free of them.
+  browser:
+    name: end-to-end (browser)
+    runs-on: ubuntu-latest
+    # Builds two images and starts a Kafka cluster before it opens a browser. Twenty-five minutes is
+    # a backstop against a hung container, not a budget.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+      - name: Install pnpm
+        run: npm install --global --no-fund --no-audit pnpm@11.25.0
+      - name: Install
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      # The browser Playwright drives is not in the runner image, and the library only speaks to the
+      # revision it shipped with — so this installs *the* browser rather than *a* browser.
+      # `--with-deps` adds the shared libraries a fresh runner does not have.
+      - name: Install the pinned browser
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Start the product
+        run: deployment/quickstart/quickstart.sh
+      - name: Drive it
+        working-directory: frontend
+        run: pnpm e2e
+      # The trace is the artefact that explains a browser failure without anybody reproducing it: it
+      # carries the DOM, the network and a screenshot at every step. On failure only.
+      - name: Upload the failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/**
+            frontend/test-results/**
+          if-no-files-found: ignore
+      - name: The container logs, when it was the stack rather than the screen
+        if: failure()
+        run: deployment/quickstart/quickstart.sh logs || true
+
+  # The distributed stack, and what happens to it when one service stops. Not a browser test — it
+  # asserts that stopping one service degrades the others in the documented way — so it stays on the
+  # backend's side of the split.
   compose:
     name: distributed stack + fault isolation
     runs-on: ubuntu-latest
