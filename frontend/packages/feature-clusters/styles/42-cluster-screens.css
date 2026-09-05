@@ -1,0 +1,236 @@
+/*
+ * The SolidJS cluster and broker screens.
+ *
+ * Every class here starts `kui-brk-`. The product is one concatenated stylesheet with no module
+ * system, so a name that exists elsewhere is silently restyled by whichever block is written later;
+ * the pre-migration sheets beside this one own `.kui-brokers-*` and `.kui-clusters-*`, and the
+ * kernel owns `.kui-table-*` and `.kui-progress*`. Grep before adding a block.
+ *
+ * The vocabulary is the dashboard's broker-health panel (SPEC §4.20) and the consumer table
+ * (§4.16). Nothing new is drawn, and nothing below is a raw value.
+ */
+
+.kui-brk-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+  min-width: 0;
+}
+
+/* Two panels above the table: the picture and the one figure it cannot draw. Collapses to one
+ * column at the SPEC §7.5 breakpoint, in the same place the dashboard's grids collapse. */
+.kui-brk-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--kui-space-5);
+}
+
+@media (max-width: 1199px) {
+  .kui-brk-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Names, dots and chips ------------------------------------------------------------------ */
+
+.kui-brk-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-brk-name__link {
+  color: var(--kui-color-text-strong);
+  font-weight: 500;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-brk-name__link:hover,
+.kui-brk-name__link:focus-visible {
+  text-decoration: underline;
+}
+
+/*
+ * The health dot: 6px, exactly as the drawer's cluster status card draws it.
+ *
+ * It is `aria-hidden` in the markup and it is never the only signal — every row that carries one
+ * also carries the word, either as a pill or as visually-hidden text. A dot on its own is a colour,
+ * and a colour on its own is nothing to a reader who cannot separate these four.
+ */
+.kui-brk-dot {
+  flex: none;
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: var(--kui-radius-pill);
+  background: var(--kui-color-text-subtle);
+}
+
+.kui-brk-dot--healthy {
+  background: var(--kui-color-success);
+}
+
+.kui-brk-dot--degraded {
+  background: var(--kui-color-warning);
+}
+
+.kui-brk-dot--offline {
+  background: var(--kui-color-danger);
+}
+
+/* Grey, and deliberately the same grey as "no value": a broker we could not reach is a broker we
+ * know nothing about, which is a different claim from "it is down". */
+.kui-brk-dot--unknown {
+  background: var(--kui-color-text-subtle);
+}
+
+.kui-brk-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-brk-mono {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-brk-missing {
+  color: var(--kui-color-text-muted);
+  cursor: help;
+}
+
+.kui-brk-fraction {
+  font-variant-numeric: tabular-nums;
+}
+
+/* `2/3` when a broker is down. The denominator is the story, so the whole figure is amber. */
+.kui-brk-fraction--short {
+  color: var(--kui-color-warning);
+  font-weight: 600;
+}
+
+.kui-brk-meta {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-brk-freshness {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+}
+
+/* --- The broker health panel (SPEC §4.20) ---------------------------------------------------- */
+
+.kui-brk-health {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  /* 11px between 50px rows, measured at `01` (346, 407, 468). The scale's 12px step is the nearest
+   * token and the 1px is invisible; a `--kui-space-11px` would not be. */
+  gap: var(--kui-space-3);
+}
+
+.kui-brk-health__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-brk-health__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-brk-health__name {
+  font-size: var(--kui-font-size-md);
+  font-weight: 500;
+  color: var(--kui-color-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pushed to the right edge by the auto margin rather than by a spacer element, so the name is free
+ * to truncate into whatever space is left. */
+.kui-brk-health__meta {
+  margin-inline-start: auto;
+  flex: none;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Partition spread ------------------------------------------------------------------------ */
+
+.kui-brk-skew {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-brk-skew__value {
+  font-size: var(--kui-font-size-3xl);
+  font-weight: 600;
+  color: var(--kui-color-text-strong);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.kui-brk-skew__value--uneven {
+  color: var(--kui-color-warning);
+}
+
+.kui-brk-skew__unit,
+.kui-brk-skew__none {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Log directories and configuration ------------------------------------------------------- */
+
+.kui-brk-sizecell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--kui-space-2);
+  width: 100%;
+}
+
+.kui-brk-error {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-brk-config__name {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+/* An overridden setting is what somebody opened this tab to find, so it is the one that is bright.
+ * The inherited defaults stay muted — the contrast between the two *is* the reading. */
+.kui-brk-config__name--overridden {
+  color: var(--kui-color-text-strong);
+  font-weight: 500;
+}
+
+.kui-brk-config__value {
+  overflow-wrap: anywhere;
+}
