@@ -1,7 +1,15 @@
 # ADR-012 — Microfrontend loading: single link with module splitting and dynamic import
 
-- Status: Accepted
+- Status: Accepted; **amended by [ADR-048](ADR-048-solidjs-typescript-vite-frontend.md)** (2026-09-05)
 - Date: 2026-09-03
+
+> **Amended by ADR-048.** The property this ADR decides — an unavailable feature is never
+> downloaded, and a feature's code cannot leak into the entry bundle — is unchanged, and so are
+> both amendments below: the dev loop still needs no proxy, and route patterns are still static
+> while only rendering is dynamically imported. What changes is the mechanism. Scala.js
+> `ModuleSplitStyle` and `js.dynamicImport` become Vite code splitting and Solid's `lazy()`, and
+> the bundle-shape check moves from the `fullLinkJS` output to the Vite build manifest's module
+> graph. See ADR-048 §4.
 
 ## Context
 

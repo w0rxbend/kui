@@ -15,7 +15,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 | [ADR-008](docs/adr/ADR-008-logging-log4cats-logback.md) | Structured logging with log4cats over Logback; Fabric dropped | Accepted | 2026-09-03 |
 | [ADR-009](docs/adr/ADR-009-otel4s-oteljava-telemetry.md) | otel4s (oteljava backend) for traces and metrics | Accepted | 2026-09-03 |
 | [ADR-010](docs/adr/ADR-010-macwire-composition-roots.md) | MacWire composition roots | Accepted | 2026-09-03 |
-| [ADR-011](docs/adr/ADR-011-laminar-waypoint-frontend.md) | Laminar 17.2.1, Airstream 17.2.1, Waypoint 9.0.0 frontend | Accepted | 2026-09-03 |
+| [ADR-011](docs/adr/ADR-011-laminar-waypoint-frontend.md) | Laminar 17.2.1, Airstream 17.2.1, Waypoint 9.0.0 frontend | Superseded by ADR-048 | 2026-09-03 |
 | [ADR-012](docs/adr/ADR-012-microfrontend-loading-strategy.md) | Microfrontend loading: single link with module splitting and dynamic import | Accepted | 2026-09-03 |
 | [ADR-013](docs/adr/ADR-013-ciris-configuration.md) | Configuration with Ciris (over PureConfig) | Accepted | 2026-09-03 |
 | [ADR-014](docs/adr/ADR-014-schema-registry-client-strategy.md) | Schema Registry: own REST client for management, Confluent serializers for wire format | Accepted | 2026-09-03 |
@@ -52,6 +52,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 | [ADR-045](docs/adr/ADR-045-plan-token-confirmation-for-mutations.md) | A destructive operation is confirmed against a server-computed plan carried by an HMAC'd plan token, not against a form | Accepted | 2026-09-04 |
 | [ADR-046](docs/adr/ADR-046-cluster-profile-seam.md) | Cluster credentials travel on `/internal/v1` and exactly one shared module, `services/cluster/client`, consumes them | Accepted | 2026-09-04 |
 | [ADR-047](docs/adr/ADR-047-mutation-marker-readonly-and-audit-sink.md) | Every mutation ships with a `Mutation` marker, a per-cluster read-only refusal and an audit record, from the first one | Accepted | 2026-09-04 |
+| [ADR-048](docs/adr/ADR-048-solidjs-typescript-vite-frontend.md) | The browser is SolidJS 2, TypeScript and Vite; the shared-contract guarantee is kept by generating the client from the committed OpenAPI documents | Accepted | 2026-09-05 |
 
 ADR-039 … ADR-043 were written at and after the architecture review (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded

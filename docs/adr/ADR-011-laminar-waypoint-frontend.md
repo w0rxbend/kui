@@ -1,7 +1,14 @@
 # ADR-011 — Laminar 17.2.1, Airstream 17.2.1, Waypoint 9.0.0 frontend
 
-- Status: Accepted
+- Status: **Superseded by [ADR-048](ADR-048-solidjs-typescript-vite-frontend.md)** (2026-09-05)
 - Date: 2026-09-03
+
+> **Superseded.** The frontend is no longer Scala.js. ADR-048 replaces Laminar, Airstream and
+> Waypoint with SolidJS 2, TypeScript and Vite, and explains what that costs — chiefly
+> compile-time contract sharing, which ADR-048 §3 replaces with types generated from the
+> committed OpenAPI documents. This ADR is kept because the behaviour it specifies (state
+> ownership, the SSE split, the error-handling rules) was ported rather than redesigned, and
+> because it records why the original choice was made.
 
 ## Context
 
