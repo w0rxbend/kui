@@ -432,3 +432,102 @@ a.kui-brkcard__name:hover {
   line-height: inherit;
   min-width: 0;
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Managing which clusters KUI knows about
+ *
+ * This screen is about KUI's own configuration and not about a Kafka cluster's settings, which is
+ * why it looks like a list of records rather than like a dashboard: there are no figures on it and
+ * nothing here is live.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-cluster-admin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  max-width: 52rem;
+}
+
+.kui-cluster-admin__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-4);
+}
+
+.kui-cluster-admin__title {
+  margin: 0;
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-cluster-admin__head > :last-child {
+  margin-inline-start: auto;
+}
+
+.kui-cluster-admin__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-cluster-admin__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-3);
+}
+
+/* A broker list is long and is copied into a command line, so it wraps rather than truncating. */
+.kui-cluster-admin__brokers {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.kui-cluster-admin__actions,
+.kui-cluster-admin__form-actions {
+  display: flex;
+  gap: var(--kui-space-2);
+  margin-inline-start: auto;
+}
+
+.kui-cluster-admin__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+/* The sentences that carry this screen's real content: what read-only means, why the password box
+ * is empty, what this form cannot configure. Sized down but not faded past legibility — these are
+ * the lines that stop somebody wiping a credential by saving. */
+.kui-cluster-admin__help {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+/* Every reason at once, not the first. Somebody who got three fields wrong should be told about all
+ * three rather than discovering them one save at a time. */
+.kui-cluster-admin__problems {
+  margin: 0;
+  padding-inline-start: var(--kui-space-5);
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-cluster-admin__tuning {
+  padding: var(--kui-space-3);
+  background: var(--kui-color-surface-raised);
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-cluster-admin__tuning summary {
+  cursor: pointer;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+}

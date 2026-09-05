@@ -30,7 +30,7 @@
  * a product judgement, and it is made in one place so that the list, the broker page and the
  * environment rail cannot disagree about what a healthy cluster is.
  */
-import { decodeSection, type KuiApiClient } from "@kui/api";
+import { decodeSection, type ApiResult, type KuiApiClient } from "@kui/api";
 import { apiFailure, figure, fromSection, type Fetched } from "@kui/kernel";
 import type { Broker, ClusterSummary, Health } from "./model.js";
 
@@ -131,7 +131,9 @@ function toClusterSummary(entry: ClusterEntryPayload): ClusterSummary {
 
   const topicsSection = decodeSection<ClusterTopicsPayload>(entry.topics);
   const topics =
-    topicsSection.status === "ok" || topicsSection.status === "stale" ? topicsSection.data : undefined;
+    topicsSection.status === "ok" || topicsSection.status === "stale"
+      ? topicsSection.data
+      : undefined;
 
   return {
     id: row.id,
@@ -164,7 +166,8 @@ function toBroker(payload: BrokerPayload): Broker {
     // separate question, so health is derived from what is missing rather than assumed from its
     // presence. `replicaCount` is the field that is populated on every cluster KUI has seen —
     // `leaderCount` is null on a single-broker cluster — so it is the one that decides.
-    health: payload.replicaCount === null || payload.replicaCount === undefined ? "unknown" : "healthy",
+    health:
+      payload.replicaCount === null || payload.replicaCount === undefined ? "unknown" : "healthy",
     leaderPartitions: figure(payload.leaderCount),
     replicaPartitions: figure(payload.replicaCount),
     // Not on the wire. The brokers endpoint reports no out-of-sync count per broker; it is a
@@ -181,7 +184,9 @@ function toBroker(payload: BrokerPayload): Broker {
 }
 
 /** Every configured cluster. Rows whose scrape failed are kept, with their figures absent. */
-export async function fetchClusters(api: KuiApiClient): Promise<Fetched<readonly ClusterSummary[]>> {
+export async function fetchClusters(
+  api: KuiApiClient,
+): Promise<Fetched<readonly ClusterSummary[]>> {
   const answer = await api.get("/api/v1/clusters", {});
   if (!answer.ok) return apiFailure(answer.error);
   const section = decodeSection<readonly ClusterEntryPayload[]>(answer.value.clusters);
@@ -199,4 +204,183 @@ export async function fetchBrokers(
   if (!answer.ok) return apiFailure(answer.error);
   const section = decodeSection<readonly BrokerPayload[]>(answer.value.brokers);
   return fromSection(section, (rows) => rows.map(toBroker));
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Managing the registration itself                                                                 */
+/* ---------------------------------------------------------------------------------------------- */
+
+/**
+ * One configured cluster, for the screen that adds, edits and removes them.
+ *
+ * Read from the same `GET /clusters` document the list uses, but for a different purpose: this cares
+ * about the *registration* — where it came from and which version of it the server holds — where the
+ * list cares about how the cluster is doing.
+ */
+export interface ManagedClusterRow {
+  readonly id: string;
+  readonly name: string;
+  readonly bootstrapServers: string;
+  readonly readOnly: boolean;
+  /**
+   * Where this cluster's definition comes from, and therefore what may be done to it.
+   *
+   * `static` — only the file this process was started with names it.
+   * `stored` — only a record in KUI's metadata store.
+   * `staticThenStored` — both, and the stored record won.
+   */
+  readonly origin: ClusterOrigin;
+  /**
+   * The optimistic-concurrency version, echoed back as `If-Match`.
+   *
+   * `undefined` when the server did not send one, which is not zero: a save then goes without the
+   * header and the server decides. Inventing a version would be claiming to have read a record that
+   * was never read.
+   */
+  readonly version: number | undefined;
+  readonly security: { readonly protocol: string; readonly mechanism: string | null };
+}
+
+/** The three origins the cluster registry distinguishes, plus what an unknown word becomes. */
+export type ClusterOrigin = "static" | "stored" | "staticThenStored" | "unknown";
+
+/**
+ * Reading the origin, conservatively.
+ *
+ * A word the browser does not recognise becomes `unknown`, which this screen treats as *not
+ * editable*. That is the safe direction and it is worth saying why: offering an edit for a cluster
+ * whose definition lives in the deployment's configuration file would make the file a lie — the next
+ * deployment would quietly change the cluster back — whereas withholding an edit for one that is in
+ * fact editable is an inconvenience the operator can work around, and the server refuses the write
+ * anyway.
+ */
+export function originOf(raw: string | null | undefined): ClusterOrigin {
+  if (typeof raw !== "string") return "unknown";
+  const lower = raw.toLowerCase();
+  if (lower === "stored") return "stored";
+  if (lower === "static") return "static";
+  if (lower === "staticthenstored") return "staticThenStored";
+  return "unknown";
+}
+
+/** Whether this cluster's definition can be replaced from the browser. */
+export function isEditable(origin: ClusterOrigin): boolean {
+  // `staticThenStored` included: a stored record already wins over the file, so replacing it changes
+  // what is actually in force.
+  return origin === "stored" || origin === "staticThenStored";
+}
+
+/**
+ * Whether it can be removed.
+ *
+ * Only a purely stored cluster. Deleting the store record for one the file also names would leave
+ * the row on screen — which reads as a delete that silently failed — so the server refuses it, and
+ * so does this screen, before the click rather than after.
+ */
+export function isRemovable(origin: ClusterOrigin): boolean {
+  return origin === "stored";
+}
+
+interface ManagedRowPayload {
+  readonly id: string;
+  readonly name: string;
+  readonly bootstrapServers: string;
+  readonly readOnly: boolean;
+  readonly origin?: string | null;
+  readonly version?: number | null;
+  readonly security?: { readonly protocol?: string; readonly mechanism?: string | null };
+}
+
+export async function fetchManagedClusters(
+  api: KuiApiClient,
+): Promise<Fetched<readonly ManagedClusterRow[]>> {
+  const answer = await api.get("/api/v1/clusters", {});
+  if (!answer.ok) return apiFailure(answer.error);
+
+  /*
+   * A section, not a bare array. `GET /clusters` answers `{"clusters": {"status": "ok", "data": …}}`
+   * — the same ADR-039 envelope every aggregated response uses — and reading `.clusters` as a list
+   * produced an empty screen that looked exactly like a deployment with no clusters configured.
+   */
+  const section = decodeSection<readonly { readonly cluster?: ManagedRowPayload }[]>(
+    (answer.value as { clusters?: unknown }).clusters,
+  );
+  return fromSection(section, (entries) =>
+    entries
+      .map((entry) => entry.cluster)
+      .filter((row): row is ManagedRowPayload => row !== undefined)
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        bootstrapServers: row.bootstrapServers,
+        readOnly: row.readOnly,
+        origin: originOf(row.origin),
+        version: typeof row.version === "number" ? row.version : undefined,
+        security: {
+          protocol: row.security?.protocol ?? "PLAINTEXT",
+          mechanism: row.security?.mechanism ?? null,
+        },
+      })),
+  );
+}
+
+/** Registers a cluster, or replaces one. A `PUT` replaces the whole record — there is no patch. */
+export async function saveCluster(
+  api: KuiApiClient,
+  clusterId: string,
+  request: Record<string, unknown>,
+  version: number | undefined,
+): Promise<ApiResult<unknown>> {
+  return api.put("/api/v1/clusters/{clusterId}", {
+    params: { path: { clusterId }, header: { "If-Match": ifMatch(version) } },
+    body: request as never,
+  });
+}
+
+/**
+ * The `If-Match` value: the version being replaced, quoted, or `"0"` to create.
+ *
+ * Required by the contract rather than optional, and the reasoning there is worth keeping in view
+ * from this side too: an unconditional write to a versioned record is a lost update waiting for a
+ * second person with the same screen open. `"0"` means "create this, and fail if it already exists",
+ * which is what keeps one code path here instead of two endpoints.
+ *
+ * The quotes are part of the value — it is an HTTP entity tag, not a number in a header.
+ */
+function ifMatch(version: number | undefined): string {
+  return version === undefined ? '"0"' : `"${version}"`;
+}
+
+export async function deleteCluster(
+  api: KuiApiClient,
+  clusterId: string,
+  version: number | undefined,
+): Promise<ApiResult<unknown>> {
+  return api.delete("/api/v1/clusters/{clusterId}", {
+    params: { path: { clusterId }, header: { "If-Match": ifMatch(version) } },
+  });
+}
+
+/**
+ * Asks whether KUI could reach a cluster with these settings, without registering anything.
+ *
+ * Takes the same request the save would, which is what makes it worth having: it exercises the
+ * broker addresses, the protocol and the credentials exactly as the save will use them.
+ */
+export async function testConnection(
+  api: KuiApiClient,
+  request: Record<string, unknown>,
+): Promise<
+  ApiResult<{ readonly reachable: boolean; readonly status: string; readonly detail?: string }>
+> {
+  const answer = await api.post("/api/v1/clusters/connection-test", { body: request as never });
+  if (!answer.ok) return answer;
+  return {
+    ok: true,
+    value: {
+      reachable: answer.value.reachable,
+      status: answer.value.status,
+      ...(answer.value.detail === undefined ? {} : { detail: answer.value.detail }),
+    },
+  };
 }

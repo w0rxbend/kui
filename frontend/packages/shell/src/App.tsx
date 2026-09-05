@@ -716,19 +716,30 @@ function themeMode(): ThemeMode {
  * a network that is fine.
  */
 function deferUntilSession(open: () => SseHandle, csrf: CsrfTokens): SseHandle {
-  let opened: SseHandle | undefined;
+  /*
+   * A *signal*, not a plain variable.
+   *
+   * `connection()` is read inside an effect — that is how the frame's connectivity banner follows
+   * the stream — and an accessor that closes over an ordinary variable gives Solid nothing to
+   * subscribe to. The effect therefore ran once, read `connecting`, and never ran again: the stream
+   * opened, the server sent frames, and the application went on saying "KUI has lost its live
+   * connection to the gateway" for the rest of the session. A banner that is wrong in the reassuring
+   * direction would be bad; this one was wrong in the alarming direction, which teaches operators to
+   * ignore it.
+   */
+  const [opened, setOpened] = createSignal<SseHandle | undefined>(undefined, { ownedWrite: true });
   let cancelled = false;
 
   void csrf.waitForToken().then(() => {
-    if (!cancelled) opened = open();
+    if (!cancelled) setOpened(() => open());
   });
 
   return {
-    connection: () => opened?.connection() ?? { phase: "connecting" },
+    connection: () => opened()?.connection() ?? { phase: "connecting" },
     close: () => {
       cancelled = true;
-      opened?.close();
+      opened()?.close();
     },
-    endMarker: () => opened?.endMarker(),
+    endMarker: () => opened()?.endMarker(),
   };
 }

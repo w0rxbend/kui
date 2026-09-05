@@ -74,8 +74,19 @@ type ResultMethod<Method extends HttpMethod> = <
  * guarantees it.
  */
 type WithoutCsrf<Init> = Init extends { readonly params: infer Params }
-  ? Omit<Init, "params"> & { readonly params: WithoutCsrfParams<Params> }
+  ? Omit<Init, "params"> & ParamsSlot<WithoutCsrfParams<Params>>
   : Init;
+
+/**
+ * `params` itself becomes optional once nothing inside it is required.
+ *
+ * A mutation whose only parameter was the CSRF header — `POST /clusters/connection-test`, for one —
+ * is left with a `params` object that has no required members, and requiring the caller to write
+ * `params: {}` to satisfy it is exactly the kind of ceremony that gets copied around and then
+ * misread as meaningful.
+ */
+type ParamsSlot<Params> =
+  RequiredKeys<Params> extends never ? { readonly params?: Params } : { readonly params: Params };
 
 type WithoutCsrfParams<Params> = Params extends {
   readonly header: infer Header;

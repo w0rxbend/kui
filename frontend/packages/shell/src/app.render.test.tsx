@@ -294,6 +294,18 @@ describe("start-up asks for the session before anything else", () => {
     expect(asked.some((path) => path.includes("/auth/settings"))).toBe(true);
     expect(SilentEventSource.opened.length).toBeGreaterThan(0);
 
+/*
+     * Not asserted here: whether the connectivity banner clears.
+     *
+     * `SilentEventSource` records the URL and never dispatches `open`, so the stream in this harness
+     * genuinely never connects and the banner is *correct*. The property that matters — that the
+     * deferred handle's `connection()` is reactive, so the effect driving the banner re-runs when the
+     * real stream opens — needs a stream that opens, and is checked against the running stack
+     * instead. It was a plain variable first, which gave Solid nothing to subscribe to: the effect
+     * read "connecting" once and never again, and the application told the operator it had lost its
+     * connection for the rest of the session while frames were arriving.
+     */
+
     dispose();
   });
 });
