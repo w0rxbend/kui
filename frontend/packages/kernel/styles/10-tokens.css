@@ -121,6 +121,21 @@
    * an already-dark page, so it is heavier there. */
   --kui-color-scrim: rgba(0, 0, 0, 0.45); /* kui */
 
+  /* --- Card separation ---------------------------------------------------------------------- */
+
+  /* Whether a card draws a border is a property of the *theme*, not of the card.
+   *
+   * In dark the design draws none, and does not need one: #1b1f25 on #0e1013 is a ratio of about
+   * 1.4:1 and the edge of every card in the screenshots is plainly visible from fill alone. In
+   * light the equivalent step is #f0f3f8 on #f7f9fc, which is far weaker, and the same borderless
+   * card simply disappears into the page.
+   *
+   * So it is one token, redefined in the dark blocks, and every card, table container and record
+   * row says `border: var(--kui-card-border)`. The alternative -- a `[data-theme="light"]` rule
+   * inside each of those components -- is the same decision written out once per component, and
+   * the day a third theme arrives it has to be found in all of them. */
+  --kui-card-border: 1px solid var(--kui-color-border); /* kui */
+
   /* --- Colour: the accent (blue, the default seed) --------------------------------------- */
   --kui-color-primary: #0b57d0; /* design */
   --kui-color-primary-contrast: #ffffff; /* design */
@@ -346,6 +361,7 @@
     --kui-color-scrollbar-thumb: rgba(227, 230, 235, 0.14); /* design */
     --kui-color-scrollbar-thumb-hover: rgba(227, 230, 235, 0.26); /* design */
     --kui-color-scrim: rgba(0, 0, 0, 0.6); /* kui */
+    --kui-card-border: 1px solid transparent; /* design */
 
     --kui-color-primary: #a8c7fa; /* design */
     --kui-color-primary-contrast: #062e6f; /* design */
@@ -414,6 +430,7 @@
   --kui-color-scrollbar-thumb: rgba(227, 230, 235, 0.14); /* design */
   --kui-color-scrollbar-thumb-hover: rgba(227, 230, 235, 0.26); /* design */
   --kui-color-scrim: rgba(0, 0, 0, 0.6); /* kui */
+  --kui-card-border: 1px solid transparent; /* design */
 
   --kui-color-primary: #a8c7fa; /* design */
   --kui-color-primary-contrast: #062e6f; /* design */

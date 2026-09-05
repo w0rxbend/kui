@@ -1,15 +1,18 @@
-package kui.ui.kernel.theme
+package kui.build.design
 
 /** The names of every design token, as Scala constants.
   *
-  * The values live in `resources/css/10-tokens.css` and only the browser ever reads them. What Scala code
-  * needs is the *names*: to read a computed value in a test, to pass a token into an inline style when a
-  * value has to be computed at runtime, and — most importantly — to make `ContrastSuite` fail when a token is
-  * added to the stylesheet and forgotten here.
+  * The values live in `frontend/packages/kernel/styles/10-tokens.css` and only the browser ever reads them.
+  * What this list is for is the *names*: to make `TokensSuite` fail when a token is added to the stylesheet
+  * and forgotten here, and to give `ContrastSuite` the vocabulary it checks legibility over.
   *
-  * Nothing in KUI may write a colour literal in Scala. If a component needs a colour, it needs a token, and
-  * if no token fits, the answer is a new token here and in the stylesheet, not a hex code in a component
+  * Nothing in KUI may write a colour literal in a component. If a component needs a colour, it needs a token,
+  * and if no token fits, the answer is a new token here and in the stylesheet, not a hex code in a component
   * (ADR-024).
+  *
+  * It is Scala, and it lives in `build-tests`, because the two suites that read it are build tests. The
+  * browser code is TypeScript and never names a token in code at all — it writes an attribute on `<html>` and
+  * lets the stylesheet do the rest (ADR-048 §5).
   */
 object Tokens {
 
@@ -30,6 +33,17 @@ object Tokens {
 
     val Text = "--kui-color-text"
     val TextMuted = "--kui-color-text-muted"
+
+    /** The two ends of the text ramp beyond body copy.
+      *
+      * `strong` is the one thing in a region the eye is meant to land on: a page title, a card title, the
+      * large figure on the dashboard. `subtle` is deliberately *below* the AA body threshold, which is why it
+      * appears in no contrast pair and why it is only ever allowed on text that repeats something available
+      * elsewhere — a chart axis tick beside a labelled bar, a relative time that also carries an absolute
+      * one. Never a value an operator has to read.
+      */
+    val TextStrong = "--kui-color-text-strong"
+    val TextSubtle = "--kui-color-text-subtle"
 
     val Border = "--kui-color-border"
     val BorderStrong = "--kui-color-border-strong"
@@ -80,6 +94,20 @@ object Tokens {
     /** The veil behind a dialog or a drawer. One value for both, because they say the same thing. */
     val Scrim = "--kui-color-scrim"
 
+    /** The chart palette, which is not a sixth ramp: each of these is declared as an alias of a colour that
+      * already exists, so a chart never invents ink of its own.
+      *
+      * They have their own names anyway, because "the third line on this chart" and "this thing is healthy"
+      * are different ideas that happen to share a colour today. Only in the partition-health donut do 3, 4
+      * and 5 carry their status meaning, because there the categories genuinely are healthy, degraded and
+      * failed; anywhere else a series colour means nothing but "a different line".
+      */
+    val Series1 = "--kui-color-series-1"
+    val Series2 = "--kui-color-series-2"
+    val Series3 = "--kui-color-series-3"
+    val Series4 = "--kui-color-series-4"
+    val Series5 = "--kui-color-series-5"
+
     val all: List[String] = List(
       Surface,
       SurfaceRaised,
@@ -88,6 +116,8 @@ object Tokens {
       SurfaceOverlay,
       Text,
       TextMuted,
+      TextStrong,
+      TextSubtle,
       Border,
       BorderStrong,
       Primary,
@@ -110,7 +140,12 @@ object Tokens {
       StateLayer,
       ScrollbarThumb,
       ScrollbarThumbHover,
-      Scrim
+      Scrim,
+      Series1,
+      Series2,
+      Series3,
+      Series4,
+      Series5
     )
   }
 
@@ -225,10 +260,45 @@ object Tokens {
     val all: List[String] = List(Fast, Normal)
   }
 
+  /** Whether a card, a table container or a record row draws an edge — which is a property of the theme and
+    * not of the card. In dark the fill step is strong enough on its own and the design draws no border; in
+    * light the equivalent step is far weaker and a borderless card disappears into the page. One token,
+    * redefined per theme, rather than the same decision written out inside every component that is a card.
+    */
+  object Border {
+    val Card = "--kui-card-border"
+
+    val all: List[String] = List(Card)
+  }
+
+  /** The one gradient in the product: the rounded tile at the head of the navigation drawer. Written in the
+    * accent tokens rather than in two hex values, so a teal deployment does not have a blue mark.
+    */
+  object Gradient {
+    val Brand = "--kui-gradient-brand"
+
+    val all: List[String] = List(Brand)
+  }
+
+  /** The three fixed measurements of the application frame.
+    *
+    * Tokens rather than numbers in the shell's stylesheet because several rules have to agree about each of
+    * them — the drawer's own width, the left offset of the content column, the left offset of the top bar,
+    * and the offset a sticky table header scrolls to. Written out separately they drift, and the symptom is a
+    * one-pixel seam of page ground down the side of the drawer that nobody can find the source of.
+    */
+  object Frame {
+    val DrawerWidth = "--kui-drawer-width"
+    val TopbarHeight = "--kui-topbar-height"
+    val PageGutter = "--kui-page-gutter"
+
+    val all: List[String] = List(DrawerWidth, TopbarHeight, PageGutter)
+  }
+
   /** Every token KUI defines. `TokensSuite` asserts that this list and the stylesheet agree in both
     * directions, so neither can gain a token the other does not know about.
     */
   val all: List[String] =
     Color.all ++ Space.all ++ Density.all ++ Font.all ++ Radius.all ++ Shadow.all ++ Z.all ++
-      Opacity.all ++ Duration.all
+      Opacity.all ++ Duration.all ++ Border.all ++ Gradient.all ++ Frame.all
 }

@@ -919,9 +919,91 @@ trait KuiBuildInfoModule extends KuiModule {
   * `ui-kernel` is the design system and the shell's plumbing: tokens, primitives, the feature
   * loading contract. Feature microfrontends (`ui-clusters`, `ui-topics`, …) arrive in later
   * milestones as sibling modules; each adds its package to `KuiFrontendModule`'s split list and its
-  * CSS directory to `cssModules` below.
+  * CSS directory to `cssSources` below.
   */
 object frontend extends Module {
+
+  /** Where the pnpm workspace lives. Every Node task below runs from here, never from the repository
+    * root, so that pnpm resolves `frontend/pnpm-workspace.yaml` and nothing else.
+    */
+  private def workspace: os.Path = mill.api.BuildCtx.workspaceRoot / "frontend"
+
+  /** Runs one pnpm command in the workspace, or explains what is missing.
+    *
+    * pnpm is not a Maven dependency and Mill cannot fetch it, so the one failure worth handling by
+    * hand is "it is not installed": the raw error from a missing executable names a file, not a fix.
+    * `.tool-versions` states the version this build expects and `asdf`/`mise` install it from there.
+    */
+  private def pnpm(arguments: String*): Unit = {
+    val executable = sys.env
+      .get("PATH")
+      .toList
+      .flatMap(_.split(java.io.File.pathSeparatorChar).toList)
+      .map(os.Path(_, os.pwd) / "pnpm")
+      .find(os.exists)
+      .getOrElse(
+        sys.error(
+          "pnpm is not on PATH. The browser build needs Node and pnpm at the versions in " +
+            ".tool-versions; install them with `asdf install` or `mise install`, or with " +
+            "`npm install -g pnpm@11.25.0`."
+        )
+      )
+
+    os.proc(executable.toString +: arguments)
+      .call(cwd = workspace, stdout = os.Inherit, stderr = os.Inherit)
+  }
+
+  /** Regenerates `frontend/packages/api/src/schema.d.ts` from the committed browser OpenAPI document.
+    *
+    * This is the contract seam of ADR-048 §3, and the chain it closes is worth stating in full,
+    * because no single step in it is obviously load-bearing on its own:
+    *
+    *   1. a Tapir endpoint changes shape, so `./mill __.openApiCheck` fails until `docs/api/openapi.json`
+    *      and its browser projection are regenerated and committed;
+    *   1. regenerating the document changes `schema.d.ts`, which this task's `--check` mode enforces;
+    *   1. the changed `schema.d.ts` fails `./mill frontend.typecheck` at every browser call site that
+    *      still uses the old shape.
+    *
+    * Three build gates, and a browser never enters into it. Under ADR-011 the compiler did this by
+    * cross-compiling the endpoint values themselves; this is what replaces that guarantee.
+    *
+    * `./mill frontend.apiTypes --check` is the CI mode: it regenerates, compares, and puts the
+    * committed bytes back before failing, so a check never leaves a modified file behind.
+    */
+  def apiTypes(args: String*): Command[Unit] = Task.Command {
+    val committed = workspace / "packages" / "api" / "src" / "schema.d.ts"
+
+    if !args.contains("--check") then {
+      pnpm("--filter", "@kui/api", "run", "generate")
+      println(s"wrote $committed")
+    } else {
+      val before = os.read(committed)
+      pnpm("--filter", "@kui/api", "run", "generate")
+      val after = os.read(committed)
+      if before != after then {
+        os.write.over(committed, before)
+        sys.error(
+          s"$committed is out of date with docs/api/openapi.browser.json; " +
+            "run ./mill frontend.apiTypes and commit the result"
+        )
+      }
+      println(s"$committed is up to date")
+    }
+  }
+
+  /** Regenerates the TypeScript constants the browser shares with the server, letter for letter: the
+    * CSRF header's name and the vocabulary of the error envelope's `code` field.
+    *
+    * Neither appears in an OpenAPI document, and both have caused shipped defects when the two halves
+    * were spelled out independently — `kui.contracts.HttpHeaders` tells that story. `--check` fails when
+    * the committed file no longer matches the Scala it was generated from.
+    */
+  private def apiConstantsTarget: String =
+    (mill.api.BuildCtx.workspaceRoot / "frontend" / "packages" / "api" / "src" / "constants.generated.ts").toString
+
+  def apiConstants(args: String*): Command[Unit] = Task.Command {
+    tools.errorCodes.runMain("kui.tools.BrowserConstantsMain", (apiConstantsTarget +: args)*)()
+  }
 
   object uiKernel extends KuiFrontendModule {
 
@@ -982,46 +1064,6 @@ object frontend extends Module {
     object test extends ScalaJSTests with KuiJsDomTests {
       def mvnDeps = super.mvnDeps() ++ Seq(mvn"com.raquo::domtestutils::${Versions.domtestutils}")
 
-      /** Compiles the token stylesheet and its documentation into the test binary as plain strings.
-        *
-        * `ContrastSuite` has to read both: the CSS to learn every colour's value, and
-        * `docs/frontend/tokens.md` to learn which foreground/background pairs are supposed to be
-        * legible. Code compiled by Scala.js has no filesystem — it runs inside a JavaScript engine —
-        * so a test cannot open either file at run time. Handing them to it as generated source is
-        * the way to keep the *documentation* as the single source of truth for the pair list, which
-        * is the point: adding a pair to the table makes the test check it, and adding a token
-        * without adding its pair leaves the omission visible in one place.
-        *
-        * Both files are declared as `Task.Sources`, which is what lets Mill read them at all and
-        * what makes the generator re-run when either changes.
-        */
-      def tokenFixtureInputs: T[Seq[PathRef]] = Task.Sources(
-        mill.api.BuildCtx.workspaceRoot / "frontend" / "ui-kernel" / "resources" / "css" / "10-tokens.css",
-        mill.api.BuildCtx.workspaceRoot / "docs" / "frontend" / "tokens.md"
-      )
-
-      def tokenFixtureSource: T[PathRef] = Task {
-        val contents = tokenFixtureInputs().map(input => os.read(input.path))
-        val file     = Task.dest / "TokenFixtures.scala"
-
-        // Deliberately not `stripMargin`: the documentation is full of Markdown tables, and every
-        // one of their rows starts with the `|` that `stripMargin` would eat.
-        os.write(
-          file,
-          List(
-            "package kui.ui.kernel.theme",
-            "",
-            "/** Generated by `build.mill` from the token stylesheet and its documentation. Do not edit. */",
-            "private[theme] object TokenFixtures {",
-            s"  val stylesheet: String = \"\"\"${contents(0)}\"\"\"",
-            s"  val documentation: String = \"\"\"${contents(1)}\"\"\"",
-            "}",
-            ""
-          ).mkString("\n")
-        )
-        PathRef(file)
-      }
-
       /** Compiles the gateway's own golden capability snapshot into the test binary.
         *
         * `CapabilityStoreSuite` decodes the exact bytes the server's golden test writes, which is what
@@ -1057,7 +1099,7 @@ object frontend extends Module {
       }
 
       def generatedSources = Task {
-        super.generatedSources() ++ Seq(tokenFixtureSource(), capabilityFixtureSource())
+        super.generatedSources() :+ capabilityFixtureSource()
       }
     }
   }
@@ -1227,28 +1269,56 @@ object frontend extends Module {
     }
   }
 
-  /** Every frontend module whose `resources/css` directory contributes to `kui.css`, in no
-    * particular order — `CssPipeline` decides the cascade, not this list.
+  /** Where each Mill frontend module's stylesheets now live, and the module name `CssPipeline`
+    * knows it by.
+    *
+    * The stylesheets moved out of the `resources/css` directory of each `frontend/ui-…` module and
+    * into each package's own `styles` directory in the TypeScript workspace (ADR-048 §5). They moved
+    * unchanged, and while both frontends are being built they are shared: this task reads the very
+    * same files the Vite build reads, so there is one copy of the design system on disk and no
+    * chance of the two halves drifting during the migration. `frontend.css` disappears together with
+    * the Scala.js frontend at cutover.
     */
-  private def cssModules: Seq[KuiFrontendModule] =
-    Seq(uiKernel, uiShell, uiClusters, uiTopics, uiMessages, uiConsumers)
+  private def cssSources: Seq[(String, os.SubPath)] = Seq(
+    "uiKernel"    -> os.sub / "kernel",
+    "uiShell"     -> os.sub / "shell",
+    "uiClusters"  -> os.sub / "feature-clusters",
+    "uiTopics"    -> os.sub / "feature-topics",
+    "uiMessages"  -> os.sub / "feature-messages",
+    "uiConsumers" -> os.sub / "feature-consumers"
+  )
 
   /** Concatenates every module's CSS into one `kui.css` (ADR-024).
     *
     * The ordering rules, and the reasoning behind them, live in `kui.build.CssPipeline` so that they
     * can be unit-tested by `build-tests` rather than only observed by running the build.
     */
-  def css: T[PathRef] = Task {
-    val resourceRoots = Task.traverse(cssModules)(_.resources)()
+  private def stylesDirectory(directory: os.SubPath): os.Path =
+    mill.api.BuildCtx.workspaceRoot / "frontend" / "packages" / directory / "styles"
 
-    val sources = cssModules.zip(resourceRoots).flatMap { (module, roots) =>
-      val moduleName = module.moduleSegments.parts.last
-      roots
-        .map(_.path / "css")
-        .filter(os.exists)
-        .flatMap(directory => os.list(directory).filter(_.ext == "css"))
-        .sorted
-        .map(file => CssSource(moduleName, file.last, os.read(file)))
+  /** The stylesheet directories, declared so that Mill re-runs `css` when one of them changes.
+    *
+    * Not a formality. A task that reads files it has not declared is cached against inputs that do
+    * not include them, so editing a stylesheet would leave the previously built `kui.css` in place
+    * and the change would appear not to work — the kind of defect that is blamed on the browser
+    * cache for an afternoon.
+    */
+  def cssInputs: T[Seq[PathRef]] = Task.Sources(cssSources.map((_, directory) => stylesDirectory(directory))*)
+
+  def css: T[PathRef] = Task {
+    // Consumed for its effect on caching; the directories are re-listed below rather than filtered
+    // out of this value, because `Task.Sources` reports files and the grouping needed here is by
+    // module.
+    cssInputs(): Unit
+
+    val sources = cssSources.flatMap { (moduleName, directory) =>
+      val styles = stylesDirectory(directory)
+      if !os.exists(styles) then Nil
+      else
+        os.list(styles)
+          .filter(file => file.ext == "css" && file.last != "index.css")
+          .sorted
+          .map(file => CssSource(moduleName, file.last, os.read(file)))
     }.toList
 
     val stylesheet = Task.dest / "kui.css"
@@ -1291,6 +1361,315 @@ object frontend extends Module {
     println(s"frontend.bundle: ${jsFiles.size} linker file(s) + kui.css -> $web")
     PathRef(Task.dest)
   }
+
+  /** The TypeScript, SolidJS 2 and Vite frontend, and the seam between Mill and pnpm (ADR-048 §6).
+    *
+    * ==Why this is a Mill module at all==
+    *
+    * The product's build story is one command. A contributor types `./mill …` and gets a jar with
+    * the interface inside it; nobody is told to remember a second toolchain in a second terminal.
+    * Before ADR-048 that was free, because the browser was Scala.js and Mill drove the linker. It is
+    * no longer free: the browser is now built by Vite, which needs Node and pnpm. So the seam is
+    * written here, once, and every browser artefact is produced by a Mill task with declared inputs
+    * — which also means Mill caches it, and a JVM-only change does not rebuild the bundle.
+    *
+    * ==What comes out of it==
+    *
+    * `bundle` produces exactly what `frontend.bundle` produces today: a directory containing one
+    * `web` directory, handed back as a resource root. `StaticRoutes` serves `/ui/…` from the
+    * classpath under `/web`, so this is the shape the gateway needs and nothing downstream of it —
+    * `IndexHtml`, the `#kui-bootstrap` element, the ETag, the single-page fallback — changes at all.
+    * At cutover (SOL-041) `frontend.bundle` becomes this task and the Scala.js one is deleted; until
+    * then both build, which is what makes the cutover a one-line change rather than a leap.
+    *
+    * ==The base path==
+    *
+    * `vite.config.ts` sets `base: "./"`, so every asset URL in the built `index.html` is relative
+    * and resolves against the `<base href="<basePath>/ui/">` the gateway injects at request time.
+    * One built bundle therefore runs unmodified at `/` and behind a reverse proxy at `/kui`, and a
+    * deep link like `/ui/clusters/orders` — which is answered with `index.html` by the single-page
+    * fallback — still loads its assets from `/ui/assets/…` rather than from `/ui/clusters/assets/…`.
+    * Nothing about the mount point is baked into the build, which is the property that would
+    * otherwise be quietly lost by hard-coding an absolute `base`.
+    */
+  object solid extends Module {
+
+    /** The pnpm workspace root: `frontend/`, where `package.json` and `pnpm-lock.yaml` live. */
+    private def workspace: os.Path = mill.api.BuildCtx.workspaceRoot / "frontend"
+
+    /** Where `devWatch` builds to, and the directory the development server serves live.
+      *
+      * A fixed path rather than a task output directory, on purpose: `vite build --watch` is a
+      * long-running process writing continuously, so its output cannot be a Mill task's `dest`
+      * (Mill owns those and would have to be told about each rewrite). The development server links
+      * to this directory once and then sees every rebuild without anything being copied.
+      */
+    def devDistDirectory: os.Path = workspace / "dist"
+
+    /** Every file the Vite build reads, declared so that Mill re-runs the build when one changes —
+      * and, just as importantly, does *not* re-run it when an unrelated Scala file changes.
+      *
+      * The directories are enumerated rather than globbed from `frontend/` because pnpm puts a
+      * `node_modules` directory inside the workspace root *and* inside every package. Declaring
+      * `frontend/` wholesale would make Mill hash tens of thousands of dependency files on every
+      * invocation, which is slow enough to be blamed on Mill rather than on this line.
+      */
+    def sources: T[Seq[PathRef]] = Task.Sources(
+      (Seq(
+        workspace / "package.json",
+        workspace / "pnpm-lock.yaml",
+        workspace / "pnpm-workspace.yaml",
+        workspace / "tsconfig.json",
+        workspace / "tsconfig.base.json",
+        workspace / "vite.config.ts",
+        workspace / "index.html"
+      ) ++ solidPackages.flatMap { name =>
+        val directory = workspace / "packages" / name
+        Seq(directory / "package.json", directory / "tsconfig.json", directory / "src", directory / "styles")
+      })*
+    )
+
+    /** Checks Node and pnpm before anything tries to use them, and says what to do when they are
+      * missing.
+      *
+      * This exists because of what the failure looks like without it. `os.proc("pnpm", …)` on a
+      * machine with no pnpm throws a `java.io.IOException: Cannot run program "pnpm"` from inside a
+      * Mill task, which reads as a build bug rather than as "install the toolchain this repository
+      * pins in `.tool-versions`". The Playwright browser pin set the precedent (`e2e.installBrowser`)
+      * and this is the same idea for the two new tools ADR-048 §7 R-1 admits are a real new cost.
+      *
+      * Node is checked against a minimum because Vite 8 states one and a newer Node is fine; pnpm is
+      * only checked to exist, because `frontend/package.json`'s `packageManager` field pins the exact
+      * version and pnpm installs and runs that version itself.
+      */
+    def toolchain: T[String] = Task {
+      val path = Task.env.getOrElse("PATH", "")
+
+      def version(tool: String): Either[String, String] =
+        scala.util
+          .Try(os.proc(tool, "--version").call(cwd = workspace, env = Map("PATH" -> path), check = false))
+          .toEither
+          .left
+          .map(_ => s"$tool is not on PATH")
+          .flatMap { result =>
+            if result.exitCode == 0 then Right(result.out.trim().stripPrefix("v"))
+            else Left(s"`$tool --version` failed with exit code ${result.exitCode}")
+          }
+
+      val required = toolVersions()
+
+      val node = version("node").flatMap { found =>
+        val wanted = required.getOrElse("nodejs", "22.12.0")
+        if atLeast(found, wanted) then Right(found)
+        else Left(s"node $found is older than the $wanted this build needs")
+      }
+      val pnpm = version("pnpm")
+
+      (node, pnpm) match {
+        case (Right(nodeVersion), Right(pnpmVersion)) =>
+          s"node $nodeVersion, pnpm $pnpmVersion"
+        case (nodeResult, pnpmResult) =>
+          val problems = Seq(nodeResult, pnpmResult).collect { case Left(problem) => s"  - $problem" }
+          throw new Exception(
+            s"""The browser build needs Node and pnpm, and cannot run:
+               |${problems.mkString("\n")}
+               |
+               |The versions this repository pins are in `.tool-versions`. Install them with a version
+               |manager that reads that file (`mise install`, `asdf install`), or install them yourself:
+               |
+               |  node   ${required.getOrElse("nodejs", "22.12.0")} or newer   https://nodejs.org
+               |  pnpm   ${required.getOrElse("pnpm", "11.25.0")}             npm install -g pnpm
+               |
+               |Everything that is not the browser still builds without them: `./mill __.compile`,
+               |every service, and `./mill apps.allinone.run` (which then serves the API and a page
+               |saying the interface was not bundled in).""".stripMargin
+          )
+      }
+    }
+
+    /** The pinned toolchain versions, declared as a source so that Mill re-checks when they change. */
+    def toolVersionsFile: T[PathRef] = Task.Source(mill.api.BuildCtx.workspaceRoot / ".tool-versions")
+
+    /** `.tool-versions`, parsed. One `tool version` pair per line, `#` starts a comment. */
+    private def toolVersions: T[Map[String, String]] = Task {
+      val file = toolVersionsFile().path
+      if !os.exists(file) then Map.empty[String, String]
+      else
+        os.read
+          .lines(file)
+          .map(_.takeWhile(_ != '#').trim)
+          .filter(_.nonEmpty)
+          .flatMap(_.split("\\s+").toList match {
+            case tool :: version :: _ => Some(tool -> version)
+            case _                    => None
+          })
+          .toMap
+    }
+
+    /** Whether `found` is at least `wanted`, comparing dotted numbers left to right. */
+    private def atLeast(found: String, wanted: String): Boolean = {
+      def parts(version: String): Seq[Int] =
+        version.split("[.+-]").toSeq.flatMap(part => scala.util.Try(part.toInt).toOption)
+
+      val foundParts = parts(found)
+      val wantedParts = parts(wanted)
+      val compared = foundParts.zipAll(wantedParts, 0, 0).map((a, b) => a.compare(b)).find(_ != 0)
+      compared.forall(_ > 0)
+    }
+
+    /** `pnpm install --frozen-lockfile`: the dependency tree, exactly as the committed lockfile
+      * describes it.
+      *
+      * `--frozen-lockfile` rather than a plain install, everywhere and not only in CI: it fails when
+      * `pnpm-lock.yaml` does not match the `package.json` files instead of quietly rewriting the
+      * lockfile, so a dependency can only change by somebody deciding to change it and committing
+      * the result. That is also what makes an offline build possible — the lockfile plus a warmed
+      * store is the whole input (ADR-048 §7 R-2).
+      */
+    def install: T[PathRef] = Task {
+      val declared = sources()
+      declared: Unit
+
+      println(s"frontend.solid.install: ${toolchain()}")
+      run(Seq("pnpm", "install", "--frozen-lockfile"), Task.env)
+
+      // The marker is what Mill caches against. `node_modules` itself cannot be the output: pnpm
+      // insists on writing it inside the workspace, next to the sources, rather than into a
+      // directory the build chose.
+      val marker = Task.dest / "installed"
+      os.write.over(marker, "pnpm install --frozen-lockfile\n")
+      PathRef(marker)
+    }
+
+    /** `vite build`: the production bundle, in this task's own output directory.
+      *
+      * Built into `Task.dest` rather than into `frontend/dist` so that the release build is
+      * hermetic — it cannot pick up whatever a developer's `devWatch` last left lying around, and
+      * two different Mill invocations cannot fight over one directory.
+      */
+    def dist: T[PathRef] = Task {
+      install(): Unit
+
+      val out = Task.dest / "dist"
+      run(
+        Seq("pnpm", "exec", "vite", "build", "--outDir", out.toString, "--emptyOutDir"),
+        Task.env
+      )
+
+      println(s"frontend.solid.dist: ${os.walk(out).count(os.isFile)} file(s) -> $out")
+      PathRef(out)
+    }
+
+    /** The built bundle, laid out the way the classpath has to see it: one `web` directory.
+      *
+      * Identical in shape to `frontend.bundle`, which is the point — a deployable adds this to its
+      * `resources` and the files land inside the jar and therefore inside the container image. The
+      * failure this prevents is a specific one, and it has happened: without the assets in the jar
+      * the gateway answers the request for `index.html`'s script with `index.html` again (the
+      * single-page fallback doing exactly what it should for an unknown path), so the browser loads
+      * an HTML document as a JavaScript module and the application never starts, while every API
+      * call keeps working and every smoke test stays green.
+      *
+      * `.vite/manifest.json` is deliberately left behind. It is a build artefact for
+      * `checkBundleShape` (SOL-010) to read, not something a browser has any business fetching.
+      */
+    def bundle: T[PathRef] = Task {
+      val built = dist().path
+      val web = Task.dest / "web"
+      os.makeDir.all(web)
+
+      os.list(built).filter(_.last != ".vite").foreach(entry => os.copy.into(entry, web, replaceExisting = true))
+
+      println(s"frontend.solid.bundle: ${os.walk(web).count(os.isFile)} file(s) -> $web")
+      PathRef(Task.dest)
+    }
+
+    /** `tsc --build` over every package, with the strictness DEVPLAN exit criterion 15 names.
+      *
+      * Separate from `dist` because Vite does not type-check: `vite-plugin-solid` strips the types
+      * and compiles the JSX, and a program full of type errors bundles perfectly happily. The type
+      * check is the build gate, so it is its own task and CI runs it.
+      */
+    def typecheck(): Command[Unit] = Task.Command {
+      install(): Unit
+      run(Seq("pnpm", "exec", "tsc", "--build", "--pretty", "false"), Task.env)
+      println("frontend.solid.typecheck: clean")
+    }
+
+    /** The Vitest suites.
+      *
+      * `--passWithNoTests` while the workspace is still being filled in: this task exists so that CI
+      * has the right task name from the first day, and SOL-035 — which owns the test harness — turns
+      * it into something that can actually fail.
+      */
+    def test(): Command[Unit] = Task.Command {
+      install(): Unit
+      run(Seq("pnpm", "exec", "vitest", "run", "--passWithNoTests"), Task.env)
+    }
+
+    /** Rebuilds the bundle on every save, into the directory the development server serves live.
+      *
+      * This is the browser half of the development loop, and it is `vite build --watch` rather than
+      * a Vite dev server on a second port. That is ADR-012 Amendment 1 and it is worth restating,
+      * because reaching for `vite dev` is the reflex: a dev server would put the assets on a
+      * different origin from the API, which needs either a proxy or a CORS configuration, and a CORS
+      * configuration that exists only in development is a configuration that only ever breaks in
+      * development. Here there is one origin in development for the same reason there is one in
+      * production — the gateway serves both.
+      *
+      * The loop is:
+      *
+      * {{{
+      * KUI_FRONTEND=solid ./mill devStart   # the whole product, in the background
+      * ./mill frontend.solid.devWatch       # rebuilds on save; refresh the browser
+      * ./mill devStop
+      * }}}
+      *
+      * Two terminals rather than one because Mill serialises invocations on its output directory: a
+      * foreground `./mill dev` holds that lock and the watch would wait behind it forever. `devStart`
+      * detaches for exactly this reason.
+      */
+    def devWatch(): Command[Unit] = Task.Command {
+      install(): Unit
+
+      println(s"""frontend.solid.devWatch
+                 |  building to ${devDistDirectory.relativeTo(mill.api.BuildCtx.workspaceRoot)} on every save
+                 |  serve it with: KUI_FRONTEND=solid ./mill devStart
+                 |  then refresh http://localhost:${devPortOf(Task.env)}/ui/""".stripMargin)
+
+      run(
+        Seq("pnpm", "exec", "vite", "build", "--watch", "--mode", "development", "--outDir", devDistDirectory.toString),
+        Task.env
+      )
+    }
+
+    /** Runs one pnpm command in the workspace, with the developer's `PATH` rather than the Mill
+      * daemon's.
+      *
+      * `Task.env` and not `sys.env`, for the reason `devPortOf` gives at length: Mill runs tasks
+      * inside a long-lived daemon, so `sys.env` is the environment that daemon happened to start
+      * with. A `PATH` that gained pnpm afterwards — which is exactly what happens the first time
+      * somebody installs it — would be invisible until an unrelated `./mill shutdown`.
+      */
+    private def run(command: Seq[String], env: Map[String, String]): Unit = {
+      val result = os
+        .proc(command)
+        .call(
+          cwd = workspace,
+          env = env,
+          stdout = os.Inherit,
+          stderr = os.Inherit,
+          check = false
+        )
+
+      if result.exitCode != 0 then
+        throw new Exception(s"${command.mkString(" ")} failed with exit code ${result.exitCode}")
+    }
+  }
+
+  /** The seven packages of the pnpm workspace, in dependency order (DEVPLAN §6.1). */
+  private def solidPackages: Seq[String] =
+    Seq("api", "kernel", "shell", "feature-clusters", "feature-topics", "feature-messages", "feature-consumers")
 }
 
 /** The eleven services. Each is one module tree with the layers of `ARCHITECTURE.md` §3, and the
@@ -2024,9 +2403,18 @@ object services extends Module {
       private def openApiTarget: String =
         (mill.api.BuildCtx.workspaceRoot / "docs" / "api" / "openapi.json").toString
 
-      /** Regenerates the committed document. */
+      /** Where the *edge view* of that document is committed: the same endpoints with every header the
+        * gateway strips from browsers removed (`BrowserProjection`, ADR-040, ADR-048 §3). It is the source
+        * `frontend.apiTypes` generates the browser's TypeScript types from, so it is committed and checked
+        * exactly like its parent -- a contract change that is not regenerated fails CI here, before it can
+        * reach anyone's browser.
+        */
+      private def openApiBrowserTarget: String =
+        (mill.api.BuildCtx.workspaceRoot / "docs" / "api" / "openapi.browser.json").toString
+
+      /** Regenerates both committed documents. */
       def openApi(): Command[Unit] = Task.Command {
-        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget)()
+        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget, openApiBrowserTarget)()
       }
 
       /** Fails when the committed document no longer matches the endpoints it was generated from. A
@@ -2034,7 +2422,7 @@ object services extends Module {
         * builds against an API that changed three releases ago.
         */
       def openApiCheck(): Command[Unit] = Task.Command {
-        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget, "--check")()
+        runMain("kui.gateway.api.openapi.OpenApiDocument", openApiTarget, openApiBrowserTarget, "--check")()
       }
 
       object test extends ScalaTests with KuiTests {
@@ -2431,7 +2819,10 @@ object services extends Module {
 
         def mvnDeps = super.mvnDeps() ++ Seq(
           mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
-          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}"
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          // The stub backend, so that `OidcRelyingPartySuite` can play the part of an identity
+          // provider — discovery, the token exchange and the key set — without a network.
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}"
         )
       }
     }
@@ -3655,13 +4046,61 @@ def devStop(): Task.Command[Unit] = Task.Command {
   * all-in-one process would normally have.
   */
 private def devClassPath = Task.Anon {
-  val linked = frontend.uiShell.fastLinkJS().dest.path
-  val stylesheet = frontend.css().path
+  val assets =
+    if devFrontendOf(Task.env) == "solid" then Seq(devSolidAssetLink())
+    else {
+      val linked = frontend.uiShell.fastLinkJS().dest.path
+      val stylesheet = frontend.css().path
 
-  val js = devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "js", linked)
-  val css = devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "css", stylesheet / os.up)
+      Seq(
+        devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "js", linked),
+        devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "css", stylesheet / os.up)
+      )
+    }
 
-  (Seq(js, css) ++ apps.allinone.runClasspath().map(_.path)).mkString(java.io.File.pathSeparator)
+  (assets ++ apps.allinone.runClasspath().map(_.path)).mkString(java.io.File.pathSeparator)
+}
+
+/** Which frontend `./mill dev` serves: `scalajs` (the shipped one) or `solid` (the one being built).
+  *
+  * Both frontends build until the cutover (ADR-048, DEVPLAN decision D12), so during the migration
+  * there has to be a way to run the product with either one, and a switch is the smallest one:
+  *
+  * {{{
+  * ./mill devStart                       # today's Laminar frontend, unchanged
+  * KUI_FRONTEND=solid ./mill devStart    # the TypeScript one, from frontend/dist
+  * }}}
+  *
+  * The variable disappears at SOL-041 together with the branch it selects.
+  */
+private def devFrontendOf(env: Map[String, String]): String =
+  env.getOrElse("KUI_FRONTEND", "scalajs").trim.toLowerCase
+
+/** The classpath entry that puts the Vite build in front of the gateway's own resources.
+  *
+  * One link rather than the Scala.js build's two, because Vite emits the whole interface —
+  * `index.html`, the hashed JavaScript chunks, the stylesheet — into a single directory. That
+  * `index.html` is what makes this work: a classloader takes the first hit on the classpath, so the
+  * one Vite generated shadows the committed `services/gateway/api/resources/web/index.html`, and the
+  * gateway's own `IndexHtml` substitution then runs over it. Both carry the same two markers, so the
+  * base path and the bootstrap block reach the browser identically either way.
+  *
+  * It is deliberately not a Mill task output. `./mill frontend.solid.devWatch` rewrites this
+  * directory continuously while the server runs, and the whole point of a symbolic link is that the
+  * server reads whatever the last rebuild wrote — a copy would be a snapshot, and a snapshot is a
+  * stale page.
+  */
+private def devSolidAssetLink(): os.Path = {
+  val dist = frontend.solid.devDistDirectory
+  if !os.exists(dist) then
+    throw new Exception(
+      s"""KUI_FRONTEND=solid, but ${dist.relativeTo(mill.api.BuildCtx.workspaceRoot)} does not exist yet.
+         |Build it once, or start the watch that keeps it up to date:
+         |
+         |  ./mill frontend.solid.devWatch""".stripMargin
+    )
+
+  devAssetLink(mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "solid", dist)
 }
 
 /** Creates `<root>/web -> target` and answers `<root>`, which is what goes on the classpath.
@@ -3739,7 +4178,10 @@ object tools extends Module {
   object errorCodes extends KuiJvmModule {
     override def moduleDir = mill.api.BuildCtx.workspaceRoot / "tools" / "error-codes"
 
-    def moduleDeps = Seq(libs.kernel.jvm)
+    // `contracts-core` is here for one string: `HttpHeaders.Csrf`. The browser's generated constants
+    // must carry the same header name the gateway reads, and generating it from the constant both
+    // halves already share is what makes the two impossible to change apart (ADR-048 §3).
+    def moduleDeps = Seq(libs.kernel.jvm, libs.contractsCore.jvm)
 
     object test extends ScalaTests with KuiTests
   }
@@ -3759,7 +4201,9 @@ object docs extends Module {
     (mill.api.BuildCtx.workspaceRoot / "docs" / "api" / "error-codes.md").toString
 
   def errorCodes(args: String*): Command[Unit] = Task.Command {
-    tools.errorCodes.run(Task.Anon(mill.api.Args(errorCodesTarget +: args)))()
+    // `runMain` and not `run`: the module now holds two `main` methods (the Markdown table and the
+    // browser's TypeScript constants), so the class to run has to be named.
+    tools.errorCodes.runMain("kui.tools.ErrorCodeDocMain", (errorCodesTarget +: args)*)()
   }
 }
 

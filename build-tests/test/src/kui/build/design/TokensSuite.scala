@@ -1,4 +1,4 @@
-package kui.ui.kernel.theme
+package kui.build.design
 
 import munit.FunSuite
 
@@ -34,13 +34,18 @@ final class TokensSuite extends FunSuite {
     // component-scoped ones. A token count drifting into the hundreds is the measurable symptom of
     // that rule being abandoned, and this is where it gets noticed.
     //
-    // The ceiling was 60 and is 80. It moved once, when the design import (UI-013) brought a
-    // five-deep surface ramp, a paired text colour for every container, and a second and third
-    // radius step. That is the palette getting *more complete*, which is the opposite of the
-    // failure this guard exists to catch: not one of the tokens it added names a component, and the
-    // test below is what actually enforces that. Move it again only for the same kind of reason,
-    // and write down what the reason was.
-    assert(Tokens.all.size <= 80, s"${Tokens.all.size} tokens; see docs/frontend/tokens.md")
+    // The ceiling was 60, then 80, and is 88. It moved the first time when the design import
+    // (UI-013) brought a five-deep surface ramp, a paired text colour for every container, and a
+    // second and third radius step. It moved the second time when the design screenshots were read
+    // in full and turned out to draw five things the palette could not name: two more steps of the
+    // text ramp (`text-strong`, `text-subtle`), five chart series, a card border that differs by
+    // theme, the brand gradient, and the three fixed measurements of the application frame.
+    //
+    // Both moves are the palette getting *more complete*, which is the opposite of the failure this
+    // guard exists to catch. The five series tokens in particular add no colour at all — each is an
+    // alias of ink that already existed. Move it again only for the same kind of reason, and write
+    // down what the reason was.
+    assert(Tokens.all.size <= 88, s"${Tokens.all.size} tokens; see docs/frontend/tokens.md")
   }
 
   test("no colour, spacing or typography token names a component") {
@@ -62,5 +67,5 @@ private object TokensSuite {
     */
   val stylesheetRules: String =
     // `(?s)` makes `.` match newlines, which a CSS block comment is full of.
-    """(?s)/\*.*?\*/""".r.replaceAllIn(TokenFixtures.stylesheet, "")
+    """(?s)/\*.*?\*/""".r.replaceAllIn(DesignSources.stylesheet, "")
 }

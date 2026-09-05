@@ -1,4 +1,4 @@
-package kui.ui.kernel.theme
+package kui.build.design
 
 import munit.FunSuite
 
@@ -27,12 +27,21 @@ import munit.FunSuite
   *
   * ## Where the inputs come from
   *
-  * Both are compiled into this test binary by `build.mill` (Scala.js has no filesystem):
+  * Both are read off disk by `DesignSources`:
   *
-  *   - the token stylesheet, so the checked values are the ones that actually ship;
+  *   - `frontend/packages/kernel/styles/10-tokens.css`, so the checked values are the ones that actually
+  *     ship;
   *   - `docs/frontend/tokens.md`, so the list of pairs is *documentation* that happens to be executable.
   *     Adding a pair to the table there makes this suite check it. That ordering is deliberate: a pair list
   *     maintained only in a test file drifts out of the docs within a month.
+  *
+  * ## Why this is a JVM build test and not a frontend test
+  *
+  * It parses CSS and Markdown and does arithmetic. It imports `munit` and nothing else — no browser, no
+  * rendering framework, not one line that knows which language the interface is written in. When the
+  * browser moved from Scala.js to TypeScript (ADR-048) this suite had no reason to move with it, and
+  * rewriting a proven accessibility gate in a new language during a migration would have risked the gate
+  * for nothing. On the JVM it also got simpler: it opens two files instead of having them compiled in.
   */
 final class ContrastSuite extends FunSuite {
 
@@ -115,12 +124,20 @@ final class ContrastSuite extends FunSuite {
       Tokens.Color.Focus
     )
 
+    // Compared as the text each token is *declared* with, rather than as the colour it resolves
+    // to. A token declared as `var(--kui-color-primary)` — the first chart series is one — reads
+    // differently under every seed once resolved, and would look like a violation, when in fact it
+    // is the rule working: it is an alias, it was written as one precisely so that it would follow
+    // the seed, and the colour it aliases is checked in its own right one line above.
+    def declaredColours(state: State): Map[String, String] =
+      declarations(state).filter((token, _) => token.startsWith("--kui-color-"))
+
     for {
       mode <- Mode.values.toList
       accent <- Accents.filterNot(_ == DefaultAccent)
     } {
-      val default = colours(State(DefaultAccent, mode))
-      val reseeded = colours(State(accent, mode))
+      val default = declaredColours(State(DefaultAccent, mode))
+      val reseeded = declaredColours(State(accent, mode))
       val differing = default.filter((token, value) => reseeded(token) != value).keySet
 
       assertEquals(
@@ -210,7 +227,7 @@ private object ContrastSuite {
     */
   private val stylesheet: String =
     // `(?s)` makes `.` match newlines, which a CSS block comment is full of.
-    """(?s)/\*.*?\*/""".r.replaceAllIn(TokenFixtures.stylesheet, "")
+    """(?s)/\*.*?\*/""".r.replaceAllIn(DesignSources.stylesheet, "")
 
   private val AttributeSelector = """\[([a-z-]+)="([a-z]+)"\]""".r
   private val NotSelector = """:not\(([^)]*)\)""".r
@@ -306,11 +323,44 @@ private object ContrastSuite {
       }
   }
 
-  /** The colour tokens a browser would end up with, for one state. */
-  def colours(state: State): Map[String, Rgb] =
-    declarations(state).collect {
-      case (name, value) if name.startsWith("--kui-color-") => name -> parseColour(name, value)
+  private val VarReference = """var\(\s*(--kui-[a-z0-9-]+)\s*\)""".r
+
+  /** Follows `var(--other-token)` until a real colour is reached.
+    *
+    * A token is allowed to be an alias: `--kui-color-series-1: var(--kui-color-primary)` names "the
+    * first line on a chart" without inventing a colour for it, and — because a custom property
+    * holding a `var()` is substituted where it is *used* and not where it is declared — one
+    * declaration is correct in both themes. A browser resolves that chain before painting, so this
+    * has to as well, or an alias reads as an unparseable colour and every check that touches it is
+    * lost.
+    *
+    * The depth limit is not defensive tidiness. CSS lets a `var()` chain refer to itself, and a
+    * browser answers such a cycle with the property's initial value rather than by hanging; here the
+    * honest answer is to fail loudly and name the token, because a cycle in this file is a mistake.
+    */
+  private def resolve(name: String, value: String, palette: Map[String, String], depth: Int = 0): String =
+    VarReference.findFirstMatchIn(value) match {
+      case None => value
+      case Some(_) if depth >= 10 =>
+        throw new IllegalArgumentException(s"$name is part of a var() cycle, or one over ten deep")
+      case Some(found) =>
+        val target = found.group(1)
+        val substituted = palette.getOrElse(
+          target,
+          throw new IllegalArgumentException(s"$name refers to $target, which nothing declares")
+        )
+        resolve(name, VarReference.replaceFirstIn(value, java.util.regex.Matcher.quoteReplacement(substituted)), palette, depth + 1)
     }
+
+  /** The colour tokens a browser would end up with, for one state. */
+  def colours(state: State): Map[String, Rgb] = {
+    val palette = declarations(state)
+
+    palette.collect {
+      case (name, value) if name.startsWith("--kui-color-") =>
+        name -> parseColour(name, resolve(name, value, palette))
+    }
+  }
 
   private val Hex = """#([0-9a-fA-F]{6})""".r
   private val Rgba = """rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*[\d.]+\s*\)""".r
@@ -339,7 +389,7 @@ private object ContrastSuite {
     * the parser needing to know where in the file the pair table is.
     */
   val documentedPairs: List[Pair] =
-    TokenFixtures.documentation.linesIterator
+    DesignSources.documentation.linesIterator
       .map(_.trim)
       .filter(_.startsWith("|"))
       .flatMap { line =>

@@ -29,7 +29,6 @@ frontend/
       sse/              Sse, SseParser — the two server-sent-events wrappers
       state/            the kernel-owned Vars: AuthState, NotificationBus
       theme/            Theme (light / dark / follow the system) and Tokens
-    resources/css/      this module's stylesheets
     test/src/…          MUnit suites, run under jsdom
 ```
 
@@ -41,7 +40,6 @@ frontend/
       Main.scala        the one `@main` the whole frontend has
       Page.scala        ShellPage and the history.state codec
       ShellRouter.scala the single Router[Page]
-    resources/css/      30-shell.css
 ```
 
 Later milestones add sibling modules — `ui-clusters`, `ui-topics`, `ui-messages` — one per feature. Each is a *microfrontend*: it is compiled into
@@ -54,13 +52,26 @@ directory can stay kebab-case like every other directory in the repository.
 
 ## CSS
 
-### One file per module, concatenated in a fixed order
+### One file per screen, concatenated in a fixed order
 
-Each module keeps its stylesheets in `resources/css/*.css`. The Mill task `frontend.css` pastes them
-all into a single `kui.css` in the order **tokens → reset → kernel → features** (ADR-024). Plain CSS
-has no import graph: when two rules match the same element with equal specificity, the one written
-later wins, so the concatenation order *is* the cascade and it is decided once, in
-`kui.build.CssPipeline`, rather than by whatever order the filesystem returns.
+The stylesheets do not live with the Scala modules. They live in the TypeScript workspace, at
+`frontend/packages/<package>/styles/*.css`, and both frontends read them from there while the
+migration to SolidJS is under way (ADR-048 §5) — one copy on disk, so the two halves cannot drift.
+
+They are pasted into a single `kui.css` in the order **tokens → reset → kernel → features**
+(ADR-024). Plain CSS has no import graph: when two rules match the same element with equal
+specificity, the one written later wins, so the concatenation order *is* the cascade and it is
+decided once rather than by whatever order the filesystem returns. Who decides it depends on which
+frontend is being built:
+
+- the Scala.js build decides it in `kui.build.CssPipeline`, a Mill task that sorts the discovered
+  files by role;
+- the Vite build decides it in `frontend/packages/kernel/styles/index.css`, an explicit `@import`
+  list in that same order, which Vite inlines at build time.
+
+An explicit list can be forgotten, which a directory scan cannot be, so `kui.build.CssReferences`
+fails the build if any `styles/*.css` file in the workspace is missing from `index.css` or named
+twice.
 
 ```bash
 ./mill show frontend.css        # prints the path to the assembled kui.css

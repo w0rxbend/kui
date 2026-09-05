@@ -2,7 +2,7 @@
 
 Every colour, spacing step, font size, radius, shadow, stacking layer and animation duration in KUI
 is declared once, as a CSS custom property, in
-[`frontend/ui-kernel/resources/css/10-tokens.css`](../../frontend/ui-kernel/resources/css/10-tokens.css).
+[`frontend/packages/kernel/styles/10-tokens.css`](../../frontend/packages/kernel/styles/10-tokens.css).
 Components reference them by name and never write a value of their own. Restyling KUI means editing
 that one file.
 

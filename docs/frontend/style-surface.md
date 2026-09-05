@@ -41,7 +41,7 @@ the *method*; this document owns the *inventory* that method operates on).
 ## 1. Design tokens
 
 Tokens are CSS custom properties declared in
-[`frontend/ui-kernel/resources/css/10-tokens.css`](../../frontend/ui-kernel/resources/css/10-tokens.css).
+[`frontend/packages/kernel/styles/10-tokens.css`](../../frontend/packages/kernel/styles/10-tokens.css).
 A *custom property* is a variable the browser itself understands: `--kui-color-primary: #4a56d6;`
 declares one, and `color: var(--kui-color-primary)` reads it. Because the browser resolves it at
 paint time rather than at build time, changing a token re-themes a running page — that is the whole
@@ -241,7 +241,7 @@ Supporting pieces:
 
 ### 2.4 Where a new palette is dropped in
 
-**One file, three blocks: `frontend/ui-kernel/resources/css/10-tokens.css`.** A new palette means
+**One file, three blocks: `frontend/packages/kernel/styles/10-tokens.css`.** A new palette means
 replacing the 13 colour values in `:root`, and the same 13 in *both* dark blocks. Nothing else has
 to change for colour: no Scala file, no component, no other stylesheet. That is the property UI-002
 was designed to buy, and UI-013's acceptance criterion is literally `git diff --stat frontend/`
@@ -266,14 +266,14 @@ files, 1 471 lines total.
 
 | File | Lines | Owns |
 | --- | --- | --- |
-| [`ui-kernel/resources/css/00-reset.css`](../../frontend/ui-kernel/resources/css/00-reset.css) | 137 | Browser-default normalisation, the global `:focus-visible` ring, the `prefers-reduced-motion` neutraliser, `.kui-visually-hidden` |
-| [`ui-kernel/resources/css/10-tokens.css`](../../frontend/ui-kernel/resources/css/10-tokens.css) | 210 | All 46 tokens, in three theme blocks |
-| [`ui-kernel/resources/css/20-kernel-controls.css`](../../frontend/ui-kernel/resources/css/20-kernel-controls.css) | 299 | Icon, spinner, Button, Field (input/select), Tag, Card, Tabs, action gate |
-| [`ui-kernel/resources/css/21-kernel-overlays.css`](../../frontend/ui-kernel/resources/css/21-kernel-overlays.css) | 302 | Dialog, Drawer, Toast, Tooltip, Breadcrumbs, EmptyState |
-| [`ui-kernel/resources/css/22-kernel-table.css`](../../frontend/ui-kernel/resources/css/22-kernel-table.css) | 66 | DataTable: sticky header, sort button, row hover, loading dim, empty row |
-| [`ui-shell/resources/css/30-shell.css`](../../frontend/ui-shell/resources/css/30-shell.css) | 269 | The application frame (grid), skip link, header, sidebar, content, page wrapper, gallery, error pages, gateway-unreachable overlay, the responsive breakpoint |
-| [`ui-shell/resources/css/31-shell-nav.css`](../../frontend/ui-shell/resources/css/31-shell-nav.css) | 136 | Capability-driven navigation states (dimmed / disabled / degraded dot), the capability banner, the feature fallback panel, the feature-loading spinner |
-| [`ui-clusters/resources/css/40-clusters.css`](../../frontend/ui-clusters/resources/css/40-clusters.css) | 52 | The clusters feature page: layout, lead paragraph, form row, error and stale-data treatments |
+| [`packages/kernel/styles/00-reset.css`](../../frontend/packages/kernel/styles/00-reset.css) | 137 | Browser-default normalisation, the global `:focus-visible` ring, the `prefers-reduced-motion` neutraliser, `.kui-visually-hidden` |
+| [`packages/kernel/styles/10-tokens.css`](../../frontend/packages/kernel/styles/10-tokens.css) | 210 | All 46 tokens, in three theme blocks |
+| [`packages/kernel/styles/20-kernel-controls.css`](../../frontend/packages/kernel/styles/20-kernel-controls.css) | 299 | Icon, spinner, Button, Field (input/select), Tag, Card, Tabs, action gate |
+| [`packages/kernel/styles/21-kernel-overlays.css`](../../frontend/packages/kernel/styles/21-kernel-overlays.css) | 302 | Dialog, Drawer, Toast, Tooltip, Breadcrumbs, EmptyState |
+| [`packages/kernel/styles/22-kernel-table.css`](../../frontend/packages/kernel/styles/22-kernel-table.css) | 66 | DataTable: sticky header, sort button, row hover, loading dim, empty row |
+| [`packages/shell/styles/30-shell.css`](../../frontend/packages/shell/styles/30-shell.css) | 269 | The application frame (grid), skip link, header, sidebar, content, page wrapper, gallery, error pages, gateway-unreachable overlay, the responsive breakpoint |
+| [`packages/shell/styles/31-shell-nav.css`](../../frontend/packages/shell/styles/31-shell-nav.css) | 136 | Capability-driven navigation states (dimmed / disabled / degraded dot), the capability banner, the feature fallback panel, the feature-loading spinner |
+| [`packages/feature-clusters/styles/40-clusters.css`](../../frontend/packages/feature-clusters/styles/40-clusters.css) | 52 | The clusters feature page: layout, lead paragraph, form row, error and stale-data treatments |
 
 ### 3.2 The ordering rules
 
@@ -545,7 +545,7 @@ Ordered roughly by how much trouble each will cause.
 
 ### R1 — `--kui-z-modal` does not exist
 
-**File:** `frontend/ui-shell/resources/css/30-shell.css:226` —
+**File:** `frontend/packages/shell/styles/30-shell.css:226` —
 `z-index: var(--kui-z-modal, 1000);` on `.kui-shell__unreachable`.
 
 There is no `--kui-z-modal` token. The declared stacking tokens are `dropdown` (100), `drawer` (200),
@@ -559,7 +559,7 @@ custom property is silent. Either add a fifth stacking token or use `--kui-z-toa
 
 ### R2 — `--kui-sidebar-width` does not exist
 
-**File:** `frontend/ui-shell/resources/css/30-shell.css:12` —
+**File:** `frontend/packages/shell/styles/30-shell.css:12` —
 `grid-template-columns: var(--kui-sidebar-width, 15rem) 1fr;`
 
 Same class of problem. The sidebar width is effectively the literal `15rem`, and a design that wants

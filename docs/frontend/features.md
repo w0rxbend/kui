@@ -74,7 +74,7 @@ decode**. Depend on the shell not at all: the shell depends on every feature, an
 would be a cycle as well as the end of lazy loading. Depend on another *feature* not at all either —
 if you need something a feature has, it belongs in the kernel (§5, rule 5).
 
-### 2. The stylesheet directory — `frontend/ui-topics/resources/css/`, and `cssModules`
+### 2. The stylesheet directory — `frontend/packages/feature-topics/styles/`, and `cssModules`
 
 One directory, files numbered so the cascade is decided by the file order rather than by who nested
 their selectors more deeply. The kernel owns 00–29, features start at 40. Add the module to

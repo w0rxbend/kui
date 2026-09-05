@@ -150,9 +150,8 @@ object ImportedFeature {
   /** The real timer. A parameter on the class rather than a call to `setTimeout` in the body, so a test can
     * decide when the deadline passes instead of waiting out a real one.
     */
-  def browserTimer(millis: Double, run: () => Unit): Unit = {
+  def browserTimer(millis: Double, run: () => Unit): Unit =
     js.timers.setTimeout(millis)(run()): Unit
-  }
 }
 
 /** A `LazyFeature` for an id nothing is registered under.
