@@ -1,0 +1,428 @@
+/* The message list: a stack of record cards, each of which opens in place.
+ *
+ * ## Why this is not the table stylesheet
+ *
+ * The design draws two list treatments and §3.5 of the spec says not to merge them. A table is a
+ * grid of comparable values — ruled rows, no gaps, aligned columns, and the eye travels across. A
+ * record list is a stack of independent objects — separated cards, a gap of page ground between
+ * them, and the eye travels down. Nothing compares one record to the next column by column; the
+ * reader is looking for one record and then opening it.
+ *
+ * ## Two measurements that did not land on a token, and what was done about them
+ *
+ *   - The card's corner measured 20px. The scale has `--kui-radius-lg` at 16px and
+ *     `--kui-radius-xl` at 24px. `lg` is used and the 4px difference is left standing, because
+ *     inventing a one-off radius would break the property that makes the scale a scale. This is
+ *     open finding 1 in `.agent/design/SPEC.md` §8: the recommendation there is to move `lg` to
+ *     20px, which would fix this file and every card at once.
+ *   - The gap between cards measured 6.3px (a 42.3px pitch over 36px rows). The 4px scale's
+ *     nearest step is `--kui-space-2` at 8px, which is what is used; the list is 2px looser than
+ *     the screenshot per row. Raised for the same reason as the radius.
+ */
+
+.kui-record-list {
+  display: flex;
+  flex-direction: column;
+  /* The gap belongs to the list, not to the rows. A row that carried its own bottom margin would
+   * have to know whether it was the last one, and the last one always ends up with the margin. */
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-record {
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+  /* The card clips its own expansion, so the payload block's corners do not poke through. */
+  overflow: hidden;
+  /* In light, the card and the page are one step apart on the neutral ramp (#e9eef5 on #f7f9fc)
+   * and that step is too weak to read as an edge, so a list of cards looks like one grey block.
+   * In dark the same step (#1b1f25 on #0e1013) is about 1.4:1 and carries the separation on fill
+   * alone, where an added rule would be visible clutter. So the outline is conditional on the
+   * theme rather than on the component (SPEC §1.7).
+   *
+   * `inset` box-shadow rather than `border`, because a border would move the content in by a
+   * pixel in one theme and not the other, and the row's height is fixed arithmetic.
+   *
+   * The three blocks mirror the structure of `10-tokens.css`: light on bare `:root`, the system
+   * preference guarded so an explicit light choice still wins, and the explicit dark attribute
+   * last so the toggle wins in both directions. */
+  box-shadow: inset 0 0 0 1px var(--kui-color-border);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .kui-record {
+    box-shadow: none;
+  }
+}
+
+:root[data-theme="dark"] .kui-record {
+  box-shadow: none;
+}
+
+/* --- The collapsed row ------------------------------------------------------------------------
+ *
+ * The whole row is the button. Not the chevron — a 16px target in a 36px row — and not the offset.
+ *
+ * `display: grid` rather than flex, so each field has a declared minimum and only the value column
+ * gives way. Note what this does *not* buy: every row is its own grid, so the tracks are sized per
+ * row and two rows only line up when their content is a similar width. That is acceptable here and
+ * would not be in a table — offsets inside one topic are contiguous, so they are the same number of
+ * digits and the columns do line up in practice. A row whose offset is wildly longer than its
+ * neighbours' will sit out of step with them, and that is the right trade: the alternative is fixed
+ * tracks, and a fixed track wide enough for the largest offset Kafka can produce (25 characters
+ * with separators) would spend a quarter of every row on nine digits.
+ *
+ * `subgrid` would give real alignment without either cost, and is deliberately not used: it landed
+ * in Chrome 117 and this product supports Chrome 111 (`vite.config.ts`).
+ */
+
+.kui-record__summary {
+  display: grid;
+  grid-template-columns:
+    minmax(9ch, auto) /* offset */
+    auto /* partition */
+    minmax(8ch, 22ch) /* key */
+    minmax(0, 1fr) /* value: the only column that gives way */
+    auto /* time */
+    auto; /* chevron */
+  align-items: center;
+  gap: var(--kui-space-3);
+  width: 100%;
+  box-sizing: border-box;
+  /* The density switch, and the whole of it. 9px + an 18px line box + 9px = the 36px compact row;
+   * 15px + 18 + 15 = the 48px default. Same two numbers as every table row in the product. */
+  padding: var(--kui-density-row-padding-y) var(--kui-space-4);
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-tight);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kui-record__summary:hover {
+  /* The state layer, not a hard-coded lighter grey. A record row that failed to deserialize is
+   * drawn on a different fill, and a wash keeps its hover consistent with every other row's. */
+  background-color: var(--kui-color-state-layer);
+}
+
+.kui-record__summary:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+}
+
+.kui-record__offset {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-family: var(--kui-font-family-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-record__hash {
+  color: var(--kui-color-text-subtle);
+}
+
+/* The offset is the record's name and the accent colour is what marks it as such. */
+.kui-record__offset-value {
+  color: var(--kui-color-primary);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* A small neutral pill, so the partition reads as a label rather than as more of the offset. */
+.kui-record__partition {
+  display: inline-block;
+  padding: 1px var(--kui-space-2);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kui-record__key,
+.kui-record__value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+/* Warning-coloured, per the design. It is the only warm thing in a resting row, which is what
+ * makes the key findable while scanning — and it never carries meaning on its own, because the key
+ * is written next to it. */
+.kui-record__key-glyph {
+  flex: none;
+  color: var(--kui-color-warning);
+}
+
+.kui-record__value-glyph {
+  flex: none;
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-record__key-value,
+.kui-record__value-preview {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--kui-font-family-mono);
+  text-overflow: ellipsis;
+  /* Never wrapped. A wrapped preview makes one row two lines tall, and in a list of five hundred
+   * that is a list whose rows are different heights for no reason the reader chose. */
+  white-space: nowrap;
+}
+
+.kui-record__value-preview {
+  color: var(--kui-color-text-muted);
+}
+
+/* A payload that would not deserialize is the one preview that is not the data. It is coloured,
+ * and it still says what happened in words — the colour is the second signal, never the only one. */
+.kui-record__value-preview--failed {
+  color: var(--kui-color-danger);
+}
+
+/* "— (tombstone)". Subtle, because it repeats what the value column already says, and named
+ * rather than left as a bare dash, because a null key in a compacted topic *is* the deletion. */
+.kui-record__key-absent {
+  color: var(--kui-color-text-subtle);
+  font-style: normal;
+}
+
+.kui-record__time {
+  color: var(--kui-color-text-subtle);
+  font-size: var(--kui-font-size-xs);
+  white-space: nowrap;
+}
+
+.kui-record__chevron {
+  flex: none;
+  color: var(--kui-color-text-muted);
+  font-size: 16px;
+  transition: transform var(--kui-duration-fast) ease;
+}
+
+.kui-record--open .kui-record__chevron {
+  transform: rotate(180deg);
+}
+
+/* The one-shot wash for a record that arrived while live-tailing. It fades out and does not
+ * repeat: a list that is tailing fast would otherwise be a permanently green list, which says
+ * nothing at all. */
+.kui-record--arrived {
+  animation: kui-record-arrived 400ms ease-out;
+}
+
+@keyframes kui-record-arrived {
+  from {
+    background-color: var(--kui-color-success-container);
+  }
+  to {
+    background-color: var(--kui-color-surface-elevated);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-record--arrived {
+    animation: none;
+  }
+  .kui-record__chevron {
+    transition: none;
+  }
+}
+
+/* --- The expansion ----------------------------------------------------------------------------
+ *
+ * Recessed relative to the row above it, which is how it reads as being *inside* the record rather
+ * than as another card stacked under it.
+ */
+
+.kui-record__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  padding: var(--kui-space-4);
+  border-top: 1px solid var(--kui-color-border);
+  background-color: var(--kui-color-surface-raised);
+}
+
+/* `auto-fit` with a floor, not four fixed columns: a schema adds a fifth box, and five boxes in a
+ * four-column grid either squash or overflow. This reflows onto a second line instead. */
+.kui-record__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--kui-space-3);
+  margin: 0;
+}
+
+.kui-record__fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-hover);
+  min-width: 0;
+}
+
+/* Real upper-case text with tracking, not `text-transform` over a mixed-case string: a screen
+ * reader handed "OFFSET" reads a word, and one handed a transformed string may spell it. */
+.kui-record__fact-label,
+.kui-record__section-label {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+}
+
+.kui-record__fact-value {
+  margin: 0;
+  color: var(--kui-color-text-strong);
+  font-size: var(--kui-font-size-md);
+  overflow-wrap: anywhere;
+}
+
+.kui-record__fact-value--mono {
+  font-family: var(--kui-font-family-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-record__fact-note {
+  display: block;
+  color: var(--kui-color-text-subtle);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-record__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-record__none {
+  margin: 0;
+  color: var(--kui-color-text-subtle);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-record__headers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+}
+
+/* Scrolls vertically inside itself, and never horizontally: long strings wrap. A horizontal
+ * scrollbar inside a vertical list means the reader has to scroll two axes to read one payload.
+ *
+ * `tabindex="0"` because a scrollable region that cannot be reached by keyboard is a region a
+ * keyboard user cannot read past the first screenful. */
+.kui-record__payload {
+  max-height: 400px;
+  margin: 0;
+  padding: var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-raised);
+  box-shadow: inset 0 0 0 1px var(--kui-color-border);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kui-record__payload:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-record__decode-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-record__decode-reason {
+  margin: 0;
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* --- Header chips -----------------------------------------------------------------------------
+ *
+ * A chip is a button because a correlation id exists to be pasted into a log search.
+ */
+
+.kui-header-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--kui-space-1);
+  max-width: 100%;
+  padding: var(--kui-space-1) var(--kui-space-3);
+  border: 0;
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface-elevated);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-tight);
+  cursor: pointer;
+}
+
+.kui-header-chip:hover {
+  background-color: var(--kui-color-surface-overlay);
+}
+
+.kui-header-chip:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-header-chip__name {
+  color: var(--kui-color-text-strong);
+  font-weight: var(--kui-font-weight-bold);
+  white-space: nowrap;
+}
+
+.kui-header-chip__value {
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Present-with-an-empty-value. Distinct from absent, which is not drawn at all. */
+.kui-header-chip--empty .kui-header-chip__value {
+  color: var(--kui-color-text-subtle);
+  font-style: italic;
+}
+
+/* The bytes were not valid UTF-8 and what is shown is hex. Marked in words, not only in colour. */
+.kui-header-chip__marker {
+  padding: 0 var(--kui-space-1);
+  border-radius: var(--kui-radius-xs);
+  background-color: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-header-chip__copied {
+  color: var(--kui-color-success);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* Empty until it says "Copied", so the chip does not reserve a gap that never fills. It is a live
+ * region either way, which is what carries the confirmation to a screen reader. */
+.kui-header-chip__copied:empty {
+  display: none;
+}

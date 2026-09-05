@@ -101,6 +101,13 @@
   /* The vertical half is the density switch; the horizontal half is fixed, because a narrower
    * gutter would not fit more columns on screen, only crowd the ones already there. */
   padding: var(--kui-density-row-padding-y) var(--kui-space-5);
+  /* The design's row arithmetic is 15px + an 18px line box + 15px = 48px, and 9 + 18 + 9 = 36 at
+   * compact. The 18px line box is 14px type at the *tight* line height, and without this line the
+   * cell inherited the document's `normal` instead — measured 23.5px, giving a 53.5px row where
+   * the design draws 48. It was invisible on its own (the table simply looked a little loose) and
+   * visible the moment a plain table sat beside a windowed one, because `VirtualizedTable` sets
+   * the line height explicitly and the two then disagreed by 5.5px per row. */
+  line-height: var(--kui-font-line-height-tight);
   border-bottom: 1px solid var(--kui-color-border);
   /* Centred, not top-aligned: a row whose cells hold a chip, a bar and a number reads as one line
    * only if all three sit on the same middle. */

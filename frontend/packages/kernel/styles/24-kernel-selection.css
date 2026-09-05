@@ -1,0 +1,116 @@
+/* The loading placeholder, the missing-value dash, the error code in an empty state, and the
+ * additions a table needs once its rows can be selected or clicked.
+ *
+ * Every value comes from a token. Where the design's measurement falls between two token steps,
+ * the nearer step is used and the difference is recorded as an open finding in
+ * `.agent/design/SPEC.md` §8 — inventing a one-off value is how a scale stops being a scale.
+ *
+ * This file sits after 22-kernel-table.css in the cascade because some of it adjusts rules that
+ * file sets, and after 23-kernel-data.css only because that is where the numbering had a gap.
+ */
+
+/* The checkbox itself is not here: `27-primitives.css` owns `.kui-checkbox`, and two stylesheets
+ * drawing one control is how a control ends up half-styled by whichever loaded last. What is here
+ * is only how a *table* accommodates one.
+ */
+
+/* --- Table selection and clickable rows ------------------------------------------------------ */
+
+/* The selection column is as narrow as its control and does not take the text gutter: a 16px box
+ * centred in a 24px-padded cell reads as a column of its own, which it is not. */
+.kui-table__header-cell--select,
+.kui-table__cell--select {
+  width: 1%;
+  padding-right: var(--kui-space-2);
+  white-space: nowrap;
+}
+
+/* A row that is a control looks like one and focuses like one. The ring is drawn *inside* the row:
+ * an outline outside a `<tr>` is clipped by the cells in several engines and comes out as four
+ * disconnected corners. */
+.kui-table__row--clickable {
+  cursor: pointer;
+}
+
+.kui-table__row--clickable:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+}
+
+/* A selected row keeps the same fill as the selected navigation item and the secondary filled
+ * button. "This is the thing you chose" is one idea and gets one colour. */
+.kui-table__row--selected > .kui-table__cell {
+  background-color: var(--kui-color-selected);
+  color: var(--kui-color-selected-contrast);
+}
+
+/* The primary cell of a row: the topic name, the group id, the offset — the one thing in the row
+ * the eye is meant to land on, and the thing a reader is scanning the column for. Heavier and at
+ * the strong text colour, per the design's reading of screenshot `04`. Everything else in the row
+ * stays at reading weight; a table where every cell is emphasised has emphasised nothing. */
+.kui-table__cell-strong {
+  color: var(--kui-color-text-strong);
+  font-weight: var(--kui-font-weight-medium);
+}
+
+/* --- Loading placeholders --------------------------------------------------------------------
+ *
+ * A block at the size the real content will be, so nothing resizes when the data lands. A spinner
+ * in a card moves the layout twice: once when it replaces what was there, and again when the
+ * content arrives at a different size.
+ */
+
+.kui-skeleton {
+  display: inline-block;
+  border-radius: var(--kui-radius-xs);
+  background-color: var(--kui-color-surface-hover);
+  /* The sweep is a moving highlight rather than a pulse in opacity, because a pulsing block in a
+   * table of six looks like six things flashing and a sweep reads as one region working. */
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--kui-color-state-layer) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: kui-skeleton-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes kui-skeleton-sweep {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+/* The block stays; only the motion goes. Removing the placeholder as well would leave a reader who
+ * has asked for reduced motion with an empty region and no indication anything is coming. */
+@media (prefers-reduced-motion: reduce) {
+  .kui-skeleton {
+    animation: none;
+  }
+}
+
+/* A skeleton row keeps the row's height so the table does not resize when the data lands. */
+.kui-table__row--skeleton > .kui-table__cell {
+  color: transparent;
+}
+
+/* --- The absent value -------------------------------------------------------------------------
+ *
+ * An em dash at the muted colour, and never a zero. `0` and "no value" are different facts: a
+ * consumer group at zero lag is caught up, and one whose lag could not be read is a group nobody
+ * knows anything about. The `title` is on the element, so the dash has a name in the accessibility
+ * tree rather than being announced as a punctuation mark or skipped.
+ */
+.kui-missing {
+  color: var(--kui-color-text-muted);
+}
+
+/* The empty state itself is not here. `28-surfaces.css` owns `.kui-empty-state` and everything
+ * under it, including the error code and the two failure glyph colours, and it loads after this
+ * file — rules for it here would be dead CSS that quietly loses the cascade, which is worse than
+ * no rules at all because the next reader believes them.
+ */
