@@ -160,6 +160,23 @@ export interface ApiClientOptions {
 const UnauthorizedStatus = 401;
 
 /**
+ * The one call that establishes the session, and is therefore the one call that cannot wait for it.
+ *
+ * Matched on the path's tail so that a deployment served under a base path (`server.basePath`, which
+ * KUI supports) is recognised too. `/auth/settings` is deliberately *not* exempt: it used to run
+ * beside `/auth/me` in the same `Promise.all`, which is two cookieless requests racing — exactly the
+ * situation the gate exists to remove, in miniature.
+ */
+const SessionPath = "/api/v1/auth/me";
+
+function isSessionCall(url: string): boolean {
+  // The query string is dropped first: this endpoint takes no parameters today, and a path test that
+  // a future one could break is a test that silently reintroduces the deadlock it prevents.
+  const [path] = url.split("?");
+  return path !== undefined && path.endsWith(SessionPath);
+}
+
+/**
  * The gateway's own correlation id, on the response.
  *
  * The browser deliberately sends *no* correlation header of its own. Every header named `X-Kui-*`
@@ -194,6 +211,31 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
      * quietly refused to send.
      */
     async onRequest({ request }) {
+      /*
+       * Everything except the session call itself waits for the session to exist.
+       *
+       * This is not about the CSRF header — a `GET` carries none — it is about the *cookie*. The
+       * gateway mints an anonymous session for any API request that arrives without one, and stamps
+       * `Set-Cookie` on the answer. The shell used to open with seven requests at once — `/auth/me`,
+       * `/auth/settings`, the capability stream and four feature reads — none of them carrying a
+       * cookie, so the gateway minted seven sessions and sent seven different `Set-Cookie` headers.
+       * The browser keeps whichever arrives last, and the CSRF token the client kept belongs to
+       * whichever session answered `/auth/me`. Those are the same session only by luck.
+       *
+       * The symptom is the worst kind: every read works, because a fresh anonymous session can read
+       * everything an anonymous session can read, and every *write* is refused with
+       * "X-Csrf-Token does not match the session's token" — a message that reads like a bug in the
+       * CSRF machinery, which had been checked and was correct. It cost an afternoon, and it only
+       * appeared once the first mutation existed to be refused.
+       *
+       * So `/auth/me` goes first and alone, and everything else waits behind it. By the time the
+       * second request leaves, the browser holds a cookie, the gateway resolves it instead of
+       * minting, and no further `Set-Cookie` can displace it. The wait is bounded by the same
+       * deadline as the token gate: if start-up never answers, requests go out unsessioned and fail
+       * legibly rather than hanging for ever.
+       */
+      if (!isSessionCall(request.url)) await options.csrf.waitForToken();
+
       if (request.method === "GET" || request.method === "HEAD") return request;
       const token = await options.csrf.waitForToken();
       if (token !== undefined) request.headers.set(CsrfHeaderName, token);

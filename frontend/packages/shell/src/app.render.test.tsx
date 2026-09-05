@@ -178,7 +178,9 @@ describe("the permissions the features ask for", () => {
   it("names only actions from the generated vocabulary", () => {
     const known = new Set(Object.values(Actions).map((a) => `${a.resource}:${a.action}`));
     for (const registration of featureRegistry) {
-      expect(known).toContain(`${registration.viewAction.resource}:${registration.viewAction.action}`);
+      expect(known).toContain(
+        `${registration.viewAction.resource}:${registration.viewAction.action}`,
+      );
     }
   });
 
@@ -208,5 +210,90 @@ describe("the permissions the features ask for", () => {
       );
       expect(covering.length).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * Lets the pending promises run, then flushes Solid.
+ *
+ * A macrotask rather than a few `await Promise.resolve()`: releasing the session gate resolves a
+ * chain of promises inside the client's middleware and the capability store, and counting how many
+ * microtask turns that takes is a test asserting an implementation detail of two other modules.
+ */
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flush();
+}
+
+describe("start-up asks for the session before anything else", () => {
+  /**
+   * The gateway mints an anonymous session for any API request that arrives without a cookie, and
+   * stamps `Set-Cookie` on the answer. Two cookieless requests therefore mint two sessions, the
+   * browser keeps whichever reply lands last, and the CSRF token this client keeps — the one
+   * `/auth/me` returned — belongs to the other one.
+   *
+   * The symptom is as bad as it gets: every read works, because a fresh anonymous session can read
+   * everything an anonymous session can read, and every *write* comes back
+   * "X-Csrf-Token does not match the session's token". It stayed invisible for the whole of the read
+   * work and appeared the moment the first mutation existed to be refused.
+   *
+   * So `/auth/me` goes first and alone. Everything else — `/auth/settings`, the capability stream,
+   * every feature's first read — waits behind it, by which time the browser holds a cookie and the
+   * gateway resolves it instead of minting another.
+   */
+  it("nothing goes out beside /auth/me", async () => {
+    const asked: string[] = [];
+    SilentEventSource.opened.length = 0;
+    vi.stubGlobal("EventSource", SilentEventSource);
+
+    let releaseMe: (() => void) | undefined;
+    const mePending = new Promise<void>((resolve) => {
+      releaseMe = resolve;
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        asked.push(new URL(url, "http://kui.test").pathname);
+        if (url.includes("/auth/me")) {
+          await mePending;
+          return new Response(
+            JSON.stringify({
+              authType: "disabled",
+              csrfToken: "test-token",
+              principal: { kind: "anonymous", name: "anonymous" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ authType: "disabled", providers: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const { dispose } = mountApp();
+    await settle();
+    await settle();
+
+    // While `/auth/me` is still out, it is the only thing that has been asked for, and the
+    // capability stream — which uses the native EventSource and so bypasses the client's own gate —
+    // has not been opened either.
+    expect(asked.filter((path) => !path.includes("/auth/me"))).toEqual([]);
+    expect(SilentEventSource.opened).toEqual([]);
+
+    releaseMe?.();
+    await settle();
+    await settle();
+    await settle();
+
+    // Once the session exists, the rest follows.
+    expect(asked.some((path) => path.includes("/auth/settings"))).toBe(true);
+    expect(SilentEventSource.opened.length).toBeGreaterThan(0);
+
+    dispose();
   });
 });

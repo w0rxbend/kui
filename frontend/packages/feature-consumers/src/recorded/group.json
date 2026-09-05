@@ -1,0 +1,168 @@
+{
+    "groupId": "analytics-indexer",
+    "state": "STABLE",
+    "protocol": "CLASSIC",
+    "isSimple": false,
+    "partitionAssignor": "range",
+    "coordinatorId": 1,
+    "members": [
+        {
+            "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+            "groupInstanceId": null,
+            "clientId": "kui-quickstart-indexer",
+            "host": "/172.21.0.4",
+            "partitions": [
+                "analytics.pageviews-0",
+                "analytics.pageviews-1",
+                "analytics.pageviews-10",
+                "analytics.pageviews-11",
+                "analytics.pageviews-2",
+                "analytics.pageviews-3",
+                "analytics.pageviews-4",
+                "analytics.pageviews-5",
+                "analytics.pageviews-6",
+                "analytics.pageviews-7",
+                "analytics.pageviews-8",
+                "analytics.pageviews-9"
+            ],
+            "rebalancing": false
+        }
+    ],
+    "topics": [
+        {
+            "topic": "analytics.pageviews",
+            "lag": 0,
+            "excludedPartitions": 0,
+            "partitions": [
+                {
+                    "partition": 0,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 1,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 2,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 3,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 4,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 5,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 6,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 7,
+                    "committed": 36,
+                    "begin": 0,
+                    "end": 36,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 8,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 9,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 10,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                },
+                {
+                    "partition": 11,
+                    "committed": 0,
+                    "begin": 0,
+                    "end": 0,
+                    "lag": 0,
+                    "anomalies": [],
+                    "memberId": "kui-quickstart-indexer-3ebae783-f34b-4ebe-9c74-fb87331b2e27",
+                    "host": "/172.21.0.4"
+                }
+            ]
+        }
+    ],
+    "totalLag": 0,
+    "excludedPartitions": 0,
+    "assignments": {
+        "status": "CURRENT",
+        "observedAt": null
+    },
+    "observedAt": "2026-09-05T16:50:49.468Z",
+    "stale": null
+}

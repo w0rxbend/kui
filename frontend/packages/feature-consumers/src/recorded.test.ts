@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KuiApiClient } from "@kui/api";
 import groupsDocument from "./recorded/groups.json" with { type: "json" };
-import { fetchGroups, stateOf } from "./data.js";
+import groupDocument from "./recorded/group.json" with { type: "json" };
+import { fetchGroup, fetchGroups, stateOf } from "./data.js";
+import { subscriptions } from "./detail.js";
 
 /**
  * The mapping, against a document a real gateway produced.
@@ -73,5 +75,63 @@ describe("stateOf", () => {
     expect(stateOf("")).toBeNull();
     expect(stateOf(null)).toBeNull();
     expect(stateOf(undefined)).toBeNull();
+  });
+});
+
+describe("the recorded group detail", () => {
+  it("flattens the wire's per-topic nesting into the offsets the screen draws", async () => {
+    const answer = await fetchGroup(client(groupDocument), "quickstart", "analytics-indexer");
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+
+    const group = answer.value;
+    expect(group.groupId).toBe("analytics-indexer");
+    expect(group.state).toBe("STABLE");
+    expect(group.partitionAssignor).toBe("range");
+    expect(group.protocol).toBe("CLASSIC");
+    expect(group.coordinator).toBe("broker 1");
+
+    // The wire nests partitions under `topics`; the table wants one flat list.
+    expect(group.offsets.length).toBe(12);
+    expect(group.offsets.every((offset) => offset.topic === "analytics.pageviews")).toBe(true);
+    // Zero committed is a real position, not an absence. It must survive as `0`.
+    expect(group.offsets[0]?.committed).toBe(0);
+  });
+
+  it("strips the slash Kafka puts in front of a member's host", () => {
+    /*
+     * Kafka reports `/172.21.0.4`, because it is rendering a Java `InetSocketAddress`. Not cosmetic:
+     * an operator copies this into `ssh` or a `grep`, and `/172.21.0.4` matches nothing.
+     */
+    return fetchGroup(client(groupDocument), "quickstart", "analytics-indexer").then((answer) => {
+      if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+      const member = answer.value.members[0];
+      expect(member?.host).toBe("172.21.0.4");
+      expect(member?.clientId).toBe("kui-quickstart-indexer");
+      // `null` here is a real answer — this group does not use static membership.
+      expect(member?.groupInstanceId).toBeNull();
+    });
+  });
+
+  it("gives the reset wizard the topics this group actually holds offsets on", async () => {
+    // The wizard resets one topic at a time and offers only these. Resetting a group on a topic it
+    // does not consume writes offsets for a subscription that does not exist.
+    const answer = await fetchGroup(client(groupDocument), "quickstart", "analytics-indexer");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    const topics = subscriptions(answer.value);
+    expect(topics).toHaveLength(1);
+    expect(topics[0]?.topic).toBe("analytics.pageviews");
+    expect(topics[0]?.partitions).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  });
+
+  it("says the pace is not measured rather than inventing one", async () => {
+    /*
+     * This endpoint does not carry a rate. Computing one from two observations the browser happens
+     * to hold would produce a figure that changes with how often somebody reloaded the page — a
+     * number that looks like a measurement and is an artefact of the reader.
+     */
+    const answer = await fetchGroup(client(groupDocument), "quickstart", "analytics-indexer");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.pace).toBeNull();
   });
 });

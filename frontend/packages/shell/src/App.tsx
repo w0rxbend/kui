@@ -23,10 +23,19 @@
  * answer to it is no, because authentication is disabled in every deployment until somebody
  * configures an identity provider.
  */
-import { Show, createEffect, createMemo, createSignal, createStore, onCleanup, onSettled } from "solid-js";
+import {
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  createStore,
+  onCleanup,
+  onSettled,
+} from "solid-js";
 import {
   createApiClient,
   createCsrfTokens,
+  type CsrfTokens,
   readBootstrap,
   userMessage,
   type ApiError,
@@ -40,6 +49,7 @@ import {
   createSession,
   notify,
   openEventSource,
+  type SseHandle,
   soleClusterChoice,
   type FeatureId,
   type FeatureRegistration,
@@ -59,9 +69,20 @@ import { featureRegistry } from "./features/registry.js";
 import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, type CallScope } from "./health.js";
 import { degradedBanner, StaleBanner } from "./messages.js";
-import { navigationGroups, stillWorking, degradedLabels, type FeatureStatus } from "./nav/navigation.js";
+import {
+  navigationGroups,
+  stillWorking,
+  degradedLabels,
+  type FeatureStatus,
+} from "./nav/navigation.js";
 import { ForbiddenPage, GatewayUnreachablePage, NotFoundPage } from "./pages/errorPages.jsx";
-import { clusterInUrl, createShellRouter, landingFor, UiPath, type ShellRouter } from "./routing/routes.jsx";
+import {
+  clusterInUrl,
+  createShellRouter,
+  landingFor,
+  UiPath,
+  type ShellRouter,
+} from "./routing/routes.jsx";
 import { shellPaths } from "./routing/paths.js";
 import type { RouteSectionProps } from "@solidjs/router";
 
@@ -95,12 +116,34 @@ export function App() {
   const report = (scope: CallScope, error: ApiError | undefined): void => {
     if (error === undefined) health.report(scope, "ok");
     // A 403 or a 404 is the gateway *answering*, and answering is the opposite of being unreachable.
-    else health.report(scope, error.kind === "unreachable" || error.kind === "timeout" ? "transport-failure" : "answered");
+    else
+      health.report(
+        scope,
+        error.kind === "unreachable" || error.kind === "timeout" ? "transport-failure" : "answered",
+      );
   };
 
   const capabilities = createCapabilities({
+    /*
+     * The capability stream waits for the session, like every other call — but it has to do it here
+     * rather than in the client, because it is the one request that does not go through the client
+     * at all. `openEventSource` uses the browser's native `EventSource`, which the client's
+     * middleware never sees, so the gate in `@kui/api` cannot hold it.
+     *
+     * Left ungated it is usually the *first* request out, since it opens during construction while
+     * `startUp` is still queued behind `onSettled`. Cookieless, it makes the gateway mint a session,
+     * which `/auth/me` then races — and the loser's CSRF token is the one this client keeps. See
+     * `isSessionCall` in `@kui/api` for what that costs.
+     */
     openStream: (subscriber) =>
-      openEventSource(`${bootstrap.apiBase.replace(/\/$/, "")}/capabilities/stream`, subscriber),
+      deferUntilSession(
+        () =>
+          openEventSource(
+            `${bootstrap.apiBase.replace(/\/$/, "")}/capabilities/stream`,
+            subscriber,
+          ),
+        csrf,
+      ),
     poll: () => api.get("/api/v1/capabilities", {}),
     notify: (notice) => notify(notice.title, { tone: notice.tone, message: notice.message }),
     schedule: (delayMs, action) => void setTimeout(action, delayMs),
@@ -199,21 +242,43 @@ export function App() {
       });
   };
 
-  /** The start-up calls, re-run by the connectivity tracker's retry. */
+  /**
+   * The start-up calls, re-run by the connectivity tracker's retry.
+   *
+   * `/auth/me` goes first and **alone**, and everything else follows it. These two used to run in
+   * one `Promise.all`, which was wrong twice over.
+   *
+   * The gateway mints an anonymous session for any API request arriving without a cookie and stamps
+   * `Set-Cookie` on the answer, so two cookieless requests mint two sessions and the browser keeps
+   * whichever reply lands last. The CSRF token this client keeps is the one `/auth/me` returned, and
+   * it belongs to that session — the same session only by luck. Every read then works, because a
+   * fresh anonymous session can read what an anonymous session can read, and every *write* is
+   * refused with "X-Csrf-Token does not match the session's token".
+   *
+   * The client now holds every request other than `/auth/me` behind the token gate for exactly this
+   * reason (see `isSessionCall` in `@kui/api`), which makes the second problem with `Promise.all`
+   * fatal rather than merely subtle: `/auth/settings` would wait for the gate, the gate opens on
+   * `session.accept` below, and `session.accept` was waiting for `/auth/settings`. A deadlock, ended
+   * only by the gate's ten-second deadline — long enough that the first person to see it reads it as
+   * the gateway being slow.
+   */
   const startUp = async (): Promise<void> => {
-    const [me, settings] = await Promise.all([
-      api.get("/api/v1/auth/me", {}),
-      api.get("/api/v1/auth/settings", {}),
-    ]);
+    const me = await api.get("/api/v1/auth/me", {});
 
     report("shell", me.ok ? undefined : me.error);
     if (me.ok) session.accept(me.value);
     else {
       // Nothing answered, or it answered with a failure. The token gate is still released, so a
       // mutation issued now fails fast with a legible 403 instead of hanging for ever.
-      session.accept({ authType: "unknown", csrfToken: "", principal: { kind: "anonymous", name: "anonymous" } });
+      session.accept({
+        authType: "unknown",
+        csrfToken: "",
+        principal: { kind: "anonymous", name: "anonymous" },
+      });
     }
 
+    // Only now, with the session established and the gate open, does anything else go out.
+    const settings = await api.get("/api/v1/auth/settings", {});
     session.acceptSettings(settings.ok ? settings.value : undefined);
   };
 
@@ -281,7 +346,8 @@ export function App() {
     notFound: () => <NotFoundPage attempted={window.location.pathname} homeHref={Router.paths()} />,
     feature: (id) => () => {
       const status = statusOf(id);
-      if (status === undefined) return <NotFoundPage attempted={window.location.pathname} homeHref={Router.paths()} />;
+      if (status === undefined)
+        return <NotFoundPage attempted={window.location.pathname} homeHref={Router.paths()} />;
       return (
         <FeatureGate
           registration={status.registration}
@@ -296,7 +362,9 @@ export function App() {
   });
 
   /** The clusters the capability registry knows, folded to one row each. */
-  const clusters = createMemo<readonly ClusterSummary[]>(() => clusterSummaries(capabilities.states()));
+  const clusters = createMemo<readonly ClusterSummary[]>(() =>
+    clusterSummaries(capabilities.states()),
+  );
 
   // A deployment with one cluster is not asking the user to choose. The selection is filled in and
   // the user is *not* navigated anywhere: that would move somebody who had deliberately opened
@@ -350,66 +418,72 @@ export function App() {
     <Router>
       {(route: RouteSectionProps) => (
         <KuiProvider value={featureContext}>
-        <AppFrame
-          rail={
-            <EnvRail
-              environments={clusters()}
-              currentId={cluster.selected()}
-              onSelect={(id) => cluster.select(id)}
-              destinations={railDestinations(Router)}
-              homeHref={Router.paths()}
-              accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
-            />
-          }
-          drawer={
-            <NavDrawer
-              groups={groups()}
-              currentId={currentFeatureId(route.location.pathname, uiPrefix)}
-              cluster={clusters().find((entry) => entry.id === cluster.selected())}
-              /* Per-broker disk is not on the overview's model yet, so the meter is told nothing and
+          <AppFrame
+            rail={
+              <EnvRail
+                environments={clusters()}
+                currentId={cluster.selected()}
+                onSelect={(id) => cluster.select(id)}
+                destinations={railDestinations(Router)}
+                homeHref={Router.paths()}
+                accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
+              />
+            }
+            drawer={
+              <NavDrawer
+                groups={groups()}
+                currentId={currentFeatureId(route.location.pathname, uiPrefix)}
+                cluster={clusters().find((entry) => entry.id === cluster.selected())}
+                /* Per-broker disk is not on the overview's model yet, so the meter is told nothing and
                  draws its "not known" rendering — a neutral track and a sentence, never a zero.
                  Wiring it to real figures is the metrics work, not the chrome's. */
-            />
-          }
-          topbar={
-            <TopBar
-              crumbs={topCrumbs(clusters(), cluster.selected(), route.location.pathname, uiPrefix, Router)}
-              /* What the field *searches* is still the features' to supply, so it stays idle. What it
+              />
+            }
+            topbar={
+              <TopBar
+                crumbs={topCrumbs(
+                  clusters(),
+                  cluster.selected(),
+                  route.location.pathname,
+                  uiPrefix,
+                  Router,
+                )}
+                /* What the field *searches* is still the features' to supply, so it stays idle. What it
                  no longer does is advertise a shortcut nobody implements: the `⌘K` hint in its corner
                  is bound below, and `inputRef` is how the binding reaches the element. A hint for a
                  key that does nothing teaches the reader that shortcuts here do not work. */
-              search={{
-                value: "",
-                onInput: () => undefined,
-                status: "idle",
-                inputRef: (el) => {
-                  searchInput = el;
-                },
-              }}
-              theme={themeMode()}
-              notificationsOpen={noticesOpen()}
-              onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
-              /* There is no notification service yet. The panel therefore opens and says there is
+                search={{
+                  value: "",
+                  onInput: () => undefined,
+                  status: "idle",
+                  inputRef: (el) => {
+                    searchInput = el;
+                  },
+                }}
+                theme={themeMode()}
+                notificationsOpen={noticesOpen()}
+                onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
+                /* There is no notification service yet. The panel therefore opens and says there is
                  nothing, which is the honest answer — and is deliberately not the same rendering as a
                  request that failed. */
-              notifications={{ kind: "ready", notices: [] }}
-            />
-          }
-        >
-          <Show when={banner()}>
-            {(message) => (
-              <Banner
-                tone="warning"
-                message={message()}
-                testId="capability-banner"
-                /* A cluster that is not answering must not be dismissible: dismissing it makes every
-                   stale number on the page look current. */
+                notifications={{ kind: "ready", notices: [] }}
               />
-            )}
-          </Show>
+            }
+          >
+            <Show when={banner()}>
+              {(message) => (
+                <Banner
+                  tone="warning"
+                  message={message()}
+                  testId="capability-banner"
+                  /* A cluster that is not answering must not be dismissible: dismissing it makes every
+                   stale number on the page look current. */
+                />
+              )}
+            </Show>
 
-          {route.children}
-        </AppFrame>
+            {route.children}
+          </AppFrame>
 
           <ToastRegion />
 
@@ -435,7 +509,15 @@ export function App() {
  * this list when their features exist and their capabilities say so.
  */
 function railDestinations(Router: ShellRouter): readonly RailDestination[] {
-  return [{ id: "settings", label: "Settings", icon: "settings", href: Router.paths.settings(), atFoot: true }];
+  return [
+    {
+      id: "settings",
+      label: "Settings",
+      icon: "settings",
+      href: Router.paths.settings(),
+      atFoot: true,
+    },
+  ];
 }
 
 /**
@@ -480,7 +562,13 @@ export function topCrumbs(
 function shellDestinations(Router: ShellRouter): readonly NavDestination[] {
   return [
     { id: "overview", label: "Overview", icon: "dashboard", href: Router.paths(), state: "ready" },
-    { id: "settings", label: "Settings", icon: "settings", href: Router.paths.settings(), state: "ready" },
+    {
+      id: "settings",
+      label: "Settings",
+      icon: "settings",
+      href: Router.paths.settings(),
+      state: "ready",
+    },
   ];
 }
 
@@ -493,7 +581,14 @@ function shellDestinations(Router: ShellRouter): readonly NavDestination[] {
  * row.
  */
 export function clusterSummaries(
-  entries: ReadonlyMap<string, { readonly key: { readonly cluster?: string | undefined }; readonly state: { readonly status: string }; readonly name?: string | undefined }>,
+  entries: ReadonlyMap<
+    string,
+    {
+      readonly key: { readonly cluster?: string | undefined };
+      readonly state: { readonly status: string };
+      readonly name?: string | undefined;
+    }
+  >,
 ): readonly ClusterSummary[] {
   const worst = new Map<string, { health: ClusterSummary["health"]; name: string }>();
 
@@ -520,7 +615,10 @@ const SEVERITY: Record<ClusterSummary["health"], number> = {
   healthy: 3,
 };
 
-function worseOf(a: ClusterSummary["health"], b: ClusterSummary["health"]): ClusterSummary["health"] {
+function worseOf(
+  a: ClusterSummary["health"],
+  b: ClusterSummary["health"],
+): ClusterSummary["health"] {
   return SEVERITY[a] <= SEVERITY[b] ? a : b;
 }
 
@@ -573,7 +671,6 @@ function themeMode(): ThemeMode {
  * rather than nothing, because a route that renders nothing is a blank content area and users read a
  * blank page as a broken page. (The overview is no longer among these: it is the real screen now.) */
 
-
 function Settings() {
   return (
     <div class="kui-shell__page" data-testid="page-settings">
@@ -588,4 +685,34 @@ function SignIn() {
       <h1>Sign in</h1>
     </div>
   );
+}
+
+/**
+ * Opens a stream once the session has been established, and stays closable in the meantime.
+ *
+ * The handle is returned immediately because the caller needs one — `createCapabilities` stores it
+ * and calls `close()` on teardown, and a component that unmounts during start-up must not leave a
+ * stream to open behind it. So this stands in for the real handle: `close()` before the session
+ * settles cancels the opening rather than closing something that does not exist yet.
+ *
+ * `connection` reports `connecting` while waiting, which is what it is. Reporting `open` would put a
+ * green indicator on a stream with no socket, and reporting an error would send somebody to look at
+ * a network that is fine.
+ */
+function deferUntilSession(open: () => SseHandle, csrf: CsrfTokens): SseHandle {
+  let opened: SseHandle | undefined;
+  let cancelled = false;
+
+  void csrf.waitForToken().then(() => {
+    if (!cancelled) opened = open();
+  });
+
+  return {
+    connection: () => opened?.connection() ?? { phase: "connecting" },
+    close: () => {
+      cancelled = true;
+      opened?.close();
+    },
+    endMarker: () => opened?.endMarker(),
+  };
 }

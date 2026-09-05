@@ -28,6 +28,13 @@ function recordingFetch(reply: (request: Request) => Response): {
   };
 }
 
+/** The gate, already released, with no token — an anonymous session. */
+function settledTokens() {
+  const tokens = createCsrfTokens();
+  tokens.settle(undefined);
+  return tokens;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -35,9 +42,18 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * A client whose session has already been established.
+ *
+ * The default gate is *settled*, because every request other than `/auth/me` now waits for start-up
+ * to finish before it is sent — see `isSessionCall` in the client for the seven-concurrent-sessions
+ * defect that rule exists to prevent. A test that left it unsettled would not fail, it would sit
+ * there for the gate's ten-second deadline and then time out, which says nothing about the thing
+ * under test.
+ */
 function clientWith(
   transport: (request: Request) => Promise<Response>,
-  csrf = createCsrfTokens(),
+  csrf = settledTokens(),
   onUnauthorized?: () => void,
 ) {
   return createApiClient({
@@ -222,5 +238,66 @@ describe("the request itself", () => {
 
     const names = [...(transport.sent[0]?.headers.keys() ?? [])];
     expect(names.filter((name) => name.toLowerCase().startsWith("x-kui-"))).toEqual([]);
+  });
+});
+
+describe("the session gate", () => {
+  /**
+   * The defect: the gateway mints an anonymous session for any API request arriving without a
+   * cookie, and stamps `Set-Cookie` on the answer. The shell opened with seven cookieless requests
+   * at once, so the gateway minted seven sessions, the browser kept whichever `Set-Cookie` landed
+   * last, and the CSRF token the client kept belonged to whichever session answered `/auth/me`.
+   * Every read worked; every write came back "X-Csrf-Token does not match the session's token".
+   */
+  test("holds every other call until the session has been established", async () => {
+    const sent: string[] = [];
+    const csrf = createCsrfTokens();
+    const client = clientWith(async (request) => {
+      sent.push(new URL(request.url).pathname);
+      return json({});
+    }, csrf);
+
+    // Fired together, exactly as start-up fires them.
+    const others = Promise.all([
+      client.get("/api/v1/capabilities"),
+      client.get("/api/v1/auth/settings"),
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Nothing has gone out: a second cookieless request would mint a second session.
+    expect(sent).toEqual([]);
+
+    csrf.settle("token-abc");
+    await others;
+    expect(sent).toContain("/api/v1/capabilities");
+    expect(sent).toContain("/api/v1/auth/settings");
+  });
+
+  test("lets the session call itself through, or nothing would ever settle", async () => {
+    const sent: string[] = [];
+    // Deliberately never settled: `/auth/me` is what settles it, so it cannot wait for it.
+    const client = clientWith(async (request) => {
+      sent.push(new URL(request.url).pathname);
+      return json({ csrfToken: "token-abc" });
+    }, createCsrfTokens());
+
+    await client.get("/api/v1/auth/me", {});
+    expect(sent).toEqual(["/api/v1/auth/me"]);
+  });
+
+  test("does not exempt /auth/settings, which used to race /auth/me", async () => {
+    // The two ran side by side in one `Promise.all`. That is the same defect in miniature: two
+    // cookieless requests, two sessions, one surviving cookie.
+    const sent: string[] = [];
+    const client = clientWith(async (request) => {
+      sent.push(new URL(request.url).pathname);
+      return json({});
+    }, createCsrfTokens());
+
+    void client.get("/api/v1/auth/settings");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent).toEqual([]);
   });
 });

@@ -28,9 +28,11 @@
 import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useLocation, useParams } from "@solidjs/router";
-import { useKui } from "@kui/kernel";
+import { createMutation, useKui } from "@kui/kernel";
 import { Actions } from "@kui/api";
 import { MessagesTab } from "./MessagesTab.jsx";
+import { ProduceDrawer } from "./ProduceDrawer.jsx";
+import { produce, type RecordDraft } from "./produce.js";
 import { createBrowseSession } from "./session.js";
 import { createBrowseTransport } from "./transport.js";
 import { fromParams, queryString, type BrowseQuery } from "./browse.js";
@@ -103,31 +105,57 @@ function BrowserScreen(props: {
   });
 
   const [partitionCount] = createSignal(0);
+  const [producing, setProducing] = createSignal(false);
+
+  const write = createMutation((draft: RecordDraft) =>
+    produce(kui.api, props.clusterId, props.topicName, draft),
+  );
+
+  const mayProduce = () => kui.permits(Actions.TopicMessagesProduce);
 
   return (
-    <MessagesTab
-      topic={props.topicName}
-      /* Not known here: the partition count comes from the topic overview, which this route does
+    <>
+      <MessagesTab
+        topic={props.topicName}
+        /* Not known here: the partition count comes from the topic overview, which this route does
          not fetch. `0` makes the selector offer "all partitions" and nothing else, which is honest
          — it cannot offer a list of partitions it has not been told about. Fetching the overview
          alongside the stream is the next step. */
-      partitionCount={partitionCount()}
-      query={query()}
-      onQueryChange={(next) => {
-        // The one writer of the address. `replaceState` rather than `pushState`: adjusting a filter
-        // is refining one view, not visiting a new page, and pushing every keystroke would make the
-        // Back button walk backwards through a sentence somebody typed.
-        const search = queryString(next);
-        const url = `${location.pathname}${search === "" ? "" : `?${search}`}`;
-        window.history.replaceState(null, "", url);
-      }}
-      session={session}
-      mayProduce={kui.permits(Actions.TopicMessagesProduce)}
-      produceDisabledReason={
-        kui.permits(Actions.TopicMessagesProduce)
-          ? undefined
-          : "You do not have permission to publish into this topic."
-      }
-    />
+        partitionCount={partitionCount()}
+        query={query()}
+        onQueryChange={(next) => {
+          // The one writer of the address. `replaceState` rather than `pushState`: adjusting a filter
+          // is refining one view, not visiting a new page, and pushing every keystroke would make the
+          // Back button walk backwards through a sentence somebody typed.
+          const search = queryString(next);
+          const url = `${location.pathname}${search === "" ? "" : `?${search}`}`;
+          window.history.replaceState(null, "", url);
+        }}
+        session={session}
+        mayProduce={mayProduce()}
+        produceDisabledReason={
+          mayProduce() ? undefined : "You do not have permission to publish into this topic."
+        }
+        onProduce={() => {
+          // The last attempt's receipt or error belongs to the drawer that showed it. Reopening to
+          // find "written to partition 3" from ten minutes ago reads as this record having been sent.
+          write.reset();
+          setProducing(true);
+        }}
+      />
+
+      <ProduceDrawer
+        open={producing()}
+        onClose={() => setProducing(false)}
+        topic={props.topicName}
+        partitionCount={partitionCount()}
+        state={write.state()}
+        onSend={(draft) => {
+          /* The drawer deliberately stays open on success: it shows the partition and offset the
+           broker assigned. "Sent" is not something an operator can go and check; a position is. */
+          void write.run(draft);
+        }}
+      />
+    </>
   );
 }

@@ -15,13 +15,21 @@ import type { JSX } from "@solidjs/web";
 import { useParams } from "@solidjs/router";
 import { useKui, valueOf, type Fetched } from "@kui/kernel";
 import { GroupList } from "./GroupList.jsx";
+import { GroupRoute } from "./GroupRoute.jsx";
 import { fetchGroups, type GroupListResult } from "./data.js";
 
 export default function Consumers(): JSX.Element {
-  const params = useParams<{ readonly clusterId?: string }>();
+  const params = useParams<{ readonly clusterId?: string; readonly groupId?: string }>();
   return (
     <Show when={params.clusterId} fallback={<NoCluster />}>
-      {(clusterId) => <GroupsScreen clusterId={clusterId()} />}
+      {(clusterId) => (
+        <Show when={params.groupId} fallback={<GroupsScreen clusterId={clusterId()} />}>
+          {/* Every row in the list links here, and until now every one of those links landed back
+              on the list: the detail page and the offset-reset wizard were both built and neither
+              had a route to reach them from. */}
+          <GroupRoute />
+        </Show>
+      )}
     </Show>
   );
 }
@@ -90,7 +98,12 @@ function GroupsScreen(props: { readonly clusterId: string }): JSX.Element {
     const current = state();
     switch (current.kind) {
       case "failed":
-        return { kind: "unavailable" as const, message: current.message, code: current.code, onRetry: reload };
+        return {
+          kind: "unavailable" as const,
+          message: current.message,
+          code: current.code,
+          onRetry: reload,
+        };
       case "forbidden":
         return {
           kind: "forbidden" as const,

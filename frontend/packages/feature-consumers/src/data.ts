@@ -10,6 +10,7 @@
 import { decodeSection, type KuiApiClient } from "@kui/api";
 import { apiFailure, fromSection, type Fetched } from "@kui/kernel";
 import type { GroupState, GroupSummary } from "./model.js";
+import type { GroupDetail, Member, PartitionOffset } from "./detail.js";
 
 interface GroupRowPayload {
   readonly groupId: string;
@@ -39,11 +40,22 @@ interface GroupRowPayload {
 
 interface GroupListPayload {
   readonly items: readonly GroupRowPayload[];
-  readonly page?: { readonly page?: number; readonly pageSize?: number; readonly totalItems?: number } | null;
+  readonly page?: {
+    readonly page?: number;
+    readonly pageSize?: number;
+    readonly totalItems?: number;
+  } | null;
 }
 
 /** The states Kafka reports. Anything else is `null` — an unknown state is not a state. */
-const STATES: readonly string[] = ["STABLE", "EMPTY", "PREPARING_REBALANCE", "COMPLETING_REBALANCE", "DEAD", "UNKNOWN"];
+const STATES: readonly string[] = [
+  "STABLE",
+  "EMPTY",
+  "PREPARING_REBALANCE",
+  "COMPLETING_REBALANCE",
+  "DEAD",
+  "UNKNOWN",
+];
 
 /**
  * The group's state, or `null`.
@@ -73,9 +85,10 @@ function toGroupSummary(payload: GroupRowPayload): GroupSummary {
     // The wire gives a broker *id*; the screen wants `host:port`, which this endpoint does not
     // carry. `null` says the coordinator is not named here rather than printing a bare number that
     // reads like a count.
-    coordinator: payload.coordinatorId === null || payload.coordinatorId === undefined
-      ? null
-      : `broker ${payload.coordinatorId}`,
+    coordinator:
+      payload.coordinatorId === null || payload.coordinatorId === undefined
+        ? null
+        : `broker ${payload.coordinatorId}`,
     // The most expensive `0` on this screen: a group with no lag is caught up, and a group whose
     // lag could not be computed is a group nobody knows about. They must not look alike.
     totalLag: figure(payload.totalLag),
@@ -110,11 +123,142 @@ export async function fetchGroups(
   // Outside the section, like the topic list's `incompleteTopics`: how many coordinators failed is
   // known even when the groups they hold are not.
   const missing =
-    typeof answer.value.incompleteCoordinators === "number" ? answer.value.incompleteCoordinators : 0;
+    typeof answer.value.incompleteCoordinators === "number"
+      ? answer.value.incompleteCoordinators
+      : 0;
 
   const section = decodeSection<GroupListPayload>(answer.value.groups);
   return fromSection(section, (listing) => ({
     groups: listing.items.map(toGroupSummary),
     coordinatorsMissing: missing,
   }));
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* One group                                                                                        */
+/* ---------------------------------------------------------------------------------------------- */
+
+/**
+ * The group detail endpoint's shape, from a response a running gateway produced
+ * (`src/recorded/group.json`).
+ *
+ * Unlike the list, this response is **not** wrapped in an ADR-039 section — the whole thing is the
+ * group. A `stale` field beside the data carries the ADR-039 idea instead: present when the picture
+ * was served from a cache because the coordinator did not answer in time.
+ *
+ * The wire nests partitions under `topics`, one entry per subscribed topic; the screen wants one
+ * flat list of partition positions, because that is what the offsets table draws and what the reset
+ * wizard groups by topic again through `subscriptions`.
+ */
+interface GroupPartitionPayload {
+  readonly partition: number;
+  readonly committed?: number | null;
+  readonly begin?: number | null;
+  readonly end?: number | null;
+  readonly lag?: number | null;
+  readonly memberId?: string | null;
+}
+
+interface GroupTopicPayload {
+  readonly topic: string;
+  readonly partitions?: readonly GroupPartitionPayload[];
+}
+
+interface MemberPayload {
+  readonly memberId: string;
+  readonly clientId?: string | null;
+  readonly host?: string | null;
+  readonly groupInstanceId?: string | null;
+  readonly partitions?: readonly string[];
+  readonly rebalancing?: boolean;
+}
+
+interface GroupDetailPayload {
+  readonly groupId: string;
+  readonly state?: string | null;
+  readonly protocol?: string | null;
+  readonly isSimple?: boolean;
+  readonly partitionAssignor?: string | null;
+  readonly coordinatorId?: number | null;
+  readonly members?: readonly MemberPayload[];
+  readonly topics?: readonly GroupTopicPayload[];
+  readonly totalLag?: number | null;
+  readonly excludedPartitions?: number | null;
+  readonly observedAt?: string | null;
+}
+
+function toMember(payload: MemberPayload): Member {
+  return {
+    memberId: payload.memberId,
+    clientId: payload.clientId ?? "",
+    /*
+     * Kafka reports a member's host with a leading slash — `/172.21.0.4` — because it is rendering a
+     * Java `InetSocketAddress`. Stripping it is not cosmetic: an operator copies this into `ssh` or
+     * a `grep`, and `/172.21.0.4` matches nothing.
+     */
+    host: (payload.host ?? "").replace(/^\//, ""),
+    // `null` is a real answer: this group does not use static membership. Not a missing value.
+    groupInstanceId: payload.groupInstanceId ?? null,
+    partitions: payload.partitions ?? [],
+    rebalancing: payload.rebalancing === true,
+  };
+}
+
+function toOffsets(topics: readonly GroupTopicPayload[]): readonly PartitionOffset[] {
+  return topics.flatMap((topic) =>
+    (topic.partitions ?? []).map((partition) => ({
+      topic: topic.topic,
+      partition: partition.partition,
+      // Never `0` by default. A group that has never committed here and a group sitting at the first
+      // record are different facts, and the table draws the first as a dash.
+      committed: typeof partition.committed === "number" ? partition.committed : null,
+      endOffset: typeof partition.end === "number" ? partition.end : null,
+      memberId: partition.memberId ?? null,
+    })),
+  );
+}
+
+export async function fetchGroup(
+  api: KuiApiClient,
+  clusterId: string,
+  groupId: string,
+): Promise<Fetched<GroupDetail>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}/consumer-groups/{groupId}", {
+    params: { path: { clusterId, groupId } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+
+  const payload = answer.value as unknown as GroupDetailPayload;
+  const observedAt =
+    payload.observedAt === null || payload.observedAt === undefined
+      ? new Date()
+      : new Date(payload.observedAt);
+
+  return {
+    kind: "ready",
+    value: {
+      groupId: payload.groupId,
+      state: stateOf(payload.state),
+      // The wire gives a broker id, not a `host:port`; saying "broker 1" is honest where printing a
+      // bare number would read as a count.
+      coordinator:
+        payload.coordinatorId === null || payload.coordinatorId === undefined
+          ? null
+          : `broker ${payload.coordinatorId}`,
+      partitionAssignor: payload.partitionAssignor ?? "",
+      protocol: payload.protocol ?? "UNKNOWN",
+      isSimple: payload.isSimple === true,
+      totalLag: typeof payload.totalLag === "number" ? payload.totalLag : null,
+      /*
+       * Not on this endpoint. `null` says "not measured", which is what the figure means — the
+       * alternative, computing it from two observations the browser happens to hold, would produce a
+       * rate that changes with how often somebody reloaded the page.
+       */
+      pace: null,
+      members: (payload.members ?? []).map(toMember),
+      offsets: toOffsets(payload.topics ?? []),
+      excludedPartitions: payload.excludedPartitions ?? 0,
+      observedAt,
+    },
+  };
 }
