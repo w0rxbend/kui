@@ -80,8 +80,8 @@ decision from an imported one, and after the fact there is no other way to know.
 ## The three switches
 
 Three attributes on `<html>` select a palette, and they compose freely: any theme, with any accent,
-at either density. Scala writes the attributes; the stylesheet does everything else, and no colour
-or measurement is ever computed in Scala.
+at either density. TypeScript writes the attributes; the stylesheet does everything else, and no
+colour or measurement is ever computed in TypeScript.
 
 ### `data-theme` — light, dark, or follow the system
 
@@ -95,8 +95,8 @@ is not a synonym for either of the others.
 | `Light` | `light` | The media query is guarded by `:root:not([data-theme="light"])`, so dark cannot apply even at night |
 | `Dark` | `dark` | `:root[data-theme="dark"]` is written after the media query, so it wins even on a system set to light |
 
-Written by `ThemeChoice` / `Theme` in
-[`theme/Theme.scala`](../../frontend/ui-kernel/src/kui/ui/kernel/theme/Theme.scala).
+Written by `createThemePreference` in
+[`theme/appearance.ts`](../../frontend/packages/kernel/src/theme/appearance.ts).
 
 ### `data-accent` — which of the four seeds
 
@@ -118,8 +118,8 @@ directly, so an accent block that reached outside its four colours would fail th
 | `Green` | `green` |
 | `Amber` | `amber` |
 
-Written by `AccentChoice` / `Accent` in
-[`theme/Appearance.scala`](../../frontend/ui-kernel/src/kui/ui/kernel/theme/Appearance.scala).
+Written by `accentPreference` in
+[`theme/appearance.ts`](../../frontend/packages/kernel/src/theme/appearance.ts).
 
 ### `data-density` — comfortable or compact
 
@@ -133,12 +133,17 @@ control heights as well would only make the interface harder to read and harder 
 | `Comfortable` (default) | attribute removed | `15px` |
 | `Compact` | `compact` | `9px` |
 
-Written by `DensityChoice` / `Density` in
-[`theme/Appearance.scala`](../../frontend/ui-kernel/src/kui/ui/kernel/theme/Appearance.scala).
+Written by `densityPreference` in
+[`theme/appearance.ts`](../../frontend/packages/kernel/src/theme/appearance.ts).
 
 Each of the three preferences is persisted in `localStorage` (`kui.theme`, `kui.accent`,
 `kui.density`). A browser that refuses storage — Safari private browsing, an enterprise policy —
 gets working switches that forget the choice on reload, never an application that fails to start.
+All three are built on `createRootPreference` in
+[`theme/rootPreference.ts`](../../frontend/packages/kernel/src/theme/rootPreference.ts), which is
+the whole mechanism: read the remembered value, write one attribute, and remember the new one. The
+shell calls `installAppearance()` once during start-up so the remembered choices are on `<html>`
+before the first paint.
 
 ## The token table
 
@@ -334,8 +339,12 @@ Every other value in this file is the design's, unchanged.
    if it is one of the four the accent owns — every seed block too, each with its provenance
    comment. `ContrastSuite` resolves the cascade the way a browser does, so it will notice a block
    you missed.
-2. Add the constant to `Tokens.scala`, in its group and in that group's `all`.
+2. Add the constant to `build-tests/src/kui/build/design/Tokens.scala`, in its group and in that
+   group's `all`. That list is the only place a token name is written in code — nothing in the
+   browser names a token, because the browser writes attributes and reads none of the values.
 3. If it is a colour used as a foreground or a background, add its pair (or pairs) to the table
    above. A pair naming a token that does not exist now fails, so a typo is caught immediately.
-4. Run `./mill frontend.uiKernel.test`. `TokensSuite` fails if the stylesheet and `Tokens.scala`
-   disagree; `ContrastSuite` fails if a documented pair misses AA in any theme or accent.
+4. Run `./mill build-tests.test`. `TokensSuite` fails if the stylesheet and `Tokens.scala`
+   disagree, in either direction; `ContrastSuite` fails if a documented pair misses AA in any theme
+   or accent. Both read this file and `10-tokens.css` straight off disk, so what they check is what
+   ships.
