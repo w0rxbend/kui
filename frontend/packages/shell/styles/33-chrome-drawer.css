@@ -1,0 +1,344 @@
+/* The navigation drawer: brand block, lettered groups of destinations, cluster card at the foot.
+ *
+ * Every measurement here was read off the five design screenshots by scanning a row or a column of
+ * pixels for the boundary between two fills; the coordinates are in `.agent/design/SPEC.md` §3.2,
+ * §3.5, §4.2, §4.3 and §4.5. Nothing is a hex: every colour is a token, so both themes and all four
+ * accent seeds are correct by construction rather than by somebody remembering to check the other
+ * seven combinations.
+ *
+ * The one thing worth stating up front is the drawer's layout. It is a three-row grid — head, list,
+ * foot — with only the middle row scrolling. A drawer that scrolls as one piece takes the cluster
+ * card off screen as soon as a deployment has enough destinations to overflow, and that card is the
+ * answer to "which cluster am I about to break?".
+ */
+
+.kui-nav-drawer {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: var(--kui-nav-drawer-width);
+  height: 100%;
+  min-height: 0;
+  background: var(--kui-color-surface-raised);
+  /* No border. In dark the drawer is separated from the page by fill alone — #15181C against
+   * #0E1013 — which is what the design draws. In light that step is far weaker, so there the
+   * separation is restored as a rule; the condition is on the theme, not on the component. */
+  border-right: 0;
+}
+
+:root:not([data-theme="dark"]) .kui-nav-drawer {
+  border-right: 1px solid var(--kui-color-border);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .kui-nav-drawer {
+    border-right: 0;
+  }
+}
+
+/* --- Brand block ------------------------------------------------------------------------------ */
+
+.kui-brand {
+  display: flex;
+  gap: var(--kui-space-3);
+  align-items: center;
+  padding: var(--kui-space-3) var(--kui-space-3) var(--kui-space-4);
+}
+
+.kui-brand__tile {
+  position: relative;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: #fff;
+  background: var(--kui-gradient-brand);
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-brand__dot {
+  /* Ringed in the drawer's own fill so the dot reads as a separate object sitting on the corner of
+   * the tile rather than as a notch cut out of it. */
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  background: var(--kui-color-text-subtle);
+  border: 2px solid var(--kui-color-surface-raised);
+  border-radius: var(--kui-radius-pill);
+}
+
+.kui-brand__dot--healthy {
+  background: var(--kui-color-success);
+}
+
+.kui-brand__dot--degraded {
+  background: var(--kui-color-warning);
+}
+
+.kui-brand__dot--unreachable {
+  background: var(--kui-color-danger);
+}
+
+.kui-brand__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kui-brand__name {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-brand__tagline {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Groups and destinations ------------------------------------------------------------------ */
+
+.kui-nav-drawer__nav {
+  min-height: 0;
+  padding: 0 var(--kui-space-2);
+  overflow-y: auto;
+}
+
+.kui-nav-group + .kui-nav-group {
+  /* The rule above ECOSYSTEM in the design. It is a separator between groups, so it belongs to the
+   * second group and not to the first — a trailing rule under the last group would draw a line
+   * across the drawer with nothing under it. */
+  margin-top: var(--kui-space-4);
+  border-top: 1px solid var(--kui-color-border);
+}
+
+.kui-nav-group__heading {
+  /* Real uppercase text with tracking, written uppercase in the source. `text-transform` on a
+   * mixed-case string leaves a screen reader reading the original, and an acronym-shaped string is
+   * sometimes spelled out letter by letter. */
+  padding: var(--kui-space-4) var(--kui-space-3) var(--kui-space-2);
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-nav-group__list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px; /* 41px pitch over a 36px row, measured from the design */
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.kui-nav-item {
+  display: flex;
+  gap: var(--kui-space-3);
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--kui-space-3);
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-muted);
+  text-decoration: none;
+  /* A full stadium, not a rounded rectangle: confirmed at six times magnification against the
+   * design. The difference is small and it is the difference between this drawer and every other
+   * one. */
+  border-radius: var(--kui-radius-pill);
+  transition: background-color var(--kui-duration-fast) ease, color var(--kui-duration-fast) ease;
+}
+
+.kui-nav-item__icon {
+  color: inherit;
+}
+
+.kui-nav-item__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.kui-nav-item:hover {
+  color: var(--kui-color-text);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-nav-item--current,
+a.kui-nav-item--current:hover {
+  font-weight: 600;
+  color: var(--kui-color-selected-contrast);
+  background: var(--kui-color-selected);
+}
+
+.kui-nav-item:focus-visible {
+  /* Offset so the ring sits outside the pill rather than on it. It is never removed for tidiness:
+   * a keyboard user who cannot see where they are is not served by a focus state that exists only
+   * in the accessibility tree. */
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-nav-item--disabled {
+  color: var(--kui-color-text-subtle);
+  cursor: not-allowed;
+}
+
+.kui-nav-item__badge {
+  flex-shrink: 0;
+  padding: 2px var(--kui-space-2);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--kui-radius-pill);
+}
+
+.kui-nav-item__badge--neutral {
+  color: var(--kui-color-text-muted);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-nav-item__badge--success {
+  color: var(--kui-color-success);
+  background: var(--kui-color-success-container);
+}
+
+.kui-nav-item__badge--warning {
+  color: var(--kui-color-warning);
+  background: var(--kui-color-warning-container);
+}
+
+.kui-nav-item__badge--danger {
+  color: var(--kui-color-danger);
+  background: var(--kui-color-danger-container);
+}
+
+.kui-nav-item--disabled .kui-nav-item__badge {
+  color: var(--kui-color-text-subtle);
+  background: var(--kui-color-surface-hover);
+}
+
+/* --- Cluster status card ---------------------------------------------------------------------- */
+
+.kui-cluster-card__slot {
+  padding: var(--kui-space-2);
+}
+
+.kui-cluster-card {
+  display: flex;
+  gap: var(--kui-space-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  background: var(--kui-color-surface-elevated);
+  border: 0;
+  border-radius: var(--kui-radius-md);
+  cursor: pointer;
+}
+
+.kui-cluster-card:hover {
+  /* The hover wash is the state layer composited over whatever surface the card is on, drawn as a
+   * flat gradient over the existing background rather than as a second, lighter grey. A hard-coded
+   * lighter grey breaks the moment the card is moved onto a different surface, and the design's own
+   * hover fills reconcile exactly to this composite: #1B1F25 under rgba(227,230,235,0.08) is the
+   * #2B2F34 sampled from the design's hovered rows. */
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-cluster-card:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-cluster-card__tile {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-cluster-card__tile--success {
+  color: var(--kui-color-success);
+  background: var(--kui-color-success-container);
+}
+
+.kui-cluster-card__tile--warning {
+  color: var(--kui-color-warning);
+  background: var(--kui-color-warning-container);
+}
+
+.kui-cluster-card__tile--danger {
+  color: var(--kui-color-danger);
+  background: var(--kui-color-danger-container);
+}
+
+.kui-cluster-card__tile--neutral {
+  color: var(--kui-color-text-muted);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-cluster-card__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kui-cluster-card__name {
+  overflow: hidden;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-cluster-card__detail {
+  display: flex;
+  gap: var(--kui-space-1);
+  align-items: center;
+  overflow: hidden;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-cluster-card__dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--kui-radius-pill);
+}
+
+.kui-cluster-card__dot--success {
+  background: var(--kui-color-success);
+}
+
+.kui-cluster-card__dot--warning {
+  background: var(--kui-color-warning);
+}
+
+.kui-cluster-card__dot--danger {
+  background: var(--kui-color-danger);
+}
+
+.kui-cluster-card__dot--neutral {
+  background: var(--kui-color-text-subtle);
+}
+
+.kui-cluster-card__retry-icon {
+  margin-left: auto;
+  color: var(--kui-color-text-muted);
+}

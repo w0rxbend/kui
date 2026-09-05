@@ -1,0 +1,358 @@
+/* The top bar: search, cluster selector, theme, appearance, notifications, account.
+ *
+ * Measurements from `.agent/design/SPEC.md` §3.2, §4.8–§4.11. The bar is 58px tall and starts at
+ * the drawer's right edge rather than at the window's left edge, because the drawer has its own
+ * head — the wordmark block — occupying that corner.
+ *
+ * A note on one shared idea. A resting *input* and a *hovered surface* are the same token,
+ * `--kui-color-surface-hover`. That is not an accident in the design and it is not a mistake here:
+ * both are saying "this is a thing you are about to interact with", and having them share a value
+ * is what stops the top bar from looking like six unrelated controls.
+ */
+
+.kui-topbar {
+  display: flex;
+  gap: var(--kui-space-4);
+  align-items: center;
+  justify-content: space-between;
+  height: var(--kui-topbar-height);
+  padding: 0 var(--kui-page-gutter);
+  background: var(--kui-color-surface);
+}
+
+.kui-topbar__actions {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+}
+
+/* --- Search ----------------------------------------------------------------------------------- */
+
+.kui-global-search {
+  position: relative;
+  flex: 0 1 324px;
+  min-width: 0;
+}
+
+.kui-global-search__field {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  height: 38px;
+  padding: 0 var(--kui-space-3);
+  background: var(--kui-color-surface-hover);
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-global-search__field:focus-within {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-global-search__icon {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-global-search__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text);
+  background: none;
+  border: 0;
+  /* The ring is drawn on the field, not on the input, so it surrounds the whole control including
+   * the magnifier. Removing it here is safe only because it is replaced two rules up — never
+   * `outline: none` on its own. */
+  outline: none;
+  /* The placeholder is longer than the 324px field on a machine whose hint reads "Ctrl K" rather
+   * than the narrower "⌘K". Ellipsis rather than a hard clip: a sentence that stops mid-word reads
+   * as a rendering fault, and one that ends in an ellipsis reads as a sentence that continues. */
+  text-overflow: ellipsis;
+}
+
+.kui-global-search__input::placeholder {
+  color: var(--kui-color-text-muted);
+}
+
+/* Chrome and Safari draw their own clear button inside a `type="search"` input, in a colour that
+ * belongs to neither theme. The product draws its own controls. */
+.kui-global-search__input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.kui-global-search__hint {
+  flex-shrink: 0;
+  padding: 2px var(--kui-space-2);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  background: var(--kui-color-surface-overlay);
+  border-radius: var(--kui-radius-pill);
+}
+
+.kui-global-search__results {
+  position: absolute;
+  top: calc(100% + var(--kui-space-2));
+  right: 0;
+  left: 0;
+  z-index: var(--kui-z-dropdown);
+  max-height: 320px;
+  padding: var(--kui-space-2);
+  overflow-y: auto;
+  background: var(--kui-color-surface-overlay);
+  border-radius: var(--kui-radius-md);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-global-search__group + .kui-global-search__group {
+  margin-top: var(--kui-space-2);
+}
+
+.kui-global-search__group-heading {
+  padding: var(--kui-space-1) var(--kui-space-2);
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-global-search__result {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: baseline;
+  padding: var(--kui-space-2);
+  color: var(--kui-color-text);
+  text-decoration: none;
+  border-radius: var(--kui-radius-sm);
+}
+
+.kui-global-search__result:hover,
+.kui-global-search__result:focus-visible {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-global-search__result:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+}
+
+.kui-global-search__result-label {
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-global-search__result-detail {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-global-search__message {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  padding: var(--kui-space-3);
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-global-search__message--failed {
+  justify-content: space-between;
+  color: var(--kui-color-text);
+}
+
+.kui-global-search__retry {
+  font: inherit;
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.kui-global-search__retry:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+/* The search overlay's skeleton rows. The `.kui-skeleton` block itself belongs to the kernel
+ * (`28-surfaces.css`) and is used here rather than redeclared: two skeletons in one stylesheet
+ * means two shimmer speeds on one screen, and the second one always looks like a fault. Only the
+ * size a search row stands in for is this file's business. */
+.kui-global-search__skeleton {
+  flex: 1 1 auto;
+  height: 14px;
+}
+
+/* --- Cluster selector -------------------------------------------------------------------------- */
+
+.kui-cluster-select {
+  position: relative;
+}
+
+.kui-cluster-select__trigger {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  height: 38px;
+  padding: 0 var(--kui-space-3);
+  font: inherit;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+  background: var(--kui-color-surface-hover);
+  border: 0;
+  border-radius: var(--kui-radius-md);
+  cursor: pointer;
+}
+
+.kui-cluster-select__trigger:hover {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-cluster-select__trigger:focus-visible,
+.kui-cluster-select__options:focus-visible,
+.kui-cluster-select__add:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-cluster-select__name {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-cluster-select__dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--kui-radius-pill);
+  background: var(--kui-color-text-subtle);
+}
+
+.kui-cluster-select__dot--healthy {
+  background: var(--kui-color-success);
+}
+
+.kui-cluster-select__dot--degraded {
+  background: var(--kui-color-warning);
+}
+
+.kui-cluster-select__dot--unreachable {
+  background: var(--kui-color-danger);
+}
+
+.kui-cluster-select__menu {
+  position: absolute;
+  top: calc(100% + var(--kui-space-2));
+  right: 0;
+  z-index: var(--kui-z-dropdown);
+  min-width: 260px;
+  padding: var(--kui-space-2);
+  background: var(--kui-color-surface-overlay);
+  border-radius: var(--kui-radius-md);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-cluster-select__options {
+  outline-offset: -2px;
+}
+
+.kui-cluster-select__option {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  padding: var(--kui-space-2);
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text);
+  border-radius: var(--kui-radius-sm);
+  cursor: pointer;
+}
+
+.kui-cluster-select__option--active {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-cluster-select__option-name {
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-cluster-select__option-detail {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-cluster-select__check {
+  margin-left: auto;
+  color: var(--kui-color-primary);
+}
+
+.kui-cluster-select__add {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  width: 100%;
+  padding: var(--kui-space-2);
+  margin-top: var(--kui-space-1);
+  font: inherit;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-primary);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--kui-color-border);
+  border-radius: 0 0 var(--kui-radius-sm) var(--kui-radius-sm);
+  cursor: pointer;
+}
+
+/* --- Icon buttons and the notification marker -------------------------------------------------- */
+
+/* The avatar is the kernel's `Avatar` primitive and is styled by `27-primitives.css`. It is used
+ * rather than re-drawn here, because "never invent somebody's initials" is a rule that has to hold
+ * in one place: two avatars means two answers to what an unknown identity looks like. */
+
+.kui-topbar__icon-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--kui-color-text-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--kui-radius-md);
+  cursor: pointer;
+}
+
+.kui-topbar__icon-button:hover {
+  color: var(--kui-color-text);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-topbar__icon-button:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+/* Unread notifications. A dot, and the count in the accessible name — a dot on its own is a
+ * colour-only signal, and no dot at all when there is nothing unread, because a marker that is
+ * always present is a marker nobody looks at. */
+.kui-topbar__bell-dot {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  background: var(--kui-color-danger);
+  border-radius: var(--kui-radius-pill);
+}
+
+/* The cluster menu never grows past the window: it scrolls inside itself, like every other list in
+ * this product. */
+.kui-cluster-select__menu {
+  max-height: 60vh;
+  overflow-y: auto;
+}

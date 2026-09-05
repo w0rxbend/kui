@@ -1,0 +1,141 @@
+/* The two pieces of navigation that live on a page rather than in the frame: the breadcrumb trail
+ * above a page title, and the tab strip below it.
+ *
+ * Measurements from `.agent/design/SPEC.md` §4.14 and §4.15.
+ *
+ * The rule both of them obey, and the reason they are in one file: neither may ever make the page
+ * scroll sideways. A Kafka topic name is long — `orders.payments.v2.dead-letter.retry-5m` is
+ * ordinary — and both of these components are made of names. The breadcrumb answers by collapsing
+ * its middle to a button; the tab strip answers by scrolling inside its own box. Both answers keep
+ * the page's own horizontal scrollbar at zero, which is the property that matters: a page that
+ * scrolls sideways hides the right-hand end of every row on it.
+ */
+
+.kui-breadcrumb {
+  min-width: 0;
+}
+
+.kui-breadcrumb__list {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.kui-breadcrumb__item {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  min-width: 0;
+  font-size: var(--kui-font-size-sm);
+  /* No wrapping. A trail that wraps to a second line pushes the page title down, and the title
+   * moving between two adjacent pages is the kind of thing that makes an interface feel unsteady
+   * without anybody being able to say why. */
+  white-space: nowrap;
+}
+
+.kui-breadcrumb__link {
+  overflow: hidden;
+  color: var(--kui-color-text-muted);
+  text-decoration: none;
+  text-overflow: ellipsis;
+}
+
+.kui-breadcrumb__link:hover {
+  color: var(--kui-color-text);
+  text-decoration: underline;
+}
+
+.kui-breadcrumb__link:focus-visible,
+.kui-breadcrumb__more:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+  border-radius: var(--kui-radius-xs);
+}
+
+.kui-breadcrumb__current {
+  overflow: hidden;
+  color: var(--kui-color-text);
+  text-overflow: ellipsis;
+}
+
+.kui-breadcrumb__separator {
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-breadcrumb__more {
+  padding: 0 var(--kui-space-1);
+  font: inherit;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--kui-radius-xs);
+  cursor: pointer;
+}
+
+.kui-breadcrumb__more:hover {
+  color: var(--kui-color-text);
+  background: var(--kui-color-surface-hover);
+}
+
+/* --- Tab strip --------------------------------------------------------------------------------- */
+
+.kui-page-tabs {
+  /* The rule runs the full content width behind the strip, and the strip scrolls over it when there
+   * are more tabs than room. `overflow-x: auto` on the strip and not on the page is the whole of
+   * the "a list scrolls inside its own box" rule, applied to a list of tabs. */
+  border-bottom: 1px solid var(--kui-color-border);
+}
+
+.kui-page-tabs__list {
+  display: flex;
+  gap: var(--kui-space-5);
+  padding: 0;
+  margin: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.kui-page-tabs__tab {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
+  height: 40px;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  /* The underline is drawn as a transparent border in every state, so that the active tab's label
+   * does not move by two pixels when it becomes active. */
+  border-bottom: 2px solid transparent;
+}
+
+.kui-page-tabs__tab:hover {
+  color: var(--kui-color-text);
+}
+
+.kui-page-tabs__tab--current {
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+  border-bottom-color: var(--kui-color-primary);
+}
+
+.kui-page-tabs__tab:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+  border-radius: var(--kui-radius-xs);
+}
+
+.kui-page-tabs__count {
+  padding: 1px var(--kui-space-2);
+  font-size: var(--kui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-muted);
+  background: var(--kui-color-surface-hover);
+  border-radius: var(--kui-radius-pill);
+}
