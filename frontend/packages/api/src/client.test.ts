@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { createApiClient } from "./client.js";
 import { CsrfHeaderName, createCsrfTokens } from "./csrf.js";
@@ -299,5 +299,49 @@ describe("the session gate", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(sent).toEqual([]);
+  });
+});
+
+describe("a 401", () => {
+  test("tears down the session for an ordinary call", async () => {
+    const lapsed = vi.fn();
+    const client = clientWith(
+      async () => new Response(JSON.stringify({ code: "KUI-UNAUTHENTICATED" }), { status: 401 }),
+      settledTokens(),
+      lapsed,
+    );
+    await client.get("/api/v1/clusters", {});
+    expect(lapsed).toHaveBeenCalled();
+  });
+
+  test("does not tear it down for the sign-in call itself", async () => {
+    /*
+     * A 401 from `/auth/login` means "those credentials are wrong", not "your session has ended",
+     * and the difference shipped as a real defect. The shell's expired-session handler clears the
+     * identity; `mustSignIn()` needs an identity to conclude the principal is anonymous. So a
+     * *failed* sign-in cleared the identity, `mustSignIn()` fell to false, and the sign-in screen
+     * vanished — leaving the anonymous application on screen, with no error, to somebody who had
+     * just typed the wrong password.
+     */
+    const lapsed = vi.fn();
+    const client = clientWith(
+      async () => new Response(JSON.stringify({ code: "KUI-UNAUTHENTICATED" }), { status: 401 }),
+      settledTokens(),
+      lapsed,
+    );
+    await client.post("/api/v1/auth/login", { body: { username: "ada", password: "wrong" } });
+    expect(lapsed).not.toHaveBeenCalled();
+  });
+
+  test("nor for a refused password change", async () => {
+    // Same flow, same reasoning: the challenge was rejected, no session existed to lose.
+    const lapsed = vi.fn();
+    const client = clientWith(
+      async () => new Response(JSON.stringify({ code: "KUI-UNAUTHENTICATED" }), { status: 401 }),
+      settledTokens(),
+      lapsed,
+    );
+    await client.post("/api/v1/auth/password", { body: { challenge: "x", newPassword: "y" } });
+    expect(lapsed).not.toHaveBeenCalled();
   });
 });

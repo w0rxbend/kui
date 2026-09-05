@@ -56,6 +56,9 @@ import {
   type FeatureState,
   KuiProvider,
   type KuiContextValue,
+  accentPreference,
+  densityPreference,
+  themePreference,
 } from "@kui/kernel";
 import { AppFrame } from "./chrome/AppFrame.jsx";
 import { EnvRail, type RailDestination } from "./chrome/EnvRail.jsx";
@@ -76,6 +79,8 @@ import {
   type FeatureStatus,
 } from "./nav/navigation.js";
 import { ForbiddenPage, GatewayUnreachablePage, NotFoundPage } from "./pages/errorPages.jsx";
+import { SignIn } from "./pages/SignIn.jsx";
+import { SettingsPage, asPreference } from "./pages/SettingsPage.jsx";
 import {
   clusterInUrl,
   createShellRouter,
@@ -341,7 +346,17 @@ export function App() {
 
   const Router: ShellRouter = createShellRouter(bootstrap.basePath, {
     home: () => <Overview model={toOverviewModel(overview.data)} />,
-    settings: () => <Settings />,
+    settings: () => (
+      <SettingsPage
+        /* The kernel's singletons, handed in rather than reached for. The page takes them as props
+           so a test can drive it without sharing `localStorage` with the next suite. */
+        theme={asPreference(themePreference)}
+        accent={asPreference(accentPreference)}
+        density={asPreference(densityPreference)}
+        version={bootstrap.buildVersion}
+        apiBase={bootstrap.apiBase}
+      />
+    ),
     forbidden: () => <ForbiddenPage subject="this page" homeHref={Router.paths()} />,
     notFound: () => <NotFoundPage attempted={window.location.pathname} homeHref={Router.paths()} />,
     feature: (id) => () => {
@@ -492,7 +507,24 @@ export function App() {
             <GatewayUnreachablePage state={health.connectivity()} onRetry={health.retryNow} />
           </Show>
           <Show when={health.connectivity().kind === "connected" && session.mustSignIn()}>
-            <SignIn />
+            <SignIn
+              authType={session.settings()?.authType ?? "form"}
+              providerLabel={session.settings()?.providerLabel}
+              api={api}
+              onSignedIn={() => {
+                /*
+                 * A reload, deliberately, and not a re-fetch.
+                 *
+                 * Every store in this shell — the permissions, the capability fold, the cluster
+                 * list, each feature's own data — was populated as the *anonymous* principal while
+                 * the sign-in screen was on top of it. Re-fetching a few of them by hand is a list
+                 * somebody will one day fail to keep up to date, and the failure mode is the worst
+                 * kind: a signed-in operator looking at what anonymous was allowed to see, with no
+                 * indication that anything is missing. A reload cannot get that list wrong.
+                 */
+                window.location.reload();
+              }}
+            />
           </Show>
         </KuiProvider>
       )}
@@ -670,22 +702,6 @@ function themeMode(): ThemeMode {
 /* A placeholder for the one shell-owned screen that is still to come. It renders something honest
  * rather than nothing, because a route that renders nothing is a blank content area and users read a
  * blank page as a broken page. (The overview is no longer among these: it is the real screen now.) */
-
-function Settings() {
-  return (
-    <div class="kui-shell__page" data-testid="page-settings">
-      <h1>Settings</h1>
-    </div>
-  );
-}
-
-function SignIn() {
-  return (
-    <div class="kui-shell__page" data-testid="page-sign-in">
-      <h1>Sign in</h1>
-    </div>
-  );
-}
 
 /**
  * Opens a stream once the session has been established, and stays closable in the meantime.

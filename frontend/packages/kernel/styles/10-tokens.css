@@ -306,6 +306,10 @@
   --kui-z-drawer: 200;
   --kui-z-dialog: 300;
   --kui-z-toast: 400;
+  /* Above everything, including a toast. The sign-in cover and the gateway-unreachable screen are
+   * not layers over a usable application — nothing behind them works — so nothing may sit on top of
+   * them and invite a click that cannot do anything. */
+  --kui-z-cover: 500;
 
   /* --- Opacity ----------------------------------------------------------------------------- */
 

@@ -169,6 +169,19 @@ const UnauthorizedStatus = 401;
  */
 const SessionPath = "/api/v1/auth/me";
 
+/**
+ * The calls that *establish* a session rather than carry one.
+ *
+ * A 401 from any of these is an answer about the credentials just offered, not a statement that an
+ * existing session has lapsed — and the difference decides whether the shell tears the session down.
+ */
+const CredentialsPaths = ["/api/v1/auth/login", "/api/v1/auth/password", "/api/v1/auth/oidc/start"];
+
+function isCredentialsCall(url: string): boolean {
+  const [path] = url.split("?");
+  return path !== undefined && CredentialsPaths.some((one) => path.endsWith(one));
+}
+
 function isSessionCall(url: string): boolean {
   // The query string is dropped first: this endpoint takes no parameters today, and a path test that
   // a future one could break is a test that silently reintroduces the deadlock it prevents.
@@ -242,8 +255,25 @@ export function createApiClient(options: ApiClientOptions): KuiApiClient {
       return request;
     },
 
-    onResponse({ response }) {
-      if (response.status === UnauthorizedStatus) {
+    onResponse({ request, response }) {
+      /*
+       * A 401 means "your session has ended" everywhere except on the sign-in call itself, where it
+       * means "those credentials are wrong".
+       *
+       * Treating them alike was a real defect and a bad one. The shell's handler for an expired
+       * session clears the identity, and `mustSignIn()` needs an identity to decide that the
+       * principal is anonymous — so a *failed* sign-in cleared the identity, `mustSignIn()` fell to
+       * false, and the sign-in screen disappeared, leaving the anonymous application on screen with
+       * no error and no way back to the form. The person who typed the wrong password was shown
+       * what looked like a successful sign-in.
+       *
+       * The session call is exempt for the same reason it is exempt from the gate above: it is the
+       * one request that is *about* establishing a session rather than carrying one.
+       */
+      // The *request's* URL, not the response's: a `Response` constructed by hand — which is what a
+      // test transport returns, and what a service worker may return — has an empty `url`, and the
+      // exemption would then silently never apply in exactly the place it is being tested.
+      if (response.status === UnauthorizedStatus && !isCredentialsCall(request.url)) {
         options.csrf.invalidate();
         options.onUnauthorized?.();
       }
