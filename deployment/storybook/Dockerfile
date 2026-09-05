@@ -46,6 +46,7 @@ COPY frontend/packages/feature-clusters/package.json ./packages/feature-clusters
 COPY frontend/packages/feature-topics/package.json ./packages/feature-topics/
 COPY frontend/packages/feature-messages/package.json ./packages/feature-messages/
 COPY frontend/packages/feature-consumers/package.json ./packages/feature-consumers/
+COPY frontend/packages/feature-schemas/package.json ./packages/feature-schemas/
 
 # `--frozen-lockfile` so a lockfile that has drifted from the manifests fails the build here, rather
 # than silently resolving to different versions than a developer has. That is the whole reason a
