@@ -19,6 +19,19 @@ export {
   AllErrorCodes,
   type ErrorCode,
   type KnownErrorCode,
+  CapabilityStatuses,
+  ReasonCodes,
+  ReasonSentences,
+  AllReasonCodes,
+  type CapabilityStatus,
+  type KnownReasonCode,
+  SseEventNames,
+  SharedSseEventNames,
+  Resources,
+  Actions,
+  ConnectorFallbackActions,
+  type ResourceName,
+  type PermissionAction,
 } from "./constants.generated.js";
 
 export {

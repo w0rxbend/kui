@@ -16,3 +16,15 @@ export { Icon, iconNames, type IconName, type IconProps } from "./icon.jsx";
  * colour or measurement is ever computed in TypeScript (ADR-024, ADR-048 §5).
  */
 export * from "./theme/index.js";
+
+/**
+ * What the browser knows about the deployment: the capability picture, the session and its
+ * permissions, and which cluster is being looked at.
+ */
+export * from "./state/index.js";
+
+/**
+ * Feature registration and lazy loading — the static half a deep link resolves against, and the
+ * bounded, retryable download of the dynamic half.
+ */
+export * from "./feature/index.js";
