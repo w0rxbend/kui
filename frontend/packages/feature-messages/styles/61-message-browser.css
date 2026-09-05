@@ -253,3 +253,110 @@
     margin-inline-start: 0;
   }
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Tracking one value across several topics
+ *
+ * "Where did order 4711 go?" — an identifier, some topics and a window, answered with the records in
+ * time order. The layout puts the time column first for that reason: the answer is the sequence.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-track {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-track__title {
+  margin: 0;
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-track__lede {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  max-width: 56ch;
+}
+
+.kui-track__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-raised);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+}
+
+/* The match reads as one sentence — look in <the value> that <contains> <4711> — so its controls sit
+ * on a line and wrap together rather than stacking into four unrelated fields. */
+.kui-track__match,
+.kui-track__window {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-3);
+  align-items: end;
+}
+
+.kui-track__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Read N records; M matched. Not a footnote: without it, "nothing matched" and "nothing was read"
+ * are the same screen, and they mean opposite things. */
+.kui-track__summary {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-track__results {
+  overflow-x: auto;
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-track__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-track__table th,
+.kui-track__table td {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  text-align: start;
+  vertical-align: baseline;
+  border-block-end: 1px solid var(--kui-color-border);
+}
+
+.kui-track__table thead th {
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-medium);
+  white-space: nowrap;
+}
+
+.kui-track__time,
+.kui-track__topic {
+  font-family: var(--kui-font-family-mono);
+  white-space: nowrap;
+}
+
+.kui-track__topic {
+  font-weight: var(--kui-font-weight-regular);
+}
+
+/* A payload can be a page of JSON. It is clamped rather than allowed to make one row as tall as the
+ * screen: the point of this table is the *sequence*, and one enormous row hides it. */
+.kui-track__payload {
+  font-family: var(--kui-font-family-mono);
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

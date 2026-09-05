@@ -32,6 +32,8 @@ import { createMutation, useKui } from "@kui/kernel";
 import { Actions } from "@kui/api";
 import { MessagesTab } from "./MessagesTab.jsx";
 import { ProduceDrawer } from "./ProduceDrawer.jsx";
+import { TrackPage } from "./TrackPage.jsx";
+import { emptyQuery, track, type TrackQuery } from "./track.js";
 import { produce, type RecordDraft } from "./produce.js";
 import { createBrowseSession } from "./session.js";
 import { createBrowseTransport } from "./transport.js";
@@ -42,12 +44,22 @@ export default function Messages(): JSX.Element {
     readonly clusterId?: string;
     readonly topicName?: string;
   }>();
+  const location = useLocation();
+
+  /*
+   * `/messages/track` is the one address this feature serves that names no topic: a track reads
+   * *across* topics, which is the whole point of it. It is matched on the path rather than by a
+   * route parameter because it sits outside the `/topics/:topicName` subtree the browser lives in.
+   */
+  const tracking = () => location.pathname.replace(/\/+$/, "").endsWith("/messages/track");
 
   return (
     <Show when={params.clusterId} fallback={<NoSubject what="cluster" />}>
       {(clusterId) => (
-        <Show when={params.topicName} fallback={<NoSubject what="topic" />}>
-          {(topicName) => <BrowserScreen clusterId={clusterId()} topicName={topicName()} />}
+        <Show when={!tracking()} fallback={<TrackScreen clusterId={clusterId()} />}>
+          <Show when={params.topicName} fallback={<NoSubject what="topic" />}>
+            {(topicName) => <BrowserScreen clusterId={clusterId()} topicName={topicName()} />}
+          </Show>
         </Show>
       )}
     </Show>
@@ -157,5 +169,31 @@ function BrowserScreen(props: {
         }}
       />
     </>
+  );
+}
+
+/** Tracking one value across several topics. */
+function TrackScreen(props: { readonly clusterId: string }): JSX.Element {
+  const kui = useKui();
+  const [query, setQuery] = createSignal<TrackQuery>(emptyQuery());
+  const run = createMutation((q: TrackQuery) => track(kui.api, props.clusterId, q));
+
+  const mayRead = () => kui.permits(Actions.TopicMessagesRead);
+
+  return (
+    <TrackPage
+      query={query()}
+      onQueryChange={(next) => {
+        setQuery(next);
+        /* The last answer described the last query. Leaving it on screen under a changed form is
+           how somebody concludes a value is absent from a window they never searched. */
+        run.reset();
+      }}
+      onSearch={() => void run.run(query())}
+      state={run.state()}
+      disabledReason={
+        mayRead() ? undefined : "You do not have permission to read messages on this cluster."
+      }
+    />
   );
 }
