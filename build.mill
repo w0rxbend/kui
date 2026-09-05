@@ -4185,10 +4185,12 @@ object tools extends Module {
   object errorCodes extends KuiJvmModule {
     override def moduleDir = mill.api.BuildCtx.workspaceRoot / "tools" / "error-codes"
 
-    // `contracts-core` is here for one string: `HttpHeaders.Csrf`. The browser's generated constants
-    // must carry the same header name the gateway reads, and generating it from the constant both
-    // halves already share is what makes the two impossible to change apart (ADR-048 §3).
-    def moduleDeps = Seq(libs.kernel.jvm, libs.contractsCore.jvm)
+    // `contracts-core` is here for the strings that never reach an OpenAPI document: the CSRF header
+    // name (`HttpHeaders.Csrf`), the capability vocabulary and the stream event names. `security-core`
+    // is here for the RBAC vocabulary the browser's permission store asks its questions in. Generating
+    // all of them from the constants both halves already share is what makes them impossible to change
+    // apart (ADR-048 §3).
+    def moduleDeps = Seq(libs.kernel.jvm, libs.contractsCore.jvm, libs.securityCore.jvm)
 
     object test extends ScalaTests with KuiTests
   }
