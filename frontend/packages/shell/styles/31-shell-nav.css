@@ -139,6 +139,18 @@
   font-size: var(--kui-font-size-sm);
 }
 
+/* The stable reason code, under the sentence that explains it.
+ *
+ * Monospaced and selectable on its own so that it can be read over the phone and copied into a
+ * ticket without catching the prose either side of it. The sentence above is what the operator acts
+ * on; this is what they quote. */
+.kui-shell__fallback-code {
+  margin: 0 0 var(--kui-space-4) 0;
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}
+
 .kui-shell__fallback-feature {
   margin-bottom: var(--kui-space-4);
 }

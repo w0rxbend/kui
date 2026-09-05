@@ -54,6 +54,16 @@ export type NavBadge = {
   readonly description: string;
 };
 
+/**
+ * Which of ADR-032's five states a destination is in.
+ *
+ * Written to `data-state` on the row, and deliberately not expressed as a class name. Class names
+ * belong to the visual design and change whenever the design does; this is a statement about state,
+ * and the end-to-end tests that assert the five rules against a real browser have to keep asserting
+ * on something that stays true through a restyle.
+ */
+export type NavState = "ready" | "degraded" | "unavailable" | "forbidden" | "not_configured";
+
 export type NavDestination = {
   readonly id: string;
   readonly label: string;
@@ -64,6 +74,15 @@ export type NavDestination = {
    * cluster and must never be printed for an unknown, and a spinner does not fit in a 20px badge.
    */
   readonly badge?: NavBadge | undefined;
+  /**
+   * What the shell knows about the service behind this destination, when it knows anything.
+   *
+   * `unavailable` is the interesting one: the row is drawn dimmed and stays a real link, because the
+   * page behind it is the feature's fallback panel and that is the only place the reason, the time
+   * it went away, a working retry and "what still works" exist. A dead row would take away the one
+   * route to the explanation.
+   */
+  readonly state?: NavState | undefined;
   /** A destination that exists but is not built yet, or that this principal may not open. */
   readonly disabled?: boolean | undefined;
   /**

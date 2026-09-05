@@ -11,14 +11,16 @@
  * - **Its URLs.** A bookmarked link to `/ui/clusters` must resolve on the first load, before any
  *   chunk has been fetched. If the router only learned the pattern once the feature had been
  *   imported, the first address it saw would be one it could not match, and the user would get a 404
- *   for a page that exists.
- * - **Its navigation entry and where that entry points.** The navigation is drawn on first paint,
- *   from capability state alone; nothing may be downloaded in order to draw a link.
+ *   for a page that exists. Those patterns live in the shell's route table rather than here, so that
+ *   they stay literal and every link is built through the router's typed path proxy — a typo or a
+ *   missing parameter is then a compile error rather than a dead link.
+ * - **Its navigation entry.** The navigation is drawn on first paint, from capability state alone;
+ *   nothing may be downloaded in order to draw a link.
  * - **Which service backs it**, so a capability frame naming a service can be matched to the feature
  *   it affects.
  *
- * All three are *data*: path shapes, a label, an icon name, a service id. Linking against them costs
- * a few bytes in the entry chunk and pulls no feature code with them. What must never appear on this
+ * All of that is *data*: a label, an icon name, a service id, a sort order. Linking against it costs
+ * a few bytes in the entry chunk and pulls no feature code with it. What must never appear on this
  * side of the line is the feature's component: that is the dynamic half, reached only through
  * {@link FeatureRegistration.load}'s `import()`, and `frontend.checkBundleShape` fails the build if
  * it leaks into the entry chunk's static imports.
@@ -46,6 +48,34 @@ export type ServiceId = string;
 
 /** What a feature's chunk default-exports: the component the shell renders for its routes. */
 export type FeatureComponent = Component;
+
+/**
+ * What a feature's chunk looks like from the shell.
+ *
+ * The `default` export is the contract: it is the feature's root, and the shell renders it for every
+ * one of that feature's routes. It is optional in the *type* only because a feature package can exist
+ * before its root does — lane D builds the screens first — and a shell that failed to compile against
+ * a half-built feature would stop the whole frontend rather than one screen. A module that arrives
+ * without one renders a panel saying exactly that, which is a legible state; silently rendering
+ * nothing is not.
+ */
+export type FeatureModule = {
+  readonly default?: FeatureComponent | undefined;
+};
+
+/**
+ * Reads a feature's root component out of whatever its chunk turned out to export.
+ *
+ * Every `load` thunk ends in this, and it is what keeps the shell compiling against feature packages
+ * that are still being built. TypeScript synthesises a `default` for a module that has none — the
+ * namespace object itself — so "does it have a default" cannot be asked of the type, only of the
+ * value: a root component is a function, and a namespace object is not. Anything else is reported as
+ * a feature with no screen rather than rendered as nothing.
+ */
+export function featureModule(chunk: unknown): FeatureModule {
+  const candidate = (chunk as { readonly default?: unknown } | null)?.default;
+  return typeof candidate === "function" ? { default: candidate as FeatureComponent } : {};
+}
 
 export type FeatureRegistration = {
   readonly id: FeatureId;
@@ -86,29 +116,16 @@ export type FeatureRegistration = {
    */
   readonly sidebar: boolean;
   /**
-   * Every URL this feature owns, as router patterns relative to the mount point.
-   *
-   * Registered with the router at start-up, before a byte of the feature has been downloaded, which
-   * is what makes a deep link resolve on the first pass.
-   */
-  readonly routes: readonly string[];
-  /**
-   * Where the navigation entry goes.
-   *
-   * Built from the chosen cluster rather than being a constant, so that a cluster-scoped entry points
-   * at the cluster the user is actually on. `undefined` means "there is nowhere to point right now",
-   * which is what keeps the entry out of the navigation instead of pointing it at a broken address.
-   */
-  readonly landing: (cluster: string | undefined) => string | undefined;
-  /**
    * The dynamic half: the `import()` that fetches the feature's chunk.
    *
-   * The body of this thunk must be a bare dynamic `import()` of the feature package and nothing else.
-   * Anything that also *statically* names the feature — a type annotation naming its component, a
-   * re-export, a value pulled out for convenience — makes it reachable from the entry chunk, and the
-   * bundler then ships it to every user on first paint, including users whose deployment has no such
-   * service. Nothing about the source looks different when that happens, which is why the check reads
-   * the build manifest's module graph rather than trusting a review to spot it.
+   * The body of this thunk must be a dynamic `import()` of the feature package with a literal
+   * specifier, and nothing that *statically* names the feature — no top-level `import` of it, no type
+   * annotation naming its component, no value pulled out for convenience. Any of those makes the
+   * feature reachable from the entry chunk, and the bundler then ships it to every user on first
+   * paint, including users whose deployment has no such service. Nothing about the source looks
+   * different when that happens, which is why the check reads the build manifest's module graph
+   * rather than trusting a review to spot it. Chaining {@link featureModule} onto the import is safe:
+   * it names no feature and the specifier stays literal.
    */
-  readonly load: () => Promise<{ readonly default: FeatureComponent }>;
+  readonly load: () => Promise<FeatureModule>;
 };

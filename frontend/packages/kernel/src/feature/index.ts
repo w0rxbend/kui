@@ -6,8 +6,10 @@
  * is bounded and its failure is recoverable.
  */
 export {
+  featureModule,
   type FeatureComponent,
   type FeatureId,
+  type FeatureModule,
   type FeatureRegistration,
   type ServiceId,
 } from "./registration.js";

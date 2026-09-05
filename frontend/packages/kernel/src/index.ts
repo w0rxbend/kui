@@ -18,8 +18,7 @@ export { Icon, iconNames, type IconName, type IconProps } from "./icon.jsx";
 export * from "./theme/index.js";
 
 /**
- * What the browser knows about the deployment: the capability picture, the session and its
- * permissions, and which cluster is being looked at.
+ * The session and its permissions, and which cluster is being looked at.
  */
 export * from "./state/index.js";
 
@@ -28,3 +27,55 @@ export * from "./state/index.js";
  * bounded, retryable download of the dynamic half.
  */
 export * from "./feature/index.js";
+
+/**
+ * How a quantity is printed. Thousands separators, signed deltas, guarded fractions, and the em
+ * dash that means "no value" — shared because three screens printing the same kind of number must
+ * not each decide how to group its thousands (SPEC §6.6).
+ */
+export { formatCount, formatRate, formatDelta, share, MISSING } from "./numbers.js";
+
+/**
+ * A media query as a signal — how a screen drops a column rather than hiding it (SPEC §7.5).
+ */
+export { createMediaQuery, NARROW_QUERY } from "./media.js";
+
+/**
+ * The capability picture: what every service can currently do, and the five states the shell renders
+ * from it (ADR-032). Exported from the two modules directly rather than through a barrel, so that
+ * adding one later is a merge of two lines rather than a conflict.
+ */
+export {
+  type Capabilities,
+  type CapabilitiesOptions,
+  type CapabilityNotice,
+  createCapabilities,
+  POLL_INTERVAL_MS,
+  DEDUP_WINDOW_MS,
+} from "./data/capabilities/store.js";
+export {
+  type CapabilityEntry,
+  type CapabilityFrame,
+  type CapabilityKey,
+  type CapabilityState,
+  capabilityKeyOf,
+  decodeCapabilityFrame,
+  describeCapability,
+  isUnavailable,
+  stateMessage,
+} from "./data/capabilities/frames.js";
+export {
+  type FeatureState,
+  STARTING_MESSAGE,
+  deriveFeatureState,
+  isDimmed,
+  isHidden,
+  isNavigable,
+} from "./data/capabilities/featureState.js";
+
+/**
+ * The data layer: the query cache, the server-sent-event client, and the capability, permission and
+ * session stores. Behaviour, not components — a screen reads these and draws itself from what they
+ * say, including when what they say is "this is not working and here is why".
+ */
+export * from "./data/index.js";

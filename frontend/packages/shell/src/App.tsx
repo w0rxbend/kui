@@ -1,96 +1,427 @@
-import { lazy, Loading } from "solid-js";
-import { createRouter, defineRoutes } from "@solidjs/router";
-import { readBootstrap } from "./bootstrap.js";
-
 /**
- * The scaffold's proof page: the smallest thing that exercises the whole chain end to end.
+ * The application, assembled.
  *
- * It is not a screen and no screen is ported here (DEVPLAN §4 forbids it). It exists to make four
- * claims observable in a browser rather than asserted in a document:
+ * ## The order of start-up matters
  *
- *  1. the gateway's bootstrap block reaches the browser and is read (`basePath`, `apiBase`,
- *     `buildVersion` are rendered);
- *  2. the router is mounted under the deployment's base path, so a deep link works behind a
- *     reverse proxy as well as at the root;
- *  3. a feature package is reached only through `lazy(() => import(...))`, so it arrives as its
- *     own chunk after the shell has already rendered;
- *  4. the stylesheet is part of the build and is served from the same origin.
+ * The session is fetched before anything mutating can work, because the only place a CSRF token ever
+ * comes from is the body of `GET /api/v1/auth/me` and nothing else calls it. When start-up did not,
+ * the token stayed absent for the life of the page and every non-`GET` was refused — including the
+ * "Retry now" button on the degraded-feature panel, which therefore never worked.
  *
- * Lane C replaces this file with the real shell (SOL-024 … SOL-026).
+ * The capability stream is opened before the first paint, and nothing waits for it: an empty picture
+ * renders as degraded-with-STARTING, which is the honest state — the features are usable and their
+ * health has not been established yet.
+ *
+ * The router is built from the static route table, which is complete before a byte of any feature has
+ * been downloaded, so a deep link resolves on the very first pass.
+ *
+ * ## The two full-screen states, and why their order is the whole rule
+ *
+ * A gateway that is not answering wins over the sign-in screen, because a sign-in form that cannot
+ * reach a server is a form that can only fail, and the unreachable screen is the one that says why
+ * and retries. Only when KUI *is* reachable is the sign-in question asked at all — and the default
+ * answer to it is no, because authentication is disabled in every deployment until somebody
+ * configures an identity provider.
  */
-
-const bootstrap = readBootstrap();
-
-/**
- * Where the router thinks it is mounted.
- *
- * The gateway serves the application under `<basePath>/ui/`, so a URL the browser sees is
- * `/kui/ui/clusters` while the route pattern is `/clusters`. Handing the router that prefix is
- * what keeps the patterns free of the mount point — the same reason `<base href>` exists for the
- * assets.
- */
-const routerBase = `${bootstrap.basePath}/ui`;
-
-/**
- * The clusters feature, reached the only way a feature may ever be reached.
- *
- * `lazy` + `import()` is the loading seam itself: Vite gives this specifier its own chunk, the
- * build manifest records it under the entry's `dynamicImports`, and nothing of the feature is in
- * the entry chunk. A static `import Clusters from "@kui/feature-clusters"` here would be a build
- * failure once SOL-010 lands, and that is deliberate.
- */
-const Clusters = lazy(() => import("@kui/feature-clusters"));
-
-const routes = defineRoutes([
-  { path: "/", component: Home },
-  { path: "/clusters", component: ClustersRoute },
-]);
-
-const Router = createRouter({ routes, base: routerBase });
+import { Show, createEffect, createMemo, createSignal, onSettled } from "solid-js";
+import {
+  createApiClient,
+  createCsrfTokens,
+  readBootstrap,
+  userMessage,
+  type ApiError,
+  type KuiApiClient,
+} from "@kui/api";
+import {
+  Banner,
+  ToastRegion,
+  createCapabilities,
+  createCurrentCluster,
+  createSession,
+  notify,
+  openEventSource,
+  soleClusterChoice,
+  type FeatureId,
+  type FeatureRegistration,
+  type FeatureState,
+} from "@kui/kernel";
+import { NavDrawer } from "./chrome/NavDrawer.jsx";
+import { TopBar, type ThemeMode } from "./chrome/TopBar.jsx";
+import type { ClusterSummary, NavDestination } from "./chrome/types.js";
+import { featureRegistry } from "./features/registry.js";
+import { FeatureGate } from "./features/FeatureGate.jsx";
+import { createHealth, type CallScope } from "./health.js";
+import { degradedBanner, StaleBanner } from "./messages.js";
+import { navigationGroups, stillWorking, degradedLabels, type FeatureStatus } from "./nav/navigation.js";
+import { ForbiddenPage, GatewayUnreachablePage, NotFoundPage } from "./pages/errorPages.jsx";
+import { clusterInUrl, createShellRouter, landingFor, UiPath, type ShellRouter } from "./routing/routes.jsx";
+import type { RouteSectionProps } from "@solidjs/router";
 
 export function App() {
+  const bootstrap = readBootstrap();
+  const origin = window.location.origin;
+  /** Where the frontend is mounted, deployment prefix included. */
+  const uiPrefix = `${bootstrap.basePath.replace(/\/$/, "")}${UiPath}`;
+
+  const csrf = createCsrfTokens();
+  const session = createSession({
+    settleCsrf: (token) => csrf.settle(token),
+    invalidateCsrf: () => csrf.invalidate(),
+  });
+
+  const api: KuiApiClient = createApiClient({
+    bootstrap,
+    origin,
+    csrf,
+    // The gateway said the session lapsed. Emptying it here rather than at the call site means no
+    // write control survives that moment even for the length of a reload.
+    onUnauthorized: () => session.markExpired(),
+  });
+
+  const health = createHealth({
+    now: () => new Date(),
+    schedule: (delayMs, run) => void setTimeout(run, delayMs),
+    onRetry: () => void startUp(),
+  });
+
+  const report = (scope: CallScope, error: ApiError | undefined): void => {
+    if (error === undefined) health.report(scope, "ok");
+    // A 403 or a 404 is the gateway *answering*, and answering is the opposite of being unreachable.
+    else health.report(scope, error.kind === "unreachable" || error.kind === "timeout" ? "transport-failure" : "answered");
+  };
+
+  const capabilities = createCapabilities({
+    openStream: (subscriber) =>
+      openEventSource(`${bootstrap.apiBase.replace(/\/$/, "")}/capabilities/stream`, subscriber),
+    poll: () => api.get("/api/v1/capabilities", {}),
+    notify: (notice) => notify(notice.title, { tone: notice.tone, message: notice.message }),
+    schedule: (delayMs, action) => void setTimeout(action, delayMs),
+  });
+
+  const cluster = createCurrentCluster({ storage: safeLocalStorage() });
+  // A cluster named in the URL wins over the stored selection, and is applied before anything reads
+  // it: a pasted link has to show the recipient what the sender saw.
+  const fromUrl = clusterInUrl(window.location.pathname, uiPrefix);
+  if (fromUrl !== undefined) cluster.select(fromUrl);
+
+  const [probing, setProbing] = createSignal<ReadonlySet<string>>(new Set<string>());
+  const [probeErrors, setProbeErrors] = createSignal<ReadonlyMap<string, string>>(new Map());
+
+  /**
+   * The "Retry now" button's other half: asking the gateway to re-check one service.
+   *
+   * A second press while the first is outstanding does nothing. Without that, a user watching a slow
+   * service can queue up a dozen probes, each of which makes the gateway call an upstream that is
+   * already struggling. The recomputed state reaches the navigation through the capability stream
+   * like every other transition — nothing here writes into the store, because two writers to one
+   * picture is how a picture ends up disagreeing with itself.
+   */
+  const probe = (service: string): void => {
+    if (probing().has(service)) return;
+    setProbing(new Set([...probing(), service]));
+    setProbeErrors(new Map([...probeErrors()].filter(([key]) => key !== service)));
+
+    void api
+      .post("/api/v1/capabilities/{service}/probe", { params: { path: { service } } })
+      .then((answer) => {
+        setProbing(new Set([...probing()].filter((id) => id !== service)));
+        // The capability endpoints are the shell's own, so a failure here is evidence about the
+        // gateway itself and is reported as such.
+        report("shell", answer.ok ? undefined : answer.error);
+        if (!answer.ok) {
+          setProbeErrors(new Map([...probeErrors(), [service, userMessage(answer.error)]]));
+        }
+      });
+  };
+
+  /** The start-up calls, re-run by the connectivity tracker's retry. */
+  const startUp = async (): Promise<void> => {
+    const [me, settings] = await Promise.all([
+      api.get("/api/v1/auth/me", {}),
+      api.get("/api/v1/auth/settings", {}),
+    ]);
+
+    report("shell", me.ok ? undefined : me.error);
+    if (me.ok) session.accept(me.value);
+    else {
+      // Nothing answered, or it answered with a failure. The token gate is still released, so a
+      // mutation issued now fails fast with a legible 403 instead of hanging for ever.
+      session.accept({ authType: "unknown", csrfToken: "", principal: { kind: "anonymous", name: "anonymous" } });
+    }
+
+    session.acceptSettings(settings.ok ? settings.value : undefined);
+  };
+
+  onSettled(() => {
+    void startUp();
+    capabilities.start();
+    return () => capabilities.stop();
+  });
+
+  /** Every feature's registration paired with what the shell currently knows about it. */
+  const statuses = createMemo<readonly FeatureStatus[]>(() =>
+    featureRegistry.map((registration) => ({
+      registration,
+      state: stateOf(registration),
+    })),
+  );
+
+  const stateOf = (registration: FeatureRegistration): FeatureState =>
+    capabilities.featureState(
+      registration.serviceId,
+      registration.requiresCluster ? cluster.selected() : undefined,
+      // A control the caller may not use is disabled and explains itself rather than failing at the
+      // server. Until the session has answered, permission is assumed: refusing everything while
+      // `/auth/me` is in flight would flash a forbidden navigation on every load.
+      session.identity() === undefined || session.permits(registration.serviceId, "view", cluster.selected()),
+    );
+
+  const statusOf = (id: FeatureId): FeatureStatus | undefined =>
+    statuses().find((status) => status.registration.id === id);
+
+  const Router: ShellRouter = createShellRouter(bootstrap.basePath, {
+    home: () => <Overview />,
+    settings: () => <Settings />,
+    forbidden: () => <ForbiddenPage subject="this page" homeHref={Router.paths()} />,
+    notFound: () => <NotFoundPage attempted={window.location.pathname} homeHref={Router.paths()} />,
+    feature: (id) => () => {
+      const status = statusOf(id);
+      if (status === undefined) return <NotFoundPage attempted={window.location.pathname} homeHref={Router.paths()} />;
+      return (
+        <FeatureGate
+          registration={status.registration}
+          state={() => statusOf(id)?.state ?? { kind: "ready" }}
+          onProbe={() => probe(status.registration.serviceId)}
+          probing={() => probing().has(status.registration.serviceId)}
+          probeError={() => probeErrors().get(status.registration.serviceId)}
+          stillWorking={() => stillWorking(statuses(), id)}
+        />
+      );
+    },
+  });
+
+  /** The clusters the capability registry knows, folded to one row each. */
+  const clusters = createMemo<readonly ClusterSummary[]>(() => clusterSummaries(capabilities.states()));
+
+  // A deployment with one cluster is not asking the user to choose. The selection is filled in and
+  // the user is *not* navigated anywhere: that would move somebody who had deliberately opened
+  // another page, and the only thing missing was the cluster-scoped navigation entries, which appear
+  // the moment the selection exists.
+  createEffect(
+    () => soleClusterChoice(clusters(), cluster.selected()),
+    (only) => {
+      if (only !== undefined) cluster.select(only);
+    },
+  );
+
+  const groups = createMemo(() =>
+    navigationGroups({
+      features: statuses(),
+      landingFor: (registration, chosen) => landingFor(Router, registration.id, chosen),
+      cluster: cluster.selected(),
+      shellDestinations: shellDestinations(Router),
+    }),
+  );
+
+  const banner = createMemo<string | undefined>(() =>
+    capabilities.stale() ? StaleBanner : degradedBanner(degradedLabels(statuses())),
+  );
+
   return (
     <Router>
-      {(props) => (
-        <main class="kui-proof">
-          <h1 class="kui-proof__title">KUI</h1>
-          <p class="kui-proof__lede">
-            The TypeScript and SolidJS build is being served by the gateway, from the gateway's own
-            resources, on one origin.
-          </p>
+      {(route: RouteSectionProps) => (
+        <div class="kui-frame">
+          {/* The first focusable element in the document. A keyboard user landing on a page
+              otherwise has to tab through every navigation entry before reaching what they came for,
+              on every page, every time. It is visually hidden until it has focus, which is why it
+              costs sighted users nothing and why it must not be moved down "because it is invisible
+              anyway". */}
+          <a class="kui-shell__skip" href="#kui-content">
+            Skip to content
+          </a>
 
-          <nav class="kui-proof__nav" aria-label="Proof pages">
-            {/* Built through the router's typed path proxy rather than written by hand: a typo or
-                a missing parameter is a compile error, which is the UI-side half of this
-                repository's "never hand-write a path" rule. */}
-            <a href={Router.paths()}>Bootstrap</a>
-            <a href={Router.paths.clusters()}>Load a feature on demand</a>
-          </nav>
+          <div class="kui-frame__drawer">
+            <NavDrawer
+            groups={groups()}
+            currentId={currentFeatureId(route.location.pathname, uiPrefix)}
+            cluster={clusters().find((entry) => entry.id === cluster.selected())}
+            />
+          </div>
 
-          <section class="kui-proof__panel">{props.children}</section>
-        </main>
+          <div class="kui-frame__topbar">
+            <TopBar
+            /* The search field is wired to nothing yet: it is the chrome's, and what it searches
+               belongs to the features. It is drawn in its idle state rather than left out, because
+               the top bar's layout is designed around it. */
+            search={{ value: "", onInput: () => undefined, status: "idle" }}
+            clusters={clusters()}
+            currentClusterId={cluster.selected()}
+            onSelectCluster={(id) => cluster.select(id)}
+            theme={themeMode()}
+            accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
+            />
+          </div>
+
+          <main
+            id="kui-content"
+            class="kui-frame__content"
+            /* `tabindex="-1"` makes the element focusable by the skip link without putting it in the
+               tab order. Without it the browser moves the *scroll* position and leaves focus where it
+               was, so the next Tab goes back into the navigation and the link achieves nothing. */
+            tabindex={-1}
+          >
+            <Show when={banner()}>
+              {(message) => (
+                <Banner
+                  tone="warning"
+                  message={message()}
+                  testId="capability-banner"
+                  /* A cluster that is not answering must not be dismissible: dismissing it makes
+                     every stale number on the page look current. */
+                />
+              )}
+            </Show>
+
+            {route.children}
+          </main>
+
+          <ToastRegion />
+
+          {/* The full-screen states, in the one order that is correct. */}
+          <Show when={health.connectivity().kind === "lost"}>
+            <GatewayUnreachablePage state={health.connectivity()} onRetry={health.retryNow} />
+          </Show>
+          <Show when={health.connectivity().kind === "connected" && session.mustSignIn()}>
+            <SignIn />
+          </Show>
+        </div>
       )}
     </Router>
   );
 }
 
-function Home() {
+/**
+ * The shell's own destinations.
+ *
+ * They have no service behind them — they are the frame, not a feature — so they are always
+ * reachable, and their hrefs come from the same typed proxy every other link uses.
+ */
+function shellDestinations(Router: ShellRouter): readonly NavDestination[] {
+  return [
+    { id: "overview", label: "Overview", icon: "dashboard", href: Router.paths(), state: "ready" },
+    { id: "settings", label: "Settings", icon: "settings", href: Router.paths.settings(), state: "ready" },
+  ];
+}
+
+/**
+ * One row per cluster, folded to the *worst* of its services.
+ *
+ * A cluster whose topic service is fine and whose cluster service is unreachable is not a healthy
+ * cluster, and a dot reporting the best of its services would be reassuring and wrong. The name is
+ * the one the gateway reported; the id is the fallback, which degrades rather than showing a blank
+ * row.
+ */
+export function clusterSummaries(
+  entries: ReadonlyMap<string, { readonly key: { readonly cluster?: string | undefined }; readonly state: { readonly status: string }; readonly name?: string | undefined }>,
+): readonly ClusterSummary[] {
+  const worst = new Map<string, { health: ClusterSummary["health"]; name: string }>();
+
+  for (const entry of entries.values()) {
+    const id = entry.key.cluster;
+    if (id === undefined) continue;
+    const health = healthOf(entry.state.status);
+    const existing = worst.get(id);
+    worst.set(id, {
+      health: existing === undefined ? health : worseOf(existing.health, health),
+      name: entry.name ?? existing?.name ?? id,
+    });
+  }
+
+  return [...worst]
+    .map(([id, value]) => ({ id, name: value.name, health: value.health }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+const SEVERITY: Record<ClusterSummary["health"], number> = {
+  unreachable: 0,
+  degraded: 1,
+  unknown: 2,
+  healthy: 3,
+};
+
+function worseOf(a: ClusterSummary["health"], b: ClusterSummary["health"]): ClusterSummary["health"] {
+  return SEVERITY[a] <= SEVERITY[b] ? a : b;
+}
+
+function healthOf(status: string): ClusterSummary["health"] {
+  switch (status) {
+    case "available":
+      return "healthy";
+    case "degraded":
+      return "degraded";
+    case "unavailable":
+      return "unreachable";
+    default:
+      // "not configured" is not a health claim, and neither is a status this build does not know.
+      return "unknown";
+  }
+}
+
+/** Which navigation entry to mark as current, from the address the browser is on. */
+export function currentFeatureId(pathname: string, uiPrefix: string): string | undefined {
+  const relative = pathname.startsWith(uiPrefix) ? pathname.slice(uiPrefix.length) : pathname;
+  const segments = relative.split("/").filter((segment) => segment.length > 0);
+  if (segments.length === 0) return "overview";
+  if (segments[0] === "settings") return "settings";
+  if (segments[0] !== "clusters") return undefined;
+  if (segments.includes("topics")) return "topics";
+  if (segments.includes("consumer-groups")) return "consumers";
+  return "clusters";
+}
+
+/**
+ * `localStorage`, when there is one.
+ *
+ * Reaching for it can itself throw — a browser configured to block site data raises on the accessor,
+ * not on the call — so even asking the question is wrapped.
+ */
+function safeLocalStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function themeMode(): ThemeMode {
+  const attribute = document.documentElement.getAttribute("data-theme");
+  return attribute === "light" || attribute === "dark" ? attribute : "auto";
+}
+
+/* Placeholders for the two shell-owned screens that are not part of this task. They render something
+ * honest rather than nothing, because a route that renders nothing is a blank content area and users
+ * read a blank page as a broken page. */
+
+function Overview() {
   return (
-    <dl class="kui-proof__facts">
-      <dt>Base path</dt>
-      <dd data-testid="base-path">{bootstrap.basePath === "" ? "(mounted at the root)" : bootstrap.basePath}</dd>
-      <dt>API base</dt>
-      <dd data-testid="api-base">{bootstrap.apiBase}</dd>
-      <dt>Build version</dt>
-      <dd data-testid="build-version">{bootstrap.buildVersion}</dd>
-    </dl>
+    <div class="kui-shell__page" data-testid="page-overview">
+      <h1>Overview</h1>
+    </div>
   );
 }
 
-function ClustersRoute() {
+function Settings() {
   return (
-    <Loading fallback={<p class="kui-proof__pending">Loading the clusters feature…</p>}>
-      <Clusters />
-    </Loading>
+    <div class="kui-shell__page" data-testid="page-settings">
+      <h1>Settings</h1>
+    </div>
+  );
+}
+
+function SignIn() {
+  return (
+    <div class="kui-shell__page" data-testid="page-sign-in">
+      <h1>Sign in</h1>
+    </div>
   );
 }

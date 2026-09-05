@@ -81,6 +81,7 @@ export function NavItem(props: NavItemProps) {
           role="link"
           aria-disabled="true"
           aria-label={accessibleName()}
+          data-state={props.destination.state}
           title={props.destination.disabledReason ?? undefined}
           data-testid={`nav-${props.destination.id}`}
         >
@@ -88,8 +89,16 @@ export function NavItem(props: NavItemProps) {
         </span>
       ) : (
         <a
-          class={["kui-nav-item", { "kui-nav-item--current": props.current === true }]}
+          class={[
+            "kui-nav-item",
+            {
+              "kui-nav-item--current": props.current === true,
+              /* Dimmed, and still a link. See `NavDestination.state`. */
+              "kui-nav-item--dimmed": props.destination.state === "unavailable",
+            },
+          ]}
           href={props.destination.href}
+          data-state={props.destination.state}
           aria-current={props.current === true ? "page" : undefined}
           aria-label={accessibleName()}
           data-testid={`nav-${props.destination.id}`}

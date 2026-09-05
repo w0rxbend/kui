@@ -15,7 +15,13 @@
 .kui-nav-drawer {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  width: var(--kui-nav-drawer-width);
+  /* `--kui-drawer-width`, the token that is actually declared. This read used to name
+   * `--kui-nav-drawer-width`, which is defined nowhere: `var()` with no fallback and no definition
+   * makes the whole declaration invalid at computed-value time, so the drawer fell back to
+   * `width: auto` and sized itself to its widest destination instead of to the design's 196px.
+   * A missing custom property fails silently — no console warning, no build error — which is why
+   * this went unnoticed until the frame was assembled around it. */
+  width: var(--kui-drawer-width);
   height: 100%;
   min-height: 0;
   background: var(--kui-color-surface-raised);
@@ -189,6 +195,21 @@ a.kui-nav-item--current:hover {
 .kui-nav-item--disabled {
   color: var(--kui-color-text-subtle);
   cursor: not-allowed;
+}
+
+/* A feature whose service is not answering: dimmed, and still a link.
+ *
+ * The dimming is opacity rather than a colour, so it reads the same in both themes and in every
+ * accent without a second token. It stops short of the disabled treatment on purpose — this row is
+ * live, it is in the tab order, and the page behind it is the only place the reason and the retry
+ * exist. The focus ring is untouched, because a keyboard user must still see where they are. */
+.kui-nav-item--dimmed {
+  opacity: 0.62;
+}
+
+.kui-nav-item--dimmed:hover,
+.kui-nav-item--dimmed:focus-visible {
+  opacity: 1;
 }
 
 .kui-nav-item__badge {

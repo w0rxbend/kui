@@ -29,7 +29,42 @@
 import { createSignal, type Accessor } from "solid-js";
 import type { components } from "@kui/api";
 
-type AuthMeResponse = components["schemas"]["AuthMeResponse"];
+import { grantsAllow, grantsAllowAny, grantsFromWire } from "../data/permissions/store.js";
+
+/**
+ * What `/auth/me` answers with, as this store is willing to receive it.
+ *
+ * Every field name and every scalar type is still the generated schema's — `SchemaAuthMe` below is
+ * what makes a server-side rename fail this file's compilation, which is the whole point of
+ * generating the types at all. Two allowances are made for how the value arrives:
+ *
+ * - `permissions` is `| undefined` as well as optional, because `exactOptionalPropertyTypes`
+ *   distinguishes "absent" from "present and undefined" and the client hands back the second;
+ * - the lists are {@link ArrayLike} rather than arrays, because `openapi-fetch`'s response type maps
+ *   `Readonly<>` over the body and a readonly-mapped array is an index-signature object, not an
+ *   array. `Array.from` turns either into the one shape the rest of the browser holds.
+ */
+type SchemaAuthMe = components["schemas"]["AuthMeResponse"];
+
+export type AuthMeResponse = {
+  readonly authType: SchemaAuthMe["authType"];
+  readonly csrfToken: SchemaAuthMe["csrfToken"];
+  readonly permissions?: ArrayLike<WirePermission> | undefined;
+  readonly principal: WirePrincipal;
+};
+
+type WirePermission = {
+  readonly resource: PermissionDto["resource"];
+  readonly actions?: ArrayLike<string> | undefined;
+  readonly clusters?: ArrayLike<string> | undefined;
+  readonly value?: string | undefined;
+};
+
+type WirePrincipal = {
+  readonly kind: PrincipalDto["kind"];
+  readonly name: PrincipalDto["name"];
+  readonly roles?: ArrayLike<string> | undefined;
+};
 type AuthSettingsDto = components["schemas"]["AuthSettingsDto"];
 type PermissionDto = components["schemas"]["PermissionDto"];
 type PrincipalDto = components["schemas"]["PrincipalDto"];
@@ -68,8 +103,24 @@ export type SessionState = {
   readonly mustSignIn: Accessor<boolean>;
   /** Whether somebody is signed in, as opposed to the anonymous stand-in. */
   readonly signedIn: Accessor<boolean>;
-  /** Whether this principal holds a grant for an action on a resource, on this cluster. */
-  readonly permits: (resource: string, action: string, cluster?: string | undefined) => boolean;
+  /**
+   * Whether this principal holds a grant for an action on a resource, on this cluster.
+   *
+   * `name` is the resource's own name — a topic name, a group id — and passing it is what makes the
+   * answer match the server's. A grant carries a *pattern*, so somebody granted `payments\..*` may
+   * delete `payments.orders` and may not delete `orders`; asked without a name this can only answer
+   * the weaker question "do they hold this action on anything of this kind", which is the right
+   * answer for a list heading or a create button and the wrong one for a row's delete button.
+   *
+   * Both questions are evaluated by `../data/permissions`, which is also what the standalone
+   * permission store uses, so the two cannot drift apart.
+   */
+  readonly permits: (
+    resource: string,
+    action: string,
+    cluster?: string | undefined,
+    name?: string | undefined,
+  ) => boolean;
   /** Records what `/auth/me` answered, and hands the CSRF token to the API client. */
   readonly accept: (response: AuthMeResponse) => void;
   /** Records what `/auth/settings` answered, or that it did not. */
@@ -121,15 +172,17 @@ export function createSession(options: SessionOptions): SessionState {
       return current !== undefined && current.principal.kind === AnonymousKind;
     },
 
-    permits: (resource, action, cluster) => {
+    permits: (resource, action, cluster, name) => {
       const current = identity();
       if (current === undefined) return false;
-      return current.permissions.some(
-        (grant) =>
-          grant.resource === resource &&
-          (grant.actions ?? []).includes(action) &&
-          grantCoversCluster(grant, cluster),
-      );
+      const grants = grantsFromWire(current.permissions);
+      // The empty string stands in for "no cluster named": no cluster id is empty, so only a grant
+      // scoped to every cluster can match, which is what a question about KUI itself deserves.
+      const scope = cluster ?? "";
+      const permission = { resource, action } as Parameters<typeof grantsAllowAny>[2];
+      return name === undefined
+        ? grantsAllowAny(grants, scope, permission)
+        : grantsAllow(grants, scope, permission, name);
     },
 
     accept: (response) => {
@@ -137,9 +190,18 @@ export function createSession(options: SessionOptions): SessionState {
       // is, but with a far more confusing message in the gateway's log.
       const token = response.csrfToken.length > 0 ? response.csrfToken : undefined;
       setIdentity({
-        principal: response.principal,
+        principal: {
+          kind: response.principal.kind,
+          name: response.principal.name,
+          ...(response.principal.roles === undefined ? {} : { roles: Array.from(response.principal.roles) }),
+        },
         authType: response.authType,
-        permissions: response.permissions ?? [],
+        permissions: Array.from(response.permissions ?? []).map((grant) => ({
+          resource: grant.resource,
+          actions: Array.from(grant.actions ?? []),
+          clusters: Array.from(grant.clusters ?? []),
+          ...(grant.value === undefined ? {} : { value: grant.value }),
+        })),
         csrfToken: token,
       });
       options.settleCsrf(token);
@@ -157,17 +219,4 @@ export function createSession(options: SessionOptions): SessionState {
       options.invalidateCsrf();
     },
   };
-}
-
-/**
- * Whether a grant applies to the cluster in question.
- *
- * `*` is the wire spelling of "every cluster". A grant naming no clusters at all is treated as
- * naming none, which is the safe direction: a dropped grant hides a control the user could have used,
- * and a mistakenly kept one offers a control the server will refuse.
- */
-function grantCoversCluster(grant: PermissionDto, cluster: string | undefined): boolean {
-  const clusters = grant.clusters ?? [];
-  if (clusters.includes("*")) return true;
-  return cluster !== undefined && clusters.includes(cluster);
 }
