@@ -1,7 +1,22 @@
 import { render } from "@solidjs/web";
 
 import { App } from "./App.jsx";
-import "./proof.css";
+
+/*
+ * The product's stylesheet: tokens, reset, kernel primitives, chrome and screens, in the one order
+ * the cascade is allowed to have (`packages/kernel/styles/index.css` explains the order at length).
+ *
+ * This import is what puts the design system in the *bundle*. Until it was added, the entry pulled
+ * in `./proof.css` — 0.4 kB of styling for the scaffold's proof page — and nothing else, so the
+ * built application shipped with no tokens, no reset and no component styles at all. It went
+ * unnoticed because Storybook loads this same file from its own `preview.tsx`: every component and
+ * every screen looked correct in Storybook and would have rendered as unstyled HTML in the product.
+ * A design system that is only in the component workshop is not in the product.
+ *
+ * `proof.css` is gone with it: `.kui-proof` is rendered by nothing now that `App` draws the real
+ * shell.
+ */
+import "@kui/kernel/styles/index.css";
 
 /**
  * The browser entry point: the one module `index.html` loads.
