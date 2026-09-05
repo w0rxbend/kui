@@ -1,0 +1,52 @@
+# The SolidJS frontend, against the quickstart's real backend.
+#
+#   docker compose \
+#     -f deployment/quickstart/docker-compose.quickstart.yml \
+#     -f deployment/solid-preview/docker-compose.solid.yml \
+#     up --build
+#
+#   open http://localhost:8090/ui/     # the new TypeScript interface
+#   open http://localhost:8080/ui/     # the shipped Scala.js one, for comparison
+#
+# Two files rather than one service added to the quickstart, because this is a preview and the
+# quickstart is the product. Somebody trying KUI for the first time should get what KUI ships; adding
+# a second, half-wired interface to that stack by default would be the most confusing possible
+# introduction.
+#
+# ## Why this exists at all
+#
+# The SolidJS tree is not finished — several screens still render fixtures rather than calling the
+# gateway — so it is deliberately not what the image serves. But "not finished" is not a reason to
+# make it unreachable: the parts that *are* wired can only be judged against a real cluster with real
+# data, and this is the shortest path from a checkout to that judgement.
+services:
+  solid:
+    build:
+      context: ../..
+      dockerfile: deployment/solid-preview/Dockerfile
+    image: kui-solid-preview:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-quickstart-solid
+    ports:
+      - "${KUI_SOLID_PORT:-8090}:8082"
+    depends_on:
+      kui:
+        # The proxy target must be answering before this is worth opening: nginx resolves `kui` at
+        # start-up, and a container that is not there yet is a 502 on the first request with no
+        # indication that waiting would have fixed it.
+        condition: service_healthy
+    networks:
+      - kui-quickstart
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8082/ui/index.html"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
