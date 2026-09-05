@@ -79,6 +79,14 @@
  * After `27-primitives.css` because it consumes the control metrics declared there, and after
  * `21-kernel-overlays.css` because it deliberately overrides that sheet's `.kui-empty-state`
  * treatment for the same markup — see the header of the file. */
+/* The controls the v3 screens added — switch, segmented control, filter chip, configuration chip,
+ * segment bar, statistic tile and pagination — read from the seventeen screenshots in
+ * `research/design/SCREENS.md`. After `27-primitives.css` and owning class names it does not
+ * touch, for the same reason that file sits after `20-kernel-controls.css`: each sheet is a later
+ * reading of the same design, and a component built against one must not change appearance when
+ * the next one lands. See the header of the file. */
+@import "./27-primitives-v3.css";
+
 @import "./28-surfaces.css";
 
 /* `PageHeader`: the breadcrumb, title, chip, actions and voice line above every content region.

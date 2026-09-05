@@ -31,3 +31,10 @@ export {
 } from "./format.js";
 export { toneColor, toneAreaFill, type ChartTone } from "./tone.js";
 export { useElementSize, type ElementSize, type UseElementSize } from "./elementSize.js";
+
+/**
+ * A row of equal segments, one per thing, coloured by that thing's state — a connector's tasks, a
+ * cluster's brokers. Neither a progress bar (one quantity against a limit) nor a stacked bar
+ * (parts sized by their share): the segments are equal because the things are.
+ */
+export { SegmentBar, type SegmentBarProps, type SegmentBarSegment, type SegmentState } from "./SegmentBar.jsx";

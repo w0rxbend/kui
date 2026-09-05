@@ -195,15 +195,30 @@
 
   /* --- Frame geometry ---------------------------------------------------------------------- */
 
-  /* The three fixed measurements of the application frame, measured off the design by scanning a
-   * row and a column of pixels for the boundary between two fills (SPEC.md §3.2). They are tokens
-   * and not literals in the shell's stylesheet because three separate things need to agree on
-   * each of them: the drawer's own width, the content column's left offset, and the top bar's
-   * left offset. Written out three times they drift, and the symptom is a one-pixel seam of page
-   * ground down the side of the drawer that nobody can find the source of. */
-  --kui-drawer-width: 196px; /* design */
+  /* The fixed measurements of the application frame, measured off the design by scanning a row and
+   * a column of pixels for the boundary between two fills (SCREENS.md §1.1). They are tokens and
+   * not literals in the shell's stylesheet because several separate things need to agree on each of
+   * them: the rail's width, the drawer's own width, the content column's left offset, and the top
+   * bar's left offset. Written out separately they drift, and the symptom is a one-pixel seam of
+   * page ground down the side of the drawer that nobody can find the source of.
+   *
+   * Three of these moved when the design gained an environment rail (SCREENS.md §1). Scanning row
+   * 700 of the old and the new screenshot, both 1999px wide, gives the whole change:
+   *
+   *   01-dashboard.png   x=0 drawer · x=196 page · x=217 first card
+   *   13-topics-list.png x=0 page   · x=48 drawer · x=230 page · x=250 first card
+   *
+   * So the rail took 48px, the drawer gave back 14px of it, and the gutter tightened by 4px. The
+   * left chrome grew by 34px in total rather than by 48px. */
+  --kui-rail-width: 48px; /* design; SCREENS.md §1.2 */
+  --kui-drawer-width: 182px; /* design; was 196px before the rail */
   --kui-topbar-height: 58px; /* design */
-  --kui-page-gutter: var(--kui-space-5); /* design; measured 24px */
+  --kui-page-gutter: 20px; /* design; measured 20px, was 24px */
+
+  /* The environment tile inside the rail. Its own token rather than the rail's width minus padding,
+   * because the tile is a square with a health dot hung off its corner and the dot's ring is sized
+   * from the tile, not from the column it happens to sit in. */
+  --kui-rail-tile-size: 36px; /* design; SCREENS.md §2.2 */
 
   /* --- Typography -------------------------------------------------------------------------- */
 

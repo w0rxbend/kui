@@ -1,0 +1,594 @@
+/* The controls and surfaces the v3 screens added: switch, segmented control, filter chip,
+ * configuration chip, segment bar, statistic tile and pagination.
+ *
+ * ## Why a third primitives sheet
+ *
+ * The same reason there is a second one. `20-kernel-controls.css` was written from the artboard,
+ * `27-primitives.css` from the five screenshots that superseded it, and this file from the
+ * seventeen screenshots read in `research/design/SCREENS.md` that supersede those in turn. Each
+ * sheet owns class names the others do not touch, so a component built against one reading does
+ * not silently change appearance when a later reading lands.
+ *
+ * Two of the names here were chosen to avoid a collision that would have done exactly that.
+ * `.kui-chip` already belongs to `HeaderChip` in `27-primitives.css`, so the filter chip is
+ * `.kui-fchip`; `.kui-stat` already belongs to `StatCard` in `28-surfaces.css`, so the statistic
+ * tile is `.kui-tile`. Reusing either would have restyled a shipping component from a commit that
+ * claims to add a new one.
+ *
+ * ## The rule this file obeys without exception
+ *
+ * Every colour, radius, duration and weight below is a custom property, and there is not one
+ * literal hex. `research/design/SCREENS.md` §0 established that this design introduces no colour —
+ * twenty samples from the new screens all came back equal to tokens `10-tokens.css` already
+ * declares — so a hex literal in this file would be a token that was not looked for.
+ */
+
+:root {
+  /* --- Metrics for the new controls -----------------------------------------------------------
+   *
+   * Measured off the screenshots the same way as the block in `27-primitives.css`, and declared
+   * here for the same reason: so that a component still never writes a literal length, and so the
+   * set is one short list a reviewer can check against the images.
+   */
+  --kui-switch-width: 34px; /* design; 13 (676..710, y=144) */
+  --kui-switch-height: 18px; /* design */
+  --kui-switch-knob: 14px; /* design; 2px inset each side */
+  --kui-segment-height: 30px; /* design; the Table/Cards toggle, 13 y=130..160 */
+  --kui-fchip-height: 28px; /* design; the topic filter chips, 13 y=546..574 */
+  --kui-segbar-height: 6px; /* design; the connector task bar, 20 y=189..195 */
+}
+
+/* --- Switch -----------------------------------------------------------------------------------
+ *
+ * A checkbox with `role="switch"`, drawn as a track and a travelling knob. The input stays in the
+ * document, focusable and full-size over the track — never `display: none`, which would take it
+ * out of the tab order and the accessibility tree together.
+ */
+
+.kui-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+
+.kui-switch--disabled {
+  cursor: not-allowed;
+  opacity: var(--kui-opacity-disabled);
+}
+
+.kui-switch__label {
+  font-size: var(--kui-control-label-size);
+  color: var(--kui-color-text-muted);
+  white-space: nowrap;
+}
+
+/* Sits exactly over the track, invisible but present. `opacity: 0` rather than
+ * `appearance: none` + transparent, because the browser's own focus ring is what
+ * `.kui-focusable` styles, and it needs a box to be drawn around. */
+.kui-switch__input {
+  position: absolute;
+  right: 0;
+  width: var(--kui-switch-width);
+  height: var(--kui-switch-height);
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.kui-switch__track {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--kui-switch-width);
+  height: var(--kui-switch-height);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-overlay);
+  transition: background-color var(--kui-duration-fast) ease;
+}
+
+.kui-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: var(--kui-switch-knob);
+  height: var(--kui-switch-knob);
+  border-radius: 50%;
+  background-color: var(--kui-color-text-muted);
+  transition: transform var(--kui-duration-fast) ease, background-color var(--kui-duration-fast) ease;
+}
+
+/* The knob travels, and that is the point: an operator who cannot separate the on colour from the
+ * off colour can still see which end it is at. */
+.kui-switch__input:checked ~ .kui-switch__track {
+  background-color: var(--kui-color-primary);
+}
+
+.kui-switch__input:checked ~ .kui-switch__track .kui-switch__knob {
+  transform: translateX(calc(var(--kui-switch-width) - var(--kui-switch-knob) - 4px));
+  background-color: var(--kui-color-primary-contrast);
+}
+
+/* The input is transparent, so its focus ring has to be drawn on the visible track instead. */
+.kui-switch__input:focus-visible ~ .kui-switch__track {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-switch__track,
+  .kui-switch__knob {
+    transition: none;
+  }
+}
+
+/* --- Segmented control ------------------------------------------------------------------------
+ *
+ * A radio group drawn as a track of alternatives. The radios are visually hidden and still
+ * focusable, so arrow-key navigation and the single tab stop are the browser's rather than ours.
+ */
+
+.kui-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-elevated);
+  border: var(--kui-card-border);
+}
+
+.kui-segmented--stretch {
+  display: flex;
+  width: 100%;
+}
+
+.kui-segmented__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kui-control-gap);
+  position: relative;
+  height: var(--kui-segment-height);
+  padding: 0 var(--kui-space-3);
+  border-radius: var(--kui-radius-pill);
+  font-size: var(--kui-control-label-size);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--kui-duration-fast) ease, color var(--kui-duration-fast) ease;
+}
+
+.kui-segmented--stretch .kui-segmented__item {
+  flex: 1 1 0;
+}
+
+.kui-segmented--sm .kui-segmented__item {
+  height: var(--kui-control-height-sm);
+  padding: 0 var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-segmented__item:hover:not(.kui-segmented__item--active):not(.kui-segmented__item--disabled) {
+  color: var(--kui-color-text);
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-segmented__item--active {
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-segmented__item--disabled {
+  cursor: not-allowed;
+  opacity: var(--kui-opacity-disabled);
+}
+
+/* Present and focusable, drawn nowhere. Stretched over the whole label so that the click target
+ * is the segment rather than a point inside it. */
+.kui-segmented__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.kui-segmented__input:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: -2px;
+  border-radius: var(--kui-radius-pill);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-segmented__item {
+    transition: none;
+  }
+}
+
+/* --- Filter chip -------------------------------------------------------------------------------
+ *
+ * A toggle, and the only pill-shaped thing in the product that is a button. It is drawn
+ * deliberately unlike `StatusPill`: if a chip ever looks like a pill, operators start clicking the
+ * pills.
+ */
+
+.kui-fchip-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-control-gap);
+  height: var(--kui-fchip-height);
+  padding: 0 var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-pill);
+  background-color: transparent;
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-control-label-size);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--kui-duration-fast) ease, color var(--kui-duration-fast) ease;
+}
+
+.kui-fchip:hover:not(:disabled) {
+  color: var(--kui-color-text);
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-fchip--active {
+  background-color: var(--kui-color-selected);
+  border-color: transparent;
+  color: var(--kui-color-selected-contrast);
+}
+
+.kui-fchip:disabled {
+  cursor: not-allowed;
+  opacity: var(--kui-opacity-disabled);
+}
+
+/* Tabular so that a row of chips does not reflow as counts tick. `--kui-color-text-muted` rather
+ * than the subtle step below it: a count is a value the operator reads and acts on, and the subtle
+ * step is documented as below the AA body threshold and reserved for text that repeats something
+ * available elsewhere. */
+.kui-fchip__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-fchip--active .kui-fchip__count {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* --- Configuration chip ------------------------------------------------------------------------
+ *
+ * Key on the left in the body face, value on the right in the mono face — because the values are
+ * compared down a column by eye and only line up if the digits are one width.
+ */
+
+.kui-config-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+}
+
+.kui-config-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  min-width: 0;
+  height: var(--kui-control-height-sm);
+  padding: 0 var(--kui-space-3);
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface-overlay);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-tight);
+}
+
+/* The name truncates before the value does: a chip whose value is cut off still tells you which
+ * setting it is, and one whose name is cut off tells you nothing. */
+.kui-config-chip__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--kui-font-family-mono);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-config-chip__value {
+  flex: 0 0 auto;
+  font-family: var(--kui-font-family-mono);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dash is the value, not a decoration beside one, so it stays on the readable step and is made
+ * quiet by dropping the bold weight instead. */
+.kui-config-chip__value--none {
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-regular);
+}
+
+.kui-config-chip__mark {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--kui-color-primary);
+}
+
+/* --- Segment bar -------------------------------------------------------------------------------
+ *
+ * Equal segments, one per thing, coloured by that thing's state. Never sized by a quantity: a
+ * connector with three tasks has three equal tasks, and sizing them would invent a number.
+ */
+
+.kui-segbar {
+  display: flex;
+  gap: var(--kui-space-1);
+  width: 100%;
+  height: var(--kui-segbar-height);
+}
+
+.kui-segbar__seg {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: var(--kui-radius-xs);
+}
+
+.kui-segbar__seg--ok {
+  background-color: var(--kui-color-success);
+}
+
+.kui-segbar__seg--warning {
+  background-color: var(--kui-color-warning);
+}
+
+.kui-segbar__seg--failed {
+  background-color: var(--kui-color-danger);
+}
+
+/* Also the whole track when there are no segments at all. Neutral, because drawing nothing reads
+ * as a rendering fault and drawing the failure colour says something false. */
+.kui-segbar__seg--idle {
+  background-color: var(--kui-color-surface-overlay);
+}
+
+/* --- Statistic tile ----------------------------------------------------------------------------
+ *
+ * The landing-page card: label first, then the figure. `StatCard` is the other order and is for the
+ * dashboard; the reasoning for having both is in `StatTile.tsx`.
+ */
+
+.kui-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-4);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+  background-color: var(--kui-color-surface-elevated);
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.kui-tile--link:hover {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-tile__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+/* Real uppercase text with tracking, written uppercase in the source — `text-transform` leaves a
+ * screen reader reading the original mixed-case string, and on an acronym the two disagree. */
+.kui-tile__label {
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kui-tile__figure {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+  margin: 0;
+  min-height: var(--kui-font-size-3xl);
+}
+
+.kui-tile__value {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-3xl);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-tile__unit {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-muted);
+}
+
+/* Drawn at the figure's size, so the tile does not change shape between knowing and not knowing. */
+.kui-tile__absent {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-3xl);
+  font-weight: var(--kui-font-weight-display);
+  line-height: var(--kui-font-line-height-tight);
+  color: var(--kui-color-text-muted);
+}
+
+/* "not measured" is words, and words at 32px are a wall. Dropped to the section-heading size, so
+ * that it is quieter than a figure — because it is the absence of one.
+ *
+ * It keeps `--kui-color-text-muted` rather than dropping to `--kui-color-text-subtle`, which is
+ * what it was written as first. The subtle step is documented in `10-tokens.css` as deliberately
+ * below the AA body threshold and permitted only on text that repeats information available
+ * elsewhere; this text repeats nothing, and it is the whole answer to "what is this number?". The
+ * accessibility addon agreed, at 3.41:1 against a required 4.5:1 on `--kui-color-surface-elevated`.
+ * Size is what makes it quiet here, not contrast. */
+.kui-tile__absent--words {
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-muted);
+}
+
+/* The qualifying chip. Not pill-shaped: a pill is this product's shape for a verdict, and this is
+ * a bare fact about the figure above it. */
+.kui-tile__chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--kui-space-1);
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border-radius: var(--kui-radius-sm);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-tile__chip--neutral {
+  background-color: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+}
+
+.kui-tile__chip--positive {
+  background-color: var(--kui-color-success-container);
+  color: var(--kui-color-success);
+}
+
+.kui-tile__chip--attention {
+  background-color: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+}
+
+/* --- Pagination --------------------------------------------------------------------------------
+ *
+ * Range on the left, page size and steps on the right. The range is a live region: changing pages
+ * otherwise moves focus to a button labelled with a bare digit and says nothing about what
+ * happened.
+ */
+
+.kui-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3) var(--kui-space-4);
+}
+
+.kui-pagination__range {
+  margin: 0;
+  margin-right: auto;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-pagination__sizes,
+.kui-pagination__pages {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.kui-pagination__size,
+.kui-pagination__page,
+.kui-pagination__step,
+.kui-pagination__goto-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--kui-control-height-sm);
+  height: var(--kui-control-height-sm);
+  padding: 0 var(--kui-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-sm);
+  background-color: transparent;
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-pagination__size:hover:not(:disabled),
+.kui-pagination__page:hover:not(:disabled),
+.kui-pagination__step:hover:not(:disabled),
+.kui-pagination__goto-go:hover {
+  color: var(--kui-color-text);
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-pagination__size--active,
+.kui-pagination__page--current {
+  background-color: var(--kui-color-selected);
+  color: var(--kui-color-selected-contrast);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* Disabled steps stay in the document and stay dim, rather than disappearing: a first-page button
+ * that vanishes on page 1 moves every other button under the pointer. */
+.kui-pagination__step:disabled {
+  cursor: not-allowed;
+  opacity: var(--kui-opacity-disabled);
+}
+
+.kui-pagination__goto {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-pagination__goto-label {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-pagination__goto-input {
+  width: 48px;
+  height: var(--kui-control-height-sm);
+  padding: 0 var(--kui-space-2);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-pagination__goto-go {
+  border-color: var(--kui-color-border);
+}

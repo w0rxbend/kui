@@ -160,6 +160,52 @@ const SHAPES = {
    * shape so that it reads at 14px, which is the size it is used at: a filled funnel that small
    * is a grey triangle. */
   filter: { paths: ["M3 5h18l-7 8v6l-4 2v-8z"] },
+
+  /* --- Added for the screens read in research/design/SCREENS.md ---------------------------- */
+
+  /* Jump to the first or last page. Two chevrons rather than a chevron-and-bar, because the bar
+   * variant is a "skip to end" transport control and reads as media playback beside the
+   * single-chevron steps it sits between. */
+  "chevrons-left": { paths: ["M11 17l-5-5 5-5", "M18 17l-5-5 5-5"] },
+  "chevrons-right": { paths: ["M13 17l5-5-5-5", "M6 17l5-5-5-5"] },
+  /* The two list treatments, for the Table/Cards toggle. They have to be distinguishable at 14px
+   * side by side, which is why the table is ruled rows and the cards are four separated squares
+   * rather than the more usual three-lines-and-a-grid pair. */
+  table: { paths: ["M3 5h18v14H3z", "M3 10h18", "M3 15h18", "M9 10v9"] },
+  cards: { paths: ["M4 4h6v6H4z", "M14 4h6v6h-6z", "M4 14h6v6H4z", "M14 14h6v6h-6z"] },
+  /* Sort. An arrow with rungs, sized so the direction is legible without the arrowhead having to
+   * be the whole glyph — the direction is also stated by a separate control beside it. */
+  sort: { paths: ["M4 7h10", "M4 12h7", "M4 17h4", "M17 5v14", "M14 16l3 3 3-3"] },
+  /* Save to a file. The tray-and-arrow, not the cloud: nothing in this product downloads from a
+   * cloud, and the tray reads as "onto your machine". */
+  download: { paths: ["M12 3v12", "M8 11l4 4 4-4", "M4 19h16"] },
+  /* A favourite. Drawn as an outline; the filled state is produced by the caller's CSS setting
+   * `fill: currentColor`, so that favourited and not are one glyph in two states rather than two
+   * glyphs that have to be kept in step. */
+  star: { paths: ["M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"] },
+  /* Stored bytes. Stacked platters — the same picture the design puts beside "STORAGE" and
+   * "SIZE ON DISK", and distinct from `brokers`, which is a machine. */
+  disk: {
+    paths: ["M4 6c0 1.7 3.6 3 8 3s8-1.3 8-3-3.6-3-8-3-8 1.3-8 3z", "M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6", "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"],
+  },
+  /* Connector transport controls. `play` doubles as "resume" and as ksqlDB's "run query"; it is
+   * filled by the caller where it needs to read as a primary action. */
+  play: { paths: ["M8 5l11 7-11 7z"] },
+  pause: { paths: ["M9 5v14", "M15 5v14"] },
+  /* Distinct from `refresh`, which means "fetch this again". Restarting a connector destroys and
+   * recreates its tasks, and the two must not share a glyph. */
+  restart: { paths: ["M20 5v6h-6", "M19.4 15a8 8 0 1 1-1.6-8.4L20 9"] },
+  /* Partitions: a whole divided into equal parts. The design's topics-and-partitions pair are a
+   * stack of layers and a divided square, and keeping them different matters because they label
+   * two figures that sit next to each other on the topic overview. */
+  partitions: { paths: ["M4 4h16v16H4z", "M12 4v16", "M4 12h8"] },
+  /* A single stream or table in ksqlDB's object list, and the glyph on the schema subject rows. */
+  stream: { paths: ["M3 8c3-2 6 2 9 0s6-2 9 0", "M3 14c3-2 6 2 9 0s6-2 9 0", "M3 20c3-2 6 2 9 0s6-2 9 0"] },
+  /* An offset or an identifier: the hash that precedes every record number in the browser. */
+  hash: { paths: ["M9 4L7 20", "M17 4l-2 16", "M4 9h16", "M3 15h16"] },
+  /* A moment in time. Used by the message browser's time-window control and by every relative age
+   * in the product. */
+  clock: { paths: ["M12 7v5l3 2"], circles: [[12, 12, 9]] },
 } as const satisfies Record<string, IconShape>;
 /* eslint-enable sort-keys */
 

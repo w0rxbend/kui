@@ -20,6 +20,28 @@ export { Avatar, initialsOf, type AvatarProps } from "./Avatar.jsx";
 export { Tooltip, type TooltipProps } from "./Tooltip.jsx";
 
 /**
+ * The controls the v3 screens added (`research/design/SCREENS.md` §2).
+ *
+ * `Switch` and `Checkbox` are two shapes for what looks like one idea, and the rule dividing them
+ * is about when the change happens rather than about how they look — a switch takes effect at
+ * once, a checkbox contributes to something that will be submitted. `SegmentedControl` and
+ * `Select` divide the same way: a segmented control when the alternatives are worth advertising, a
+ * select when there are too many to show. Both rules are argued in the components themselves.
+ */
+export { Switch, type SwitchProps } from "./Switch.jsx";
+export { SegmentedControl, type SegmentedControlProps, type Segment } from "./SegmentedControl.jsx";
+export {
+  FilterChip,
+  FilterChipBar,
+  SingleSelectChips,
+  type FilterChipProps,
+  type FilterChipBarProps,
+  type SingleSelectChipsProps,
+} from "./FilterChips.jsx";
+export { ConfigChip, ConfigChips, type ConfigChipProps, type ConfigChipsProps } from "./ConfigChip.jsx";
+export { Pagination, pageWindow, type PaginationProps } from "./Pagination.jsx";
+
+/**
  * Lists: the surfaces an operator spends the day scanning.
  *
  * Two treatments, deliberately not merged (design spec §3.5). `DataTable` and `VirtualizedTable`
@@ -79,6 +101,7 @@ export { createIsCompact, COMPACT_ROW_SAVING_PX } from "./density.js";
  */
 export { Card, type CardProps, type CardState } from "./Card.jsx";
 export { StatCard, type StatCardProps, type StatFigure, type StatPill } from "./StatCard.jsx";
+export { StatTile, type StatTileProps, type TileFigure, type TileChip, type TileChipTone } from "./StatTile.jsx";
 export { StaleBadge, relativeAge, type StaleBadgeProps } from "./StaleBadge.jsx";
 export { Banner, type BannerProps, type BannerTone } from "./Banner.jsx";
 export { Dialog, ConfirmDialog, type DialogProps, type DialogSize, type ConfirmDialogProps } from "./Dialog.jsx";
