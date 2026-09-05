@@ -1358,9 +1358,24 @@ object frontend extends Module {
     jsFiles.foreach(file => os.copy.into(file, web, replaceExisting = true))
     os.copy.into(css().path, web, replaceExisting = true)
 
-    println(s"frontend.bundle: ${jsFiles.size} linker file(s) + kui.css -> $web")
+    /* The page itself, which used to live in the gateway's own resources.
+     *
+     * It moved here at the SolidJS cutover, and the move is the point rather than tidiness. Both
+     * bundles produce an `index.html` — this one names `main.js`, the Vite one names its hashed
+     * assets — and while the template sat in `services/gateway/api/resources/web/` it was earlier on
+     * the classpath than either, so the gateway served the Scala.js page whatever bundle was wired
+     * in. The interface then failed to start with three 404s and an empty `<div id="app">`.
+     *
+     * With each bundle carrying its own page, swapping which one the gateway depends on is still the
+     * one-line change it was designed to be. */
+    os.copy.into(indexHtml().path, web, replaceExisting = true)
+
+    println(s"frontend.bundle: ${jsFiles.size} linker file(s) + kui.css + index.html -> $web")
     PathRef(Task.dest)
   }
+
+  /** The Scala.js `index.html`, with the two markers the gateway substitutes at request time. */
+  def indexHtml: T[PathRef] = Task.Source(mill.api.BuildCtx.workspaceRoot / "frontend" / "ui-shell" / "index.html")
 
   /** The TypeScript, SolidJS 2 and Vite frontend, and the seam between Mill and pnpm (ADR-048 §6).
     *
@@ -2471,11 +2486,19 @@ object services extends Module {
     object app extends KuiJvmModule {
       def moduleDeps = Seq(api, application, libs.config, libs.observability, libs.http)
 
-      /** The gateway's own resources, plus the linked frontend. See `frontend.bundle`: the gateway
-        * is the only process a browser talks to, so it is the one that has to carry the JavaScript
-        * and the stylesheet.
+      /** The gateway's own resources, plus the built frontend. See `frontend.solid`: the gateway is
+        * the only process a browser talks to, so it is the one that has to carry the interface.
+        *
+        * This is `frontend.solid.bundle` as of the cutover (ADR-048, SOL-041). Every screen the
+        * Scala.js frontend served now has a SolidJS counterpart — the sign-in screen, the settings
+        * page, cluster administration and message tracking were the last four — and each has been
+        * driven against a running gateway rather than only against fixtures.
+        *
+        * `frontend.bundle` still builds. It is not wired to anything, which is the point: the way
+        * back is this one line, and until the Scala.js tree is deleted it stays a way back rather
+        * than a rewrite.
         */
-      override def resources = Task { super.resources() :+ frontend.bundle() }
+      override def resources = Task { super.resources() :+ frontend.solid.bundle() }
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
@@ -3444,9 +3467,9 @@ object apps extends Module {
     )
 
     /** The frontend, in the jar, for the same reason the gateway carries it: this process serves the
-      * browser too. See `frontend.bundle`.
+      * browser too. See the note on the gateway's own `resources` for why this is the SolidJS bundle.
       */
-    override def resources = Task { super.resources() :+ frontend.bundle() }
+    override def resources = Task { super.resources() :+ frontend.solid.bundle() }
 
     def mvnDeps = Seq(
       mvn"org.typelevel::cats-core::${Versions.cats}",

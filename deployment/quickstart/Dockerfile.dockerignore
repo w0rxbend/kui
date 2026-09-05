@@ -9,12 +9,15 @@
 # newcomer wait through a large upload for files the build then ignores.
 
 out/
-node_modules/
+# `**/` and not a bare `node_modules/`, which BuildKit anchors to the context root: the ones that
+# matter are `frontend/node_modules` and one per workspace package, and a bare pattern misses every
+# one of them. Uploading them is not just slow — pnpm's store is symlinked, so the copies that
+# arrived would be broken links that the install inside the container then has to undo.
+**/node_modules/
 .git/
 .idea/
 .vscode/
 .bsp/
 .metals/
 .bloop/
-e2e/node_modules/
 **/*.log
