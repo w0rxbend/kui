@@ -3066,9 +3066,10 @@ def dev(): Task.Command[Unit] = Task.Command {
   * The pair is therefore:
   *
   * {{{
-  * ./mill devStart          # the API, in the background
-  * cd frontend && pnpm dev  # the interface, with hot reload, proxying /api to it
-  * ./mill devStop           # when you are done
+  * cd frontend && pnpm build   # once, so there is an interface to serve
+  * ./mill devStart             # the product, in the background
+  * cd frontend && pnpm watch   # rebuilds on every save; refresh the browser
+  * ./mill devStop              # when you are done
   * }}}
   *
   * `./mill dev` is still the right thing for a first run — it puts the log on the screen and stops
@@ -3098,7 +3099,7 @@ def devStart(): Task.Command[Unit] = Task.Command {
   println(devBanner(port))
   println(s"  running in the background as pid ${process.wrapped.pid()}")
   println(s"  logs:  tail -f ${devLogFile.relativeTo(mill.api.BuildCtx.workspaceRoot)}")
-  println(s"  frontend: cd frontend && pnpm dev")
+  println(s"  watch: cd frontend && pnpm watch")
   println(s"  stop:  ./mill devStop")
 }
 
@@ -3113,10 +3114,41 @@ def devStop(): Task.Command[Unit] = Task.Command {
   * all-in-one process would normally have.
   */
 private def devClassPath = Task.Anon {
-  // No frontend on it. The interface is built and served independently — `pnpm dev` in `frontend/`
-  // gives a Vite server with hot reload, which is a better loop than anything this could offer, and
-  // it proxies `/api` here. This process serves the API and nothing else.
-  apps.allinone.runClasspath().map(_.path).mkString(java.io.File.pathSeparator)
+  // The interface, if somebody has built it, and nothing if not.
+  //
+  // Mill never *builds* the browser bundle — that is the frontend's own pnpm workspace, and keeping
+  // it that way is what lets this build need only a JDK. But serving a directory somebody else built
+  // costs nothing and is worth having: it gives one process on one port and one origin, which is the
+  // shape the product actually ships in, and it is the quickest way to look at a change against a
+  // real gateway without a second server or a proxy.
+  //
+  // Absent is not an error. A backend developer who has never run `pnpm build` should get a working
+  // API and a 503 on `/ui/`, not a build that refuses to start over a directory they do not need.
+  val assets = devSolidAssetLink().toList
+  (assets ++ apps.allinone.runClasspath().map(_.path)).mkString(java.io.File.pathSeparator)
+}
+
+/** The classpath entry that puts a built interface in front of the gateway's own resources.
+  *
+  * A classloader takes the first hit on the classpath, so `index.html` and every hashed asset resolve
+  * through this link and the gateway's `IndexHtml` substitution then runs over the page Vite wrote.
+  * Both carry the same two markers, so the base path and the bootstrap block reach the browser
+  * identically whether the gateway serves the interface or the frontend's own nginx does.
+  *
+  * Deliberately not a Mill task output. `pnpm watch` rewrites this directory continuously while the
+  * server runs, and the point of a symbolic link is that the server reads whatever the last rebuild
+  * wrote — a copy would be a snapshot, and a snapshot is a stale page.
+  */
+private def devSolidAssetLink(): Option[os.Path] = {
+  val dist = mill.api.BuildCtx.workspaceRoot / "frontend" / "dist"
+  Option.when(os.exists(dist)) {
+    val root = mill.api.BuildCtx.workspaceRoot / "out" / "dev-assets" / "solid"
+    val link = root / "web"
+    os.remove.all(root)
+    os.makeDir.all(root)
+    os.symlink(link, dist)
+    root
+  }
 }
 
 
@@ -3145,10 +3177,19 @@ private def devCommand(classPath: String, devPort: String): Seq[String] =
     "--kui.server.devInsecureCookies=true"
   )
 
-private def devBanner(devPort: String): String =
-  s"""kui API development server
-     |  api    http://localhost:$devPort/api/v1
-     |  ui     cd frontend && pnpm dev   (Vite, hot reload, proxies /api here)""".stripMargin
+private def devBanner(devPort: String): String = {
+  val dist = mill.api.BuildCtx.workspaceRoot / "frontend" / "dist"
+  val ui =
+    if os.exists(dist) then
+      s"""  open   http://localhost:$devPort/ui/
+         |  assets frontend/dist (served live; `cd frontend && pnpm watch` rebuilds, then refresh)"""
+    else
+      s"""  api    http://localhost:$devPort/api/v1
+         |  ui     not built. Run `cd frontend && pnpm build`, then restart this server."""
+
+  s"""kui development server
+     |$ui""".stripMargin
+}
 
 /** Kills a previously started development server. Answers whether there was one. */
 private def stopDevServer(): Boolean =
