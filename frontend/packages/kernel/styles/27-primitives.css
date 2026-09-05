@@ -1,0 +1,887 @@
+/* Kernel primitives, second generation: button, text field, select, checkbox, pill, chip, icon
+ * tile, avatar, tooltip.
+ *
+ * ## Why this file exists beside `20-kernel-controls.css`
+ *
+ * `20-kernel-controls.css` draws the Laminar frontend's controls, and it was written from the
+ * "Kafka UI v2" artboard. The five screenshots in `.agent/design/screens` are what the owner
+ * actually asked for, and where the two disagree the screenshots win (SPEC preamble). They
+ * disagree about buttons in three ways that are not cosmetic:
+ *
+ *   - the artboard draws a button as a 40px pill; the screenshots draw a 34px control at the
+ *     12px `--kui-radius-md` step, the same radius as an input;
+ *   - the artboard fills the primary button with `--kui-color-primary`; the screenshots fill it
+ *     with `--kui-color-primary-container` and label it with that colour's paired contrast
+ *     (SPEC §1.4 — in dark, `--kui-color-primary` is the pale `#a8c7fa`, which is ink, not fill);
+ *   - the artboard's second button is a tonal brand fill; the screenshots' is
+ *     `--kui-color-selected`, deliberately the same pair as the selected navigation item.
+ *
+ * Rather than edit the sheet the shipping Laminar app is still styled by — which would change
+ * that app's appearance in a commit about a different frontend — the SolidJS components own a
+ * separate namespace (`.kui-btn`, not `.kui-button`). When the Laminar frontend is retired,
+ * `20-kernel-controls.css` goes with it and these names lose their suffix in one rename.
+ *
+ * ## The rule this file obeys without exception
+ *
+ * Every colour, size, radius, duration and weight below is a custom property. There is not one
+ * literal hex, and the only literal lengths are in the metrics block at the top, which exists
+ * precisely so that they are named rather than scattered — see the finding recorded there.
+ */
+
+:root {
+  /* --- Control metrics -----------------------------------------------------------------------
+   *
+   * FINDING, for whoever promotes these. The five screenshots measure a 34px button, a 38px
+   * search field and select, a 22px status pill, a 32px icon tile, a 30px avatar and 14px of
+   * horizontal padding inside a button. None of those is on the 4px spacing scale in
+   * `10-tokens.css`, and none has a token. They are declared here as named properties so that a
+   * component still never writes a literal length, and so that the set of them is one short list
+   * a reviewer can check against the images rather than a value repeated in nine rules.
+   *
+   * They belong in `10-tokens.css` next to `--kui-density-row-padding-y`, which is the same kind
+   * of value. They are not put there in this commit because that file is the palette contract the
+   * contrast suite checks and the Laminar frontend also reads; moving them is a separate change.
+   */
+  --kui-control-height-sm: 28px; /* design; measured on "Produce message", 02 y 93-118 + edges */
+  --kui-control-height-md: 34px; /* design; SPEC §4.13, measured on "Create topic" */
+  --kui-control-height-lg: 38px; /* design; SPEC §4.8/§4.9, search field and cluster selector */
+  --kui-control-padding-x: 14px; /* design; SPEC §4.13 */
+  --kui-control-gap: 6px; /* design; SPEC §4.13, glyph to label */
+  --kui-control-label-size: 0.8125rem; /* 13px — design; SPEC §4.13 */
+
+  --kui-pill-height: 22px; /* design; SPEC §4.7 */
+  --kui-pill-padding-x: 10px; /* design; SPEC §4.7 */
+
+  --kui-icon-tile-size: 32px; /* design; SPEC §4.4 */
+  --kui-icon-tile-size-sm: 28px; /* design; SPEC §4.5, the cluster card's tile */
+  --kui-avatar-size: 30px; /* design; SPEC §4.11 */
+  --kui-checkbox-size: 16px; /* design; SPEC §4.16 */
+
+  /* The destructive outline. Expressed from the danger token rather than a neutral rule so that
+   * the border still reads as danger when the accent seed changes (SPEC §1.7). */
+  --kui-border-danger: 1px solid color-mix(in srgb, var(--kui-color-danger) 45%, transparent);
+}
+
+/* --- The focus ring, declared once -----------------------------------------------------------
+ *
+ * "A control must look like what it does, not merely be correct in the accessibility tree."
+ * This project has shipped three controls that were perfect to a screen reader and invisible to
+ * everyone else, and a removed focus outline was one of them. Every primitive below uses this
+ * class rather than restating the ring, so there is exactly one place it can be deleted from and
+ * exactly one place a reviewer has to look.
+ *
+ * `:focus-visible` rather than `:focus`: a ring that appears on every mouse click trains people
+ * to ignore rings, and then the keyboard user's ring is noise too.
+ */
+.kui-focusable:focus-visible {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+/* --- Busy indicator -------------------------------------------------------------------------
+ *
+ * Icons themselves are not styled here. They come from `src/icon.tsx`, are shared with the list,
+ * card and chart components, and carry `.kui-icon` from `20-kernel-controls.css` — one icon set,
+ * one stroke weight, one answer to "is this decorative". Only the spinner is below, because it is
+ * the one glyph that moves.
+ */
+
+.kui-spinner2 {
+  animation: kui-spin2 800ms linear infinite;
+  transform-origin: center;
+}
+
+@keyframes kui-spin2 {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Motion is a preference, not a detail. Under `prefers-reduced-motion` the spinner is suppressed
+ * rather than sped up: a fast spin is still a spin. It keeps its shape, so "busy" is still drawn.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .kui-spinner2 {
+    animation: none;
+  }
+}
+
+/* --- Button ---------------------------------------------------------------------------------- */
+
+.kui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kui-control-gap);
+  height: var(--kui-control-height-md);
+  padding: 0 var(--kui-control-padding-x);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-md);
+  background-color: transparent;
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-control-label-size);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+  cursor: pointer;
+  text-decoration: none;
+  /* A button never grows past the box it was put in.
+   *
+   * Found by the `LongestLabel` story, which is what that story is for: a confirmation button
+   * labelled with a 60-character topic name grew to its label's width, overflowed a 320px
+   * container and ran off the side of the window. `white-space: nowrap` on its own says "do not
+   * wrap" and says nothing about what to do instead, so the browser did the only other thing it
+   * can and made the element wider than its parent. The product's rule is the one the record row
+   * already follows: ellipsise, never wrap, and never make the page scroll sideways. */
+  max-width: 100%;
+  min-width: 0;
+  transition:
+    background-color var(--kui-duration-fast) ease,
+    border-color var(--kui-duration-fast) ease,
+    color var(--kui-duration-fast) ease;
+}
+
+/* The small button is a **stadium**, and the medium one is not.
+ *
+ * That is measured, not stylistic. In `02-topic-messages.png` the "Produce message" button's fill
+ * runs y 93-118 (26px of solid colour, ~28px with the antialiased edge) and its left edge is
+ * inset 12px at the top row, reaching 0 at dy 13 — a corner arc whose radius is half the height,
+ * which is a stadium. In `01-dashboard.png` the "Create topic" button's fill runs y 81-113 (33px)
+ * and its inset reaches 0 by dy 5, fitting a radius near 8-10px — nowhere near half of 33.
+ *
+ * So the design has two button sizes, and the smaller one goes fully round. SPEC §4.13 gives one
+ * 34px size at `--kui-radius-md` and reads the topic page's actions as that size; the two
+ * measurements above say otherwise, and where the specification and the screenshots disagree the
+ * screenshots win.
+ *
+ * FINDING, and an honest one: the two screenshots do not settle *why* the radii differ, because
+ * the dashboard shows only a primary button and the topic page only a secondary and a danger one.
+ * The alternative reading is that the radius follows the **variant**. This code takes the size
+ * reading, because a design system in which changing a button's emphasis also changes its shape
+ * is not a system, and because the heights differ independently of the radii — which the variant
+ * reading would have to explain away. Worth putting to the owner. */
+/* The label truncates; the glyph does not. A button whose icon was cut in half to fit a label
+ * would be a button with no silhouette, and the silhouette is how a destructive action is told
+ * apart from a constructive one. The whole label stays in the accessible name either way, because
+ * an ellipsis is drawn by CSS and the text node is untouched. */
+.kui-btn__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.kui-btn--sm {
+  height: var(--kui-control-height-sm);
+  padding: 0 var(--kui-space-3);
+  border-radius: var(--kui-radius-pill);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* An icon-only button is square, so that a row of them is a row of equal boxes rather than a row
+ * of pills of accidental widths. */
+.kui-btn--icon-only {
+  width: var(--kui-control-height-md);
+  padding: 0;
+}
+
+.kui-btn--icon-only.kui-btn--sm {
+  width: var(--kui-control-height-sm);
+}
+
+/* The screen's one real action. Filled with the *container*, labelled with the container's paired
+ * contrast — which means it inverts between themes (a strong blue with pale text in dark, a pale
+ * blue with dark text in light) and that is correct, not a bug to hard-code away (SPEC §7.3). */
+.kui-btn--primary {
+  background-color: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+}
+
+/* "The thing you chose / the thing you are about to do" — the same pair as the selected
+ * navigation destination, on purpose (SPEC §1.4). */
+.kui-btn--secondary {
+  background-color: var(--kui-color-selected);
+  color: var(--kui-color-selected-contrast);
+}
+
+/* Destructive.
+ *
+ * Delete, empty and add-partitions once looked identical to one another and to ordinary actions;
+ * this variant is the direct answer. It is outlined rather than filled because a filled red button
+ * is the loudest thing on a page, which sends the eye first to the action you least want taken by
+ * accident. The outline gives it a silhouette no other button has, without competing for the first
+ * glance — and because the outline alone would be a colour-only distinction, the component
+ * requires a glyph as well (SPEC §4.13). */
+.kui-btn--danger {
+  background-color: transparent;
+  border: var(--kui-border-danger);
+  color: var(--kui-color-danger);
+}
+
+.kui-btn--ghost {
+  background-color: transparent;
+  color: var(--kui-color-text-muted);
+}
+
+/* One hover rule for the filled variants. The state layer is a translucent wash painted *over*
+ * the fill via `background-image`, so each variant keeps the fill/text pair it declared and no
+ * new legibility question is created. Deriving a lighter shade instead would need a different sum
+ * per theme, because in light the fill is the darker half of its pair and in dark the lighter. */
+.kui-btn:hover:not(:disabled):not([aria-disabled="true"]) {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-btn--ghost:hover:not(:disabled):not([aria-disabled="true"]) {
+  color: var(--kui-color-text);
+}
+
+/* Danger is the one variant that changes fill on hover, to the danger container — whose paired
+ * text colour is the danger colour the label already carries. */
+.kui-btn--danger:hover:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--kui-color-danger-container);
+  background-image: none;
+  border-color: transparent;
+}
+
+.kui-btn:active:not(:disabled):not([aria-disabled="true"]) {
+  transform: translateY(1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-btn:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: none;
+  }
+}
+
+/* Disabled carries both cues. Opacity alone still reads as "enabled but quiet", and a cursor
+ * alone is invisible until you are already reaching for it. */
+.kui-btn:disabled,
+.kui-btn[aria-disabled="true"] {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+/* Busy. The spinner replaces the leading glyph and the label stays, so the button does not change
+ * width mid-press and move the thing next to it out from under the pointer. */
+.kui-btn[aria-busy="true"] {
+  cursor: progress;
+}
+
+/* --- Text field ------------------------------------------------------------------------------ */
+
+.kui-textfield {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-textfield__label {
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: none; /* the label is written uppercase in the source, not transformed */
+  color: var(--kui-color-text-muted);
+}
+
+/* The box, not the input, carries the fill, the radius and the focus ring — so that a leading
+ * glyph and a trailing hint sit *inside* the control rather than beside it. */
+.kui-textfield__box {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  height: var(--kui-control-height-lg);
+  padding: 0 var(--kui-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+  min-width: 0;
+  transition: border-color var(--kui-duration-fast) ease;
+}
+
+.kui-textfield__box:focus-within {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-textfield--invalid .kui-textfield__box {
+  border-color: var(--kui-color-danger);
+}
+
+.kui-textfield--sm .kui-textfield__box {
+  height: var(--kui-control-height-md);
+}
+
+.kui-textfield__glyph {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-lg);
+}
+
+/* The input itself is transparent and borderless: it is the text, and the box around it is the
+ * control. `min-width: 0` is what lets it shrink inside the flex box instead of forcing the whole
+ * field wider than its container — the same rule that keeps a table from scrolling the page. */
+.kui-textfield__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--kui-font-size-md);
+  line-height: var(--kui-font-line-height-tight);
+}
+
+.kui-textfield__input:focus {
+  /* The ring is on the box. Removing it here is safe *because* the box draws one; that pairing is
+   * the only reason an `outline: none` is allowed anywhere in this product. */
+  outline: none;
+}
+
+.kui-textfield__input::placeholder {
+  color: var(--kui-color-text-muted);
+  opacity: 1; /* Firefox dims placeholders on top of the colour; that would put it below AA. */
+}
+
+.kui-textfield__input:disabled {
+  cursor: not-allowed;
+}
+
+.kui-textfield--disabled .kui-textfield__box {
+  opacity: var(--kui-opacity-disabled);
+}
+
+.kui-textfield__input--mono {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The keyboard hint at the trailing edge of the search field: a small stadium on the overlay
+ * surface. It is decoration for the shortcut, and it is `aria-hidden` in the markup — a screen
+ * reader user gets the shortcut from the field's description, not from a floating glyph. */
+.kui-textfield__hint-key {
+  flex: 0 0 auto;
+  padding: 2px var(--kui-space-2);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-overlay);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+}
+
+.kui-textfield__box:focus-within .kui-textfield__hint-key {
+  opacity: 0;
+}
+
+.kui-textfield__help {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-textfield__error {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-danger);
+}
+
+/* --- Select (a listbox the product draws itself) --------------------------------------------- */
+
+/* The native `<select>` cannot be styled to match this design in any browser, and its dropdown is
+ * drawn by the operating system in the operating system's palette — so a dark KUI opens a light
+ * menu. The seek and partition controls in the screenshots are custom listboxes for that reason
+ * (SPEC §4.16). What the product owes in exchange is every behaviour the native control gave away
+ * for free: keyboard operation, an accessible role, and a visible focus ring. */
+
+.kui-select {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  position: relative;
+  min-width: 0;
+}
+
+.kui-select__label {
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-select__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  height: var(--kui-control-height-lg);
+  padding: 0 var(--kui-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-strong);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-control-label-size);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+  cursor: pointer;
+  min-width: 0;
+  text-align: left;
+}
+
+.kui-select--sm .kui-select__trigger {
+  height: var(--kui-control-height-md);
+}
+
+.kui-select__trigger:hover:not(:disabled) {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-select__trigger:disabled {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+/* The prefix ("Seek:", "Partitions:") is part of the control, quiet, and never truncated — it is
+ * what the value means. The value is what truncates. */
+.kui-select__prefix {
+  flex: 0 0 auto;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-regular);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-select__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kui-select__value--placeholder {
+  color: var(--kui-color-text-muted);
+  font-weight: var(--kui-font-weight-regular);
+}
+
+.kui-select__chevron {
+  flex: 0 0 auto;
+  color: var(--kui-color-text-muted);
+  transition: transform var(--kui-duration-fast) ease;
+}
+
+.kui-select__trigger[aria-expanded="true"] .kui-select__chevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-select__chevron {
+    transition: none;
+  }
+}
+
+/* The menu is one of the few things in this product that genuinely floats, so it is one of the
+ * few things that casts a shadow (SPEC §3.6). */
+.kui-select__listbox {
+  position: absolute;
+  /* Under the trigger, not over it.
+   *
+   * Without an explicit `top` an absolutely positioned box sits at its *static* position, which
+   * here is the top of the control — so the menu opened directly on top of the thing that opened
+   * it, hiding the current value at the exact moment the user is choosing a new one. The label is
+   * `position: absolute` when visually hidden and contributes no height, which is why the static
+   * position was the trigger's own top edge rather than below it. */
+  top: 100%;
+  left: 0;
+  margin-top: var(--kui-space-1);
+  z-index: var(--kui-z-dropdown);
+  margin: 0;
+  padding: var(--kui-space-1);
+  list-style: none;
+  min-width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-overlay);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-select__option {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-sm);
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* The *active* option is the one the keyboard is on. It has to be visibly different from both the
+ * resting rows and the selected one, because during keyboard navigation the selected row is still
+ * showing the old choice and the two are on screen at once. */
+.kui-select__option[data-active="true"] {
+  background-color: var(--kui-color-surface-hover);
+}
+
+.kui-select__option[aria-selected="true"] {
+  color: var(--kui-color-text-strong);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-select__option[aria-disabled="true"] {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+.kui-select__option-check {
+  flex: 0 0 auto;
+  width: 1em;
+  color: var(--kui-color-primary);
+}
+
+.kui-select__empty {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* --- Checkbox -------------------------------------------------------------------------------- */
+
+/* A real `<input type="checkbox">`, visually hidden, plus a box the product draws. The input is
+ * kept — not replaced by a `div` with `role="checkbox"` — because it brings form participation,
+ * the space key, label association, `indeterminate`, and the accessibility tree, all of which have
+ * to be reimplemented (and get reimplemented wrongly) the moment it is thrown away. */
+
+.kui-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  cursor: pointer;
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text);
+}
+
+.kui-checkbox--disabled {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+/* Hidden from the eye, present to the browser and to assistive technology. `opacity: 0` over the
+ * drawn box rather than `display: none`, because a `display: none` input is not focusable and the
+ * whole point of keeping the real one is that it is. */
+.kui-checkbox__input {
+  position: absolute;
+  width: var(--kui-checkbox-size);
+  height: var(--kui-checkbox-size);
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.kui-checkbox__box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--kui-checkbox-size);
+  height: var(--kui-checkbox-size);
+  border: 1.5px solid var(--kui-color-border-strong);
+  border-radius: var(--kui-radius-xs);
+  background-color: transparent;
+  color: transparent;
+  transition:
+    background-color var(--kui-duration-fast) ease,
+    border-color var(--kui-duration-fast) ease;
+}
+
+.kui-checkbox__input:checked + .kui-checkbox__box,
+.kui-checkbox__input:indeterminate + .kui-checkbox__box {
+  background-color: var(--kui-color-primary-container);
+  border-color: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+}
+
+/* The ring is drawn on the box, driven by focus on the hidden input. Without this pairing the
+ * control is focusable and completely invisible while focused — one of the three this project has
+ * already shipped. */
+.kui-checkbox__input:focus-visible + .kui-checkbox__box {
+  outline: 2px solid var(--kui-color-focus);
+  outline-offset: 2px;
+}
+
+.kui-checkbox:hover .kui-checkbox__input:not(:disabled) + .kui-checkbox__box {
+  border-color: var(--kui-color-text);
+}
+
+/* --- Status pill ----------------------------------------------------------------------------- */
+
+.kui-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  height: var(--kui-pill-height);
+  padding: 0 var(--kui-pill-padding-x);
+  border-radius: var(--kui-radius-pill);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: var(--kui-font-line-height-tight);
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* A pill that is a button (LIVE / PAUSED) is a control and must say so. */
+button.kui-pill {
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+button.kui-pill:disabled {
+  opacity: var(--kui-opacity-disabled);
+  cursor: not-allowed;
+}
+
+.kui-pill__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kui-pill--success {
+  background-color: var(--kui-color-success-container);
+  color: var(--kui-color-success);
+}
+
+.kui-pill--warning {
+  background-color: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+}
+
+.kui-pill--danger {
+  background-color: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+}
+
+.kui-pill--accent {
+  background-color: var(--kui-color-accent-container);
+  color: var(--kui-color-accent);
+}
+
+.kui-pill--neutral {
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+}
+
+/* The dot is 6px and never the only signal: every pill carries text as well, because around one
+ * man in twelve cannot separate the red from the green and a screen reader gets no colour at all
+ * (SPEC §4.0). */
+.kui-pill__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--kui-radius-pill);
+  background-color: currentColor;
+}
+
+.kui-pill__dot--pulsing {
+  animation: kui-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes kui-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kui-pill__dot--pulsing {
+    animation: none;
+  }
+}
+
+/* --- Header chip ----------------------------------------------------------------------------- */
+
+.kui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  max-width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--kui-pill-padding-x);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface-elevated);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-tight);
+}
+
+button.kui-chip {
+  cursor: pointer;
+}
+
+button.kui-chip:hover {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+.kui-chip__name {
+  flex: 0 0 auto;
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+/* The value truncates and the name does not: a chip whose name is cut off names nothing. */
+.kui-chip__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--kui-font-family-mono);
+  color: var(--kui-color-text-muted);
+}
+
+/* An empty value is not the same picture as an absent header, so it gets its own drawing rather
+ * than rendering as a chip with nothing after the colon. */
+.kui-chip__value--empty {
+  font-family: var(--kui-font-family-sans);
+  font-style: italic;
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-chip__marker {
+  flex: 0 0 auto;
+  padding: 0 var(--kui-space-1);
+  border-radius: var(--kui-radius-xs);
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* --- Icon tile ------------------------------------------------------------------------------- */
+
+.kui-icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--kui-icon-tile-size);
+  height: var(--kui-icon-tile-size);
+  border-radius: var(--kui-radius-md);
+  font-size: 18px;
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-icon-tile--sm {
+  width: var(--kui-icon-tile-size-sm);
+  height: var(--kui-icon-tile-size-sm);
+  font-size: 16px;
+}
+
+.kui-icon-tile--primary {
+  background-color: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+}
+
+.kui-icon-tile--accent {
+  background-color: var(--kui-color-accent-container);
+  color: var(--kui-color-accent-container-contrast);
+}
+
+.kui-icon-tile--success {
+  background-color: var(--kui-color-success-container);
+  color: var(--kui-color-success);
+}
+
+.kui-icon-tile--warning {
+  background-color: var(--kui-color-warning-container);
+  color: var(--kui-color-warning);
+}
+
+.kui-icon-tile--danger {
+  background-color: var(--kui-color-danger-container);
+  color: var(--kui-color-danger);
+}
+
+/* --- Avatar ---------------------------------------------------------------------------------- */
+
+.kui-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--kui-avatar-size);
+  height: var(--kui-avatar-size);
+  border: 1px solid transparent;
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-accent-container);
+  color: var(--kui-color-accent-container-contrast);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+}
+
+/* "Unknown" is a real state and it is not the accent one: inventing somebody's initials is worse
+ * than admitting you do not know them (SPEC §4.11), so the unknown avatar is neutral and carries
+ * a person glyph rather than letters. */
+.kui-avatar--unknown {
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+  font-size: 16px;
+}
+
+button.kui-avatar {
+  cursor: pointer;
+}
+
+button.kui-avatar:hover {
+  background-image: linear-gradient(var(--kui-color-state-layer), var(--kui-color-state-layer));
+}
+
+/* --- Tooltip --------------------------------------------------------------------------------- */
+
+/* A tooltip floats, so it is allowed the shadow. It is `position: fixed` and mounted in a portal
+ * because a tooltip inside a table cell that has `overflow: auto` is clipped by it, and the
+ * clipping only shows up on the one row near the edge that nobody tests. */
+.kui-tooltip {
+  position: fixed;
+  z-index: var(--kui-z-toast);
+  max-width: 280px;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-sm);
+  background-color: var(--kui-color-surface-overlay);
+  color: var(--kui-color-text);
+  box-shadow: var(--kui-shadow-md);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  /* The tooltip must never eat the pointer: hovering it must not be what keeps it open, or moving
+   * the mouse towards a control behind it becomes impossible. */
+  pointer-events: none;
+}
+
+.kui-tooltip__code {
+  display: block;
+  margin-top: var(--kui-space-1);
+  font-family: var(--kui-font-family-mono);
+  color: var(--kui-color-text-subtle);
+}
+
+/* The wrapper an anchor sits in. `display: contents` would be tidier but it removes the wrapper
+ * from the layout *and* from hit testing in some engines, which is exactly what a disabled
+ * button's tooltip needs to survive. `inline-flex` keeps the wrapper hoverable, which is the whole
+ * reason a disabled control can explain itself at all — a `disabled` element fires no pointer
+ * events of its own. */
+.kui-tooltip-anchor {
+  display: inline-flex;
+  max-width: 100%;
+}
