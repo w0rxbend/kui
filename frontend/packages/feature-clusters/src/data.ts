@@ -32,7 +32,7 @@
  */
 import { decodeSection, type ApiResult, type KuiApiClient } from "@kui/api";
 import { apiFailure, figure, fromSection, type Fetched } from "@kui/kernel";
-import type { Broker, ClusterSummary, Health } from "./model.js";
+import type { Broker, ClusterSummary, ConfigEntry, ConfigSource, Health, LogDir } from "./model.js";
 
 /**
  * What the gateway reports about one cluster once a scrape has succeeded.
@@ -204,6 +204,148 @@ export async function fetchBrokers(
   if (!answer.ok) return apiFailure(answer.error);
   const section = decodeSection<readonly BrokerPayload[]>(answer.value.brokers);
   return fromSection(section, (rows) => rows.map(toBroker));
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* One broker: its settings and its disks                                                           */
+/* ---------------------------------------------------------------------------------------------- */
+
+/**
+ * One row of `describeConfigs`, as the gateway actually sends it.
+ *
+ * Recorded from `GET /clusters/development/brokers/1/configs` (`src/recorded/brokerConfigs.json`)
+ * rather than read off the schema, and two things in it are worth stating because a plausible guess
+ * gets both wrong:
+ *
+ * - the booleans are `isSensitive` and `isReadOnly`, not `sensitive` and `readOnly` — which is what
+ *   the *topic* configuration endpoint calls them, so the two are genuinely different spellings for
+ *   the same idea and copying the topic mapping across would silently disclose nothing and hide
+ *   nothing;
+ * - there is no `isDefault` on the wire at all, although the server's own domain entity has one.
+ *   `overridden` is therefore derived from the source below.
+ */
+interface BrokerConfigPayload {
+  readonly name: string;
+  readonly value?: string | null;
+  readonly source?: string | null;
+  readonly isSensitive?: boolean;
+  readonly isReadOnly?: boolean;
+  readonly documentation?: string | null;
+}
+
+/**
+ * The wire's source token as the screen's vocabulary.
+ *
+ * The tokens come from `kui.cluster.domain.ConfigSource#token` and are hyphenated lower case, not
+ * Kafka's own `DYNAMIC_BROKER_CONFIG` shouting. An unrecognised token becomes `UNKNOWN`, which sorts
+ * last and reads "Unknown" — mapping it to `DEFAULT` instead would put a setting somebody changed at
+ * the bottom of the table among three hundred untouched defaults, which is precisely where nobody
+ * looks.
+ */
+export function brokerConfigSourceOf(raw: string | null | undefined): ConfigSource {
+  switch (raw) {
+    case "dynamic-broker":
+      return "DYNAMIC_BROKER";
+    case "dynamic-default-broker":
+      return "DYNAMIC_DEFAULT";
+    case "static-broker":
+      return "STATIC";
+    case "default":
+      return "DEFAULT";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function toConfigEntry(payload: BrokerConfigPayload): ConfigEntry {
+  const sensitive = payload.isSensitive === true;
+  const source = brokerConfigSourceOf(payload.source);
+  return {
+    name: payload.name,
+    /*
+     * A sensitive setting carries no value on the wire, and the screen must say "hidden" rather than
+     * draw an em dash. `null` is what both a withheld value and an unset one arrive as, so the
+     * `sensitive` flag beside it is the only thing that can tell them apart — which is why it is
+     * carried rather than inferred from the value being absent.
+     */
+    value: sensitive ? null : (payload.value ?? null),
+    sensitive,
+    source,
+    // Not on the wire. Anything the broker did not fall back to its own default for was set by
+    // somebody, whether in the file or at runtime, and those are the rows this page exists for.
+    overridden: source !== "DEFAULT",
+  };
+}
+
+/** One broker's settings, ordered and filtered by the screen rather than here. */
+export async function fetchBrokerConfigs(
+  api: KuiApiClient,
+  clusterId: string,
+  brokerId: number,
+): Promise<Fetched<readonly ConfigEntry[]>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs", {
+    params: { path: { clusterId, brokerId } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+  const section = decodeSection<readonly BrokerConfigPayload[]>(answer.value.configs);
+  return fromSection(section, (rows) => rows.map(toConfigEntry));
+}
+
+/**
+ * One log directory, as `describeLogDirs` reports it through the gateway.
+ *
+ * `totalBytes` and `usableBytes` describe the *filesystem the directory sits on*, not the directory:
+ * on the recorded document they are 503 GB and 199 GB against 32 MB of actual Kafka data. Reading
+ * either as the directory's size would draw a bar saying this broker holds half a terabyte of
+ * messages. What the directory holds is the sum of its replicas, which is also the figure the
+ * brokers endpoint reports as `diskUsageBytes`, and the two agreeing is the check that this is the
+ * right field.
+ */
+interface LogDirPayload {
+  readonly brokerId?: number;
+  readonly path: string;
+  readonly error?: string | null;
+  readonly partitionCount?: number | null;
+  readonly replicas?: readonly { readonly sizeBytes?: number | null }[];
+}
+
+function toLogDir(payload: LogDirPayload): LogDir {
+  const error = payload.error ?? null;
+  const replicas = payload.replicas ?? [];
+  return {
+    path: payload.path,
+    /*
+     * A directory that reported an error has no size, and must never be summed as zero: the total
+     * under the table is described as the sum of the directories that answered, and quietly adding a
+     * failed disk as 0 makes it a claim about a disk nobody could read.
+     */
+    sizeBytes:
+      error !== null
+        ? null
+        : replicas.reduce((sum, replica) => sum + (replica.sizeBytes ?? 0), 0),
+    partitions: error !== null ? null : figure(payload.partitionCount),
+    error,
+  };
+}
+
+/**
+ * One broker's log directories.
+ *
+ * The endpoint is the cluster's — `GET /clusters/{id}/log-dirs` — with the broker as a query
+ * parameter, so this asks for one broker's disks rather than fetching every broker's and discarding
+ * the rest. On a fifty-broker cluster the difference is the whole response.
+ */
+export async function fetchBrokerLogDirs(
+  api: KuiApiClient,
+  clusterId: string,
+  brokerId: number,
+): Promise<Fetched<readonly LogDir[]>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}/log-dirs", {
+    params: { path: { clusterId }, query: { brokerId } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+  const section = decodeSection<readonly LogDirPayload[]>(answer.value.logDirs);
+  return fromSection(section, (rows) => rows.map(toLogDir));
 }
 
 /* ---------------------------------------------------------------------------------------------- */

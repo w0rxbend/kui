@@ -274,6 +274,24 @@ function StateCell(props: { readonly row: GroupSummary }): JSX.Element {
  * figure and nothing else, and the bars live in the dashboard's "Top consumer lag" panel where
  * there is room for them. Drawing one in a cell a hundred and fifty pixels wide puts a four-pixel
  * smudge beside every number, which says nothing and costs the column its scannability.
+ *
+ * **No change highlight either, and that is a decision rather than an omission.** `ConsumersRoute`
+ * now refreshes this column incrementally (see `lag.ts`), so the screen knows exactly which rows the
+ * server said had moved and could flash them. It does not, for three reasons:
+ *
+ * - On a cluster that is actually doing work, nearly every group's lag changes on nearly every poll.
+ *   A marker that fires on almost every row marks nothing — and the one row it fails to fire on is
+ *   then read as the odd one out, which is backwards.
+ * - The interesting quantity is not *that* the figure moved but which way and how fast, and this
+ *   column cannot show that. A group falling from two million to one million and a group climbing
+ *   from nine hundred to a thousand would get the same flash. The rate has a home already: PACE on
+ *   the group detail page, printed with the words "per second" beside it.
+ * - The row is a link people click. A cell that repaints under a moving pointer every thirty seconds
+ *   makes a table feel untrustworthy while telling nobody anything.
+ *
+ * What the incremental refresh must never do is make an *unchanged* row look stale or absent. It
+ * does not: `applyLagDelta` passes an unmentioned row through by identity, so this cell keeps drawing
+ * the last figure the server stood behind — including a `null` that stays an em dash.
  */
 function LagCell(props: { readonly row: GroupSummary }): JSX.Element {
   return (

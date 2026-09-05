@@ -7,8 +7,13 @@
  */
 export { SubjectList, type SubjectListProps } from "./SubjectList.jsx";
 export { SubjectPage, type SubjectPageProps } from "./SubjectPage.jsx";
+export { CompatibilityCheck, type CompatibilityCheckProps } from "./CompatibilityCheck.jsx";
 export {
   COMPATIBILITY_LEVELS,
+  checkBlockedReason,
+  checkCompatibility,
+  checkIsMeaningful,
+  proposedSchemaProblem,
   fetchSchema,
   fetchSubjects,
   fetchVersions,
@@ -16,6 +21,8 @@ export {
   setCompatibility,
   type Compatibility,
   type CompatibilityLevel,
+  type CompatibilityVerdict,
+  type ProposedSchema,
   type SchemaVersion,
   type SubjectListResult,
 } from "./data.js";

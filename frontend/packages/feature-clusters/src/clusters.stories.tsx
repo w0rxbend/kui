@@ -201,3 +201,49 @@ export const BrokerConfigurationForbidden: Story = {
     />
   ),
 };
+
+/**
+ * The first paint, before either endpoint has answered.
+ *
+ * Both tabs are in their loading state at once, which is the state the route actually starts in and
+ * the one that never appears in a screenshot. What it has to show is a page with its head, its
+ * health pill and its tab strip already drawn: the broker's identity comes from the broker list and
+ * is on screen before either of the two slow calls returns, so nothing about the page moves when
+ * they land.
+ */
+export const BrokerLoading: Story = {
+  render: () => (
+    <BrokerDetail
+      broker={SAMPLE_BROKERS[0]!}
+      clusterName="prod-kyiv-01"
+      clustersHref="#/clusters"
+      brokersHref="#/brokers"
+      tab="logdirs"
+      onTabChange={noop}
+      logDirs={{ kind: "loading" }}
+      configuration={{ kind: "loading" }}
+    />
+  ),
+};
+
+/**
+ * The disks failed and the settings did not — `BrokerTabFailedAlone` the other way round.
+ *
+ * Worth having as its own story rather than trusting the symmetry: this is the tab the page opens
+ * on, so it is the failure a visitor meets without touching anything, and it has to say that the
+ * *directories* could not be read rather than that the broker is gone.
+ */
+export const BrokerLogDirsUnavailable: Story = {
+  render: () => (
+    <BrokerDetail
+      broker={SAMPLE_BROKERS[0]!}
+      clusterName="prod-kyiv-01"
+      clustersHref="#/clusters"
+      brokersHref="#/brokers"
+      tab="logdirs"
+      onTabChange={noop}
+      logDirs={{ kind: "unavailable", message: "Log directories are unavailable.", code: "UPSTREAM_UNAVAILABLE", onRetry: noop }}
+      configuration={{ kind: "ready", value: SAMPLE_CONFIGS }}
+    />
+  ),
+};

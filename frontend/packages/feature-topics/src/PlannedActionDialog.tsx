@@ -1,5 +1,12 @@
 /**
- * The confirmation for a destructive action that the server plans first.
+ * The confirmation for an irreversible action that the server plans first.
+ *
+ * Three callers: purge, delete, and raising a topic's partition count. The first two destroy data;
+ * the third destroys nothing and still cannot be undone, because Kafka has no way to remove a
+ * partition. That is why the dialog is about *irreversibility* rather than about destruction — the
+ * `destructive` and `planningMessage` props are how the third caller says so, and a dialog that
+ * announced it was working out what a partition increase "would destroy" would be the product
+ * inventing a consequence.
  *
  * ## Why the plan is not a formality
  *
@@ -50,8 +57,33 @@ export interface PlannedActionDialogProps<P extends TokenPlan> {
   /** `Purge`, `Delete topic`. A verb. */
   readonly confirmLabel: string;
   readonly confirmIcon: IconName;
-  /** Typed before the button becomes usable. The topic's name, for anything that destroys data. */
-  readonly typeToConfirm: string;
+  /**
+   * Typed before the button becomes usable. The topic's name, for anything that cannot be undone.
+   *
+   * Optional, and the test is undo-ability rather than destruction. Purge and delete ask for it
+   * because the records do not come back; adding partitions asks for it too, because Kafka has no
+   * way to remove one afterwards. An action that can be reversed must not ask, or the mechanism
+   * becomes a reflex and stops being read.
+   */
+  readonly typeToConfirm?: string | undefined;
+
+  /**
+   * `false` for an action that is irreversible but destroys nothing.
+   *
+   * Adding partitions is the case this exists for. It cannot be undone, so it is confirmed and
+   * typed; it deletes no record, so it must not wear delete's silhouette. Two danger buttons that
+   * mean different amounts of harm is how the wrong one gets clicked.
+   */
+  readonly destructive?: boolean | undefined;
+
+  /**
+   * What the "working it out" dialog says while the plan is out.
+   *
+   * The default names destruction, which is right for purge and delete and false for a partition
+   * increase — telling an operator KUI is working out what an operation "would destroy" when it
+   * destroys nothing is the product inventing a consequence.
+   */
+  readonly planningMessage?: string | undefined;
 
   /** Asks the server what would happen. Started when the dialog opens. */
   readonly plan: () => Promise<P | { readonly failure: string }>;
@@ -116,7 +148,8 @@ export function PlannedActionDialog<P extends TokenPlan>(
         testId="planned-action-planning"
       >
         <p role="status">
-          <Spinner /> Asking the cluster what this would destroy…
+          <Spinner />{" "}
+          {props.planningMessage ?? "Asking the cluster what this would destroy…"}
         </p>
       </Dialog>
 
@@ -141,7 +174,8 @@ export function PlannedActionDialog<P extends TokenPlan>(
             consequence={consequenceOf(ready(), props.describe)}
             confirmLabel={props.confirmLabel}
             confirmIcon={props.confirmIcon}
-            typeToConfirm={props.typeToConfirm}
+            {...(props.typeToConfirm === undefined ? {} : { typeToConfirm: props.typeToConfirm })}
+            {...(props.destructive === undefined ? {} : { destructive: props.destructive })}
             busy={busy()}
             error={
               failure() === undefined

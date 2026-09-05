@@ -1,0 +1,15 @@
+{
+    "code": "KUI-VALIDATION",
+    "message": "a resend may copy at most 10000 records at a time, and this range holds 900000000; copy it in several ranges",
+    "details": [
+        {
+            "field": "ranges",
+            "restrictions": [
+                "a range of at most 10000 offsets"
+            ]
+        }
+    ],
+    "correlationId": "a8c29cdcacb2cc65",
+    "timestamp": "2026-09-05T22:05:18.154Z",
+    "retryable": false
+}

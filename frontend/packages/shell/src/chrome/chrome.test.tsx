@@ -11,6 +11,7 @@ import { createSignal, flush } from "solid-js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import { AccountMenu } from "./AccountMenu.jsx";
 import { Breadcrumb } from "./Breadcrumb.jsx";
 import { ClusterSelector } from "./ClusterSelector.jsx";
 import { ClusterStatusCard } from "./ClusterStatusCard.jsx";
@@ -512,6 +513,103 @@ describe("EnvRail", () => {
       <EnvRail environments={CLUSTERS} currentId="prod-kyiv-01" accountName="Olena Petrenko" />
     ));
     expect(describeViolations(await findViolations(container))).toBe("");
+    dispose();
+  });
+});
+
+describe("the account panel", () => {
+  it("does not draw a panel the caller did not supply", () => {
+    // A deployment with `authType: "disabled"` passes no handler and no panel. The avatar has to
+    // stay a picture: a button that opens an empty panel, or a "Sign out" that clears a session
+    // that never existed, both teach the operator that the rail's controls do nothing.
+    const { container, dispose } = mount(() => (
+      <EnvRail environments={CLUSTERS} currentId="prod-kyiv-01" accountName="Olena Petrenko" />
+    ));
+    expect(container.querySelector(".kui-rail__account button")).toBeNull();
+    expect(container.querySelector('[data-testid="account-menu"]')).toBeNull();
+    dispose();
+  });
+
+  it("keeps the panel shut until the caller says it is open", () => {
+    const { container, dispose } = mount(() => (
+      <EnvRail
+        environments={CLUSTERS}
+        currentId="prod-kyiv-01"
+        accountName="Olena Petrenko"
+        onOpenAccount={() => undefined}
+        accountPanel={<AccountMenu name="olena" onSignOut={() => undefined} />}
+      />
+    ));
+    // Openness belongs to whoever can also close it — Escape, a click elsewhere. A panel that owned
+    // its own openness would be one nothing else could dismiss.
+    expect(container.querySelector('[data-testid="account-menu"]')).toBeNull();
+    dispose();
+  });
+
+  it("shows the panel, anchored to the avatar, when it is open", () => {
+    const { container, dispose } = mount(() => (
+      <EnvRail
+        environments={CLUSTERS}
+        currentId="prod-kyiv-01"
+        accountName="Olena Petrenko"
+        onOpenAccount={() => undefined}
+        accountOpen
+        accountPanel={<AccountMenu name="olena" onSignOut={() => undefined} />}
+      />
+    ));
+    const panel = container.querySelector(".kui-rail__account .kui-rail__account-panel");
+    expect(panel).not.toBeNull();
+    expect(panel!.querySelector('[data-testid="account-name"]')!.textContent).toBe("olena");
+    dispose();
+  });
+
+  it("says who is signed in, and offers exactly one way out", async () => {
+    let signedOut = 0;
+    const { container, dispose } = mount(() => (
+      <AccountMenu name="olena.petrenko" authType="form" onSignOut={() => (signedOut += 1)} />
+    ));
+    const button = container.querySelector("button")!;
+    expect(button.textContent).toContain("Sign out");
+    await userEvent.click(button);
+    await flush();
+    expect(signedOut).toBe(1);
+    dispose();
+  });
+
+  it("refuses a second click while the first sign-out is still out", async () => {
+    // Two logouts are harmless at the gateway, but the second one's answer arrives against a page
+    // that is already reloading, and its failure would be reported as though the first had failed.
+    let signedOut = 0;
+    const { container, dispose } = mount(() => (
+      <AccountMenu name="olena.petrenko" busy onSignOut={() => (signedOut += 1)} />
+    ));
+    await userEvent.click(container.querySelector("button")!);
+    await flush();
+    expect(signedOut).toBe(0);
+    dispose();
+  });
+
+  it("says the session is still live when signing out did not work", () => {
+    const { container, dispose } = mount(() => (
+      <AccountMenu
+        name="olena.petrenko"
+        failure="Signing out did not work. You are still signed in."
+        onSignOut={() => undefined}
+      />
+    ));
+    expect(container.textContent).toContain("still signed in");
+    // And the way out is still there to try again. A failure that removed the button would leave
+    // the operator with a live session and nothing to press.
+    expect(container.querySelector("button")!.textContent).toContain("Sign out");
+    dispose();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container, dispose } = mount(() => (
+      <AccountMenu name="olena.petrenko" authType="form" onSignOut={() => undefined} />
+    ));
+    const violations = await findViolations(container);
+    expect(describeViolations(violations)).toBe("");
     dispose();
   });
 });

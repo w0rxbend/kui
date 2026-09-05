@@ -1,0 +1,23 @@
+{
+    "rows": [
+        {
+            "group": {
+                "groupId": "order-fulfilment",
+                "state": "EMPTY",
+                "protocol": "CLASSIC",
+                "isSimple": true,
+                "members": 0,
+                "topics": 1,
+                "partitions": 6,
+                "coordinatorId": 1,
+                "totalLag": 21,
+                "pace": 0.0,
+                "excludedPartitions": 0,
+                "incomplete": null
+            },
+            "topicLag": 21,
+            "partitions": 6,
+            "dormant": true
+        }
+    ]
+}

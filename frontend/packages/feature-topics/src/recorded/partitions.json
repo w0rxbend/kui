@@ -1,0 +1,98 @@
+{
+    "partitions": {
+        "status": "ok",
+        "data": [
+            {
+                "partition": 0,
+                "leader": 1,
+                "replicas": [
+                    {
+                        "broker": 1,
+                        "leader": true,
+                        "inSync": true
+                    }
+                ],
+                "earliestOffset": 0,
+                "latestOffset": 8,
+                "messageCount": 8,
+                "sizeBytes": null
+            },
+            {
+                "partition": 1,
+                "leader": 1,
+                "replicas": [
+                    {
+                        "broker": 1,
+                        "leader": true,
+                        "inSync": true
+                    }
+                ],
+                "earliestOffset": 0,
+                "latestOffset": 0,
+                "messageCount": 0,
+                "sizeBytes": null
+            },
+            {
+                "partition": 2,
+                "leader": 1,
+                "replicas": [
+                    {
+                        "broker": 1,
+                        "leader": true,
+                        "inSync": true
+                    }
+                ],
+                "earliestOffset": 0,
+                "latestOffset": 5,
+                "messageCount": 5,
+                "sizeBytes": null
+            },
+            {
+                "partition": 3,
+                "leader": 1,
+                "replicas": [
+                    {
+                        "broker": 1,
+                        "leader": true,
+                        "inSync": true
+                    }
+                ],
+                "earliestOffset": 0,
+                "latestOffset": 3,
+                "messageCount": 3,
+                "sizeBytes": null
+            },
+            {
+                "partition": 4,
+                "leader": 1,
+                "replicas": [
+                    {
+                        "broker": 1,
+                        "leader": true,
+                        "inSync": true
+                    }
+                ],
+                "earliestOffset": 0,
+                "latestOffset": 4,
+                "messageCount": 4,
+                "sizeBytes": null
+            },
+            {
+                "partition": 5,
+                "leader": 1,
+                "replicas": [
+                    {
+                        "broker": 1,
+                        "leader": true,
+                        "inSync": true
+                    }
+                ],
+                "earliestOffset": 0,
+                "latestOffset": 8,
+                "messageCount": 8,
+                "sizeBytes": null
+            }
+        ],
+        "fetchedAt": "2026-09-05T22:01:25.072Z"
+    }
+}

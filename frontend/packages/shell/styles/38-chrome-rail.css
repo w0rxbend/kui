@@ -187,7 +187,46 @@
 }
 
 .kui-rail__account {
+  position: relative;
   flex: 0 0 auto;
+}
+
+/* --- The account panel -------------------------------------------------------------------------- */
+
+/* Anchored to the avatar and floated to its right, because the rail is 48px wide and the panel is
+ * not: a panel constrained to the rail's width would wrap "Sign out" onto three lines. It opens
+ * upwards from the foot (`bottom: 0`) so that it never leaves the viewport on a short window, which
+ * a downward-opening panel pinned to the bottom of the screen always would. */
+.kui-rail__account-panel {
+  position: absolute;
+  bottom: 0;
+  left: calc(100% + var(--kui-space-2));
+  z-index: var(--kui-z-dropdown);
+}
+
+.kui-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  min-width: 14rem;
+  padding: var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  background-color: var(--kui-color-surface-elevated);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-account__name {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text);
+}
+
+.kui-account__auth {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-subtle);
 }
 
 @media (prefers-reduced-motion: reduce) {

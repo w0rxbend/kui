@@ -1,0 +1,15 @@
+{
+    "code": "KUI-FILTER-COMPILE",
+    "message": "mismatched input '<EOF>' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}",
+    "details": [
+        {
+            "field": "filterSource",
+            "restrictions": [
+                "line 1, column 22: mismatched input '<EOF>' expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}"
+            ]
+        }
+    ],
+    "correlationId": "3f3a710c34975290",
+    "timestamp": "2026-09-05T22:05:09.964Z",
+    "retryable": false
+}

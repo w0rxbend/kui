@@ -17,10 +17,13 @@
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Banner, Select, StatusPill, type Mutation } from "@kui/kernel";
+import { CompatibilityCheck } from "./CompatibilityCheck.jsx";
 import {
   COMPATIBILITY_LEVELS,
   type Compatibility,
+  type CompatibilityVerdict,
   type CompatibilityLevel,
+  type ProposedSchema,
   type SchemaVersion,
 } from "./data.js";
 
@@ -36,6 +39,13 @@ export interface SubjectPageProps {
   readonly setCompatibilityDisabledReason?: string | undefined;
   readonly state: Mutation<unknown>;
   readonly failure?: { readonly message: string; readonly code?: string | undefined } | undefined;
+  /**
+   * Runs the "check a schema" panel's question. Absent leaves the panel off the page entirely, which
+   * is what a story showing only the registered schema wants — it is not a permission gate: the
+   * check is a read and every principal who may see this page may ask it.
+   */
+  readonly onCheckCompatibility?: ((proposed: ProposedSchema) => void) | undefined;
+  readonly checkState?: Mutation<CompatibilityVerdict> | undefined;
 }
 
 export function SubjectPage(props: SubjectPageProps): JSX.Element {
@@ -156,6 +166,21 @@ export function SubjectPage(props: SubjectPageProps): JSX.Element {
               <code>{schema().definition}</code>
             </pre>
           </>
+        )}
+      </Show>
+
+      {/* Below the registered schema, because the ordinary use is to read what is there, copy it and
+          change one field — and the box starts with that schema for the same reason. */}
+      <Show when={props.onCheckCompatibility}>
+        {(check) => (
+          <CompatibilityCheck
+            subject={props.subject}
+            level={props.compatibility?.level}
+            initialSchemaType={props.current?.schemaType}
+            initialDefinition={props.current?.definition}
+            onCheck={(proposed) => check()(proposed)}
+            state={props.checkState ?? { kind: "idle" }}
+          />
         )}
       </Show>
     </section>

@@ -56,8 +56,36 @@ export interface MessageFilterBarProps {
   readonly live: boolean;
   readonly onLiveChange: (live: boolean) => void;
   readonly liveAvailability?: LiveAvailability | undefined;
+
+  /**
+   * The smart filter running on this browse, and the way to change it.
+   *
+   * Optional as a whole. A deployment whose cluster has no filter engine is refused with
+   * `KUI-UNSUPPORTED` — the quickstart is one — and on such a cluster the control is offered
+   * **disabled with that reason** rather than left out, because a missing control reads as a
+   * product that cannot do the thing at all.
+   */
+  readonly smartFilter?: SmartFilterSlot | undefined;
+
   /** Anything the screen wants at the right of the bar, before the LIVE pill. */
   readonly children?: JSX.Element;
+}
+
+/**
+ * The smart-filter control's state, as the screen owns it.
+ *
+ * The bar shows what is running and asks for the editor; it never registers, tests or clears
+ * anything itself. That is the same rule every other control here follows and it is in the header:
+ * changing what a browse reads has to stop what is running, and only the screen can do that.
+ */
+export interface SmartFilterSlot {
+  /** The expression currently applied, if any. Shown so it can be read without opening anything. */
+  readonly source?: string | undefined;
+  readonly onOpen: () => void;
+  /** Removes it from the browse. */
+  readonly onClear?: (() => void) | undefined;
+  /** Why smart filtering cannot be used here — an absent filter engine, or a missing permission. */
+  readonly unavailableReason?: string | undefined;
 }
 
 const SEEK_OPTIONS: readonly { readonly value: SeekKind; readonly label: string }[] = [
@@ -189,6 +217,10 @@ export function MessageFilterBar(props: MessageFilterBarProps): JSX.Element {
         }}
       />
 
+      <Show when={props.smartFilter}>
+        {(slot) => <SmartFilterControl slot={slot()} />}
+      </Show>
+
       <div class="kui-browse-bar__end">
         {props.children}
         <LiveToggle
@@ -197,6 +229,65 @@ export function MessageFilterBar(props: MessageFilterBarProps): JSX.Element {
           onChange={props.onLiveChange}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The smart filter, as one control in the bar.
+ *
+ * Two different things depending on whether one is running, because they are two different pieces of
+ * news. With no filter it is a plain button that opens the editor. With one applied it shows the
+ * **expression itself**, truncated, with a clear beside it — an operator who comes back to a tab an
+ * hour later has to be able to see why the list is short without opening a dialog, and a control that
+ * only said "Filter ✓" would leave them to guess.
+ *
+ * When the cluster has no filter engine the button stays and is disabled with the server's reason.
+ * Removing it would teach the operator KUI cannot filter, when in fact this cluster cannot.
+ */
+function SmartFilterControl(props: { readonly slot: SmartFilterSlot }): JSX.Element {
+  const reason = (): string | undefined => props.slot.unavailableReason;
+  const applied = (): string | undefined =>
+    props.slot.source === undefined || props.slot.source === "" ? undefined : props.slot.source;
+
+  return (
+    <div class="kui-browse-bar__smart">
+      <button
+        type="button"
+        class={[
+          "kui-smart-chip",
+          "kui-focusable",
+          ...(applied() === undefined ? [] : ["kui-smart-chip--applied"]),
+        ]}
+        disabled={reason() !== undefined}
+        title={reason() ?? applied() ?? "Filter with an expression evaluated on the server"}
+        aria-label={
+          applied() === undefined
+            ? "Filter with an expression"
+            : `Filtering by ${applied() ?? ""}. Edit the expression.`
+        }
+        onClick={() => props.slot.onOpen()}
+      >
+        <Icon name="filter" size="14px" />
+        <Show when={applied()} fallback={<span>Expression…</span>}>
+          {(source) => <code class="kui-smart-chip__source">{source()}</code>}
+        </Show>
+      </button>
+
+      {/* Clearing is its own control, never a second meaning for clicking the chip. The chip opens
+          the editor; a chip that sometimes removed the filter instead would be a control whose
+          effect depends on state the operator cannot see. */}
+      <Show when={applied() !== undefined && props.slot.onClear !== undefined}>
+        <button
+          type="button"
+          class="kui-smart-chip__clear kui-focusable"
+          aria-label="Stop filtering by this expression"
+          title="Stop filtering by this expression"
+          onClick={() => props.slot.onClear?.()}
+        >
+          <Icon name="close" size="12px" />
+        </button>
+      </Show>
     </div>
   );
 }

@@ -284,3 +284,109 @@ export async function updateTopicConfig(
     },
   });
 }
+
+/**
+ * What raising a topic's partition count would do.
+ *
+ * ## The one field the schema does not have
+ *
+ * `added` is in every response a running gateway produced and in none of the OpenAPI document's
+ * `PartitionPlanDto`. It is `target - current`, so it is derivable and this mapping derives it
+ * rather than reading it — a field that is not in the schema is a field the generated types do not
+ * carry, and reaching for it would be a cast today and an `undefined` the day the server drops it.
+ *
+ * ## Why the plan is worth having for an operation that destroys nothing
+ *
+ * Adding partitions deletes no record. It is still planned, and the token still matters, for a
+ * different reason from purge's: the server re-reads the current count immediately before the
+ * write, so a token that says "grow to twelve" cannot be applied to a topic somebody else has
+ * already grown to sixteen. Without that, two operators each adding six partitions to a
+ * six-partition topic would leave it with eighteen and neither of them would know.
+ *
+ * And the warning the plan carries is the whole reason a confirmation exists here at all: Kafka
+ * routes a keyed record by `hash(key) % partitions`, so raising the count sends most keys to a
+ * different partition from the records already stored under them. Per-key ordering breaks across
+ * the change, and there is no way back — Kafka cannot remove a partition.
+ */
+export interface PartitionPlan {
+  readonly topic: string;
+  readonly current: number;
+  readonly target: number;
+  /** `target - current`. Derived here; see the note above. */
+  readonly added: number;
+  readonly warnings: readonly PlanWarning[];
+  /** Absent when the server computed a plan it will not let this caller apply. See {@link PurgePlan}. */
+  readonly token: string | null;
+  readonly expiresAt: string | null;
+}
+
+function toPartitionPlan(raw: {
+  readonly topic: string;
+  readonly current: number;
+  readonly target: number;
+  readonly warnings?: readonly { readonly code?: string; readonly message?: string }[];
+  readonly token?: string;
+  readonly expiresAt?: string;
+}): PartitionPlan {
+  return {
+    topic: raw.topic,
+    current: raw.current,
+    target: raw.target,
+    added: raw.target - raw.current,
+    warnings: warningsOf(raw.warnings),
+    token: raw.token ?? null,
+    expiresAt: raw.expiresAt ?? null,
+  };
+}
+
+/**
+ * Asks what growing this topic to `partitions` would do. Changes nothing.
+ *
+ * A target that is not **greater** than the current count is refused here, by the server, with a
+ * `KUI-VALIDATION` envelope naming the count the topic already has — rather than by the broker one
+ * screen later. That refusal is the honest answer to "can I shrink this topic", and the dialog
+ * shows the server's sentence rather than composing its own, because the server knows the count.
+ */
+export async function planPartitionIncrease(
+  api: KuiApiClient,
+  clusterId: string,
+  topicName: string,
+  partitions: number,
+): Promise<ApiResult<PartitionPlan>> {
+  const answer = await api.post(
+    "/api/v1/clusters/{clusterId}/topics/{topicName}/partitions/plan",
+    {
+      params: { path: { clusterId, topicName } },
+      body: { partitions },
+    },
+  );
+  if (!answer.ok) return answer;
+  return { ok: true, value: toPartitionPlan(answer.value) };
+}
+
+/**
+ * Grows the topic to the count the plan named.
+ *
+ * The answer repeats the plan that was applied, with `token` and `expiresAt` set to `null` — the
+ * agreement has been spent. That is checked against a real gateway rather than assumed, because a
+ * screen that read the returned `token` as "still valid" would offer a second confirmation of a
+ * change that has already happened.
+ *
+ * Applying a token twice is refused with the same validation envelope a shrink gets: by the time
+ * the second attempt arrives the topic already has the target count, so "it can only be increased"
+ * is both true and, read cold, confusing. Nothing here rewrites it — the screen re-plans instead,
+ * from a fresh reading of the count.
+ */
+export async function increasePartitions(
+  api: KuiApiClient,
+  clusterId: string,
+  topicName: string,
+  token: string,
+): Promise<ApiResult<PartitionPlan>> {
+  const answer = await api.post("/api/v1/clusters/{clusterId}/topics/{topicName}/partitions", {
+    params: { path: { clusterId, topicName } },
+    body: { token },
+  });
+  if (!answer.ok) return answer;
+  return { ok: true, value: toPartitionPlan(answer.value) };
+}

@@ -1,0 +1,10 @@
+{
+    "compatible": false,
+    "messages": [
+        "{errorType:'TYPE_MISMATCH', description:'The type (path '/fields/3/type') of a field in the new schema does not match with the old schema', additionalInfo:'reader type: STRING not compatible with writer type: DOUBLE'}",
+        "{errorType:'READER_FIELD_MISSING_DEFAULT_VALUE', description:'The field 'channel' at path '/fields/6' in the new schema has no default value and is missing in the old schema', additionalInfo:'channel'}",
+        "{oldSchemaVersion: 2}",
+        "{oldSchema: '{\"type\":\"record\",\"name\":\"Order\",\"namespace\":\"kui.demo.avro\",\"doc\":\"One order, written in Avro binary with a Confluent Schema Registry header.\",\"fields\":[{\"name\":\"orderId\",\"type\":\"string\"},{\"name\":\"customerId\",\"type\":\"string\"},{\"name\":\"currency\",\"type\":\"string\",\"doc\":\"ISO 4217, three letters\"},{\"name\":\"total\",\"type\":\"double\"},{\"name\":\"status\",\"type\":{\"type\":\"enum\",\"name\":\"Status\",\"symbols\":[\"PLACED\",\"PAID\",\"SHIPPED\",\"CANCELLED\"]}},{\"name\":\"note\",\"type\":[\"null\",\"string\"],\"default\":null}]}'}",
+        "{validateFields: 'false', compatibility: 'BACKWARD'}"
+    ]
+}

@@ -238,3 +238,149 @@ export async function fetchTopicOverview(
     partitions: (detail.partitions ?? []).map(toPartition),
   }));
 }
+
+/**
+ * Every partition of one topic, from the endpoint that answers with all of them.
+ *
+ * ## Why this exists beside the overview, which also carries partitions
+ *
+ * `fetchTopicOverview` reads `/overview`, whose topic section holds a partition list that the
+ * gateway **stops at 500** — and the envelope's `partitionsTruncated` flag is the only thing that
+ * says so. A topic with 1,024 partitions therefore renders an overview whose partition table is
+ * missing more than half its rows, with the totals above it counted from all of them. That is a
+ * screen an operator reads a wrong conclusion off, so the Partitions tab reads this endpoint
+ * instead, which returns the whole table.
+ *
+ * The payload is the same `PartitionDto` shape the overview nests under `topic.data.partitions`,
+ * so it goes through the same {@link toPartition}: one mapping, one place for a renamed field to
+ * break, and no chance of the two tabs disagreeing about what `inSync` means.
+ */
+export async function fetchPartitions(
+  api: KuiApiClient,
+  clusterId: string,
+  topicName: string,
+): Promise<Fetched<readonly PartitionRow[]>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}/topics/{topicName}/partitions", {
+    params: { path: { clusterId, topicName } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+
+  // Sectioned (ADR-039), like every read in this file: a cluster that cannot describe the
+  // partitions answers `unavailable` with a reason rather than failing the request, and the tab
+  // draws that instead of an empty table. An empty table would say "this topic has no partitions",
+  // which no Kafka topic ever is.
+  const section = decodeSection<readonly PartitionPayload[]>(answer.value.partitions);
+  return fromSection(section, (partitions) => partitions.map(toPartition));
+}
+
+/**
+ * One consumer group that reads this topic, with its lag **on this topic**.
+ *
+ * `topicLag` is not `group.totalLag`, and the difference is the reason this row exists: a group
+ * that reads four topics carries the lag of all four in its total, so the consumer-group list's
+ * figure answers "is this group behind?" while this one answers "is this group behind *here*?".
+ * Those are different questions and the topic page is only ever asking the second.
+ */
+export interface TopicConsumerRow {
+  readonly groupId: string;
+  /** Kafka's own word: `STABLE`, `EMPTY`, `DEAD`, `PREPARING_REBALANCE`, … */
+  readonly state: string;
+  readonly members: number;
+  /** Lag on this topic alone. `null` when it could not be computed — never `0`. */
+  readonly topicLag: number | null;
+  /** How many of this topic's partitions the group holds a committed offset for. */
+  readonly partitions: number;
+  /** The group has offsets on this topic but no live member reading it. The server decides this. */
+  readonly dormant: boolean;
+  /** The group's lag across every topic it reads. `null` when not computed. */
+  readonly totalLag: number | null;
+  /** How many topics the group reads in total, which is what makes `totalLag` readable. */
+  readonly topics: number;
+}
+
+interface TopicConsumerPayload {
+  readonly group?: {
+    readonly groupId?: string;
+    readonly state?: string;
+    readonly members?: number;
+    readonly topics?: number;
+    readonly totalLag?: number | null;
+  } | null;
+  readonly topicLag?: number | null;
+  readonly partitions?: number;
+  readonly dormant?: boolean;
+}
+
+/**
+ * The groups reading this topic.
+ *
+ * Unlike every other read here this response is **not** an ADR-039 section — the gateway answers a
+ * bare `{ "rows": [...] }`, verified against a running gateway and recorded in
+ * `recorded/topic-consumers.json`. So there is no `stale`, no `unavailable` and no `forbidden`
+ * status to read: the consumer service being down is an error envelope, which `apiFailure` turns
+ * into `failed` with the code on it. Writing a `decodeSection` here would have decoded the object
+ * `{rows: […]}` as a section with no `status`, and every row would have vanished silently.
+ *
+ * The overview carries the same rows in a `consumerGroups` section, and this tab deliberately does
+ * not use them: the overview is fetched once when the page opens, and lag is the one figure here
+ * that moves while somebody is looking at it. Reading it when the tab is opened costs one request
+ * and is the difference between a lag figure and a lag figure from four minutes ago.
+ */
+export async function fetchTopicConsumers(
+  api: KuiApiClient,
+  clusterId: string,
+  topicName: string,
+): Promise<Fetched<readonly TopicConsumerRow[]>> {
+  // `{topic}`, not `{topicName}`: this endpoint belongs to the consumer service and spells its own
+  // path parameter differently from every topic-service endpoint in this file. The generated types
+  // enforce it, which is the only reason it is not a run-time 404 waiting to happen.
+  const answer = await api.get("/api/v1/clusters/{clusterId}/topics/{topic}/consumer-groups", {
+    params: { path: { clusterId, topic: topicName } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+
+  const rows = (answer.value.rows ?? []) as readonly TopicConsumerPayload[];
+  return { kind: "ready", value: rows.map(toTopicConsumer) };
+}
+
+function toTopicConsumer(payload: TopicConsumerPayload): TopicConsumerRow {
+  const group = payload.group ?? {};
+  return {
+    // A row whose group has no id is a row nothing can link to. It is kept rather than dropped —
+    // dropping it would quietly shorten a list somebody counts — and named so it reads as broken.
+    groupId: group.groupId ?? "",
+    state: group.state ?? "UNKNOWN",
+    members: typeof group.members === "number" ? group.members : 0,
+    // `null`, not `0`: a lag that could not be computed is not a group that has caught up, and
+    // those two facts must never render alike.
+    topicLag: typeof payload.topicLag === "number" ? payload.topicLag : null,
+    partitions: typeof payload.partitions === "number" ? payload.partitions : 0,
+    dormant: payload.dormant === true,
+    totalLag: typeof group.totalLag === "number" ? group.totalLag : null,
+    topics: typeof group.topics === "number" ? group.topics : 0,
+  };
+}
+
+/*
+ * ## `GET …/topics/{topicName}` has no call site, and should not get one
+ *
+ * Curled side by side against the quickstart gateway on 2026-09-06:
+ *
+ *   GET …/topics/orders.v1           -> { topic: <section>, partitionsTruncated: false }
+ *   GET …/topics/orders.v1/overview  -> { topic: <section>, consumerGroups, connectors, acls,
+ *                                         schemas, generatedAt }
+ *
+ * The `topic` section is byte-for-byte the same document in both — the same `row`, the same
+ * `partitions`, the same `cleanupPolicy` and `segmentCount`. The overview adds four more sections
+ * and the timestamp; the detail endpoint adds exactly one thing the overview does not have, the
+ * envelope flag `partitionsTruncated`, which says whether the 500-partition cap was hit.
+ *
+ * So the overview is a superset in every field the topic page draws, and adopting the detail
+ * endpoint would add a second request for one boolean. That boolean is worth naming rather than
+ * shrugging at, because it is a real gap: on a topic with more than 500 partitions the overview's
+ * table is short and says nothing about it. The Partitions tab is the answer to that — it reads
+ * {@link fetchPartitions}, which is not capped — rather than a second call for a flag whose only
+ * possible use would be to tell the operator to go and look at that tab.
+ *
+ * Leave `GET …/topics/{topicName}` unused.
+ */

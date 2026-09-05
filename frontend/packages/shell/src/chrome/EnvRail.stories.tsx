@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { createSignal } from "solid-js";
+import { AccountMenu } from "./AccountMenu.jsx";
 import { EnvRail, type RailDestination } from "./EnvRail.jsx";
 import { CLUSTERS } from "./fixtures.js";
 import type { ClusterSummary } from "./types.js";
@@ -177,6 +178,51 @@ export const AnAwkwardName: Story = {
         ]}
         currentId="1"
         accountName="Olena Petrenko"
+      />
+    </OnThePage>
+  ),
+};
+
+/**
+ * The account panel open at the rail's foot.
+ *
+ * Two things to judge here, and neither is visible with the panel shut. It floats out to the *right*
+ * of the 48px rail rather than being squeezed into it, and it opens *upward* from the foot — a panel
+ * that opened downward from the bottom of the window would have half of itself off the screen.
+ */
+export const AccountOpen: Story = {
+  render: () => (
+    <OnThePage>
+      <EnvRail
+        environments={CLUSTERS}
+        currentId={CLUSTERS[0]?.id}
+        destinations={DESTINATIONS}
+        accountName="Olena Petrenko"
+        onOpenAccount={() => undefined}
+        accountOpen
+        accountPanel={
+          <AccountMenu name="olena.petrenko" authType="form" onSignOut={() => undefined} />
+        }
+      />
+    </OnThePage>
+  ),
+};
+
+/**
+ * A deployment with authentication disabled — the default, the quickstart and every demonstration.
+ *
+ * The avatar is a picture, not a button: there is an anonymous principal and no session that logging
+ * out could dispose of, so offering to end one would be a control that cannot work. Compare it with
+ * `AccountOpen` above; the difference is deliberate and is the whole rule.
+ */
+export const NoSessionToEnd: Story = {
+  render: () => (
+    <OnThePage>
+      <EnvRail
+        environments={CLUSTERS}
+        currentId={CLUSTERS[0]?.id}
+        destinations={DESTINATIONS}
+        accountName={undefined}
       />
     </OnThePage>
   ),

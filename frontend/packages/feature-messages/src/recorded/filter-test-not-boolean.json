@@ -1,0 +1,4 @@
+{
+    "matched": false,
+    "error": "the filter returned Long rather than true or false"
+}

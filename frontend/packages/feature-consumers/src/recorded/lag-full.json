@@ -1,0 +1,29 @@
+{
+    "changed": [
+        {
+            "groupId": "analytics-indexer",
+            "totalLag": 0,
+            "pace": null,
+            "state": "STABLE",
+            "members": 1
+        },
+        {
+            "groupId": "order-fulfilment",
+            "totalLag": 21,
+            "pace": null,
+            "state": "EMPTY",
+            "members": 0
+        },
+        {
+            "groupId": "payments-ledger-sync",
+            "totalLag": 0,
+            "pace": null,
+            "state": "EMPTY",
+            "members": 0
+        }
+    ],
+    "gone": [],
+    "token": "cXVpY2tzdGFydDox",
+    "nextPollMs": 30000,
+    "full": true
+}

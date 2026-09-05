@@ -36,6 +36,7 @@
  * the health colours, so "we have not asked" can never be read as "it is fine".
  */
 import { For, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { Avatar, Icon, Tooltip, type IconName } from "@kui/kernel";
 import type { ClusterHealth, ClusterSummary } from "./types.js";
 
@@ -65,7 +66,24 @@ export type EnvRailProps = {
   readonly currentDestinationId?: string | undefined;
   readonly onAdd?: (() => void) | undefined;
   readonly accountName?: string | undefined;
+  /**
+   * Absent means the avatar is a picture rather than a button.
+   *
+   * That is the honest rendering for a deployment with authentication disabled: there is an
+   * anonymous principal, there is nothing to open, and a control that opens an empty panel teaches
+   * the operator that the rail's controls do nothing.
+   */
   readonly onOpenAccount?: (() => void) | undefined;
+  /**
+   * What the avatar reveals, and whether it is revealed.
+   *
+   * The panel is passed in rather than built here for the same reason the drawer takes its groups:
+   * the rail knows nothing about sessions, so every state of it — signed in, signing out, a
+   * sign-out the gateway refused — is reachable from a story with no server. Openness is the
+   * caller's too, so that Escape and a click elsewhere can close it from outside this component.
+   */
+  readonly accountOpen?: boolean | undefined;
+  readonly accountPanel?: JSX.Element | undefined;
   /** Where the product mark links to. */
   readonly homeHref?: string | undefined;
 };
@@ -177,6 +195,11 @@ export function EnvRail(props: EnvRailProps) {
         {/* The kernel's Avatar owns the rule that an unknown identity is a neutral person glyph
             rather than guessed initials, and that rule has to live in exactly one place. */}
         <Avatar name={props.accountName} onClick={props.onOpenAccount} />
+        {/* Anchored to the avatar rather than portalled, so it stays with it when the window is
+            resized and so Tab moves from the avatar straight into it. */}
+        <Show when={props.accountOpen === true && props.accountPanel !== undefined}>
+          <div class="kui-rail__account-panel">{props.accountPanel}</div>
+        </Show>
       </div>
     </div>
   );

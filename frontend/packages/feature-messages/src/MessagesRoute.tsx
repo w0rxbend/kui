@@ -28,10 +28,15 @@
 import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useLocation, useParams } from "@solidjs/router";
-import { createMutation, useKui } from "@kui/kernel";
+import { createMutation, useKui, type KafkaRecord } from "@kui/kernel";
 import { Actions } from "@kui/api";
 import { MessagesTab } from "./MessagesTab.jsx";
 import { ProduceDrawer } from "./ProduceDrawer.jsx";
+import { SmartFilterDialog } from "./SmartFilterDialog.jsx";
+import { ResendDialog } from "./ResendDialog.jsx";
+import { registerFilter, testFilter, type RegisteredFilter } from "./filters.js";
+import { resend, type ResendDraft } from "./resend.js";
+import { toDto } from "./wire.js";
 import { TrackPage } from "./TrackPage.jsx";
 import { emptyQuery, track, type TrackQuery } from "./track.js";
 import { produce, type RecordDraft } from "./produce.js";
@@ -118,12 +123,63 @@ function BrowserScreen(props: {
 
   const [partitionCount] = createSignal(0);
   const [producing, setProducing] = createSignal(false);
+  const [editingFilter, setEditingFilter] = createSignal(false);
+  const [resending, setResending] = createSignal(false);
 
   const write = createMutation((draft: RecordDraft) =>
     produce(kui.api, props.clusterId, props.topicName, draft),
   );
 
+  /* Registering and previewing are two mutations rather than one, because their states are shown in
+   * two different places in the dialog and a shared one would make a failed preview blank out the
+   * apply button's error, or the other way round. */
+  const compile = createMutation((source: string) =>
+    registerFilter(kui.api, props.clusterId, source),
+  );
+  const preview = createMutation((source: string, sample: KafkaRecord) =>
+    testFilter(kui.api, props.clusterId, source, toDto(sample)),
+  );
+  const copy = createMutation((draft: ResendDraft) =>
+    resend(kui.api, props.clusterId, props.topicName, draft),
+  );
+
+  /**
+   * The one writer of the address.
+   *
+   * `replaceState` rather than `pushState`: adjusting a filter is refining one view, not visiting a
+   * new page, and pushing every keystroke would make the Back button walk backwards through a
+   * sentence somebody typed.
+   */
+  function writeQuery(next: BrowseQuery): void {
+    const search = queryString(next);
+    const url = `${location.pathname}${search === "" ? "" : `?${search}`}`;
+    window.history.replaceState(null, "", url);
+  }
+
+  /**
+   * Put a compiled filter on the browse, or take it off.
+   *
+   * The id and the source move **together, always** — both set or both cleared. That pairing is the
+   * whole reason the browse takes two parameters instead of one: a replica which has never seen this
+   * id compiles the source beside it rather than refusing a filter that was registered a second ago
+   * on a sibling. An address carrying only the id would work until it was opened on the wrong
+   * replica, which is the worst possible time to find out.
+   */
+  function applyFilter(filter: RegisteredFilter | undefined): void {
+    const next = query();
+    writeQuery(
+      filter === undefined
+        ? { ...next, filterId: undefined, filterSource: undefined }
+        : { ...next, filterId: filter.id, filterSource: filter.source },
+    );
+  }
+
   const mayProduce = () => kui.permits(Actions.TopicMessagesProduce);
+  /* A resend reads this topic and writes another. The gateway checks both, and the second is a
+   * permission on a topic that has not been named yet — so this only gates on the half that can be
+   * checked here, and the server refuses the other half with the destination in the message. */
+  const mayResend = () =>
+    kui.permits(Actions.TopicMessagesRead) && kui.permits(Actions.TopicMessagesProduce);
 
   return (
     <>
@@ -135,14 +191,7 @@ function BrowserScreen(props: {
          alongside the stream is the next step. */
         partitionCount={partitionCount()}
         query={query()}
-        onQueryChange={(next) => {
-          // The one writer of the address. `replaceState` rather than `pushState`: adjusting a filter
-          // is refining one view, not visiting a new page, and pushing every keystroke would make the
-          // Back button walk backwards through a sentence somebody typed.
-          const search = queryString(next);
-          const url = `${location.pathname}${search === "" ? "" : `?${search}`}`;
-          window.history.replaceState(null, "", url);
-        }}
+        onQueryChange={writeQuery}
         session={session}
         mayProduce={mayProduce()}
         produceDisabledReason={
@@ -154,6 +203,80 @@ function BrowserScreen(props: {
           write.reset();
           setProducing(true);
         }}
+        mayResend={mayResend()}
+        resendDisabledReason={
+          mayResend()
+            ? undefined
+            : "You do not have permission to read this topic and publish into another one."
+        }
+        onResend={() => {
+          // Same rule as produce: a tally from a previous copy reappearing over a fresh form would
+          // read as this copy's receipt, and the figures are the whole content of that panel.
+          copy.reset();
+          setResending(true);
+        }}
+        smartFilter={{
+          ...(query().filterSource === undefined ? {} : { source: query().filterSource }),
+          onOpen: () => {
+            compile.reset();
+            preview.reset();
+            setEditingFilter(true);
+          },
+          ...(query().filterId === undefined
+            ? {}
+            : {
+                onClear: () => {
+                  session.stop();
+                  applyFilter(undefined);
+                },
+              }),
+        }}
+      />
+
+      <SmartFilterDialog
+        open={editingFilter()}
+        onClose={() => setEditingFilter(false)}
+        topic={props.topicName}
+        {...(query().filterSource === undefined ? {} : { source: query().filterSource })}
+        /* The records on screen are what a preview may be tried against. A filter is written about
+           a shape of document, and a synthetic record would answer a question about a document this
+           topic does not contain. */
+        samples={session.rows()}
+        testState={preview.state()}
+        onTest={(source, sample) => void preview.run(source, sample)}
+        applyState={compile.state()}
+        onApply={(source) => {
+          void compile.run(source).then((state) => {
+            /* Only a filter the server compiled reaches the browse — and the id travels with the
+               source it was minted from, because a replica that has never seen this id compiles the
+               source rather than refusing a filter registered a second ago on its neighbour. */
+            if (state.kind !== "done") return;
+            session.stop();
+            applyFilter(state.value);
+            setEditingFilter(false);
+          });
+        }}
+        {...(query().filterId === undefined
+          ? {}
+          : {
+              onClear: () => {
+                session.stop();
+                applyFilter(undefined);
+                setEditingFilter(false);
+              },
+            })}
+      />
+
+      <ResendDialog
+        open={resending()}
+        onClose={() => setResending(false)}
+        topic={props.topicName}
+        partitionCount={partitionCount()}
+        state={copy.state()}
+        /* Stays open on success, like the produce drawer and for a stronger reason: the answer is
+           two figures, and a copy that read and wrote nothing is a 200 whose whole meaning is in
+           them. Closing on success would show the operator nothing at all. */
+        onSend={(draft) => void copy.run(draft)}
       />
 
       <ProduceDrawer

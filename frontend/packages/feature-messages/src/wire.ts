@@ -167,3 +167,103 @@ function schemaOf(
   if (subject === undefined || subject === "" || !Number.isSafeInteger(version)) return {};
   return { schema: { subject, version } };
 }
+
+/**
+ * A record on the screen, back as the document the filter preview has to be given.
+ *
+ * ## This is not an inverse of `toRecord`, and must not be used as one
+ *
+ * It cannot be. `toRecord` throws information away on purpose — the serde names, the property bags,
+ * the byte sizes of a payload it decided not to preview — and none of that can be recovered from a
+ * `KafkaRecord`. What comes out of here is a document that is *faithful in the fields a filter can
+ * read* and reconstructed in the ones it cannot.
+ *
+ * That is enough, and the reason it is enough is worth stating: the CEL environment gives an
+ * expression exactly eight fields — `partition`, `offset`, `timestampMs`, `keyAsText`,
+ * `valueAsText`, `headers`, and `key`/`value` parsed from those last two texts. Every one of them
+ * survives this trip unchanged. The sizes and serde names travel because the DTO's decoder requires
+ * them, not because anything reads them, and they are reconstructed rather than invented — the size
+ * is the byte length of the text that is actually being sent.
+ *
+ * ## The two distinctions that had to survive
+ *
+ * A **null key is not an empty key**: the first is `kind: "null"`, and on a compacted topic it is
+ * how the deletion itself is recorded. A **tombstone is not an empty value**, for the same reason.
+ * Collapsing either would make the preview answer a question about a record that is not the one the
+ * operator pointed at — a filter checking `record.keyAsText == ""` would come back matched for a
+ * record whose key is genuinely absent.
+ *
+ * A value the browser declined to preview (`large`) or could not decode (`undecodable`) has no text
+ * to give, and the preview is honest about that by sending an empty string with the *real* declared
+ * size where one is known. A filter tried against such a record answers about the record as the
+ * browser has it, which is the only thing anybody here can promise.
+ */
+export function toDto(record: KafkaRecord): MessageDto {
+  const value = valueTextOf(record.value);
+  const key = record.key;
+
+  return {
+    partition: record.partition,
+    /* The offset goes back to a number because the DTO says `int64`. It arrived through the same
+     * seam as a double, so this loses nothing that was not already lost — see `toRecord`. */
+    offset: Number(record.offset),
+    timestamp: record.timestamp,
+    // Required by the decoder, and absent from `KafkaRecord` whenever the server sent a third value
+    // (`NoTimestampType`). The producer's clock is the reading that DTO field defaults to.
+    timestampType: record.timestampType ?? "CreateTime",
+    key:
+      key === null
+        ? { kind: "null", text: "", serde: "String", properties: {} }
+        : { kind: "string", text: key, serde: "String", properties: {} },
+    value: { kind: value.kind, text: value.text, serde: "String", properties: {} },
+    /* A header whose value is `null` becomes the empty string, and there is nowhere better for it
+     * to go: `MessageDto.headers` is a `map(string, string)` on the wire, so the distinction between
+     * "present with no value" and "present and empty" does not exist in the document a filter is
+     * evaluated against. It is a real loss and it is the server's, not this function's — a browse
+     * hands the filter the same flattened map. Sending the empty string is therefore the *faithful*
+     * choice: it is what the filter would see if this record came from a browse. */
+    headers: Object.fromEntries(
+      record.headers.map((header) => [header.name, header.value ?? ""]),
+    ),
+    keySize: key === null ? 0 : byteLength(key),
+    valueSize: value.bytes ?? byteLength(value.text),
+    headersSize: record.headers.reduce(
+      (total, header) => total + byteLength(header.name) + byteLength(header.value ?? ""),
+      0,
+    ),
+    /* Empty, always. The failures that reached the row are already reflected in the value's kind,
+     * and re-declaring them here would make the service take the fallback path a second time. */
+    deserializeErrors: [],
+  };
+}
+
+/**
+ * The value as the filter will see it, and the size to declare for it.
+ *
+ * A tombstone is `null` and not `""` — the whole point of the kind. A payload that was too large to
+ * preview or failed to decode has no text on this side, so it is sent as an empty string with its
+ * true size, which is the honest statement of "the browser is holding no text for this".
+ */
+function valueTextOf(value: RecordValue): {
+  readonly kind: string;
+  readonly text: string;
+  readonly bytes?: number;
+} {
+  switch (value.kind) {
+    case "json":
+      return { kind: PAYLOAD_KIND.json, text: value.text };
+    case "text":
+      return { kind: PAYLOAD_KIND.text, text: value.text };
+    case "tombstone":
+      return { kind: PAYLOAD_KIND.absent, text: "" };
+    case "large":
+      return { kind: PAYLOAD_KIND.text, text: "", bytes: value.bytes };
+    case "undecodable":
+      return { kind: PAYLOAD_KIND.binary, text: value.hex ?? "" };
+  }
+}
+
+/** Bytes, not characters: a size in a DTO is what the record weighs, and `länge` is six not five. */
+function byteLength(text: string): number {
+  return new TextEncoder().encode(text).length;
+}

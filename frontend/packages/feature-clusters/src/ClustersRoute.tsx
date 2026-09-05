@@ -12,7 +12,7 @@
  *
  *   /clusters                          the cluster list
  *   /clusters/:id/brokers              that cluster's brokers
- *   /clusters/:id/brokers/:brokerId    one broker  (not yet built here — see below)
+ *   /clusters/:id/brokers/:brokerId    one broker: its disks and its settings
  *
  * ## What it does when nothing has arrived
  *
@@ -24,15 +24,27 @@
  */
 import { Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { createMutation, useKui, valueOf, type Fetched } from "@kui/kernel";
+import {
+  Button,
+  Card,
+  EmptyState,
+  PageHeader,
+  createMutation,
+  useKui,
+  valueOf,
+  type Fetched,
+} from "@kui/kernel";
 import { Actions } from "@kui/api";
-import { useLocation, useParams } from "@solidjs/router";
+import { useLocation, useNavigate, useParams } from "@solidjs/router";
 import { ClusterList } from "./ClusterList.jsx";
 import { BrokerList } from "./BrokerList.jsx";
+import { BrokerDetail, type BrokerTabKey, type Loaded } from "./BrokerDetail.jsx";
 import { ClusterAdmin, type Connectivity } from "./ClusterAdmin.jsx";
 import { EMPTY_CLUSTER_FORM, formFor, toRequest, type ClusterForm } from "./clusterForm.js";
 import {
   deleteCluster,
+  fetchBrokerConfigs,
+  fetchBrokerLogDirs,
   fetchBrokers,
   fetchClusters,
   fetchManagedClusters,
@@ -40,10 +52,10 @@ import {
   testConnection,
   type ManagedClusterRow,
 } from "./data.js";
-import type { Broker, ClusterSummary } from "./model.js";
+import type { Broker, ClusterSummary, ConfigEntry, LogDir } from "./model.js";
 
 export default function Clusters(): JSX.Element {
-  const params = useParams<{ readonly clusterId?: string }>();
+  const params = useParams<{ readonly clusterId?: string; readonly brokerId?: string }>();
   const location = useLocation();
 
   /*
@@ -57,7 +69,11 @@ export default function Clusters(): JSX.Element {
   return (
     <Show when={!managing()} fallback={<ManageScreen />}>
       <Show when={params.clusterId} fallback={<ClustersScreen />}>
-        {(clusterId) => <BrokersScreen clusterId={clusterId()} />}
+        {(clusterId) => (
+          <Show when={params.brokerId} fallback={<BrokersScreen clusterId={clusterId()} />}>
+            {(brokerId) => <BrokerScreen clusterId={clusterId()} brokerId={brokerId()} />}
+          </Show>
+        )}
       </Show>
     </Show>
   );
@@ -277,6 +293,209 @@ function BrokersScreen(props: { readonly clusterId: string }): JSX.Element {
       hrefFor={(brokerId) => kui.paths.broker(props.clusterId, brokerId)}
     />
   );
+}
+
+/**
+ * One broker: the page the broker list has been linking to since it was written.
+ *
+ * ## Three requests, three fates
+ *
+ * The broker's identity comes from the cluster's broker *list* — there is no per-broker endpoint,
+ * and the row in that list is where the host, the port, the rack and the controller flag live. Its
+ * disks and its settings come from two more endpoints, each of which fails on its own and neither of
+ * which may blank the other; `BrokerDetail` already draws that, so all this does is keep the three
+ * states apart on the way in.
+ *
+ * ## The settings are not fetched until the tab is opened
+ *
+ * `describeConfigs` on an ordinary broker is three hundred and forty rows and sixty kilobytes.
+ * Somebody who came to see which disk is filling up should not pay for it, so the request is made
+ * when the configuration tab is selected and not before. Coming back to it later fetches again
+ * rather than holding the last answer, which is the right way round for a page whose whole purpose
+ * is to show what a broker is configured with *now*.
+ *
+ * ## The tab is in the address, not in a signal
+ *
+ * `?tab=configuration`, so that the tab somebody is looking at is the tab in the link they send, and
+ * so that Back leaves the tab where Back should leave it. The same shape the topic page uses.
+ */
+function BrokerScreen(props: {
+  readonly clusterId: string;
+  readonly brokerId: string;
+}): JSX.Element {
+  const kui = useKui();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  /*
+   * Kafka node ids are integers and the endpoints take them as integers. A path segment that is not
+   * one — a typed URL, an old bookmark — becomes `NaN`, which matches no broker in the list, and the
+   * page below says so instead of asking the gateway about a broker that cannot exist.
+   */
+  const brokerId = (): number => Number(props.brokerId);
+
+  const tab = (): BrokerTabKey =>
+    new URLSearchParams(location.search).get("tab") === "configuration"
+      ? "configuration"
+      : "logdirs";
+
+  const brokers = useFetch<readonly Broker[]>(
+    () => fetchBrokers(kui.api, props.clusterId),
+    () => props.clusterId,
+  );
+
+  const logDirs = useFetch<readonly LogDir[]>(
+    () => fetchBrokerLogDirs(kui.api, props.clusterId, brokerId()),
+    () => `${props.clusterId}/${props.brokerId}`,
+  );
+
+  const configs = useFetch<readonly ConfigEntry[]>(
+    () =>
+      tab() === "configuration"
+        ? fetchBrokerConfigs(kui.api, props.clusterId, brokerId())
+        : // Not "there is nothing to show": nothing has been asked for yet, and the tab is not on
+          // screen to show it. The panel this feeds is only built once the tab is selected.
+          Promise.resolve<Fetched<readonly ConfigEntry[]>>({ kind: "loading" }),
+    () => `${props.clusterId}/${props.brokerId}/${tab()}`,
+  );
+
+  createEffect(
+    () => brokers.state(),
+    (current) => {
+      if (current.kind !== "loading") kui.report("feature", current.kind === "failed");
+    },
+  );
+
+  const broker = () => valueOf(brokers.state(), []).find((row) => row.id === brokerId());
+
+  return (
+    <Show
+      when={broker()}
+      fallback={
+        <BrokerNotShown
+          clusterId={props.clusterId}
+          brokerId={props.brokerId}
+          state={brokers.state()}
+          onRetry={brokers.reload}
+          brokersHref={kui.paths.brokers(props.clusterId)}
+        />
+      }
+    >
+      {(found) => (
+        <BrokerDetail
+          broker={found()}
+          clusterName={props.clusterId}
+          clustersHref={kui.paths.clusters()}
+          brokersHref={kui.paths.brokers(props.clusterId)}
+          logDirs={loadedOf(logDirs.state(), logDirs.reload)}
+          configuration={loadedOf(configs.state(), configs.reload)}
+          tab={tab()}
+          onTabChange={(next) => {
+            const here = kui.paths.broker(props.clusterId, found().id);
+            // The default tab carries no query at all, so the canonical address of this page is the
+            // bare one and two links to the same view cannot be spelled two ways.
+            navigate(next === "logdirs" ? here : `${here}?tab=${next}`);
+          }}
+        />
+      )}
+    </Show>
+  );
+}
+
+/**
+ * What stands in for the page when there is no broker to draw.
+ *
+ * Three different situations, and they must not look alike: the list has not answered yet, the list
+ * could not be read, and the list was read and this broker is not in it. The third is the one worth
+ * the care — a broker id that no longer exists is what a bookmark from before a decommission looks
+ * like, and "the cluster service is not answering" would send somebody to investigate an outage that
+ * is not happening.
+ */
+function BrokerNotShown(props: {
+  readonly clusterId: string;
+  readonly brokerId: string;
+  readonly state: Fetched<readonly Broker[]>;
+  readonly onRetry: () => void;
+  readonly brokersHref: string;
+}): JSX.Element {
+  const failure = () => failureOf(props.state, props.onRetry);
+
+  return (
+    <section class="kui-brk-page" data-testid="broker-not-shown">
+      <PageHeader
+        title={`Broker ${props.brokerId}`}
+        crumbs={[
+          { label: props.clusterId },
+          { label: "Brokers", href: props.brokersHref },
+          { label: `Broker ${props.brokerId}` },
+        ]}
+        testId="broker-not-shown-head"
+      />
+      <Card
+        title="Broker"
+        state={props.state.kind === "loading" ? "loading" : failure() === undefined ? "ready" : "unavailable"}
+        message={failure()?.message}
+        description={
+          failure() === undefined
+            ? undefined
+            : `KUI reads a broker's identity from ${props.clusterId}'s broker list, and that list could not be read.`
+        }
+        code={failure()?.code}
+        stateAction={
+          failure() === undefined ? undefined : (
+            <Button variant="secondary" icon="refresh" onClick={props.onRetry}>
+              Retry
+            </Button>
+          )
+        }
+        bodyMinHeight="12rem"
+        testId="broker-not-shown-card"
+      >
+        <EmptyState
+          kind="empty"
+          title={`${props.clusterId} has no broker ${props.brokerId}.`}
+          description="The cluster answered, and no broker in it reports that node id. It may have been decommissioned since this link was made."
+          /* An anchor rather than a `Button`, because it goes somewhere: a real link is what makes
+             middle-click, "open in new tab" and the status bar's preview work, and `Button` takes no
+             href precisely so that this decision has to be made deliberately. */
+          action={
+            <a class="kui-btn kui-btn--secondary kui-btn--md" href={props.brokersHref}>
+              <span class="kui-btn__label">All brokers</span>
+            </a>
+          }
+        />
+      </Card>
+    </section>
+  );
+}
+
+/**
+ * A screen state as one tab of {@link BrokerDetail} takes it.
+ *
+ * `stale` keeps its value and is shown: data that is real and out of date is still the best answer
+ * anybody has, and hiding it would replace a figure that was true a minute ago with a dash meaning
+ * "not known". `not-configured` is drawn as unavailable with its own sentence rather than being
+ * merged into a failure, for the same reason the cluster screens keep them apart.
+ */
+function loadedOf<T>(state: Fetched<T>, onRetry: () => void): Loaded<T> {
+  switch (state.kind) {
+    case "ready":
+    case "stale":
+      return { kind: "ready", value: state.value };
+    case "loading":
+      return { kind: "loading" };
+    case "forbidden":
+      return { kind: "forbidden", message: "You may not read this.", code: "FORBIDDEN" };
+    case "not-configured":
+      return {
+        kind: "unavailable",
+        message: "This deployment has not configured it.",
+        code: "NOT_CONFIGURED",
+        onRetry,
+      };
+    case "failed":
+      return { kind: "unavailable", message: state.message, code: state.code, onRetry };
+  }
 }
 
 /**

@@ -3,8 +3,12 @@ import type { KuiApiClient } from "@kui/api";
 import topicsDocument from "./recorded/topics.json" with { type: "json" };
 import overviewDocument from "./recorded/overview.json" with { type: "json" };
 import configDocument from "./recorded/config.json" with { type: "json" };
+import partitionsDocument from "./recorded/partitions.json" with { type: "json" };
+import consumersDocument from "./recorded/topic-consumers.json" with { type: "json" };
+import planDocument from "./recorded/partition-plan.json" with { type: "json" };
 import { fetchTopicConfig, sourceOf } from "./config.js";
-import { fetchTopicOverview, fetchTopics } from "./data.js";
+import { fetchPartitions, fetchTopicConsumers, fetchTopicOverview, fetchTopics } from "./data.js";
+import { planPartitionIncrease } from "./write.js";
 
 /**
  * The mapping, against documents a real gateway produced.
@@ -161,5 +165,214 @@ describe("reading a configuration entry's source", () => {
     expect(sourceOf("something-new")).toBe("inherited");
     expect(sourceOf(null)).toBe("inherited");
     expect(sourceOf(undefined)).toBe("inherited");
+  });
+});
+
+describe("the recorded partition table", () => {
+  it("maps every partition the endpoint returns", async () => {
+    const answer = await fetchPartitions(client(partitionsDocument), "quickstart", "orders.v1");
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+
+    // Six, and in the order the server sent them. The tab does not sort: partition order *is*
+    // partition id, and re-sorting a table whose first column is already the natural key gains
+    // nothing and loses the ability to say "look at row 4".
+    expect(answer.value.map((partition) => partition.partition)).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it("reads the same partition shape the overview nests, through the same mapping", async () => {
+    /*
+     * The two endpoints answer with the same `PartitionDto`, so both go through `toPartition`. What
+     * is compared is the *shape* and not the values: the two documents were captured minutes apart
+     * from a quickstart whose seeded consumer keeps producing, so their offsets differ by however
+     * long sat between the two curls. Asserting equal offsets would be asserting that nothing
+     * happened in the cluster, which is a property of the recording session and not of the mapping.
+     *
+     * The shape is the part that can break. If the standalone endpoint ever grows a different
+     * replica structure, every row here becomes a row of dashes and nothing else notices.
+     */
+    const fromTab = await fetchPartitions(client(partitionsDocument), "quickstart", "orders.v1");
+    const fromOverview = await fetchTopicOverview(
+      client(overviewDocument),
+      "quickstart",
+      "orders.v1",
+    );
+    if (fromTab.kind !== "ready" || fromOverview.kind !== "ready") throw new Error("expected ready");
+
+    expect(fromTab.value).toHaveLength(fromOverview.value.partitions.length);
+    const keysOf = (row: object): readonly string[] => Object.keys(row).sort();
+    expect(fromTab.value.map(keysOf)).toEqual(fromOverview.value.partitions.map(keysOf));
+    // And the derived halves agree, which is the pair a wrong mapping gets wrong first.
+    expect(fromTab.value.map((row) => row.replicas)).toEqual(
+      fromOverview.value.partitions.map((row) => row.replicas),
+    );
+    expect(fromTab.value.map((row) => row.inSync)).toEqual(
+      fromOverview.value.partitions.map((row) => row.inSync),
+    );
+  });
+
+  it("keeps a leader, its replicas and its in-sync list apart", async () => {
+    const answer = await fetchPartitions(client(partitionsDocument), "quickstart", "orders.v1");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+
+    const first = answer.value[0];
+    expect(first).toBeDefined();
+    if (first === undefined) return;
+
+    expect(first.leader).toBe(1);
+    // The wire sends replicas as `{broker, leader, inSync}` objects. Both lists here are broker
+    // ids, and `inSync` is derived from the flag rather than read from a second field, so the two
+    // cannot disagree about a replica.
+    expect(first.replicas).toEqual([1]);
+    expect(first.inSync).toEqual([1]);
+    // Nothing has been deleted by retention, so the window starts at zero — a fact, printed as `0`.
+    expect(first.earliestOffset).toBe(0);
+    expect(first.latestOffset).toBe(8);
+    expect(first.messageCount).toBe(8);
+    // Genuinely absent on a single-broker cluster with no metrics source. `null`, and it draws as a
+    // dash: a partition holding eight records does not occupy no disk.
+    expect(first.sizeBytes).toBeNull();
+  });
+
+  it("does not decode the whole table to nothing", async () => {
+    // The property stated separately, for the reason in this file's header: a mapping that produced
+    // six rows of `undefined` would satisfy every assertion that only checks for absence.
+    const answer = await fetchPartitions(client(partitionsDocument), "quickstart", "orders.v1");
+    if (answer.kind !== "ready") throw new Error("expected ready");
+    expect(answer.value.filter((partition) => partition.latestOffset !== null)).toHaveLength(6);
+    expect(answer.value.some((partition) => (partition.messageCount ?? 0) > 0)).toBe(true);
+  });
+
+  it("is an ADR-039 section, so an unavailable partition table is not an empty one", async () => {
+    /*
+     * The response is `{"partitions": {"status": "ok", "data": [...]}}` and not a bare array. A
+     * mapping that read `answer.value.partitions` as the array would find an object, map nothing,
+     * and render "this topic has no partitions" — a sentence that is never true of a Kafka topic.
+     */
+    /* `reason` is the code, as a *string*, and `message` is its sibling — not a nested object.
+       Getting that wrong here produced a section with the code `unknown`, which is what the decoder
+       falls back to and is exactly the silent degradation this suite exists to catch. */
+    const unavailable = {
+      partitions: {
+        status: "unavailable",
+        reason: "KUI-UPSTREAM-UNAVAILABLE",
+        message: "the cluster service did not answer",
+      },
+    };
+    const answer = await fetchPartitions(client(unavailable), "quickstart", "orders.v1");
+    expect(answer.kind).toBe("failed");
+    if (answer.kind !== "failed") return;
+    expect(answer.code).toBe("KUI-UPSTREAM-UNAVAILABLE");
+  });
+});
+
+describe("the recorded consumer groups for one topic", () => {
+  it("maps the group, its lag on this topic, and the dormant mark", async () => {
+    const answer = await fetchTopicConsumers(client(consumersDocument), "quickstart", "orders.v1");
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+
+    expect(answer.value).toHaveLength(1);
+    const row = answer.value[0];
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+
+    // `groupId` and `state` are nested under `group`; `topicLag`, `partitions` and `dormant` sit
+    // beside it. Reading either from the wrong level is a type-correct `undefined` on this side.
+    expect(row.groupId).toBe("order-fulfilment");
+    expect(row.state).toBe("EMPTY");
+    // The figure the recording holds. It is `topicLag` and not `group.totalLag`; on this group the
+    // two happen to be equal, because it reads one topic — which is why the assertion below that it
+    // reads exactly one topic is part of reading this one.
+    expect(row.topicLag).toBe(21);
+    expect(row.topics).toBe(1);
+    expect(row.partitions).toBe(6);
+    expect(row.dormant).toBe(true);
+    // Zero members is a *fact* about this group, and it is what "dormant" means. It prints as `0`.
+    expect(row.members).toBe(0);
+  });
+
+  it("is not an ADR-039 section, which is the drift this test exists for", async () => {
+    /*
+     * Every other read in `data.ts` is sectioned. This one is a bare `{ "rows": [...] }` — verified
+     * against a running gateway. Decoding it as a section would find no `status`, yield nothing, and
+     * the tab would say "no consumer group reads this topic" about a topic with a group on it.
+     */
+    expect(Object.keys(consumersDocument)).toEqual(["rows"]);
+    expect("status" in consumersDocument).toBe(false);
+  });
+
+  it("answers with no rows for a topic nothing reads, which is not a failure", async () => {
+    // Recorded from a freshly created topic: the server answers `{"rows": []}` rather than 404 or
+    // an empty section. The tab draws "no consumer group reads this topic", which is a fact.
+    const answer = await fetchTopicConsumers(client({ rows: [] }), "quickstart", "m4.scratch");
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+    expect(answer.value).toHaveLength(0);
+  });
+
+  it("keeps a lag that could not be computed apart from a lag of zero", async () => {
+    const answer = await fetchTopicConsumers(
+      client({ rows: [{ group: { groupId: "g", state: "STABLE", members: 2 }, partitions: 3, dormant: false }] }),
+      "quickstart",
+      "orders.v1",
+    );
+    if (answer.kind !== "ready") throw new Error("expected ready");
+    // `null`, never `0`. A group whose lag KUI could not compute has not caught up.
+    expect(answer.value[0]?.topicLag).toBeNull();
+  });
+});
+
+describe("the recorded partition-increase plan", () => {
+  it("maps the plan and derives what the schema does not carry", async () => {
+    const answer = await planPartitionIncrease(
+      client(planDocument),
+      "quickstart",
+      "orders.v1",
+      12,
+    );
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+
+    expect(answer.value.topic).toBe("orders.v1");
+    expect(answer.value.current).toBe(6);
+    expect(answer.value.target).toBe(12);
+    /*
+     * The real response carries `added: 6` and `PartitionPlanDto` in `openapi.browser.json` does
+     * not declare it. So it is derived here rather than read: a field that is not in the schema is
+     * not in the generated types, and reading it would be a cast today and an `undefined` the day
+     * the server stops sending it. The value below matches what the server sent, which is the whole
+     * point of deriving it rather than inventing a different arithmetic.
+     */
+    expect(answer.value.added).toBe(6);
+    expect(answer.value.token).not.toBeNull();
+    expect(answer.value.expiresAt).not.toBeNull();
+  });
+
+  it("carries the server's own warning about key routing, which the dialog shows verbatim", async () => {
+    const answer = await planPartitionIncrease(client(planDocument), "quickstart", "orders.v1", 12);
+    if (!answer.ok) throw new Error("expected a plan");
+
+    expect(answer.value.warnings).toHaveLength(1);
+    const warning = answer.value.warnings[0];
+    expect(warning?.code).toBe("KEY_ROUTING_CHANGES");
+    /* The sentence the operator reads is the server's, not one composed here: it names both counts,
+       which the browser could do, and the ordering guarantee that breaks, which is the part a
+       client-side sentence has historically got wrong. */
+    expect(warning?.message).toContain("hash(key) % partitions");
+    expect(warning?.message).toContain("Per-key ordering");
+  });
+
+  it("reports a plan the server spent as having no token left", async () => {
+    /*
+     * Applying the increase answers with the same plan and `token: null`. Recorded from a real
+     * apply against a scratch topic. A screen that read the returned `token` as still valid would
+     * offer a second confirmation of a change that has already happened.
+     */
+    const applied = { ...planDocument, token: null, expiresAt: null };
+    const answer = await planPartitionIncrease(client(applied), "quickstart", "orders.v1", 12);
+    if (!answer.ok) throw new Error("expected a plan");
+    expect(answer.value.token).toBeNull();
+    expect(answer.value.expiresAt).toBeNull();
   });
 });

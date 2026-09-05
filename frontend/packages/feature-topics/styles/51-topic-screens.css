@@ -319,3 +319,110 @@
 .kui-topic-card__foot {
   margin-block-start: auto;
 }
+
+/* --- The partitions tab ------------------------------------------------------------------------
+ *
+ * Added with M4's Partitions tab, which reads the uncapped `…/topics/{name}/partitions` endpoint
+ * rather than the overview's 500-row list. Everything here is a token; nothing is measured off a
+ * screenshot, because there is no screenshot for this screen — the rules below follow the topic
+ * list's, which is the table this one is read beside. */
+
+.kui-partitions,
+.kui-topic-consumers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  min-height: 0;
+}
+
+/* The summary and the Add-partitions button share a line. The summary is a sentence and the button
+ * is pushed to the end of it, the same arrangement as the topic list's count and Create. */
+.kui-partitions__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-4);
+}
+
+.kui-partitions__summary {
+  margin: 0;
+  margin-inline-end: auto;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Two lines and two colours, because they are two situations. A partition with no leader is an
+ * outage; one short of a replica is a risk. Colouring them the same is how the first stops being
+ * noticed. Neither is a `Banner`: a banner is for something the operator must act on before doing
+ * anything else, and both of these are facts about the table underneath them. */
+.kui-partitions__alarm {
+  margin: 0;
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-partitions__warning,
+.kui-topic-consumers__warning {
+  margin: 0;
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* Broker ids, spaced so a five-replica partition reads as five things rather than one number. */
+.kui-partitions__replicas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-partitions__replica {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A replica that is not in sync. Underlined as well as coloured: the colour alone is a distinction
+ * that disappears for a reader who cannot see it, and the row's own `title` and the visually
+ * hidden "(not in sync)" carry it the rest of the way. */
+.kui-partitions__replica--behind {
+  color: var(--kui-color-warning);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+/* Marks the leader inside the replica list, so "which broker leads this partition" is answerable
+ * without reading across to the Leader column and back. */
+.kui-partitions__leader-mark {
+  color: var(--kui-color-text-muted);
+  font-size: 0.75em;
+  line-height: 1;
+}
+
+/* `2 of 3`. Amber only when it is short — an in-sync partition must not wear a warning colour, or
+ * the colour stops meaning anything in the column where it has to. */
+.kui-partitions__short {
+  color: var(--kui-color-warning);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Adding partitions -------------------------------------------------------------------------- */
+
+.kui-add-partitions__current {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The dialog body stacks its three parts — what the topic has now, the field, and the warning —
+ * with the same rhythm the rest of the product uses. `Dialog` gives its body padding and no gap,
+ * deliberately, so the spacing is the caller's to set. */
+.kui-add-partitions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}

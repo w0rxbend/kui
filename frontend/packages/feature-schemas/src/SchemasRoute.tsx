@@ -13,6 +13,7 @@ import { createMutation, useKui, valueOf, writeBlockedReason, type Fetched } fro
 import { SubjectList } from "./SubjectList.jsx";
 import { SubjectPage } from "./SubjectPage.jsx";
 import {
+  checkCompatibility,
   fetchGlobalCompatibility,
   fetchSchema,
   fetchSubjectCompatibility,
@@ -21,6 +22,7 @@ import {
   setCompatibility,
   type Compatibility,
   type CompatibilityLevel,
+  type ProposedSchema,
   type SchemaVersion,
   type SubjectListResult,
 } from "./data.js";
@@ -207,6 +209,19 @@ function SubjectScreen(props: { readonly clusterId: string; readonly subject: st
     setCompatibility(kui.api, props.clusterId, level, props.subject),
   );
 
+  /**
+   * The compatibility check.
+   *
+   * A `createMutation` although it changes nothing: what it needs is the running / done / failed /
+   * forbidden state machine and the guard that stops a double press sending two requests. The
+   * endpoint carries no mutation marker on the server, is not gated behind an edit permission, and is
+   * answered on a read-only cluster like any other read — so unlike `setLevel` above it is offered to
+   * every principal who can see this page.
+   */
+  const check = createMutation((proposed: ProposedSchema) =>
+    checkCompatibility(kui.api, props.clusterId, props.subject, proposed),
+  );
+
   createEffect(
     () => schema.state(),
     (current) => {
@@ -245,6 +260,8 @@ function SubjectScreen(props: { readonly clusterId: string; readonly subject: st
       })}
       state={setLevel.state()}
       failure={failureOf(schema.state()) ?? mutationFailure(setLevel.state())}
+      onCheckCompatibility={(proposed) => void check.run(proposed)}
+      checkState={check.state()}
     />
   );
 }

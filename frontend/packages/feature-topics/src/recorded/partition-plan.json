@@ -1,0 +1,15 @@
+{
+    "topic": "orders.v1",
+    "current": 6,
+    "target": 12,
+    "added": 6,
+    "warnings": [
+        {
+            "code": "KEY_ROUTING_CHANGES",
+            "message": "Records are routed by hash(key) % partitions, so raising the count from 6 to 12 sends most keys to a different partition from the records already stored under them. Per-key ordering is broken across the change, and it cannot be undone: Kafka has no way to remove a partition."
+        }
+    ],
+    "token": "djF8cXVpY2tzdGFydC9vcmRlcnMudjF8dG9waWMucGFydGl0aW9ucy5pbmNyZWFzZXwxMnwxNzg4NjQ1OTg1MTE0.bkNAR7nwaqvoEvFsw6arGvwemEg797yd08Bqla4sUh4",
+    "expiresAt": "2026-09-05T22:06:25.114Z",
+    "computedAt": "2026-09-05T22:01:25.114Z"
+}

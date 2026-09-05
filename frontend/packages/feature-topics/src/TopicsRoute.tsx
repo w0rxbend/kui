@@ -34,10 +34,17 @@ import { TopicPage } from "./TopicPage.jsx";
 import { CreateTopicDialog } from "./CreateTopicDialog.jsx";
 import { PlannedActionDialog } from "./PlannedActionDialog.jsx";
 import { TopicSettings, type ConfigChange } from "./TopicSettings.jsx";
+import { TopicPartitions, type PartitionsFailure } from "./TopicPartitions.jsx";
+import { TopicConsumers, type ConsumersFailure } from "./TopicConsumers.jsx";
+import { AddPartitionsDialog } from "./AddPartitionsDialog.jsx";
 import { fetchTopicConfig, type TopicConfig } from "./config.js";
 import {
+  fetchPartitions,
+  fetchTopicConsumers,
   fetchTopicOverview,
   fetchTopics,
+  type PartitionRow,
+  type TopicConsumerRow,
   type TopicListResult,
   type TopicOverview,
   type TopicQuery,
@@ -47,10 +54,13 @@ import {
   confirmPurge,
   createTopic,
   deleteTopic,
+  increasePartitions,
   planDeletion,
+  planPartitionIncrease,
   planPurge,
   updateTopicConfig,
   type DeletionPlan,
+  type PartitionPlan,
   type PurgePlan,
 } from "./write.js";
 
@@ -115,6 +125,88 @@ function useFetch<T>(
   );
 
   return { state, reload: () => setAttempt(attempt() + 1) };
+}
+
+/**
+ * A tab's data, fetched the first time the tab is opened and re-fetched whenever it is opened again.
+ *
+ * The topic page is one document with several sections, and fetching all of them on arrival would
+ * ask the cluster for thirty-three configuration keys, the whole partition table and every consumer
+ * group for a visitor who came to look at the overview. So each tab pays for itself.
+ *
+ * Re-fetching on *every* open, rather than caching the first answer, is deliberate and is about
+ * what these particular tabs hold: consumer lag and partition offsets move while somebody is
+ * looking at the page, and a figure carried over from four minutes ago is wrong in the direction
+ * that matters — it says a group has caught up when it has not.
+ */
+function useTabFetch<T>(
+  isOpen: () => boolean,
+  load: () => Promise<Fetched<T>>,
+  deps: () => unknown,
+): { readonly state: () => Fetched<T>; readonly reload: () => void } {
+  const [state, setState] = createSignal<Fetched<T>>({ kind: "loading" });
+  const [attempt, setAttempt] = createSignal(0);
+
+  createEffect(
+    () => [isOpen(), deps(), attempt()] as const,
+    ([open]) => {
+      if (!open) return undefined;
+      let cancelled = false;
+      setState({ kind: "loading" });
+      void load().then((next) => {
+        // The operator can switch tab or topic while the request is out. Landing the old answer on
+        // the new subject is the most convincing kind of wrong data there is.
+        if (!cancelled) setState(() => next);
+      });
+      return () => {
+        cancelled = true;
+      };
+    },
+  );
+
+  return { state, reload: () => setAttempt(attempt() + 1) };
+}
+
+/**
+ * A tab's fetch state, as the table's `failure` prop wants it.
+ *
+ * The four not-happy states of ADR-039 are never interchangeable and this is the one place they are
+ * translated. `loading`, `ready` and `stale` all produce `undefined`: a stale table draws its rows,
+ * because real data that is out of date is worth more than an error message, and the staleness is
+ * reported beside it rather than instead of it.
+ */
+function tabFailure<T>(
+  state: Fetched<T>,
+  onRetry: () => void,
+):
+  | {
+      readonly kind: "unavailable";
+      readonly message: string;
+      readonly code: string;
+      readonly onRetry: () => void;
+    }
+  | { readonly kind: "forbidden"; readonly message: string; readonly code: string }
+  | { readonly kind: "not-configured"; readonly message: string }
+  | undefined {
+  switch (state.kind) {
+    case "failed":
+      return { kind: "unavailable", message: state.message, code: state.code, onRetry };
+    case "forbidden":
+      return {
+        kind: "forbidden",
+        // No code: a refusal is not an incident and there is nothing for the operator to quote at
+        // anybody except the administrator who grants the role.
+        message: "Ask an administrator for a role that includes this cluster's consumer and topic read permissions.",
+        code: "FORBIDDEN",
+      };
+    case "not-configured":
+      return {
+        kind: "not-configured",
+        message: "This deployment has not configured the service that answers for it, so there is nothing to retry.",
+      };
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -258,11 +350,26 @@ function TopicScreen(props: {
   const [purging, setPurging] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
 
+  /*
+   * Growing the topic is two dialogs and therefore two signals.
+   *
+   * `growing` is the form that asks for a number; `growTarget` is the number it produced, and its
+   * presence is what opens the confirmation. They are separate rather than one three-state value
+   * because the confirmation's `plan()` closes over the target, and `PlannedActionDialog` fetches
+   * the plan the moment it opens — a target that arrived after the dialog did would plan for the
+   * previous one.
+   */
+  const [growing, setGrowing] = createSignal(false);
+  const [growTarget, setGrowTarget] = createSignal<number | undefined>(undefined);
+
   const purge = createMutation((token: string) =>
     confirmPurge(kui.api, props.clusterId, props.topicName, token),
   );
   const remove = createMutation((token: string) =>
     deleteTopic(kui.api, props.clusterId, props.topicName, token),
+  );
+  const grow = createMutation((token: string) =>
+    increasePartitions(kui.api, props.clusterId, props.topicName, token),
   );
 
   /** A plan request, as the dialog wants it: the plan, or one sentence saying why there is none. */
@@ -282,24 +389,27 @@ function TopicScreen(props: {
    */
   const tab = () => new URLSearchParams(location.search).get("tab") ?? "overview";
 
-  const [configAttempt, setConfigAttempt] = createSignal(0);
-  const [config, setConfig] = createSignal<Fetched<TopicConfig>>({ kind: "loading" });
+  /** What identifies the subject of every tab's request. Changing topic re-fetches whatever is open. */
+  const subject = (): string => `${props.clusterId}/${props.topicName}`;
 
-  createEffect(
-    () => [props.clusterId, props.topicName, tab(), configAttempt()] as const,
-    () => {
-      // Fetched when the tab is opened, not with the page. Thirty-three keys per topic is a request
-      // nobody asked for on a page most visitors come to for the partition table.
-      if (tab() !== "settings") return undefined;
-      let cancelled = false;
-      setConfig({ kind: "loading" });
-      void fetchTopicConfig(kui.api, props.clusterId, props.topicName).then((next) => {
-        if (!cancelled) setConfig(() => next);
-      });
-      return () => {
-        cancelled = true;
-      };
-    },
+  const config = useTabFetch<TopicConfig>(
+    () => tab() === "settings",
+    () => fetchTopicConfig(kui.api, props.clusterId, props.topicName),
+    subject,
+  );
+
+  const partitions = useTabFetch<readonly PartitionRow[]>(
+    () => tab() === "partitions",
+    /* The uncapped endpoint, not the overview's list. The overview stops at 500 partitions, so on a
+       large topic its table is short and the totals above it are not — see `fetchPartitions`. */
+    () => fetchPartitions(kui.api, props.clusterId, props.topicName),
+    subject,
+  );
+
+  const consumers = useTabFetch<readonly TopicConsumerRow[]>(
+    () => tab() === "consumers",
+    () => fetchTopicConsumers(kui.api, props.clusterId, props.topicName),
+    subject,
   );
 
   const editConfig = createMutation((change: ConfigChange) =>
@@ -318,6 +428,21 @@ function TopicScreen(props: {
       permitted: kui.permits(Actions.TopicDelete),
       readOnly: false,
       action: "delete this topic",
+    });
+
+  /**
+   * Growing the topic is an edit of the topic itself, so it is gated on `TopicEdit`.
+   *
+   * There is no separate "add partitions" action in the server's vocabulary, and inventing one here
+   * — a hand-written `{resource, action}` pair — is exactly the mistake `useKui().permits` was
+   * narrowed to make impossible: it would name an action the server has never heard of, answer
+   * `false` for everyone for ever, and disable a control with a message blaming the operator.
+   */
+  const growBlocked = (): string | undefined =>
+    writeBlockedReason({
+      permitted: kui.permits(Actions.TopicEdit),
+      readOnly: false,
+      action: "add partitions to this topic",
     });
 
   const editBlocked = (): string | undefined =>
@@ -364,10 +489,27 @@ function TopicScreen(props: {
                 href: kui.paths.topic(props.clusterId, props.topicName),
               },
               {
+                id: "partitions",
+                label: "Partitions",
+                icon: "partitions",
+                /* The count comes from the overview's row rather than from the partition tab's own
+                   fetch, so the strip can say how many there are before anybody opens the tab. It
+                   is `undefined` — no badge at all — while the topic is undescribed, because a `0`
+                   beside "Partitions" would claim something no Kafka topic is. */
+                count: overview()?.topic.partitions,
+                href: `${kui.paths.topic(props.clusterId, props.topicName)}?tab=partitions`,
+              },
+              {
                 id: "messages",
                 label: "Messages",
                 icon: "messages",
                 href: kui.paths.topicMessages(props.clusterId, props.topicName),
+              },
+              {
+                id: "consumers",
+                label: "Consumers",
+                icon: "consumers",
+                href: `${kui.paths.topic(props.clusterId, props.topicName)}?tab=consumers`,
               },
               {
                 id: "settings",
@@ -379,10 +521,44 @@ function TopicScreen(props: {
           />
         }
       >
+        <Show when={tab() === "partitions"}>
+          <TopicPartitions
+            partitions={valueOf(partitions.state(), [])}
+            loading={partitions.state().kind === "loading"}
+            failure={
+              tabFailure(partitions.state(), () => partitions.reload()) as
+                | PartitionsFailure
+                | undefined
+            }
+            onAdd={() => {
+              grow.reset();
+              setGrowing(true);
+            }}
+            addDisabledReason={growBlocked()}
+            addBusy={grow.busy()}
+          />
+        </Show>
+
+        <Show when={tab() === "consumers"}>
+          <TopicConsumers
+            rows={valueOf(consumers.state(), [])}
+            loading={consumers.state().kind === "loading"}
+            /* `not-configured` cannot reach here: this endpoint is not sectioned, so a consumer
+               service that is not configured arrives as an error envelope. The cast is narrowing
+               the shared union to the two members this table draws. */
+            failure={
+              tabFailure(consumers.state(), () => consumers.reload()) as
+                | ConsumersFailure
+                | undefined
+            }
+            hrefFor={(groupId) => kui.paths.consumerGroup(props.clusterId, groupId)}
+          />
+        </Show>
+
         <Show when={tab() === "settings"}>
           <TopicSettings
-            config={valueOf(config(), { entries: [], overridden: 0 })}
-            loading={config().kind === "loading"}
+            config={valueOf(config.state(), { entries: [], overridden: 0 })}
+            loading={config.state().kind === "loading"}
             state={editConfig.state()}
             onChange={
               editBlocked() === undefined
@@ -394,7 +570,7 @@ function TopicScreen(props: {
                          normalised — "3600000" for "1h" — is the value the operator sees, and the
                          `source` of the key they just changed flips to "set on this topic" without
                          this screen having to work out that it would. */
-                      setConfigAttempt(configAttempt() + 1);
+                      config.reload();
                     });
                   }
                 : undefined
@@ -422,6 +598,60 @@ function TopicScreen(props: {
             if (outcome.kind !== "done") return;
             setPurging(false);
             // The record counts and sizes on this page are now wrong by exactly what was deleted.
+            reload();
+          });
+        }}
+      />
+
+      <AddPartitionsDialog
+        open={growing()}
+        onClose={() => setGrowing(false)}
+        topicName={props.topicName}
+        /* The count the page already read. `undefined` when the topic could not be described, which
+           the form reports rather than filling in a plausible number — a pre-filled `1` on a topic
+           with twelve partitions is a wrong answer wearing a right answer's shape. */
+        current={overview()?.topic.partitions}
+        onContinue={(target) => {
+          setGrowing(false);
+          setGrowTarget(target);
+        }}
+      />
+
+      <PlannedActionDialog<PartitionPlan>
+        /* The confirmation exists only once a target has been chosen, which is what guarantees the
+           plan it fetches on open is a plan for that target. */
+        open={growTarget() !== undefined}
+        onClose={() => setGrowTarget(undefined)}
+        title={`Add partitions to ${props.topicName}?`}
+        confirmLabel="Add partitions"
+        confirmIcon="plus"
+        /* Not destructive — no record is deleted — and still typed, because Kafka cannot remove a
+           partition afterwards. The kernel's test for asking somebody to type a name is whether the
+           action can be undone, and this one cannot. */
+        destructive={false}
+        typeToConfirm={props.topicName}
+        planningMessage="Asking the cluster what this would change…"
+        plan={() =>
+          planning(
+            planPartitionIncrease(
+              kui.api,
+              props.clusterId,
+              props.topicName,
+              growTarget() as number,
+            ),
+          )
+        }
+        describe={describePartitionIncrease}
+        state={grow.state()}
+        onConfirm={(token) => {
+          void grow.run(token).then((outcome) => {
+            if (outcome.kind !== "done") return;
+            setGrowTarget(undefined);
+            /* Both the partition table and the topic's own row are now wrong: the table is short by
+               the new partitions and the header's count is the old one. Re-read both rather than
+               splicing empty rows in — the broker decides the new partitions' replica assignment,
+               and this screen would be guessing at it. */
+            partitions.reload();
             reload();
           });
         }}
@@ -487,4 +717,17 @@ export function describeDeletion(plan: DeletionPlan): string {
       ? " This cluster creates topics automatically, so anything still producing to this name will recreate it immediately — with the broker's default settings, not these."
       : "";
   return `Removes the topic and its ${where}, along with its configuration. ${records}${recreated}`;
+}
+
+/**
+ * What adding partitions would do, when the server's plan carries no warning of its own.
+ *
+ * The server always sends `KEY_ROUTING_CHANGES`, so in practice `consequenceOf` uses that sentence
+ * and this one never appears — which is the right way round: the server knows the counts, writes
+ * the better sentence, and this is here so the dialog is never blank if a future server has nothing
+ * to say. It states the count change and nothing else, because the one thing worth warning about is
+ * precisely the thing the server's own warning covers.
+ */
+export function describePartitionIncrease(plan: PartitionPlan): string {
+  return `Raises this topic from ${plan.current} to ${plan.target} partitions, adding ${plan.added} ${plan.added === 1 ? "partition" : "partitions"}. Kafka cannot remove a partition, so this cannot be undone.`;
 }

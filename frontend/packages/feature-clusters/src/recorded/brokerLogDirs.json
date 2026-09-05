@@ -1,0 +1,425 @@
+{
+    "logDirs": {
+        "status": "ok",
+        "data": [
+            {
+                "brokerId": 1,
+                "path": "/tmp/kafka-logs",
+                "error": null,
+                "totalBytes": 503316811776,
+                "usableBytes": 199708225536,
+                "topicCount": 7,
+                "partitionCount": 58,
+                "replicas": [
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 43,
+                        "sizeBytes": 31939220,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "_schemas",
+                        "partition": 0,
+                        "sizeBytes": 3357,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "customers.profiles",
+                        "partition": 0,
+                        "sizeBytes": 2527,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "audit.log.raw",
+                        "partition": 0,
+                        "sizeBytes": 2202,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 29,
+                        "sizeBytes": 1877,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 6,
+                        "sizeBytes": 700,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 10,
+                        "sizeBytes": 700,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 15,
+                        "sizeBytes": 700,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 30,
+                        "sizeBytes": 700,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 49,
+                        "sizeBytes": 700,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 23,
+                        "sizeBytes": 697,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 26,
+                        "sizeBytes": 697,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "orders.avro.v1",
+                        "partition": 0,
+                        "sizeBytes": 501,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 39,
+                        "sizeBytes": 316,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 0,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 1,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 2,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 3,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 4,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 5,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 7,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 8,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 9,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 11,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 12,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 13,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 14,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 16,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 17,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 18,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 19,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 20,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 21,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 22,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 24,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 25,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 27,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 28,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 31,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 32,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 33,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 34,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 35,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 36,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 37,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 38,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 40,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 41,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 42,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 44,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 45,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 46,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 47,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "__consumer_offsets",
+                        "partition": 48,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "orders.v1",
+                        "partition": 0,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "orders.v1",
+                        "partition": 1,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "orders.v1",
+                        "partition": 2,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    },
+                    {
+                        "topic": "scratch.jm-test",
+                        "partition": 0,
+                        "sizeBytes": 0,
+                        "offsetLag": 0,
+                        "isFuture": false
+                    }
+                ]
+            }
+        ],
+        "fetchedAt": "2026-09-05T21:59:38.749Z"
+    }
+}

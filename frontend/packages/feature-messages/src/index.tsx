@@ -14,7 +14,44 @@ export {
   FILTER_DEBOUNCE_MS,
   type MessageFilterBarProps,
   type LiveAvailability,
+  type SmartFilterSlot,
 } from "./MessageFilterBar.jsx";
+
+/**
+ * Smart filters, and the preview that keeps a compiled expression from being trusted.
+ *
+ * Registering answers "does this compile"; testing answers "does this do what I mean". They ship
+ * together because an expression can pass the first and fail the second — `record.offset` compiles
+ * and is not a predicate — and a browse is a poor place to find that out.
+ */
+export { SmartFilterDialog, type SmartFilterDialogProps } from "./SmartFilterDialog.jsx";
+export {
+  registerFilter,
+  testFilter,
+  verdictOf,
+  filterProblem,
+  FILTER_EXAMPLES,
+  FILTER_VARIABLES,
+  MAX_FILTER_SOURCE_BYTES,
+  type FilterVerdict,
+  type RegisteredFilter,
+} from "./filters.js";
+
+/** Copying a range of records into another topic, and reading the two figures it answers with. */
+export { ResendDialog, type ResendDialogProps } from "./ResendDialog.jsx";
+export {
+  resend,
+  readingOf,
+  rangeSize,
+  draftSize,
+  resendDraftProblem,
+  MAX_RESEND_RECORDS,
+  RESEND_WARNINGS,
+  type ResendDraft,
+  type ResendRange,
+  type ResendOutcome,
+  type ResendReading,
+} from "./resend.js";
 export {
   createBrowseSession,
   decodeBrowseEvent,
@@ -48,7 +85,7 @@ export {
   type SeekMode,
   type SerdeName,
 } from "./browse.js";
-export { toRecord, LARGE_VALUE_BYTES, type MessageDto } from "./wire.js";
+export { toRecord, toDto, LARGE_VALUE_BYTES, type MessageDto } from "./wire.js";
 
 /**
  * The real transport, and the reason it is not `openEventSource`: a browse must be cancellable, and

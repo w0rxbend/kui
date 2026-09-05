@@ -44,8 +44,10 @@ import {
 import {
   Banner,
   ToastRegion,
+  AuthDisabled,
   createCapabilities,
   createCurrentCluster,
+  createMutation,
   createSession,
   notify,
   openEventSource,
@@ -60,6 +62,7 @@ import {
   densityPreference,
   themePreference,
 } from "@kui/kernel";
+import { AccountMenu } from "./chrome/AccountMenu.jsx";
 import { AppFrame } from "./chrome/AppFrame.jsx";
 import { EnvRail, type RailDestination } from "./chrome/EnvRail.jsx";
 import { NavDrawer } from "./chrome/NavDrawer.jsx";
@@ -216,6 +219,31 @@ export function App() {
    * dismiss.
    */
   const [noticesOpen, setNoticesOpen] = createSignal(false);
+
+  /**
+   * Whether the account panel at the foot of the rail is showing. Owned here for the same reason the
+   * notifications panel's openness is.
+   */
+  const [accountOpen, setAccountOpen] = createSignal(false);
+
+  /**
+   * Ending the session.
+   *
+   * `POST /api/v1/auth/logout` clears the cookie server-side; the reload afterwards is what clears
+   * everything this page built while the departing principal was signed in. See `AccountMenu` for
+   * why the reload is not a list of stores to refresh, and why a *failed* sign-out must not reload.
+   */
+  const signOut = createMutation(() => api.post("/api/v1/auth/logout", {}));
+
+  /**
+   * Whether there is a session for the rail to offer to end.
+   *
+   * The mirror of `mustSignIn`'s rule, and it needs both halves for the same reasons: a deployment
+   * with `authType: "disabled"` has an anonymous principal that logging out cannot dispose of, and a
+   * principal who is anonymous under a configured provider is somebody who has not signed in yet.
+   */
+  const canSignOut = (): boolean =>
+    session.signedIn() && (session.settings()?.authType ?? AuthDisabled) !== AuthDisabled;
 
   const [probing, setProbing] = createSignal<ReadonlySet<string>>(new Set<string>());
   const [probeErrors, setProbeErrors] = createSignal<ReadonlyMap<string, string>>(new Map());
@@ -442,6 +470,31 @@ export function App() {
                 destinations={railDestinations(Router)}
                 homeHref={Router.paths()}
                 accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
+                /* No handler where there is no session: the avatar stays a picture rather than
+                   becoming a button that opens a panel offering to end nothing. */
+                onOpenAccount={canSignOut() ? () => setAccountOpen(!accountOpen()) : undefined}
+                accountOpen={accountOpen()}
+                accountPanel={
+                  canSignOut() ? (
+                    <AccountMenu
+                      name={session.identity()?.principal.name ?? ""}
+                      authType={session.settings()?.authType}
+                      busy={signOut.busy()}
+                      failure={
+                        signOut.state().kind === "failed" || signOut.state().kind === "forbidden"
+                          ? "Signing out did not work. You are still signed in."
+                          : undefined
+                      }
+                      onSignOut={() => {
+                        void signOut.run().then((outcome) => {
+                          // Only on success. Reloading after a refusal would redraw a signed-in
+                          // shell, which is indistinguishable from a sign-out that worked.
+                          if (outcome.kind === "done") window.location.reload();
+                        });
+                      }}
+                    />
+                  ) : undefined
+                }
               />
             }
             drawer={

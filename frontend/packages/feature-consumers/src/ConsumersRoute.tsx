@@ -17,6 +17,8 @@ import { useKui, valueOf, type Fetched } from "@kui/kernel";
 import { GroupList } from "./GroupList.jsx";
 import { GroupRoute } from "./GroupRoute.jsx";
 import { fetchGroups, type GroupListResult } from "./data.js";
+import { pollLag } from "./lag.js";
+import type { GroupSummary } from "./model.js";
 
 export default function Consumers(): JSX.Element {
   const params = useParams<{ readonly clusterId?: string; readonly groupId?: string }>();
@@ -78,14 +80,41 @@ function GroupsScreen(props: { readonly clusterId: string }): JSX.Element {
     () => props.clusterId,
   );
 
+  /*
+   * The rows the screen draws, held apart from the request that first produced them.
+   *
+   * They have to be a signal of their own rather than a derivation of `state()`, because after the
+   * first answer they are edited in place by the lag poll — and `state()` must stay what the list
+   * request said, so that `failure()` below still describes the right thing.
+   */
+  const [rows, setRows] = createSignal<readonly GroupSummary[]>([]);
+  const [coordinatorsMissing, setCoordinatorsMissing] = createSignal(0);
+
   createEffect(
     () => state(),
     (current) => {
       if (current.kind !== "loading") kui.report("feature", current.kind === "failed");
+      const listing = valueOf(current, { groups: [], coordinatorsMissing: 0 });
+      setRows(() => listing.groups);
+      setCoordinatorsMissing(listing.coordinatorsMissing);
     },
   );
 
-  const result = () => valueOf(state(), { groups: [], coordinatorsMissing: 0 });
+  // Polling starts only once there is a list to merge into, and stops when this screen goes away —
+  // a timer left running after unmount holds the whole component graph alive and keeps asking a
+  // cluster the operator has navigated away from.
+  createEffect(
+    () => [props.clusterId, state().kind === "ready"] as const,
+    ([clusterId, ready]) => {
+      if (!ready) return undefined;
+      // The returned function is the effect's cleanup, the same shape `useFetch` above uses: Solid
+      // runs it before the next run and again when the screen is disposed.
+      return pollLag(kui.api, clusterId, rows, (next, missing) => {
+        setRows(() => next);
+        if (missing !== null) setCoordinatorsMissing(missing);
+      });
+    },
+  );
 
   /**
    * The failure, in the screen's own vocabulary.
@@ -124,8 +153,8 @@ function GroupsScreen(props: { readonly clusterId: string }): JSX.Element {
 
   return (
     <GroupList
-      rows={result().groups}
-      coordinatorsMissing={result().coordinatorsMissing}
+      rows={rows()}
+      coordinatorsMissing={coordinatorsMissing()}
       loading={state().kind === "loading"}
       failure={failure()}
       hrefFor={(groupId) => kui.paths.consumerGroup(props.clusterId, groupId)}

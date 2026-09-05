@@ -1,0 +1,15 @@
+{
+    "code": "KUI-VALIDATION",
+    "message": "a resend names no offsets, so there is nothing to copy",
+    "details": [
+        {
+            "field": "ranges",
+            "restrictions": [
+                "at least one partition range"
+            ]
+        }
+    ],
+    "correlationId": "93cd30b3047e6bda",
+    "timestamp": "2026-09-05T22:05:18.133Z",
+    "retryable": false
+}

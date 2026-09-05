@@ -1,0 +1,15 @@
+{
+    "changed": [
+        {
+            "groupId": "order-fulfilment",
+            "totalLag": 21,
+            "pace": 0.0,
+            "state": "EMPTY",
+            "members": 0
+        }
+    ],
+    "gone": [],
+    "token": "cXVpY2tzdGFydDo3",
+    "nextPollMs": 30000,
+    "full": false
+}

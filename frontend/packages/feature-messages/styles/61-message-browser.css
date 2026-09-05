@@ -360,3 +360,470 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* --- The smart filter --------------------------------------------------------------------------
+ *
+ * A server-side expression is a different kind of thing from the substring box beside it, and the
+ * bar has to say so without a paragraph. The chip does it by showing the expression itself once one
+ * is applied: an operator returning to a tab an hour later can read *why* the list is short without
+ * opening anything, which a control reading "Filter ✓" could never tell them. */
+
+.kui-browse-bar__smart {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+}
+
+.kui-smart-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  /* 27px, the height every other control in this bar was measured at in screenshot `02`. A control
+   * that is one pixel taller than its neighbours makes the whole row look misaligned. */
+  min-height: 27px;
+  padding: 0 var(--kui-space-2);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-sm);
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  cursor: pointer;
+  /* The bar wraps rather than scrolls, so the chip must be allowed to shrink instead of forcing a
+   * horizontal scrollbar onto the row when the expression is long. */
+  min-width: 0;
+  max-width: 22rem;
+}
+
+.kui-smart-chip:hover:not(:disabled) {
+  border-color: var(--kui-color-border-strong);
+  color: var(--kui-color-text);
+}
+
+/* An applied filter is a *state of the data on screen*, not a hover effect, so it is drawn in the
+ * accent rather than merely darkened — the same distinction the LIVE pill makes between following
+ * and paused. Colour alone would not be enough on its own; the expression appearing inside the chip
+ * is the non-colour half of the signal. */
+.kui-smart-chip--applied {
+  border-color: var(--kui-color-primary);
+  background: var(--kui-color-primary-container);
+  color: var(--kui-color-primary-container-contrast);
+}
+
+/* Disabled because this cluster has no filter engine. It stays in the bar, and its `title` carries
+ * the server's own reason — removing it would teach the operator KUI cannot filter at all, when in
+ * fact this one cluster cannot. */
+.kui-smart-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kui-smart-chip__source {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  /* One line, ellipsised. An expression is often a paragraph and the bar is a row; the full text is
+   * in the `title` and in the editor, both a keystroke away. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.kui-smart-chip__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A 24px target rather than the 12px glyph inside it: this sits beside a control it must not be
+   * mistaken for, and a small target next to a large one is the one people miss. */
+  inline-size: 24px;
+  block-size: 24px;
+  border: none;
+  border-radius: var(--kui-radius-sm);
+  background: none;
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+}
+
+.kui-smart-chip__clear:hover {
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+}
+
+/* --- The expression editor ---------------------------------------------------------------------- */
+
+.kui-smart-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-smart-filter__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-smart-filter__label {
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text);
+}
+
+/* A textarea and not the kernel's `TextField`: a predicate wraps, and a filter that has scrolled off
+ * the right edge of a one-line box is a filter nobody can check before running it. */
+.kui-smart-filter__editor {
+  inline-size: 100%;
+  padding: var(--kui-space-2);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-sm);
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  resize: vertical;
+}
+
+.kui-smart-filter__problem {
+  margin: 0;
+  color: var(--kui-color-danger);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-smart-filter__preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-smart-filter__preview-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-smart-filter__hint,
+.kui-smart-filter__help-note {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+/* --- The verdict ---------------------------------------------------------------------------------
+ *
+ * Three tones for three outcomes. The one that matters is that `no-match` is *informational* and
+ * `failed` is a failure: both arrive as `matched: false`, and drawing them alike would make a filter
+ * that throws on every record indistinguishable from one that is working and excluding things. */
+
+.kui-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-3);
+  border: 1px solid;
+  border-radius: var(--kui-radius-sm);
+}
+
+.kui-verdict--match {
+  border-color: var(--kui-color-success);
+  background: var(--kui-color-success-container);
+}
+
+.kui-verdict--no-match {
+  border-color: var(--kui-color-border);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-verdict--failed {
+  border-color: var(--kui-color-danger);
+  background: var(--kui-color-danger-container);
+}
+
+.kui-verdict__glyph {
+  flex: none;
+  /* Nudged to sit on the headline's cap height rather than its box. */
+  margin-block-start: 1px;
+}
+
+.kui-verdict--match .kui-verdict__glyph {
+  color: var(--kui-color-success);
+}
+
+.kui-verdict--failed .kui-verdict__glyph {
+  color: var(--kui-color-danger);
+}
+
+.kui-verdict__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-verdict__headline {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-verdict__detail {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+/* The server's own message, in the mono face, because it names a field or a type and those are read
+ * character by character. */
+.kui-verdict__reason {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text);
+  overflow-wrap: anywhere;
+}
+
+/* --- The vocabulary, beside the box ------------------------------------------------------------- */
+
+.kui-smart-filter__help-summary {
+  cursor: pointer;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-smart-filter__help-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding-block-start: var(--kui-space-3);
+}
+
+.kui-smart-filter__variables {
+  display: grid;
+  /* The name column sizes to its longest entry and the description takes the rest, so the two read
+   * as a table without one being written. */
+  grid-template-columns: max-content 1fr;
+  gap: var(--kui-space-1) var(--kui-space-3);
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-smart-filter__variables dt {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text);
+}
+
+.kui-smart-filter__variables dd {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-smart-filter__type {
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-smart-filter__examples {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-smart-filter__examples li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+}
+
+/* An example is a button because clicking it fills the box. A block of text somebody has to retype
+ * is a block of text somebody mistypes. */
+.kui-smart-filter__example {
+  padding: var(--kui-space-1) var(--kui-space-2);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-sm);
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+  cursor: pointer;
+  text-align: start;
+}
+
+.kui-smart-filter__example:hover {
+  border-color: var(--kui-color-primary);
+}
+
+.kui-smart-filter__example-note {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* --- Copying records into another topic ----------------------------------------------------------
+ *
+ * The receipt at the bottom is the part that matters. A resend that copied nothing answers 200 with
+ * two zeroes, so `--nothing` is drawn as a warning and never as a success — and the figures are
+ * always figures: 0 is a measurement, and blanking or dashing it would make "we copied none" look
+ * like "we could not tell". */
+
+.kui-resend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-resend__heading {
+  margin: 0 0 var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-resend__note,
+.kui-resend__problem {
+  margin: 0 0 var(--kui-space-3);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-resend__problem {
+  color: var(--kui-color-danger);
+}
+
+.kui-resend__range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--kui-space-2);
+  margin-block-end: var(--kui-space-2);
+}
+
+.kui-resend__range-size,
+.kui-resend__total {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  /* Sits on the baseline of the inputs beside it rather than on the labels above them. */
+  padding-block-end: var(--kui-space-1);
+}
+
+.kui-resend__range-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-3);
+}
+
+.kui-resend__warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Listed one per line rather than run together into a paragraph. These are four separate facts with
+ * four separate consequences, and a paragraph is the shape people skim. */
+.kui-resend__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-resend__warning-glyph {
+  flex: none;
+  margin-block-start: 2px;
+  color: var(--kui-color-warning);
+}
+
+.kui-resend__receipt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-4);
+  border: 1px solid;
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-resend__receipt--complete {
+  border-color: var(--kui-color-success);
+  background: var(--kui-color-success-container);
+}
+
+/* Nothing copied, part-way, and short of what was asked for all wear the warning tone. None of them
+ * is a success and none of them is an error the server reported — they are all "read this". */
+.kui-resend__receipt--nothing,
+.kui-resend__receipt--partial,
+.kui-resend__receipt--short {
+  border-color: var(--kui-color-warning);
+  background: var(--kui-color-warning-container);
+}
+
+.kui-resend__receipt-headline {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-resend__receipt-glyph {
+  flex: none;
+}
+
+.kui-resend__receipt--complete .kui-resend__receipt-glyph {
+  color: var(--kui-color-success);
+}
+
+.kui-resend__receipt--nothing .kui-resend__receipt-glyph,
+.kui-resend__receipt--partial .kui-resend__receipt-glyph,
+.kui-resend__receipt--short .kui-resend__receipt-glyph {
+  color: var(--kui-color-warning);
+}
+
+.kui-resend__tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-6);
+  margin: 0;
+}
+
+.kui-resend__tally dt {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-resend__tally dd {
+  margin: 0;
+}
+
+/* The figures, in the display face at a size that makes the pair readable at a glance — because the
+ * pair *is* the message, and `0` and `0` side by side is the sentence "nothing moved". */
+.kui-resend__figure {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.kui-resend__receipt-detail {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}

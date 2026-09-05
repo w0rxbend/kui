@@ -163,3 +163,137 @@
   line-height: var(--kui-font-line-height-normal);
   white-space: pre;
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * "Check a schema"
+ *
+ * A panel and not a dialog. The question it answers is asked while reading the registered schema
+ * directly above it — copy that, change one field, ask — and a dialog would cover the very thing
+ * being edited from.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-schema-check {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-raised);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+}
+
+.kui-schema-check__title {
+  margin: 0;
+  font-size: var(--kui-font-size-lg);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+/* The sentence saying nothing is registered. Muted, but not `text-subtle`: it is the line that
+ * decides whether the button below it gets pressed at all. */
+.kui-schema-check__promise {
+  margin: var(--kui-space-1) 0 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  max-width: 68ch;
+}
+
+.kui-schema-check__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-3);
+}
+
+.kui-schema-check__against {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-schema-check__against code {
+  font-family: var(--kui-font-family-mono);
+  overflow-wrap: anywhere;
+}
+
+.kui-schema-check__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+}
+
+.kui-schema-check__label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* Monospaced and not wrapped at the word: a schema is compared character by character, and a box
+ * that reflows it hides the whitespace the operator is looking at. */
+.kui-schema-check__editor {
+  width: 100%;
+  padding: var(--kui-space-3);
+  background: var(--kui-color-surface-sunken, var(--kui-color-surface));
+  color: var(--kui-color-text);
+  border: 1px solid var(--kui-color-border);
+  border-radius: var(--kui-radius-md);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+  resize: vertical;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+.kui-schema-check__problem {
+  margin: 0;
+  color: var(--kui-color-danger-text, var(--kui-color-danger));
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-schema-check__actions {
+  display: flex;
+  gap: var(--kui-space-3);
+}
+
+.kui-schema-check__verdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--kui-space-2);
+}
+
+.kui-schema-check__note {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  max-width: 68ch;
+}
+
+/* A refusal the registry gave no reason for. Italic so it cannot be mistaken for one of the
+ * registry's own messages, which are set in the monospaced list below. */
+.kui-schema-check__note--absent {
+  font-style: italic;
+}
+
+/* The registry's words, reproduced. Monospaced because they carry JSON pointers and, on a Confluent
+ * registry, the whole of the older schema; scrolling rather than wrapping for the same reason the
+ * registered definition scrolls. */
+.kui-schema-check__messages {
+  list-style: none;
+  margin: 0;
+  padding: var(--kui-space-3);
+  width: 100%;
+  max-height: 24rem;
+  overflow: auto;
+  background: var(--kui-color-surface-sunken, var(--kui-color-surface));
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-md);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+}
+
+.kui-schema-check__messages li + li {
+  margin-top: var(--kui-space-2);
+  padding-top: var(--kui-space-2);
+  border-top: 1px solid var(--kui-color-border);
+}

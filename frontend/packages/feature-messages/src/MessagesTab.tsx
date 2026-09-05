@@ -53,7 +53,11 @@ import {
   type KafkaRecord,
 } from "@kui/kernel";
 import { userMessage } from "@kui/api";
-import { MessageFilterBar, type LiveAvailability } from "./MessageFilterBar.jsx";
+import {
+  MessageFilterBar,
+  type LiveAvailability,
+  type SmartFilterSlot,
+} from "./MessageFilterBar.jsx";
 import type { BrowseQuery, SeekMode } from "./browse.js";
 import type { BrowseSession } from "./session.js";
 
@@ -75,6 +79,21 @@ export interface MessagesTabProps {
   readonly produceDisabledReason?: string | undefined;
   readonly onProduce?: (() => void) | undefined;
   readonly liveAvailability?: LiveAvailability | undefined;
+
+  /**
+   * The smart-filter control, when the screen above offers one.
+   *
+   * Passed straight through to the bar. `MessagesTab` deliberately does not own it: registering a
+   * filter is a request, and this component has no client — the same reason producing is a callback
+   * and not a form here.
+   */
+  readonly smartFilter?: SmartFilterSlot | undefined;
+
+  /** Copy a range of these records into another topic. */
+  readonly onResend?: (() => void) | undefined;
+  readonly mayResend?: boolean | undefined;
+  readonly resendDisabledReason?: string | undefined;
+
   /** The clock, passed in so relative times are testable. */
   readonly now?: number | undefined;
 }
@@ -139,6 +158,7 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
         live={props.query.live}
         onLiveChange={setLive}
         {...(props.liveAvailability === undefined ? {} : { liveAvailability: props.liveAvailability })}
+        {...(props.smartFilter === undefined ? {} : { smartFilter: props.smartFilter })}
       >
         <Show
           when={session.running()}
@@ -188,7 +208,8 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
           <BrowseEmpty
             running={session.running()}
             everRan={session.progress().connection.phase !== "idle"}
-            filtered={props.query.contains !== undefined}
+            filtered={props.query.contains !== undefined || props.query.filterId !== undefined}
+            byExpression={props.query.filterSource}
             onRead={read}
           />
         }
@@ -231,6 +252,27 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
           >
             Produce message
           </Button>
+
+          {/* Beside produce rather than in the bar: both of these *write*, and grouping them keeps
+              the row of controls that change a cluster in one place instead of scattered among the
+              ones that only read it. */}
+          <Show when={props.onResend !== undefined}>
+            <Button
+              variant="secondary"
+              icon="refresh"
+              {...(props.mayResend === false
+                ? {
+                    disabled: true as const,
+                    disabledReason:
+                      props.resendDisabledReason ??
+                      "You do not hold a role that permits copying records out of this topic.",
+                  }
+                : {})}
+              onClick={() => props.onResend?.()}
+            >
+              Copy records out
+            </Button>
+          </Show>
         </div>
       </Show>
     </section>
@@ -287,16 +329,25 @@ function phaseSentence(session: BrowseSession): string {
 }
 
 /**
- * The four things "no records" can mean, drawn as four different screens.
+ * The five things "no records" can mean, drawn as five different screens.
  *
- * They are genuinely different facts and this project has drawn all four as the same blank space:
+ * They are genuinely different facts and this project has drawn them all as the same blank space:
  * a browse nobody has started yet, one that is running and has not delivered, one that finished
- * with nothing, and one whose filter excluded everything. Only the last two are about the topic.
+ * with nothing, one whose substring excluded everything, and one whose *expression* did. Only the
+ * last three are about the topic, and the last two are about different things the operator typed.
+ *
+ * The expression case is separate because its remedy is different. A substring that matched nothing
+ * is usually the wrong substring; an expression that matched nothing may equally be an expression
+ * that **threw on every record**, which the server counts separately and which looks identical from
+ * here. So that panel points at the preview rather than telling the operator to clear the filter,
+ * because trying it against one record is the thing that tells the two apart.
  */
 function BrowseEmpty(props: {
   readonly running: boolean;
   readonly everRan: boolean;
   readonly filtered: boolean;
+  /** The smart-filter expression that was running, when one was. */
+  readonly byExpression?: string | undefined;
   readonly onRead: () => void;
 }): JSX.Element {
   return (
@@ -337,11 +388,28 @@ function BrowseEmpty(props: {
             />
           }
         >
-          <EmptyState
-            kind="filtered"
-            title="No record matched that filter."
-            description="Every record in the range was read; none contained that text. Clearing the filter shows them."
-          />
+          <Show
+            when={props.byExpression}
+            fallback={
+              <EmptyState
+                kind="filtered"
+                title="No record matched that filter."
+                description="Every record in the range was read; none contained that text. Clearing the filter shows them."
+              />
+            }
+          >
+            {(expression) => (
+              <EmptyState
+                kind="filtered"
+                title="No record matched that expression."
+                description={
+                  `Every record in the range was read and none of them satisfied ${expression()}. ` +
+                  "An expression that throws on every record produces this same empty list, so try " +
+                  "it against a single record before assuming the topic has nothing in it."
+                }
+              />
+            )}
+          </Show>
         </Show>
       </Show>
     </Show>

@@ -2,7 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { KuiApiClient } from "@kui/api";
 import clustersDocument from "./recorded/clusters.json" with { type: "json" };
 import brokersDocument from "./recorded/brokers.json" with { type: "json" };
-import { fetchBrokers, fetchClusters } from "./data.js";
+import brokerConfigsDocument from "./recorded/brokerConfigs.json" with { type: "json" };
+import logDirsDocument from "./recorded/brokerLogDirs.json" with { type: "json" };
+import {
+  fetchBrokerConfigs,
+  fetchBrokerLogDirs,
+  fetchBrokers,
+  fetchClusters,
+} from "./data.js";
 
 /**
  * The mapping, against documents a real server actually produced.
@@ -109,5 +116,116 @@ describe("the recorded broker list", () => {
     expect(broker.leaderPartitions).toBeNull();
     expect(broker.diskTotalBytes).toBeNull();
     expect(broker.outOfSyncReplicas).toBeNull();
+  });
+});
+
+describe("the recorded broker configuration", () => {
+  /*
+   * Sixty kilobytes of one broker's `describeConfigs`, kept whole and kept compact.
+   *
+   * Whole, because the point of the document is that it is what a server sent — a trimmed one is a
+   * fixture with a curl command in its history, and it cannot catch a field this mapping reads that
+   * only appears on the three hundredth row. Compact, because pretty-printing quadruples it for no
+   * reader: nobody reads this file, they diff it, and a diff of a contract change shows up either
+   * way.
+   *
+   * Re-record it from the demonstration stack, which unlike the quickstart has a cluster with
+   * brokers in it:
+   *
+   *   curl -s localhost:18080/api/v1/clusters/development/brokers/1/configs > src/recorded/brokerConfigs.json
+   */
+  it("reads the wire's own spellings, not the topic endpoint's", async () => {
+    const answer = await fetchBrokerConfigs(client(brokerConfigsDocument), "development", 1);
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+
+    // The whole document, not a page of it. A mapping that dropped rows would still pass every
+    // assertion below.
+    expect(answer.value.length).toBe(340);
+
+    const listeners = answer.value.find((entry) => entry.name === "advertised.listeners");
+    expect(listeners?.value).toBe("INTERNAL://kafka-dev:9092,EXTERNAL://localhost:19092");
+    // `static-broker`, and the screen's word for it. Not `STATIC_BROKER_CONFIG`, which is Kafka's
+    // own spelling and is not what this gateway sends.
+    expect(listeners?.source).toBe("STATIC");
+    expect(listeners?.overridden).toBe(true);
+    expect(listeners?.sensitive).toBe(false);
+
+    const background = answer.value.find((entry) => entry.name === "background.threads");
+    expect(background?.source).toBe("DEFAULT");
+    // There is no `isDefault` field on the wire, although the server's domain entity has one, so
+    // this is derived from the source. If a future response grows the field, prefer it — but until
+    // then reading `payload.isDefault` gives `undefined`, which is falsy, which marks every setting
+    // on the broker as untouched and empties the one column this page is for.
+    expect(background?.overridden).toBe(false);
+  });
+
+  it("keeps a sensitive setting out of the value column without calling it missing", async () => {
+    const answer = await fetchBrokerConfigs(client(brokerConfigsDocument), "development", 1);
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+
+    const jaas = answer.value.find((entry) => entry.name === "sasl.jaas.config");
+    expect(jaas).toBeDefined();
+    // `isSensitive` on the wire — the topic endpoint calls the same idea `sensitive`, and reading
+    // that name here yields `false` for every row. Nothing would look broken: the values are null
+    // anyway, so the table would draw em dashes and quietly claim Kafka has no password set.
+    expect(jaas?.sensitive).toBe(true);
+    expect(jaas?.value).toBeNull();
+
+    expect(answer.value.some((entry) => entry.sensitive)).toBe(true);
+  });
+
+  it("does not silently produce three hundred empty rows", async () => {
+    const answer = await fetchBrokerConfigs(client(brokerConfigsDocument), "development", 1);
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    // The property, stated on its own: a mapping that read every field from the wrong name decodes
+    // to rows of nulls, and a table of em dashes reads as a broker that did not answer.
+    expect(answer.value.filter((entry) => entry.value !== null).length).toBeGreaterThan(200);
+    expect(answer.value.every((entry) => entry.source === "UNKNOWN")).toBe(false);
+  });
+});
+
+describe("the recorded log directories", () => {
+  /*
+   *   curl -s 'localhost:18080/api/v1/clusters/development/log-dirs?brokerId=1' > src/recorded/brokerLogDirs.json
+   */
+  it("sizes a directory by what it holds, not by the disk under it", async () => {
+    const answer = await fetchBrokerLogDirs(client(logDirsDocument), "development", 1);
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+
+    const [dir] = answer.value;
+    expect(dir?.path).toBe("/tmp/kafka-logs");
+    expect(dir?.error).toBeNull();
+    expect(dir?.partitions).toBe(58);
+
+    /*
+     * The assertion this document exists for. `totalBytes` is 503 GB and `usableBytes` is 199 GB —
+     * both describe the filesystem — while the directory holds about 32 MB. Either of the first two
+     * would draw a broker sitting on half a terabyte of Kafka data.
+     */
+    expect(dir?.sizeBytes).toBeGreaterThan(1_000_000);
+    expect(dir?.sizeBytes).toBeLessThan(1_000_000_000);
+  });
+
+  it("gives an unreadable directory no size at all", async () => {
+    // Not in the recorded document — a healthy stack has no failed disk, and one cannot be arranged
+    // on demand. The shape is the server's all the same: `error` is a per-directory field, which is
+    // how Kafka reports one disk failing while the rest of the answer is good.
+    const failed = {
+      logDirs: {
+        status: "ok",
+        data: [{ brokerId: 1, path: "/mnt/broken", error: "KafkaStorageException", replicas: [] }],
+        fetchedAt: "2026-09-05T21:59:38.749Z",
+      },
+    };
+    const answer = await fetchBrokerLogDirs(client(failed), "development", 1);
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+
+    // Zero would be a claim about a disk nobody could read, and it would be summed into the total
+    // under the table as though the directory were empty.
+    expect(answer.value[0]?.sizeBytes).toBeNull();
+    expect(answer.value[0]?.partitions).toBeNull();
+    expect(answer.value[0]?.error).toBe("KafkaStorageException");
   });
 });
