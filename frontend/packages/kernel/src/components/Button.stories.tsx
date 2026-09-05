@@ -205,7 +205,9 @@ export const Matrix: Story = {
       <table style={{ "border-collapse": "separate", "border-spacing": "12px" }}>
         <thead>
           <tr>
-            <th />
+            {/* Named rather than empty: an empty `<th>` is a column header a screen reader
+                announces as nothing, and this one heads the variant column. */}
+            <th style={{ "font-size": "11px", color: "var(--kui-color-text-muted)" }}>variant</th>
             <th style={{ "font-size": "11px", color: "var(--kui-color-text-muted)" }}>default</th>
             <th style={{ "font-size": "11px", color: "var(--kui-color-text-muted)" }}>busy</th>
             <th style={{ "font-size": "11px", color: "var(--kui-color-text-muted)" }}>disabled</th>

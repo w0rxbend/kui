@@ -26,8 +26,21 @@ const meta = {
   component: RecordRow,
   parameters: { layout: "padded" },
   decorators: [
-    (Story) => (
-      <RecordList label="Records in orders.payments.v2">{Story()}</RecordList>
+    (Story, context) => (
+      /* The list lives here and ONLY here.
+       *
+       * A `RecordRow` renders an `<li>`, so every story needs a `<ul>` around it or axe reports
+       * `listitem` — hence the decorator. But three stories used to build a `RecordList` of their
+       * own inside this one, which produced a `<ul>` directly inside a `<ul>`: `list` and
+       * `listitem` both fail, and a screen reader announces a list of one item that is a list.
+       * Those stories now render bare rows and inherit this list. */
+      /* The width goes on a wrapper *outside* the list, driven by a parameter, rather than on a
+         per-story decorator. A story decorator runs inside the meta one, so a `<div>` there lands
+         as a direct child of this `<ul>` — which axe reports as `list`, and which makes the row
+         inside it an `<li>` with no list parent. */
+      <div style={{ width: (context.parameters["width"] as string | undefined) ?? "auto" }}>
+        <RecordList label="Records in orders.payments.v2">{Story()}</RecordList>
+      </div>
     ),
   ],
 } satisfies Meta<typeof RecordRow>;
@@ -54,13 +67,9 @@ export const Expanded: Story = { args: { record: first, now: NOW, initiallyExpan
  */
 export const OpensInPlace: StoryObj = {
   render: () => (
-    <RecordList label="Records">
-      <For each={RECORDS}>
-        {(record) => (
-          <RecordRow record={record} now={NOW} testId={`record-${recordKey(record)}`} />
-        )}
-      </For>
-    </RecordList>
+    <For each={RECORDS}>
+      {(record) => <RecordRow record={record} now={NOW} testId={`record-${recordKey(record)}`} />}
+    </For>
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -160,18 +169,16 @@ export const EveryExtremeCollapsed: Story = { args: { record: EXTREME_RECORD, no
  * partition and the time stay readable at every width. */
 export const NarrowWindow: Story = {
   args: { record: EXTREME_RECORD, now: NOW, initiallyExpanded: true },
-  decorators: [(Story) => <div style={{ width: "380px" }}>{Story()}</div>],
+  parameters: { width: "380px" },
 };
 
 /** The whole list, as screenshot `02` draws it, with the awkward records mixed in among the
  * ordinary ones — which is how they arrive in a real topic. */
 export const TheWholeList: StoryObj = {
   render: () => (
-    <RecordList label="Records in orders.payments.v2">
-      <For each={[...RECORDS, TOMBSTONE, UNDECODABLE, TOO_LARGE, EXTREME_RECORD]}>
-        {(record) => <RecordRow record={record} now={NOW} />}
-      </For>
-    </RecordList>
+    <For each={[...RECORDS, TOMBSTONE, UNDECODABLE, TOO_LARGE, EXTREME_RECORD]}>
+      {(record) => <RecordRow record={record} now={NOW} />}
+    </For>
   ),
 };
 
@@ -186,20 +193,18 @@ export const EveryRelativeTime: StoryObj = {
   render: () => {
     const offsets = [-3, 2, 45, 3600 * 2, 86_400 * 5];
     return (
-      <RecordList label="Times">
-        <For each={offsets}>
-          {(seconds, index) => (
-            <RecordRow
-              record={{
-                ...first,
-                offset: String(1000 + index()),
-                timestamp: new Date(NOW - seconds * 1000).toISOString(),
-              }}
-              now={NOW}
-            />
-          )}
-        </For>
-      </RecordList>
+      <For each={offsets}>
+        {(seconds, index) => (
+          <RecordRow
+            record={{
+              ...first,
+              offset: String(1000 + index()),
+              timestamp: new Date(NOW - seconds * 1000).toISOString(),
+            }}
+            now={NOW}
+          />
+        )}
+      </For>
     );
   },
 };

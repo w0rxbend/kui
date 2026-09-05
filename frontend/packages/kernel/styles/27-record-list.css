@@ -125,7 +125,7 @@
 }
 
 .kui-record__hash {
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
 }
 
 /* The offset is the record's name and the accent colour is what marks it as such. */
@@ -164,7 +164,7 @@
 
 .kui-record__value-glyph {
   flex: none;
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
 }
 
 .kui-record__key-value,
@@ -191,12 +191,16 @@
 /* "— (tombstone)". Subtle, because it repeats what the value column already says, and named
  * rather than left as a bare dash, because a null key in a compacted topic *is* the deletion. */
 .kui-record__key-absent {
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
   font-style: normal;
 }
 
+/* `text-muted`, not the subtle step. A record's age is drawn over the one-shot green wash that marks
+ * an arrival, and `--kui-color-text-subtle` on `--kui-color-success-container` is 3.5:1 — the
+ * subtle step is only legible on the three neutral surfaces (see `10-tokens.css`). Caught by
+ * `scripts/a11y-stories.mjs` on the just-arrived story. */
 .kui-record__time {
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-xs);
   white-space: nowrap;
 }
@@ -296,12 +300,13 @@
 
 /* `CreateTime` / `LogAppendTime`, under the TIMESTAMP box.
  *
- * `--kui-color-text-subtle` is deliberately below the AA threshold, and SPEC §1.3 therefore allows
- * it only for "text that repeats information available elsewhere" — the relative-time column above
- * is the example it gives. This note repeats nothing. SPEC §4.28 asks for it precisely because an
- * operator debugging ordering has to know which clock they are reading, and a value the reader must
- * actually read does not belong in the one colour the palette reserves for values they need not.
- * `--kui-color-text-muted` meets AA on every surface in both themes. */
+ * `--kui-color-text-muted` rather than the subtle step below it. SPEC §4.28 asks for this note
+ * precisely because an operator debugging ordering has to know which clock they are reading, and a
+ * value the reader must actually read is not one to draw in the dimmest ink available.
+ *
+ * (The subtle step has since been raised to meet AA on the three neutral surfaces — see
+ * `10-tokens.css` — but it still fails on the green arrival wash a record row can carry, so muted
+ * remains the right choice here.) */
 .kui-record__fact-note {
   display: block;
   color: var(--kui-color-text-muted);
@@ -316,7 +321,7 @@
 
 .kui-record__none {
   margin: 0;
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
   font-size: var(--kui-font-size-sm);
 }
 
@@ -410,7 +415,7 @@
 
 /* Present-with-an-empty-value. Distinct from absent, which is not drawn at all. */
 .kui-header-chip--empty .kui-header-chip__value {
-  color: var(--kui-color-text-subtle);
+  color: var(--kui-color-text-muted);
   font-style: italic;
 }
 

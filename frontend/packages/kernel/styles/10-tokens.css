@@ -313,8 +313,25 @@
    * two values -- but only two. Written out one at a time they had become five numbers between 0.5
    * and 0.65 scattered across six files, which meant a disabled pagination button and a disabled
    * kernel button sat side by side on the same screen at two different weights. */
-  --kui-opacity-disabled: 0.55;
-  --kui-opacity-stale: 0.65;
+  /* Both were lower — 0.55 and 0.65 — and both put text below the AA threshold once composited.
+   *
+   * Dimming is done with opacity rather than with a second set of colours, which is right: it works
+   * in both themes and every accent without another token. But opacity composites the *text* as
+   * well as everything else, and `--kui-color-text-muted` at 0.55 over `--kui-color-surface-raised`
+   * is 3.23:1. Sweeping axe over every story found this on a busy dialog's labels, a ghost button's
+   * label, a confirmation dialog's error code, and every cell of a table that is refreshing.
+   *
+   * WCAG exempts genuinely inactive controls, and a `disabled` attribute would be exempt. These are
+   * not that: the controls carry `aria-disabled`, they stay in the tab order, and the product's own
+   * rule is that a disabled control must explain *why* — which is a sentence the reader has to be
+   * able to read. A refreshing table is not inactive at all; it is the data, a moment old.
+   *
+   * 0.8 is the lowest step on the 0.05 grid at which muted text clears 4.5:1 on all three neutral
+   * surfaces *and* on the tinted containers a status pill sits in — 0.75 cleared the neutrals and
+   * left a handful of pills and captions between 4.26:1 and 4.34:1. Both still read plainly as
+   * dimmed. */
+  --kui-opacity-disabled: 0.8;
+  --kui-opacity-stale: 0.8;
 
   /* --- Motion ------------------------------------------------------------------------------ */
 

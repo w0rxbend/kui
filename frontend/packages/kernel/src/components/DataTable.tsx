@@ -190,7 +190,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): JSX.Element {
   }
 
   return (
-    <div class="kui-table-scroll" data-testid={props.testId}>
+    <div
+      class="kui-table-scroll"
+      data-testid={props.testId}
+      /* Focusable because it scrolls sideways. A scroll container outside the tab order cannot be
+         scrolled from the keyboard at all, so a table wider than its column is one a keyboard user
+         can only ever see the left of. axe calls this `scrollable-region-focusable`. */
+      tabindex={0}
+    >
       <table
         class={["kui-table", { "kui-table--loading": props.loading === true && !isEmpty() }]}
         // ARIA booleans are the strings "true" and "false", not JS booleans: in HTML a boolean

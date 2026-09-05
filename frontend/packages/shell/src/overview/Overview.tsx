@@ -354,7 +354,15 @@ function ReadingFallback(props: { readonly reading: Reading<unknown>; readonly n
     >
       {/* `aria-busy` rather than a live region: a screen reader should learn that this panel is
           still filling in when it reaches it, not be interrupted about it. */}
-      <div class="kui-overview__waiting" aria-busy="true" aria-label={`Reading ${props.noun}`} />
+      {/* `role="status"` because a bare `<div>` may not carry `aria-label` — ARIA forbids naming an
+          element with no role, so the label was being dropped and the placeholder announced nothing
+          at all. `status` is what this is: a polite statement that a figure is on its way. */}
+      <div
+        class="kui-overview__waiting"
+        role="status"
+        aria-busy="true"
+        aria-label={`Reading ${props.noun}`}
+      />
     </Show>
   );
 }

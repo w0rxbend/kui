@@ -86,7 +86,10 @@ export function TopicPage(props: TopicPageProps): JSX.Element {
     <div class="kui-topic-page">
       <Show when={props.breadcrumb}>{(trail) => <>{trail()}</>}</Show>
 
-      <header class="kui-topic-page__header">
+      {/* A `div`, not a `header`. A `<header>` that is not inside a section or an article is
+          exposed as a `banner` landmark, and the application already has one — the top bar. Two
+          banners give a screen-reader user two indistinguishable entries in the landmark list. */}
+      <div class="kui-topic-page__header">
         <div class="kui-topic-page__identity">
           {/* The name is the heading, and it is the topic's *real* name — never shortened, never
               pretty-printed. An operator copies it out of here into a command line. */}
@@ -127,7 +130,7 @@ export function TopicPage(props: TopicPageProps): JSX.Element {
             )}
           </Show>
         </div>
-      </header>
+      </div>
 
       <Show when={props.tabs}>{(strip) => <>{strip()}</>}</Show>
 

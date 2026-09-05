@@ -124,16 +124,18 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
         <IconTile icon="brokers" tone={broker().isController ? "primary" : "success"} />
 
         <div class="kui-brkcard__identity">
-          <Show
-            when={props.href}
-            fallback={<span class="kui-brkcard__name">{broker().host}</span>}
-          >
-            {(href) => (
-              <a class="kui-brkcard__name kui-focusable" href={href()}>
-                {broker().host}
-              </a>
-            )}
-          </Show>
+          {/* The broker's name is the card's heading. It was a span, which left the CONFIGURATION
+              `h3` inside the expansion with no `h2` above it — an outline in which every broker's
+              settings hang off the page title rather than off the broker. */}
+          <h2 class="kui-brkcard__name-heading">
+            <Show when={props.href} fallback={<span class="kui-brkcard__name">{broker().host}</span>}>
+              {(href) => (
+                <a class="kui-brkcard__name kui-focusable" href={href()}>
+                  {broker().host}
+                </a>
+              )}
+            </Show>
+          </h2>
           <span class="kui-brkcard__address">
             {broker().host}:{broker().port}
           </span>
@@ -201,6 +203,9 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
             <Show when={props.uptime}>{(uptime) => <Tag tone="neutral">{uptime()}</Tag>}</Show>
           </div>
 
+          {/* `h3` under the card's own `h2` below, not under the page's `h1`: heading levels may
+              only increase by one, and a card that jumps straight to `h3` makes the document
+              outline lie about what contains what. */}
           <h3 class="kui-brkcard__section">CONFIGURATION</h3>
 
           <Show

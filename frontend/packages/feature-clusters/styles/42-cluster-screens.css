@@ -421,3 +421,14 @@ a.kui-brkcard__name:hover {
     grid-area: disk;
   }
 }
+
+/* The broker name is a heading so that the card's CONFIGURATION block has something to hang off,
+ * but it is drawn as the same 14px line it always was — an `h2` here is about the document outline,
+ * not about size. */
+.kui-brkcard__name-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  min-width: 0;
+}
