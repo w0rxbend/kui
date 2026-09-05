@@ -23,7 +23,7 @@
  * answer to it is no, because authentication is disabled in every deployment until somebody
  * configures an identity provider.
  */
-import { Show, createEffect, createMemo, createSignal, createStore, onSettled } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, createStore, onCleanup, onSettled } from "solid-js";
 import {
   createApiClient,
   createCsrfTokens,
@@ -203,20 +203,37 @@ export function App() {
     session.acceptSettings(settings.ok ? settings.value : undefined);
   };
 
+  /*
+   * The capability stream is opened during construction, not in `onSettled`.
+   *
+   * `capabilities.start()` builds a reactive root to watch the connection, and Solid 2 forbids
+   * creating reactive primitives inside an effect or an owner-backed `onSettled`: it raises
+   * `PRIMITIVE_IN_FORBIDDEN_SCOPE`. The development build enforces that and the production build
+   * compiles the check away, so the violation ran unnoticed in the browser and failed the moment
+   * anything mounted `App` under the development renderer — the worst way round, because the shape
+   * that is wrong is the shape that ships.
+   *
+   * Opening it here is also what the start-up order already asked for: nothing waits for the
+   * picture, so there is nothing to gain by waiting for the first paint before asking for it.
+   */
+  capabilities.start();
+  onCleanup(() => capabilities.stop());
+
   onSettled(() => {
     void startUp();
-    capabilities.start();
-    return () => capabilities.stop();
   });
 
-  /** Every feature's registration paired with what the shell currently knows about it. */
-  const statuses = createMemo<readonly FeatureStatus[]>(() =>
-    featureRegistry.map((registration) => ({
-      registration,
-      state: stateOf(registration),
-    })),
-  );
-
+  /**
+   * What the shell currently knows about one feature.
+   *
+   * Declared *before* the memo that calls it, and that order is load-bearing rather than tidiness.
+   * A `const` arrow function is in its temporal dead zone until the line that assigns it runs, and
+   * `createMemo` in Solid 2 computes eagerly when it is created — so a memo written above this
+   * binding calls it while it is still uninitialised. That throws `ReferenceError: Cannot access
+   * 'stateOf' before initialization` inside the reactive graph, which Solid reports as
+   * `REACTIVITY_HALTED`: the whole tree stops and the application renders a blank page with no
+   * failed request and no visibly broken component to point at.
+   */
   const stateOf = (registration: FeatureRegistration): FeatureState =>
     capabilities.featureState(
       registration.serviceId,
@@ -226,6 +243,14 @@ export function App() {
       // `/auth/me` is in flight would flash a forbidden navigation on every load.
       session.identity() === undefined || session.permits(registration.serviceId, "view", cluster.selected()),
     );
+
+  /** Every feature's registration paired with what the shell currently knows about it. */
+  const statuses = createMemo<readonly FeatureStatus[]>(() =>
+    featureRegistry.map((registration) => ({
+      registration,
+      state: stateOf(registration),
+    })),
+  );
 
   const statusOf = (id: FeatureId): FeatureStatus | undefined =>
     statuses().find((status) => status.registration.id === id);
