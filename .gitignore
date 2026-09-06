@@ -11,6 +11,12 @@ out/
 node_modules/
 frontend/dist/
 
+# `pnpm build-storybook`. It is a CI step and it is also the input the a11y sweep runs against, so
+# every developer who checks the gate before pushing leaves ~11MB of it behind; untracked, it makes
+# `git status` unreadable for everyone who does. No trailing slash, unlike its neighbours, so that
+# `git check-ignore frontend/storybook-static` answers the same before the build has ever run.
+frontend/storybook-static
+
 # Playwright's own output: the HTML report and the per-test traces, videos and screenshots it keeps
 # for a failure. Regenerable by re-running the suite, and a trace is megabytes.
 frontend/playwright-report/
@@ -25,3 +31,13 @@ deployment/secured/certs/
 
 # TypeScript project-reference build state (frontend/tsconfig*.json)
 frontend/.tsbuild/
+
+# Storybook's static build. Produced by `pnpm build-storybook`, which the a11y gate runs on every
+# check, so without this every run leaves 11 MB of untracked output in `git status` — and the agents
+# and people who read that status to see what a change touched lose the signal in the noise.
+frontend/storybook-static/
+
+# Design captures. `research/design/SCREENS.md` records that this repository keeps screenshots
+# outside itself; the reading of them is what is committed (`SCREENS-V4.md`), not the pixels. Six
+# megabytes of PNG per design revision is not history anybody will thank us for keeping.
+screens/
