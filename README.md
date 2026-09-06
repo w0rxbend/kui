@@ -3,16 +3,18 @@
 A Kafka management and observability interface. Scala 3 on the server, TypeScript and SolidJS in
 the browser, built and shipped as two independent halves that talk over HTTP.
 
-> **Status: milestones 0 to 4, plus topic administration from milestone 5.** KUI connects to real
-> Kafka clusters and is usable from a browser: a dashboard, clusters and brokers, topics and their
-> configuration, browsing and publishing records, consumer groups with their lag, and an offset-reset
-> wizard. It can also create a topic, change a setting, add partitions, empty a topic and delete one
-> — the three that cannot be undone are confirmed against a plan the server computed and applied
-> against a token naming exactly what you were shown. What is *not* built is named plainly under
-> [What is built, and what is not](#what-is-built-and-what-is-not) below — schema registry,
-> connectors, ksqlDB, access control, authentication and metrics among them, and there is no
-> authentication of any kind, so do not put this on a network you do not control. See
-> [ROADMAP.md](docs/ROADMAP.md) for what lands when.
+> **Status: milestones 0 to 5, with sign-in, access control and the schema registry substantially
+> delivered.** KUI connects to real Kafka clusters and is usable from a browser: a dashboard,
+> clusters and brokers, topics and their configuration, browsing and publishing records, consumer
+> groups with their lag, an offset-reset wizard, and schema subjects with their versions and
+> compatibility. It can also create a topic, change a setting, add partitions, empty a topic and
+> delete one — the three that cannot be undone are confirmed against a plan the server computed and
+> applied against a token naming exactly what you were shown. Sign-in and role-based authorization
+> are built, but **`kui.auth.type` defaults to `disabled`**, so an unconfigured deployment lets
+> anyone who can reach the port do anything KUI can do. What is *not* built is named plainly under
+> [What is built, and what is not](#what-is-built-and-what-is-not) below — Kafka Connect, ksqlDB,
+> ACL and quota management, and metrics among them. See [ROADMAP.md](docs/ROADMAP.md) for what
+> lands when, and [docs/plan/](docs/plan/) for the plan that closes the gap to the current design.
 
 ## What it is
 
@@ -71,25 +73,31 @@ reason the architecture is shaped the way it is, and it is tested rather than as
 | Topic administration: create, reconfigure, add partitions, empty, delete | done, with read-only mode, plan-token confirmation and an audit trail |
 | Messages: browsing with every seek mode, streaming, serialization formats, publishing, filters | done except purge from the message screen |
 | Consumer groups: groups, members, assignments, lag, offset reset | done, wizard included |
+| Schema registry: subjects, versions, compatibility levels and checks, registry-backed Avro and JSON Schema decoding | done |
+| Sign-in and access control: form and OIDC authentication, sessions, CSRF, role-based authorization at the edge | done, and disabled by default |
 | Quickstart, configuration examples, demonstration environment | done |
 
 **What is not built:**
 
-- **No authentication and no authorization.** Anyone who can reach the port can do anything KUI
-  can do, including deleting topics. Run it on a network you control.
-- **No schema registry integration**, so Avro and Protobuf payloads are not decoded against a
-  registry.
+- **Authentication and authorization ship disabled.** Both are built — form and OIDC sign-in, a
+  session and CSRF layer at the gateway, and a role-based policy evaluated at the edge — but
+  `kui.auth.type` defaults to `disabled`. Until you configure it, anyone who can reach the port can
+  do anything KUI can do, including deleting topics. Run it on a network you control.
 - **No Kafka Connect, no ksqlDB, no ACL or quota management.**
-- **No metrics collection**: throughput columns render as `—` rather than as numbers.
-- Some components exist and are tested but are not yet reachable from a screen — live tailing, the
-  CEL filter engine, the masking engine, event tracking and CSV export among them. These are
-  marked `IMPLEMENTING` rather than `COMPLETE` in the feature matrix, and the matrix says exactly
-  which.
+- **No metrics collection**: nothing in the product reads a broker metric, so throughput, request
+  latency and per-client rates render as "not measured" rather than as numbers. There is no JMX
+  client, no Prometheus scraper and no time-series store anywhere in the tree.
+- **No alerts and no event feed.** No alert definition, threshold, severity or acknowledgement
+  exists, and the notification panel is fed an empty list.
+- The masking engine exists and is tested but is not yet reachable from a screen; it is marked
+  `IMPLEMENTING` rather than `COMPLETE` in the feature matrix.
 
-Of 177 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md), 53 are
-delivered end to end — about 30%. Every row there was set by reading the code and driving the
-running application, not by asking whether the work had been scheduled.
-[docs/ROADMAP.md](docs/ROADMAP.md) says what lands when.
+64 of 177 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
+delivered end to end — about 36%. That figure is recounted from the rows every time it is written
+down, never adjusted from the previous figure. Every row there was set by reading the code and
+driving the running application, not by asking whether the work had been scheduled.
+[docs/ROADMAP.md](docs/ROADMAP.md) says what lands when, and [docs/plan/](docs/plan/) holds the
+plan for the rest.
 
 ## Quick start
 
@@ -108,7 +116,7 @@ rather than merely until it has started, seeds it with topics, JSON messages and
 that is behind, starts KUI pointed at it, and prints the URL. `quickstart.sh down` removes all of it,
 volumes included.
 
-What you get is the product against that broker: the cluster and its one node, seven topics with
+What you get is the product against that broker: the cluster and its one node, nine topics with
 their partitions and configuration, the JSON records inside them, a form to publish more, three
 consumer groups with their lag, and a wizard that resets a group's offsets and shows you what it
 would write before it writes it. [`deployment/quickstart/README.md`](deployment/quickstart/README.md)
@@ -254,7 +262,7 @@ including the CI machine — builds with the same tool.
 ./mill devStart                   # the same, in the background, so you can re-link while it runs
 ./mill devStop                    # stop the background one
 
-./mill deployment.docker.__.build # the three container images
+./mill deployment.docker.__.build # the seven container images
 ```
 
 ### The quality gates
@@ -357,7 +365,7 @@ rather than saying "build failed". Every one of them is a command you can run yo
 | `test` | Every unit, property and contract suite passes on the JVM | `./scripts/run-tests.sh` |
 | `frontend` | The interface's own build, with no JDK and no Mill: `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and a check that the committed browser types have not drifted from the OpenAPI document they are generated from | — |
 | `compose` | The five container images build and the Compose stack survives one service dying | `./deployment/compose/smoke.sh` |
-| — | ⚠️ **There is no browser end-to-end gate.** The Scala Playwright suite in `e2e/` selects on `data-testid` attributes the deleted Laminar components carried, and points the browser at the gateway, which no longer serves an interface. It fails structurally on every commit, so it is not run rather than left red — a red build that is always red means nothing, and `continue-on-error` would be worse. `docs/ROADMAP-SOLID.md` M2 replaces it with a TypeScript Playwright suite beside the frontend | — |
+| `browser` | The shipped interface works in a real browser against a real stack: `quickstart.sh` brings the product up, then Playwright drives it | `deployment/quickstart/quickstart.sh up` then `pnpm -C frontend e2e` |
 
 One thing about the `test` stage is worth knowing before you are surprised by it.
 
