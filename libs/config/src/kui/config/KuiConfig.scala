@@ -84,8 +84,8 @@ object ConfigErrors {
   * `metrics` and `alerts` are sections for services that do not exist yet, and they carry defaults for that
   * reason: a deployment that has never heard of either still loads, and a cluster with no metrics source
   * configured is the case those screens are designed around rather than a misconfiguration (ADR-032). They
-  * are here before their services because four later milestones each need a section, and each would
-  * otherwise have to reopen this closed case class and its decoder.
+  * are here before their services because four later milestones each need a section, and each would otherwise
+  * have to reopen this closed case class and its decoder.
   *
   * `rbac` is held as the evaluator's own `RbacPolicy` rather than as a parallel set of configuration types.
   * The translation from a file to a policy is where the interesting mistakes live — what `actions: [DELETE]`

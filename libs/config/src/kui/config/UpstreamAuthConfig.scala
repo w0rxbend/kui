@@ -7,8 +7,8 @@ import kui.kernel.Secret
   *
   * Three cases and not a bag of optional fields, for the reason [[RegistryAuthConfig]] gives at length:
   * "basic or OAuth, never both" (ADR-014) is a rule that a record holding a username *and* a client secret
-  * cannot express, and whichever of the two silently lost would be the one an operator changed when the
-  * other expired.
+  * cannot express, and whichever of the two silently lost would be the one an operator changed when the other
+  * expired.
   *
   * It is a second enum rather than a rename of [[RegistryAuthConfig]] because that type is named in
   * `services/schema`, which this slice does not own. The two are the same three cases and should become one

@@ -6,16 +6,16 @@ import cats.data.NonEmptyList
 
 /** One cluster's ksqlDB, as an operator configured it.
   *
-  * Optional in full, and at most one per cluster: unlike Kafka Connect, a second ksqlDB cluster over the
-  * same brokers shares the same command topic and is the same logical service, so a list here would model a
+  * Optional in full, and at most one per cluster: unlike Kafka Connect, a second ksqlDB cluster over the same
+  * brokers shares the same command topic and is the same logical service, so a list here would model a
   * deployment that does not exist.
   *
   * @param urls
-  *   the servers' addresses in preference order. A ksqlDB cluster's servers all accept statements and
-  *   forward what they must, so a second address is failover rather than a second system
+  *   the servers' addresses in preference order. A ksqlDB cluster's servers all accept statements and forward
+  *   what they must, so a second address is failover rather than a second system
   * @param callTimeout
-  *   the budget for a request that answers and finishes: listing objects, describing a stream, running a
-  *   pull query
+  *   the budget for a request that answers and finishes: listing objects, describing a stream, running a pull
+  *   query
   * @param streamTimeout
   *   the budget for a *push* query, which by definition does not finish. It is a separate key rather than a
   *   larger `callTimeout` because the two are different promises: a listing that takes thirty seconds is
@@ -29,8 +29,8 @@ final case class KsqlSettings(
     streamTimeout: FiniteDuration = KsqlSettings.DefaultStreamTimeout
 ) {
 
-  /** Addresses and mechanism, never credentials. Same reason as every other settings type here: a field
-    * added later that is not a `Secret` would otherwise leak into `ClusterConfig`'s diagnostic.
+  /** Addresses and mechanism, never credentials. Same reason as every other settings type here: a field added
+    * later that is not a `Secret` would otherwise leak into `ClusterConfig`'s diagnostic.
     */
   override def toString: String =
     s"KsqlSettings(${urls.toList.map(_.value).mkString(", ")}, ${auth.describe}, " +

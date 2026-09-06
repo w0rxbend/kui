@@ -6,8 +6,8 @@ import kui.kernel.ClusterId
 
 /** Where one cluster's broker metrics are read from, and how.
   *
-  * KUI reads no broker metric today, and M7's adapter has two shapes to choose between: a Prometheus
-  * endpoint — a JMX exporter, or anything else that serves the same text format — or JMX itself. Which one a
+  * KUI reads no broker metric today, and M7's adapter has two shapes to choose between: a Prometheus endpoint
+  * — a JMX exporter, or anything else that serves the same text format — or JMX itself. Which one a
   * deployment has is a fact only the deployment knows, so it is declared here rather than guessed by probing
   * an address and hoping the wrong answer is a clean failure.
   *
@@ -67,8 +67,8 @@ object MetricsSourceKind {
   * the service that reads it exists.
   *
   * Nothing about *what* is measured belongs here. Metric names, JMX object names and bucket boundaries are
-  * the adapter's business; a deployment that had to name `kafka.server:type=BrokerTopicMetrics` in YAML
-  * would be configuring KUI's source code.
+  * the adapter's business; a deployment that had to name `kafka.server:type=BrokerTopicMetrics` in YAML would
+  * be configuring KUI's source code.
   *
   * @param scrapeInterval
   *   how often each configured source is read. It is also the step of the series the samples land in, so
@@ -78,10 +78,10 @@ object MetricsSourceKind {
   *   answered honestly, and the series primitive answers `None` rather than computing a percentage over four
   *   minutes and printing it as "over the last 24h"
   * @param maxSamplesPerSeries
-  *   the hard bound on one series, whatever the other two keys multiply out to. Retention of thirty days at
-  *   a five-second interval is half a million samples per series per cluster, and the operator who typed
-  *   those two numbers did not ask for that much resident memory; this is the key that says so before the
-  *   process runs out
+  *   the hard bound on one series, whatever the other two keys multiply out to. Retention of thirty days at a
+  *   five-second interval is half a million samples per series per cluster, and the operator who typed those
+  *   two numbers did not ask for that much resident memory; this is the key that says so before the process
+  *   runs out
   * @param sources
   *   the per-cluster addresses, keyed by the `ClusterId` in `kui.clusters[]`. A cluster with no entry has no
   *   source, which is the honest, common and fully supported case
@@ -95,9 +95,9 @@ final case class MetricsConfig(
 
   /** The source for one cluster, or `None` when the deployment did not configure one.
     *
-    * Given as a method so that no caller reads the map its own way and gets "not configured" subtly
-    * different from the next caller's — the difference between `not_configured` and `unavailable` is a
-    * difference the screens draw.
+    * Given as a method so that no caller reads the map its own way and gets "not configured" subtly different
+    * from the next caller's — the difference between `not_configured` and `unavailable` is a difference the
+    * screens draw.
     */
   def sourceFor(cluster: ClusterId): Option[MetricsSourceSettings] = sources.get(cluster)
 
@@ -111,8 +111,8 @@ object MetricsConfig {
   val DefaultRetention: FiniteDuration = 24.hours
   val DefaultMaxSamplesPerSeries: Int = 5000
 
-  /** Below five seconds a scrape never finishes before the next one starts on a cluster worth scraping;
-    * above an hour the charts are a historical record rather than a monitoring signal — the same bounds
+  /** Below five seconds a scrape never finishes before the next one starts on a cluster worth scraping; above
+    * an hour the charts are a historical record rather than a monitoring signal — the same bounds
     * `kui.topics.refreshInterval` is held to, for the same reasons.
     */
   val MinScrapeInterval: FiniteDuration = 5.seconds

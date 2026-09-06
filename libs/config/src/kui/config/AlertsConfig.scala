@@ -25,8 +25,8 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
   * @param diskUsedWarningPercent
   *   the share of a log directory's capacity at which it is worth mentioning
   * @param diskUsedCriticalPercent
-  *   the share at which it is worth waking somebody. Held above the warning by the loader, because a
-  *   critical bound below the warning would mean the warning never fires on the way past it
+  *   the share at which it is worth waking somebody. Held above the warning by the loader, because a critical
+  *   bound below the warning would mean the warning never fires on the way past it
   */
 final case class AlertThresholds(
     offlinePartitions: Int,

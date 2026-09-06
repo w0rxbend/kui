@@ -499,9 +499,7 @@ object KuiConfigSource {
       rbac,
       metrics,
       alerts
-    ).mapN((_, s, g, t, st, tp, cn, sr, cs, a, r, m, al) =>
-      Draft(s, g, t, st, tp, cn, sr, cs, a, r, m, al)
-    )
+    ).mapN((_, s, g, t, st, tp, cn, sr, cs, a, r, m, al) => Draft(s, g, t, st, tp, cn, sr, cs, a, r, m, al))
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {
@@ -1128,11 +1126,11 @@ object KuiConfigSource {
 
   /** The `kui.metrics.*` slice.
     *
-    * Every key has a default and the section as a whole is optional, so a file written before either of
-    * these sections existed loads unchanged. What is *not* defaulted into existence is a source: a cluster
-    * with no entry under `kui.metrics.sources` has none, the metrics service answers `not_configured` for
-    * it, and the cards keep their sentence. That is the design (ADR-032) and not a degraded mode, which is
-    * why the absence is a value rather than a problem to report.
+    * Every key has a default and the section as a whole is optional, so a file written before either of these
+    * sections existed loads unchanged. What is *not* defaulted into existence is a source: a cluster with no
+    * entry under `kui.metrics.sources` has none, the metrics service answers `not_configured` for it, and the
+    * cards keep their sentence. That is the design (ADR-032) and not a degraded mode, which is why the
+    * absence is a value rather than a problem to report.
     */
   private def decodeMetrics[F[_]: Async](layers: Layers, policy: UrlPolicy): F[Problems[MetricsConfig]] =
     for {
@@ -1174,9 +1172,9 @@ object KuiConfigSource {
     *
     * Every leaf under a source is a single segment on purpose. `Layers.childrenOf` reads an environment
     * variable's member name as everything up to the *last* underscore, so `KUI_METRICS_SOURCES_LOCAL_URL`
-    * means the cluster `local`; a nested block would make `..._LOCAL_AUTH_USERNAME` discover a cluster
-    * called `local-auth` and then fail it for having no URL. A flat shape is what keeps the environment and
-    * the YAML file spelling the same thing.
+    * means the cluster `local`; a nested block would make `..._LOCAL_AUTH_USERNAME` discover a cluster called
+    * `local-auth` and then fail it for having no URL. A flat shape is what keeps the environment and the YAML
+    * file spelling the same thing.
     */
   private def decodeMetricsSources[F[_]: Async](
       layers: Layers,
@@ -1324,8 +1322,8 @@ object KuiConfigSource {
     *
     * The `None` is the interesting half. A cross-field rule that compares an out-of-bounds value reports a
     * second problem about the same key — "your retention is below your interval" on top of "your interval is
-    * above the maximum" — and the second sentence sends the operator looking for a mistake they did not
-    * make. Staying quiet while the field speaks for itself is the discipline [[checkTopicRules]] describes.
+    * above the maximum" — and the second sentence sends the operator looking for a mistake they did not make.
+    * Staying quiet while the field speaks for itself is the discipline [[checkTopicRules]] describes.
     */
   private def effectiveDuration(
       layers: Layers,
@@ -1963,8 +1961,7 @@ object KuiConfigSource {
         )
         auth <- decodeUpstreamAuth[F](layers, s"$prefix.auth", "ksqlDB cluster", policy)
       } yield (urls, callTimeout, streamTimeout, auth, checkKsqlTimeouts(layers, prefix)).mapN(
-        (addresses, call, stream, credentials, _) =>
-          Some(KsqlSettings(addresses, credentials, call, stream))
+        (addresses, call, stream, credentials, _) => Some(KsqlSettings(addresses, credentials, call, stream))
       )
   }
 
@@ -2690,8 +2687,8 @@ object KuiConfigSource {
       .map(_.split('.').toList)
       ++ UpstreamAuthConfig.keysUnder("kui.clusters.*.ksql.auth").map(_.split('.').toList)
       ++ AuthConfigSection.keys ++ RbacConfigSection.keys ++ ClusterSecurityConfig
-      .keysUnder("kui.store.kafka.security")
-      .map(_.split('.').toList)
+        .keysUnder("kui.store.kafka.security")
+        .map(_.split('.').toList)
       ++ ClusterSecurityConfig
         .keysUnder("kui.clusters.*.security")
         .flatMap { key =>
