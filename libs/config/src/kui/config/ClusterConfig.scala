@@ -31,7 +31,9 @@ final case class ClusterConfig(
     readOnly: Boolean,
     admin: AdminTuning,
     serde: ClusterSerdeConfig = ClusterSerdeConfig.empty,
-    schemaRegistry: Option[SchemaRegistrySettings] = None
+    schemaRegistry: Option[SchemaRegistrySettings] = None,
+    connect: List[ConnectClusterSettings] = Nil,
+    ksql: Option[KsqlSettings] = None
 ) {
 
   /** The four things a client needs, as the one value every port takes.
@@ -52,8 +54,10 @@ final case class ClusterConfig(
     val mechanism = security.saslMechanism.fold("")(m => s", mechanism=${m.wireName}")
     val extra = if properties.isEmpty then "" else s", properties=[${properties.render}]"
     val registry = schemaRegistry.fold("")(settings => s", schemaRegistry=$settings")
+    val connectClusters = if connect.isEmpty then "" else s", connect=[${connect.mkString(", ")}]"
+    val ksqldb = ksql.fold("")(settings => s", ksql=$settings")
     s"ClusterConfig(${id.value}, '$name', ${bootstrapServers.value}, " +
-      s"${security.securityProtocol}$mechanism, readOnly=$readOnly$extra$registry)"
+      s"${security.securityProtocol}$mechanism, readOnly=$readOnly$extra$registry$connectClusters$ksqldb)"
   }
 }
 

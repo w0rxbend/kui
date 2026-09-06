@@ -1,6 +1,14 @@
 {
     "items": [
-        "orders.avro-value"
+        {
+            "subject": "orders.avro-value",
+            "format": "AVRO",
+            "versionCount": 1,
+            "compatibility": {
+                "level": "BACKWARD",
+                "inheritedFromGlobal": true
+            }
+        }
     ],
     "page": {
         "page": 1,

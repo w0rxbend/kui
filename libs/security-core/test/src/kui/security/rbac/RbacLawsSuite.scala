@@ -290,6 +290,101 @@ final class RbacLawsSuite extends ScalaCheckSuite {
     )
   }
 
+  // -- The resources with no read (W1-07) -----------------------------------------------------------
+
+  test("runningAKsqlStatementImpliesBeingAbleToListKsqlObjects") {
+    // The same rule as TopicCreate -> TopicView, applied where it was missing: a principal allowed to run a
+    // statement has to be allowed to know the objects it names exist.
+    assert(Action.closure(Set(Action.KsqlExecute)).contains(Action.KsqlView))
+  }
+
+  test("aReadOnlyClusterStillListsKsqlObjects") {
+    // Ksql's only action used to be EXECUTE, which alters, so the read-only gate refused the resource
+    // outright and the ksqlDB screen was empty on exactly the clusters most likely to be read-only.
+    assertEquals(
+      Rbac.decide(
+        RbacPolicy.Disabled,
+        user(),
+        ReadOnly,
+        AccessRequest(Cluster, "listKsqlObjects", ResourceAccess.unnamed(Resource.Ksql, Action.KsqlView))
+      ),
+      Decision.Allowed
+    )
+  }
+
+  test("aReadOnlyClusterStillRefusesAKsqlStatement") {
+    // The other half of the pair, and the reason the fix is a second action rather than making EXECUTE a
+    // read: a statement can create a stream and the topic under it.
+    assertEquals(
+      Rbac.decide(
+        RbacPolicy.Disabled,
+        user(),
+        ReadOnly,
+        AccessRequest(Cluster, "runKsqlStatement", ResourceAccess.unnamed(Resource.Ksql, Action.KsqlExecute))
+      ),
+      Decision.Denied(DenialReason.ReadOnlyCluster(Cluster, Set(Action.KsqlExecute)))
+    )
+  }
+
+  test("acknowledgingAnAlertImpliesSeeingTheFeed") {
+    assert(Action.closure(Set(Action.AlertsAcknowledge)).contains(Action.AlertsView))
+  }
+
+  test("aReadOnlyClusterStillShowsItsMetricsAndItsAlerts") {
+    // Neither reads anything from the cluster that a read-only flag is about. A dashboard that went blank
+    // because the cluster was marked read-only would be read the wrong way round by every operator.
+    assertEquals(
+      Rbac.decide(
+        RbacPolicy.Disabled,
+        user(),
+        ReadOnly,
+        AccessRequest(
+          Cluster,
+          "readDashboard",
+          ResourceAccess.unnamed(Resource.Metrics, Action.MetricsView),
+          ResourceAccess.unnamed(Resource.Alerts, Action.AlertsView)
+        )
+      ),
+      Decision.Allowed
+    )
+  }
+
+  test("theTwoNewResourcesAreUnnamed") {
+    // `isNamed` is what the configuration loader asks before it demands a `value`, so getting this wrong
+    // makes `resource: METRICS` a permission that grants nothing while looking like it grants everything.
+    assert(!Resource.Metrics.isNamed)
+    assert(!Resource.Alerts.isNamed)
+  }
+
+  test("aRoleGrantingTheAlertsFeedDoesNotGrantAcknowledgement") {
+    // Reading and silencing are two grants. `ALL` is how an operator asks for both.
+    val policy = RbacPolicy(
+      List(
+        Role(
+          RoleName.unsafe("on-call"),
+          Set(Cluster),
+          List(Subject(Provider.Oauth, SubjectKind.User, "tester", isRegex = false)),
+          List(RbacPolicy.permission(Resource.Alerts, None, Set(Action.AlertsView)))
+        )
+      ),
+      None
+    )
+
+    assertEquals(
+      Rbac.decide(
+        policy,
+        user(RoleName.unsafe("on-call")),
+        Writable,
+        AccessRequest(
+          Cluster,
+          "acknowledgeAlert",
+          ResourceAccess.unnamed(Resource.Alerts, Action.AlertsAcknowledge)
+        )
+      ),
+      Decision.Denied(DenialReason.MissingActions(Resource.Alerts, None, Set(Action.AlertsAcknowledge)))
+    )
+  }
+
   // -- RBAC switched off ----------------------------------------------------------------------------
 
   property("everyNonAlteringRequestIsAllowedWhenRbacIsOff") {

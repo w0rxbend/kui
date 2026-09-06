@@ -205,7 +205,17 @@ export function TopicConsumers(props: TopicConsumersProps): JSX.Element {
     },
     {
       id: "dormant",
-      header: "",
+      /* This header was `""`, and it was the only empty column header in the workspace: fourteen
+         of the a11y sweep's fourteen violations, `empty-table-header` on seven stories in two
+         themes. A blank `<th>` is the one thing a screen reader cannot work around — it announces
+         a cell by its column, and this column had nothing to be announced by.
+         The design's reason for the blank was that a heading is louder than the one word it heads,
+         so the string is the quietest one that names what is reported rather than the exception
+         being reported: the cells say "dormant", the heading says the axis. A visually-hidden
+         string would honour the design exactly, and cannot be written here — `Column.header` is a
+         `string` that `DataTable` renders straight into the `<th>`, so hiding it needs the kernel
+         to accept an element there. Do not empty it again in the meantime. */
+      header: "Activity",
       width: "10%",
       render: (row) => (
         <Show when={row.dormant}>

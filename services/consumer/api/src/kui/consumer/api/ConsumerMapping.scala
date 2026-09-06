@@ -90,6 +90,13 @@ object ConsumerMapping {
     }
   }
 
+  /** The list row.
+    *
+    * The three coordinator fields are each a `map` over the same `Option`, which is what makes them absent
+    * together: `SCREENS-V4.md` §4.12 prints `broker-1:9092`, and a host beside an id with no port would let a
+    * screen render half an address. Splitting the ref here rather than joining it into one string keeps the
+    * port a number for anything that wants to compare it.
+    */
   def summary(row: GroupSummary): GroupSummaryDto =
     GroupSummaryDto(
       groupId = row.groupId,
@@ -100,6 +107,8 @@ object ConsumerMapping {
       topics = row.topicCount,
       partitions = row.partitionCount,
       coordinatorId = row.coordinator.map(_.id.value),
+      coordinatorHost = row.coordinator.map(_.host),
+      coordinatorPort = row.coordinator.map(_.port),
       totalLag = row.totalLag,
       pace = row.pace,
       excludedPartitions = row.completeness.excludedPartitions.size,
@@ -167,6 +176,8 @@ object ConsumerMapping {
       isSimple = view.group.isSimple,
       partitionAssignor = view.group.partitionAssignor,
       coordinatorId = view.group.coordinator.map(_.id.value),
+      coordinatorHost = view.group.coordinator.map(_.host),
+      coordinatorPort = view.group.coordinator.map(_.port),
       members = view.group.members.sorted.map(member),
       topics = view.topics.sorted.map(subscription),
       totalLag = view.total.value,

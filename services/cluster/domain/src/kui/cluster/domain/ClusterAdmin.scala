@@ -59,6 +59,24 @@ trait ClusterAdmin[F[_]] {
       brokers: NonEmptyList[BrokerId]
   ): F[Either[KuiError, PartialResult[BrokerId, List[LogDir]]]]
 
+  /** One `describeTopics` sweep over every topic, folded into partition counts as it goes.
+    *
+    * The counts a cluster screen wants — how many partitions a broker hosts, how many it leads, how many are
+    * under-replicated cluster-wide — exist in no other call. `describeCluster` knows nothing about partitions
+    * and `describeLogDirs` knows only what is on a disk, which is why `BrokerDto.partitionCount` and
+    * `leaderCount` shipped as `Option` with nothing to fill them.
+    *
+    * A `Left` is a sweep that did not happen at all: the listing failed, or the cluster refused. A sweep that
+    * happened but could not describe every topic it listed is a `Right` whose `unreadable` set says so, and
+    * `TopicSweep.complete` is then the only way to the census — see that type for why a partial sum is worse
+    * than no sum.
+    *
+    * It is one call in name and a batched one in fact: the adapter chunks the topic list by
+    * `AdminTuning.topicChunkSize`, because a `describeTopics` of ten thousand names is one response the
+    * broker has to build in memory before it can send any of it.
+    */
+  def sweepPartitions(profile: ClusterProfile): F[Either[KuiError, TopicSweep]]
+
   /** What this cluster can do, established by probing and never by inferring from a version.
     *
     * Total — it returns a value rather than an `Either` — because "the probe failed" is a third answer the

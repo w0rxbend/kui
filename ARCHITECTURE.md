@@ -221,7 +221,7 @@ the *shape*; exact signatures are finalized in the M0 tasks. Scala 3, opaque typ
 | `libs/kafka` (+ `libs/kafka-auth`) | `KafkaAdminPort` family over fs2-kafka `KafkaAdminClient`, consumer/producer factories, `KafkaErrorMapper`, batching, client property assembly from `ClusterProfile`; cloud SASL handlers as optional runtime modules | ADR-006, ADR-022, ADR-030 |
 | `libs/serde` (+ `libs/serde-confluent`) | `Serde[F]` SPI, built-ins, registry/resolution, Kafbat bridge; Confluent wire-format serializers isolated | ADR-028, ADR-014 |
 | `libs/filter` | `MessageFilterPort[F]` over cel-java | ADR-017 |
-| `libs/cache` | `Ref`+TTL `SnapshotCell`, Caffeine wrapper, metrics hooks | ADR-016 |
+| `libs/cache` | `Ref`+TTL `SnapshotCell`, Caffeine wrapper, `SeriesWindow` retention ring, metrics hooks | ADR-016 |
 | `libs/observability` | otel4s bootstrap, log4cats structured logger with MDC bridge, Tapir interceptors, metric names | ADR-008, ADR-009 |
 | `libs/security-core` | `Principal`, `Rbac.decide`, `PrincipalCodec`, masking rule model. Pure; JVM/JS. | ADR-020, ADR-021, ADR-023 |
 | `libs/http` | Netty server setup, error interceptor, health/ready/capabilities endpoints, sttp client factory with failover/retry/circuit breaker/bulkhead, SSE helpers | ADR-003, ADR-037 |
@@ -682,13 +682,17 @@ loops run under a `Supervisor`, are cancellable and emit `kui.cache.*` and
 | connect | per-connect state: connectors + statuses via `?expand=status&expand=info` | every 30 s | after any action | list ≤ 30 s old; detail live |
 | ksql | query pipes (TTL 1 min, single use) | — | — | — |
 | metrics | scraped broker metrics, inferred metrics from topic/consumer snapshot endpoints | every 30 s | — | `/metrics` exposition is the last scrape |
+| metrics | per-(cluster, metric) `SeriesWindow` ring (`libs/cache`), one bucket per `step`, bounded by `maxAge` and by `maxSamples` | one bucket per scrape; every read evicts first, against an `Instant` the caller supplies | `clear` on a cluster-profile change, which restarts the coverage clock | a never-sampled bucket is absent, never `0`; a window collecting for less than the period asked for answers `None` rather than four minutes labelled "the last 24h"; a window whose samples have all been evicted counts a `miss`, so a dead collector shows on `kui.cache.misses` |
 | identity | `RbacPolicy` (compiled once, hot-reloaded from the `rbac/roles` key of `__kui_config` or from a file watcher), sessions, OIDC state entries (5 min, single use) | on change | new store record, file change, session expiry | store unreachable means last known policy plus `Degraded`; writes rejected |
 | gateway | capability registry; `sessionId → Principal` (TTL 30 s); OpenAPI merge | readiness every 10 s | logout, role reload event | — |
 
 Cache discipline: TTL, invalidation trigger, bound, hit/miss metrics and a named
 staleness contract, all recorded in the table above. Secrets and message payloads are never
 cached. Small caches use `Ref` + TTL (`libs/cache.SnapshotCell`); bounded large caches
-(schema by id, compiled filters) wrap Caffeine `AsyncCache` in `IO` (no Scaffeine).
+(schema by id, compiled filters) wrap Caffeine `AsyncCache` in `IO` (no Scaffeine); a history
+of one value over time — every chart and sparkline this product draws — uses
+`libs/cache.SeriesWindowCell`, which refuses on each of the three counts its row states
+rather than interpolating across them.
 
 Search: an in-memory prefix/substring/trigram index inside each snapshot (`libs/kernel`
 `NameIndex`); Lucene only if a benchmark on ≥ 50 k names shows p95 > 50 ms (ADR-038).

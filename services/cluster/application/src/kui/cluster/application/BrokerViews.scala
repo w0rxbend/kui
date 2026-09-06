@@ -5,14 +5,23 @@ import kui.kernel.{BrokerId, TopicPartition}
 
 /** One row of the broker list.
   *
-  * Everything on it comes from the topology snapshot, so the whole list is one memory read. `leaders` is
-  * `None` in M1 and the column renders `—`: leadership needs a topic sweep the cluster service does not do.
+  * Everything on it comes from the topology snapshot, so the whole list is one memory read.
+  *
+  * `partitions` and `leaders` come from the snapshot's partition census and the disk figures come from its
+  * log directories, which is why they are separately optional: a broker whose disks could not be read still
+  * reports what it leads, and a cluster whose topic sweep was incomplete still reports its disks. They are
+  * absent together only because the two sources failed together.
   */
 final case class BrokerListRow(
     broker: Broker,
     isController: Boolean,
-    replicas: Option[Int],
+    /** Partitions with a replica on this broker, and how many of them it leads. Both `None` unless the last
+      * `describeTopics` sweep covered every topic — a partial sum over brokers is the same lie as a partial
+      * sum over the cluster, told one row at a time.
+      */
+    partitions: Option[Int],
     leaders: Option[Int],
+    replicas: Option[Int],
     skewPercent: Option[Double],
     totalBytes: Option[Long],
     usableBytes: Option[Long],

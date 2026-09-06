@@ -533,10 +533,238 @@
   color: var(--kui-color-text-strong);
 }
 
+/* --- Sparkline ---------------------------------------------------------------------------------
+ *
+ * A 24px mark inside a stat card. It has no track, no axis and no empty state in CSS: an empty
+ * sparkline renders no element at all, because a card with nothing to trend must not draw a flat
+ * line at zero — that would assert a measured zero (SCREENS-V4.md §3.2).
+ */
+
+.kui-sparkline {
+  display: block;
+  /* The viewBox is stretched to this box, so the stroke is pinned by `non-scaling-stroke` in the
+     component rather than being allowed to scale with it. */
+  overflow: visible;
+}
+
+.kui-sparkline__line {
+  /* 2px, the same weight as `LineChart`'s line, so the micro-visual and the full chart of the same
+     quantity look like the same product rather than like two. */
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- Ring gauge --------------------------------------------------------------------------------
+ *
+ * One scalar against an explicit domain. The tone is on the root as a data attribute rather than
+ * in a modifier class, because the judgement it encodes -- given this direction and these
+ * thresholds, is 38% good news -- is the component's whole reason to exist, and a caller reading
+ * `data-tone` gets the answer without re-deriving it from a fill.
+ */
+
+.kui-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.kui-gauge__ring {
+  position: relative;
+  flex: none;
+}
+
+.kui-gauge__svg {
+  display: block;
+}
+
+/* The arc is inked from the tone on the root, so the drawing and the figure below it cannot
+   disagree: there is one decision and both read it. */
+.kui-gauge[data-tone="success"] .kui-gauge__arc {
+  stroke: var(--kui-color-success);
+}
+
+.kui-gauge[data-tone="warning"] .kui-gauge__arc {
+  stroke: var(--kui-color-warning);
+}
+
+.kui-gauge[data-tone="danger"] .kui-gauge__arc {
+  stroke: var(--kui-color-danger);
+}
+
+/* Same reasoning as `.kui-donut__centre`: the figure is HTML stacked over an `aria-hidden` ring,
+   inset by the stroke so a long caption wraps inside the hole rather than over the arc. */
+.kui-gauge__centre {
+  position: absolute;
+  inset: 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  text-align: center;
+  line-height: 1.1;
+  pointer-events: none;
+}
+
+.kui-gauge__figure {
+  font-family: var(--kui-font-family-display);
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-display);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--kui-color-text-strong);
+}
+
+/* Colour is never the only signal, so the figure carries the same three levels as the arc. */
+.kui-gauge[data-tone="warning"] .kui-gauge__figure {
+  color: var(--kui-color-warning);
+}
+
+.kui-gauge[data-tone="danger"] .kui-gauge__figure {
+  color: var(--kui-color-danger);
+}
+
+/* An unmeasured gauge prints the em dash in the muted ink, next to a track with no arc on it. */
+.kui-gauge[data-tone="absent"] .kui-gauge__figure {
+  color: var(--kui-color-text-muted);
+}
+
+.kui-gauge__caption {
+  font-size: 9px;
+  font-weight: var(--kui-font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Histogram ---------------------------------------------------------------------------------
+ *
+ * The plot itself reuses `.kui-plot*` wholesale -- surface, focus ring, bars, axis, tooltip and
+ * empty state are the same furniture as the bar and line charts, and a second copy of them would
+ * be a second place for the axis to drift. Only the percentile chips beneath are new.
+ */
+
+.kui-histogram {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+.kui-histogram__readouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-histogram__readout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+  padding: var(--kui-space-1) var(--kui-space-3);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-hover);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-histogram__readout-label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kui-histogram__readout-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-histogram__readout[data-tone="success"] .kui-histogram__readout-value {
+  color: var(--kui-color-success);
+}
+
+.kui-histogram__readout[data-tone="warning"] .kui-histogram__readout-value {
+  color: var(--kui-color-warning);
+}
+
+.kui-histogram__readout[data-tone="danger"] .kui-histogram__readout-value {
+  color: var(--kui-color-danger);
+}
+
+/* --- Stacked bar -------------------------------------------------------------------------------
+ *
+ * Parts of a capacity over the remainder. The track is `--kui-color-surface-overlay`, measured off
+ * the light-theme storage card at (1103,545), and it is what an unknown capacity draws on its own.
+ */
+
+.kui-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+.kui-stacked__row {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+.kui-stacked__track {
+  display: flex;
+  flex: 1;
+  min-width: var(--kui-space-6);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-overlay);
+  overflow: hidden;
+}
+
+/* No radius on a segment: rounding each one would put a notch of track between neighbours and turn
+   a continuous capacity into a row of separate things, which is `SegmentBar`'s picture and not
+   this one. The stadium ends come from the track clipping them. */
+.kui-stacked__segment {
+  height: 100%;
+  flex: none;
+  transition: width var(--kui-duration-normal) ease;
+}
+
+.kui-stacked__value {
+  flex: none;
+  min-width: 5ch;
+  text-align: right;
+  font-size: var(--kui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--kui-color-text-muted);
+}
+
+/* `347 GB` is amber at 83% while `254 GB` and `241 GB` beside it are not (SCREENS-V4.md §3.6).
+   The threshold is on the figure as well as nowhere else -- the segments keep their own inks,
+   which are prefixes and carry no status -- so the reading survives without colour vision. */
+.kui-stacked__value--warning {
+  color: var(--kui-color-warning);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-stacked__value--critical {
+  color: var(--kui-color-danger);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-stacked__value--unknown {
+  color: var(--kui-color-text-subtle);
+}
+
 /* Under reduced motion the widths change without travelling. Suppressed, not sped up. */
 @media (prefers-reduced-motion: reduce) {
   .kui-progress__fill,
-  .kui-magnitude-list__fill {
+  .kui-magnitude-list__fill,
+  .kui-stacked__segment {
     transition: none;
   }
 }

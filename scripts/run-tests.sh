@@ -21,35 +21,21 @@
 #
 # USAGE
 # -----
-#   ./scripts/run-tests.sh            # every suite except the browser end-to-end one
-#   ./scripts/run-tests.sh --with-e2e # everything, including e2e (needs Docker and a browser)
+#   ./scripts/run-tests.sh            # every Mill test module in the repository
 #
-# `e2e.test` is excluded by default because it builds container images and drives a real Chromium.
-# CI runs it as its own job, with its own timeout and its own failure artifacts.
+# There is no longer anything to exclude. The browser suite is `pnpm e2e` under `frontend/`, built
+# and run by pnpm rather than by Mill, so it is not one of the modules this script resolves and this
+# script does not need a flag to skip it.
 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-with_e2e=false
-if [[ "${1:-}" == "--with-e2e" ]]; then
-  with_e2e=true
-  shift
-fi
-
 # Ask Mill which test modules exist rather than listing them here. A list in this file would go
 # stale the first time somebody adds a module, and going stale silently is the exact failure this
 # script was written to end.
 mapfile -t modules < <(./mill resolve '__.test' | grep -E '^[a-zA-Z][a-zA-Z0-9._-]*\.test$' | sort)
-
-if [[ "$with_e2e" == false ]]; then
-  filtered=()
-  for m in "${modules[@]}"; do
-    [[ "$m" == "e2e.test" ]] || filtered+=("$m")
-  done
-  modules=("${filtered[@]}")
-fi
 
 if (( ${#modules[@]} == 0 )); then
   echo "run-tests.sh: resolved no test modules; that cannot be right." >&2

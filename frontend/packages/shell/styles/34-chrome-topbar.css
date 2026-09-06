@@ -356,3 +356,78 @@
   max-height: 60vh;
   overflow-y: auto;
 }
+
+/* --- The appearance popover (SCREENS-V4.md §3.10) ---------------------------------------------- */
+
+/* The glyph takes a filled backing while its popover is open, exactly as the bell does.
+ *
+ * §7.5 records that the design draws these two inconsistently — the bell backed, the sliders glyph
+ * not — and asks for one of them to be settled. This is the settlement, and it goes to the bell's
+ * behaviour rather than the sliders': a control that has opened a scrim-less panel somewhere else
+ * on the page is the only thing on screen saying which control the panel belongs to, and taking the
+ * backing away leaves a card floating with no visible owner. */
+.kui-topbar__icon-button--open {
+  color: var(--kui-color-text);
+  background: var(--kui-color-surface-hover);
+}
+
+.kui-topbar__appearance-anchor {
+  position: relative;
+  display: flex;
+}
+
+/* Below the glyph and hard against the right edge of the band, because the glyph is the second
+ * control from the right and a panel centred on it would hang off the window. `--kui-z-dropdown`
+ * and not `--kui-z-dialog`: it is scrim-less and the page behind it stays live, which is exactly
+ * what that layer is for. */
+.kui-topbar__appearance-panel {
+  position: absolute;
+  top: calc(100% + var(--kui-space-2));
+  right: 0;
+  z-index: var(--kui-z-dropdown);
+}
+
+.kui-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  /* Wide enough for four named accent segments at the small size. A narrower card would put
+     "Comfortable" on two lines, and a wrapped segment label is where a control starts looking like
+     a paragraph. */
+  width: 268px;
+  padding: var(--kui-space-4);
+  background: var(--kui-color-surface-overlay);
+  border-radius: var(--kui-radius-lg);
+  box-shadow: var(--kui-shadow-md);
+}
+
+.kui-appearance__title {
+  margin: 0;
+  font-size: var(--kui-font-size-md);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-appearance__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+/* The lettered caption over each control. Decoration — the control below carries its own accessible
+ * name — so it is `aria-hidden` in the markup and styled to match the drawer's group headings, which
+ * is the same kind of label doing the same job one column to the left. */
+.kui-appearance__caption {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  font-weight: var(--kui-font-weight-medium);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}
+
+.kui-appearance__help {
+  margin: 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}

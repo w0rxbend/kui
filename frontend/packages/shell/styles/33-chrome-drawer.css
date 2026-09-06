@@ -41,37 +41,33 @@
   }
 }
 
-/* --- Brand block ------------------------------------------------------------------------------ */
+/* --- The cluster block at the head ------------------------------------------------------------- */
+
+/* SCREENS-V4.md §2.1. The product wordmark and its gradient tile are gone: in all twenty-three
+ * captures the head is the selected cluster, and the product marks itself once, on the rail above.
+ * The classes keep the `kui-brand` prefix because it is the drawer's head that is being named here
+ * and renaming it would touch every one of its rules for nothing. */
 
 .kui-brand {
   display: flex;
-  gap: var(--kui-space-3);
-  align-items: center;
-  padding: var(--kui-space-3) var(--kui-space-3) var(--kui-space-4);
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--kui-space-4) var(--kui-space-3);
 }
 
-.kui-brand__tile {
-  position: relative;
-  display: grid;
-  flex-shrink: 0;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  color: #fff;
-  background: var(--kui-gradient-brand);
-  border-radius: var(--kui-radius-md);
+.kui-brand__head {
+  display: flex;
+  gap: var(--kui-space-2);
+  align-items: center;
 }
 
 .kui-brand__dot {
-  /* Ringed in the drawer's own fill so the dot reads as a separate object sitting on the corner of
-   * the tile rather than as a notch cut out of it. */
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  width: 10px;
-  height: 10px;
+  /* No longer on the corner of a tile, so no ring: it is a dot on the drawer's own fill, beside the
+   * cluster name rather than centred on the two-line block, which is where the design puts it. */
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
   background: var(--kui-color-text-subtle);
-  border: 2px solid var(--kui-color-surface-raised);
   border-radius: var(--kui-radius-pill);
 }
 
@@ -93,17 +89,49 @@
   min-width: 0;
 }
 
+/* 15px/600 in the design, which is `--kui-font-size-lg` at the medium weight rather than the
+ * display family's bold: this is a cluster's name, not a wordmark, and setting it in the display
+ * face would make every drawer look like it were branded after the cluster. */
 .kui-brand__name {
-  font-family: var(--kui-font-family-display);
+  overflow: hidden;
   font-size: var(--kui-font-size-lg);
-  font-weight: var(--kui-font-weight-bold);
+  font-weight: var(--kui-font-weight-medium);
   line-height: var(--kui-font-line-height-tight);
   color: var(--kui-color-text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.kui-brand__tagline {
+/* `1 URP · v3.7.0 · 3 brokers`, indented to sit under the name rather than under the dot.
+ *
+ * It wraps rather than truncating: every part of it is a fact, and a caption cut off after
+ * "1 URP · v3.7…" has lost the only one that changes. It fits on one line at the drawer's width for
+ * a three-part caption of the design's own lengths, which is why the second line is a consequence
+ * of an unusually long version string and not the normal case. */
+.kui-brand__caption {
+  padding-left: calc(8px + var(--kui-space-2));
   font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
   color: var(--kui-color-text-muted);
+}
+
+/* The `+`. It is the only route to cluster registration in twenty-three screens, which is the
+ * argument for it being a real target rather than a 12px glyph in the corner: 24px is the smallest
+ * square this product uses for a control that is pressed rather than dragged. */
+.kui-brand__add {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  color: var(--kui-color-text-muted);
+  border-radius: var(--kui-radius-sm);
+}
+
+.kui-brand__add:hover {
+  color: var(--kui-color-text);
+  background: var(--kui-color-surface-hover);
 }
 
 /* --- Groups and destinations ------------------------------------------------------------------ */
@@ -234,6 +262,76 @@ a.kui-nav-item--current:hover {
 .kui-nav-item--dimmed:hover,
 .kui-nav-item--dimmed:focus-visible {
   opacity: 1;
+}
+
+/* --- The topic tree (SCREENS-V4.md §2.2) -------------------------------------------------------- */
+
+/* The row and its disclosure are two controls side by side, which is why the row is a flex line
+ * rather than the link alone: the label navigates to the topic list and the chevron opens the rows
+ * beneath, and merging them would cost whichever affordance lost. */
+.kui-nav-item__row {
+  display: flex;
+  gap: var(--kui-space-1);
+  align-items: center;
+}
+
+.kui-nav-item__row > .kui-nav-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kui-nav-item__disclosure {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--kui-color-text-subtle);
+  background: none;
+  border: 0;
+  border-radius: var(--kui-radius-sm);
+  cursor: pointer;
+}
+
+.kui-nav-item__disclosure:hover {
+  color: var(--kui-color-text);
+  background: var(--kui-color-surface-hover);
+}
+
+/* The vertical guide rule the design draws down the left of the nested rows. It is `border-left` on
+ * the list rather than a pseudo-element on each row, so a subtree of one row still draws a rule of
+ * exactly its own height — a per-row rule leaves a gap at every seam. */
+.kui-nav-subtree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 20px of indent in total, and not a pixel more: the drawer is 182px wide and every pixel spent
+   * here comes off a topic name, which is the one string in this tree that must not truncate any
+   * earlier than it has to. */
+  padding: 2px 0 2px var(--kui-space-2);
+  margin: 2px 0 2px var(--kui-space-3);
+  list-style: none;
+  border-left: 1px solid var(--kui-color-border);
+}
+
+/* Mono, because these are topic names and a topic name is an identifier: `orders.payments.v2` and
+ * `orders.payments.v3` differ in one character, and a proportional face is where that difference
+ * hides. The size drops one step, which is the design's own hierarchy — the tree is a summary of
+ * the row above it, not a second navigation. */
+.kui-nav-subtree .kui-nav-item {
+  height: 26px;
+  gap: var(--kui-space-1);
+  padding: 0 var(--kui-space-1);
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-xs);
+}
+
+/* The glyph shrinks with the row. 20px beside 11px mono is a mark twice the height of the word it
+ * belongs to, and at this indent it costs a whole segment of the topic name. */
+.kui-nav-subtree .kui-nav-item__icon {
+  width: 14px;
+  height: 14px;
 }
 
 .kui-nav-item__badge {

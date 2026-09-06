@@ -71,7 +71,8 @@ object GoldenDocuments {
       |              "totalDiskUsageBytes" : 549755813888,
       |              "features" : [
       |              ],
-      |              "scrapedAt" : "2026-09-03T10:11:12.000Z"
+      |              "scrapedAt" : "2026-09-03T10:11:12.000Z",
+      |              "controllerUptime" : null
       |            },
       |            "fetchedAt" : "2026-09-03T10:11:12.000Z"
       |          },
@@ -187,7 +188,9 @@ object GoldenDocuments {
       |        "outOfSyncReplicas" : 0,
       |        "offlinePartitions" : 0,
       |        "messageCount" : 617283,
-      |        "sizeBytes" : 4741632
+      |        "sizeBytes" : 4741632,
+      |        "produceRate" : null,
+      |        "cleanupPolicy" : null
       |      },
       |      "partitions" : [
       |        {

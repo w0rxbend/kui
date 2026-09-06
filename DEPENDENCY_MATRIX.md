@@ -189,10 +189,10 @@ yet** — no row above claims a version — and they are to be added here when a
 | org.scalacheck | scalacheck_3 | 1.20.0 | test | all | ADR-018 |
 | org.typelevel | munit-cats-effect_3 | 2.2.0 | test | all JVM | ADR-018 |
 | org.typelevel | discipline-munit_3 | 2.0.0 | test | libs/kernel | ADR-018 |
-| com.dimafeng | testcontainers-scala-munit_3 | 0.44.1 | test | libs/testkit, integration suites, e2e | ADR-018 |
+| com.dimafeng | testcontainers-scala-munit_3 | 0.44.1 | test | libs/testkit, integration suites | ADR-018 |
 | com.dimafeng | testcontainers-scala-kafka_3 | 0.44.1 | test | libs/testkit | ADR-018 |
 | org.testcontainers | testcontainers-kafka | 2.0.5 | test | libs/testkit | ADR-018 — **settled in CFGOP-004**: `org.testcontainers:kafka` does not resolve at any version; the module is published as `testcontainers-kafka`. Three M1 task specs write the wrong id and are wrong. |
-| com.microsoft.playwright | playwright | 1.62.0 | test | e2e | ADR-018 (BUILD-006 spike 3; pinned together with the browser build it downloads, Chromium 1234 / Chrome for Testing 151.0.7922.34 — the library only speaks to its own revision) |
+| com.microsoft.playwright | playwright | 1.62.0 | test | **no module** | ADR-018 (BUILD-006 spike 3). The Scala `e2e` module this was pinned for is gone: the browser suite is `pnpm e2e` under `frontend/`, which drives `@playwright/test` 1.63.0 from `frontend/package.json` and installs its own browser. Kept as the record of the pin, per the rule above that this file lists every version even when no module uses it. |
 | org.bouncycastle | bcpkix-jdk18on | 1.85 | test | libs/testkit | ADR-018 |
 
 ## Explicitly excluded
@@ -229,4 +229,4 @@ against the exact versions this repository pins.
 | --- | --- |
 | tapir-netty-server-cats | Netty keeps a `serverSentEventsBody` open past 10 minutes, flushes each event within ~2 ms, and cancels the fs2 stream within 8 ms of the client leaving. Netty stays; the http4s-ember fallback is not taken. |
 | mill-scalablytyped | Was ADR-025's one-off generator of Scala.js facades. **Removed by ADR-048**: the frontend is TypeScript, so a library's own published types are used directly and there is no facade to generate. |
-| com.microsoft.playwright | 1.62.0, which downloads Chromium build 1234 (Chrome for Testing 151.0.7922.34). Both pinned in `build.mill`. |
+| com.microsoft.playwright | 1.62.0, which downloads Chromium build 1234 (Chrome for Testing 151.0.7922.34). Both still named in `build.mill`'s `Versions`, but nothing depends on them: the browser suite is `@playwright/test` 1.63.0 under `frontend/`, pinned in `frontend/package.json`. |

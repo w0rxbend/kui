@@ -11,13 +11,24 @@ project's caching rules allow caches only with TTL, invalidation, bounds, metric
 
 ## Decision
 
-- Two cache primitives in `libs/cache`:
+- Three cache primitives in `libs/cache`:
   - `SnapshotCell[F, A]`: `Ref`-backed single value with `status`, `scrapedAt`, atomic
     replacement, `refresh` under a `Supervisor`, `Stale` reads while the upstream fails.
     Used for every per-cluster snapshot (ADR-027).
   - `BoundedCache[F, K, V]`: Caffeine 3.2.4 `AsyncCache` wrapped in `F` (≈40 lines; Scaffeine
     is not used) with max size and TTL. Used for schema-by-id, compiled CEL filters, gateway
     session cache, OAuth tokens for registries.
+  - `SeriesWindow[A]` and its `Ref`-backed holder `SeriesWindowCell[F, A]`: many samples of
+    one value over time, filed into buckets of `step` and bounded by both `maxAge` and
+    `maxSamples`, with the same `kui.cache.*` counters as the other two. It retains every
+    history this product draws — the throughput and p99 charts, the stat-card sparklines,
+    the controller-uptime window — and it refuses three ways, because each of those figures
+    would otherwise be printed wrongly: a bucket nobody sampled is absent rather than `0`,
+    since a `0` is a measurement; a window collecting for less than the period asked for
+    answers `None` rather than computing four minutes and labelling it a day; and a window
+    whose samples have all been evicted counts a miss, because an answer that is nothing
+    but gaps is a refusal spelt as a vector, and counting it as a hit is how a collector
+    dead for hours reads as a healthy cache.
 - Every cache declares: TTL, invalidation trigger, bound, `kui.cache.hits/misses{cache}` and
   its staleness contract in `ARCHITECTURE.md` §9. Adding a cache requires adding a row there.
 - Never cached: secrets, message payloads, ACL lists (live with a bounded timeout).
@@ -42,4 +53,5 @@ project's caching rules allow caches only with TTL, invalidation, bounds, metric
 
 ## Reversibility
 
-High. Both primitives sit behind small traits.
+High. Each primitive sits behind a small trait; `SeriesWindow`'s arithmetic is an
+immutable value that `SeriesWindowCell` only holds and instruments.

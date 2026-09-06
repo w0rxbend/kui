@@ -3,7 +3,6 @@ package kui.schema.contract
 import sttp.tapir.*
 import sttp.tapir.json.circe.jsonBody
 
-import kui.contracts.KernelCodecs.given
 import kui.contracts.KernelSchemas.given
 import kui.contracts.paging.PageDto
 import kui.contracts.rbac.{EndpointAuthorization, ResourceRequirement}
@@ -12,6 +11,7 @@ import kui.kernel.{ClusterId, SortOrder, Subject}
 import kui.schema.contract.dto.*
 import kui.schema.contract.dto.CompatibilityDto.given
 import kui.schema.contract.dto.SchemaDto.given
+import kui.schema.contract.dto.SubjectSummaryDto.given
 import kui.schema.contract.dto.SubjectVersionsDto.given
 import kui.security.SignedPrincipal
 import kui.security.rbac.{Action, Resource}
@@ -93,31 +93,40 @@ object SchemaEndpoints {
         (params.q, params.direction, params.page, params.pageSize)
       )
 
-  /** One page of the cluster's subjects.
+  /** One page of the cluster's subjects, each row carrying the facts the design's caption is made of.
     *
     * The registry has no search, no sort and no paging of its own — `GET /subjects` returns every name — so
     * all three happen in the service. The parameters are still on this endpoint rather than in the browser,
     * because moving the whole subject list of a large registry into every browser tab is worse than moving it
     * into one service that already has it.
+    *
+    * ==Why the row is enriched here and not by the browser==
+    *
+    * A row's format, version count and compatibility level are three separate registry calls, and a browser
+    * that fetched them per row would open twenty-five connections from a tab and then do it again on every
+    * page change. Doing it in the service bounds the fan-out to the page — the page size is the number of
+    * subjects enriched, whether the registry holds six or six thousand — and lets a row whose enrichment
+    * failed still be sent, with its name and three absent fields.
     */
   val subjects: Endpoint[
     SignedPrincipal,
     (ClusterId, SubjectListParams),
     ErrorEnvelope,
-    PageDto[Subject],
+    PageDto[SubjectSummaryDto],
     Any
   ] =
     KuiEndpoint.internal.get
       .in(clustersBase / clusterIdPath / SchemasSegment / SubjectsSegment)
       .in(listParams)
-      .out(jsonBody[PageDto[Subject]])
+      .out(jsonBody[PageDto[SubjectSummaryDto]])
       .attribute(EndpointAuthorization.Key, EndpointAuthorization.clusterScoped("schema.subjects"))
       .name("schema.subjects")
       .summary("The subjects registered on this cluster's Schema Registry")
       .description(
         "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice " +
           "rather than a failure: the capability document reports that cluster as not_configured and the " +
-          "browser hides the feature for it."
+          "browser hides the feature for it. A row's format, versionCount and compatibility are absent " +
+          "when the per-subject call that fills them did not answer; the row itself is still returned."
       )
       .tag("schema")
 

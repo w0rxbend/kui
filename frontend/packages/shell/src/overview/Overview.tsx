@@ -1,5 +1,5 @@
 /**
- * The cluster overview — screenshots `01` and `05`.
+ * The cluster dashboard — screenshots `01`, `04` and `05`.
  *
  * ## What this component is, and is not
  *
@@ -10,17 +10,38 @@
  * screen (a cluster that has not answered, a broker too old to report disk sizes, a panel that will
  * never have data) are then all reachable from a test and from Storybook without a Kafka cluster.
  *
- * ## The three panels that are not real
+ * ## The route is the only source of truth for which cluster and which tab
  *
- * Throughput over time, the current produce rate, and latency percentiles are drawn in the design
- * and are not collected by this backend — there is no metrics service, no timeseries store, and no
- * endpoint in the gateway's OpenAPI documents that could answer any of them. They render as a
- * sentence saying so. See `NotMeasured.tsx` for why that is a `ready` card and not an `unavailable`
- * one, and `model.ts` for the sentences themselves.
+ * Both come from `useParams()` and neither is a prop. The address is `/clusters/:clusterId/dashboard`
+ * and `/dashboard/:tab`, both of which the router already resolves here, and a link somebody pastes
+ * carries both — so reading either from a stored selection or from local component state would give
+ * the page a second answer to a question the URL has already answered. The two answers only ever
+ * differ when it matters: after a pasted link, or after the back button. The one place the stored
+ * selection is still consulted is the address that names no cluster at all (`/ui` itself), and the
+ * comment on `cluster()` below says why.
+ *
+ * `tab` is deliberately forgiving. A path segment is user-editable and a typo is not an error state;
+ * `tabs.ts` carries that rule and the default that keeps it in step with `paths.dashboard`.
+ *
+ * ## What each tab owns
+ *
+ * SCREENS-V4.md §3.1: a tab changes the voice line, the card set and the address, and nothing else.
+ * §4.2's composition rule and §4.3's shape together say where the seam is — the stat cards are
+ * tab-invariant and the body below them belongs to the tab. That is exactly how this file is laid
+ * out, so a third tab is a case in one switch rather than a rearrangement.
+ *
+ * ## The panels that are not real
+ *
+ * Throughput over time, the current produce rate, latency percentiles and the record-size
+ * distribution are drawn in the design and are not collected by this backend — `services/metrics`
+ * answers `not_configured` by design, and no other endpoint could answer any of them. They render as
+ * a sentence saying so. See `NotMeasured.tsx` for why that is a `ready` card and not an
+ * `unavailable` one, and `model.ts` for the sentences themselves.
  */
 
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
+import { useParams } from "@solidjs/router";
 
 import {
   Button,
@@ -30,20 +51,27 @@ import {
   MagnitudeBarList,
   PageHeader,
   ProgressBar,
+  RingGauge,
   StatCard,
+  TabStrip,
   formatCount,
   formatPercent,
+  useKui,
   type MagnitudeEntry,
   type StatFigure,
+  type Tab,
 } from "@kui/kernel";
 
 import { NotMeasured } from "./NotMeasured.jsx";
+import { StorageByBroker, topicsCounted } from "./StorageByBroker.jsx";
+import { DASHBOARD_TABS, dashboardTab, type DashboardTab } from "./tabs.js";
 import {
   DISK_CRITICAL_PERCENT,
   DISK_WARN_PERCENT,
   type BrokerBar,
   type LagEntry,
   type PartitionHealth,
+  type StorageBreakdown,
   type Tone,
 } from "./model.js";
 import type { Reading } from "./reading.js";
@@ -57,25 +85,36 @@ import type { Reading } from "./reading.js";
  */
 export interface OverviewModel {
   readonly lede: string;
+  /** The Storage tab's own voice line. Conditional for the same reason `lede` is — see `model.ts`. */
+  readonly storageLede: string;
   readonly brokerCount: Reading<number>;
   readonly brokerPill: { text: string; tone: Tone } | undefined;
   readonly topicCount: Reading<number>;
   readonly partitionTotal: Reading<number>;
+  readonly inSync: Reading<number>;
   readonly productionRate: Reading<never>;
   readonly throughput: Reading<never>;
   readonly latency: Reading<never>;
+  readonly messageSizes: Reading<never>;
   readonly lag: Reading<{ total: number; incomplete: number }>;
   readonly lagPill: { text: string; tone: Tone } | undefined;
   readonly brokers: Reading<readonly BrokerBar[]>;
   readonly controllerNote: string | undefined;
   readonly partitions: Reading<PartitionHealth>;
   readonly topLag: Reading<readonly LagEntry[]>;
+  readonly storage: Reading<StorageBreakdown>;
 }
 
 export interface OverviewProps {
   readonly model: OverviewModel;
   readonly onCreateTopic?: (() => void) | undefined;
 }
+
+/** What each tab's segment says and shows. The icons are the design's (§3.1). */
+const TAB_LABELS: Readonly<Record<DashboardTab, { readonly label: string; readonly icon: Tab["icon"] }>> = {
+  overview: { label: "Overview", icon: "dashboard" },
+  storage: { label: "Storage", icon: "disk" },
+};
 
 /**
  * Turns a `Reading<number>` into the figure a `StatCard` draws.
@@ -101,6 +140,36 @@ function figureOf(reading: Reading<number>, unit?: string): StatFigure {
 }
 
 export function Overview(props: OverviewProps): JSX.Element {
+  const params = useParams<{ readonly clusterId?: string; readonly tab?: string }>();
+  const kui = useKui();
+
+  const tab = (): DashboardTab => dashboardTab(params.tab);
+
+  /**
+   * Which cluster's dashboard this is.
+   *
+   * The route parameter wins, always. It is `undefined` on exactly one address — `/ui` itself, the
+   * table's root entry, which resolves to this same component and names no cluster — and there the
+   * selection the shell is already fetching for is the only cluster there is. Falling back the other
+   * way round, or not falling back at all, would give the root address a tab strip whose links point
+   * nowhere.
+   */
+  const cluster = (): string | undefined => params.clusterId ?? kui.cluster();
+
+  const tabs = (): readonly Tab[] => {
+    const id = cluster();
+    if (id === undefined) return [];
+    return DASHBOARD_TABS.map((name) => ({
+      id: name,
+      label: TAB_LABELS[name].label,
+      icon: TAB_LABELS[name].icon,
+      /* Built rather than written. `paths.dashboard` is the one place the tab's default lives, so
+         the strip and a hand-written link cannot spell the same page two ways — which is the whole
+         reason the tab is a route parameter and not a piece of component state. */
+      href: kui.paths.dashboard(id, name),
+    }));
+  };
+
   return (
     <div class="kui-overview" data-testid="overview">
       {/* The kernel's `PageHeader`, not markup of this screen's own. It already draws the title,
@@ -109,9 +178,10 @@ export function Overview(props: OverviewProps): JSX.Element {
           pages that use it. */}
       <PageHeader
         title="Cluster overview"
-        /* The voice line. Conditional on the cluster actually being healthy — see `overviewLede`.
-           A cheerful sentence over a broken cluster is worse than a plain one. */
-        voice={props.model.lede}
+        /* The voice line, chosen by the tab. Conditional on the cluster actually being healthy —
+           see `overviewLede` and `storageLede`. A cheerful sentence over a broken cluster is worse
+           than a plain one. */
+        voice={ledeFor(tab(), props.model)}
         actions={
           <Button variant="primary" icon="plus" onClick={() => props.onCreateTopic?.()}>
             Create topic
@@ -120,37 +190,114 @@ export function Overview(props: OverviewProps): JSX.Element {
         testId="overview-header"
       />
 
-      <div class="kui-overview__stats">
-        <StatCard
-          label="BROKERS ONLINE"
-          icon="brokers"
-          tone="success"
-          figure={figureOf(props.model.brokerCount)}
-          pill={props.model.brokerPill}
-          testId="stat-brokers"
-        />
-        <StatCard
-          label="TOPICS"
-          icon="topics"
-          tone="accent"
-          figure={figureOf(props.model.topicCount)}
-          pill={pillForPartitions(props.model.partitionTotal)}
-          testId="stat-topics"
-        />
-        {/* The design's "PRODUCTION 86.4 MB/s". Nothing samples broker byte rates, so this card
-            carries the sentence rather than a figure — a card reading `— MB/s` would say the rate
-            is momentarily unreadable, which is a different and untrue claim. */}
-        <ProductionCard reading={props.model.productionRate} />
-        <StatCard
-          label="CONSUMER LAG"
-          icon="lag"
-          tone="warning"
-          figure={figureOf(mapLagTotal(props.model.lag))}
-          pill={props.model.lagPill}
-          testId="stat-lag"
-        />
-      </div>
+      {/* Nothing at all when there is no cluster to build hrefs for. A strip of segments that
+          navigate nowhere is worse than no strip: it is the `⌘K` hint bound to nothing, drawn
+          across the top of the page. */}
+      <Show when={tabs().length > 0}>
+        <TabStrip tabs={tabs()} currentId={tab()} label="Cluster sections" />
+      </Show>
 
+      {/* Tab-invariant, and drawn once above the switch rather than inside each arm. §4.2 proves
+          the rule the design only implies: the stat cards are identical on every tab, so a reader
+          who switches tabs is not made to re-read them. */}
+      <StatRow model={props.model} />
+
+      {bodyFor(tab(), props.model)}
+    </div>
+  );
+}
+
+/**
+ * The voice line and the body, each chosen by a switch over the tab rather than by a ternary.
+ *
+ * `noImplicitReturns` over an exhaustive switch is what makes a third tab a compile error in this
+ * file instead of a silently-empty body. That matters more than it looks: Traffic and Alerts are
+ * both in the design and both arrive with the service that measures them, and the failure a ternary
+ * would produce — a new segment in the strip that draws the overview under a different name — is
+ * one nothing else in this package would notice.
+ */
+function ledeFor(tab: DashboardTab, model: OverviewModel): string {
+  switch (tab) {
+    case "overview":
+      return model.lede;
+    case "storage":
+      return model.storageLede;
+  }
+}
+
+function bodyFor(tab: DashboardTab, model: OverviewModel): JSX.Element {
+  switch (tab) {
+    case "overview":
+      return <OverviewBody model={model} />;
+    case "storage":
+      return <StorageBody model={model} />;
+  }
+}
+
+/** The row of stat cards, which every tab carries unchanged. */
+function StatRow(props: { readonly model: OverviewModel }): JSX.Element {
+  return (
+    <div class="kui-overview__stats">
+      <StatCard
+        label="BROKERS ONLINE"
+        icon="brokers"
+        tone="success"
+        figure={figureOf(props.model.brokerCount)}
+        pill={props.model.brokerPill}
+        testId="stat-brokers"
+      />
+      <StatCard
+        label="TOPICS"
+        icon="topics"
+        tone="accent"
+        figure={figureOf(props.model.topicCount)}
+        pill={pillForPartitions(props.model.partitionTotal)}
+        testId="stat-topics"
+      />
+      <StatCard
+        label="PARTITIONS IN SYNC"
+        icon="partitions"
+        tone="primary"
+        figure={inSyncFigure(props.model.inSync)}
+        /* The design's third micro-visual (§3.2), and the one card on this screen whose good end of
+           the domain is the *high* end — hence `goodDirection`, which `RingGauge` refuses to guess.
+           The slot is left empty rather than filled with a plain track when the share is not a
+           number: §3.2's own rule is that a card with no series draws no visual, because an
+           unmeasured ring beside an em dash says the same absence twice and reserves a box for it. */
+        visual={
+          props.model.inSync.kind === "value" ? (
+            <RingGauge
+              value={props.model.inSync.value}
+              goodDirection="high"
+              caption="IN SYNC"
+              diameter={44}
+              strokeWidth={5}
+              decimals={1}
+            />
+          ) : undefined
+        }
+        testId="stat-in-sync"
+      />
+      {/* The design's "PRODUCTION 86.4 MB/s". Nothing samples broker byte rates, so this card
+          carries the sentence rather than a figure — a card reading `— MB/s` would say the rate
+          is momentarily unreadable, which is a different and untrue claim. */}
+      <ProductionCard reading={props.model.productionRate} />
+      <StatCard
+        label="CONSUMER LAG"
+        icon="lag"
+        tone="warning"
+        figure={figureOf(mapLagTotal(props.model.lag))}
+        pill={props.model.lagPill}
+        testId="stat-lag"
+      />
+    </div>
+  );
+}
+
+/** Rows 2, 3 and 4 of `M01`: the two chart cards, the three panels, and the storage card. */
+function OverviewBody(props: { readonly model: OverviewModel }): JSX.Element {
+  return (
+    <>
       <div class="kui-overview__charts">
         <Card
           title="Throughput"
@@ -181,8 +328,71 @@ export function Overview(props: OverviewProps): JSX.Element {
           <NotMeasured why={props.model.latency.kind === "notCollected" ? props.model.latency.why : ""} />
         </Card>
       </div>
+
+      <div class="kui-overview__charts">
+        <StorageCard reading={props.model.storage} />
+      </div>
+    </>
+  );
+}
+
+/**
+ * The Storage tab: exactly two cards, and then the page ends (§4.3).
+ *
+ * It is short, and it is not padded to fill the viewport. §4.3 records that the Storage capture
+ * replaces the whole body rather than only the last row — which is why rows 2 and 3 are absent here
+ * rather than repeated. A tab that repeated the Overview's panels under a different name would make
+ * the strip a control whose settings mostly agree with each other.
+ */
+function StorageBody(props: { readonly model: OverviewModel }): JSX.Element {
+  return (
+    <div class="kui-overview__charts">
+      <StorageCard reading={props.model.storage} />
+      <Card title="Message size distribution" icon="chart-bars" testId="panel-message-sizes">
+        <NotMeasured
+          why={props.model.messageSizes.kind === "notCollected" ? props.model.messageSizes.why : ""}
+        />
+      </Card>
     </div>
   );
+}
+
+/** The storage card, drawn identically on both tabs because it is the same card (§4.1 row 4). */
+function StorageCard(props: { readonly reading: Reading<StorageBreakdown> }): JSX.Element {
+  return (
+    <Card
+      title="Storage by broker"
+      icon="disk"
+      testId="panel-storage"
+      caption={props.reading.kind === "value" ? topicsCounted(props.reading.value) : undefined}
+    >
+      <Show
+        when={props.reading.kind === "value" ? props.reading.value : undefined}
+        fallback={<ReadingFallback reading={props.reading} noun="the log directories" />}
+      >
+        {(breakdown) => <StorageByBroker breakdown={breakdown()} />}
+      </Show>
+    </Card>
+  );
+}
+
+/**
+ * The in-sync share as a stat figure.
+ *
+ * Its own function rather than `figureOf`, because the unit belongs *inside* the formatted string:
+ * `formatPercent` writes the sign, and a card printing `99.1` beside a separate `%` would have two
+ * places where the share could be spelled and one of them would eventually drift.
+ */
+function inSyncFigure(reading: Reading<number>): StatFigure {
+  switch (reading.kind) {
+    case "value":
+      return { kind: "value", text: formatPercent(reading.value, 1) };
+    case "pending":
+      return { kind: "pending" };
+    case "unknown":
+    case "notCollected":
+      return { kind: "unknown" };
+  }
 }
 
 /** The lag card's figure is the total; the count of uncounted groups goes in the pill. */

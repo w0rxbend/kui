@@ -1,4 +1,5 @@
-# KUI in its distributed shape: the gateway and all four services as separate containers.
+# KUI in its distributed shape: the interface, the gateway and all five services as separate
+# containers.
 #
 # THIS IS A DEVELOPMENT AND TEST ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. The signing key comes
 # from an environment variable with a default in this file, there is no TLS, and the session cookie
@@ -9,10 +10,11 @@
 # `docker compose stop kui-cluster` kills an actual process, and the gateway has to keep serving the
 # UI and report the cluster service as unavailable rather than falling over with it. That is KUI's
 # central promise, and this file is where it stops being a claim. The same is true one service at a
-# time for the other three: stopping `kui-topic` must leave the messages and consumer-group screens
+# time for the other four: stopping `kui-topic` must leave the messages and consumer-group screens
 # working, which is a stronger statement than "the gateway survives" and is only checkable here.
 #
-#   docker compose -f deployment/compose/docker-compose.yml up -d
+#   docker compose -f deployment/compose/docker-compose.yml up -d --wait
+#   open http://localhost:8090/ui/
 #   docker compose -f deployment/compose/docker-compose.yml stop kui-cluster
 #   docker compose -f deployment/compose/docker-compose.yml start kui-cluster
 #   docker compose -f deployment/compose/docker-compose.yml stop kui-topic
@@ -26,7 +28,71 @@
 name: kui
 
 services:
-  # The one process a browser talks to. It is the only container with a published port.
+  # ===============================================================================================
+  # The interface. Since ADR-048 it is a separate image built from the pnpm workspace under
+  # `frontend/`, and the gateway's jar contains none of it — so a stack without this container
+  # answers 503 at /ui/ and demonstrates a product nobody can look at.
+  #
+  # It is a first-class member of this file rather than an overlay because THIS is the stack that
+  # grows: M7-M9 each add a service beside the four below, and every one of them has to work
+  # through a browser that is already here. The overlay `../frontend/docker-compose.frontend.yml`
+  # stays for the quickstart, whose two halves are deliberately composed at the command line.
+  #
+  # The browser talks only to this container: nginx serves /ui/ and proxies /api/ to the gateway, so
+  # the two share an origin and the session cookie and the CSRF header behave as they do when one
+  # process serves both (ADR-019). See ../frontend/README.md.
+  # ===============================================================================================
+  kui-frontend:
+    image: kui-frontend:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    # Built from source, because the frontend image is not one of the images
+    # `./mill deployment.docker.__.build` produces — Mill never builds the browser bundle, which is
+    # the whole point of the two halves being separable. Without this stanza the first
+    # `docker compose up` fails on an image name the registry has never heard of.
+    build:
+      context: ../..
+      dockerfile: deployment/frontend/Dockerfile
+    container_name: kui-frontend
+    ports:
+      - "${KUI_FRONTEND_PORT:-8090}:8082"
+    environment:
+      # A service name on this network, not a published port. The gateway does not have to be
+      # reachable from the host at all for the interface to work; it is published below only so a
+      # curl against the API is possible.
+      KUI_GATEWAY_URL: http://kui-gateway:8080
+      KUI_BASE_PATH: ${KUI_BASE_PATH:-}
+      KUI_BUILD_VERSION: ${KUI_VERSION:-0.1.0-SNAPSHOT}
+    depends_on:
+      kui-gateway:
+        # A hard gate, unlike every `depends_on` below. nginx resolves `kui-gateway` once at start,
+        # so a gateway that is not there yet is a container that answers 502 for ever with nothing
+        # to say that waiting would have fixed it. The gateway, in turn, gates on nothing — which
+        # is what keeps one service's outage from reaching this page.
+        condition: service_healthy
+    networks:
+      - kui
+    # Nothing in a static file server has any business writing to its own image. The entrypoint
+    # renders the two per-deployment things — the nginx server block and the page's markers — into
+    # tmpfs at start instead.
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      # The long form rather than the `tmpfs:` list above, because this one needs a mode: a tmpfs is
+      # mounted root-owned, this image runs as uid 101, and the entrypoint's write would otherwise
+      # fail with "Permission denied" on a directory that plainly exists.
+      - type: tmpfs
+        target: /etc/nginx/conf.d
+        tmpfs:
+          mode: 0777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  # The gateway: the one KUI process the interface talks to, and the only one with an API a browser
+  # could reach. Its port is published so that a `curl` against the API is possible from the host;
+  # the browser reaches it through `kui-frontend` above.
   kui-gateway:
     image: kui-gateway:${KUI_VERSION:-0.1.0-SNAPSHOT}
     container_name: kui-gateway
@@ -73,6 +139,9 @@ services:
       kui-consumer:
         condition: service_healthy
         required: false
+      kui-metrics:
+        condition: service_healthy
+        required: false
       kui-cluster:
         # Ordered, not gated. `required: false` means Compose starts the cluster service first and
         # waits for it, but does not refuse to start the gateway when it never becomes healthy.
@@ -116,10 +185,10 @@ services:
 
   # The topic service: browsing topics, their partitions and their settings, and administering them.
   #
-  # This and the two below follow the cluster service's conventions exactly -- no published port, a
-  # mounted read-only configuration, a read-only root filesystem with a tmpfs at /tmp, and no restart
-  # policy so that a test which stops one of them can assert what happens next without racing Docker.
-  # The one difference from `kui-cluster` is the configuration file: these three share
+  # This and the three below follow the cluster service's conventions exactly -- no published port,
+  # a mounted read-only configuration, a read-only root filesystem with a tmpfs at /tmp, and no
+  # restart policy so that a test which stops one of them can assert what happens next without
+  # racing Docker. The one difference from `kui-cluster` is the configuration file: these four share
   # `kui-service.yaml`, because they read the same settings, while the cluster service has its own
   # for the metadata-store section nobody else reads.
   kui-topic:
@@ -201,6 +270,73 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+
+  # The metrics service: the cluster's throughput, and the four other measurements the dashboard's
+  # cards need. It is the eighth service and the newest, and it is here even though it measures
+  # nothing yet: KUI has no JMX client and no Prometheus parser, so every cluster answers
+  # `not_configured` and every metrics card keeps its written "not measured" sentence (ADR-032).
+  #
+  # That is exactly why it must run. The gateway derives a service's public routes from the contract
+  # it holds *and* the address it was given, so without this container and its `kui.yaml` entry
+  # there is no `/api/v1/clusters/*/metrics/*` at all and no `metrics` row in the capability
+  # document -- and a card that should have shown its sentence has nothing to read it from. A
+  # service that answers honestly and measures nothing is a different thing from a service that is
+  # not there, and only one of them is true of this build.
+  kui-metrics:
+    image: kui-metrics:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-metrics
+    command: ["--config", "/etc/kui/kui-service.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Carried although this service signs nothing: it mounts the file the other three mount, and
+      # that file resolves `kui.streaming.cursorKey` from this variable, so a container without it
+      # fails the load rather than ignoring a key it does not read.
+      KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-service.yaml:/etc/kui/kui-service.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # ===============================================================================================
+  # THE SLOT FOR THE THREE SERVICES THAT DO NOT EXIST YET.
+  #
+  # M8 adds `services/alerts`, and M9 `services/connect` and `services/ksql` (docs/plan/ROADMAP.md).
+  # Each is a container exactly like `kui-consumer` above: no published port, `kui-service.yaml`
+  # mounted read-only, a read-only root with a tmpfs at /tmp, and no restart policy so a test that
+  # stops it can assert what happens next without racing Docker.
+  #
+  # The names and the addresses are decided HERE, once, rather than three times by three people:
+  #
+  #   service    container       address on this network     configuration
+  #   ---------  --------------  --------------------------  ---------------------------------
+  #   alerts     kui-alerts      http://kui-alerts:8080      kui-service.yaml
+  #   connect    kui-connect     http://kui-connect:8080     kui-service.yaml
+  #   ksql       kui-ksql        http://kui-ksql:8080        kui-service.yaml
+  #
+  # Every service listens on 8080 INSIDE its own container and publishes nothing, so there is no
+  # port to allocate and no collision to think about: the container name is the address. That is
+  # the same rule ARCHITECTURE.md §14 states for a real deployment.
+  #
+  # Adding one is three edits and no reshaping: copy `kui-consumer` above and change the two names,
+  # add the matching `kui.gateway.services.<id>` block to `kui.yaml`, and add a `depends_on` entry
+  # under `kui-gateway` with `condition: service_healthy` and `required: false` — the same
+  # ordered-not-gated relationship every service already has, for the reason spelled out there.
+  #
+  # `kui-metrics` above is that recipe already applied: it was the commented entry in this block
+  # until `services/metrics` had an image to run, which it now has. The row it used to occupy is
+  # gone from the table because the address it names is a live container thirty lines up, and a
+  # slot that still listed it would be a plan for something already built.
 
 networks:
   kui:

@@ -17,7 +17,7 @@ import io.circe.Json
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties}
 import kui.kernel.search.SearchMode
 import kui.kernel.serde.SerdeName
-import kui.kernel.{ClusterId, Host, PageSize, Port, PositiveInt, Secret, ServiceId}
+import kui.kernel.{ClusterId, ConnectName, Host, PageSize, Port, PositiveInt, Secret, ServiceId}
 import kui.security.rbac.RbacPolicy
 
 /** Loads [[KuiConfig]] from the command line, the environment and YAML files.
@@ -475,6 +475,8 @@ object KuiConfigSource {
       topics <- decodeTopics[F](layers, policy)
       consumers <- decodeConsumers[F](layers)
       streaming <- decodeStreaming[F](layers)
+      metrics <- decodeMetrics[F](layers, policy)
+      alerts <- decodeAlerts[F](layers)
       clusters <- decodeClusters[F](layers, policy)
       // `kui.auth` and `kui.rbac` are read through their own sections rather than through the `Field`
       // chain above, because both are list-shaped: how many accounts and how many roles a file has is
@@ -483,8 +485,23 @@ object KuiConfigSource {
       // prefix — and see nothing else of the precedence chain.
       auth <- Async[F].pure(AuthConfigSection.decode(layers.first, layers.indicesOf))
       rbac <- Async[F].pure(RbacConfigSection.decode(layers.first, layers.indicesOf))
-    } yield (unknown, server, gateway, telemetry, store, topics, consumers, streaming, clusters, auth, rbac)
-      .mapN((_, s, g, t, st, tp, cn, sr, cs, a, r) => Draft(s, g, t, st, tp, cn, sr, cs, a, r))
+    } yield (
+      unknown,
+      server,
+      gateway,
+      telemetry,
+      store,
+      topics,
+      consumers,
+      streaming,
+      clusters,
+      auth,
+      rbac,
+      metrics,
+      alerts
+    ).mapN((_, s, g, t, st, tp, cn, sr, cs, a, r, m, al) =>
+      Draft(s, g, t, st, tp, cn, sr, cs, a, r, m, al)
+    )
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {
@@ -1105,6 +1122,337 @@ object KuiConfigSource {
       ).map(_.map(ref => StreamingDraft(Some(ref))))
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // The metrics and alerts services, which do not exist yet
+  // ---------------------------------------------------------------------------------------------
+
+  /** The `kui.metrics.*` slice.
+    *
+    * Every key has a default and the section as a whole is optional, so a file written before either of
+    * these sections existed loads unchanged. What is *not* defaulted into existence is a source: a cluster
+    * with no entry under `kui.metrics.sources` has none, the metrics service answers `not_configured` for
+    * it, and the cards keep their sentence. That is the design (ADR-032) and not a degraded mode, which is
+    * why the absence is a value rather than a problem to report.
+    */
+  private def decodeMetrics[F[_]: Async](layers: Layers, policy: UrlPolicy): F[Problems[MetricsConfig]] =
+    for {
+      scrapeInterval <- read[F, FiniteDuration](
+        field(
+          "kui.metrics.scrapeInterval",
+          s"a duration between ${MetricsConfig.MinScrapeInterval} and ${MetricsConfig.MaxScrapeInterval}",
+          readBoundedDuration(MetricsConfig.MinScrapeInterval, MetricsConfig.MaxScrapeInterval),
+          MetricsConfig.DefaultScrapeInterval
+        ),
+        layers
+      )
+      retention <- read[F, FiniteDuration](
+        field(
+          "kui.metrics.retention",
+          s"a duration between ${MetricsConfig.MinRetention} and ${MetricsConfig.MaxRetention}",
+          readBoundedDuration(MetricsConfig.MinRetention, MetricsConfig.MaxRetention),
+          MetricsConfig.DefaultRetention
+        ),
+        layers
+      )
+      maxSamples <- read[F, Int](
+        field(
+          "kui.metrics.maxSamplesPerSeries",
+          s"a whole number between ${MetricsConfig.MinSamplesPerSeries} and " +
+            s"${MetricsConfig.MaxSamplesPerSeries}",
+          readBoundedInt(MetricsConfig.MinSamplesPerSeries, MetricsConfig.MaxSamplesPerSeries),
+          MetricsConfig.DefaultMaxSamplesPerSeries
+        ),
+        layers
+      )
+      sources <- decodeMetricsSources[F](layers, policy)
+      rules = checkMetricsRules(layers)
+    } yield (scrapeInterval, retention, maxSamples, sources, rules).mapN(
+      (interval, window, cap, addresses, _) => MetricsConfig(interval, window, cap, addresses)
+    )
+
+  /** The per-cluster sources, keyed by cluster id, discovered the way the gateway's services are.
+    *
+    * Every leaf under a source is a single segment on purpose. `Layers.childrenOf` reads an environment
+    * variable's member name as everything up to the *last* underscore, so `KUI_METRICS_SOURCES_LOCAL_URL`
+    * means the cluster `local`; a nested block would make `..._LOCAL_AUTH_USERNAME` discover a cluster
+    * called `local-auth` and then fail it for having no URL. A flat shape is what keeps the environment and
+    * the YAML file spelling the same thing.
+    */
+  private def decodeMetricsSources[F[_]: Async](
+      layers: Layers,
+      policy: UrlPolicy
+  ): F[Problems[Map[ClusterId, MetricsSourceSettings]]] =
+    layers
+      .childrenOf(MetricsSourcesPrefix)
+      .toList
+      .sorted
+      .traverse(name => decodeMetricsSource[F](layers, policy, name))
+      .map(_.sequence.map(_.toMap))
+
+  private def decodeMetricsSource[F[_]: Async](
+      layers: Layers,
+      policy: UrlPolicy,
+      name: String
+  ): F[Problems[(ClusterId, MetricsSourceSettings)]] = {
+    val prefix = s"$MetricsSourcesPrefix.$name"
+    for {
+      url <- read[F, SafeUrl](
+        field(
+          s"$prefix.url",
+          "an http or https URL this deployment is allowed to call, such as http://broker-1:9404/metrics",
+          readUrl(policy)
+        ),
+        layers
+      )
+      kind <- read[F, MetricsSourceKind](
+        field(
+          s"$prefix.kind",
+          MetricsSourceKind.All.map(_.wireName).mkString(" or "),
+          readMetricsSourceKind,
+          MetricsSourceKind.Prometheus
+        ),
+        layers
+      )
+      callTimeout <- read[F, FiniteDuration](
+        field(
+          s"$prefix.callTimeout",
+          s"a duration between ${MetricsSourceSettings.MinCallTimeout} and " +
+            s"${MetricsSourceSettings.MaxCallTimeout}",
+          readBoundedDuration(
+            MetricsSourceSettings.MinCallTimeout,
+            MetricsSourceSettings.MaxCallTimeout
+          ),
+          MetricsSourceSettings.DefaultCallTimeout
+        ),
+        layers
+      )
+      // The member name is a cluster id and not a free label: it is how a source is matched to the cluster
+      // in `kui.clusters[]`, so a name that could never be a `ClusterId` is a source that could never be
+      // read, and saying so at load time is the difference between a typo and a card that never fills.
+      id = ClusterId
+        .from(name)
+        .leftMap(error =>
+          NonEmptyList.one(
+            ConfigProblem(
+              prefix,
+              s"${error.message}; the member name is the id of the cluster this source measures",
+              layers.first(s"$prefix.url").map(_._1).getOrElse(ConfigSourceName.Default)
+            )
+          )
+        )
+        .toValidated
+    } yield (id, url, kind, callTimeout).mapN((clusterId, address, protocol, timeout) =>
+      clusterId -> MetricsSourceSettings(address, protocol, timeout)
+    )
+  }
+
+  private val MetricsSourcesPrefix: String = "kui.metrics.sources"
+
+  private def readMetricsSourceKind(raw: String): Either[String, MetricsSourceKind] =
+    MetricsSourceKind
+      .fromWire(raw)
+      .toRight(s"'$raw' is not ${MetricsSourceKind.All.map(_.wireName).mkString(" or ")}")
+
+  /** The cross-field rules of `kui.metrics.*`.
+    *
+    * They read the layers rather than the decoded values, for the reason [[checkTopicRules]] gives: a rule
+    * expressed over a decoded value goes unreported whenever some unrelated field is also wrong.
+    */
+  private def checkMetricsRules(layers: Layers): Problems[Unit] = {
+    val scrapeInterval = effectiveDuration(
+      layers,
+      "kui.metrics.scrapeInterval",
+      MetricsConfig.MinScrapeInterval,
+      MetricsConfig.MaxScrapeInterval,
+      MetricsConfig.DefaultScrapeInterval
+    )
+    val retention = effectiveDuration(
+      layers,
+      "kui.metrics.retention",
+      MetricsConfig.MinRetention,
+      MetricsConfig.MaxRetention,
+      MetricsConfig.DefaultRetention
+    )
+
+    val windowRule = (scrapeInterval, retention) match {
+      case (Some(interval), Some(window)) if window < interval =>
+        ConfigProblem(
+          "kui.metrics.retention",
+          s"($window) must not be shorter than kui.metrics.scrapeInterval ($interval); a window that ends " +
+            "before the next sample arrives retains nothing and every chart would be empty",
+          layers.first("kui.metrics.retention").map(_._1).getOrElse(ConfigSourceName.Default)
+        ).invalidNel
+      case _ => ().validNel
+    }
+
+    // One scrape must finish before the next one starts, which is the rule `kui.topics.scrapeTimeout`
+    // already follows: a scrape that outlives its interval overlaps the next one and doubles the load on
+    // the exporter that is already the slow part.
+    val budgetRules = layers
+      .childrenOf(MetricsSourcesPrefix)
+      .toList
+      .sorted
+      .map { name =>
+        val key = s"$MetricsSourcesPrefix.$name.callTimeout"
+        val callTimeout = effectiveDuration(
+          layers,
+          key,
+          MetricsSourceSettings.MinCallTimeout,
+          MetricsSourceSettings.MaxCallTimeout,
+          MetricsSourceSettings.DefaultCallTimeout
+        )
+        (scrapeInterval, callTimeout) match {
+          case (Some(interval), Some(budget)) if budget >= interval =>
+            val origin =
+              if layers.first("kui.metrics.scrapeInterval").isDefined then "" else ", which is the default"
+            ConfigProblem(
+              key,
+              s"($budget) must be shorter than kui.metrics.scrapeInterval " +
+                s"($interval$origin); a scrape that outlives its interval overlaps the next one",
+              layers.first(key).map(_._1).getOrElse(ConfigSourceName.Default)
+            ).invalidNel
+          case _ => ().validNel
+        }
+      }
+      .sequence_
+
+    (windowRule, budgetRules).mapN((_, _) => ())
+  }
+
+  /** What one duration key is worth once the layers and the default are taken into account, and `None` when
+    * the operator wrote something the field itself will already refuse.
+    *
+    * The `None` is the interesting half. A cross-field rule that compares an out-of-bounds value reports a
+    * second problem about the same key — "your retention is below your interval" on top of "your interval is
+    * above the maximum" — and the second sentence sends the operator looking for a mistake they did not
+    * make. Staying quiet while the field speaks for itself is the discipline [[checkTopicRules]] describes.
+    */
+  private def effectiveDuration(
+      layers: Layers,
+      key: String,
+      min: FiniteDuration,
+      max: FiniteDuration,
+      fallback: FiniteDuration
+  ): Option[FiniteDuration] =
+    layers.first(key) match {
+      case None => Some(fallback)
+      case Some((_, raw)) => readBoundedDuration(min, max)(raw).toOption
+    }
+
+  /** The `kui.alerts.*` slice: a retention window, a cadence, and the five numbers M8's rules compare
+    * against. No rule is expressed here — see [[AlertThresholds]] for why that line is drawn where it is.
+    */
+  private def decodeAlerts[F[_]: Async](layers: Layers): F[Problems[AlertsConfig]] =
+    for {
+      retention <- read[F, FiniteDuration](
+        field(
+          "kui.alerts.retention",
+          s"a duration between ${AlertsConfig.MinRetention} and ${AlertsConfig.MaxRetention}",
+          readBoundedDuration(AlertsConfig.MinRetention, AlertsConfig.MaxRetention),
+          AlertsConfig.DefaultRetention
+        ),
+        layers
+      )
+      evaluationInterval <- read[F, FiniteDuration](
+        field(
+          "kui.alerts.evaluationInterval",
+          s"a duration between ${AlertsConfig.MinEvaluationInterval} and " +
+            s"${AlertsConfig.MaxEvaluationInterval}",
+          readBoundedDuration(AlertsConfig.MinEvaluationInterval, AlertsConfig.MaxEvaluationInterval),
+          AlertsConfig.DefaultEvaluationInterval
+        ),
+        layers
+      )
+      thresholds <- decodeAlertThresholds[F](layers)
+    } yield (retention, evaluationInterval, thresholds).mapN(AlertsConfig.apply)
+
+  private def decodeAlertThresholds[F[_]: Async](layers: Layers): F[Problems[AlertThresholds]] = {
+    val prefix = "kui.alerts.thresholds"
+    val counts =
+      s"a whole number between ${AlertThresholds.MinPartitionCount} and ${AlertThresholds.MaxPartitionCount}"
+    val percent =
+      s"a percentage between ${AlertThresholds.MinPercent} and ${AlertThresholds.MaxPercent}"
+    for {
+      offline <- read[F, Int](
+        field(
+          s"$prefix.offlinePartitions",
+          counts,
+          readBoundedInt(AlertThresholds.MinPartitionCount, AlertThresholds.MaxPartitionCount),
+          AlertThresholds.DefaultOfflinePartitions
+        ),
+        layers
+      )
+      underReplicated <- read[F, Int](
+        field(
+          s"$prefix.underReplicatedPartitions",
+          counts,
+          readBoundedInt(AlertThresholds.MinPartitionCount, AlertThresholds.MaxPartitionCount),
+          AlertThresholds.DefaultUnderReplicatedPartitions
+        ),
+        layers
+      )
+      rebalance <- read[F, FiniteDuration](
+        field(
+          s"$prefix.rebalanceDuration",
+          s"a duration between ${AlertThresholds.MinRebalanceDuration} and " +
+            s"${AlertThresholds.MaxRebalanceDuration}",
+          readBoundedDuration(
+            AlertThresholds.MinRebalanceDuration,
+            AlertThresholds.MaxRebalanceDuration
+          ),
+          AlertThresholds.DefaultRebalanceDuration
+        ),
+        layers
+      )
+      diskWarning <- read[F, Int](
+        field(
+          s"$prefix.diskUsedWarningPercent",
+          percent,
+          readBoundedInt(AlertThresholds.MinPercent, AlertThresholds.MaxPercent),
+          AlertThresholds.DefaultDiskUsedWarningPercent
+        ),
+        layers
+      )
+      diskCritical <- read[F, Int](
+        field(
+          s"$prefix.diskUsedCriticalPercent",
+          percent,
+          readBoundedInt(AlertThresholds.MinPercent, AlertThresholds.MaxPercent),
+          AlertThresholds.DefaultDiskUsedCriticalPercent
+        ),
+        layers
+      )
+      rules = checkAlertRules(layers, prefix)
+    } yield (offline, underReplicated, rebalance, diskWarning, diskCritical, rules).mapN(
+      (offlineCount, underReplicatedCount, stuck, warning, critical, _) =>
+        AlertThresholds(offlineCount, underReplicatedCount, stuck, warning, critical)
+    )
+  }
+
+  /** A critical disk threshold at or below the warning one, which would mean the warning never fires. */
+  private def checkAlertRules(layers: Layers, prefix: String): Problems[Unit] = {
+    def percent(leaf: String, fallback: Int): Option[Int] =
+      layers.first(s"$prefix.$leaf") match {
+        case None => Some(fallback)
+        case Some((_, raw)) =>
+          readBoundedInt(AlertThresholds.MinPercent, AlertThresholds.MaxPercent)(raw).toOption
+      }
+
+    val warning = percent("diskUsedWarningPercent", AlertThresholds.DefaultDiskUsedWarningPercent)
+    val critical = percent("diskUsedCriticalPercent", AlertThresholds.DefaultDiskUsedCriticalPercent)
+
+    (warning, critical) match {
+      case (Some(warn), Some(danger)) if danger <= warn =>
+        ConfigProblem(
+          s"$prefix.diskUsedCriticalPercent",
+          s"($danger%) must be above $prefix.diskUsedWarningPercent ($warn%); a critical threshold at or " +
+            "below the warning one means a directory becomes critical without ever having been a warning",
+          layers.first(s"$prefix.diskUsedCriticalPercent").map(_._1).getOrElse(ConfigSourceName.Default)
+        ).invalidNel
+      case _ => ().validNel
+    }
+  }
+
   private def decodeProfileClient[F[_]: Async](
       layers: Layers,
       policy: UrlPolicy
@@ -1386,10 +1734,12 @@ object KuiConfigSource {
         .map(_.andThen(identity))
       admin <- decodeAdminTuning[F](layers, index)
       registry <- decodeSchemaRegistry[F](layers, s"$prefix.schemaRegistry", policy)
+      connect <- decodeConnectClusters[F](layers, s"$prefix.connect", policy)
+      ksql <- decodeKsql[F](layers, s"$prefix.ksql", policy)
       serde <- decodeClusterSerde[F](layers, s"$prefix.serde")
       properties = ClientProperties.fromRaw(propertiesUnder(layers, s"$prefix.properties"))
-    } yield (name, servers, readOnly, security, admin, registry, serde).tupled.andThen {
-      (clusterName, bootstrap, readonly, sec, tuning, schemaRegistry, serdes) =>
+    } yield (name, servers, readOnly, security, admin, registry, connect, ksql, serde).tupled.andThen {
+      (clusterName, bootstrap, readonly, sec, tuning, schemaRegistry, connectClusters, ksqldb, serdes) =>
         // The id is derived last, and only from a name that decoded: deriving it from a name that did not
         // would report the same bad name twice, once under `.name` and once under `.id`.
         clusterId(layers, prefix, clusterName).map { id =>
@@ -1402,7 +1752,9 @@ object KuiConfigSource {
             readOnly = readonly,
             admin = tuning,
             serde = serdes,
-            schemaRegistry = schemaRegistry
+            schemaRegistry = schemaRegistry,
+            connect = connectClusters,
+            ksql = ksqldb
           )
         }
     }
@@ -1433,7 +1785,7 @@ object KuiConfigSource {
           field(
             urlKey,
             "one or more http or https URLs this deployment is allowed to call, separated by commas",
-            readRegistryUrls(policy)
+            readUpstreamUrls(policy)
           ),
           layers
         )
@@ -1455,6 +1807,223 @@ object KuiConfigSource {
         Some(SchemaRegistrySettings(addresses, credentials, timeout))
       )
   }
+
+  // -------------------------------------------------------------------------------------------
+  // `kui.clusters.<n>.connect`: the Kafka Connect clusters attached to one cluster
+  // -------------------------------------------------------------------------------------------
+
+  /** The Connect list, which is empty far more often than it is not.
+    *
+    * A *list*, unlike the registry, because one set of brokers routinely has a source Connect cluster and a
+    * sink one; and dense, like `kui.clusters[]` itself, because the entry's default name is derived from its
+    * index and renumbering it silently would rename a Connect cluster that RBAC rules and bookmarks already
+    * point at.
+    *
+    * An empty list is not a problem to report. A cluster with no Connect cluster is an ordinary cluster: the
+    * connect service answers `not_configured` and ADR-032's rule hides the drawer row, rather than showing a
+    * row that can never fill.
+    */
+  private def decodeConnectClusters[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      policy: UrlPolicy
+  ): F[Problems[List[ConnectClusterSettings]]] = {
+    val indices = layers.indicesOf(prefix)
+    indices
+      .traverse(index => decodeConnectCluster[F](layers, prefix, index, policy))
+      .map(_.sequence)
+      .map { entries =>
+        (
+          entries.andThen(rejectDuplicateConnectNames(prefix, _)),
+          denseListIndex(prefix, "Connect clusters", indices)
+        ).mapN((connect, _) => connect)
+      }
+  }
+
+  private def decodeConnectCluster[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      index: Int,
+      policy: UrlPolicy
+  ): F[Problems[ConnectClusterSettings]] = {
+    val entry = s"$prefix.$index"
+    for {
+      name <- read[F, ConnectName](
+        field(
+          s"$entry.name",
+          "a name for this Connect cluster, which is what URLs and RBAC rules address it by",
+          readConnectName,
+          ConnectClusterSettings.defaultName(index)
+        ),
+        layers
+      )
+      urls <- read[F, NonEmptyList[SafeUrl]](
+        field(
+          s"$entry.url",
+          "one or more http or https URLs this deployment is allowed to call, separated by commas",
+          readUpstreamUrls(policy)
+        ),
+        layers
+      )
+      callTimeout <- read[F, FiniteDuration](
+        field(
+          s"$entry.callTimeout",
+          s"a duration between ${ConnectClusterSettings.MinCallTimeout} and " +
+            s"${ConnectClusterSettings.MaxCallTimeout}",
+          readBoundedDuration(
+            ConnectClusterSettings.MinCallTimeout,
+            ConnectClusterSettings.MaxCallTimeout
+          ),
+          ConnectClusterSettings.DefaultCallTimeout
+        ),
+        layers
+      )
+      auth <- decodeUpstreamAuth[F](layers, s"$entry.auth", "Kafka Connect cluster", policy)
+    } yield (name, urls, callTimeout, auth).mapN((connectName, addresses, timeout, credentials) =>
+      ConnectClusterSettings(connectName, addresses, credentials, timeout)
+    )
+  }
+
+  /** Two Connect clusters that answer to the same name, named by the entries that clash.
+    *
+    * The name is what a URL, a cache key and an RBAC rule are written against, exactly as a `ClusterId` is,
+    * so a collision would silently make one of the two unreachable. The default name is the index and cannot
+    * collide, so this only ever fires on names an operator wrote.
+    */
+  private def rejectDuplicateConnectNames(
+      prefix: String,
+      entries: List[ConnectClusterSettings]
+  ): Problems[List[ConnectClusterSettings]] =
+    entries.zipWithIndex
+      .groupBy((settings, _) => settings.name)
+      .toList
+      .sortBy((name, _) => name.value)
+      .collect {
+        case (name, clashing) if clashing.sizeIs > 1 =>
+          ConfigProblem(
+            s"$prefix.${clashing.map((_, index) => index).min}.name",
+            s"'${name.value}' names more than one Connect cluster " +
+              s"(entries ${clashing.map((_, index) => index).sorted.mkString(", ")}); a connector is " +
+              "addressed as (Connect cluster, connector), so two clusters with one name make one of them " +
+              "unreachable",
+            ConfigSourceName.Default
+          )
+      } match {
+      case Nil => entries.validNel
+      case first :: rest => cats.data.Validated.Invalid(NonEmptyList(first, rest))
+    }
+
+  private def readConnectName(raw: String): Either[String, ConnectName] =
+    ConnectName.from(raw.trim).leftMap(_.message)
+
+  // -------------------------------------------------------------------------------------------
+  // `kui.clusters.<n>.ksql`: the optional ksqlDB cluster attached to one cluster
+  // -------------------------------------------------------------------------------------------
+
+  /** The ksqlDB block, which is optional and singular.
+    *
+    * Singular where Connect is plural because a second ksqlDB cluster over the same brokers shares the same
+    * command topic and is the same logical service; `url` being set is the on/off switch, and its absence is
+    * an ordinary cluster rather than a problem to report.
+    */
+  private def decodeKsql[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      policy: UrlPolicy
+  ): F[Problems[Option[KsqlSettings]]] = {
+    val urlKey = s"$prefix.url"
+    if layers.first(urlKey).isEmpty then Async[F].pure(none[KsqlSettings].validNel)
+    else
+      for {
+        urls <- read[F, NonEmptyList[SafeUrl]](
+          field(
+            urlKey,
+            "one or more http or https URLs this deployment is allowed to call, separated by commas",
+            readUpstreamUrls(policy)
+          ),
+          layers
+        )
+        callTimeout <- read[F, FiniteDuration](
+          field(
+            s"$prefix.callTimeout",
+            s"a duration between ${KsqlSettings.MinCallTimeout} and ${KsqlSettings.MaxCallTimeout}",
+            readBoundedDuration(KsqlSettings.MinCallTimeout, KsqlSettings.MaxCallTimeout),
+            KsqlSettings.DefaultCallTimeout
+          ),
+          layers
+        )
+        streamTimeout <- read[F, FiniteDuration](
+          field(
+            s"$prefix.streamTimeout",
+            s"a duration between ${KsqlSettings.MinStreamTimeout} and ${KsqlSettings.MaxStreamTimeout}",
+            readBoundedDuration(KsqlSettings.MinStreamTimeout, KsqlSettings.MaxStreamTimeout),
+            KsqlSettings.DefaultStreamTimeout
+          ),
+          layers
+        )
+        auth <- decodeUpstreamAuth[F](layers, s"$prefix.auth", "ksqlDB cluster", policy)
+      } yield (urls, callTimeout, streamTimeout, auth, checkKsqlTimeouts(layers, prefix)).mapN(
+        (addresses, call, stream, credentials, _) =>
+          Some(KsqlSettings(addresses, credentials, call, stream))
+      )
+  }
+
+  /** A push query's budget shorter than a listing's is refused, naming both keys.
+    *
+    * The two keys exist because the two promises differ, and a `streamTimeout` below `callTimeout` inverts
+    * them: the query that by definition does not finish would be cut off before the listing that must. The
+    * message names the other key and its effective value, including when that value is the default, which is
+    * the case the operator cannot see for themselves — the rule `kui.clusters.<n>.admin` already follows.
+    */
+  private def checkKsqlTimeouts(layers: Layers, prefix: String): Problems[Unit] = {
+    val call = effectiveDuration(
+      layers,
+      s"$prefix.callTimeout",
+      KsqlSettings.MinCallTimeout,
+      KsqlSettings.MaxCallTimeout,
+      KsqlSettings.DefaultCallTimeout
+    )
+    val stream = effectiveDuration(
+      layers,
+      s"$prefix.streamTimeout",
+      KsqlSettings.MinStreamTimeout,
+      KsqlSettings.MaxStreamTimeout,
+      KsqlSettings.DefaultStreamTimeout
+    )
+
+    (call, stream) match {
+      case (Some(ordinary), Some(push)) if push < ordinary =>
+        val origin =
+          if layers.first(s"$prefix.callTimeout").isDefined then "" else ", which is the default"
+        ConfigProblem(
+          s"$prefix.streamTimeout",
+          s"expected a duration at least as long as $prefix.callTimeout ($ordinary$origin); got $push. A " +
+            "push query is the request that is meant to outlive an ordinary one",
+          layers.first(s"$prefix.streamTimeout").map(_._1).getOrElse(ConfigSourceName.Default)
+        ).invalidNel
+      case _ => ().validNel
+    }
+  }
+
+  /** D-3's rule, for any list that is not `kui.clusters[]` itself: dense, and starting at zero.
+    *
+    * A `connect.0` and a `connect.2` with no `1` almost always means a deleted entry or a typo in an
+    * environment variable name, and silently renumbering would hide both — and here it would also rename the
+    * entry that took its default name from the index.
+    */
+  private def denseListIndex(prefix: String, what: String, indices: List[Int]): Problems[Unit] =
+    indices.zipWithIndex.collectFirst {
+      case (configured, expected) if configured != expected =>
+        ConfigProblem(
+          s"$prefix.$configured",
+          s"expected $what to be numbered from 0 with no gaps; " +
+            (if expected == 0 then "the list starts at 0" else s"$configured follows ${expected - 1}"),
+          ConfigSourceName.Default
+        )
+    } match {
+      case None => ().validNel
+      case Some(problem) => problem.invalidNel
+    }
 
   // -------------------------------------------------------------------------------------------
   // `kui.clusters.<n>.serde`: which serde reads which topic (SD-003)
@@ -1530,7 +2099,7 @@ object KuiConfigSource {
     indices
       .traverse(index => decodeSerdePattern[F](layers, prefix, index))
       .map(_.sequence)
-      .map(entries => (entries, denseSerdeIndex(prefix, indices)).mapN((rules, _) => rules))
+      .map(entries => (entries, denseListIndex(prefix, "serde patterns", indices)).mapN((rules, _) => rules))
   }
 
   private def decodeSerdePattern[F[_]: Async](
@@ -1563,20 +2132,6 @@ object KuiConfigSource {
       )
   }
 
-  private def denseSerdeIndex(prefix: String, indices: List[Int]): Problems[Unit] =
-    indices.zipWithIndex.collectFirst {
-      case (configured, expected) if configured != expected =>
-        ConfigProblem(
-          s"$prefix.$configured",
-          s"expected serde patterns to be numbered from 0 with no gaps; " +
-            (if expected == 0 then "the list starts at 0" else s"$configured follows ${expected - 1}"),
-          ConfigSourceName.Default
-        )
-    } match {
-      case None => ().validNel
-      case Some(problem) => problem.invalidNel
-    }
-
   private def readSerdeName(raw: String): Either[String, SerdeName] =
     ClusterSerdeConfig.readSerdeName(raw)
 
@@ -1595,7 +2150,7 @@ object KuiConfigSource {
     * is spelled, and because a YAML list of scalars already arrives here as a comma-joined string
     * (`Layers.scalar`), so both spellings work with one reader.
     */
-  private def readRegistryUrls(policy: UrlPolicy)(raw: String): Either[String, NonEmptyList[SafeUrl]] =
+  private def readUpstreamUrls(policy: UrlPolicy)(raw: String): Either[String, NonEmptyList[SafeUrl]] =
     raw.split(',').toList.map(_.trim).filter(_.nonEmpty) match {
       case Nil => Left("must name at least one address")
       case addresses =>
@@ -1609,13 +2164,21 @@ object KuiConfigSource {
     * ADR-014's "never both" is enforced here rather than left to the operator: a configuration that names a
     * username *and* a client secret is refused with a message saying which keys are surplus, instead of one
     * of the two silently losing. The one that loses is always the one somebody changes when the other
-    * expires, and the resulting outage looks like a registry problem rather than a KUI configuration problem.
+    * expires, and the resulting outage looks like an upstream problem rather than a KUI configuration
+    * problem.
+    *
+    * One decoder for every HTTP dependency a cluster has. A Schema Registry, a Kafka Connect cluster and a
+    * ksqlDB cluster accept exactly the same three spellings, and three decoders for one shape is precisely
+    * what ADR-013's "one hand-written loader per field" discipline exists to make visible. `dependency`
+    * reaches nothing but the sentence an operator reads, so each upstream is named by the thing they
+    * configured rather than by the type this returns.
     */
-  private def decodeRegistryAuth[F[_]: Async](
+  private def decodeUpstreamAuth[F[_]: Async](
       layers: Layers,
       prefix: String,
+      dependency: String,
       policy: UrlPolicy
-  ): F[Problems[RegistryAuthConfig]] = {
+  ): F[Problems[UpstreamAuthConfig]] = {
     val typeKey = s"$prefix.type"
     val basicKeys = List("username", "password").map(leaf => s"$prefix.$leaf")
     val oauthKeys = List("tokenEndpoint", "clientId", "clientSecret", "scope").map(leaf => s"$prefix.$leaf")
@@ -1628,9 +2191,9 @@ object KuiConfigSource {
           ConfigProblem(
             typeKey,
             s"is '$chosen', so ${offenders.mkString(", ")} " +
-              s"${if offenders.sizeIs == 1 then "is" else "are"} not read. KUI authenticates to a Schema " +
-              "Registry with basic credentials or with OAuth client credentials, never both; remove the " +
-              "keys belonging to the mechanism you are not using",
+              s"${if offenders.sizeIs == 1 then "is" else "are"} not read. KUI authenticates to a " +
+              s"$dependency with basic credentials or with OAuth client credentials, never both; remove " +
+              "the keys belonging to the mechanism you are not using",
             layers.first(typeKey).map(_._1).getOrElse(ConfigSourceName.Default)
           ).invalidNel
       }
@@ -1639,7 +2202,7 @@ object KuiConfigSource {
       field(
         typeKey,
         "none, basic or oauth",
-        raw => RegistryAuthConfig.fromWire(raw).toRight(s"'$raw' is not none, basic or oauth"),
+        raw => UpstreamAuthConfig.fromWire(raw).toRight(s"'$raw' is not none, basic or oauth"),
         "none"
       ),
       layers
@@ -1648,17 +2211,17 @@ object KuiConfigSource {
         Async[F].pure(cats.data.Validated.Invalid(problems))
 
       case cats.data.Validated.Valid("none") =>
-        Async[F].pure(surplus(Nil, "none").map(_ => RegistryAuthConfig.Anonymous))
+        Async[F].pure(surplus(Nil, "none").map(_ => UpstreamAuthConfig.Anonymous))
 
       case cats.data.Validated.Valid("basic") =>
         for {
           username <- read[F, String](
-            field(s"$prefix.username", "the user name the registry knows KUI by", readNonEmpty),
+            field(s"$prefix.username", s"the user name the $dependency knows KUI by", readNonEmpty),
             layers
           )
-          password <- readRegistrySecret[F](layers, s"$prefix.password")
+          password <- readUpstreamSecret[F](layers, s"$prefix.password")
         } yield (username, password, surplus(basicKeys, "basic"))
-          .mapN((user, secret, _) => RegistryAuthConfig.Basic(user, secret))
+          .mapN((user, secret, _) => UpstreamAuthConfig.Basic(user, secret))
 
       case cats.data.Validated.Valid(_) =>
         for {
@@ -1671,24 +2234,43 @@ object KuiConfigSource {
             layers
           )
           clientId <- read[F, String](field(s"$prefix.clientId", "the OAuth client id", readNonEmpty), layers)
-          clientSecret <- readRegistrySecret[F](layers, s"$prefix.clientSecret")
+          clientSecret <- readUpstreamSecret[F](layers, s"$prefix.clientSecret")
           scope <- readOptional[F, String](
             field(s"$prefix.scope", "the scope to request, if the issuer needs one", readNonEmpty),
             layers
           )
         } yield (endpoint, clientId, clientSecret, scope, surplus(oauthKeys, "oauth"))
-          .mapN((url, id, secret, requested, _) => RegistryAuthConfig.OAuth(url, id, secret, requested))
+          .mapN((url, id, secret, requested, _) => UpstreamAuthConfig.OAuth(url, id, secret, requested))
     }
   }
 
-  /** One registry credential, with its `env:` or `file:` reference already followed.
+  /** The registry's own spelling of those same three cases.
+    *
+    * `RegistryAuthConfig` predates [[UpstreamAuthConfig]] and is the type `services/schema` names, so it
+    * stays and this is a projection rather than a second decoder. The two enums should become one the next
+    * time that service is opened; what matters here is that the *decoding* — which keys, which mechanism,
+    * which mistake is refused — has only one implementation.
+    */
+  private def decodeRegistryAuth[F[_]: Async](
+      layers: Layers,
+      prefix: String,
+      policy: UrlPolicy
+  ): F[Problems[RegistryAuthConfig]] =
+    decodeUpstreamAuth[F](layers, prefix, "Schema Registry", policy).map(_.map {
+      case UpstreamAuthConfig.Anonymous => RegistryAuthConfig.Anonymous
+      case UpstreamAuthConfig.Basic(username, password) => RegistryAuthConfig.Basic(username, password)
+      case UpstreamAuthConfig.OAuth(endpoint, clientId, clientSecret, scope) =>
+        RegistryAuthConfig.OAuth(endpoint, clientId, clientSecret, scope)
+    })
+
+  /** One upstream credential, with its `env:` or `file:` reference already followed.
     *
     * Resolved here rather than in [[resolveSecrets]] for the reason [[decodeCluster]] gives about every other
     * per-cluster secret: that second phase runs only when the whole decode succeeded, so a missing
     * environment variable on one cluster would be hidden by an unrelated typo on another and would only
     * appear on the next restart.
     */
-  private def readRegistrySecret[F[_]: Async](
+  private def readUpstreamSecret[F[_]: Async](
       layers: Layers,
       key: String
   ): F[Problems[Secret[String]]] =
@@ -1877,7 +2459,9 @@ object KuiConfigSource {
       streaming: StreamingDraft,
       clusters: List[ClusterConfig],
       auth: AuthConfigSection.Draft,
-      rbac: RbacPolicy
+      rbac: RbacPolicy,
+      metrics: MetricsConfig,
+      alerts: AlertsConfig
   )
 
   /** `kui.streaming` before its `env:` / `file:` reference has been followed. */
@@ -1925,7 +2509,9 @@ object KuiConfigSource {
               streamingConfig,
               value.clusters,
               authConfig,
-              value.rbac
+              value.rbac,
+              value.metrics,
+              value.alerts
             )
         )
     }
@@ -2038,6 +2624,22 @@ object KuiConfigSource {
       List("kui", "topics", "maxPageSize"),
       List("kui", "consumers", "refreshInterval"),
       List("kui", "streaming", "cursorKey"),
+      // `kui.metrics` and `kui.alerts` are read in full even though the services that consume them are not
+      // written yet. A section that parses but is not registered here would refuse a perfectly valid file,
+      // which is the failure this whole list exists to prevent.
+      List("kui", "metrics", "scrapeInterval"),
+      List("kui", "metrics", "retention"),
+      List("kui", "metrics", "maxSamplesPerSeries"),
+      List("kui", "metrics", "sources", "*", "url"),
+      List("kui", "metrics", "sources", "*", "kind"),
+      List("kui", "metrics", "sources", "*", "callTimeout"),
+      List("kui", "alerts", "retention"),
+      List("kui", "alerts", "evaluationInterval"),
+      List("kui", "alerts", "thresholds", "offlinePartitions"),
+      List("kui", "alerts", "thresholds", "underReplicatedPartitions"),
+      List("kui", "alerts", "thresholds", "rebalanceDuration"),
+      List("kui", "alerts", "thresholds", "diskUsedWarningPercent"),
+      List("kui", "alerts", "thresholds", "diskUsedCriticalPercent"),
       List("kui", "clusterProfiles", "url"),
       List("kui", "clusterProfiles", "pollInterval"),
       List("kui", "clusterProfiles", "requestTimeout"),
@@ -2067,6 +2669,14 @@ object KuiConfigSource {
       List("kui", "clusters", "*", "schemaRegistry", "auth", "clientId"),
       List("kui", "clusters", "*", "schemaRegistry", "auth", "clientSecret"),
       List("kui", "clusters", "*", "schemaRegistry", "auth", "scope"),
+      List("kui", "clusters", "*", "connect", "*", "name"),
+      List("kui", "clusters", "*", "connect", "*", "url"),
+      List("kui", "clusters", "*", "connect", "*", "url", "*"),
+      List("kui", "clusters", "*", "connect", "*", "callTimeout"),
+      List("kui", "clusters", "*", "ksql", "url"),
+      List("kui", "clusters", "*", "ksql", "url", "*"),
+      List("kui", "clusters", "*", "ksql", "callTimeout"),
+      List("kui", "clusters", "*", "ksql", "streamTimeout"),
       List("kui", "clusters", "*", "serde", "defaultKey"),
       List("kui", "clusters", "*", "serde", "defaultValue"),
       List("kui", "clusters", "*", "serde", "schemaCacheSize"),
@@ -2075,7 +2685,11 @@ object KuiConfigSource {
       List("kui", "clusters", "*", "serde", "patterns", "*", "topicKeysPattern"),
       List("kui", "clusters", "*", "serde", "patterns", "*", "topicValuesPattern"),
       List("kui", "clusters", "*", "properties", "**")
-    ) ++ AuthConfigSection.keys ++ RbacConfigSection.keys ++ ClusterSecurityConfig
+    ) ++ UpstreamAuthConfig
+      .keysUnder("kui.clusters.*.connect.*.auth")
+      .map(_.split('.').toList)
+      ++ UpstreamAuthConfig.keysUnder("kui.clusters.*.ksql.auth").map(_.split('.').toList)
+      ++ AuthConfigSection.keys ++ RbacConfigSection.keys ++ ClusterSecurityConfig
       .keysUnder("kui.store.kafka.security")
       .map(_.split('.').toList)
       ++ ClusterSecurityConfig

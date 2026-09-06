@@ -6,7 +6,9 @@
  *
  * - **{@link createQueryCache}** holds what a screen has asked the server for. A failure is a value
  *   in its state, next to the last good answer, so a page can keep showing yesterday's numbers with
- *   a badge on them instead of going blank.
+ *   a badge on them instead of going blank. {@link useQuery} is how a component reads one, and is
+ *   the only thing features should call: it turns the cache's bookkeeping into the six-case
+ *   `Fetched` every screen already draws.
  * - **{@link openEventSource} / {@link openFetchStream}** carry the streams. One bad frame never
  *   ends a stream; a terminal event ends it exactly once; a stream the server refused is reported as
  *   a refusal rather than as a stream that finished.
@@ -29,6 +31,24 @@ export {
   type QueryCacheOptions,
   type QueryState,
 } from "./query/cache.js";
+
+/**
+ * The hook a screen actually calls, and the shared answers behind it.
+ *
+ * Separate from the cache above because they answer different questions: `createQueryCache` is
+ * "what does this browser hold", and `useQuery` is "what does this component draw, right now,
+ * including the parts of the answer a cache has no way to express".
+ */
+export {
+  createQueryRegistry,
+  sharedQueries,
+  useQuery,
+  type Query,
+  type QueryLoader,
+  type QueryOptions,
+  type QueryRegistry,
+  type QueryRegistryOptions,
+} from "./query/useQuery.js";
 
 export {
   DEFAULT_EVENT_NAME,

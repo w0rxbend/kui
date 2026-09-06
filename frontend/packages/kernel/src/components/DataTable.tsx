@@ -320,7 +320,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): JSX.Element {
                 >
                   <Show when={props.selection}>
                     {(selection) => (
-                      <td class="kui-table__cell kui-table__cell--select">
+                      <td
+                        class="kui-table__cell kui-table__cell--select"
+                        /* The row is the control and the checkbox is inside it, so without this a
+                           tick also activates the row: the operator loses the list they were
+                           selecting from, and the ticks with it. `VirtualizedTable` has the same
+                           cell and the same guard, and the two agree. */
+                        onClick={(event: MouseEvent) => event.stopPropagation()}
+                      >
                         <Checkbox
                           labelHidden
                           label={`Select ${selection().rowLabel?.(key()) ?? key()}`}

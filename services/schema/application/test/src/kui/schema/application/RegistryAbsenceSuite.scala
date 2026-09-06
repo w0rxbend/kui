@@ -27,7 +27,8 @@ final class RegistryAbsenceSuite extends KuiIOSuite {
   test("a cluster KUI has never heard of is a cluster-not-found, not a missing registry") {
     for {
       registry <- SchemaRig.registry()
-      useCase = SubjectListUseCase.make[IO](SchemaRig.registries(registry))
+      logger <- SchemaRig.logger
+      useCase = SubjectListUseCase.make[IO](SchemaRig.registries(registry), logger)
       result <- useCase.list(SchemaRig.Unknown, SubjectQuery.Default)
     } yield assertEquals(result.left.map(_.code), Left(ErrorCode.ClusterNotFound))
   }
@@ -35,7 +36,8 @@ final class RegistryAbsenceSuite extends KuiIOSuite {
   test("a configured cluster with no registry is unsupported, and the message names the key to set") {
     for {
       registry <- SchemaRig.registry()
-      useCase = SubjectListUseCase.make[IO](SchemaRig.registries(registry))
+      logger <- SchemaRig.logger
+      useCase = SubjectListUseCase.make[IO](SchemaRig.registries(registry), logger)
       result <- useCase.list(SchemaRig.WithoutRegistry, SubjectQuery.Default)
     } yield {
       assertEquals(result.left.map(_.code), Left(ErrorCode.Unsupported))
@@ -49,7 +51,8 @@ final class RegistryAbsenceSuite extends KuiIOSuite {
   test("a registry that does not answer fails; it never becomes an empty subject list") {
     for {
       registry <- SchemaRig.registry(failure = Some(SchemaRig.unreachable))
-      useCase = SubjectListUseCase.make[IO](SchemaRig.registries(registry))
+      logger <- SchemaRig.logger
+      useCase = SubjectListUseCase.make[IO](SchemaRig.registries(registry), logger)
       result <- useCase.list(SchemaRig.WithRegistry, SubjectQuery.Default)
     } yield assertEquals(result, Left(SchemaRig.unreachable))
   }

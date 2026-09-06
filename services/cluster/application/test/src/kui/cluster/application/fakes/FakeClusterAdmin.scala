@@ -45,6 +45,9 @@ final class FakeClusterAdmin[F[_]: Temporal] private (state: Ref[F, FakeClusterA
   ): F[Either[KuiError, PartialResult[BrokerId, List[LogDir]]]] =
     answer(profile, "describeLogDirs")(_.logDirs)
 
+  def sweepPartitions(profile: ClusterProfile): F[Either[KuiError, TopicSweep]] =
+    answer(profile, "sweepPartitions")(_.sweep)
+
   def capabilities(profile: ClusterProfile): F[ClusterFeatures] =
     record(profile, "capabilities", false) >> pause >> state.get.map(_.features)
 
@@ -95,6 +98,7 @@ object FakeClusterAdmin {
       quorum: Either[KuiError, Option[QuorumInfo]],
       configs: Map[BrokerId, Either[KuiError, List[ConfigEntry]]],
       logDirs: Either[KuiError, PartialResult[BrokerId, List[LogDir]]],
+      sweep: Either[KuiError, TopicSweep],
       features: ClusterFeatures,
       /** How long every method sleeps before answering. */
       delay: FiniteDuration,
@@ -116,6 +120,9 @@ object FakeClusterAdmin {
           quorum = Right(None),
           configs = Map.empty,
           logDirs = Right(PartialResult.empty[BrokerId, List[LogDir]]),
+          // A cluster with no topics, complete: the default has to be a *measured* nothing rather than a
+          // refusal, so that a suite about disks does not have to think about the partition sweep.
+          sweep = Right(TopicSweep.emptyCluster),
           features = features,
           delay = delay,
           calls = Nil,

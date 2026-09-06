@@ -7,6 +7,7 @@ import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
+import kui.metrics.contract.MetricsEndpoints
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
@@ -23,6 +24,7 @@ final class ServiceContractsSuite extends FunSuite {
   private val consumer = ServiceId.unsafe("consumer")
   private val message = ServiceId.unsafe("message")
   private val schema = ServiceId.unsafe("schema")
+  private val metrics = ServiceId.unsafe("metrics")
 
   /** The public address of one endpoint, including its path parameters.
     *
@@ -36,7 +38,7 @@ final class ServiceContractsSuite extends FunSuite {
   }
 
   test("everyConfiguredServiceHasItsContract") {
-    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message, schema))
+    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message, schema, metrics))
     // Both of the cluster service's lists. `ClusterWriteEndpoints` used to be deliberately absent, so
     // that the one write M1 shipped had no public route while it had no screen; the administration screen
     // exists now, and an endpoint the browser cannot reach would make it a set of buttons that answer 404.
@@ -73,6 +75,9 @@ final class ServiceContractsSuite extends FunSuite {
       ServiceContracts.of(schema),
       SchemaEndpoints.all ++ SchemaMutationEndpoints.all
     )
+    // The metrics service's one list. It publishes a single read and no mutation, so unlike every
+    // service above it there is no second object to forget.
+    assertEquals(ServiceContracts.of(metrics), MetricsEndpoints.all)
   }
 
   test("a service the gateway has no contract for is not an error") {

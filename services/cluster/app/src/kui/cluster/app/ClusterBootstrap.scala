@@ -22,7 +22,12 @@ import kui.cluster.domain.{
   StoreHealth
 }
 import kui.cluster.infrastructure.store.{ClusterConfigStoreAdapter, ProfileChangeListener}
-import kui.cluster.infrastructure.{ClusterAdminAdapter, ClusterAdminClients, ConnectivityProbeAdapter}
+import kui.cluster.infrastructure.{
+  ClusterAdminAdapter,
+  ClusterAdminClients,
+  ConnectivityProbeAdapter,
+  KafkaPartitionSweeper
+}
 import kui.config.store.*
 import kui.config.{ClusterConfig, StoreConfig}
 import kui.contracts.health.CheckResult
@@ -92,6 +97,29 @@ object ClusterBootstrap {
 
   val CapabilityProbeInterval: FiniteDuration = 1.hour
 
+  /** How often the partition sweep runs.
+    *
+    * A minute rather than the topology's thirty seconds, and the number is the topic service's own
+    * `kui.topics.refreshInterval` default for the same stated reason: a topic sweep is an order of magnitude
+    * more expensive than a cluster one and its data changes an order of magnitude less often. It is a
+    * constant here rather than a setting because `libs/config` has no `kui.clusters.*` key for it and adding
+    * one is a configuration-compatibility change of its own.
+    */
+  val PartitionSweepInterval: FiniteDuration = 60.seconds
+
+  /** The controller-uptime window, and the bucket it is measured in.
+    *
+    * Six hours at one minute: 360 buckets, which is the ring `SeriesWindow` retains. The step is twice the
+    * refresh interval, so each bucket holds the newest of the two scrapes that land in it — a step shorter
+    * than the refresh would leave every other bucket a gap and report a healthy cluster as half-observed.
+    *
+    * Six and not twenty-four because the window has to *fill* before it answers, and a KUI that had to run
+    * for a day before its uptime card said anything would show nothing at all on the day anybody looked.
+    */
+  val ControllerUptimeWindow: FiniteDuration = 6.hours
+
+  val ControllerUptimeStep: FiniteDuration = 1.minute
+
   /** The instrumentation scope the cache metrics are recorded under. */
   val CacheMeter: String = "kui.cache"
 
@@ -118,8 +146,17 @@ object ClusterBootstrap {
       metrics <- Resource.eval(AdminMetrics.otel[F](telemetry))
       pool <- AdminClientPool.resource[F](metrics)
       clients <- ClusterAdminClients.resource[F](pool, logger)
+      // The sweeper takes the pool directly rather than going through `libs/kafka`'s `ClusterAdmin`:
+      // `describeTopics` is a topic call and that port is the cluster context's, so the call shape is
+      // local while the client, the timeouts and the metrics stay shared. See `KafkaPartitionSweeper`.
       admin <- Resource.eval(
-        ClusterAdminAdapter.create[F](KafkaClusterAdmin[F](pool), clients, telemetry, logger)
+        ClusterAdminAdapter.create[F](
+          KafkaClusterAdmin[F](pool),
+          new KafkaPartitionSweeper[F](pool, logger),
+          clients,
+          telemetry,
+          logger
+        )
       )
       // Step 6. The refresh loops, owned by this resource so that releasing it stops them.
       cacheMetrics <- Resource.eval(telemetry.meter(CacheMeter).flatMap(CacheMetrics.otel4s[F]))
@@ -127,8 +164,13 @@ object ClusterBootstrap {
         registry,
         admin,
         cacheMetrics,
-        RefreshInterval,
-        CapabilityProbeInterval,
+        ClusterSnapshots.Tuning(
+          refreshInterval = RefreshInterval,
+          capabilityInterval = CapabilityProbeInterval,
+          sweepInterval = PartitionSweepInterval,
+          uptimeWindow = ControllerUptimeWindow,
+          uptimeStep = ControllerUptimeStep
+        ),
         logger
       )
       // A profile edited in the store reaches this replica here: the listener reloads the registry, which

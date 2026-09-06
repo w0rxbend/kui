@@ -1,7 +1,8 @@
 package kui.schema.application
 
 import cats.Monad
-import cats.effect.kernel.Sync
+import cats.effect.kernel.{Async, Sync}
+import cats.effect.syntax.all.*
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
@@ -58,24 +59,118 @@ object RegistryQuery {
     result.toRight(ApplicationError.NotFound(what, id, ErrorCode.SchemaNotFound))
 }
 
-/** One page of a cluster's subjects, searched and sorted.
+/** One page of a cluster's subjects, searched, sorted, and enriched with the facts its rows show.
   *
   * The registry hands back every subject name in a single response and offers no search, sort or paging of
   * its own, so the whole list crosses the wire on every request and [[SubjectCatalog]] cuts the page. That is
   * fine at the sizes registries actually reach — a few thousand names is a few hundred kilobytes — and it is
   * the only option the API offers, but it is why this call has the shortest timeout budget of the four and
   * why the page size is bounded like every other list in KUI.
+  *
+  * ==The page is cut before anything is enriched==
+  *
+  * A subject's format, version count and compatibility level cost a call each, and the page is what bounds
+  * how many are made: twenty-five rows on screen is twenty-five [[SchemaRegistryPort.summary]] calls, no
+  * matter whether the registry holds six subjects or six thousand. Enriching the whole list and then cutting
+  * a page out of it would turn opening a list into two thousand calls to a component that is a single-writer
+  * JVM, which is the failure this ordering exists to prevent — and it is why the fold happens here rather
+  * than in [[SubjectCatalog]], which is pure and has no calls to make.
+  *
+  * ==Enrichment never fails the page==
+  *
+  * The subject list is one call, and it either arrived or it did not; that failure travels, because an empty
+  * subject list is a claim the registry holds nothing. Everything after it is a secondary call about one row,
+  * and a row that loses its facts keeps its name. A subject that disappeared from a list because the call
+  * that decorated it did not answer would send an operator looking for a schema nobody deleted.
   */
 trait SubjectListUseCase[F[_]] {
-  def list(cluster: ClusterId, query: SubjectQuery): F[Either[KuiError, Page[Subject]]]
+  def list(cluster: ClusterId, query: SubjectQuery): F[Either[KuiError, Page[SubjectSummary]]]
 }
 
 object SubjectListUseCase {
 
-  def make[F[_]: Sync](registries: ClusterRegistries[F]): SubjectListUseCase[F] =
+  /** How many of a page's rows are enriched at once.
+    *
+    * Half of `SchemaWiring.MaxConcurrentPerRegistry`, and deliberately not equal to it: the bulkhead is the
+    * limit for *everything* KUI sends one registry, and a single list page that filled it would queue every
+    * other screen's request behind itself. Eight is enough that a page of twenty-five costs four rounds of
+    * latency instead of twenty-five, and few enough that a list is never the reason another panel waits.
+    */
+  val MaxConcurrentRows: Int = 8
+
+  def make[F[_]: Async](
+      registries: ClusterRegistries[F],
+      logger: StructuredLogger[F]
+  ): SubjectListUseCase[F] =
     new SubjectListUseCase[F] {
-      def list(cluster: ClusterId, query: SubjectQuery): F[Either[KuiError, Page[Subject]]] =
-        RegistryQuery.on(registries, cluster)(_.subjects.map(_.map(SubjectCatalog.page(_, query))))
+
+      def list(cluster: ClusterId, query: SubjectQuery): F[Either[KuiError, Page[SubjectSummary]]] =
+        RegistryQuery.on(registries, cluster) { port =>
+          port.subjects.flatMap {
+            case Left(error) => error.asLeft[Page[SubjectSummary]].pure[F]
+            case Right(names) =>
+              enrich(port, cluster, SubjectCatalog.page(names, query)).map(_.asRight[KuiError])
+          }
+        }
+
+      /** The page's rows, filled in. The pagination metadata is carried across untouched: it was computed
+        * over the filtered list and nothing here adds or removes a row.
+        */
+      private def enrich(
+          port: SchemaRegistryPort[F],
+          cluster: ClusterId,
+          page: Page[Subject]
+      ): F[Page[SubjectSummary]] =
+        if page.isEmpty then page.map(SubjectSummary.bare).pure[F]
+        else
+          for {
+            global <- globalLevel(port, cluster)
+            rows <- page.items.parTraverseN(MaxConcurrentRows)(row(port, cluster, global, _))
+          } yield page.copy(items = rows)
+
+      /** The registry-wide level, once for the page, or `None` and a line in the log.
+        *
+        * One call for the whole page rather than one per row, because it is the same answer for every row. A
+        * failure here costs the inheriting rows their level and costs the page nothing else.
+        */
+      private def globalLevel(
+          port: SchemaRegistryPort[F],
+          cluster: ClusterId
+      ): F[Option[CompatibilityLevel]] =
+        port.globalCompatibility.flatMap {
+          case Right(level) => level.some.pure[F]
+          case Left(error) =>
+            logger
+              .warn(Map("cluster.id" -> cluster.value))(
+                "the registry-wide compatibility level could not be read, so the subject rows that " +
+                  s"inherit it show none: ${error.message}"
+              )
+              .as(none[CompatibilityLevel])
+        }
+
+      /** One row. The reason a row is bare is logged and never invented into a field on the wire: "we could
+        * not read this" and "this subject has no format" are different facts, and a client that was handed a
+        * reason string would print it as though the registry had said it.
+        */
+      private def row(
+          port: SchemaRegistryPort[F],
+          cluster: ClusterId,
+          global: Option[CompatibilityLevel],
+          subject: Subject
+      ): F[SubjectSummary] =
+        port.summary(subject).flatMap {
+          case Right(Some(summary)) => summary.inheriting(global).pure[F]
+          // The subject was listed and is gone. It keeps its row for this page — the list said it was
+          // there — and gains no inherited level, because a subject that no longer exists inherits nothing.
+          case Right(None) => SubjectSummary.bare(subject).pure[F]
+          case Left(error) =>
+            logger
+              .warn(Map("cluster.id" -> cluster.value, "subject" -> subject.value))(
+                "the subject's list facts could not be read, so the row carries the name alone: " +
+                  error.message
+              )
+              .as(SubjectSummary.bare(subject))
+        }
     }
 }
 

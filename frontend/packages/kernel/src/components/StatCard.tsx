@@ -36,6 +36,36 @@
  * The label and the tile do not depend on data, so they draw at once and never move. Only the
  * figure is a skeleton, and it is a skeleton the size of the figure, so nothing on the card shifts
  * when the number lands.
+ *
+ * ## The visual sits beside the figure, and the pill keeps its own line
+ *
+ * `SCREENS-V4.md` §3.2 draws a micro-visual at the right of every dashboard card: a sparkline, a
+ * ring, a strip of blocks. It is a *slot* — the card does not know what a sparkline is, and the
+ * chart components come through `@kui/kernel` from the caller — and the decision this component
+ * makes is where it goes and what it may not do.
+ *
+ * It goes **beside the figure**, and it does **not** replace the pill. The two answer different
+ * questions and a card that swapped one for the other would lose an answer: the pill says whether
+ * the number is all right *now* ("all in sync", "metrics unavailable") and the visual says how the
+ * number got here. Six of the design's eight cards carry both. So the figure and the visual share
+ * one row, the pill keeps the line below it, and a card with a visual is the same height as a card
+ * without one.
+ *
+ * Two rules come with the slot:
+ *
+ *   - **A card with no series passes no visual.** It must never draw a flat line at zero, which is
+ *     a measured claim about a quantity nobody measured — the same lie as printing `0` for an
+ *     unknown, drawn instead of written. The component's half of that is to render nothing at all
+ *     when the slot is empty rather than reserving an empty box, so the absence is visible. The
+ *     slot is read for truthiness rather than for presence, because `false` is the shape the
+ *     absence actually arrives in: `visual={hasSeries && <Sparkline .../>}`.
+ *   - **The slot is `aria-hidden`.** Whatever goes in it is a second drawing of the figure the card
+ *     has already printed, and announcing both reads as "128, 128". A visual that says something
+ *     the figure does not is not a stat card; it is a chart, and it belongs in a panel with a
+ *     legend and a data table.
+ *
+ * A pending figure keeps its skeleton and the card keeps `aria-busy` with the visual present: the
+ * visual is not the value, so it cannot stand in for one that has not arrived.
  */
 import { Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
@@ -77,6 +107,12 @@ export interface StatCardProps {
   readonly tone: TileTone;
   readonly figure: StatFigure;
   readonly pill?: StatPill | undefined;
+  /**
+   * A micro-visual drawn at the right of the figure — `Sparkline`, `RingGauge`, a strip of blocks.
+   * Absent when the card has no series to draw; see the note at the top of this file on why an
+   * empty slot draws nothing rather than a flat line.
+   */
+  readonly visual?: JSX.Element | undefined;
   /**
    * Makes the whole card a link. The label and the figure are both inside it, so the accessible
    * name is the card's whole content — which is what somebody tabbing the dashboard wants to hear.
@@ -120,7 +156,21 @@ function Content(props: StatCardProps): JSX.Element {
         <span class="kui-stat__label">{props.label}</span>
       </span>
 
-      <Figure figure={props.figure} />
+      {/* The row exists whether or not the visual does, so the figure sits in the same place on
+          every card in a grid where only some of them have a series to draw. */}
+      <div class="kui-stat__row">
+        <Figure figure={props.figure} />
+        {/* Truthiness, not `!== undefined`. `JSX.Element` admits `false` and `null`, so the
+            natural `visual={hasSeries && <Sparkline .../>}` at a call site hands this component a
+            `false` — and a presence test would reserve the empty box the header two paragraphs up
+            forbids. A caller who has no series says so by passing nothing renderable, however it
+            spells it. */}
+        <Show when={props.visual}>
+          <span class="kui-stat__visual" aria-hidden="true">
+            {props.visual}
+          </span>
+        </Show>
+      </div>
 
       <Show when={props.pill}>
         {(pill) => (

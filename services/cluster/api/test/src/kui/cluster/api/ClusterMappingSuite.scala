@@ -1,5 +1,7 @@
 package kui.cluster.api
 
+import scala.concurrent.duration.*
+
 import io.circe.syntax.*
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
@@ -7,7 +9,7 @@ import org.scalacheck.Prop.forAll
 
 import kui.cluster.application.{BrokerListRow, SnapshotFreshness}
 import kui.cluster.contract.dto.ClusterProfileDto
-import kui.cluster.domain.{ControllerMode, LogDirError, PartitionSummary, QuorumInfo, ReplicaState}
+import kui.cluster.domain.{ControllerMode, ControllerUptime, LogDirError, QuorumInfo, ReplicaState}
 import kui.contracts.cluster.ClusterSummaryDto
 import kui.kernel.{BrokerId, Secret}
 import kui.kernel.cluster.*
@@ -106,9 +108,10 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     // as long as the outage lasted.
     //
     // Nothing in `describeCluster` or `describeLogDirs` carries the ISR: a log directory lists the replicas
-    // stored on this disk, in sync or not (`research/kafka/admin-capabilities.md`). Only `describeTopics`
-    // knows, and the cluster service does not sweep topics. So the assertion is in two halves - the number
-    // is the total, and no field on the wire offers an in-sync count for anyone to read the total as.
+    // stored on this disk, in sync or not (`research/kafka/admin-capabilities.md`). The topic sweep does
+    // know, and its answer is published as a *cluster* count rather than folded into this per-broker one.
+    // So the assertion is in two halves - the number is the total, and no field on the wire offers an
+    // in-sync count for anyone to read the total as.
     val hosted = 147
     val actuallyInSync = 96
     assertNotEquals(hosted, actuallyInSync)
@@ -116,8 +119,9 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     val row = BrokerListRow(
       broker = ClusterFixtures.broker(1),
       isController = true,
-      replicas = Some(hosted),
+      partitions = Some(hosted),
       leaders = Some(50),
+      replicas = Some(hosted),
       skewPercent = Some(0.0d),
       totalBytes = None,
       usableBytes = None,
@@ -135,10 +139,38 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     // Where under-replication *is* honestly reported: the cluster summary, from a count Kafka gives us.
     val topology = ClusterFixtures.topology()
     val summary = ClusterMapping.summary(
-      topology.copy(partitions = Some(PartitionSummary(online = 200, offline = 0, underReplicated = 51))),
+      topology.copy(census = Some(ClusterFixtures.census(online = 200, underReplicated = 51))),
       ClusterFixtures.At
     )
     assertEquals(summary.underReplicatedPartitionCount, Some(hosted - actuallyInSync))
+  }
+
+  test("aControllerWindowThatIsNotFullSendsANullPercentageAndItsLengthAnyway") {
+    // The state a browser meets most often — a KUI that restarted this morning — and the one where a
+    // literal in the client would be wrong: `null` with `windowSeconds` present is what lets the card say
+    // "collecting, 41m of 6h" instead of drawing an empty ring or, worse, a zero.
+    val collecting = ControllerUptime(window = 6.hours, coverage = 41.minutes, percent = None)
+    val summary = ClusterMapping.summary(
+      ClusterFixtures.topology().copy(controllerUptime = Some(collecting)),
+      ClusterFixtures.At
+    )
+
+    assertEquals(summary.controllerUptime.flatMap(_.percent), None)
+    assertEquals(summary.controllerUptime.map(_.windowSeconds), Some(21600L))
+    assertEquals(summary.controllerUptime.map(_.coverageSeconds), Some(2460L))
+
+    val rendered = summary.asJson.noSpaces
+    assert(rendered.contains(""""percent":null"""), rendered)
+    assert(rendered.contains(""""windowSeconds":21600"""), rendered)
+  }
+
+  test("aClusterKeepingNoWindowAtAllSendsNoUptimeObjectRatherThanAnEmptyOne") {
+    // Absent and "collecting" are different claims and a client renders them differently, so the mapping
+    // must not manufacture an object for a window nobody is keeping.
+    val summary = ClusterMapping.summary(ClusterFixtures.topology(), ClusterFixtures.At)
+
+    assertEquals(summary.controllerUptime, None)
+    assert(summary.asJson.noSpaces.contains(""""controllerUptime":null"""), summary.asJson.noSpaces)
   }
 
   test("controllerKindIsTheWireWordAndNotTheEnumName") {

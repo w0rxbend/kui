@@ -12,6 +12,13 @@
  * opens and says that, with a retry. It never shows an empty list for a failed request, and it
  * never shows a stale list without admitting it is stale.
  *
+ * ## Severity and category are two axes
+ *
+ * The tile's tone comes from the severity and its glyph from the category, and they are separate
+ * fields for the reason `SCREENS-V4.md` §3.9 gives: `M06` draws two warnings with two different
+ * glyphs, so a component that derived the glyph from the severity cannot draw the design at all.
+ * See {@link NoticeCategory}.
+ *
  * ## Read and unread are a real distinction, and the dot is not the signal
  *
  * The bell's dot is decoration: the count is in the accessible name ("Notifications, 3 unread"),
@@ -42,15 +49,47 @@ import { Button, Icon, IconTile, Spinner, relativeAge, type IconName, type TileT
 /**
  * How serious one notification is.
  *
- * Four cases, matching the four the design draws. They select the tile's tone and its glyph
- * together, so that the two can never disagree — a red tile with an information glyph is a
- * rendering that says two different things at once.
+ * Four cases, matching the four the design draws. Severity chooses the tile's **tone** and nothing
+ * else; see {@link NoticeCategory} for what chooses the glyph.
  */
 export type NoticeSeverity = "info" | "success" | "warning" | "danger";
+
+/**
+ * What happened, as opposed to how bad it is.
+ *
+ * These are two axes and the shipped component collapsed them into one: the glyph was picked from
+ * the severity, so every warning drew the same triangle. `SCREENS-V4.md` §3.9 shows why that cannot
+ * draw the design — two of the four notifications in `M06` are both warnings and carry *different*
+ * glyphs, a rebalance arrow and a disk, because they are two different things going slightly wrong.
+ * Collapsing the axes loses the one that says what happened, which is the half an operator scans
+ * for; the severity they can already see in the colour.
+ *
+ * Absent falls back to a glyph chosen from the severity, which is what every notification in the
+ * product does today. That is not a placeholder to be removed later: a notification whose category
+ * nothing recorded is a real case, and inventing a category for it would be worse than the generic
+ * glyph — a disk icon over a rebalance is a confident lie about what broke.
+ */
+export type NoticeCategory =
+  /** A group moving its partitions around, or a broker rejoining: the arrows of `M06`. */
+  | "rebalance"
+  /** A log directory filling up. */
+  | "storage"
+  /** A connector or one of its tasks. */
+  | "connector"
+  /** A schema registered, or a compatibility check refused. */
+  | "schema"
+  /** A broker, a partition, or the cluster itself. */
+  | "cluster"
+  /** A topic created, configured or deleted. */
+  | "topic"
+  /** Somebody signed in, or a permission was refused. */
+  | "security";
 
 export type Notice = {
   readonly id: string;
   readonly severity: NoticeSeverity;
+  /** What happened. Absent means nobody recorded one; see {@link NoticeCategory}. */
+  readonly category?: NoticeCategory | undefined;
   /** Always present. A notification with no title is a coloured square. */
   readonly title: string;
   /** The sentence under the title. May be absent; the title then centres against the tile. */
@@ -82,12 +121,43 @@ const TONE: Record<NoticeSeverity, TileTone> = {
   danger: "danger",
 };
 
-const GLYPH: Record<NoticeSeverity, IconName> = {
+/**
+ * The fallback glyph, for a notification that carries no category.
+ *
+ * It restates the severity, which is the only thing such a notification is known to be about. That
+ * is honest and it is also weak — a panel of four amber triangles is a panel nobody scans — which
+ * is the argument for recording a category wherever one is known.
+ */
+const SEVERITY_GLYPH: Record<NoticeSeverity, IconName> = {
   info: "info",
   success: "check",
   warning: "warning",
   danger: "error",
 };
+
+/**
+ * The glyph for each category, from the icon set the rest of the drawer already uses.
+ *
+ * `rebalance` takes the refresh arrows, which is the same mark the consumer screens use for a group
+ * that is moving; `storage` takes the disk the storage meter is headed with. Reusing the marks the
+ * feature screens use is the point — a notification is a pointer at a screen, and an operator who
+ * has learned the disk glyph on the storage card should not have to learn a second one here.
+ */
+const CATEGORY_GLYPH: Record<NoticeCategory, IconName> = {
+  rebalance: "refresh",
+  storage: "disk",
+  connector: "connect",
+  schema: "schema",
+  cluster: "brokers",
+  topic: "topics",
+  security: "shield",
+};
+
+/** The tone from the severity, the glyph from the category. Two axes, two lookups. */
+function glyphOf(notice: Notice): IconName {
+  const category = notice.category;
+  return category === undefined ? SEVERITY_GLYPH[notice.severity] : CATEGORY_GLYPH[category];
+}
 
 export type NotificationBellProps = {
   readonly unreadCount: number;
@@ -212,7 +282,7 @@ function NoticeRow(props: {
 
   const content = () => (
     <>
-      <IconTile icon={GLYPH[notice().severity]} tone={TONE[notice().severity]} />
+      <IconTile icon={glyphOf(notice())} tone={TONE[notice().severity]} />
       <span class="kui-notices__text">
         <span class="kui-notices__notice-title">{notice().title}</span>
         <Show when={notice().body}>{(body) => <span class="kui-notices__body">{body()}</span>}</Show>

@@ -66,16 +66,36 @@ final class TopicEndpointsSuite extends FunSuite {
     }
   }
 
-  test("theEndpointListIsExactlyTheFiveDeclared") {
-    // A sixth must be a deliberate edit to this list rather than something that appears because a value was
-    // declared somewhere in the object.
+  test("theEndpointListIsExactlyTheSevenDeclared") {
+    // An eighth must be a deliberate edit to this list rather than something that appears because a value
+    // was declared somewhere in the object. The **order** is asserted with the names, because two of these
+    // depend on it; see the next test.
     assertEquals(
       TopicEndpoints.all.flatMap(_.info.name),
-      List("topic.list", "topic.get", "topic.config", "topic.partitions", "topic.refresh")
+      List(
+        "topic.list",
+        "topic.statistics",
+        "topic.names",
+        "topic.get",
+        "topic.config",
+        "topic.partitions",
+        "topic.refresh"
+      )
     )
   }
 
-  test("the five endpoints are at exactly the documented addresses") {
+  test("the fixed sub-resources of /topics are declared before the one that reads a topic name") {
+    // `statistics` and `names` sit where `{topicName}` sits, and the router — this service's and the
+    // gateway's, which derives its proxy routes from this list in order — tries endpoints in the order
+    // given. Move `topic.get` above either of them and `GET /topics/statistics` is served as the detail
+    // page of a topic called `statistics`, with no error anywhere to say so.
+    val names = TopicEndpoints.all.flatMap(_.info.name)
+
+    assert(names.indexOf("topic.statistics") < names.indexOf("topic.get"), names.toString)
+    assert(names.indexOf("topic.names") < names.indexOf("topic.get"), names.toString)
+  }
+
+  test("the seven endpoints are at exactly the documented addresses") {
     val addresses = TopicEndpoints.all.map(endpoint =>
       s"${endpoint.method.getOrElse(Method.GET).method} ${pathTemplate(endpoint)}"
     )
@@ -84,6 +104,8 @@ final class TopicEndpointsSuite extends FunSuite {
       addresses,
       List(
         "GET /internal/v1/clusters/{clusterId}/topics",
+        "GET /internal/v1/clusters/{clusterId}/topics/statistics",
+        "GET /internal/v1/clusters/{clusterId}/topics/names",
         "GET /internal/v1/clusters/{clusterId}/topics/{topicName}",
         "GET /internal/v1/clusters/{clusterId}/topics/{topicName}/config",
         "GET /internal/v1/clusters/{clusterId}/topics/{topicName}/partitions",
@@ -102,6 +124,8 @@ final class TopicEndpointsSuite extends FunSuite {
       byMethod,
       List(
         "topic.list" -> Some(Method.GET),
+        "topic.statistics" -> Some(Method.GET),
+        "topic.names" -> Some(Method.GET),
         "topic.get" -> Some(Method.GET),
         "topic.config" -> Some(Method.GET),
         "topic.partitions" -> Some(Method.GET),

@@ -4,7 +4,7 @@ import java.time.Instant
 
 import scala.concurrent.duration.FiniteDuration
 
-import cats.effect.kernel.{Clock, Concurrent, Resource, Temporal}
+import cats.effect.kernel.{Clock, Concurrent, Ref, Resource, Temporal}
 import cats.effect.std.Supervisor
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
@@ -53,11 +53,21 @@ object LiveTopicSnapshots {
   ): Resource[F, TopicSnapshots[F]] =
     clusters
       .traverse(cluster =>
-        SnapshotCell
-          .resource[F, TopicSnapshot](Name, cluster, interval, metrics, Some(logger))(
-            scrape[F](cluster, admin)
+        // One previous-scrape reference per cluster, created with the cell and released with it. It is what
+        // the produce rate is differenced against, and it is a `Ref` beside the cell rather than a read of
+        // the cell itself because the load runs *inside* the cell's own construction: at the moment the
+        // scrape needs the previous value there is no cell to ask. Exactly one pass is kept, which is all a
+        // difference needs — the consumer service holds its previous `GroupSnapshot` the same way and for
+        // the same reason.
+        Resource
+          .eval(Ref.of[F, Option[TopicSnapshot]](None))
+          .flatMap(previous =>
+            SnapshotCell
+              .resource[F, TopicSnapshot](Name, cluster, interval, metrics, Some(logger))(
+                scrape[F](cluster, admin, previous)
+              )
+              .map(cluster -> _)
           )
-          .map(cluster -> _)
       )
       .mproduct(_ => Supervisor[F])
       .map((cells, supervisor) => make[F](cells.toMap, supervisor))
@@ -93,17 +103,32 @@ object LiveTopicSnapshots {
     * `Throwable` keeps the `KuiError` the screen has to show. The cell catches it, keeps the previous
     * snapshot in place, and moves only the status to `Offline` — which is the behaviour a user sees as "the
     * page still shows what KUI last saw, greyed out and stamped with when it was seen".
+    *
+    * @param previous
+    *   the last snapshot this cluster produced, which the new one differences its produce rates against. It
+    *   is read before the scrape's result is inspected and written only when a snapshot was built
     */
-  def scrape[F[_]: {Temporal, Clock}](cluster: ClusterId, admin: TopicAdmin[F]): F[TopicSnapshot] =
+  def scrape[F[_]: {Temporal, Clock}](
+      cluster: ClusterId,
+      admin: TopicAdmin[F],
+      previous: Ref[F, Option[TopicSnapshot]]
+  ): F[TopicSnapshot] =
     for {
       result <- admin.scrape(cluster)
       now <- Clock[F].realTimeInstant
+      before <- previous.get
       snapshot <- result match {
         case Right(scraped) =>
-          TopicSnapshot.of(scraped.topics.toVector, now, scraped.incomplete).pure[F]
+          TopicSnapshot.of(scraped.topics.toVector, now, scraped.incomplete, before).pure[F]
         case Left(failure) =>
           Temporal[F].raiseError[TopicSnapshot](SnapshotLoadFailure(asKuiError(failure)))
       }
+      // Only a scrape that produced a snapshot becomes the next one's predecessor. A failed pass leaves the
+      // previous one in place, so the rate after an outage is measured across the gap rather than refusing
+      // for ever — and it is measured against a real earlier observation, which is what the arithmetic
+      // needs. The interval is longer than the refresh interval, which is correct: that is how long it
+      // actually was.
+      _ <- previous.set(Some(snapshot))
     } yield snapshot
 
   /** A `TopicError` as the `KuiError` a snapshot's `Offline` status carries.

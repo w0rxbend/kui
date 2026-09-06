@@ -47,6 +47,17 @@ kui:
         url: "http://kui-consumer:8080"
         timeout: "10s"
         maxConcurrent: 32
+      # The metrics service measures nothing in this build — there is no JMX client and no
+      # Prometheus parser — so every one of its answers is a 200 saying `not_configured`. It is
+      # addressed here anyway, because the gateway derives a service's public routes from the
+      # contract it holds *and* the address it was given: with no entry here it holds the metrics
+      # contract and publishes none of it, so the dashboard's cards have nothing to read their
+      # "not measured" sentence from and show an outage instead. The two look different on screen
+      # and mean different things.
+      metrics:
+        url: "http://kui-metrics:8080"
+        timeout: "10s"
+        maxConcurrent: 32
 
     # How often the gateway asks each service whether it is ready, to keep the capability registry
     # (and therefore the greyed-out parts of the UI) current.

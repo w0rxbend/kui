@@ -34,11 +34,15 @@
  * of which say it in words. The dot's fourth state matters as much as the other three — an
  * environment whose health is not yet known takes `--kui-color-text-subtle`, which is not any of
  * the health colours, so "we have not asked" can never be read as "it is fine".
+ *
+ * The words themselves come from `types.ts` and are shared with the drawer's head, so a rename
+ * changes both screens or neither. Two tables would each read correctly on their own, which is what
+ * makes that kind of drift so hard to notice.
  */
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Avatar, Icon, Tooltip, type IconName } from "@kui/kernel";
-import type { ClusterHealth, ClusterSummary } from "./types.js";
+import { healthWord, type ClusterSummary } from "./types.js";
 
 /**
  * One of the glyph shortcuts at the rail's foot.
@@ -60,6 +64,20 @@ export type RailDestination = {
 export type EnvRailProps = {
   readonly environments: readonly ClusterSummary[];
   readonly currentId?: string | undefined;
+  /**
+   * The environment-switch *request*: the user pressed a tile, and would like to be on that
+   * cluster.
+   *
+   * A request and not the switch itself, and emphatically not a place to raise a toast. Switching
+   * environments changes the selection, the drawer's counts, the address and — this is the part
+   * that matters — what every destructive control on the page is about to act on, and only the
+   * frame knows when all of that has actually happened. A rail that announced "switched to
+   * staging-fra" the instant it was clicked would be announcing its own intention; if the selection
+   * were then refused, the toast would already be on screen saying otherwise.
+   *
+   * So the confirmation is raised by `App.tsx`, on the single `ToastRegion` it already mounts. The
+   * rail reports the press and draws the new current tile when the caller tells it to.
+   */
   readonly onSelect?: ((id: string) => void) | undefined;
   readonly destinations?: readonly RailDestination[] | undefined;
   /** Which shortcut's page is being shown, if any. */
@@ -86,13 +104,6 @@ export type EnvRailProps = {
   readonly accountPanel?: JSX.Element | undefined;
   /** Where the product mark links to. */
   readonly homeHref?: string | undefined;
-};
-
-const HEALTH_WORD: Record<ClusterHealth, string> = {
-  healthy: "healthy",
-  degraded: "degraded",
-  unreachable: "not answering",
-  unknown: "health not known yet",
 };
 
 /**
@@ -133,7 +144,7 @@ export function EnvRail(props: EnvRailProps) {
             // The full name and the health, in words. This is the accessible name *and* the
             // tooltip, so the sighted user and the screen-reader user get the same sentence — see
             // the note above about the letter not being an identifier.
-            const description = () => `${environment.name} — ${HEALTH_WORD[environment.health]}`;
+            const description = () => `${environment.name} — ${healthWord(environment.health)}`;
             return (
               <li>
                 <Tooltip content={description()}>

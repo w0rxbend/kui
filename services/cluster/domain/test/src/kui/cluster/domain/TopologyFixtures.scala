@@ -72,10 +72,27 @@ object TopologyFixtures {
   def load(replicas: Int, dirs: List[LogDir] = Nil): BrokerLoad =
     BrokerLoad(
       replicas = replicas,
-      leaders = None,
       skewPercent = None,
       logDirs = if dirs.nonEmpty then dirs else List(logDir("/var/lib/kafka/data"))
     )
+
+  /** One partition of one topic, placed. Defaults to a healthy three-replica partition led by `leader`, so
+    * that a suite about under-replication states only the ISR it is about.
+    */
+  def placement(
+      leader: Int,
+      replicas: List[Int] = List(1, 2, 3),
+      inSync: Option[List[Int]] = None
+  ): PartitionPlacement =
+    PartitionPlacement(
+      leader = Some(BrokerId.unsafe(leader)),
+      replicas = replicas.map(BrokerId.unsafe).toSet,
+      inSync = inSync.getOrElse(replicas).map(BrokerId.unsafe).toSet
+    )
+
+  /** A complete sweep of `placements`: nothing unreadable, so every figure derived from it is a number. */
+  def sweep(placements: List[PartitionPlacement], topics: Int = 1): TopicSweep =
+    TopicSweep(PartitionCensus.of(placements), topics, Set.empty)
 
   def features(present: Set[ClusterFeature], absent: Set[ClusterFeature] = Set.empty): ClusterFeatures =
     ClusterFeatures.of(present, absent, ProbedAt)
@@ -94,7 +111,10 @@ object TopologyFixtures {
       version: Option[KafkaVersion] = defaultVersion,
       quorum: Option[QuorumInfo] = None,
       features: ClusterFeatures = allFeatures,
-      load: Map[BrokerId, BrokerLoad] = Map.empty
+      load: Map[BrokerId, BrokerLoad] = Map.empty,
+      census: Option[PartitionCensus] = None,
+      topics: Option[Int] = None,
+      controllerUptime: Option[ControllerUptime] = None
   ): ClusterTopology =
     ClusterTopology(
       cluster = ref,
@@ -103,8 +123,9 @@ object TopologyFixtures {
       quorum = quorum,
       features = features,
       load = BrokerLoad.withSkew(load),
-      partitions = None,
-      topics = None
+      census = census,
+      topics = topics,
+      controllerUptime = controllerUptime
     )
 
   def quorum(leader: Int, voters: List[Int], highWatermark: Long = 100L): QuorumInfo =

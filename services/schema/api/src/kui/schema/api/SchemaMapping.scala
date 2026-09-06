@@ -27,6 +27,21 @@ object SchemaMapping {
       )
     )
 
+  /** A subject list row.
+    *
+    * The three enriched fields travel exactly as they arrived, `None` included. An absent field is the wire's
+    * way of saying nobody found out, and defaulting one here — a zero version count, the registry's
+    * documented compatibility default — would be this module computing something, which is the one thing it
+    * is not allowed to do.
+    */
+  def summary(summary: SubjectSummary): SubjectSummaryDto =
+    SubjectSummaryDto(
+      subject = summary.subject,
+      format = summary.format.map(_.label),
+      versionCount = summary.versionCount,
+      compatibility = summary.compatibility.map(subjectCompatibility)
+    )
+
   def versions(subject: Subject, versions: List[SchemaVersion]): SubjectVersionsDto =
     SubjectVersionsDto(subject, versions.map(_.value))
 

@@ -7,6 +7,7 @@ import kui.config.{
   ConsumersConfig,
   GatewayConfig,
   KuiConfig,
+  MetricsConfig,
   ServerConfig,
   StoreConfig,
   StreamingConfig,
@@ -60,6 +61,13 @@ import kui.security.rbac.{ClusterFlags, RbacPolicy}
   * @param rbac
   *   the deployment's roles, read by the identity service when it resolves somebody's roles at sign-in and by
   *   the gateway when it answers what the caller may do. One policy, one file, two readers in one process
+  * @param metrics
+  *   where each cluster's broker metrics are read from. Carried for the same reason as `clusters`: the
+  *   metrics service runs in this JVM. Nothing observable differs while this build has no collector — every
+  *   cluster answers `not_configured` either way — but the capability row's *reason* does, and the reason is
+  *   the only thing that separates "you configured nothing" from "we cannot measure what you configured".
+  *   An operator who wrote `kui.metrics.sources` and is told nothing is configured goes and re-reads their
+  *   own YAML
   */
 final case class AllInOneConfig(
     server: ServerConfig,
@@ -71,7 +79,8 @@ final case class AllInOneConfig(
     consumers: ConsumersConfig,
     streaming: StreamingConfig,
     auth: AuthConfig,
-    rbac: RbacPolicy
+    rbac: RbacPolicy,
+    metrics: MetricsConfig
 ) {
 
   /** The same settings in the shape `GatewayWiring` wants.
@@ -123,7 +132,8 @@ object AllInOneConfig {
       config.consumers,
       config.streaming,
       config.auth,
-      config.rbac
+      config.rbac,
+      config.metrics
     )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry

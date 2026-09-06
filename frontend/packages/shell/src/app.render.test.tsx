@@ -108,6 +108,17 @@ function mountApp() {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  /* The address and the stored selection are both global, and the shell writes to both: a case that
+     mounts on a cluster's address leaves that cluster selected for the next one, which then fetches
+     a cluster its own stub knows nothing about. Two suites sharing one `localStorage` is how a test
+     ends up depending on the order it runs in. */
+  window.history.replaceState({}, "", "/");
+  try {
+    window.localStorage.clear();
+  } catch {
+    /* A browser configured to block site data raises on the accessor itself, and a test that cannot
+       clear a store it was never able to write to has nothing to clean up. */
+  }
 });
 
 describe("the application, mounted", () => {
@@ -155,6 +166,129 @@ describe("the application, mounted", () => {
     const drawer = app.host.querySelector(".kui-frame__drawer");
     expect(drawer?.querySelectorAll("a").length ?? 0).toBeGreaterThan(0);
     expect(drawer?.textContent).toContain("Overview");
+
+    app.dispose();
+  });
+});
+
+/**
+ * The frame, over a cluster the address names.
+ *
+ * The three tests above mount the shell at the root, where no cluster is selected and the store
+ * therefore asks for nothing. This one is the wiring wave's own assertion, and it is the one that
+ * could not have passed before it: wave 1 built `createClusterStore`, `brokerStorageOf` and the
+ * count fold, and nothing in the product constructed any of them — `grep` found no reference to one
+ * outside `data/`. So the meter drew its "not known" rendering in every deployment since it was
+ * built, not because the disks could not be read but because nobody had ever handed it any.
+ *
+ * The address is the input on purpose. `/ui/clusters/<id>` is the shortest thing anybody types, it
+ * used to fall through to the 404 wildcard, and it is the one input that exercises the whole chain
+ * in one go: the route resolves, the cluster comes out of it, the store asks six questions about
+ * that cluster, and the drawer draws three of the answers.
+ */
+describe("the frame, given a cluster in the address", () => {
+  const ok = (data: unknown) => ({ status: "ok", data, fetchedAt: "2026-09-06T09:00:00.000Z" });
+
+  /** What the six requests behind the drawer are answered with. Everything else 404s, as above. */
+  const CLUSTER: Readonly<Record<string, unknown>> = {
+    "/api/v1/clusters/prod-kyiv-01": {
+      cluster: {
+        id: "prod-kyiv-01",
+        name: "prod-kyiv-01",
+        summary: ok({
+          version: "3.7.0",
+          brokerCount: 3,
+          offlinePartitionCount: 0,
+          underReplicatedPartitionCount: 1,
+        }),
+      },
+    },
+    "/api/v1/clusters/prod-kyiv-01/brokers": { brokers: ok([{ id: 1 }, { id: 2 }, { id: 3 }]) },
+    "/api/v1/clusters/prod-kyiv-01/log-dirs": {
+      logDirs: ok([
+        { brokerId: 1, path: "/data/a", totalBytes: 200, usableBytes: 100 },
+        { brokerId: 2, path: "/data/a", totalBytes: 200, usableBytes: 50 },
+        /* Offline, so this broker gets no row and contributes to neither sum. If it did, the
+           percentage below would be computed over capacity the cluster does not have. */
+        { brokerId: 3, path: "/data/a", error: "KafkaStorageException" },
+      ]),
+    },
+    "/api/v1/clusters/prod-kyiv-01/topics": {
+      topics: ok({ items: [], page: { totalItems: 128 } }),
+      incompleteTopics: 0,
+    },
+  };
+
+  function stubCluster(): void {
+    vi.stubGlobal("EventSource", SilentEventSource);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const href =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const path = new URL(href, "http://kui.test").pathname;
+        if (path.includes("/auth/me")) {
+          return new Response(
+            JSON.stringify({
+              authType: "disabled",
+              csrfToken: "test-token",
+              principal: { kind: "anonymous", name: "anonymous" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        const body = CLUSTER[path];
+        if (body !== undefined) {
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (path.includes("/auth/settings")) {
+          return new Response(JSON.stringify({ authType: "disabled", providers: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        /* Everything else refused, and refused as a real envelope. Four of the frame's six requests
+           are answered above and the other two are not, which is the ordinary state of this product
+           — the drawer's whole design is that six failures are six failures and not one. */
+        return new Response(
+          JSON.stringify({ code: "KUI-ROUTE-NOT-FOUND", message: "no route", details: [] }),
+          { status: 404, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+  }
+
+  /** Lets the six requests land and the reactive graph catch up. */
+  async function settled(): Promise<void> {
+    for (let turn = 0; turn < 4; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+    }
+  }
+
+  it("draws the dashboard, not the 404 page, and fills the drawer from the store", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster();
+    const app = mountApp();
+    await settled();
+
+    /* The route change: `/clusters/<id>` names no page, and now resolves to the cluster's own
+       dashboard instead of to the wildcard at the foot of the table. */
+    expect(app.host.querySelector("[data-testid='overview']")).not.toBeNull();
+
+    const drawer = app.host.querySelector(".kui-frame__drawer");
+    // The head is the cluster block, and it is the store's summary that names it.
+    expect(drawer?.textContent).toContain("prod-kyiv-01");
+
+    /* 250 B used of 400 B, over the two brokers that reported a size. The third reported none and
+       is in neither sum: a failed disk is not a disk of size zero, and counting its 200 B of
+       capacity as empty would print 42% over a cluster that is at 63%. */
+    const meter = drawer?.querySelector("[data-testid='storage-meter']");
+    expect(meter?.textContent).toContain("63%");
+    expect(meter?.textContent).toContain("250 B of 400 B");
 
     app.dispose();
   });

@@ -89,16 +89,22 @@ is half a check.
 | `kraft-quorum` | `describeMetadataQuorum` succeeds | 3.3 |
 | `incremental-alter-configs` | `incrementalAlterConfigs` | 2.3 (first used in M5) |
 
-### What M1 cannot fill
+### What the topic sweep fills, and when it refuses
 
-Three fields are declared and always `None`, so that the wire shape is final now and a later
-milestone fills a value instead of changing a contract.
+These three used to be declared and always `None`, because the cluster service did not sweep
+topics. It does now — `KafkaPartitionSweeper` runs `listTopics` + `describeTopics` — so each is a
+value whenever the sweep was complete, and `None` now means *this sweep was incomplete*, not *this
+milestone cannot answer*.
 
-| Field | Why |
+| Field | Where it comes from, and what `None` means now |
 | --- | --- |
-| `BrokerLoad.leaders` | Leadership comes from `describeTopics`, and the cluster service does not sweep topics. |
-| `ClusterTopology.partitions` | Online, offline and under-replicated counts have no single API: they are aggregated from `describeTopics` + `describeLogDirs` + `listOffsets`. |
-| `ClusterTopology.topics` | Needs `listTopics`. |
+| `ClusterTopology.leadersOn(broker)` | The sweep's census. Replaced `BrokerLoad.leaders`: leadership is a property of the whole assignment, so it is answered from the census that holds it rather than stored per broker. |
+| `ClusterTopology.partitions` | The census's summary — online, offline and under-replicated counts, aggregated from `describeTopics` over the listed topics. `None` when one topic in the sweep could not be described: a partial sweep is not a total. |
+| `ClusterTopology.topics` | What the sweep *listed*. Survives a describe that partly failed, because a listing that succeeded and a describe that did not are different failures. |
+
+The three refuse together where they are sums over one sweep (`partitions`, `partitionsOn`,
+`leadersOn`) and separately where they are not (`topics`). That is the point of holding the census
+in one optional field: the refusal is decided once and cannot be forgotten at a call site.
 
 Per-broker **replica** counts and the skew percentage *are* derivable — `describeLogDirs` reports
 one replica entry per replica per directory, which is a disk fact needing no topic sweep — and they
@@ -108,23 +114,23 @@ they are shown on together.
 
 ### What the dashboard therefore draws
 
-The four `None` fields above are not an implementation gap the screen papers over; they are visible
-on it. The dashboard renders one row per configured cluster with:
+A field the sweep could not total is not an implementation gap the screen papers over; it is
+visible on it. The dashboard renders one row per configured cluster with:
 
 | Cell | Source | In M1 |
 | --- | --- | --- |
 | cluster name, `read only` tag, the link | configuration, outside the section | always present, even when the cluster is unreachable |
 | status chip | the row's section | `Online`, `Degraded: <reason>`, `Unavailable: <message>`, `Forbidden` |
 | version, brokers, controller, disk | the section's payload | present once a scrape has succeeded |
-| partitions, under-replicated, topics | — | always `—`, per the table above |
+| partitions, under-replicated, topics | the sweep's census | present once a sweep has completed; `—` when it was incomplete, per the table above |
 | throughput | — | **no column at all** |
 
 The last two rows are the ones worth recording here, because they look like omissions and are
 decisions:
 
-- **The empty columns exist and read `—`.** A number the product will have one milestone from now
-  gets its column now, so that filling it is a data change rather than a re-layout, and an em dash
-  is an honest way to say "no value here".
+- **The columns read `—` when the sweep refused.** The columns were laid out while the numbers
+  were still a milestone away, so that filling them was a data change rather than a re-layout. They
+  carry values now, and an em dash still says the one thing it always said: "no value here".
 - **Throughput gets no column.** There is no metrics service until M8, and unlike a partition
   count, a *zero* throughput is a meaningful reading. An empty column headed "Production" would be
   read as "this cluster has no traffic" — a claim, not an absence — which is worse than the column

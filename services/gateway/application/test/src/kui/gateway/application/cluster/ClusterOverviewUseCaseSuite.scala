@@ -158,6 +158,8 @@ final class ClusterOverviewUseCaseSuite extends CatsEffectSuite {
               topics = 1,
               partitions = 1,
               coordinatorId = Some(1),
+              coordinatorHost = None,
+              coordinatorPort = None,
               totalLag = lag,
               pace = None,
               excludedPartitions = 0,

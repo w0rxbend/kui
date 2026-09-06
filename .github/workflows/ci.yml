@@ -65,12 +65,13 @@ jobs:
   generated:
     name: generated documents match their sources
     runs-on: ubuntu-latest
-    # Two files in the repository are generated from code and committed alongside it: the OpenAPI
-    # documents (one per service plus the merged product-wide one) and the error-code table. A
-    # generated file that nobody regenerates is worse than no file — an integrator reads it,
-    # believes it, and builds against an API that changed three releases ago — so both checks run
-    # on every push. When one fails, the fix is to run the matching generator and commit the result:
-    # `./mill __.openApi` and `./mill docs.errorCodes`.
+    # Three files in the repository are generated from code and committed alongside it: the OpenAPI
+    # documents (one per service plus the merged product-wide one), the error-code table, and the
+    # browser constants. A generated file that nobody regenerates is worse than no file — an
+    # integrator reads it, believes it, and builds against an API that changed three releases ago —
+    # so all three checks run on every push. When one fails, the fix is to run the matching
+    # generator and commit the result: `./mill __.openApi`, `./mill docs.errorCodes` and
+    # `./mill frontend.apiConstants`.
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
@@ -78,6 +79,11 @@ jobs:
         run: ./mill __.openApiCheck
       - name: Check the committed error-code table
         run: ./mill docs.errorCodes --check
+      # The third generated file, and the one that had no job at all: the CSRF header name and the
+      # error-code vocabulary are written into the browser's source from the Scala that defines
+      # them, so a rename on the server becomes a diff here rather than a 403 nobody can explain.
+      - name: Check the committed browser constants
+        run: ./mill frontend.apiConstants --check
 
   test:
     name: unit + property + contract tests
@@ -117,9 +123,11 @@ jobs:
   # frontend change that breaks nothing on the server does not wait for the Scala suites, and a
   # server change does not rebuild a browser bundle.
   frontend:
-    name: frontend typecheck + tests + build
+    name: frontend typecheck + tests + build + a11y
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # It now builds Storybook and renders every story twice under axe, so this job is minutes
+    # rather than seconds. The backstop is against a hung browser, not a budget.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -144,8 +152,43 @@ jobs:
         run: pnpm typecheck
       - name: Test
         run: pnpm test
+      # The other half of `./mill checkArchitecture`, which cannot see TypeScript. It is cheap and
+      # it runs before the builds because the edge it forbids — one feature package importing
+      # another — is a design mistake rather than a broken build, and it would otherwise be caught
+      # by nothing at all.
+      - name: Import boundaries
+        run: pnpm lint:boundaries
       - name: Build
         run: pnpm build
+      # The stories are this workspace's stated review surface — 670 of them when this gate was
+      # wired, across rather fewer files than that — and no job compiled one of them, so a story
+      # could reference a prop that no longer exists and stay green for months. Building Storybook
+      # is therefore a check in its own right, and it is also what the sweep below needs to run
+      # against.
+      - name: Build Storybook
+        run: pnpm build-storybook
+      # Playwright drives the sweep, and the browser it drives is not in the runner image. Same
+      # command as the `browser` job, for the same reason: the library only speaks to the revision
+      # it shipped with.
+      - name: Install the pinned browser
+        run: pnpm exec playwright install --with-deps chromium
+      # Every story, in both themes, with axe. This is the only thing in the build that can enforce
+      # "zero accessibility violations in both themes", and until now nothing called it.
+      #
+      # The server is started here rather than by `pnpm storybook:ci` because that script serves in
+      # the foreground, which is right at a terminal and a hang in a job. The wait loop polls the
+      # index the sweep itself fetches, so a server that never comes up fails as a missing index
+      # rather than as a timeout twenty minutes later.
+      - name: Accessibility sweep over every story, in both themes
+        run: |
+          npx --yes http-server storybook-static -p 6017 -s &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:6017/index.json >/dev/null && break
+            sleep 1
+          done
+          pnpm a11y
       # The generated files are committed so that the browser's types can be read without running
       # the backend build. `--check` fails when the committed copy has drifted from the OpenAPI
       # document it is generated from, which is the only way a contract change that nobody
@@ -228,15 +271,11 @@ jobs:
       - name: Build the container images the distributed stack runs
         run: ./mill '{deployment.docker.gateway,deployment.docker.cluster,deployment.docker.topic,deployment.docker.message,deployment.docker.consumer}.docker.build'
 
+      # The script's own `fail` prints the stack's state before it exits, so this job's diagnostics
+      # are its stdout and there is no artifact upload here. The one that used to sit here pointed
+      # at an output directory of the deleted Scala browser module, which no step in this workflow
+      # has ever produced — and an `if-no-files-found: ignore` upload of a path nothing writes is a
+      # step that cannot fail, so it read as diagnostics and was none. Write the artefacts first if
+      # this job is ever to have some.
       - name: Run the Compose fault-isolation smoke test
         run: ./deployment/compose/smoke.sh
-
-      # The container logs, which are the only thing that explains a compose failure without
-      # somebody reproducing it locally. On failure only; on success they are noise.
-      - name: Upload the failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: compose-artifacts
-          path: out/e2e-artifacts/**
-          if-no-files-found: ignore

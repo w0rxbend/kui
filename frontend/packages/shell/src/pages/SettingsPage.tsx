@@ -1,5 +1,5 @@
 /**
- * The four preferences an operator sets once, and the build they are looking at.
+ * The three preferences an operator sets once, and the build they are looking at.
  *
  * ## Why this page reads nothing from any service
  *
@@ -18,9 +18,19 @@
  *
  * ## Every control takes effect immediately
  *
- * There is no Save. These are four attributes on the `<html>` element and each is written the moment
- * it is chosen, so the page you are changing is the demonstration of the change. A Save button would
- * imply a round trip that does not exist and a state — chosen but not applied — that cannot occur.
+ * There is no Save. These are three attributes on the `<html>` element and each is written the
+ * moment it is chosen, so the page you are changing is the demonstration of the change. A Save
+ * button would imply a round trip that does not exist and a state — chosen but not applied — that
+ * cannot occur.
+ *
+ * ## Why there is no timezone and no refresh rate
+ *
+ * Both are on the settings screens of every product this one is compared to, and both are absent
+ * here on purpose: nothing in KUI reads either preference. A control that writes a value no code
+ * consults is worse than a missing control, because it answers the operator's question — "can I
+ * change this?" — with a yes that is false, and the timestamps go on being rendered in the browser's
+ * own zone while the setting says otherwise. `docs/FEATURE_MATRIX.md` records the absence as an
+ * absence rather than as a gap. They arrive with the code that reads them.
  */
 import { For } from "solid-js";
 import type { JSX } from "@solidjs/web";

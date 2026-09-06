@@ -160,7 +160,6 @@ object BrowserConstants {
   private val DegradedPlaceholder: DegradedReason =
     DegradedReason(ReasonCode.Unknown, "", None, None)
 
-
   /** The `event:` names of ADR-035, so a browser listener and a server writer cannot be renamed apart.
     *
     * They belong here for exactly the reason the CSRF header does: an OpenAPI document describes request and
@@ -195,7 +194,7 @@ object BrowserConstants {
     *
     * ==Why an action carries its resource==
     *
-    * The wire spelling of an action is not unique: `VIEW` is eleven different actions on eleven different
+    * The wire spelling of an action is not unique: `VIEW` is thirteen different actions on thirteen different
     * resources, and `Action.fromWire` on the server takes a resource for precisely that reason. A browser
     * that passed a bare `"VIEW"` to a permission check would be asking a question with no answer, so each
     * entry here is the pair the Scala enum already is — a resource and an action name together.
@@ -214,7 +213,7 @@ object BrowserConstants {
 
     val actions = Action.values.toList.map { action =>
       s"  ${action.toString}: { resource: ${quoted(action.resource.wire)}, " +
-        s"action: ${quoted(action.wire)} }," 
+        s"action: ${quoted(action.wire)} },"
     }
 
     // Every connector action falls back to the *same-named* action on the parent connect cluster, so

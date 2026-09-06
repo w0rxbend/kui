@@ -15,9 +15,9 @@ import kui.security.PrincipalCodec
 import kui.topic.application.*
 import kui.topic.contract.dto.*
 import kui.topic.contract.{TopicEndpoints, TopicListParams}
-import kui.topic.domain.{TopicError, TopicSnapshot}
+import kui.topic.domain.{TopicError, TopicSnapshot, TopicStatistics}
 
-/** The five endpoints, bound to use cases.
+/** The seven endpoints, bound to use cases.
   *
   * One rule shapes every route in this file, and it is the milestone's central promise written as code:
   *
@@ -54,8 +54,14 @@ object TopicRoutes {
   ): List[ServerEndpoint[Any, F]] = {
     val secured = TopicApi.Securing[F](principals, rejections, logger, guard)
 
+    // The order is the router's order, and two of these depend on it: `/topics/statistics` and
+    // `/topics/names` are fixed segments where `getTopic` expects `{topicName}`, so they have to be tried
+    // first or both are served as the detail page of a topic with that name. `TopicEndpoints.all` declares
+    // the same order for the gateway's proxy routes, which are derived from that list in order.
     List(
       listTopics(snapshots, secured),
+      topicStatistics(snapshots, secured),
+      topicNames(snapshots, secured),
       getTopic(detail, secured),
       topicConfig(config, secured),
       topicPartitions(detail, secured),
@@ -84,6 +90,47 @@ object TopicRoutes {
             TopicSections.of(snapshot, now)(topics => TopicMapping.page(ListTopics(topics, query)))
 
           TopicsResponse(section, incompleteTopics = snapshot.value.map(_.incomplete.size).getOrElse(0))
+        }
+      }
+    }
+
+  /** The cluster-wide totals above the list.
+    *
+    * Folded from the whole snapshot and never from the page the list is showing. `SCREENS-V4.md` §4.6 makes
+    * that the load-bearing fact of the screen: `TOTAL TOPICS` reads 128 while the filtered table shows three,
+    * and a total computed from the rows would track the search box instead.
+    *
+    * It reuses the list's snapshot, so the statistics region costs no admin call and cannot disagree with the
+    * table under it about how many topics there are.
+    */
+  private def topicStatistics[F[_]: Async](
+      snapshots: TopicSnapshots[F],
+      secured: TopicApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured(TopicEndpoints.topicStatistics) { _ => cluster =>
+      withSnapshot(snapshots, cluster) { snapshot =>
+        Clock[F].realTimeInstant.map { now =>
+          TopicStatisticsResponse(
+            TopicSections.of(snapshot, now)(topics => TopicMapping.statistics(TopicStatistics.of(topics)))
+          )
+        }
+      }
+    }
+
+  /** Every topic name, for the drawer's tree.
+    *
+    * The same snapshot again, and the same reason: the tree and the list must not be able to disagree about
+    * which topics exist. It sends names only — the tree folds them into prefix groups in the browser, so
+    * every figure on a row here would be a figure nothing reads.
+    */
+  private def topicNames[F[_]: Async](
+      snapshots: TopicSnapshots[F],
+      secured: TopicApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured(TopicEndpoints.topicNames) { _ => cluster =>
+      withSnapshot(snapshots, cluster) { snapshot =>
+        Clock[F].realTimeInstant.map { now =>
+          TopicNamesResponse(TopicSections.of(snapshot, now)(_.names.toList))
         }
       }
     }

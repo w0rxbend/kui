@@ -33,6 +33,12 @@ export function shellPaths(router: ShellRouter): KuiPaths {
     settings: () => paths.settings(),
     clusters: () => paths.clusters(),
     manageClusters: () => paths.clusters.manage(),
+    /* The default lives here rather than at each call site, which is what makes
+       `/clusters/x/dashboard` and `/clusters/x/dashboard/overview` the same page: the route table
+       maps both onto one component, and a caller that omitted the tab would otherwise produce the
+       shorter address while the tab strip produced the longer one, so the strip would highlight
+       nothing on arrival. */
+    dashboard: (cluster, tab) => paths.clusters(cluster).dashboard(tab ?? "overview")(),
     brokers: (cluster) => paths.clusters(cluster).brokers(),
     /* The extra `()` is the proxy's terminating call: a parameterised node returns another node,
        and calling it with no arguments is what turns it into a string. */

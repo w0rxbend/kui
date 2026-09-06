@@ -74,26 +74,42 @@ component that is built, tested, green and wired into nothing. `MS-007` (the CEL
 state today. They are marked `IMPLEMENTING`, never `COMPLETE`, because what they need is wiring
 rather than a new implementation.
 
-**Counts as of the 2026-09-05 authentication and schema integration pass** (188 capability rows):
-64 `COMPLETE`, 17 `REVIEW`, 8 `IMPLEMENTING`, 3 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 82 `RESEARCHING`
-(not started), 1 `BLOCKED`, 7 `DEFERRED`, 4 `REJECTED`. Excluding the 11 deferred and rejected rows,
-**64 of 177 in-scope capabilities are delivered — 36%**, against 63 at the verification pass before it.
+**Counts as of the 2026-09-06 recount** (188 capability rows): 64 `COMPLETE`, 20 `REVIEW`,
+8 `IMPLEMENTING`, 1 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 82 `RESEARCHING` (not started),
+7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row. Excluding the 11 deferred and rejected rows,
+**64 of 177 in-scope capabilities are delivered — 36%**.
 
-One row moved to `COMPLETE` and four moved from `IMPLEMENTING` to `REVIEW`, and the small size of
-that movement is the honest shape of this pass: almost none of the work was new capability. Four
-agents had delivered an identity service, authorization enforcement, a schema registry service and
-schema-aware decoding, every one of them green — and signing in from a browser was impossible,
-the quickstart's Avro seed had never once run, and a role with read-only permissions was offered
-eight write controls the server refuses. The pass was spent making what existed reachable and
-correcting what it said, which is why the number barely moves while the product changes a great
-deal.
+These are what the recount command at the end of this file prints. The paragraph that stood here
+before them did not: it reasoned backwards from a count delta to a story about which rows moved
+when, and re-counting the rows commit by commit disproves every clause of it. Counting the State
+column per commit gives `e3ebf4d` 63/13, `f4a914c` 63/13, `09a1806` 64/17, `c92fe12` 64/17 and
+`25176c0` 63/18, as `COMPLETE`/`REVIEW`. At `09a1806` — the 2026-09-05 pass — the prose said 64 and
+17 and the rows said 64 and 17, so nothing had drifted there; that pass moved four rows into
+`REVIEW` and one into `COMPLETE` and moved none out. `MS-011` left `COMPLETE` two commits earlier
+at `e3ebf4d`, whose prose also matched its rows. The drift arose at `25176c0`, which moved `KU-004`
+from `COMPLETE` to `REVIEW` and left the counts paragraph untouched. A total derived by arithmetic
+from the previous total drifts silently and a total derived from the rows cannot, which is why this
+paragraph is recomputed rather than adjusted. The 2026-09-06 pass then moved four rows on evidence
+read out of the tree — `PA-003` out of `BLOCKED`, and `SR-001`, `SR-003` and `SR-005` out of
+`SERVICE DONE, NO UI`, because `feature-schemas` ships, is routed and is driven in a browser — and
+corrected the notes on `KU-033`, `BR-005` and `KU-012`, none of which changed a state.
 
-Read that number with the two corrections behind it. `MS-011` was `COMPLETE` at the start of this
-pass and is `REVIEW` at the end of it, because the export handed the browser no file; `CL-006` stayed
-`REVIEW` rather than advancing, because its three routes refused every caller. Both were found by
-pressing the control, not by reading the code, and both had green suites. The rule at the top of this
-file — that `COMPLETE` means a person can do the thing from a browser — is the only thing that would
-have caught either, and it only catches them when somebody actually goes and does it.
+Of the 2026-09-05 pass itself: one row moved to `COMPLETE` and four moved from `IMPLEMENTING` to
+`REVIEW`, and none moved out of `COMPLETE`. The small size of that movement is the honest shape of
+the pass: almost none of the work was new capability. Four agents had delivered an identity
+service, authorization enforcement, a schema registry service and schema-aware decoding, every one
+of them green — and signing in from a browser was impossible, the quickstart's Avro seed had never
+once run, and a role with read-only permissions was offered eight write controls the server
+refuses. The pass was spent making what existed reachable and correcting what it said, which is why
+the number barely moves while the product changes a great deal.
+
+Read that number with the two corrections behind it. `MS-011` was `COMPLETE` at the start of the
+2026-09-05 verification pass and is `REVIEW` at the end of it, because the export handed the browser
+no file; `CL-006` stayed `REVIEW` rather than advancing, because its three routes refused every
+caller. Both were found by pressing the control, not by reading the code, and both had green suites.
+The rule at the top of this file — that `COMPLETE` means a person can do the thing from a browser —
+is the only thing that would have caught either, and it only catches them when somebody actually
+goes and does it.
 
 Behavior descriptions, edge cases and source citations are deliberately not repeated here; they
 live in the research reports (`research/kafbat/feature-matrix.md` row of the same number,
@@ -109,7 +125,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | CL-003 | Cluster stats (dashboard numbers) served from a refreshed cache | Kafbat, Provectus | P0 | cluster | feature-clusters | M1 | M | COMPLETE | Stats stay servable while the cluster is momentarily unreachable. |
 | CL-004 | Cluster-level aggregated metrics (JMX/Prometheus) | Kafbat, Provectus | P1 | metrics | feature-clusters | M8 | M | RESEARCHING | Dashboard cell shows `—` until M8. |
 | CL-005 | Force statistics cache refresh | Kafbat, Provectus | P1 | cluster | feature-clusters | M1 | S | COMPLETE | Audited 2026-09-04. `POST /clusters/{id}/refresh`, 202. The button exists only on the brokers page; the dashboard has none. |
-| CL-006 | Dynamic cluster CRUD from the UI, persisted, with connection test | Kouncil | P1 | cluster | feature-clusters | M8 | L | REVIEW | Delivered 2026-09-04. `ClusterWriteEndpoints` now carries `put`, `delete` and `probe`, all three marked as mutations with the CSRF header and an `ApplicationConfig.Edit` authorization declaration, and all three are in `ServiceContracts.byService` so the gateway derives public routes for them. `ClusterConfigStore.delete` and `ClusterWriteUseCase.delete` added (a cluster the configuration file also declares is refused by name, because the file would put it straight back). `ConnectivityProbeAdapter` is constructed in `ClusterBootstrap` behind `ClusterProbeUseCase`. The screen is `frontend/feature-clusters/.../admin` — a list with per-row edit and delete, a form, and a connection test whose verdict is cleared by any edit. **Remaining gap:** the form cannot upload a truststore or keystore, so a cluster behind a private certificate authority still needs the configuration file; the form says so. **Verification pass 2026-09-05.** **Every one of the three routes answered 403 in every deployment**, and was fixed (`f22d03e`). The service-side check was `principal.roles.exists(_.value == "ApplicationConfig.Edit")` — a comparison against a *role name*, and no role vocabulary produces a role called that, so it was false for every principal that has ever existed. Meanwhile `/api/v1/auth/me` was telling the same browser it held `APPLICATIONCONFIG EDIT` over every cluster, because a deployment with no roles has RBAC off and RBAC off allows. Pressing "Test the connection" in the demonstration printed `changing a cluster requires ApplicationConfig.Edit`. The check is now `Rbac.decide` over the deployment's own policy, threaded in through `ClusterServiceConfig.rbac` exactly as the topic service already had it. Stays `REVIEW`: the form, the list, the read-only banner for file-declared clusters and the refusal were all seen in a browser, but the *successful* path has not been driven since the fix. 
+| CL-006 | Dynamic cluster CRUD from the UI, persisted, with connection test | Kouncil | P1 | cluster | feature-clusters | M8 | L | REVIEW | Delivered 2026-09-04. `ClusterWriteEndpoints` now carries `put`, `delete` and `probe`, all three marked as mutations with the CSRF header and an `ApplicationConfig.Edit` authorization declaration, and all three are in `ServiceContracts.byService` so the gateway derives public routes for them. `ClusterConfigStore.delete` and `ClusterWriteUseCase.delete` added (a cluster the configuration file also declares is refused by name, because the file would put it straight back). `ConnectivityProbeAdapter` is constructed in `ClusterBootstrap` behind `ClusterProbeUseCase`. The screen is `frontend/feature-clusters/.../admin` — a list with per-row edit and delete, a form, and a connection test whose verdict is cleared by any edit. **Remaining gap:** the form cannot upload a truststore or keystore, so a cluster behind a private certificate authority still needs the configuration file; the form says so. **Verification pass 2026-09-05.** **Every one of the three routes answered 403 in every deployment**, and was fixed (`f22d03e`). The service-side check was `principal.roles.exists(_.value == "ApplicationConfig.Edit")` — a comparison against a *role name*, and no role vocabulary produces a role called that, so it was false for every principal that has ever existed. Meanwhile `/api/v1/auth/me` was telling the same browser it held `APPLICATIONCONFIG EDIT` over every cluster, because a deployment with no roles has RBAC off and RBAC off allows. Pressing "Test the connection" in the demonstration printed `changing a cluster requires ApplicationConfig.Edit`. The check is now `Rbac.decide` over the deployment's own policy, threaded in through `ClusterServiceConfig.rbac` exactly as the topic service already had it. Stays `REVIEW`: the form, the list, the read-only banner for file-declared clusters and the refusal were all seen in a browser, but the *successful* path has not been driven since the fix. |
 | CL-007 | Typed cluster security config (SASL/SSL/SCRAM/IAM/OAUTHBEARER) with `properties` escape hatch | Kafbat, Provectus, Kouncil | P0 | cluster (typed config in `kui-config`) | feature-admin (form in M8) | M1 | M | COMPLETE | Decision D-7 / ADR-022. JAAS strings generated from typed fields, never accepted verbatim. |
 | CL-008 | Failover across multiple SR / Connect / ksql URLs | Kafbat, Provectus | P2 | schema, connect, ksql (shared lib) | — | M7 | M | RESEARCHING | |
 | CL-009 | Per-cluster colour tag and status dot in navigation | Kafbat | P2 | — | shell | M1 | S | COMPLETE | Audited 2026-09-04. The slug-vs-name defect is fixed: the capability entry carries the operator's name. |
@@ -125,7 +141,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | BR-002 | Broker configs with source, sensitivity, read-only flag, synonyms | Kafbat, Provectus, Kouncil | P0 | cluster | feature-clusters | M1 | S | COMPLETE | Audited 2026-09-04. 340 config entries with source, sensitivity, read-only and synonyms. Redaction is proved by `SecretLeakSuite`, never observed on a live broker (none reported a sensitive setting). Synonyms are carried and rendered nowhere (TD-019). |
 | BR-003 | Update a single broker config (inline edit) | Kafbat, Provectus | P1 | cluster | feature-clusters | M5 | S | RESEARCHING | Audited; blocked in read-only mode (RB-005). |
 | BR-004 | Per-broker metrics (JMX/Prometheus), Kouncil OS metrics | Kafbat, Provectus, Kouncil | P1 | metrics | feature-clusters (metrics tab via FeaturePanel) | M8 | M | RESEARCHING | Broker page is a partial aggregation: metrics tab falls back independently. |
-| BR-005 | Log dirs per broker, per topic-partition size and lag | Kafbat, Provectus | P1 | cluster | feature-clusters | M1 | M | REVIEW | Directory-level figures ship: path, error, total and usable bytes, topic and partition counts. Per-topic-partition sizes do not — the wire carries no such field. `TECH_DEBT.md` TD-017 owes the contract field, TD-018 the virtualization. |
+| BR-005 | Log dirs per broker, per topic-partition size and lag | Kafbat, Provectus | P1 | cluster | feature-clusters | M1 | M | REVIEW | Directory-level figures ship: path, error, total and usable bytes, topic and partition counts. **Corrected 2026-09-06: per-topic-partition sizes ship too.** `LogDirDto` carries `replicas: List[LogDirReplicaDto]` — topic, partition, `sizeBytes`, `offsetLag` and the future-replica flag, sorted biggest-first by the cluster service (`libs/contracts-core/.../BrokerDtos.scala`). It is on the wire: `frontend/packages/feature-clusters/src/recorded/brokerLogDirs.json` is an answer a running gateway produced and it carries the array. And the browser already reads it — `feature-clusters/src/data.ts` sums `replicas[].sizeBytes` to get what a directory holds, in preference to the difference of the disk figures. TD-017's contract half is therefore closed and its screen half is not: **no table anywhere draws the breakdown**, so "which topic is filling this disk" is answerable from the wire and not from a screen. TD-018 still owes the virtualization that table will need. |
 | BR-006 | Move a partition replica to another log dir | Kafbat, Provectus | P2 | cluster | feature-clusters | M5 | S | RESEARCHING | |
 | BR-007 | Brokers CSV export | Kafbat | P2 | cluster | feature-clusters | M5 | S | RESEARCHING | Content negotiation (`Accept: text/csv`), not a `/csv` path. |
 
@@ -134,7 +150,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TP-001 | Topic list: paged, sorted, searched, internal-topic toggle | Kafbat, Provectus, Kouncil | P0 | topic | feature-topics | M2 | M | COMPLETE | Served end to end since the topic service was wired into the running process. Verified against the quickstart: eight seeded topics with counts, `__consumer_offsets` only with `showInternal=true`. The Size column populates as of 2026-09-04: the scrape reads `describeLogDirs` once per broker and sums a partition over its replicas, so a topic reports the disk every copy of it occupies. Verified live on all three demonstration clusters. A partition with a replica on a broker that did not answer reports no size at all, rather than the too-small sum of the copies that did. |
-| TP-002 | Full-text n-gram topic search (Lucene) | Kafbat | P2 | topic | feature-topics | M9 | L | DEFERRED(Lucene only; trigram n-gram search ships) | Audited 2026-09-04. **Row was misread as 'no fuzzy search'.** In-memory trigram search ships and is reachable: `NameIndex`, `mode=plain|fts` on the search box, `q=ordrs&mode=fts` finds `orders.v1` live. Only a Lucene index is deferred (DR-10, TD-008). No benchmark at 5k+ topics exists and `docs/benchmarks/` does not exist. |
+| TP-002 | Full-text n-gram topic search (Lucene) | Kafbat | P2 | topic | feature-topics | M9 | L | DEFERRED(Lucene only; trigram n-gram search ships) | Audited 2026-09-04. **Row was misread as 'no fuzzy search'.** In-memory trigram search ships and is reachable: `NameIndex`, `mode=plain` or `mode=fts` on the search box, `q=ordrs&mode=fts` finds `orders.v1` live. Only a Lucene index is deferred (DR-10, TD-008). No benchmark at 5k+ topics exists and `docs/benchmarks/` does not exist. |
 | TP-003 | Topic details (partitions, replicas, ISR, segments, cleanup policy, throughput) | Kafbat, Provectus, Kouncil | P0 | topic | feature-topics | M2 | M | COMPLETE | Partitions, replicas, ISR and cleanup policy render. Segments and throughput are always `—`: both need `describeLogDirs`, a per-broker call over every partition, which is not worth a topic page (BR-005). Re-checked 2026-09-04 (closing pass): while the cluster is unreachable the partition table says so and the in-sync figure reads `—` rather than "0 of 0", which used to claim every replica had fallen behind. |
 | TP-004 | Topic config list | Kafbat, Provectus | P0 | topic | feature-topics | M2 | S | COMPLETE | Settings tab, read live. Each entry's default is derived from the broker's own synonyms rather than from a table KUI keeps. Kafka's documentation strings contain HTML and are shown escaped, so `<a href="#compaction">` appears as literal text. |
 | TP-005 | Create topic (name, partitions, RF, configs, retention quick buttons) | Kafbat, Provectus, Kouncil | P0 | topic | feature-topics | M5 | M | COMPLETE | Audited 2026-09-04. Create with partitions, RF and config entries, driven against a broker and on screen. Retention *quick buttons* do not exist — the dialog takes free-form key/value entries. |
@@ -159,7 +175,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PA-001 | Partition table on the topic overview (leader, replicas, ISR, offsets, count, size) | Kafbat, Provectus, Kouncil | P0 | topic | feature-topics | M2 | S | COMPLETE | Audited 2026-09-04. Leader, replicas, ISR, offsets and message count render. The **per-partition** `sizeBytes` is still always `null`, and deliberately: the topic list's sizes come from a `describeLogDirs` made once per background scrape, while this page is a live read per view, and a cluster-wide per-broker call is not worth a topic page's latency (TP-003, BR-005). The topic-level Size on the list does populate. **Verification pass 2026-09-05.** Two defects found in a browser and fixed. (1) A twelve-partition topic drew **five** partition rows above three hundred pixels of empty table, with a scrollbar that would not scroll, while the API returned all twelve (`505690c`): `VirtualizedTable` measured its scroller once in `onMountCallback` and never again, and at mount the browser had not finished laying the element out, so the window arithmetic was fixed at a height the element had already outgrown. A `ResizeObserver` now keeps the height current. There is no unit test -- jsdom performs no layout, so the defect is one a layout-free DOM cannot have -- and it is verified by eye only. (2) While the first read was in flight the table announced **"No partitions -- the broker reported no partitions for this topic, which is unusual"** on a topic with twenty-four of them, then replaced it with the rows (`93a5ce5`): `lastGood` is `None` until the first response and was flattened to an empty list, which the table treats as a finding. `PartitionTable` now takes a `loading` signal and says it is reading; two tests, watched failing first. |
 | PA-002 | Per-partition analysis statistics | Kafbat, Provectus | P1 | topic | feature-topics | M5 | — | RESEARCHING | Delivered by TP-012; tracked separately for the UI table. |
-| PA-003 | Per-partition log-dir sizes | Kafbat, Provectus | P1 | cluster | feature-clusters | M1 | — | BLOCKED | **Blocked on TD-017.** BR-005 was to deliver this and cannot: `LogDirDto` carries no per-topic-partition data, so there is nothing behind "which topic is filling this disk". |
+| PA-003 | Per-partition log-dir sizes | Kafbat, Provectus | P1 | cluster | feature-clusters | M1 | — | SERVICE DONE, NO UI | **Unblocked 2026-09-06; it had not been blocked since 2026-09-04.** TD-017's contract half landed then: `LogDirDto` carries `replicas`, the per-topic-partition breakdown, the gateway serves it and the browser reads it — see BR-005 for the three pieces of evidence. What is absent is a *screen*: nothing in `feature-clusters` renders a table of topic-partitions under a log directory, so the data reaches the browser and is spent on a single summed figure. That is a page to build, not a contract to change, and TD-018 records that it must be virtualized when it is built. |
 | PA-004 | Partition increase / replica move | Kafbat, Provectus, Kouncil | P0 | topic, cluster | feature-topics, feature-clusters | M5 | — | IMPLEMENTING | Audited 2026-09-04. Split needed. The partition-increase half (TP-010) is COMPLETE; the replica-move half (BR-006) does not exist. |
 
 ## Messages: browsing (MS)
@@ -208,11 +224,11 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SR-001 | List subjects: paged, sorted, searched | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | M | SERVICE DONE, NO UI | Updated 2026-09-04. `GET /api/v1/clusters/{id}/schemas/subjects`, searched, sorted and paged in `SubjectCatalog` because the registry offers none of the three. Reachable through the gateway; no `feature-schemas` microfrontend yet. |
+| SR-001 | List subjects: paged, sorted, searched | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | M | REVIEW | Updated 2026-09-04, **corrected 2026-09-06: the microfrontend exists.** `GET /api/v1/clusters/{id}/schemas/subjects` is searched, sorted and paged in `SubjectCatalog` because the registry offers none of the three. `feature-schemas` is registered in `shell/src/features/registry.ts`, routed at `/clusters/:id/schemas`, and driven in a browser by `frontend/e2e/features.spec.ts`, which asserts a subject name and the registry's global compatibility level in words. `SubjectList` renders the search field and the pager and states a `NONE` global level as a sentence rather than only as a colour. **Gap, which is why this is `REVIEW` and not `COMPLETE`:** nothing sorts. The service can order the page and no control in the browser asks it to, and the two-pane master–detail the design calls for is not built. |
 | SR-002 | Create schema / new version (Avro, JSON Schema, Protobuf) | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | M | RESEARCHING | |
-| SR-003 | Get latest / by version / all versions | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | S | SERVICE DONE, NO UI | Updated 2026-09-04. Version list and one version's schema, with `latest` kept distinct from a number so a typo cannot silently return the newest. |
+| SR-003 | Get latest / by version / all versions | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | S | COMPLETE | Updated 2026-09-04, **corrected 2026-09-06: it can be done from a browser.** Version list and one version's schema, with `latest` kept distinct from a number so a typo cannot silently return the newest. `feature-schemas`' `SubjectPage` renders the versions newest-first with a picker and the schema text exactly as the registry stores it, and `frontend/e2e/features.spec.ts` opens `/ui/clusters/<id>/schemas/orders.avro-value` and asserts that the schema **id** and the **version** are two labelled numbers — which is the distinction this row exists to make, because a record's header carries the id and no version at all. |
 | SR-004 | Delete subject / latest / by version (soft and hard) | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | S | RESEARCHING | |
-| SR-005 | Compatibility: global get/set, per-subject set, compatibility check | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | S | SERVICE DONE, NO UI | Updated 2026-09-04. Both writes are audited and refused on a read-only cluster (ADR-047); the subject read reports whether the level is inherited. The check is not a mutation and is answered on a read-only cluster. |
+| SR-005 | Compatibility: global get/set, per-subject set, compatibility check | Kafbat, Provectus, Kouncil | P0 | schema | feature-schemas | M7 | S | REVIEW | Updated 2026-09-04, **corrected 2026-09-06: the controls exist.** Both writes are audited and refused on a read-only cluster (ADR-047); the subject read reports whether the level is inherited. The check is not a mutation and is answered on a read-only cluster. All three are wired in `SchemasRoute`: the global level is set from `SubjectList`, the per-subject level from `SubjectPage`, and `CompatibilityCheck` asks the check and says on the panel that it writes nothing — a control beside a registry that reads "check" and might register something is one people will not press. **Gap:** only the *display* has been pressed in a browser. `features.spec.ts` asserts the global level is stated in words; the two writes and the check have recorded-response tests and seven stories for the check panel alone, and no browser evidence. |
 | SR-006 | Version diff viewer | Kafbat, Provectus | P1 | — | feature-schemas | M7 | M | RESEARCHING | Kernel `DiffViewer`. |
 | SR-007 | SR auth: basic, OAuth client-credentials, SSL stores | Kafbat, Provectus, Kouncil | P1 | schema | feature-admin (form in M8) | M7 | M | PARTIAL | Updated 2026-09-04. `kui.clusters.<n>.schemaRegistry.auth` carries none, basic and OAuth client credentials, refusing a file that configures both. The schema service implements all three, with the token cached and fetched over its own upstream client. SSL stores are not implemented, and the serde path (ADR-014) still treats OAuth as unauthenticated. |
 | SR-008 | Topic → subject suffix convention | Kafbat | P2 | schema | — | M7 | S | PARTIAL | Updated 2026-09-04. `SubjectCatalog.subjectFor` implements the `TopicNameStrategy` convention in the schema domain. Nothing consumes it yet: SR-009's section source on the topic overview is what makes it reachable. |
@@ -399,7 +415,7 @@ security research flagged.
 | KU-009 | `403`, `404`, feature fallback pages and the single full-screen "cannot reach gateway" state | KUI-new | P0 | — | shell | M0 | S | COMPLETE | Audited 2026-09-04. Feature fallback panels and the full-screen gateway-unreachable state are exercised by `ClusterServiceDownSuite`. |
 | KU-010 | Stale data stays on screen (greyed, timestamped, actions disabled) when a feature becomes Unavailable | KUI-new | P1 | — | kernel (`StaleDataOverlay`, `QueryCache`) | M1 | M | COMPLETE | DC-H3, decided before M1 because every feature state depends on it. |
 | KU-011 | Partial aggregation endpoints with per-section status: cluster dashboard (M1), topic overview (M2, sections added in M4/M7), consumer group page (M4), connects with stats (M7) | KUI-new | P0 | gateway | feature-clusters, feature-topics, feature-consumers | M1 | M | COMPLETE | Milestone is when the first one ships. |
-| KU-012 | User settings page: theme, timezone, refresh rate, table density | KUI-new | P1 | — | shell | M1 | S | REVIEW | Audited 2026-09-04. Theme ships and a timezone signal is threaded to the message table, but there is no settings page and no control that sets timezone, refresh rate or density (see AU-005). |
+| KU-012 | User settings page: theme, timezone, refresh rate, table density | KUI-new | P1 | — | shell | M1 | S | REVIEW | Audited 2026-09-04, **corrected 2026-09-06: the settings page exists.** `shell/src/pages/SettingsPage.tsx` is routed at `/settings` and sets three of this row's four preferences — theme (`auto`, light, dark), accent and table density — each written to an attribute on the `<html>` element the moment it is chosen and each backed by a `localStorage` preference in the kernel. There is no Save, because a Save would imply a round trip that does not exist. The page deliberately reads no service, so a gateway that has stopped answering does not take it away from somebody using it to work out what has happened. **Gap:** timezone and refresh rate. Neither has a control and neither has a preference behind it — the timezone signal this row used to name was Scala.js and went with ADR-048, so timestamps render in the browser's own zone with nothing that can change it. |
 | KU-013 | Cross-feature `FeaturePanel` slot (topic → consumers tab, broker → metrics tab) keyed by feature id, never by import | KUI-new | P1 | — | kernel | M2 | M | COMPLETE | The slot exists and the topic overview renders it: `consumerGroups`, `connectors`, `acls` and `schemas` each come back `not_configured`, which is what the criterion asks for. |
 | KU-014 | SSE envelope with named events (`phase`, `message`, `consumed`, `done`, `error`, `heartbeat`) and `id:` for `Last-Event-ID` reconnect; kernel `SseStream` wrapper | KUI-new | P0 | message, gateway | kernel | M3 | M | COMPLETE | Audited 2026-09-04. `phase`/`message`/`consumed`/`done` with `id:` observed live on the browse stream; the kernel wrapper is used by the message screen. |
 | KU-015 | Self-describing signed browse cursor (survives gateway restarts and multiple replicas) | KUI-new | P0 | message | — | M3 | M | COMPLETE | Audited 2026-09-04. The signed cursor round-trips and a second page was read from one live. TD-005's promised `KUI-CURSOR-TOO-LARGE` size refusal is asserted by no test. |
@@ -420,7 +436,7 @@ security research flagged.
 | KU-030 | Server-side column projection (`flatten=true`) for CSV export of the table view | KUI-new | P3 | message | — | M9 | S | RESEARCHING | Client-side flattening is enough until proven otherwise. |
 | KU-031 | Plugin SDK for third-party microfrontends (Option C, web-component boundary) | KUI-new | P2 | — | kernel, shell | M9 | XL | RESEARCHING | ADR after M8. |
 | KU-032 | Alerting on lag, offline partitions and capability transitions | KUI-new | P2 | metrics | feature-metrics | M9 | L | RESEARCHING | Research first. |
-| KU-033 | Fault-isolation E2E suite: for every service, stop its container and assert the shell, the other features and the fallback panels still work | KUI-new | P0 | e2e | — | M1 | M | REVIEW | Audited 2026-09-04. **Corrected downward from COMPLETE.** The suite covers the cluster service only — 1 of 4 Kafka-facing services — and cannot cover the others, because `topic`, `message` and `consumer` have no `Main`, no client module and no image. |
+| KU-033 | Fault-isolation E2E suite: for every service, stop its container and assert the shell, the other features and the fallback panels still work | KUI-new | P0 | e2e | — | M1 | M | REVIEW | Audited 2026-09-04, re-read 2026-09-06. **Corrected downward from COMPLETE.** The suite covers the cluster service only — 1 of 4 Kafka-facing services: `e2e/test/src/kui/e2e/ClusterServiceDownSuite.scala` is the only caller of the reusable `FaultIsolationScenario`. **The reason recorded here was wrong in two of its three parts.** `topic`, `message` and `consumer` each have a `Main.scala` under `services/<name>/app/` and each has a container image in `deployment/compose/docker-compose.yml`. Only *no client module* survives: `services/cluster/client` is the sole client module in the tree. The other half of this row's problem is that the suite lives in the Scala `e2e/` module, which no job in `.github/workflows/ci.yml` runs — the only `e2e` CI step is `pnpm e2e`, the TypeScript suite — so the one scenario that does exist is not a gate either. |
 
 ## Decisions required
 
@@ -464,7 +480,7 @@ Totals by milestone and by state are recomputed when rows change. The initial se
 | Milestone | Rows | Of which P0 | Of which P1 |
 | --- | --- | --- | --- |
 | M0 | 15 | 12 | 3 |
-| M1 | 22 | 13 | 8 |
+| M1 | 23 | 13 | 9 |
 | M2 | 8 | 6 | 1 |
 | M3 | 28 | 16 | 9 |
 | M4 | 7 | 5 | 2 |
@@ -474,10 +490,16 @@ Totals by milestone and by state are recomputed when rows change. The initial se
 | M8 | 20 | 0 | 14 |
 | M9 | 10 | 0 | 0 |
 | — (rejected) | 4 | 0 | 0 |
-| **Total** | **187** (150 from research + 37 KUI-new) | **74** | **70** |
+| **Total** | **188** (150 from research + 38 KUI-new) | **74** | **71** |
 
 States at seed time: 172 `RESEARCHING`, 7 `DEFERRED`, 4 `REJECTED`, 0 `DESIGNED`. ADR-042
-(2026-09-03) rewrote OT-004 and added OT-007 … OT-010, so the totals above count 187 rows.
+(2026-09-03) rewrote OT-004 and added OT-007 … OT-010, and the table above counts 188 rows today.
+
+**The M1 and total lines were recomputed on 2026-09-06** with the command at the foot of this
+section, after they were found to disagree with the rows: M1 read 22 rows and 8 P1s and has 23 and
+9, and the total read 187 and is 188 (150 from research and 38, not 37, KUI-new). The rest of the
+table already agreed. The counts here are *recomputed*, never incremented, for the reason the state
+totals at the top of this file record.
 
 **After M1's integration pass (2026-09-04):** 154 `RESEARCHING`, 17 `COMPLETE`, 4 `REVIEW`,
 1 `BLOCKED`, 7 `DEFERRED`, 4 `REJECTED`.
@@ -496,9 +518,16 @@ and its client is written and tested; nothing calls it).
 
 `REVIEW` here means the feature ships and works, with a specific gap recorded in the row's own
 notes rather than in somebody's memory: CL-002's per-cluster capability, CL-009's switcher label,
-BR-005's missing per-partition data and OT-009's unproved mid-run store outage. `BLOCKED` is
-PA-003, which BR-005 was supposed to deliver and cannot until the contract carries the field.
-M0's own rows are not re-stated here; this pass moved M1's scope only.
+BR-005's missing per-partition data and OT-009's unproved mid-run store outage. `BLOCKED` was
+PA-003, which BR-005 was supposed to deliver and could not until the contract carried the field.
+*Both of those last two read differently now.* The contract carried the field the same day, in
+TD-017's half-close, and neither row was re-read until 2026-09-06 — so BR-005's gap is a screen
+rather than a field, and PA-003 is not blocked by anything. M0's own rows are not re-stated here;
+this pass moved M1's scope only.
+
+**After the 2026-09-06 recount:** 82 `RESEARCHING`, 64 `COMPLETE`, 20 `REVIEW`, 8 `IMPLEMENTING`,
+2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row. This pass
+built nothing; it read the tree against the rows and moved the four that were wrong.
 
 Every P0 and P1 row has a milestone. Recount after editing rows with:
 

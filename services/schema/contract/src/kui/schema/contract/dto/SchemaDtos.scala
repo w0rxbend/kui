@@ -67,6 +67,58 @@ object SubjectVersionsDto {
   given CanEqual[SubjectVersionsDto, SubjectVersionsDto] = CanEqual.derived
 }
 
+/** One row of the subject list: the name, and the three facts the row's caption is built from.
+  *
+  * ==Every enriched field is optional, and none of them is ever zero==
+  *
+  * The name comes from the list; the other three come from a call per subject that the service makes only for
+  * the rows of the page being returned. A row whose enrichment did not answer is still a row, with its name
+  * and three absent fields — because a row that vanished because a secondary call failed would tell an
+  * operator their subject had been deleted. `versionCount` is `None` and never `0`: a registry cannot hold a
+  * subject with no versions, so a zero here would be a state that does not exist.
+  *
+  * `format` is the registry's own word for the **latest** version's schema type, for the reason
+  * [[SchemaDto.schemaType]] gives: a registry KUI has never met still renders a row. Earlier versions of the
+  * same subject may be written in something else, which is why this is the list's summary and not the
+  * subject's definition.
+  *
+  * `compatibility` carries [[CompatibilityDto]] whole, `inheritedFromGlobal` included. A list that flattened
+  * it would show the same word for a subject pinned to `BACKWARD` and a subject following a global
+  * `BACKWARD`, and those two rows behave differently the next time the global level is changed.
+  */
+final case class SubjectSummaryDto(
+    subject: Subject,
+    format: Option[String],
+    versionCount: Option[Int],
+    compatibility: Option[CompatibilityDto]
+)
+
+object SubjectSummaryDto {
+
+  given Codec[SubjectSummaryDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        subject <- cursor.get[Subject]("subject")
+        format <- cursor.get[Option[String]]("format")
+        versionCount <- cursor.get[Option[Int]]("versionCount")
+        compatibility <- cursor.get[Option[CompatibilityDto]]("compatibility")
+      } yield SubjectSummaryDto(subject, format, versionCount, compatibility),
+    (dto: SubjectSummaryDto) =>
+      Json.obj(
+        "subject" -> dto.subject.asJson,
+        "format" -> dto.format.asJson,
+        "versionCount" -> dto.versionCount.asJson,
+        "compatibility" -> dto.compatibility.asJson
+      )
+  )
+
+  given TapirSchema[SubjectSummaryDto] = TapirSchema
+    .derived[SubjectSummaryDto]
+    .description("A subject list row: the name, and the facts a row shows when they could be read")
+
+  given CanEqual[SubjectSummaryDto, SubjectSummaryDto] = CanEqual.derived
+}
+
 /** One version of one subject: the schema text, and what it is written in.
   *
   * `definition` is the schema **verbatim**, exactly as the registry stores it — not reformatted, not

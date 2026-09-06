@@ -5,7 +5,9 @@ default written into the compose file, there is no TLS, and the session cookie i
 `Secure` so that plain HTTP on `localhost` works. Each of those is wrong for anything anyone else
 can reach.
 
-Build the images first:
+Build the backend images first, if you have a JDK. The interface's image is not one of them — Mill
+never builds the browser bundle — but both compose files carry a `build:` stanza, so the first
+`docker compose up` builds whatever is missing.
 
 ```
 ./mill deployment.docker.__.build
@@ -13,10 +15,10 @@ Build the images first:
 
 ## Two shapes, and why both exist
 
-| File                            | What runs                                | What it demonstrates                            |
-| ------------------------------- | ---------------------------------------- | ----------------------------------------------- |
-| `docker-compose.allinone.yml`   | One container, everything inside it       | The fastest possible start                      |
-| `docker-compose.yml`            | The gateway and all four services, apart  | Fault isolation between real processes          |
+| File                            | What runs                                       | What it demonstrates                     |
+| ------------------------------- | ----------------------------------------------- | ---------------------------------------- |
+| `docker-compose.allinone.yml`   | The backend in one container, and the interface  | The fastest possible start               |
+| `docker-compose.yml`            | The gateway and all five services, apart, and the interface | Fault isolation between real processes |
 
 They run the same code. That is ADR-005's whole argument, and it is why the distributed environment
 is worth having even though the all-in-one one starts faster: the all-in-one process is a single
@@ -25,17 +27,25 @@ failure domain, so it can show you a *feature* degrading but it cannot show you 
 ## The fastest start
 
 ```
-docker compose -f deployment/compose/docker-compose.allinone.yml up -d
+docker compose -f deployment/compose/docker-compose.allinone.yml up -d --wait
+open http://localhost:8090/ui/
 curl -s localhost:8080/api/v1/capabilities | jq
 docker compose -f deployment/compose/docker-compose.allinone.yml down -v
 ```
 
-**These stacks start the backend only.** Since ADR-048 the interface is a separate image built from
-the pnpm workspace under `frontend/`, and the gateway's jar contains none of it, so
-`http://localhost:8080/ui/` answers 503 here. Both compose files in this directory are about
-process topology and fault isolation, which is what they are worth reading for, and every claim
-below is made against the API rather than a screen. For a stack with a working interface use
-`deployment/quickstart/quickstart.sh`, which starts the frontend container alongside the backend.
+**Both stacks here serve the interface, and it is a second container in each.** Since ADR-048 the
+browser bundle is a separate image built from the pnpm workspace under `frontend/`, and the KUI jar
+contains none of it — so `/ui/` is served by nginx on `8090`, which proxies `/api/` to KUI so that
+the two share an origin (ADR-019). KUI's own port stays published on `8080` because every claim
+below is made against the API, and a `curl` is a better witness than a screenshot.
+
+Neither image is published to a registry, and the interface is not even a Mill target — Mill never
+builds the browser bundle, which is what makes the two halves separable. Both compose files carry a
+`build:` stanza, so the first `docker compose up` builds what it needs; `./mill deployment.docker.__.build`
+beforehand makes the backend half instant.
+
+There is no Kafka broker in either file. For a stack with a broker and data in it, use
+`deployment/quickstart/quickstart.sh`.
 
 ## The distributed environment
 
@@ -44,13 +54,26 @@ All four commands assume you are in the repository root.
 ### 1. Bring it up
 
 ```
-docker compose -f deployment/compose/docker-compose.yml up -d
+docker compose -f deployment/compose/docker-compose.yml up -d --wait
+open http://localhost:8090/ui/
 ```
 
-Five containers: the gateway plus `kui-cluster`, `kui-topic`, `kui-message` and `kui-consumer`. Only
-`kui-gateway` publishes a port; the four services are reachable only from inside the compose network,
-which is the same rule `ARCHITECTURE.md` §14 states for a real deployment — a service must not be
-exposed outside the cluster network.
+Seven containers: `kui-frontend` and `kui-gateway`, which publish a port each, plus `kui-cluster`,
+`kui-topic`, `kui-message`, `kui-consumer` and `kui-metrics`, which publish none. The five services
+are reachable only from inside the compose network, which is the same rule `ARCHITECTURE.md` §14
+states for a real deployment — a service must not be exposed outside the cluster network.
+
+`kui-metrics` measures nothing: KUI has no JMX client and no Prometheus parser, so every one of its
+answers is a 200 saying `not_configured`, and the dashboard's metrics cards keep their written "not
+measured" sentence (ADR-032). It is here because the gateway derives a service's public routes from
+the contract it holds *and* the address it was given — so a metrics container that is absent is not
+a quiet feature, it is a feature the browser cannot tell apart from an outage.
+
+This is the stack that grows. M8 and M9 each add a service beside those five, and
+`docker-compose.yml` carries a commented slot naming the container and the address each of
+`kui-alerts`, `kui-connect` and `kui-ksql` will take, so that adding one is a copy of `kui-consumer`
+and two more edits rather than a reshaping of the file. `kui-metrics` is that recipe already
+applied, and is the worked example to read beside it.
 
 Check that the gateway can reach every service, and that a request really does travel through one:
 
@@ -59,6 +82,7 @@ $ curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[] | "\(.key.servi
 cluster available
 consumer available
 message available
+metrics available
 topic available
 $ curl -s localhost:8080/api/v1/clusters | jq -r .clusters.status
 ok
@@ -84,12 +108,13 @@ $ curl -s localhost:8080/api/v1/capabilities | jq -r '.entries[] | "\(.key.servi
 cluster unavailable
 consumer available
 message available
+metrics available
 topic available
 $ curl -s localhost:8080/api/v1/info | jq -r .authType
 disabled
 ```
 
-Note what did *not* change: the other three services are untouched, because they are three other
+Note what did *not* change: the other four services are untouched, because they are four other
 processes. The topics screen, the message browser and the consumer-group screens all keep working
 while the cluster list degrades. That is the statement the all-in-one shape cannot make at all, and
 it is why these services have `main`s and images of their own rather than only running inside the
@@ -126,15 +151,26 @@ docker compose -f deployment/compose/docker-compose.yml down -v
 ./deployment/compose/smoke.sh
 ```
 
-Runs the whole sequence and exits non-zero if any step does not produce what it should. CI runs it
-in the end-to-end job, right after the five images are built, so that a broken compose file is caught
-by the same run that builds the artefacts it describes.
+Runs the whole sequence and exits non-zero if any step does not produce what it should. Its
+capability check is derived from `/api/v1/capabilities` rather than from a list written into the
+script, so a service added to `kui.yaml` and to the compose file is checked without anybody
+remembering this line — which is how `kui-metrics` stayed unreachable through a whole milestone
+while the script passed. CI runs it in the end-to-end job, right after the six backend images are
+built, so that a broken compose file is caught by the same run that builds the artefacts it
+describes. The interface's image is not one of those six and Compose builds it here, which adds a
+few minutes to a cold run and nothing to a warm one.
+
+The interface is unaffected throughout. It is a static file server that proxies `/api/`, so it has
+nothing to lose when a KUI service dies: the page still loads, and what an operator sees is the
+capability document's verdict rendered as a dimmed navigation entry with an explanation, rather than
+an error page. `smoke.sh` asserts that while `kui-cluster` is stopped.
 
 ## The gateway starts even when nothing else does
 
-The gateway has no mandatory upstream, deliberately. It is the only thing a browser can reach, so a
-gateway that refused to start until every service was healthy would turn one service's outage into a
-blank page — at exactly the moment an operator needs a working UI to find out what is wrong.
+The gateway has no mandatory upstream, deliberately. It is the only KUI process a browser's requests
+reach, so a gateway that refused to start until every service was healthy would turn one service's
+outage into a blank page — at exactly the moment an operator needs a working UI to find out what is
+wrong.
 
 You can check that claim directly by starting the stack with no service at all:
 
@@ -192,6 +228,7 @@ first minute retrying connections to a collector that is not running.
 | `kui.yaml`           | `kui-gateway`   | The service addresses, the poll interval, CORS, the shared keys    |
 | `kui-cluster.yaml`   | `kui-cluster`   | Where to listen, telemetry, and the same shared keys               |
 | `kui-allinone.yaml`  | `kui-allinone`  | Where to listen and telemetry. No addresses, no keys — see below   |
+| *(none)*             | `kui-frontend`  | Nothing on disk: the nginx block is written at start from `KUI_GATEWAY_URL`, `KUI_BASE_PATH` and `KUI_BUILD_VERSION` (`../frontend/`) |
 | `otel-collector.yaml`| the collector   | Receive on 4317 and 4318, print everything                         |
 
 **The one thing the first two must agree about is `kui.gateway.principalKeys`.** It looks like a
@@ -213,8 +250,10 @@ or as a flag. Flags beat the environment, which beats the file, which beats the 
 | Variable             | Default              | What it does                                   |
 | -------------------- | -------------------- | ---------------------------------------------- |
 | `KUI_PORT`           | `8080`               | The host port the gateway is published on      |
+| `KUI_FRONTEND_PORT`  | `8090`               | The host port the interface is published on    |
 | `KUI_VERSION`        | `0.1.0-SNAPSHOT`     | The image tag to run                           |
 | `KUI_PRINCIPAL_KEY`  | a development string | The shared signing secret                      |
+| `KUI_BASE_PATH`      | *(empty)*            | Mount point when an outer proxy serves KUI under a sub-path |
 
 ```
 KUI_PORT=9090 docker compose -f deployment/compose/docker-compose.yml up -d
@@ -222,5 +261,7 @@ KUI_PORT=9090 docker compose -f deployment/compose/docker-compose.yml up -d
 
 ## Not here
 
-No Kafka broker: M1 adds it, and until then the cluster service has no cluster to talk to. No schema
-registry, Kafka Connect, ksqlDB, Prometheus or LDAP — each arrives with the milestone that needs it.
+No Kafka broker: neither file here starts one, so the cluster service has no cluster to talk to and
+every screen reports that rather than failing. Use `deployment/quickstart/quickstart.sh` for a stack
+with a broker and data in it. No schema registry, Kafka Connect, ksqlDB, Prometheus or LDAP — each
+arrives with the milestone that needs it, into the slot `docker-compose.yml` already names for it.

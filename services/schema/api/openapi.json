@@ -150,7 +150,7 @@
           "schema"
         ],
         "summary" : "The subjects registered on this cluster's Schema Registry",
-        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned.",
         "operationId" : "schema.subjects",
         "parameters" : [
           {
@@ -923,8 +923,7 @@
           "items" : {
             "type" : "array",
             "items" : {
-              "description" : "a schema registry subject",
-              "type" : "string"
+              "$ref" : "#/components/schemas/SubjectSummaryDto"
             }
           },
           "page" : {
@@ -1071,6 +1070,30 @@
         "properties" : {
           "level" : {
             "type" : "string"
+          }
+        }
+      },
+      "SubjectSummaryDto" : {
+        "title" : "SubjectSummaryDto",
+        "description" : "A subject list row: the name, and the facts a row shows when they could be read",
+        "type" : "object",
+        "required" : [
+          "subject"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "format" : {
+            "type" : "string"
+          },
+          "versionCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "compatibility" : {
+            "$ref" : "#/components/schemas/CompatibilityDto"
           }
         }
       },

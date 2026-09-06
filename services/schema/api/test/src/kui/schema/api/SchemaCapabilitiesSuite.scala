@@ -29,6 +29,7 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
     new SchemaRegistryPort[IO] {
       private def answer[A](value: A) = IO.pure(failure.toLeft(value))
       def subjects = answer(List.empty[Subject])
+      def summary(subject: Subject) = answer(Option.empty[SubjectSummary])
       def versions(subject: Subject) = answer(None)
       def schema(subject: Subject, version: VersionSelector) = answer(None)
       def globalCompatibility = answer(CompatibilityLevel.Backward)
@@ -104,6 +105,7 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
       private def boom[A]: IO[Either[kui.kernel.error.KuiError, A]] =
         IO.raiseError(new RuntimeException("a defect below the port"))
       def subjects = boom
+      def summary(subject: Subject) = boom
       def versions(subject: Subject) = boom
       def schema(subject: Subject, version: VersionSelector) = boom
       def globalCompatibility = boom

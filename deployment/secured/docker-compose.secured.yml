@@ -11,7 +11,7 @@
 #
 #     ./generate-certs.sh                       # once; writes ./certs, which is git-ignored
 #     docker compose -f docker-compose.secured.yml up -d
-#     open http://localhost:18081
+#     open http://localhost:18091/ui/           # the interface; the API is on 18081
 #
 # The KUI image is the one `./mill deployment.docker.allinone.docker.build` produces. Change the
 # `image:` line below if yours is tagged differently.
@@ -137,6 +137,49 @@ services:
         # topic could not be created would contradict the product it is demonstrating.
         required: false
     networks: [kui-secured]
+    restart: unless-stopped
+
+  # The interface. Since ADR-048 the browser bundle is its own image, built from the pnpm workspace
+  # under `frontend/`, and the all-in-one jar above contains none of it -- so without this container
+  # the one thing this stack exists to check, that a secured cluster reaches a rendered screen, can
+  # only be checked with curl. The whole path from `deployment/examples/production.yaml` to a screen
+  # is the claim; a stack that stopped at the API would be testing half of it.
+  #
+  # nginx serves /ui/ and proxies /api/ to KUI, so the two share an origin and the session cookie
+  # and the CSRF header behave as they do when one process serves both (ADR-019). Nothing here
+  # touches the broker: the SASL_SSL connection under test is KUI's, not the browser's.
+  frontend:
+    image: kui-frontend:0.1.0-SNAPSHOT
+    build:
+      context: ../..
+      dockerfile: deployment/frontend/Dockerfile
+    container_name: kui-secured-frontend
+    ports:
+      # 18091, beside KUI's 18081. Neither is a variable in this file, which is deliberate: this
+      # stack is run by hand, once, by somebody changing `kui.clusters[].security`.
+      - "18091:8082"
+    environment:
+      KUI_GATEWAY_URL: http://kui:8080
+      KUI_BUILD_VERSION: 0.1.0-SNAPSHOT
+    depends_on:
+      kui:
+        # nginx resolves `kui` once at start, so a KUI that is not there yet is a 502 for ever
+        # rather than a slow first request.
+        condition: service_healthy
+    networks: [kui-secured]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      # A mode is needed: the tmpfs is mounted root-owned, this image runs as uid 101, and the
+      # entrypoint's write would otherwise fail on a directory that plainly exists.
+      - type: tmpfs
+        target: /etc/nginx/conf.d
+        tmpfs:
+          mode: 0777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 networks:

@@ -6,6 +6,7 @@ import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
+import kui.metrics.contract.MetricsEndpoints
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
 
@@ -58,7 +59,12 @@ object ServiceContracts {
       // second list holds the two compatibility writes *and* the compatibility check, which is not a
       // mutation at all — it is grouped by request shape, not by effect — so leaving that list out
       // would silently drop the one endpoint a registration flow needs most.
-      ServiceId.unsafe("schema") -> (SchemaEndpoints.all ++ SchemaMutationEndpoints.all)
+      ServiceId.unsafe("schema") -> (SchemaEndpoints.all ++ SchemaMutationEndpoints.all),
+      // One list, because the metrics service has one endpoint and no mutation: nothing it publishes
+      // changes a cluster, and there is nothing for a read-only deployment to refuse. It is the eighth
+      // service and the shortest entry in this map, which is the point of it — a service is added here
+      // in one line, and three later milestones each add one.
+      ServiceId.unsafe("metrics") -> MetricsEndpoints.all
     )
 
   /** The identity service is **deliberately absent** from the map above, and must stay absent.

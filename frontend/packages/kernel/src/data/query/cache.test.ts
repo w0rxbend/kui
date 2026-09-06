@@ -225,6 +225,37 @@ describe("the query cache", () => {
     kept.stop();
   });
 
+  /**
+   * What an untracked read of `watch` actually does, which is not what the docstring used to claim.
+   *
+   * It said the read "subscribes nothing and therefore fetches nothing". It fetches: the lazy memo
+   * computes, acquires the entry, starts the request — and then, with no owner to hold it, releases
+   * the entry in the same turn. The caller gets `pending`, the answer arrives with nothing left
+   * watching for it, and the entry is immediately evictable. Nothing throws, which is why the wrong
+   * sentence survived; this case is here so that the corrected one cannot rot the same way.
+   */
+  it("fetches on an untracked read and then leaves nothing watching for the answer", async () => {
+    let clock = 0;
+    const server = stubFetch();
+    const cache = createQueryCache<string>({ fetch: server.fetch, maxEntries: 1, now: () => clock });
+
+    const state = cache.watch("orphan");
+    expect(state().pending).toBe(true);
+    // The request went out, from a read the old sentence said would send none.
+    expect(server.calls).toEqual(["orphan"]);
+    await server.answer(0, "answered with nobody listening");
+    expect(cache.peek("orphan").lastGood).toBe("answered with nobody listening");
+
+    // And nothing is watching it: one genuinely watched key is enough to evict it, which only
+    // happens to entries whose watcher count is zero.
+    clock += 1;
+    const live = watching(cache.watch.bind(cache), "on-screen");
+    await server.answer(1, "visible");
+    expect(cache.peek("orphan").lastGood).toBeUndefined();
+    expect(cache.peek("on-screen").lastGood).toBe("visible");
+    live.stop();
+  });
+
   it("builds a key a prefix test can match", () => {
     // The separator is a character Kafka's own vocabulary excludes — a cluster id is a lowercase
     // slug, a topic name is [a-zA-Z0-9._-], a group id likewise — so a key part can never contain

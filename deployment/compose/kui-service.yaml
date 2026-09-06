@@ -1,10 +1,11 @@
-# The configuration the topic, message and consumer services share in the distributed topology.
+# The configuration the topic, message, consumer and metrics services share in the distributed
+# topology.
 #
-# One file for three containers, and that is deliberate. `kui-cluster.yaml` is separate because the
+# One file for four containers, and that is deliberate. `kui-cluster.yaml` is separate because the
 # cluster service reads a section nobody else does — `kui.store.*`, where KUI keeps its own state —
-# and mixing that into a file the other three also mount would put settings in front of processes
-# that have no business acting on them. These three, by contrast, read exactly the same things:
-# where to listen, which signing keys to accept, and which Kafka clusters exist. Three identical
+# and mixing that into a file the other four also mount would put settings in front of processes
+# that have no business acting on them. These four, by contrast, read exactly the same things:
+# where to listen, which signing keys to accept, and which Kafka clusters exist. Four identical
 # copies of that would drift, and the first symptom of the drift would be one screen working and
 # another not.
 #

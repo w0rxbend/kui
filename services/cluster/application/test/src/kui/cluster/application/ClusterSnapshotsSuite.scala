@@ -7,7 +7,7 @@ import cats.effect.testkit.TestControl
 
 import kui.cluster.application.fakes.FakeClusterAdmin
 import kui.cluster.domain.*
-import kui.kernel.BrokerId
+import kui.kernel.{BrokerId, TopicName}
 import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -28,9 +28,10 @@ final class ClusterSnapshotsSuite extends munit.CatsEffectSuite {
   private def refreshOne(
       admin: FakeClusterAdmin[IO],
       features: ClusterFeatures,
-      logger: FakeStructuredLogger[IO]
+      logger: FakeStructuredLogger[IO],
+      sweep: Option[TopicSweep] = None
   ): IO[Either[KuiError, ClusterTopology]] =
-    ClusterSnapshots.refreshOne[IO](admin, prod, features, logger)
+    ClusterSnapshots.refreshOne[IO](admin, prod, features, sweep, logger)
 
   test("refreshOneNeedsOnlyDescribeCluster") {
     // The managed-service case: `describeCluster` answers and everything else refuses. The page must
@@ -231,6 +232,99 @@ final class ClusterSnapshotsSuite extends munit.CatsEffectSuite {
         assert(!requested, "there is nothing to refresh, and saying otherwise would be a lie")
       }
     }
+  }
+
+  test("aCompleteSweepFillsTheClusterWideCountsAndTheyAddUp") {
+    val sweep = TopologyFixtures.sweep(
+      List(
+        TopologyFixtures.placement(leader = 1),
+        TopologyFixtures.placement(leader = 2, inSync = Some(List(2, 3))),
+        PartitionPlacement(leader = None, replicas = Set(BrokerId.unsafe(1)), inSync = Set.empty)
+      ),
+      topics = 2
+    )
+
+    for {
+      logger <- FakeStructuredLogger[IO]
+      admin <- FakeClusterAdmin.make[IO](TopologyFixtures.defaultDescription)
+      result <- refreshOne(admin, TopologyFixtures.allFeatures, logger, Some(sweep))
+    } yield result match {
+      case Left(error) => fail(s"a complete sweep must not fail the refresh: $error")
+      case Right(topology) =>
+        // The offline partition is under-replicated too — no replica of it is in sync — so the two counts
+        // overlap by design. They are not a partition of the total and a screen must not subtract them.
+        val counted = PartitionSummary(online = 2, offline = 1, underReplicated = 2)
+
+        assertEquals(topology.partitions, Some(counted))
+        // Online plus offline is every partition the sweep saw, which is the arithmetic a screen does
+        // when it draws the donut.
+        assertEquals(topology.partitions.map(p => p.online + p.offline), Some(3))
+        assertEquals(topology.topics, Some(2))
+        assertEquals(topology.leadersOn(BrokerId.unsafe(1)), Some(1))
+    }
+  }
+
+  test("oneUnreadableTopicWithholdsAllThreePartitionFiguresRatherThanSummingWhatAnswered") {
+    // The refusal the whole packet turns on. The census inside this sweep is a genuine fold over the
+    // topics that answered — two online partitions is a true statement about *some* of the cluster — and
+    // publishing it would put a reassuring number where the honest answer is nothing.
+    val partial = TopologyFixtures
+      .sweep(List(TopologyFixtures.placement(leader = 1), TopologyFixtures.placement(leader = 2)), topics = 3)
+      .copy(unreadable = Set(TopicName.unsafe("payments")))
+
+    for {
+      logger <- FakeStructuredLogger[IO]
+      admin <- FakeClusterAdmin.make[IO](TopologyFixtures.defaultDescription)
+      result <- refreshOne(admin, TopologyFixtures.allFeatures, logger, Some(partial))
+    } yield result match {
+      case Left(error) => fail(s"an incomplete sweep costs the figures, not the page: $error")
+      case Right(topology) =>
+        assertEquals(topology.partitions, None)
+        assertEquals(topology.partitionsOn(BrokerId.unsafe(1)), None)
+        assertEquals(topology.leadersOn(BrokerId.unsafe(1)), None)
+        // The listing succeeded, so the topic count survives the describes that did not. Two different
+        // calls, two different failures.
+        assertEquals(topology.topics, Some(3))
+    }
+  }
+
+  test("aControllerWindowThatIsNotYetFullRefusesAndStillStatesItsLength") {
+    val scenario = ClusterRig.resource(List(prod)).use { rig =>
+      for {
+        _ <- ClusterRig.settled(rig)
+        view <- rig.topology.view(prod.id)
+      } yield view.flatMap(_.topology.toRight(unreachable)) match {
+        case Left(error) => fail(s"the cluster must have a topology: $error")
+        case Right(topology) =>
+          val uptime = topology.controllerUptime
+
+          assertEquals(uptime.flatMap(_.percent), None, "a window minutes old cannot answer for six hours")
+          // The length still travels, which is what lets a browser print "over the last 6h" and say it is
+          // still collecting rather than drawing an empty ring.
+          assertEquals(uptime.map(_.window), Some(ClusterRig.UptimeWindow))
+      }
+    }
+
+    TestControl.executeEmbed(scenario)
+  }
+
+  test("aFullControllerWindowAnswersFromWhatWasObserved") {
+    // Six hours of virtual time: 720 refreshes at thirty seconds, one sample per one-minute bucket, every
+    // one of them finding the fixture's controller.
+    val scenario = ClusterRig.resource(List(prod)).use { rig =>
+      for {
+        _ <- ClusterRig.settled(rig)
+        _ <- IO.sleep(ClusterRig.UptimeWindow + 1.minute)
+        view <- rig.topology.view(prod.id)
+      } yield view.flatMap(_.topology.toRight(unreachable)) match {
+        case Left(error) => fail(s"the cluster must have a topology: $error")
+        case Right(topology) =>
+          assertEquals(topology.controllerUptime.flatMap(_.percent), Some(100.0d))
+          assertEquals(topology.controllerUptime.map(_.coverage), Some(ClusterRig.UptimeWindow))
+      }
+    }
+
+    TestControl.executeEmbed(scenario)
   }
 
   test("aRefusedOptionalCallIsAnApplicationErrorAndStillYieldsATopology") {

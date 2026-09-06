@@ -18,7 +18,7 @@ import kui.kernel.{BrokerId, ClusterId, PartitionId, TopicName}
 import kui.topic.application.{Fresh, TopicCapability}
 import kui.topic.domain.*
 
-/** The five endpoints, through the real interceptor chain and the real routes.
+/** The seven endpoints, through the real interceptor chain and the real routes.
   *
   * The suite is about two things and nothing else: what a caller sees, and what a caller sees when something
   * upstream is broken. Business rules — which topics match, how a page is cut — belong to
@@ -35,7 +35,13 @@ final class TopicRoutesSuite extends CatsEffectSuite {
   private val at = Instant.parse("2026-09-03T10:11:12Z")
   private val since = Instant.parse("2026-09-03T10:10:00Z")
 
-  private def summary(name: String, internal: Boolean, partitions: Int = 1): TopicSummary =
+  private def summary(
+      name: String,
+      internal: Boolean,
+      partitions: Int = 1,
+      policy: Option[String] = None,
+      size: Option[Long] = Some(1024L)
+  ): TopicSummary =
     TopicSummary(
       name = TopicName.unsafe(name),
       isInternal = internal,
@@ -44,7 +50,8 @@ final class TopicRoutesSuite extends CatsEffectSuite {
       outOfSyncReplicas = 0,
       offlinePartitions = 0,
       messageCount = Some(10L),
-      sizeBytes = Some(1024L)
+      sizeBytes = size,
+      cleanupPolicy = policy
     )
 
   /** Three topics, one of which Kafka flags internal. */
@@ -441,14 +448,157 @@ final class TopicRoutesSuite extends CatsEffectSuite {
     TopicTestServer.resource(TopicTestServer.online(snapshot), detail = big).use { server =>
       for {
         list <- get(server, listPath())
+        statistics <- get(server, listPath("/statistics"))
+        names <- get(server, listPath("/names"))
         one <- get(server, listPath("/orders"))
         config <- get(server, listPath("/orders/config"))
         partitions <- get(server, listPath("/orders/partitions"))
         refresh <- post(server, listPath("/refresh"))
       } yield assertEquals(
-        List(list, one, config, partitions, refresh).map(_.code),
-        List(StatusCode.Ok, StatusCode.Ok, StatusCode.Ok, StatusCode.Ok, StatusCode.Accepted)
+        List(list, statistics, names, one, config, partitions, refresh).map(_.code),
+        List(
+          StatusCode.Ok,
+          StatusCode.Ok,
+          StatusCode.Ok,
+          StatusCode.Ok,
+          StatusCode.Ok,
+          StatusCode.Ok,
+          StatusCode.Accepted
+        )
       )
+    }
+  }
+
+  // -------------------------------------------------------------------------- M5: the four new figures
+
+  /** Two topics whose policies were read and one whose was not, which is the shape a batched
+    * `describeConfigs` produces when the batch could not cover every row.
+    */
+  private val mixedPolicies: TopicSnapshot =
+    TopicSnapshot.of(
+      Vector(
+        summary("orders", internal = false, policy = Some("delete")),
+        summary("sessions", internal = false, policy = Some("compact")),
+        summary("payments", internal = false, policy = None)
+      ),
+      at
+    )
+
+  test("a list row carries the cleanup policy for the rows the batch covered, and none for the rest") {
+    // The whole point of batching the scrape's `describeConfigs` is that a row the batch could not cover
+    // still appears. Asserted on the wire because a caller has to be able to tell "delete" from "unknown",
+    // and a page that dropped the third row would be the failure this column was avoided over.
+    TopicTestServer.resource(TopicTestServer.online(mixedPolicies)).use { server =>
+      get(server, listPath("?sort=name:asc")).map { response =>
+        assertEquals(response.code, StatusCode.Ok, response.body.toString)
+        val rows = field(body(response), "topics", "data", "items")
+          .flatMap(_.asArray)
+          .getOrElse(fail("the list section should carry rows"))
+
+        assertEquals(rows.size, 3)
+        assertEquals(
+          rows.toList.map(row => field(row, "cleanupPolicy")),
+          List(Some(Json.fromString("delete")), Some(Json.Null), Some(Json.fromString("compact")))
+        )
+      }
+    }
+  }
+
+  test("the statistics are the whole cluster's, and the sums refuse when a topic could not be described") {
+    // One topic listed and not described: the count still includes it, because `listTopics` answered, and
+    // neither sum does, because nothing knows that topic's partitions or bytes. A partition total of 3 here
+    // would be a number that looks measured and is too small.
+    val incomplete = TopicSnapshot.of(
+      Vector(summary("orders", internal = false, partitions = 2), summary("payments", internal = false)),
+      at,
+      Map(TopicName.unsafe("audit") -> "KUI may not describe this topic")
+    )
+
+    TopicTestServer.resource(TopicTestServer.online(incomplete)).use { server =>
+      get(server, listPath("/statistics")).map { response =>
+        assertEquals(response.code, StatusCode.Ok, response.body.toString)
+        val json = body(response)
+
+        assertEquals(field(json, "statistics", "status"), Some(Json.fromString("ok")))
+        assertEquals(field(json, "statistics", "data", "topicCount"), Some(Json.fromInt(3)))
+        assertEquals(field(json, "statistics", "data", "partitionCount"), Some(Json.Null))
+        assertEquals(field(json, "statistics", "data", "sizeBytes"), Some(Json.Null))
+        assertEquals(field(json, "statistics", "data", "incompleteTopics"), Some(Json.fromInt(1)))
+      }
+    }
+  }
+
+  test("a size nobody could read costs the size total and not the partition total") {
+    // The two sums refuse independently, which is what lets a cluster that answers describeTopics and
+    // refuses describeLogDirs show a partition figure beside an em dash instead of two em dashes.
+    val noSizes = TopicSnapshot.of(
+      Vector(
+        summary("orders", internal = false, partitions = 2, size = Some(1024L)),
+        summary("payments", internal = false, partitions = 3, size = None)
+      ),
+      at
+    )
+
+    TopicTestServer.resource(TopicTestServer.online(noSizes)).use { server =>
+      get(server, listPath("/statistics")).map { response =>
+        val json = body(response)
+
+        assertEquals(field(json, "statistics", "data", "topicCount"), Some(Json.fromInt(2)))
+        assertEquals(field(json, "statistics", "data", "partitionCount"), Some(Json.fromInt(5)))
+        assertEquals(field(json, "statistics", "data", "sizeBytes"), Some(Json.Null))
+      }
+    }
+  }
+
+  test("the statistics do not move when the list is filtered") {
+    // `SCREENS-V4.md` §4.6's load-bearing fact: TOTAL TOPICS reads the cluster while the table reads the
+    // search box. The two documents are asked for separately, so this asserts they disagree on purpose.
+    TopicTestServer.resource(TopicTestServer.online(snapshot)).use { server =>
+      for {
+        filtered <- get(server, listPath("?q=orders"))
+        statistics <- get(server, listPath("/statistics"))
+      } yield {
+        assertEquals(
+          field(body(filtered), "topics", "data", "page", "totalItems"),
+          Some(Json.fromInt(1))
+        )
+        // Three, not one and not two: the names index and the statistics both count the internal topic the
+        // list hides by default, because it exists.
+        assertEquals(field(body(statistics), "statistics", "data", "topicCount"), Some(Json.fromInt(3)))
+      }
+    }
+  }
+
+  test("the names index is every name, internal topics included and unpaged") {
+    TopicTestServer.resource(TopicTestServer.online(snapshot)).use { server =>
+      get(server, listPath("/names")).map { response =>
+        assertEquals(response.code, StatusCode.Ok, response.body.toString)
+        val json = body(response)
+
+        assertEquals(field(json, "names", "status"), Some(Json.fromString("ok")))
+        assertEquals(
+          field(json, "names", "data").flatMap(_.asArray).map(_.toList),
+          Some(List("__consumer_offsets", "orders", "payments").map(Json.fromString))
+        )
+      }
+    }
+  }
+
+  test("a topic named 'statistics' does not take the statistics address, and is said so out loud") {
+    // The cost of putting both new documents under `/topics/`, asserted rather than left to be discovered:
+    // the fixed segment wins, so a cluster with a topic called `statistics` cannot open that topic's page.
+    // The list still shows the topic, and the address that is shadowed is the detail one — which is why the
+    // trade was taken. If this ever has to change, this test is the record of what changes with it.
+    val shadowed = TopicSnapshot.of(Vector(summary("statistics", internal = false)), at)
+
+    TopicTestServer.resource(TopicTestServer.online(shadowed)).use { server =>
+      get(server, listPath("/statistics")).map { response =>
+        assertEquals(response.code, StatusCode.Ok, response.body.toString)
+        val json = body(response)
+
+        assert(field(json, "statistics").isDefined, json.noSpaces)
+        assert(field(json, "topic").isEmpty, json.noSpaces)
+      }
     }
   }
 }

@@ -14,6 +14,7 @@ import kui.config.{
   AuthConfig,
   ClusterConfig,
   ConsumersConfig,
+  MetricsConfig,
   StoreConfig,
   StreamingConfig,
   TopicsConfig,
@@ -29,6 +30,8 @@ import kui.identity.app.IdentityWiring
 import kui.kernel.ServiceId
 import kui.message.api.MessageApi
 import kui.message.app.MessageWiring
+import kui.metrics.api.MetricsApi
+import kui.metrics.app.MetricsWiring
 import kui.observability.Telemetry
 import kui.schema.api.SchemaApi
 import kui.schema.app.SchemaWiring
@@ -130,6 +133,7 @@ object AllInOneWiring {
         config.auth,
         config.rbac,
         config.store,
+        config.metrics,
         telemetry,
         principals,
         logger
@@ -155,7 +159,15 @@ object AllInOneWiring {
     * `AllInOneWiringSuite` asserts that it does rather than leaving the two to drift.
     */
   val Services: List[ServiceId] =
-    List(ClusterApi.Id, ConsumerApi.Id, IdentityApi.Id, MessageApi.Id, SchemaApi.Id, TopicApi.Id)
+    List(
+      ClusterApi.Id,
+      ConsumerApi.Id,
+      IdentityApi.Id,
+      MessageApi.Id,
+      MetricsApi.Id,
+      SchemaApi.Id,
+      TopicApi.Id
+    )
 
   /** Every KUI service, wired in this process and reachable in memory.
     *
@@ -173,6 +185,13 @@ object AllInOneWiring {
       auth: AuthConfig,
       rbac: RbacPolicy,
       store: StoreConfig,
+      // Passed rather than defaulted. It used to carry `MetricsConfig.Default` because `AllInOneConfig`
+      // had no field to pass, which made the all-in-one deployment answer as though the operator had
+      // configured nothing — the same status as a real source with no collector behind it, and a
+      // different *reason*, which is the only thing separating "you configured nothing" from "we cannot
+      // measure what you configured". Nothing observable differed while no collector existed; the reason
+      // did, and a reason is what an operator reads.
+      metrics: MetricsConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -246,6 +265,12 @@ object AllInOneWiring {
         principals,
         logger
       )
+      // The metrics service, which in every deployment there is today measures nothing: this build has
+      // no collector, so every cluster reports `not_configured` and the dashboard's metrics cards keep
+      // their written "not measured" sentence. It is wired anyway, for the reason the schema service is
+      // — "this deployment has no metrics source" is an answer the browser needs from a running service,
+      // and a service missing from the process reads instead as a service that is down.
+      metricsService <- MetricsWiring.make[F](clusters, metrics, telemetry, principals, logger)
     } yield ServiceClients.of[F](
       List[ServiceClient[F]](
         InProcessServiceClient.make[F](
@@ -282,6 +307,12 @@ object AllInOneWiring {
           IdentityApi.Id,
           identityService.routes,
           identityService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          MetricsApi.Id,
+          metricsService.routes,
+          metricsService.interceptors,
           principals
         )
       )

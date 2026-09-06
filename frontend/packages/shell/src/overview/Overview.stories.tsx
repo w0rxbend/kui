@@ -7,19 +7,27 @@ import {
   HEALTHY,
   LOADING,
   NO_DISK_SIZES,
+  PARTIAL_DISKS,
   SPARSE_SUMMARY,
   UNHEALTHY,
 } from "./fixtures.js";
+import { dashboardHost } from "./harness.jsx";
 import type { OverviewData } from "./load.js";
 
 /**
- * The cluster overview, in each state it has to survive.
+ * The cluster dashboard, in each state it has to survive.
  *
- * The stories that matter here are not the healthy one. They are the four below it: a cluster
+ * The stories that matter here are not the healthy one. They are the ones below it: a cluster
  * mid-incident, where every cheerful sentence has to turn itself off; a broker too old to report a
  * disk size, where a bar must be blank rather than empty; one service down while the rest are up;
+ * a cluster that reports no partition counts at all, which is the state a reviewer never clicks;
  * and the loading state, where a figure that has not arrived must not look like one that is missing.
  * Those are the states that are expensive to reach against a real cluster and cheap to get wrong.
+ *
+ * Every story mounts the product's own router over a memory history, because the tab and the cluster
+ * come from the address and from nowhere else. That is what lets the two tabs be two stories rather
+ * than one story with a control on it — and it is why the Storage stories are honest about what the
+ * Storage tab does at that address, rather than about what a prop said it should do.
  */
 const meta = {
   title: "Screens/Overview",
@@ -35,7 +43,12 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-const story = (data: OverviewData): Story => ({ args: { model: toOverviewModel(data) } });
+const DASHBOARD = "/ui/clusters/prod-kyiv-01/dashboard";
+
+const story = (data: OverviewData, at: string = DASHBOARD): Story => ({
+  args: { model: toOverviewModel(data) },
+  render: (args) => dashboardHost(at, () => <Overview model={args.model} />, "prod-kyiv-01")(),
+});
 
 /** Screenshots `01` and `05`: everything answered, everything fine. */
 export const Healthy: Story = story(HEALTHY);
@@ -43,8 +56,9 @@ export const Healthy: Story = story(HEALTHY);
 /**
  * Nothing has come back yet.
  *
- * Look for skeletons and the *absence* of pills. A dash here would say the figure is missing; a
- * cheerful "all in sync" would be a claim made before anybody asked.
+ * Look for skeletons and the *absence* of pills and of the in-sync ring. A dash here would say the
+ * figure is missing; a cheerful "all in sync" would be a claim made before anybody asked; and a ring
+ * drawn round a skeleton would reserve a box for a picture of a number nobody has.
  */
 export const Loading: Story = story(LOADING);
 
@@ -74,5 +88,60 @@ export const NoDiskSizes: Story = story(NO_DISK_SIZES);
  */
 export const OneServiceDown: Story = story(CONSUMERS_UNAVAILABLE);
 
-/** A broker that reports no partition counts at all: the donut and two pills go quiet. */
+/**
+ * A broker that reports no partition counts at all.
+ *
+ * The state a reviewer never clicks: the donut, the in-sync ring, the partition pill and the
+ * partition total all go quiet together, and the lede says which figures are blank and why. Every
+ * one of them has a tempting zero available, and none of them may take it.
+ */
 export const SparseSummary: Story = story(SPARSE_SUMMARY);
+
+/** The Storage tab (`M04`): the same stat cards, then exactly two cards, then the page ends. */
+export const StorageTab: Story = story(HEALTHY, `${DASHBOARD}/storage`);
+
+/**
+ * The Storage tab on a cluster whose disks report no size.
+ *
+ * Three bare tracks, a sentence under each, and no legend — a key naming four prefixes the reader
+ * cannot see anywhere reads as a rendering fault rather than as an unmeasured disk. The voice line
+ * changes with it: nothing is eating anybody's budget on a card with no capacity in it.
+ */
+export const StorageWithoutDiskSizes: Story = story(NO_DISK_SIZES, `${DASHBOARD}/storage`);
+
+/**
+ * The Storage tab with one directory that reported replicas and no size.
+ *
+ * Broker 1 has a second disk holding more `orders.*` than its first one, and no capacity. Its bar
+ * must show the first disk's share only: a segment attributed against a capacity that excludes the
+ * disk it lives on runs past the end of the track, and the bar clamps rather than saying so.
+ */
+export const StorageWithAnUnmeasuredDisk: Story = story(PARTIAL_DISKS, `${DASHBOARD}/storage`);
+
+/**
+ * The Storage tab while the answers are still in flight.
+ *
+ * The card waits rather than reporting a failure: the broker list can land before the log
+ * directories do, and a card that called that an outage would raise a false alarm once per load.
+ */
+export const StorageLoading: Story = story(LOADING, `${DASHBOARD}/storage`);
+
+/**
+ * A tab nobody has, which somebody will nevertheless type.
+ *
+ * It lands on the overview with the overview marked. The address is user-editable and a typo is not
+ * an error state — a blank body under a strip with nothing current is the worst of the answers
+ * available here.
+ */
+export const UnknownTab: Story = story(HEALTHY, `${DASHBOARD}/nonsense`);
+
+/**
+ * The root address, which names no cluster.
+ *
+ * The strip is absent rather than disabled: its segments would have no address to point at. The
+ * body is unchanged, because the model is fetched for whichever cluster the shell has selected.
+ */
+export const NoClusterInTheAddress: Story = {
+  args: { model: toOverviewModel(HEALTHY) },
+  render: (args) => dashboardHost("/ui", () => <Overview model={args.model} />)(),
+};

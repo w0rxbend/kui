@@ -12,9 +12,11 @@ controls consistently with the server without re-implementing the rules in anoth
 
 ## Decision
 
-- Adopt Kafbat's model and its complete resource × action matrix verbatim as the canonical
+- Adopt Kafbat's model and its complete resource × action matrix as the base of the canonical
   KUI vocabulary (`Resource`: ApplicationConfig, ClusterConfig, Topic, ConsumerGroup, Schema,
-  Connect, Connector, Ksql, Acl, Audit, ClientQuotas; actions and `implies` per
+  Connect, Connector, Ksql, Acl, Audit, ClientQuotas — Kafbat's eleven, verbatim; plus `Metrics`
+  and `Alerts`, which are KUI's own and were added by Amendment 3, so the vocabulary is thirteen
+  resources and is no longer Kafbat's verbatim; actions and `implies` per
   `research/scala/security-research.md` §2.2), including `defaultRole`, regex `value`,
   subject `provider/type/value/isRegex`, the connector → connect fallback and the "audit topic
   requires `Audit.View`" rule. The config keys are Kafbat's under `kui.rbac`.
@@ -69,6 +71,31 @@ This is a deliberate weakening and it is named rather than hidden, so that the e
 be enumerated — they are, by the same suite — instead of being discovered later. Treating a body-named
 resource as `Unnamed` was rejected: `Permission.covers` would then refuse every create in any deployment with
 RBAC on, which is a different bug in the safer direction and still a bug.
+
+**Amendment 3 — two resources are KUI's own, and ksqlDB gained a read that does not alter.**
+
+Added 2026-09-06 alongside the `services/metrics` skeleton and the vocabulary the alerts and ksqlDB
+milestones will need. The Decision above enumerated eleven resources and called them Kafbat's verbatim; the
+enumeration is amended here rather than left to be discovered from the enum, because "verbatim" is the claim
+a reader uses to decide they need not check.
+
+`Resource.Metrics` (`MetricsView`) and `Resource.Alerts` (`AlertsView`, `AlertsAcknowledge`, which implies
+`AlertsView`) have no Kafbat counterpart. Both are *unnamed*, so no regex `value` applies to them: a
+measurement and a generated event id are not things an operator names in a role file, and a pattern written
+against either would be a second, weaker spelling of the cluster gate that has already decided which clusters
+a person may look at. Folding them into an existing resource was rejected — reading a metric would then be
+implied by being allowed to see the cluster at all, and that is a grant an operator should be able to withhold
+on its own.
+
+`Action.KsqlView` is an addition inside Kafbat's existing `Ksql` resource rather than a new resource, and it
+does not alter; `KsqlExecute` implies it. It exists because `EXECUTE` on its own made ksqlDB unreachable on a
+read-only cluster: the read-only gate refuses an altering request before any resource is considered, so a
+resource whose only action altered could not be *looked at* there. A principal allowed to run a statement must
+be allowed to know the objects exist, and without `KsqlView` a read-only cluster could not list ksqlDB objects
+at all — an operator saw an empty screen where the objects are.
+
+`VIEW` is consequently thirteen different actions on thirteen different resources rather than eleven, which is
+the reason `Action.fromWire` takes a resource: a bare `"VIEW"` is a question with no answer.
 
 ## Evidence
 

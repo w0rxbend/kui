@@ -248,6 +248,39 @@
   color: var(--kui-color-text-muted);
 }
 
+/* The figure and the micro-visual share one line (`SCREENS-V4.md` §3.2). The row is in the markup
+ * whether or not there is a visual, so that the figure sits at the same height on every card in a
+ * grid where only some of them have a series to draw. */
+.kui-stat__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+/* The figure takes the space and the visual takes what is left, never the other way round. A
+ * sparkline that pushed `18,446,744,073,709,551,615` into an ellipsis would have hidden the one
+ * thing on the card that carries the meaning. */
+.kui-stat__row > .kui-stat__figure {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* No colour and no size here on purpose: the slot is layout, and what goes in it — `Sparkline`,
+ * `RingGauge`, a strip of blocks — brings its own ink and its own height. A `color` on this
+ * element would silently retint every visual that draws in `currentColor`, from a stylesheet whose
+ * author cannot see them. */
+.kui-stat__visual {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  /* Bounded rather than unbounded: a visual wider than a third of the card stops being a
+   * micro-visual and starts being a chart in the wrong container. */
+  max-width: 40%;
+  overflow: hidden;
+}
+
 /* The pill sits on its own line, hard against the left edge, so a row of four cards has four
  * verdicts at the same height regardless of how long each one's text is. */
 .kui-stat__pill-slot {
@@ -998,4 +1031,66 @@
   font-size: var(--kui-font-size-sm);
   overflow-wrap: anywhere;
   user-select: all;
+}
+
+/* --- Bulk action bar --------------------------------------------------------------------------
+ *
+ * The pill that floats over a list once rows are selected (`SCREENS-V4.md` §3.7).
+ *
+ * ## It is drawn on the elevated surface, and the design draws it dark
+ *
+ * The capture's bar is a dark pill on a light page — an *inverted* surface, which is a thing this
+ * palette does not have: there is no `--kui-color-surface-inverse`, and `10-tokens.css` is not
+ * this packet's to add one to. Rather than approximate an inversion with a literal, or press
+ * `--kui-color-scrim` into service as a fill it was not measured for, the bar takes the same
+ * treatment as the product's other floating surface, the toast: the elevated surface, the card
+ * border, and `--kui-shadow-md` to lift it off whatever it is covering. When the inverse token
+ * exists, the three declarations below are what change.
+ *
+ * ## Fixed, and centred by transform
+ *
+ * `left: 50%` plus a translate rather than `inset-inline: 0` with `margin: auto`, because the bar
+ * is as wide as its contents and the second form would stretch it across the window.
+ */
+
+.kui-bulkbar {
+  position: fixed;
+  left: 50%;
+  bottom: var(--kui-space-5);
+  transform: translateX(-50%);
+  z-index: var(--kui-z-toast);
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  max-width: min(48rem, calc(100vw - var(--kui-space-6)));
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-pill);
+  background-color: var(--kui-color-surface-elevated);
+  box-shadow: var(--kui-shadow-md);
+  /* More actions than the window is wide is a real state on a phone. They scroll inside the bar
+   * rather than pushing the dismiss button off the end of it, which would leave the operator with
+   * a bar they cannot close. */
+  overflow-x: auto;
+}
+
+.kui-bulkbar__count {
+  margin: 0;
+  padding: 0 var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+  font-weight: var(--kui-font-weight-bold);
+  color: var(--kui-color-text-strong);
+  white-space: nowrap;
+}
+
+/* A hairline, not a gap: the count is a statement and the buttons are actions, and the design
+ * separates the two groups rather than spacing them apart. `align-self: stretch` rather than a
+ * height, so it follows the bar's padding instead of being a number that has to be kept in step
+ * with it. */
+.kui-bulkbar__rule {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 0 var(--kui-space-1);
+  background-color: var(--kui-color-border);
 }

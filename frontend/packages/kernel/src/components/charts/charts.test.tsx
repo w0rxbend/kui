@@ -21,6 +21,10 @@ import { BarChart } from "./BarChart.jsx";
 import { Donut } from "./Donut.jsx";
 import { LineChart } from "./LineChart.jsx";
 import { MagnitudeBarList } from "./MagnitudeBarList.jsx";
+import { Sparkline } from "./Sparkline.jsx";
+import { RingGauge } from "./RingGauge.jsx";
+import { Histogram } from "./Histogram.jsx";
+import { StackedBar } from "./StackedBar.jsx";
 import { ProgressBar } from "./ProgressBar.jsx";
 import { RangeSelector } from "./RangeSelector.jsx";
 import { ABSENT, formatCount, formatPercent, fraction, levelFor } from "./format.js";
@@ -657,5 +661,414 @@ describe("LineChart", () => {
     expect(container.querySelector("[role='status']")!.textContent).toContain("produce 16ms");
     await expectNoViolations(container);
     dispose();
+  });
+});
+
+/* --- Sparkline -------------------------------------------------------------------------------- */
+
+describe("Sparkline", () => {
+  it("draws one polyline for a series with no gaps", () => {
+    const { container, dispose } = mount(() => <Sparkline points={[61, 64, 63, 68, 72]} />);
+    expect(container.querySelectorAll("polyline").length).toBe(1);
+    dispose();
+  });
+
+  it("breaks the mark at a gap rather than running a line across the outage", () => {
+    const { container, dispose } = mount(() => <Sparkline points={[62, 58, null, 78, 74]} />);
+    // Two polylines, not one: the same rule LineChart obeys, in a mark a twelfth its size.
+    expect(container.querySelectorAll("polyline").length).toBe(2);
+    dispose();
+  });
+
+  it("draws a lone surviving measurement as a dot, because a one-point line is nothing", () => {
+    const { container, dispose } = mount(() => <Sparkline points={[null, null, 4.1, null]} />);
+    expect(container.querySelectorAll("polyline").length).toBe(0);
+    expect(container.querySelectorAll("circle").length).toBe(1);
+    dispose();
+  });
+
+  it("draws nothing at all when there is nothing to trend", () => {
+    // The design's rule for a card with no series: not a flat line at zero, which would assert a
+    // measured zero. No SVG is emitted at all.
+    const empty = mount(() => <Sparkline points={[]} />);
+    expect(empty.container.querySelector("svg")).toBeNull();
+    empty.dispose();
+
+    const gaps = mount(() => <Sparkline points={[null, null, null]} />);
+    expect(gaps.container.querySelector("svg")).toBeNull();
+    gaps.dispose();
+  });
+
+  it("draws a flat series down the middle instead of dividing by a zero range", () => {
+    const { container, dispose } = mount(() => <Sparkline points={[99.1, 99.1, 99.1]} />);
+    const points = container.querySelector("polyline")!.getAttribute("points")!;
+    const ys = points.split(" ").map(pair => Number.parseFloat(pair.split(",")[1]!));
+    expect(ys.every(y => Number.isFinite(y))).toBe(true);
+    expect(new Set(ys).size).toBe(1);
+    dispose();
+  });
+
+  it("is hidden from a screen reader, because the card beside it prints the same figure", async () => {
+    const { container, dispose } = mount(() => <Sparkline points={[61, 64, 63]} />);
+    expect(container.querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
+    // And it publishes no table: a second announcement of the card's own figure helps nobody.
+    expect(container.querySelector("table")).toBeNull();
+    await expectNoViolations(container);
+    dispose();
+  });
+});
+
+/* --- RingGauge -------------------------------------------------------------------------------- */
+
+describe("RingGauge", () => {
+  it("reads a high-is-good scalar as success", () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={64} caption="io idle" goodDirection="high" />
+    ));
+    expect(container.querySelector(".kui-gauge")!.getAttribute("data-tone")).toBe("success");
+    expect(container.querySelector(".kui-gauge__figure")!.textContent).toBe("64%");
+    dispose();
+  });
+
+  it("reads the same number as a warning when low is the good end", () => {
+    // 64% idle is good news and 38% purgatory is bad news in the same card. A component with
+    // Donut's warnBelow/criticalBelow cannot say that, which is why goodDirection exists.
+    const { container, dispose } = mount(() => (
+      <RingGauge value={38} caption="purgatory" goodDirection="low" warnAbove={35} />
+    ));
+    expect(container.querySelector(".kui-gauge")!.getAttribute("data-tone")).toBe("warning");
+    dispose();
+  });
+
+  it("alarms past the critical threshold in either direction", () => {
+    const low = mount(() => <RingGauge value={74} goodDirection="low" warnAbove={35} criticalAbove={60} />);
+    expect(low.container.querySelector(".kui-gauge")!.getAttribute("data-tone")).toBe("danger");
+    low.dispose();
+
+    const high = mount(() => <RingGauge value={6} goodDirection="high" />);
+    expect(high.container.querySelector(".kui-gauge")!.getAttribute("data-tone")).toBe("danger");
+    high.dispose();
+  });
+
+  it("draws the plain track and an em dash for an unmeasured value, never a full ring", () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={undefined} caption="purgatory" goodDirection="low" />
+    ));
+    expect(container.querySelector(".kui-gauge__figure")!.textContent).toBe(ABSENT);
+    // The arc is the only <path> in the component, so counting them is the honest test for
+    // "did this gauge claim a measurement".
+    expect(container.querySelectorAll("path").length).toBe(0);
+    expect(container.querySelectorAll("circle").length).toBe(1);
+    expect(container.querySelector(".kui-gauge")!.getAttribute("data-tone")).toBe("absent");
+    dispose();
+  });
+
+  it("draws a measured zero differently from an absence, which is the whole point of the pair", () => {
+    const { container, dispose } = mount(() => <RingGauge value={0} goodDirection="high" />);
+    expect(container.querySelector(".kui-gauge__figure")!.textContent).toBe("0%");
+    // No arc, because there is no share to draw — but the figure says a number, not a dash.
+    expect(container.querySelectorAll("path").length).toBe(0);
+    dispose();
+  });
+
+  it("scales a value into an explicit domain rather than assuming per cent", () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={4212} max={10_000} goodDirection="low" valueText="4,212" />
+    ));
+    const arc = container.querySelector<SVGPathElement>("path")!;
+    // `pathLength="100"` makes the dash units per cent, so the arc's length is literally 42.12%
+    // of a 10,000-message domain. Compared as numbers, because binary floating point renders it
+    // as 42.120000000000005 and that is not a defect in the gauge.
+    const dash = arc.getAttribute("stroke-dasharray")!.split(" ").map(Number.parseFloat);
+    expect(dash[0]).toBeCloseTo(42.12, 6);
+    expect(dash[1]).toBeCloseTo(57.88, 6);
+    expect(container.querySelector(".kui-gauge__figure")!.textContent).toBe("4,212");
+    dispose();
+  });
+
+  it("cannot be made to draw a full ring by a domain of zero width", () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={40} min={10} max={10} goodDirection="high" />
+    ));
+    expect(container.querySelectorAll("path").length).toBe(0);
+    dispose();
+  });
+
+  it("hides the ring and lets the figure and caption carry the reading", async () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={71} caption="network idle" goodDirection="high" />
+    ));
+    expect(container.querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
+    expect(container.textContent).toContain("71%");
+    expect(container.textContent).toContain("network idle");
+    await expectNoViolations(container);
+    dispose();
+  });
+
+  /**
+   * The gauge names itself, and the name carries both facts.
+   *
+   * `role="img"` makes the subtree presentational, so the caption and the figure stop being read
+   * as loose text — which is the point: three gauges in one panel produce six unlabelled fragments
+   * in the reading order and no way to tell which figure belongs to which caption.
+   */
+  it("is one image whose name carries both the caption and the reading", () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={64} caption="IDLE" goodDirection="high" />
+    ));
+    const root = container.querySelector(".kui-gauge")!;
+    expect(root.getAttribute("role")).toBe("img");
+    expect(root.getAttribute("aria-label")).toBe("IDLE: 64%");
+    dispose();
+  });
+
+  /**
+   * The unmeasured gauge says so in words.
+   *
+   * The centre still prints the em dash, because that is the drawing; the name may not, because a
+   * screen reader announces `—` as "dash", or as "em dash", or as nothing, and every one of those
+   * is a rendering of "not measured" that does not mean it.
+   */
+  it("says the value is not measured rather than putting an em dash in its name", () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={undefined} caption="purgatory" goodDirection="low" />
+    ));
+    const root = container.querySelector(".kui-gauge")!;
+    expect(root.getAttribute("aria-label")).toBe("purgatory: not measured");
+    expect(root.getAttribute("aria-label")).not.toContain(ABSENT);
+    // The drawing is unchanged: the dash is still what the centre shows.
+    expect(container.querySelector(".kui-gauge__figure")!.textContent).toBe(ABSENT);
+    dispose();
+  });
+
+  /** A caption is optional, and a nameless `role="img"` is an axe violation as well as a silence.
+   * Without one the reading is the whole name — poorer than two facts, and not nothing. */
+  it("still names itself when it has no caption", async () => {
+    const { container, dispose } = mount(() => (
+      <RingGauge value={4212} max={10_000} goodDirection="low" valueText="4,212" />
+    ));
+    expect(container.querySelector(".kui-gauge")!.getAttribute("aria-label")).toBe("4,212");
+    await expectNoViolations(container);
+    dispose();
+  });
+});
+
+/* --- Histogram -------------------------------------------------------------------------------- */
+
+describe("Histogram", () => {
+  const BUCKETS = [
+    { from: 256, to: 512, count: 1_240 },
+    { from: 512, to: 1024, count: 3_180 },
+    { from: 1024, to: 2048, count: 9_420 },
+    { from: 2048, to: 4096, count: 880 },
+    { from: 4096, count: 210 },
+  ];
+
+  it("gives the modal bucket the accent ink and leaves its neighbours muted", () => {
+    const { container, dispose } = mount(() => (
+      <Histogram label="Message size distribution" buckets={BUCKETS} />
+    ));
+    const fills = [...container.querySelectorAll(".kui-plot__bar")].map(b => b.getAttribute("fill"));
+    expect(fills[2]).toBe("var(--kui-color-accent)");
+    expect(fills[1]).toBe("var(--kui-color-text-muted)");
+    expect(fills[3]).toBe("var(--kui-color-text-muted)");
+    dispose();
+  });
+
+  it("lets an explicit per-bar tone win, which is what the oversize tail needs", () => {
+    // The three inks in one series are the reason this is not BarChart, where tone belongs to a
+    // series and every bar of it is painted alike.
+    const { container, dispose } = mount(() => (
+      <Histogram
+        label="Message size distribution"
+        buckets={BUCKETS.map((b, i) => (i >= 3 ? { ...b, tone: "warning" as const } : b))}
+      />
+    ));
+    const fills = [...container.querySelectorAll(".kui-plot__bar")].map(b => b.getAttribute("fill"));
+    expect(fills[3]).toBe("var(--kui-color-warning)");
+    expect(fills[4]).toBe("var(--kui-color-warning)");
+    dispose();
+  });
+
+  it("highlights nothing when two buckets tie for tallest", () => {
+    const { container, dispose } = mount(() => (
+      <Histogram
+        label="Message size distribution"
+        buckets={[
+          { from: 0, to: 1024, count: 500 },
+          { from: 1024, to: 2048, count: 9_420 },
+          { from: 2048, to: 4096, count: 9_420 },
+        ]}
+      />
+    ));
+    const fills = [...container.querySelectorAll(".kui-plot__bar")].map(b => b.getAttribute("fill"));
+    expect(fills.some(f => f === "var(--kui-color-accent)")).toBe(false);
+    dispose();
+  });
+
+  it("draws no bar for a bucket that counted nothing", () => {
+    const { container, dispose } = mount(() => (
+      <Histogram
+        label="Message size distribution"
+        buckets={[
+          { from: 0, to: 1024, count: 400 },
+          { from: 1024, to: 2048, count: 0 },
+          { from: 2048, to: 4096, count: 900 },
+        ]}
+      />
+    ));
+    expect(container.querySelectorAll(".kui-plot__bar").length).toBe(2);
+    // The bucket keeps its column, so the axis still says where it was.
+    expect(container.querySelectorAll(".kui-plot__group").length).toBe(3);
+    dispose();
+  });
+
+  it("derives its tick labels from the bucket boundaries, not from category strings", () => {
+    const { container, dispose } = mount(() => (
+      <Histogram
+        label="Message size distribution"
+        buckets={BUCKETS}
+        formatBoundary={(v: number) => `${v} B`}
+        tickEvery={2}
+      />
+    ));
+    const ticks = [...container.querySelectorAll(".kui-plot__tick")].map(t => t.textContent);
+    expect(ticks[0]).toBe("256 B");
+    expect(ticks[1]).toBe("1024 B");
+    // The open-ended tail has no served upper edge, so the last tick prints nothing rather than
+    // inventing one.
+    expect(ticks[ticks.length - 1]).toBe("");
+    dispose();
+  });
+
+  it("says the range is empty rather than drawing an axis over nothing", () => {
+    const { container, dispose } = mount(() => (
+      <Histogram
+        label="Message size distribution"
+        buckets={BUCKETS.map(b => ({ ...b, count: 0 }))}
+        emptyMessage="No messages produced in this range."
+      />
+    ));
+    expect(container.querySelector(".kui-plot__empty")!.textContent).toContain("No messages produced");
+    expect(container.querySelectorAll(".kui-plot__bar").length).toBe(0);
+    dispose();
+  });
+
+  it("publishes its buckets as a table and moves a cursor with the keyboard", async () => {
+    const { container, dispose } = mount(() => (
+      <Histogram label="Message size distribution" buckets={BUCKETS} formatBoundary={(v: number) => `${v} B`} />
+    ));
+    const rows = container.querySelectorAll("table tbody tr");
+    expect(rows.length).toBe(5);
+    expect(rows[4]!.querySelector("th")!.textContent).toBe("4096 B+");
+
+    const surface = container.querySelector<HTMLElement>(".kui-plot__surface")!;
+    expect(surface.getAttribute("aria-describedby")).toBe(container.querySelector("table")!.id);
+    surface.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    flush();
+    expect(container.querySelector("[role='status']")!.textContent).toContain("256 B – 512 B");
+    await expectNoViolations(container);
+    dispose();
+  });
+});
+
+/* --- StackedBar ------------------------------------------------------------------------------- */
+
+describe("StackedBar", () => {
+  const SEGMENTS = [
+    { label: "a", value: 1, tone: "series-1" },
+    { label: "b", value: 1, tone: "series-2" },
+    { label: "other", value: 2, tone: "series-6" },
+  ] as const;
+
+  const widths = (container: HTMLElement): string[] =>
+    [...container.querySelectorAll<HTMLElement>(".kui-stacked__segment")].map(s => s.style.width);
+
+  it("sizes each segment by its share of the capacity", () => {
+    const { container, dispose } = mount(() => (
+      <StackedBar label="broker-1 disk usage" segments={[...SEGMENTS]} capacity={4} />
+    ));
+    expect(widths(container)).toEqual(["25%", "25%", "50%"]);
+    // One row per segment in the hidden table, which is the accessible rendering of the bar.
+    expect(container.querySelectorAll("table tbody tr").length).toBe(3);
+    dispose();
+  });
+
+  it("leaves the rest of the capacity as track rather than stretching to fill it", () => {
+    const { container, dispose } = mount(() => (
+      <StackedBar label="broker-1 disk usage" segments={[...SEGMENTS]} capacity={8} />
+    ));
+    expect(widths(container)).toEqual(["12.5%", "12.5%", "25%"]);
+    dispose();
+  });
+
+  it("draws the neutral track and no fill when the capacity is unknown", () => {
+    // A broker whose directories reported no capacity has no denominator, and a bar that drew its
+    // segments anyway would be showing a ratio computed against nothing.
+    const { container, dispose } = mount(() => (
+      <StackedBar label="broker-5 disk usage" segments={[...SEGMENTS]} capacity={undefined} valueText={ABSENT} />
+    ));
+    expect(container.querySelectorAll(".kui-stacked__segment").length).toBe(0);
+    expect(container.querySelector(".kui-stacked__track")).not.toBeNull();
+    expect(container.querySelector(".kui-stacked__value--unknown")!.textContent).toBe(ABSENT);
+    dispose();
+  });
+
+  it("cannot be made to overflow its track by segments that sum past the capacity", () => {
+    const { container, dispose } = mount(() => (
+      <StackedBar
+        label="broker-8 disk usage"
+        segments={[
+          { label: "a", value: 3, tone: "series-1" },
+          { label: "b", value: 3, tone: "series-2" },
+        ]}
+        capacity={4}
+      />
+    ));
+    const total = widths(container).reduce((sum, w) => sum + Number.parseFloat(w), 0);
+    expect(total).toBeCloseTo(100, 6);
+    dispose();
+  });
+
+  it("inks the figure beside the bar by how full it is, not by the segments' own tones", () => {
+    const warning = mount(() => (
+      <StackedBar
+        label="broker-1 disk usage"
+        segments={[{ label: "a", value: 83, tone: "series-1" }]}
+        capacity={100}
+        valueText="347 GB"
+      />
+    ));
+    expect(warning.container.querySelector(".kui-stacked__value--warning")).not.toBeNull();
+    warning.dispose();
+
+    const critical = mount(() => (
+      <StackedBar
+        label="broker-4 disk usage"
+        segments={[{ label: "a", value: 95, tone: "series-1" }]}
+        capacity={100}
+        valueText="396 GB"
+      />
+    ));
+    expect(critical.container.querySelector(".kui-stacked__value--critical")).not.toBeNull();
+    critical.dispose();
+  });
+
+  it("names each segment for a hover and draws no legend unless asked", async () => {
+    const bare = mount(() => (
+      <StackedBar label="broker-1 disk usage" segments={[...SEGMENTS]} capacity={4} format={(v: number) => `${v} GB`} />
+    ));
+    // The design draws one legend under a stack of rows, so a bar does not bring its own.
+    expect(bare.container.querySelector(".kui-chart-legend")).toBeNull();
+    expect(bare.container.querySelectorAll(".kui-stacked__segment")[2]!.getAttribute("title")).toBe("other · 2 GB");
+    await expectNoViolations(bare.container);
+    bare.dispose();
+
+    const withLegend = mount(() => (
+      <StackedBar label="broker-1 disk usage" segments={[...SEGMENTS]} capacity={4} legend />
+    ));
+    expect(withLegend.container.querySelector(".kui-chart-legend")!.textContent).toContain("other");
+    withLegend.dispose();
   });
 });

@@ -16,7 +16,8 @@ import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, FailuresBeforeGivingUp, backoffAfter, MaxBackoffMs } from "./health.js";
 import { destinationFor, navigationGroups, stillWorking, type FeatureStatus } from "./nav/navigation.js";
 import { clusterInUrl, createShellRouter, landingFor } from "./routing/routes.jsx";
-import { clusterSummaries, currentFeatureId } from "./App.jsx";
+import { clusterSummaries, countLookup, currentFeatureId, environmentSwitch } from "./App.jsx";
+import type { NavCounts } from "./chrome/types.js";
 
 const topics: FeatureRegistration = {
   id: "topics",
@@ -200,6 +201,56 @@ describe("the navigation's five states", () => {
     ];
     expect(stillWorking(features, "topics")).toEqual(["Clusters"]);
     expect(stillWorking(features, "clusters")).toEqual([]);
+  });
+});
+
+/**
+ * The seam between the frame's store and the drawer's badges.
+ *
+ * `navigationGroups` owns every rule about what a badge says, and `nav/navigation.test.ts` pins
+ * them. What is asserted here is the other half: that the shell actually hands the fold the numbers
+ * its store learned, keyed the way the fold expects, and that plugging a real source in does not
+ * quietly defeat the one rule that matters most when a service is down. Wave 1 shipped the fold and
+ * the store and connected neither to the other, and every rule below was green throughout.
+ */
+describe("the badges the frame hands the drawer", () => {
+  const landing = (registration: FeatureRegistration, cluster: string | undefined) =>
+    registration.requiresCluster
+      ? cluster === undefined
+        ? undefined
+        : `/ui/clusters/${cluster}/topics`
+      : "/ui/clusters";
+
+  const badgeFor = (state: FeatureState, counts: NavCounts | undefined) =>
+    navigationGroups({
+      features: [{ registration: topics, state }],
+      landingFor: landing,
+      cluster: "prod",
+      countFor: countLookup(counts),
+    })
+      .flatMap((group) => group.destinations)
+      .find((destination) => destination.id === "topics")?.badge;
+
+  it("draws the count the store learned", () => {
+    const badge = badgeFor(ready, { topics: { kind: "total", value: 128 } });
+    expect(badge?.text).toBe("128");
+    expect(badge?.tone).toBe("neutral");
+  });
+
+  it("draws no badge at all for a count the store has not learned", () => {
+    /* Not a `0`. "Topics 0" on a cluster whose topic service did not answer is a statement about
+       the cluster, and a false one — and the store has three separate ways of having no number. */
+    expect(badgeFor(ready, {})).toBeUndefined();
+    expect(badgeFor(ready, undefined)).toBeUndefined();
+  });
+
+  it("gives the row to the capability badge when the service is down, count or no count", () => {
+    /* `128` beside a dead topic service is a reassuring picture of an outage: the reader sees a
+       figure, concludes the topics are fine, and the one marker that would have said otherwise is
+       the one dropped to make room for it. */
+    const badge = badgeFor(down, { topics: { kind: "total", value: 128 } });
+    expect(badge?.text).toBe("down");
+    expect(badge?.tone).toBe("danger");
   });
 });
 
@@ -456,6 +507,32 @@ describe("the cluster switcher's rows", () => {
       ]),
     );
     expect(rows[0]?.health).toBe("unreachable");
+  });
+});
+
+describe("changing environment", () => {
+  it("says nothing at all when the chosen cluster is the one already shown", () => {
+    /* The rail marks the current environment, so this is a misclick — and a confirmation for a
+       misclick is what teaches an operator that the toasts in this product are noise. */
+    expect(environmentSwitch("prod", "prod", "Production EU", true)).toBeUndefined();
+  });
+
+  it("names the cluster the way the operator named it, and falls back to the identifier", () => {
+    expect(environmentSwitch("prod", "staging", "Production EU", false)?.title).toBe(
+      "Switched to Production EU",
+    );
+    /* A blank where a name goes reads as a bug in the toast rather than as a cluster nobody has
+       named, which is the same degradation `clusterSummaries` makes for the same reason. */
+    expect(environmentSwitch("prod", "staging", undefined, false)?.title).toBe("Switched to prod");
+  });
+
+  it("rewrites the address only when the address disagrees with the new selection", () => {
+    /* On `/ui/clusters/staging/topics`, leaving the address alone puts a URL saying `staging` in
+       front of a frame describing `prod` — and the address is the half of that pair people copy. */
+    expect(environmentSwitch("prod", "staging", undefined, true)?.rewriteAddress).toBe(true);
+    /* On `/ui/settings` there is nothing to contradict, and moving somebody off a page they
+       deliberately opened is the rudeness `soleClusterChoice` is careful to avoid. */
+    expect(environmentSwitch("prod", "staging", undefined, false)?.rewriteAddress).toBe(false);
   });
 });
 

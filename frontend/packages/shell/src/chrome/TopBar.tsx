@@ -1,5 +1,6 @@
-import { Show } from "solid-js";
+import { Show, createSignal, onCleanup } from "solid-js";
 import { Icon } from "@kui/kernel";
+import { AppearancePopover, type AppearancePreferences } from "./AppearancePopover.js";
 import { Breadcrumb } from "./Breadcrumb.js";
 import { NotificationBell, NotificationPanel, type NoticeFeed } from "./Notifications.js";
 import { SearchField, type SearchFieldProps } from "./SearchField.js";
@@ -32,7 +33,19 @@ import type { Crumb } from "./types.js";
  * toggle cannot express the difference between "light" and "light because everything else is", and
  * the difference is the whole point. The accessible name says the mode in words — "Theme: follows
  * system" — because the glyph alone cannot distinguish "currently light" from "auto, and it is
- * daytime".
+ * daytime". `SCREENS-V4.md` §7.4 asks whether the glyph should instead name the theme it will move
+ * *to*; it cannot, because a cycle of three has no single target, and that is the half of the
+ * finding settled here. The other half — a two-segment control over a three-valued preference — is
+ * settled in `AppearancePopover`.
+ *
+ * ## The appearance popover is this component's own
+ *
+ * The notifications panel's openness belongs to the caller, because what opening it *means* is a
+ * product decision with a real trade-off (does it mark everything read?) and because its contents
+ * are fetched and can fail. Neither is true here: the popover reads and writes three browser
+ * preferences, has no request behind it and no consequence beyond itself, so a caller that had to
+ * hold a boolean for it would be holding it for nothing. It closes on Escape and on a click
+ * outside, and `onOpenAppearance` still fires for a caller that wants to know.
  *
  * ## The bell counts, and says so
  *
@@ -52,7 +65,22 @@ export type TopBarProps = {
    */
   readonly crumbs?: readonly Crumb[] | undefined;
   readonly search: SearchFieldProps;
-  readonly theme: ThemeMode;
+  /**
+   * Which theme mode the glyph names, for a caller that holds it itself.
+   *
+   * Ignored when `appearance` is supplied: the preference is then the single source, and a second
+   * one passed alongside it could only ever disagree. `auto` when neither is given.
+   */
+  readonly theme?: ThemeMode | undefined;
+  /**
+   * The three preferences the appearance popover writes — the kernel's own singletons, or a
+   * stand-in built by `createRootPreference` in a test.
+   *
+   * Absent leaves both controls inert rather than drawing controls that do nothing: without it the
+   * theme button falls back to `onCycleTheme` and the sliders button to `onOpenAppearance`, which
+   * is what a caller driving the preferences itself would pass.
+   */
+  readonly appearance?: AppearancePreferences | undefined;
   readonly onCycleTheme?: (() => void) | undefined;
   readonly onOpenAppearance?: (() => void) | undefined;
   /** Unread notifications. Zero means no marker at all. */
@@ -75,8 +103,48 @@ const THEME_LABEL: Record<ThemeMode, string> = {
 
 const THEME_ICON = { auto: "theme-auto", light: "sun", dark: "moon" } as const;
 
+/** auto → light → dark → auto. The order the settings page lists them in, so the two agree. */
+const THEME_CYCLE: readonly ThemeMode[] = ["auto", "light", "dark"];
+
 export function TopBar(props: TopBarProps) {
   const unread = () => props.unreadCount ?? 0;
+
+  /* The preference wins when there is one, because it is the thing the stylesheet reads. A `theme`
+     prop passed beside it could only be a second, staler copy of the same fact. */
+  const mode = (): ThemeMode => props.appearance?.theme.choice() ?? props.theme ?? "auto";
+
+  const cycleTheme = () => {
+    if (props.onCycleTheme !== undefined) {
+      props.onCycleTheme();
+      return;
+    }
+    const preference = props.appearance?.theme;
+    if (preference === undefined) return;
+    const next = THEME_CYCLE[(THEME_CYCLE.indexOf(preference.choice()) + 1) % THEME_CYCLE.length];
+    if (next !== undefined) preference.select(next);
+  };
+
+  const [appearanceOpen, setAppearanceOpen] = createSignal(false);
+  let appearanceAnchor: HTMLDivElement | undefined;
+
+  /* `mousedown` and not `click`: a click that begins inside the popover and ends outside it — a
+     drag that overshoots a segment — is not a click elsewhere, and closing on it would take the
+     control away mid-gesture. Registered once for the life of the bar rather than added and removed
+     with the popover, because a listener added during the click that opened it sees that same click
+     on its way back up and closes it again immediately. */
+  const closeOnOutsideClick = (event: MouseEvent) => {
+    if (!appearanceOpen()) return;
+    const target = event.target;
+    if (target instanceof Node && appearanceAnchor?.contains(target) === true) return;
+    setAppearanceOpen(false);
+  };
+  document.addEventListener("mousedown", closeOnOutsideClick);
+  onCleanup(() => document.removeEventListener("mousedown", closeOnOutsideClick));
+
+  const toggleAppearance = () => {
+    props.onOpenAppearance?.();
+    if (props.appearance !== undefined) setAppearanceOpen(!appearanceOpen());
+  };
 
   return (
     <header class="kui-topbar" data-testid="topbar">
@@ -94,22 +162,55 @@ export function TopBar(props: TopBarProps) {
         <button
           type="button"
           class="kui-topbar__icon-button"
-          aria-label={THEME_LABEL[props.theme]}
-          onClick={() => props.onCycleTheme?.()}
+          aria-label={THEME_LABEL[mode()]}
+          onClick={cycleTheme}
           data-testid="theme-control"
         >
-          <Icon name={THEME_ICON[props.theme]} size="18px" />
+          <Icon name={THEME_ICON[mode()]} size="18px" />
         </button>
 
-        <button
-          type="button"
-          class="kui-topbar__icon-button"
-          aria-label="Appearance: accent colour and density"
-          onClick={() => props.onOpenAppearance?.()}
-          data-testid="appearance-control"
+        {/* Anchored rather than portalled, so it stays under the glyph when the window is resized
+            and so Tab moves from the glyph straight into it. Escape is caught on the anchor rather
+            than on the panel, so it works while focus is still on the button that opened it. */}
+        <div
+          class="kui-topbar__appearance-anchor"
+          ref={(element) => (appearanceAnchor = element)}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape" || !appearanceOpen()) return;
+            setAppearanceOpen(false);
+            /* Focus goes back to the glyph. Escape that left focus on a removed element drops the
+               keyboard user at the top of the document. */
+            const glyph = '[data-testid="appearance-control"]';
+            event.currentTarget.querySelector<HTMLButtonElement>(glyph)?.focus();
+          }}
         >
-          <Icon name="sliders" size="18px" />
-        </button>
+          <button
+            type="button"
+            class={[
+              "kui-topbar__icon-button",
+              { "kui-topbar__icon-button--open": appearanceOpen() },
+            ]}
+            aria-label="Appearance: accent colour, theme and density"
+            aria-expanded={
+              props.appearance === undefined ? undefined : appearanceOpen() ? "true" : "false"
+            }
+            aria-haspopup={props.appearance === undefined ? undefined : "dialog"}
+            onClick={toggleAppearance}
+            data-testid="appearance-control"
+          >
+            <Icon name="sliders" size="18px" />
+          </button>
+          <Show when={appearanceOpen() ? props.appearance : undefined}>
+            {(preferences) => (
+              <div class="kui-topbar__appearance-panel">
+                <AppearancePopover
+                  preferences={preferences()}
+                  onClose={() => setAppearanceOpen(false)}
+                />
+              </div>
+            )}
+          </Show>
+        </div>
 
         {/* The panel is anchored to the bell rather than portalled, so that it stays under it when
             the window is resized and so that Tab moves from the bell straight into it. */}

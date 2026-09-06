@@ -1,6 +1,6 @@
 # KUI roadmap
 
-**Last revised:** 2026-09-03. Feature IDs refer to `docs/FEATURE_MATRIX.md`.
+**Last revised:** 2026-09-06. Feature IDs refer to `docs/FEATURE_MATRIX.md`.
 
 > **This is a record of what each milestone set out to deliver, in the words used at the time.**
 > ADR-048 replaced the Scala.js and Laminar frontend with TypeScript, SolidJS and Vite on
@@ -287,7 +287,13 @@ later may be able to take that away.**
     SameSite=Lax`, id rotates on login; CSRF header required on every cookie-authenticated
     mutation; logout is `POST`.
   - Property tests on the pure RBAC evaluator (action dependency unnesting, regex resources,
-    cluster scoping) shared with Scala.js.
+    cluster scoping). *Corrected 2026-09-06:* this criterion said "shared with Scala.js", and
+    there is no Scala.js in this build — ADR-048 replaced it. The evaluator is JVM-only
+    (`libs/security-core`, with `RbacLawsSuite` as its property suite), and the browser's gate
+    is a **separate** TypeScript implementation with tests of its own, in
+    `frontend/packages/kernel/src/data/permissions/store.ts`. Two implementations of one rule
+    is the risk this criterion now has to carry, because nothing makes them share code: each
+    must be held to the same laws, and the interesting failure is the one where they disagree.
   - A service reached directly with a forged `X-KUI-Principal` header rejects the request;
     the same request through the gateway succeeds.
   - Fault-isolation E2E: stopping `kui-identity` with `auth.type=DISABLED` changes nothing;
@@ -388,12 +394,18 @@ later may be able to take that away.**
 | Milestone | Rows | P0 | P1 | Services introduced | Microfrontends introduced |
 | --- | --- | --- | --- | --- | --- |
 | M0 | 15 | 12 | 3 | gateway, cluster (shell) | ui-kernel, ui-shell |
-| M1 | 17 | 9 | 7 | cluster (complete) | ui-clusters |
+| M1 | 23 | 13 | 9 | cluster (complete) | ui-clusters |
 | M2 | 8 | 6 | 1 | topic | ui-topics |
 | M3 | 28 | 16 | 9 | message | ui-messages |
 | M4 | 7 | 5 | 2 | consumer | ui-consumers |
 | M5 | 22 | 6 | 10 | — | — |
-| M6 | 18 | 5 | 8 | identity | ui-admin |
+| M6 | 17 | 5 | 7 | identity | ui-admin |
 | M7 | 34 | 11 | 16 | schema, connect, ksql, security | ui-schemas, ui-connect, ui-ksql, ui-security |
 | M8 | 20 | 0 | 14 | metrics, config | ui-metrics |
 | M9 | 10 | 0 | 0 | — | plugin SDK |
+
+The Rows, P0 and P1 columns belong to `docs/FEATURE_MATRIX.md` and were recomputed from its rows on
+2026-09-06 with the `awk` command that file publishes. M1 read 17/9/7 and M6 read 18/5/8: those were
+the figures when this table was written, rows have been added and reassigned since, and nobody ran
+the recount. The other eight rows already agreed, which is what makes the two that did not worth
+saying out loud rather than quietly fixing.

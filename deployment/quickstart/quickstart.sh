@@ -144,7 +144,7 @@ wait_for_frontend() {
       return 0
     fi
     if ! command -v curl >/dev/null 2>&1; then
-      case "$(docker inspect -f '{{.State.Health.Status}}' kui-frontend 2>/dev/null || echo none)" in
+      case "$(docker inspect -f '{{.State.Health.Status}}' kui-quickstart-frontend 2>/dev/null || echo none)" in
         healthy) return 0 ;;
       esac
     fi

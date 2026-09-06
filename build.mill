@@ -539,12 +539,19 @@ object libs extends Module {
     }
   }
 
-  /** The two caching primitives of ADR-016: a single value that is refreshed on a schedule and keeps
-    * answering while the refresh fails (ADR-016).
+  /** The three caching primitives of ADR-016. `SnapshotCell` is the first: a single value that is
+    * refreshed on a schedule and keeps answering while the refresh fails.
     *
-    * `BoundedCache`, ADR-016's other primitive, arrived in M3 with its first callers: the compiled
-    * CEL programs of `libs/filter` and the Schema-Registry schemas of `libs/serde-confluent`. A
-    * cache with no caller has no TTL policy to test against, which is why it waited.
+    * `BoundedCache`, the second, arrived in M3 with its first callers: the compiled CEL programs of
+    * `libs/filter` and the Schema-Registry schemas of `libs/serde-confluent`. A cache with no caller
+    * has no TTL policy to test against, which is why it waited.
+    *
+    * `SeriesWindow`, with its `Ref`-backed holder `SeriesWindowCell`, is the third: many samples of
+    * one value over time, bucketed and bounded by both age and count. It refuses three ways, and
+    * each refusal is a figure this product would otherwise print wrongly — a bucket nobody sampled
+    * is absent rather than `0`, a window collecting for less than the period asked for answers
+    * `None` rather than computing four minutes and labelling it a day, and a window whose samples
+    * have all been evicted counts a miss rather than a fresh hit.
     */
   object cache extends KuiPureModule with KuiJvmModule {
     def moduleDeps = Seq(kernel.jvm, observability)
@@ -1452,6 +1459,11 @@ object services extends Module {
         // capability document reports that cluster as not_configured. The gateway routes it exactly
         // like any other service — being optional is a runtime state, not a routing rule.
         schema.contract.jvm,
+        // The metrics service's contract. Optional in the same way the schema service's is, and
+        // reported per cluster in the same vocabulary: a deployment with no metrics source answers
+        // not_configured and the dashboard's metrics cards keep their written sentence. One entry per
+        // service in `ServiceContracts`, one module dependency here.
+        metrics.contract.jvm,
         // The identity service's contract. Alone among them it is *not* proxied: `AuthRoutes` calls its
         // login, password and OpenID Connect endpoints itself, because a sign-in has to end in a session
         // cookie and sessions live at the gateway.
@@ -2463,6 +2475,193 @@ object services extends Module {
     }
   }
 
+  /** `kui-metrics-service`: broker throughput, and the four other measurements the dashboard's cards need.
+    *
+    * The **eighth** service, and the first one added since the shape settled — which is why it ships as a
+    * skeleton. Adding a service to this repository touches seven places outside the service (this file,
+    * `ServiceContracts`, `AllInOneWiring`, the two OpenAPI documents, the browser's generated types and the
+    * Compose stack), and three later milestones each add one. Walking all seven once, for a service that
+    * answers honestly and measures nothing, is what makes those three additions a known quantity.
+    *
+    * It has no Kafka client and no HTTP client either. `services/schema` is the template — six layers, an
+    * upstream behind `libs/http` — and this service is that template with the upstream left out until the
+    * collector exists: KUI reads no broker metric today, there is no JMX client and no Prometheus parser
+    * anywhere in the repository, and writing one is the metrics milestone's work. Every cluster therefore
+    * reports `not_configured` and every card keeps its written "not measured" sentence, which is the correct
+    * rendering rather than a placeholder (ADR-032).
+    */
+  object metrics extends Module {
+
+    /** The vocabulary of a measurement, and the port it is stated in terms of.
+      *
+      * Rule A1 allows it `libs/kernel` and cats-core, nothing else. What lives here is what has a wrong
+      * answer that reaches a screen: the ranges, whose window and step have to be chosen together, and the
+      * fold from samples to buckets, whose single rule — a bucket nobody sampled is absent, never zero — is
+      * the difference between "KUI was restarting" and "your producers stopped".
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The use cases: one read, and the three-way answer every later one will copy.
+      *
+      * No `libs/security-core` here, unlike the schema service's: this service has no mutation, so there is
+      * no audit record for it to hold and no `Principal` for it to keep. The day it acquires one, that
+      * dependency arrives with it.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The adapters: which clusters exist, and which of them declared a metrics source.
+      *
+      * That is the whole layer today. It holds no client of any kind — no Kafka, no HTTP — because there is
+      * nothing yet to adapt: the JMX and Prometheus collectors arrive with the metrics milestone, and they
+      * arrive *here*, behind the domain's port, without any other module changing.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps = Seq(domain, application, libs.config, libs.kernel.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification and
+      * the OpenAPI document. It starts nothing.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.metrics.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.metrics.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          mvn"io.circe::circe-parser::${Versions.circe}"
+        )
+      }
+    }
+
+    /** The composition root: the one place in the metrics service that constructs anything concrete.
+      *
+      * It starts no listener, exactly like every other service's, which is what lets `apps/allinone` take
+      * its routes and serve them beside the rest over one port (ADR-010).
+      */
+    object app extends KuiJvmModule {
+      def moduleDeps = Seq(api, infrastructure, libs.config, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code, and all are needed by a process with a `main`.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The published wire shape of `kui-metrics-service`, cross-compiled so the browser decodes exactly what
+      * this service encodes, from one source (ADR-003).
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+    }
+  }
+
 }
 
 /** Deployable processes assembled out of the modules above.
@@ -2507,6 +2706,12 @@ object apps extends Module {
       services.identity.api,
       services.schema.app,
       services.schema.api,
+      // The metrics service, which measures nothing yet and says so per cluster. It is in this binary
+      // for the reason the schema service is: "this deployment has no metrics source" is an answer the
+      // dashboard needs from a running service, and a service left out of the process would instead look
+      // like a service that is down.
+      services.metrics.app,
+      services.metrics.api,
       libs.config,
       libs.observability,
       libs.http
@@ -2556,106 +2761,6 @@ object apps extends Module {
         mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}"
       )
     }
-  }
-}
-
-/** The end-to-end tests: a real browser, driven from Scala, against a really running KUI.
-  *
-  * ADR-018 chose JVM Playwright over the TypeScript one so that the tests are written in the same
-  * language and built by the same tool as everything else. There is therefore no `package.json`, no
-  * second dependency manager and no second CI toolchain here — `com.microsoft.playwright:playwright`
-  * is an ordinary Maven coordinate, and the browser it drives is downloaded once by
-  * `./mill e2e.installBrowser`.
-  *
-  * The module is split the way every other module is: `e2e/src` holds the reusable machinery (the
-  * fixtures, the page objects, the fault-isolation scenario) and `e2e/test/src` holds the suites.
-  * That is not ceremony. A page object is production-grade code that several suites and several
-  * milestones share, and keeping it out of the test source set is what stops it turning into
-  * copy-paste inside individual suites.
-  *
-  * It depends on no other module. The suites talk to KUI the way a user does — over HTTP, through a
-  * browser — and giving them the server's classes on the classpath would let an assertion quietly
-  * become a unit test against an object it should only be able to see through the wire.
-  */
-object e2e extends KuiJvmModule {
-
-  /** The one lint rule this module is exempt from is `DisableSyntax.noThrows`, and
-    * `.scalafix-e2e.conf` says at length why a test fixture is not production code in that respect.
-    */
-  def scalafixConfig = Task { Some(mill.api.BuildCtx.workspaceRoot / ".scalafix-e2e.conf") }
-
-  def mvnDeps = Seq(
-    mvn"com.microsoft.playwright:playwright:${Versions.playwright}",
-    // MUnit is a main dependency and not a test one because `BaseE2ESuite` — an ordinary class in
-    // this module that every suite extends — is written against it.
-    mvn"org.scalameta::munit::${Versions.munit}",
-    mvn"io.circe::circe-core::${Versions.circe}",
-    mvn"io.circe::circe-parser::${Versions.circe}"
-  )
-
-  /** Downloads the Chromium build this Playwright release speaks to.
-    *
-    * The two version numbers move together (`Versions.playwright` and `Versions.playwrightBrowser`),
-    * and the library refuses to drive any other revision, so this is not "install a browser" but
-    * "install *the* browser". It lands in `~/.cache/ms-playwright` and is shared by every later run,
-    * which is why CI caches that directory rather than paying the download on each job.
-    *
-    * `--with-deps` additionally installs the shared libraries the browser needs. It is what a fresh
-    * CI runner image requires and it needs root, so it is opt-in here: `./mill e2e.installBrowser
-    * --with-deps`.
-    */
-  def installBrowser(args: String*): Command[Unit] = Task.Command {
-    val classPath = runClasspath().map(_.path.toString).mkString(java.io.File.pathSeparator)
-    val arguments = Seq("install") ++ args ++ Seq("chromium")
-
-    os.proc(
-      Seq(s"${System.getProperty("java.home")}/bin/java", "-cp", classPath, "com.microsoft.playwright.CLI") ++
-        arguments
-    ).call(cwd = mill.api.BuildCtx.workspaceRoot, stdout = os.Inherit, stderr = os.Inherit)
-
-    println(s"e2e.installBrowser: ${Versions.playwrightBrowser}")
-  }
-
-  object test extends ScalaTests with KuiTests {
-
-    /** Everything the suites need to find, handed over as environment variables.
-      *
-      * A test cannot ask Mill for a task's output while it is running, so the two artefacts it
-      * drives — the assembled all-in-one jar and the Compose file — are resolved by the build and
-      * passed in. Declaring the jar here is also what makes `./mill e2e.test` build it first: the
-      * suite can never run against a stale binary, because there is a real dependency edge between
-      * the two rather than a convention that somebody remembers to rebuild.
-      */
-    override def forkEnv = Task {
-      // Building the two images the Compose topology runs, and throwing the tags away. The tags
-      // are not needed — `docker-compose.yml` names the images itself — but the dependency edge
-      // is, and this is the only way to declare one on a side effect that lives in the Docker
-      // daemon rather than in `out/`.
-      //
-      // Without it, `./mill e2e.test` ran the Compose suites against whichever `kui-gateway` and
-      // `kui-cluster` images happened to be on the machine. During M1 that was the M0 images, so
-      // the fault-isolation suite — the milestone's headline claim — spent the whole milestone
-      // passing against the previous milestone's code, and the failure that finally exposed it was
-      // a screenshot of the deleted Ping page.
-      val _ = deployment.docker.gateway.docker.build()
-      val _ = deployment.docker.cluster.docker.build()
-
-      super.forkEnv() ++ Map(
-        "KUI_E2E_ALLINONE_JAR" -> apps.allinone.assembly().path.toString,
-        "KUI_E2E_COMPOSE_FILE" ->
-          (mill.api.BuildCtx.workspaceRoot / "deployment" / "compose" / "docker-compose.yml").toString,
-        "KUI_E2E_COMPOSE_OVERRIDE" ->
-          (mill.api.BuildCtx.workspaceRoot / "deployment" / "compose" / "docker-compose.e2e.yml").toString,
-        "KUI_E2E_ARTIFACTS" -> (mill.api.BuildCtx.workspaceRoot / "out" / "e2e-artifacts").toString,
-        "JAVA_HOME" -> System.getProperty("java.home")
-      )
-    }
-
-    /** One suite at a time. Both Compose suites drive the same containers, by the fixed names the
-      * topology gives them, so two of them running at once would be one suite stopping the service
-      * the other had just asserted was up.
-      */
-    override def testParallelism = false
   }
 }
 
@@ -3000,6 +3105,20 @@ object deployment extends Module {
       def entryClass       = "kui.schema.app.Main"
       def livenessPath     = "/health/live"
       def imageDescription = "KUI schema registry service"
+    }
+
+    /** The Metrics service: broker throughput, and the measurements the dashboard's cards need.
+      *
+      * Packaged like every other service even though it measures nothing yet. A deployment can run it and
+      * get an honest `not_configured` per cluster, or not run it and get the gateway's `unavailable` — and
+      * those are different answers, which is exactly why it is a container rather than a flag.
+      */
+    object metrics extends KuiImage {
+      def deployable       = services.metrics.app
+      def imageName        = "kui-metrics"
+      def entryClass       = "kui.metrics.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI metrics service"
     }
 
     /** The whole product in one process (ADR-005). */
@@ -3390,13 +3509,20 @@ def checkArchitecture(): Task.Command[Unit] = Task.Command {
 /** Downloads every coordinate M0 pins and prints how many were fetched. Exits non-zero on the first
   * version that does not exist, which is the whole point of the task.
   */
-/** The pinned versions that something outside the build has to read back.
+/** The pinned versions that something outside the build can read back.
   *
   * `Versions` above is a plain Scala object, evaluated while the build definition is being
-  * compiled, so `./mill show Versions.playwright` cannot work — Mill can only show a *task*. CI
-  * needs the Playwright numbers as text (it installs the browser before the e2e job runs), so those
-  * two are re-exported here as tasks. Everything else is read by the build itself and needs no
-  * external accessor.
+  * compiled, so `./mill show Versions.playwright` cannot work — Mill can only show a *task*, which
+  * is why these two are re-exported here.
+  *
+  * Nothing reads them today. They were added for a Scala Playwright e2e module that CI installed a
+  * browser for by asking the build for the number; that module is gone, the browser suite is `pnpm
+  * e2e` under `frontend/`, and both CI jobs install with `pnpm exec playwright install --with-deps
+  * chromium` — which takes its version from `frontend/package.json` (1.63.0), not from here
+  * (1.62.0). So `Versions.playwright` is an orphaned pin and this module its orphaned accessor;
+  * `DEPENDENCY_MATRIX.md` records the same. Deleting both is the obvious follow-up and is left to
+  * whoever owns the dependency registry, because the matrix's stated rule is to keep a version
+  * written down even when no module uses it.
   */
 object versions extends Module {
   def playwright: T[String]        = Task { Versions.playwright }

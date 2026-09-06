@@ -35,12 +35,15 @@ final class ClusterResponsesSuite extends FunSuite {
         controllerId = Some(BrokerId.unsafe(1)),
         controllerKind = ClusterSummaryDto.KRaft,
         brokerCount = 3,
-        onlinePartitionCount = None,
-        offlinePartitionCount = None,
-        underReplicatedPartitionCount = None,
+        // A complete sweep, so the three of them are numbers. They are absent together or present
+        // together and never one without the others, which is what the golden document is for.
+        onlinePartitionCount = Some(1522),
+        offlinePartitionCount = Some(2),
+        underReplicatedPartitionCount = Some(12),
         totalDiskUsageBytes = Some(549755813888L),
         features = List("DESCRIBE_LOG_DIRS", "DESCRIBE_QUORUM"),
-        scrapedAt = at
+        scrapedAt = at,
+        controllerUptime = Some(ControllerUptimeDto(Some(99.98d), 21600L, 21600L))
       ),
       at
     )
@@ -70,8 +73,8 @@ final class ClusterResponsesSuite extends FunSuite {
           port = 9093,
           rack = Some("eu-west-1a"),
           isController = true,
-          partitionCount = None,
-          leaderCount = None,
+          partitionCount = Some(42),
+          leaderCount = Some(14),
           replicaCount = Some(42),
           replicaSkewPercent = Some(3.5d),
           leaderSkewPercent = None,

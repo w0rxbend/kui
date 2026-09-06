@@ -5,6 +5,8 @@
   "isSimple" : false,
   "partitionAssignor" : "cooperative-sticky",
   "coordinatorId" : 2,
+  "coordinatorHost" : "broker-2.kafka.svc",
+  "coordinatorPort" : 9092,
   "members" : [
     {
       "memberId" : "consumer-orders-indexer-1-6f1c",

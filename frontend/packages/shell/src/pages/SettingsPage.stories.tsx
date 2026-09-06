@@ -4,7 +4,7 @@ import type { AccentChoice, DensityChoice, ThemeChoice } from "@kui/kernel";
 import { SettingsPage } from "./SettingsPage.jsx";
 
 /**
- * The four preferences, and the two facts a bug report needs.
+ * The three preferences, and the two facts a bug report needs.
  *
  * It reads nothing from any service, which is the point: it is one of two screens that has to keep
  * working when everything behind KUI is down. `NothingReported` is the story that matters — a value

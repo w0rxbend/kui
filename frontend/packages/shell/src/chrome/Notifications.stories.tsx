@@ -1,6 +1,12 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { createSignal } from "solid-js";
-import { NotificationBell, NotificationPanel, type Notice, type NoticeFeed } from "./Notifications.jsx";
+import {
+  NotificationBell,
+  NotificationPanel,
+  type Notice,
+  type NoticeCategory,
+  type NoticeFeed,
+} from "./Notifications.jsx";
 
 /**
  * The bell and its panel.
@@ -26,11 +32,19 @@ type Story = StoryObj<typeof NotificationPanel>;
 const NOW = new Date("2026-09-05T12:00:00Z");
 const ago = (minutes: number): Date => new Date(NOW.getTime() - minutes * 60_000);
 
-/** The four the design draws, in the order it draws them. */
+/**
+ * The four the design draws, in the order it draws them.
+ *
+ * Two of them are warnings and they carry different glyphs — the rebalance arrows and the disk —
+ * which is the whole of `SCREENS-V4.md` §3.9's correction: severity chooses the tone, category
+ * chooses the glyph. Before the category existed, this story drew two identical amber triangles and
+ * looked correct, which is why it is worth reading the icons on it rather than the words.
+ */
 const NOTICES: readonly Notice[] = [
   {
     id: "rebalance",
     severity: "warning",
+    category: "rebalance",
     title: "clickstream-etl is rebalancing",
     body: "12 members, lag climbing past 3.8k. Third time today.",
     at: ago(2),
@@ -39,6 +53,7 @@ const NOTICES: readonly Notice[] = [
   {
     id: "connector",
     severity: "danger",
+    category: "connector",
     title: "Connector elastic-audit-sink failed",
     body: "Task 0: connection refused to es-01:9200.",
     at: ago(14),
@@ -47,6 +62,7 @@ const NOTICES: readonly Notice[] = [
   {
     id: "disk",
     severity: "warning",
+    category: "storage",
     title: "broker-3 disk at 83%",
     body: "Consider shortening retention on analytics.clickstream.",
     at: ago(60),
@@ -55,6 +71,7 @@ const NOTICES: readonly Notice[] = [
   {
     id: "schema",
     severity: "success",
+    category: "schema",
     title: "Schema v3 registered",
     body: "orders.payments.v2-value is BACKWARD compatible.",
     at: ago(180),
@@ -206,6 +223,64 @@ export const TheExtremes: Story = {
             body: "Something unremarkable happened.",
             at: ago(index * 7 + 5),
           })),
+        ],
+      }}
+    />
+  ),
+};
+
+/** One amber notification of a given category, so the list below reads as seven glyphs. */
+const warning = (id: string, category: NoticeCategory, title: string, minutes: number): Notice => ({
+  id,
+  severity: "warning",
+  category,
+  title,
+  at: ago(minutes),
+});
+
+/**
+ * One severity, every category.
+ *
+ * Seven warnings that are seven different things. Read down the tiles: they are all amber, because
+ * that is what "warning" means, and no two of them draw the same mark. This is the story that fails
+ * if the glyph ever goes back to being derived from the severity.
+ */
+export const OneSeverityEveryCategory: Story = {
+  render: () => (
+    <Panel
+      feed={{
+        kind: "ready",
+        notices: [
+          warning("1", "rebalance", "orders-consumer is rebalancing", 1),
+          warning("2", "storage", "broker-3 disk at 83%", 3),
+          warning("3", "connector", "es-audit-sink task 0 retrying", 7),
+          warning("4", "schema", "v4 is only FORWARD compatible", 11),
+          warning("5", "cluster", "broker-2 rejoined the cluster", 19),
+          warning("6", "topic", "analytics.raw has 1 URP", 31),
+          warning("7", "security", "Sign-in refused for svc-etl", 47),
+        ],
+      }}
+    />
+  ),
+};
+
+/**
+ * Notifications with no category at all, which is every notification the product raises today.
+ *
+ * The glyph falls back to the severity. It is honest and it is weak — four amber triangles is a
+ * panel nobody scans — and that weakness is the argument for recording a category wherever one is
+ * known, rather than for inventing one here.
+ */
+export const NoCategoryRecorded: Story = {
+  render: () => (
+    <Panel
+      feed={{
+        kind: "ready",
+        notices: [
+          { id: "1", severity: "info", title: "Cluster reconnected", at: ago(2) },
+          { id: "2", severity: "warning", title: "Rebalance started", at: ago(6) },
+          { id: "3", severity: "danger", title: "Connector failed", at: ago(9) },
+          { id: "4", severity: "success", title: "Schema registered", at: ago(14) },
         ],
       }}
     />

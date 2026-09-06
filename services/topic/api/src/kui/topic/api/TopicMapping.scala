@@ -6,7 +6,7 @@ import kui.contracts.paging.PageDto
 import kui.contracts.topic.{PartitionDto, ReplicaDto, TopicConfigEntryDto, TopicDetailDto, TopicRowDto}
 import kui.kernel.{Page, Sort}
 import kui.topic.contract.TopicSortField as WireSortField
-import kui.topic.contract.dto.{TopicConfigViewDto, TopicDetailResponse}
+import kui.topic.contract.dto.{TopicConfigViewDto, TopicDetailResponse, TopicStatisticsDto}
 import kui.topic.domain.{
   PartitionView,
   Replica,
@@ -14,6 +14,7 @@ import kui.topic.domain.{
   TopicConfigView,
   TopicDetail,
   TopicSortField,
+  TopicStatistics,
   TopicSummary
 }
 
@@ -48,6 +49,14 @@ object TopicMapping {
     * here would be a second opportunity to reproduce the reference product's page-count defect.
     */
   def page(items: Page[TopicSummary]): PageDto[TopicRowDto] = PageDto.of(items)(row)
+
+  /** The cluster-wide totals, renamed and nothing else.
+    *
+    * Every refusal in this document was taken in the domain, by [[kui.topic.domain.TopicStatistics.of]], over
+    * the same `sumOrRefuse` the rows are built with. A mapper that summed here would be a second opinion
+    * about a total the list already has one of.
+    */
+  def statistics(value: TopicStatistics): TopicStatisticsDto = value.into[TopicStatisticsDto].transform
 
   def replica(value: Replica): ReplicaDto =
     ReplicaDto(broker = value.broker, leader = value.isLeader, inSync = value.isInSync)

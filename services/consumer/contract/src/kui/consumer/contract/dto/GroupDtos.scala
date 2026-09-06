@@ -37,6 +37,10 @@ type GroupPageDto = PageDto[GroupSummaryDto]
   *   what the group negotiated — `range`, `cooperative-sticky`, and so on. Empty for a group with no members,
   *   which is why it is a `String` and not an `Option`: Kafka reports `""`, and translating that to `null`
   *   would invent a distinction the broker does not make
+  * @param coordinatorHost
+  *   the coordinator's address, beside `coordinatorId` and never instead of it. The detail page and the list
+  *   row spell the coordinator the same way, for the reason [[kui.contracts.consumer.GroupSummaryDto]] gives,
+  *   and the three fields are absent together
   * @param assignments
   *   whether the member assignments below are current or the last ones seen (DC-H10). During a rebalance
   *   Kafka reports none at all; showing an empty table would tell an operator their consumers had stopped,
@@ -55,6 +59,8 @@ final case class GroupDetailDto(
     isSimple: Boolean,
     partitionAssignor: String,
     coordinatorId: Option[Int],
+    coordinatorHost: Option[String],
+    coordinatorPort: Option[Int],
     members: List[MemberDto],
     topics: List[TopicSubscriptionDto],
     totalLag: Option[Long],
@@ -75,6 +81,8 @@ object GroupDetailDto {
         isSimple <- cursor.get[Boolean]("isSimple")
         partitionAssignor <- cursor.get[String]("partitionAssignor")
         coordinatorId <- cursor.get[Option[Int]]("coordinatorId")
+        coordinatorHost <- cursor.get[Option[String]]("coordinatorHost")
+        coordinatorPort <- cursor.get[Option[Int]]("coordinatorPort")
         members <- cursor.get[List[MemberDto]]("members")
         topics <- cursor.get[List[TopicSubscriptionDto]]("topics")
         totalLag <- cursor.get[Option[Long]]("totalLag")
@@ -89,6 +97,8 @@ object GroupDetailDto {
         isSimple,
         partitionAssignor,
         coordinatorId,
+        coordinatorHost,
+        coordinatorPort,
         members,
         topics,
         totalLag,
@@ -105,6 +115,8 @@ object GroupDetailDto {
         "isSimple" -> dto.isSimple.asJson,
         "partitionAssignor" -> dto.partitionAssignor.asJson,
         "coordinatorId" -> dto.coordinatorId.asJson,
+        "coordinatorHost" -> dto.coordinatorHost.asJson,
+        "coordinatorPort" -> dto.coordinatorPort.asJson,
         "members" -> dto.members.asJson,
         "topics" -> dto.topics.asJson,
         "totalLag" -> dto.totalLag.asJson,

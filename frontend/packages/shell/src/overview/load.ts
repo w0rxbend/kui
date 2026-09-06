@@ -31,13 +31,17 @@ import {
   brokerCount,
   brokerHealth,
   controllerNote,
+  inSyncPercent,
   lagPill,
   latencyPercentiles,
+  messageSizes,
   overviewLede,
   partitionHealth,
   partitionTotal,
   productionRate,
   replicationPill,
+  storageBreakdown,
+  storageLede,
   throughputSeries,
   topLag,
   totalLag,
@@ -245,8 +249,13 @@ function topicCountOf(response: unknown): Reading<number> {
 /** Assembles the view model. Pure, and therefore the thing the tests drive. */
 export function toOverviewModel(data: OverviewData): OverviewModel {
   const lag = totalLag(data.groups);
+  /* Folded once and handed to both tabs. The Storage tab is the card's own home and the Overview
+     tab draws it as its fourth row (SCREENS-V4.md §4.1), and two folds over one answer would be
+     two chances for the two tabs to disagree about which prefix owns a disk. */
+  const storage = storageBreakdown(data.brokers, data.logDirs);
   return {
     lede: overviewLede(data.summary),
+    storageLede: storageLede(storage),
     brokerCount: brokerCount(data.summary),
     brokerPill: replicationPill(data.summary),
     topicCount: data.topicCount,
@@ -259,6 +268,9 @@ export function toOverviewModel(data: OverviewData): OverviewModel {
     brokers: brokerHealth(data.brokers, data.logDirs),
     controllerNote: controllerNote(data.brokers),
     partitions: partitionHealth(data.summary),
+    inSync: inSyncPercent(data.summary),
     topLag: topLag(data.groups),
+    storage,
+    messageSizes: messageSizes(),
   };
 }

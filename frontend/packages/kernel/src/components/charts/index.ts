@@ -17,6 +17,19 @@ export { MagnitudeBarList, type MagnitudeBarListProps, type MagnitudeEntry } fro
 export { Donut, type DonutProps, type DonutSegment } from "./Donut.jsx";
 export { BarChart, type BarChartProps } from "./BarChart.jsx";
 export { LineChart, type LineChartProps } from "./LineChart.jsx";
+
+/**
+ * The four marks the dashboard's cards are drawn with (SCREENS-V4.md §3.3-§3.6). Each one exists
+ * because a component already in this barrel refuses to be it: `Sparkline` because a plot with an
+ * axis, a legend and a tab stop is not a 24px mark inside a stat card; `RingGauge` because
+ * `Donut` is parts of a whole and cannot be told which end of a scale is the good one; `Histogram`
+ * because `BarChart` tones a series and a histogram tones bars; `StackedBar` because
+ * `SegmentBar`'s segments are equal by design. Each of their headers says so in full.
+ */
+export { Sparkline, type SparklineProps } from "./Sparkline.jsx";
+export { RingGauge, type RingGaugeProps, type GaugeTone } from "./RingGauge.jsx";
+export { Histogram, type HistogramProps, type HistogramBucket, type HistogramReadout } from "./Histogram.jsx";
+export { StackedBar, type StackedBarProps, type StackedBarSegment } from "./StackedBar.jsx";
 export { type Series, type PlotProps, seriesMax, isPlotEmpty, defaultTicks, topRoundedRect } from "./plot.js";
 export {
   ABSENT,

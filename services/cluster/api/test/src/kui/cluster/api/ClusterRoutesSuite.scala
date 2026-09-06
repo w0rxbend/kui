@@ -202,8 +202,9 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
         BrokerListRow(
           broker = ClusterFixtures.broker(1),
           isController = true,
+          partitions = Some(4),
+          leaders = Some(2),
           replicas = Some(3),
-          leaders = None,
           skewPercent = Some(0.0d),
           totalBytes = Some(100L),
           usableBytes = Some(40L),
@@ -224,9 +225,9 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
         assertEquals(broker.get[Option[String]]("rack"), Right(Some("eu-west-1a")))
         assertEquals(broker.get[Boolean]("isController"), Right(true))
         assertEquals(broker.get[Option[Long]]("diskUsageBytes"), Right(Some(60L)))
-        // The two counts M1 cannot produce are null on the wire, not zero.
-        assertEquals(broker.get[Option[Int]]("partitionCount"), Right(None))
-        assertEquals(broker.get[Option[Int]]("leaderCount"), Right(None))
+        // Both come from the same sweep and both reach the wire as numbers when it was complete.
+        assertEquals(broker.get[Option[Int]]("partitionCount"), Right(Some(4)))
+        assertEquals(broker.get[Option[Int]]("leaderCount"), Right(Some(2)))
       }
   }
 
@@ -343,7 +344,18 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
     val list = BrokerList(
       profile.ref,
       List(
-        BrokerListRow(ClusterFixtures.broker(1), true, Some(3), None, Some(0.0d), Some(1L), Some(0L), Some(1L), 0)
+        BrokerListRow(
+          ClusterFixtures.broker(1),
+          true,
+          Some(4),
+          Some(2),
+          Some(3),
+          Some(0.0d),
+          Some(1L),
+          Some(0L),
+          Some(1L),
+          0
+        )
       ),
       SnapshotFreshness.Fresh(ClusterFixtures.At)
     )

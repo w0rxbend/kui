@@ -172,6 +172,12 @@ object StaleDto {
   * `orElse(0)`, which turns an unmeasurable partition into a measured zero; that is the fabrication a
   * capacity decision must never be made from (M4 DEVPLAN §10 D6).
   *
+  * The coordinator arrives as three fields rather than one address string, and `coordinatorId` keeps its
+  * name: it is already on the wire and the browser already decodes it, so a rename would be a breaking change
+  * for a figure nobody asked to change. The three are absent together — a group whose coordinator could not
+  * be described has none of them, and a host without a port is not an address — so a screen may test one and
+  * read all three. `SCREENS-V4.md` §4.12 prints `broker-1:9092`, which the id alone cannot spell.
+  *
   * @param pace
   *   the change in the group's total committed offset per second, between the last two snapshot passes.
   *   `null` until two passes exist, and `null` for one interval after the group's partition set changed — a
@@ -187,6 +193,8 @@ final case class GroupSummaryDto(
     topics: Int,
     partitions: Int,
     coordinatorId: Option[Int],
+    coordinatorHost: Option[String],
+    coordinatorPort: Option[Int],
     totalLag: Option[Long],
     pace: Option[Double],
     excludedPartitions: Int,
@@ -206,6 +214,8 @@ object GroupSummaryDto {
         topics <- cursor.get[Int]("topics")
         partitions <- cursor.get[Int]("partitions")
         coordinatorId <- cursor.get[Option[Int]]("coordinatorId")
+        coordinatorHost <- cursor.get[Option[String]]("coordinatorHost")
+        coordinatorPort <- cursor.get[Option[Int]]("coordinatorPort")
         totalLag <- cursor.get[Option[Long]]("totalLag")
         pace <- cursor.get[Option[Double]]("pace")
         excludedPartitions <- cursor.get[Int]("excludedPartitions")
@@ -219,6 +229,8 @@ object GroupSummaryDto {
         topics,
         partitions,
         coordinatorId,
+        coordinatorHost,
+        coordinatorPort,
         totalLag,
         pace,
         excludedPartitions,
@@ -234,6 +246,8 @@ object GroupSummaryDto {
         "topics" -> dto.topics.asJson,
         "partitions" -> dto.partitions.asJson,
         "coordinatorId" -> dto.coordinatorId.asJson,
+        "coordinatorHost" -> dto.coordinatorHost.asJson,
+        "coordinatorPort" -> dto.coordinatorPort.asJson,
         "totalLag" -> dto.totalLag.asJson,
         "pace" -> dto.pace.asJson,
         "excludedPartitions" -> dto.excludedPartitions.asJson,

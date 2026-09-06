@@ -11,10 +11,11 @@ import kui.kernel.error.KuiError
   *
   * ==Absence is a value, never an exception==
   *
-  * Three methods answer `Option`, and each `None` is an ordinary fact rather than a failure:
+  * Five methods answer `Option`, and each `None` is an ordinary fact rather than a failure:
   *
-  *   - a subject that does not exist ([[versions]], [[schema]], [[checkCompatibility]]) — following a stale
-  *     link should show "no such subject", and the route turns this into a 404 with a code, not a 500;
+  *   - a subject that does not exist ([[versions]], [[schema]], [[checkCompatibility]], [[summary]]) —
+  *     following a stale link should show "no such subject", and the route turns this into a 404 with a code,
+  *     not a 500;
   *   - a subject with no compatibility level of its own ([[subjectCompatibility]]) — it follows the global
   *     level, and saying so is the difference between an honest screen and one that invites an operator to
   *     write an override they did not intend.
@@ -32,6 +33,24 @@ trait SchemaRegistryPort[F[_]] {
     * is nowhere to push it to.
     */
   def subjects: F[Either[KuiError, List[Subject]]]
+
+  /** The three facts a subject list row shows beside the name, for one subject. `None` when the subject is no
+    * longer there.
+    *
+    * ==Why this is one method and not the three it is made of==
+    *
+    * The caller enriches a *page*, so what bounds the load on the registry is the number of calls per row,
+    * and a number a caller cannot count is a number nobody bounded. One method per row makes the fan-out
+    * exactly the page size and makes it assertable against a counting fake. What the call costs below this
+    * port is the registry's business — over the Confluent API it is three requests, and a registry that grows
+    * a bulk endpoint could answer it in one without a caller changing.
+    *
+    * The compatibility level here is the subject's **own**, and `None` means it has none of its own rather
+    * than that it has none at all. Resolving the inherited level needs the registry-wide one, which is the
+    * same for every row and is therefore read once for the page by the caller — see
+    * [[SubjectSummary.inheriting]]. Asking for it here would multiply one call by the page size.
+    */
+  def summary(subject: Subject): F[Either[KuiError, Option[SubjectSummary]]]
 
   /** The version numbers of one subject, ascending. `None` when the subject does not exist. */
   def versions(subject: Subject): F[Either[KuiError, Option[List[SchemaVersion]]]]

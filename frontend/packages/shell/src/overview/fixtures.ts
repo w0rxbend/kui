@@ -29,11 +29,54 @@ export const BROKERS: readonly Broker[] = [
   { id: 3, host: "broker-3.kyiv", port: 9092, isController: false, leaderCount: 526 },
 ];
 
-/** Disks at 61%, 58% and 83% — the third one over the amber threshold, as the design draws it. */
+/**
+ * Disks at 61%, 58% and 83% — the third one over the amber threshold, as the design draws it.
+ *
+ * The replica breakdown is what the storage card attributes by, and the names are chosen to exercise
+ * the fold rather than to look plausible: three ordinary prefixes that each really continue past
+ * their segment (so the rows read `orders.*` and not `orders`), and one internal topic, which has to
+ * come out under `internal` however its own name is spelled. The sizes sum to a little under each
+ * broker's used bytes, because a Kafka disk holds more than its partitions and a fixture whose
+ * segments exactly filled the used total would hide the remainder the bar is supposed to show.
+ */
 export const LOG_DIRS: readonly LogDir[] = [
-  { brokerId: 1, path: "/var/lib/kafka", totalBytes: 1000, usableBytes: 390 },
-  { brokerId: 2, path: "/var/lib/kafka", totalBytes: 1000, usableBytes: 420 },
-  { brokerId: 3, path: "/var/lib/kafka", totalBytes: 1000, usableBytes: 170 },
+  {
+    brokerId: 1,
+    path: "/var/lib/kafka",
+    totalBytes: 1000,
+    usableBytes: 390,
+    replicas: [
+      { topic: "orders.payments", sizeBytes: 250 },
+      { topic: "analytics.clicks", sizeBytes: 180 },
+      { topic: "inventory.stock", sizeBytes: 90 },
+      { topic: "__consumer_offsets", sizeBytes: 40 },
+    ],
+  },
+  {
+    brokerId: 2,
+    path: "/var/lib/kafka",
+    totalBytes: 1000,
+    usableBytes: 420,
+    replicas: [
+      { topic: "orders.payments", sizeBytes: 240 },
+      { topic: "analytics.clicks", sizeBytes: 170 },
+      { topic: "inventory.stock", sizeBytes: 85 },
+      { topic: "__consumer_offsets", sizeBytes: 35 },
+    ],
+  },
+  {
+    brokerId: 3,
+    path: "/var/lib/kafka",
+    totalBytes: 1000,
+    usableBytes: 170,
+    replicas: [
+      { topic: "orders.payments", sizeBytes: 300 },
+      { topic: "orders.refunds", sizeBytes: 120 },
+      { topic: "analytics.clicks", sizeBytes: 200 },
+      { topic: "inventory.stock", sizeBytes: 100 },
+      { topic: "__consumer_offsets", sizeBytes: 40 },
+    ],
+  },
 ];
 
 export const GROUPS: readonly ConsumerGroup[] = [
@@ -92,6 +135,30 @@ export const UNHEALTHY: OverviewData = {
 export const NO_DISK_SIZES: OverviewData = {
   ...HEALTHY,
   logDirs: value(LOG_DIRS.map((dir) => ({ ...dir, totalBytes: undefined, usableBytes: undefined }))),
+};
+
+/**
+ * One broker with a second directory that reports replicas and no capacity.
+ *
+ * This is the fixture the storage card's skip rule is argued with, and it is built so that the wrong
+ * answer is *visible*: broker 1's second disk holds 400 bytes of `orders.*`, which is more than the
+ * first disk's whole `orders.*` share. Counting it against a capacity that excludes that disk pushes
+ * the row past the end of its own track, and `StackedBar` clamps rather than complaining — so the
+ * picture would look ordinary and the ratio would be wrong. Broker 1's segments must therefore total
+ * exactly what its measured directory holds.
+ */
+export const PARTIAL_DISKS: OverviewData = {
+  ...HEALTHY,
+  logDirs: value([
+    ...LOG_DIRS,
+    {
+      brokerId: 1,
+      path: "/var/lib/kafka-2",
+      totalBytes: undefined,
+      usableBytes: undefined,
+      replicas: [{ topic: "orders.payments", sizeBytes: 400 }],
+    },
+  ]),
 };
 
 /** One service down, the rest up: the dashboard has to stay useful. */

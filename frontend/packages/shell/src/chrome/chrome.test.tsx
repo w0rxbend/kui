@@ -12,6 +12,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { AccountMenu } from "./AccountMenu.jsx";
+import { AppearancePopover, type AppearancePreferences } from "./AppearancePopover.jsx";
+import { BrandBlock } from "./BrandBlock.jsx";
 import { Breadcrumb } from "./Breadcrumb.jsx";
 import { ClusterSelector } from "./ClusterSelector.jsx";
 import { ClusterStatusCard } from "./ClusterStatusCard.jsx";
@@ -19,15 +21,21 @@ import { EnvRail } from "./EnvRail.jsx";
 import { NavDrawer } from "./NavDrawer.jsx";
 import { NavItem } from "./NavItem.jsx";
 import { SearchField } from "./SearchField.jsx";
-import { TabStrip } from "@kui/kernel";
+import { StorageMeter } from "./StorageMeter.jsx";
+import { TabStrip, createRootPreference } from "@kui/kernel";
+import type { AccentChoice, DensityChoice, ThemeChoice } from "@kui/kernel";
 import { TopBar } from "./TopBar.jsx";
 import { shortcutHint } from "./SearchField.jsx";
 import {
   CLUSTERS,
+  DEFECTIVE_CLUSTER,
   HEALTHY_CLUSTER,
   LONG_TOPIC,
   NAV_GROUPS,
+  NAV_GROUPS_EMPTY_ECOSYSTEM,
+  NAV_GROUPS_WITH_TREE,
   TOPIC_TABS,
+  UNCOUNTED_CLUSTER,
   UNREACHABLE_CLUSTER,
   VERSIONLESS_CLUSTER,
 } from "./fixtures.js";
@@ -96,6 +104,95 @@ describe("NavItem", () => {
   });
 });
 
+
+describe("BrandBlock", () => {
+  /* `SCREENS-V4.md` §2.1. The three parts of the caption are three independent figures, and the
+   * rule the whole component exists for is that a part nobody supplied is dropped rather than
+   * filled in — every one of the cases below is a way of getting that wrong that reads as a
+   * rendering fault or, worse, as a fact. */
+
+  it("writes the three-part caption with one separator between each part", () => {
+    const { container, dispose } = mount(() => <BrandBlock cluster={DEFECTIVE_CLUSTER} />);
+    expect(container.querySelector(".kui-brand__caption")!.textContent).toBe("1 URP · v3.7.0 · 3 brokers");
+    dispose();
+  });
+
+  it("takes the health word as the first token when there is no defect to report", () => {
+    const { container, dispose } = mount(() => <BrandBlock cluster={HEALTHY_CLUSTER} />);
+    // A green dot beside the word "healthy" says one thing twice; "1 URP" above says what the dot
+    // cannot. The token is variable in kind, which is the whole reason the caption exists.
+    expect(container.querySelector(".kui-brand__caption")!.textContent).toBe("healthy · v3.7.0 · 3 brokers");
+    dispose();
+  });
+
+  it("says nothing about brokers when nobody has counted them", () => {
+    const { container, dispose } = mount(() => <BrandBlock cluster={UNCOUNTED_CLUSTER} />);
+    // Not `— brokers`, which reads as a missing dash rather than as a missing figure, and not
+    // `0 brokers`, which is an assertion about the cluster nobody made.
+    expect(container.textContent).not.toContain("brokers");
+    expect(container.textContent).not.toContain("—");
+    expect(container.querySelector(".kui-brand__name")!.textContent).toBe("prod-kyiv-01");
+    expect(container.querySelector(".kui-brand__dot")).not.toBeNull();
+    dispose();
+  });
+
+  it("drops the version alone rather than leaving an empty slot for it", () => {
+    const { container, dispose } = mount(() => <BrandBlock cluster={VERSIONLESS_CLUSTER} />);
+    expect(container.querySelector(".kui-brand__caption")!.textContent).toBe("healthy");
+    dispose();
+  });
+
+  it("draws no caption at all before the first scrape has answered", () => {
+    const { container, dispose } = mount(() => (
+      <BrandBlock cluster={{ id: "c", name: "prod-kyiv-01", health: "unknown" }} />
+    ));
+    expect(container.querySelector(".kui-brand__caption")).toBeNull();
+    expect(container.querySelector(".kui-brand__dot--unknown")).not.toBeNull();
+    dispose();
+  });
+
+  it("takes the registration link from the caller and omits it when there is none", () => {
+    // Never a literal: this is the only route to cluster registration in the product, and a
+    // hand-written address goes on compiling after a route segment is renamed.
+    const withHref = mount(() => <BrandBlock cluster={HEALTHY_CLUSTER} manageHref="/ui/clusters/manage" />);
+    const add = withHref.container.querySelector('[data-testid="brand-add-cluster"]') as HTMLAnchorElement;
+    expect(add.getAttribute("href")).toBe("/ui/clusters/manage");
+    expect(add.textContent).toContain("Add a cluster");
+    withHref.dispose();
+
+    const without = mount(() => <BrandBlock cluster={HEALTHY_CLUSTER} />);
+    expect(without.container.querySelector('[data-testid="brand-add-cluster"]')).toBeNull();
+    without.dispose();
+  });
+
+  it("says there is no cluster rather than drawing an empty head", () => {
+    const { container, dispose } = mount(() => <BrandBlock manageHref="/ui/clusters/manage" />);
+    expect(container.querySelector(".kui-brand__name")!.textContent).toBe("no cluster");
+    dispose();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container, dispose } = mount(() => (
+      <BrandBlock cluster={DEFECTIVE_CLUSTER} manageHref="/ui/clusters/manage" />
+    ));
+    expect(describeViolations(await findViolations(container))).toBe("");
+    dispose();
+  });
+});
+
+describe("StorageMeter", () => {
+  it("draws its 'not known' rendering for an empty list, and no zeroed bars", () => {
+    // The rendering it has drawn in every deployment since it was built, because until this wave
+    // nothing had ever handed it data. An empty bar reads as 0% — "your disks are empty" — which is
+    // both wrong and the most comforting available misreading.
+    const { container, dispose } = mount(() => <StorageMeter brokers={[]} />);
+    expect(container.textContent).toContain("Disk usage could not be read for this cluster.");
+    expect(container.querySelector(".kui-storage__percent--unknown")!.textContent).toBe("—");
+    expect(container.textContent).not.toContain("0%");
+    dispose();
+  });
+});
+
 describe("NavDrawer", () => {
   it("labels each group's list with its own heading", () => {
     const { container, dispose } = mount(() => <NavDrawer groups={NAV_GROUPS} cluster={HEALTHY_CLUSTER} />);
@@ -110,6 +207,97 @@ describe("NavDrawer", () => {
     const { container, dispose } = mount(() => <NavDrawer groups={NAV_GROUPS} cluster={HEALTHY_CLUSTER} />);
     const headings = [...container.querySelectorAll(".kui-nav-group__heading")].map((h) => h.textContent);
     expect(headings).toEqual(["CLUSTER", "ECOSYSTEM"]);
+    dispose();
+  });
+
+  it("renders nothing at all for a group with no destinations", async () => {
+    // ECOSYSTEM's only state until M9. A lettered heading over an empty list reads as a list that
+    // failed to load, and sends an operator hunting for an outage that does not exist — the same
+    // misreading ADR-032's `not_configured → hidden` rule prevents one level up.
+    const { container, dispose } = mount(() => (
+      <NavDrawer groups={NAV_GROUPS_EMPTY_ECOSYSTEM} cluster={HEALTHY_CLUSTER} />
+    ));
+    const headings = [...container.querySelectorAll(".kui-nav-group__heading")].map((h) => h.textContent);
+    expect(headings).toEqual(["CLUSTER"]);
+    expect(container.querySelectorAll(".kui-nav-group__list").length).toBe(1);
+    expect(container.textContent).not.toContain("ECOSYSTEM");
+    dispose();
+  });
+
+  it("orders a nested tree by rank: favourites first, internal last", () => {
+    // The fixture is handed over in the wrong order on purpose — `internal` first, the favourite
+    // last — because `nav/topicTree.ts` already emits them sorted and a renderer that merely
+    // preserved its input would pass every test until somebody assembled the children from two
+    // sources the other way round.
+    const { container, dispose } = mount(() => (
+      <NavDrawer groups={NAV_GROUPS_WITH_TREE} currentId="topics" cluster={HEALTHY_CLUSTER} />
+    ));
+    const subtree = container.querySelector('[data-testid="nav-topics-subtree"]')!;
+    const labels = [...subtree.querySelectorAll(".kui-nav-item__label")].map((el) => el.textContent);
+    expect(labels[0]).toBe("orders.payments.v2");
+    expect(labels.at(-1)).toBe("internal");
+    dispose();
+  });
+
+  it("opens and closes a branch from its disclosure, and removes the subtree rather than hiding it", async () => {
+    const collapsed = NAV_GROUPS_WITH_TREE.map((group) => ({
+      ...group,
+      destinations: group.destinations.map((destination) =>
+        destination.id === "topics" ? { ...destination, expanded: false } : destination,
+      ),
+    }));
+    const { container, dispose } = mount(() => (
+      <NavDrawer groups={collapsed} currentId="topics" cluster={HEALTHY_CLUSTER} />
+    ));
+    const disclosure = container.querySelector('[data-testid="nav-topics-disclosure"]') as HTMLButtonElement;
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    // Not merely hidden: a collapsed subtree left in the document is still in the tab order and
+    // still read aloud, which is the whole failure a disclosure exists to prevent.
+    expect(container.querySelector('[data-testid="nav-topics-subtree"]')).toBeNull();
+
+    await userEvent.click(disclosure);
+    flush();
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector('[data-testid="nav-topics-subtree"]')).not.toBeNull();
+    dispose();
+  });
+
+  it("keeps the label a link and the disclosure a separate control", () => {
+    const { container, dispose } = mount(() => (
+      <NavDrawer groups={NAV_GROUPS_WITH_TREE} currentId="topics" cluster={HEALTHY_CLUSTER} />
+    ));
+    // Two affordances, both wanted: an operator who knows which prefix they want expands, and one
+    // who wants the whole list clicks the label. Merging them costs whichever loses.
+    expect((container.querySelector('[data-testid="nav-topics"]') as HTMLAnchorElement).tagName).toBe("A");
+    expect((container.querySelector('[data-testid="nav-topics-disclosure"]') as HTMLElement).tagName).toBe(
+      "BUTTON",
+    );
+    dispose();
+  });
+
+  it("puts the cluster at its head, with the registration link the caller supplied", () => {
+    const { container, dispose } = mount(() => (
+      <NavDrawer groups={NAV_GROUPS} cluster={DEFECTIVE_CLUSTER} manageHref="/ui/clusters/manage" />
+    ));
+    expect(container.querySelector(".kui-brand__name")!.textContent).toBe("staging-eu-01");
+    expect(container.querySelector('[data-testid="brand-add-cluster"]')!.getAttribute("href")).toBe(
+      "/ui/clusters/manage",
+    );
+    // The product wordmark is gone from the drawer entirely (§2.1); the rail marks the product.
+    expect(container.textContent).not.toContain("Kafka UI");
+    dispose();
+  });
+
+  it("has no accessibility violations with a tree expanded", async () => {
+    const { container, dispose } = mount(() => (
+      <NavDrawer
+        groups={NAV_GROUPS_WITH_TREE}
+        currentId="topics"
+        cluster={HEALTHY_CLUSTER}
+        manageHref="/ui/clusters/manage"
+      />
+    ));
+    expect(describeViolations(await findViolations(container))).toBe("");
     dispose();
   });
 
@@ -464,6 +652,158 @@ describe("TopBar", () => {
   it("has no accessibility violations", async () => {
     const { container, dispose } = mount(() => <TopBar {...base} theme="dark" unreadCount={2} />);
     expect(describeViolations(await findViolations(container))).toBe("");
+    dispose();
+  });
+});
+
+describe("the appearance popover", () => {
+  /**
+   * Preferences that paint a detached element and remember nothing.
+   *
+   * The application hands the popover the kernel's module-level singletons; a suite that drove
+   * those would share `localStorage` with the next suite, need a browser that has one, and repaint
+   * the test runner. The point of the props is exactly that this substitution is possible — and the
+   * substitution is the *object*, never a second storage key, because two spellings of one
+   * preference is the failure this control exists to avoid.
+   */
+  const preferences = (): AppearancePreferences => {
+    const root = document.createElement("div");
+    return {
+      theme: createRootPreference<ThemeChoice>({
+        attribute: "data-theme",
+        storageKey: "kui.theme",
+        values: ["auto", "light", "dark"],
+        fallback: "auto",
+        attributeValue: (chosen) => (chosen === "auto" ? null : chosen),
+        storage: null,
+        root,
+      }),
+      accent: createRootPreference<AccentChoice>({
+        attribute: "data-accent",
+        storageKey: "kui.accent",
+        values: ["blue", "teal", "green", "amber"],
+        fallback: "blue",
+        attributeValue: (chosen) => (chosen === "blue" ? null : chosen),
+        storage: null,
+        root,
+      }),
+      density: createRootPreference<DensityChoice>({
+        attribute: "data-density",
+        storageKey: "kui.density",
+        values: ["comfortable", "compact"],
+        fallback: "comfortable",
+        attributeValue: (chosen) => (chosen === "compact" ? "compact" : null),
+        storage: null,
+        root,
+      }),
+    };
+  };
+
+  it("offers three theme segments, because the preference has three values", async () => {
+    // `SCREENS-V4.md` §7.4, settled in favour of keeping `auto`: it is the default, and it is the
+    // one the other two cannot express — a laptop that turns dark at sunset turns KUI with it.
+    const chosen = preferences();
+    const { container, dispose } = mount(() => <AppearancePopover preferences={chosen} />);
+    const group = container.querySelector('[data-testid="appearance-theme"]')!;
+    const labels = [...group.querySelectorAll("label")].map((label) => label.textContent?.trim());
+    expect(labels).toEqual(["Auto", "Light", "Dark"]);
+    dispose();
+  });
+
+  it("writes each choice to the preference the settings page writes to", async () => {
+    const chosen = preferences();
+    const { container, dispose } = mount(() => <AppearancePopover preferences={chosen} />);
+
+    await userEvent.click(container.querySelector('[data-testid="appearance-theme"] input[value="dark"]')!);
+    await userEvent.click(container.querySelector('[data-testid="appearance-accent"] input[value="teal"]')!);
+    await userEvent.click(
+      container.querySelector('[data-testid="appearance-density"] input[value="compact"]')!,
+    );
+    flush();
+
+    expect(chosen.theme.choice()).toBe("dark");
+    expect(chosen.accent.choice()).toBe("teal");
+    expect(chosen.density.choice()).toBe("compact");
+    dispose();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container, dispose } = mount(() => <AppearancePopover preferences={preferences()} />);
+    expect(describeViolations(await findViolations(container))).toBe("");
+    dispose();
+  });
+
+  it("opens under the top bar's sliders glyph and closes on Escape", async () => {
+    const chosen = preferences();
+    const { container, dispose } = mount(() => (
+      <TopBar
+        crumbs={[{ label: "prod-kyiv-01" }]}
+        search={{ value: "", onInput: () => {}, platform: "other" }}
+        appearance={chosen}
+      />
+    ));
+    const control = container.querySelector('[data-testid="appearance-control"]') as HTMLButtonElement;
+    expect(control.getAttribute("aria-expanded")).toBe("false");
+
+    await userEvent.click(control);
+    flush();
+    expect(container.querySelector('[data-testid="appearance-popover"]')).not.toBeNull();
+    expect(control.getAttribute("aria-expanded")).toBe("true");
+
+    await userEvent.keyboard("{Escape}");
+    flush();
+    expect(container.querySelector('[data-testid="appearance-popover"]')).toBeNull();
+    // Focus goes back to the glyph. Escape that left focus on a removed element drops the keyboard
+    // user at the top of the document.
+    expect(document.activeElement).toBe(control);
+    dispose();
+  });
+
+  it("closes when the pointer goes down outside it, and not when it goes down inside", async () => {
+    const chosen = preferences();
+    const { container, dispose } = mount(() => (
+      <TopBar search={{ value: "", onInput: () => {}, platform: "other" }} appearance={chosen} />
+    ));
+    await userEvent.click(container.querySelector('[data-testid="appearance-control"]')!);
+    flush();
+
+    // A press that lands on a control inside the panel must not close it: `mousedown` and not
+    // `click` is exactly so that a drag which begins on a segment and overshoots it is still the
+    // gesture the operator meant.
+    await userEvent.pointer({
+      keys: "[MouseLeft>]",
+      target: container.querySelector('[data-testid="appearance-theme"]')!,
+    });
+    flush();
+    expect(container.querySelector('[data-testid="appearance-popover"]')).not.toBeNull();
+
+    await userEvent.pointer({ keys: "[MouseLeft>]", target: document.body });
+    flush();
+    expect(container.querySelector('[data-testid="appearance-popover"]')).toBeNull();
+    dispose();
+  });
+
+  it("cycles the theme preference from the top bar's glyph, and names the mode in words", async () => {
+    const chosen = preferences();
+    const { container, dispose } = mount(() => (
+      <TopBar search={{ value: "", onInput: () => {}, platform: "other" }} appearance={chosen} />
+    ));
+    const control = container.querySelector('[data-testid="theme-control"]') as HTMLButtonElement;
+    expect(control.getAttribute("aria-label")).toContain("Theme: follows system");
+
+    await userEvent.click(control);
+    flush();
+    expect(chosen.theme.choice()).toBe("light");
+    expect(control.getAttribute("aria-label")).toContain("Theme: light");
+
+    await userEvent.click(control);
+    flush();
+    expect(chosen.theme.choice()).toBe("dark");
+
+    await userEvent.click(control);
+    flush();
+    // Back to `auto`, which is a state a two-way toggle cannot return to at all.
+    expect(chosen.theme.choice()).toBe("auto");
     dispose();
   });
 });

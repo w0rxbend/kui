@@ -13,6 +13,9 @@ import kui.config.{
   AuthConfig,
   ConsumersConfig,
   GatewayConfig,
+  KuiConfig,
+  MetricsConfig,
+  MetricsSourceSettings,
   PrincipalKeyConfig,
   SafeUrl,
   ServerConfig,
@@ -24,7 +27,7 @@ import kui.config.{
 import kui.gateway.api.routing.ContractRouting
 import kui.gateway.app.GatewayServer
 import kui.http.KuiServer
-import kui.kernel.{Host, Port, PositiveInt, Secret, ServiceId}
+import kui.kernel.{ClusterId, Host, Port, PositiveInt, Secret, ServiceId}
 import kui.observability.Telemetry
 import kui.security.rbac.RbacPolicy
 import kui.testkit.KuiIOSuite
@@ -101,6 +104,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           auth = AuthConfig.Default,
           rbac = RbacPolicy.Disabled,
           store = StoreConfig.Default,
+          metrics = MetricsConfig.Default,
           Telemetry.noop[IO],
           AllInOneFixture.principals,
           logger
@@ -191,9 +195,29 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         .map { entries =>
           val context = entries.headOption.map(_.context).getOrElse(Map.empty)
           assertEquals(context.get("deployment"), Some("all-in-one"))
-          assertEquals(context.get("services"), Some("cluster,consumer,identity,message,schema,topic"))
+          val expected = "cluster,consumer,identity,message,metrics,schema,topic"
+          assertEquals(context.get("services"), Some(expected))
         }
     }
+  }
+
+  test("theMetricsSectionSurvivesTheSliceRatherThanBecomingItsDefault") {
+    // The shape of the defect this closes is the one `kui.clusters[]` already had: a section that loads,
+    // and a slice that quietly drops it. Nothing observable differs while this build has no collector —
+    // every cluster answers `not_configured` either way — but the capability row's *reason* does, and the
+    // reason is the only thing separating "you configured nothing" from "we cannot measure what you
+    // configured". An operator who wrote the key and was told nothing was configured would go and read
+    // their own YAML again.
+    val configured = MetricsConfig.Default.copy(
+      sources = Map(
+        ClusterId.unsafe("prod-eu") -> MetricsSourceSettings(SafeUrl.unsafe("http://exporter:9404/metrics"))
+      )
+    )
+
+    assertEquals(AllInOneConfig.from(KuiConfig.Default.copy(metrics = configured)).metrics, configured)
+    // And the default is still the default, so a deployment that configured nothing is not made to look
+    // like one that configured something.
+    assertEquals(AllInOneConfig.Default.metrics, MetricsConfig.Default)
   }
 
   /** A configuration written for the distributed deployment and handed to this one by mistake — which is

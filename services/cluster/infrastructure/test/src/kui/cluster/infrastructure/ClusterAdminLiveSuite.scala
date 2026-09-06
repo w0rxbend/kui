@@ -101,7 +101,13 @@ abstract class ClusterAdminLiveSuite(topology: KafkaTopology) extends ClusterAdm
       pool <- AdminClientPool.resource[IO](metrics)
       clients <- ClusterAdminClients.resource[IO](pool, logger)
       adapter <- Resource.eval(
-        ClusterAdminAdapter.create[IO](KafkaClusterAdmin[IO](pool), clients, Telemetry.noop[IO], logger)
+        ClusterAdminAdapter.create[IO](
+          KafkaClusterAdmin[IO](pool),
+          new KafkaPartitionSweeper[IO](pool, logger),
+          clients,
+          Telemetry.noop[IO],
+          logger
+        )
       )
     } yield adapter
 

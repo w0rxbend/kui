@@ -16,7 +16,7 @@ import kui.contracts.KernelSchemas.given
 import kui.contracts.Section
 import kui.contracts.paging.PageDto
 import kui.contracts.topic.{PartitionDto, TopicConfigEntryDto, TopicDetailDto, TopicRowDto}
-import kui.kernel.ClusterId
+import kui.kernel.{ClusterId, TopicName}
 
 /** One page of the topic list.
   *
@@ -197,6 +197,108 @@ object PartitionsResponse {
     Schema.derived[PartitionsResponse].description("Every partition of one topic, with leaders and replicas")
 
   given CanEqual[PartitionsResponse, PartitionsResponse] = CanEqual.derived
+}
+
+/** The cluster-wide totals the topics list draws above its table (`SCREENS-V4.md` §4.6).
+  *
+  * They are **not** a footer of the page below them. The capture's own load-bearing fact is that the
+  * statistics keep reading 128 topics while the filtered table shows three, so this is a separate document
+  * over the whole snapshot; a total computed from the rows on screen would track the search box, and the
+  * number an operator opens this region for is precisely the one that does not move when they type.
+  *
+  * @param topicCount
+  *   every topic the scrape learned of, including the ones it could not describe. Not an `Option`: the count
+  *   comes from the listing, and a scrape with no listing has no document at all — the section is
+  *   `unavailable` instead
+  * @param partitionCount
+  *   partitions summed over every topic, or `None` when the scrape could not describe one of them. A sum over
+  *   the topics that did answer is a number that looks measured and is wrong in the direction that reassures
+  * @param sizeBytes
+  *   bytes summed over every topic, or `None`. It refuses for the reason above *and* for its own, because
+  *   `describeLogDirs` can fail on a cluster whose describe worked — so a partition total beside an absent
+  *   size total is a state this document is meant to be able to express
+  * @param incompleteTopics
+  *   how many topics could not be described. It is what lets the screen say why a total is absent instead of
+  *   showing an unexplained em dash under a count of 128
+  */
+final case class TopicStatisticsDto(
+    topicCount: Int,
+    partitionCount: Option[Long],
+    sizeBytes: Option[Long],
+    incompleteTopics: Int
+)
+
+object TopicStatisticsDto {
+
+  given Codec[TopicStatisticsDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        topicCount <- cursor.get[Int]("topicCount")
+        partitionCount <- cursor.get[Option[Long]]("partitionCount")
+        sizeBytes <- cursor.get[Option[Long]]("sizeBytes")
+        incompleteTopics <- cursor.getOrElse[Int]("incompleteTopics")(0)
+      } yield TopicStatisticsDto(topicCount, partitionCount, sizeBytes, incompleteTopics),
+    (dto: TopicStatisticsDto) =>
+      Json.obj(
+        "topicCount" -> dto.topicCount.asJson,
+        "partitionCount" -> dto.partitionCount.asJson,
+        "sizeBytes" -> dto.sizeBytes.asJson,
+        "incompleteTopics" -> dto.incompleteTopics.asJson
+      )
+  )
+
+  given Schema[TopicStatisticsDto] = Schema
+    .derived[TopicStatisticsDto]
+    .description("Cluster-wide topic totals; each sum is absent rather than partial")
+
+  given CanEqual[TopicStatisticsDto, TopicStatisticsDto] = CanEqual.derived
+}
+
+/** One cluster's topic statistics, `Section`-wrapped like every other read this service serves. */
+final case class TopicStatisticsResponse(statistics: Section[TopicStatisticsDto])
+
+object TopicStatisticsResponse {
+
+  given Codec[TopicStatisticsResponse] = Codec.from(
+    (cursor: HCursor) =>
+      cursor.get[Section[TopicStatisticsDto]]("statistics").map(TopicStatisticsResponse(_)),
+    (response: TopicStatisticsResponse) => Json.obj("statistics" -> response.statistics.asJson)
+  )
+
+  given Schema[TopicStatisticsResponse] =
+    Schema.derived[TopicStatisticsResponse].description("The topics list's cluster-wide statistics region")
+
+  given CanEqual[TopicStatisticsResponse, TopicStatisticsResponse] = CanEqual.derived
+}
+
+/** Every topic name on a cluster, and nothing else.
+  *
+  * The drawer's topic tree is a fold over names — favourites, prefix groups, one `internal` row — and the
+  * fold is `frontend/packages/shell/src/nav/prefixes.ts`, a pure function of a list of strings. Paging the
+  * full topic list to feed it would fetch ten thousand rows of counts, sizes and replica figures to learn ten
+  * thousand strings, on every cluster switch. So this endpoint sends the strings.
+  *
+  * It is deliberately **not** paged. A page of names would make the drawer's totals depend on how far the
+  * browser had scrolled a list it never shows, and the whole point of the tree is that its counts add up. Ten
+  * thousand topic names is a few hundred kilobytes, which is smaller than one page of the list document.
+  *
+  * The names include the topics the scrape could not describe: those have no list row, they do exist, and a
+  * tree that omitted them would tell an operator a topic is gone.
+  */
+final case class TopicNamesResponse(names: Section[List[TopicName]])
+
+object TopicNamesResponse {
+
+  given Codec[TopicNamesResponse] = Codec.from(
+    (cursor: HCursor) => cursor.get[Section[List[TopicName]]]("names").map(TopicNamesResponse(_)),
+    (response: TopicNamesResponse) => Json.obj("names" -> response.names.asJson)
+  )
+
+  given Schema[TopicNamesResponse] = Schema
+    .derived[TopicNamesResponse]
+    .description("Every topic name on the cluster, for the drawer's tree; no counts and no paging")
+
+  given CanEqual[TopicNamesResponse, TopicNamesResponse] = CanEqual.derived
 }
 
 /** What a forced refresh of a cluster's topic snapshot answers with: that it was accepted, not that it has

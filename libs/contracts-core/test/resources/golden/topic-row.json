@@ -6,5 +6,7 @@
   "outOfSyncReplicas" : 0,
   "offlinePartitions" : 0,
   "messageCount" : 1048576,
-  "sizeBytes" : 734003200
+  "sizeBytes" : 734003200,
+  "produceRate" : null,
+  "cleanupPolicy" : null
 }

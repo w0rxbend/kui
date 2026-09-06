@@ -1,9 +1,9 @@
 # KUI container images
 
-Seven backend images, built by Mill. You do not need a Scala toolchain to run them; you do need a
+Eight backend images, built by Mill. You do not need a Scala toolchain to run them; you do need a
 JDK to build them, and nothing else — the interface is not in any of these.
 
-The **interface is an eighth image**, and it is not built here: it comes from the pnpm workspace
+The **interface is a ninth image**, and it is not built here: it comes from the pnpm workspace
 under `frontend/` through `deployment/frontend/Dockerfile`, and it needs Node rather than a JDK. It
 serves the built interface and proxies `/api/` to the gateway, so the browser sees one origin
 (ADR-048). Nothing below serves a user interface.
@@ -17,6 +17,7 @@ serves the built interface and proxies `/api/` to the gateway, so the browser se
 | `kui-message`  | Browsing records, producing, resending and purging    | 8080       | `/health/live`         |
 | `kui-consumer` | Consumer groups, their lag and the offset reset       | 8080       | `/health/live`         |
 | `kui-schema`   | Subjects, versions, schemas and compatibility. Optional: a deployment that configures no registry can simply not run it | 8080 | `/health/live` |
+| `kui-metrics`  | Broker throughput. It measures nothing in this build and says so per cluster, which is the answer a dashboard card needs rather than a service that is missing | 8080 | `/health/live` |
 
 The gateway serves its health probes under the public `/api/v1` prefix and a service serves them at
 the root. That is not an inconsistency: everything a browser can reach lives under `/api/v1`, and a
@@ -26,7 +27,7 @@ reaching anyway.
 ## Building them
 
 ```
-./mill deployment.docker.__.build          # all seven
+./mill deployment.docker.__.build          # all eight
 ./mill deployment.docker.gateway.docker.build   # just one
 ```
 

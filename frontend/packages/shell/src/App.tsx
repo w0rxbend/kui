@@ -69,8 +69,16 @@ import { NavDrawer } from "./chrome/NavDrawer.jsx";
 import { installSearchShortcut } from "./chrome/searchShortcut.js";
 import { Overview } from "./overview/Overview.jsx";
 import { fetchOverview, loadingData, toOverviewModel, type OverviewData } from "./overview/load.js";
-import { TopBar, type ThemeMode } from "./chrome/TopBar.jsx";
-import type { ClusterSummary, Crumb, NavDestination } from "./chrome/types.js";
+import { readingValue } from "./overview/reading.js";
+import { TopBar } from "./chrome/TopBar.jsx";
+import type {
+  ClusterSummary,
+  Crumb,
+  NavCount,
+  NavCounts,
+  NavDestination,
+} from "./chrome/types.js";
+import { brokerStorageOf, createClusterStore } from "./data/clusterStore.js";
 import { featureRegistry } from "./features/registry.js";
 import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, type CallScope } from "./health.js";
@@ -92,7 +100,7 @@ import {
   type ShellRouter,
 } from "./routing/routes.jsx";
 import { shellPaths } from "./routing/paths.js";
-import type { RouteSectionProps } from "@solidjs/router";
+import { useNavigate, type RouteSectionProps } from "@solidjs/router";
 
 export function App() {
   const bootstrap = readBootstrap();
@@ -158,10 +166,39 @@ export function App() {
   });
 
   const cluster = createCurrentCluster({ storage: safeLocalStorage() });
-  // A cluster named in the URL wins over the stored selection, and is applied before anything reads
-  // it: a pasted link has to show the recipient what the sender saw.
-  const fromUrl = clusterInUrl(window.location.pathname, uiPrefix);
-  if (fromUrl !== undefined) cluster.select(fromUrl);
+
+  /**
+   * The cluster the *address* names — the first paint's answer, and then every navigation's.
+   *
+   * A URL naming a cluster wins over the stored selection, because a link is usually pasted by a
+   * colleague and the recipient has to see what the sender saw. The initial value comes from
+   * `window.location` because it has to exist before anything renders, and {@link Frame} keeps it
+   * current from the router's own location afterwards: every navigation after the first is a
+   * client-side one and `window.location` is never read again, so a link from one cluster's topic
+   * list to another cluster's dashboard would otherwise leave the whole frame — head, badges,
+   * meter — describing the cluster the user left.
+   *
+   * A signal here, and deliberately **not** `cluster.select(...)` called on this line. Writing to a
+   * store during a component's own construction is `REACTIVE_WRITE_IN_OWNED_SCOPE`, which Solid 2's
+   * development build raises and its production build compiles away — the worse way round, because
+   * the shape that is wrong is the shape that ships, and the one address that reached this line
+   * (`/ui/clusters/<id>/…`, a deep link) is the one nothing had ever mounted. The stored selection
+   * is brought into step in `Frame`'s effect instead, where a write is what effects are for.
+   */
+  const [routeCluster, setRouteCluster] = createSignal<string | undefined>(
+    clusterInUrl(window.location.pathname, uiPrefix),
+  );
+
+  /**
+   * Which cluster everything below is about.
+   *
+   * The address wins, and the stored selection is the fallback for the addresses that name no
+   * cluster — `/ui`, `/ui/settings`. Both are needed and neither is derivable from the other: the
+   * address is the source of truth for a pasted link, and the stored selection is what somebody
+   * arriving at the root with no cluster in the address gets back. `Frame` keeps the second in step
+   * with the first, so the two only ever disagree while no address names a cluster at all.
+   */
+  const clusterForFrame = (): string | undefined => routeCluster() ?? cluster.selected();
 
   /**
    * The search input, once it exists, and the `⌘K` that focuses it.
@@ -192,7 +229,7 @@ export function App() {
   const [overview, setOverview] = createStore<{ data: OverviewData }>({ data: loadingData() });
 
   createEffect(
-    () => cluster.selected(),
+    () => clusterForFrame(),
     (selected) => {
       if (selected === undefined) return undefined;
       let cancelled = false;
@@ -349,7 +386,7 @@ export function App() {
   const stateOf = (registration: FeatureRegistration): FeatureState =>
     capabilities.featureState(
       registration.serviceId,
-      registration.requiresCluster ? cluster.selected() : undefined,
+      registration.requiresCluster ? clusterForFrame() : undefined,
       // A control the caller may not use is disabled and explains itself rather than failing at the
       // server. Until the session has answered, permission is assumed: refusing everything while
       // `/auth/me` is in flight would flash a forbidden navigation on every load.
@@ -357,7 +394,7 @@ export function App() {
         session.permits(
           registration.viewAction.resource,
           registration.viewAction.action,
-          cluster.selected(),
+          clusterForFrame(),
         ),
     );
 
@@ -373,7 +410,32 @@ export function App() {
     statuses().find((status) => status.registration.id === id);
 
   const Router: ShellRouter = createShellRouter(bootstrap.basePath, {
-    home: () => <Overview model={toOverviewModel(overview.data)} />,
+    home: () => {
+      /*
+       * `+ Create topic` on the dashboard, which did nothing at all until now.
+       *
+       * There is no address that opens the creation dialog — it lives inside the topics screen and
+       * is opened from that screen's own button — so the honest wiring is to take the operator to
+       * the place the flow starts rather than to invent a second entry point that would then be a
+       * second thing to keep working. The link is built through `KuiPaths` like every other, so a
+       * renamed segment is a compile error here instead of a button that navigates to a 404.
+       *
+       * `useNavigate` is called here rather than passed down because this *is* a route component:
+       * it is rendered under the router, which is the only place the hook can be read.
+       */
+      const navigate = useNavigate();
+      return (
+        <Overview
+          model={toOverviewModel(overview.data)}
+          onCreateTopic={() => {
+            // No cluster, no topic list to send anybody to. The dashboard's own empty state is
+            // where that case is explained; a button that navigates nowhere is not.
+            const chosen = clusterForFrame();
+            if (chosen !== undefined) navigate(paths.topics(chosen));
+          }}
+        />
+      );
+    },
     settings: () => (
       <SettingsPage
         /* The kernel's singletons, handed in rather than reached for. The page takes them as props
@@ -404,6 +466,16 @@ export function App() {
     },
   });
 
+  /**
+   * Every link the shell and its features build.
+   *
+   * Built once, from the router, and shared by the route views above and by the feature context
+   * below. Two calls to `shellPaths` would be two implementations of one interface, which is how a
+   * product ends up spelling one page two ways — and the route views read it from inside a closure
+   * that runs long after this line, so declaring it after the router is not a hazard.
+   */
+  const paths = shellPaths(Router);
+
   /** The clusters the capability registry knows, folded to one row each. */
   const clusters = createMemo<readonly ClusterSummary[]>(() =>
     clusterSummaries(capabilities.states()),
@@ -418,15 +490,6 @@ export function App() {
     (only) => {
       if (only !== undefined) cluster.select(only);
     },
-  );
-
-  const groups = createMemo(() =>
-    navigationGroups({
-      features: statuses(),
-      landingFor: (registration, chosen) => landingFor(Router, registration.id, chosen),
-      cluster: cluster.selected(),
-      shellDestinations: shellDestinations(Router),
-    }),
   );
 
   /**
@@ -445,11 +508,15 @@ export function App() {
    */
   const featureContext: KuiContextValue = {
     api,
-    cluster: () => cluster.selected(),
+    /* `clusterForFrame` rather than the stored selection, so that a feature and the frame around it
+       cannot describe two different clusters. A deep link is the case that separates them: the
+       address names one cluster from the first paint, and the stored selection is whatever the last
+       visit left behind until `Frame`'s effect has run. */
+    cluster: () => clusterForFrame(),
     permits: (action, name) =>
       session.identity() === undefined ||
-      session.permits(action.resource, action.action, cluster.selected(), name),
-    paths: shellPaths(Router),
+      session.permits(action.resource, action.action, clusterForFrame(), name),
+    paths,
     report: (scope, failed) => health.report(scope, failed ? "answered" : "ok"),
   };
 
@@ -457,128 +524,243 @@ export function App() {
     capabilities.stale() ? StaleBanner : degradedBanner(degradedLabels(statuses())),
   );
 
+  /**
+   * Everything under the provider, so that the frame's own store can be built inside it.
+   *
+   * `createClusterStore` reads the API client out of `useKui`, and the provider is inside the
+   * router's render prop — so there is nowhere in `App`'s body to build it. A component is the
+   * seam, and it is the right one: the router calls its render prop once, untracked, so this mounts
+   * once and the store's six caches are created once. One store and not one per consumer is the
+   * whole point of the query cache underneath it — the head, the badges and the meter between them
+   * ask about the same brokers, and they ask once.
+   */
+  const Frame = (props: { readonly route: RouteSectionProps }) => {
+    const navigate = useNavigate();
+    const facts = createClusterStore(clusterForFrame);
+
+    /*
+     * The address, followed.
+     *
+     * Two things happen here and they are not the same thing. `setRouteCluster` is what makes the
+     * frame describe the cluster the address names, immediately and without a stored value getting
+     * a say. `cluster.select` is what keeps the *stored* selection from drifting away from it, so
+     * that the next visit to `/ui` returns to the cluster this person was last actually looking at
+     * rather than to the one they last picked off the rail.
+     */
+    createEffect(
+      () => clusterInUrl(props.route.location.pathname, uiPrefix),
+      (named) => {
+        setRouteCluster(named);
+        if (named !== undefined && named !== cluster.selected()) cluster.select(named);
+      },
+    );
+
+    /**
+     * Changing environment: the four things that happen, from the one decision above them.
+     *
+     * The rail asks and this raises the toast, because there is exactly one `ToastRegion` in the
+     * product and it is mounted a few lines below. A rail that announced its own switch would need
+     * a region of its own, and two regions is how one confirmation gets announced twice.
+     *
+     * `setRouteCluster(undefined)` hands the frame back to the stored selection for the instant
+     * between the write and the address catching up. Without it the accessor would go on preferring
+     * the *old* cluster's name in the address, and a switch made from a cluster-scoped page would
+     * appear to do nothing at all.
+     */
+    const switchEnvironment = (id: string): void => {
+      const change = environmentSwitch(
+        id,
+        clusterForFrame(),
+        clusters().find((entry) => entry.id === id)?.name,
+        clusterInUrl(props.route.location.pathname, uiPrefix) !== undefined,
+      );
+      if (change === undefined) return;
+
+      cluster.select(id);
+      setRouteCluster(undefined);
+      notify(change.title, { tone: "info", message: change.message });
+      if (change.rewriteAddress) navigate(paths.dashboard(id));
+    };
+
+    const groups = createMemo(() =>
+      navigationGroups({
+        features: statuses(),
+        landingFor: (registration, chosen) => landingFor(Router, registration.id, chosen),
+        cluster: clusterForFrame(),
+        shellDestinations: shellDestinations(Router),
+        /* The badges the drawer draws, from the one store above. `navigationGroups` already owns
+           every rule about what happens to them — the capability badge wins over a count, an
+           unknown count is no badge rather than a `0`, and the tone follows the meaning — so all
+           that is supplied here is the lookup. */
+        countFor: countLookup(readingValue(facts.counts)),
+      }),
+    );
+
+    /**
+     * The cluster the head describes.
+     *
+     * Two sources, and the order matters. The store's summary is the cluster's own report — the
+     * version, the broker count and the under-replicated count the caption is made of — and the
+     * capability row knows only what the gateway thinks of the services in front of it. So the
+     * scrape wins when there is one, and the capability row is what remains when there is not:
+     * a cluster whose cluster service is unreachable has no scrape at all, and the row still
+     * carries its name and an `unreachable` dot, which is exactly what the head should draw.
+     */
+    const clusterBlock = createMemo<ClusterSummary | undefined>(() => {
+      const row = clusters().find((entry) => entry.id === clusterForFrame());
+      return readingValue(facts.summary) ?? row;
+    });
+
+    return (
+      <>
+        <AppFrame
+          rail={
+            <EnvRail
+              environments={clusters()}
+              currentId={clusterForFrame()}
+              onSelect={switchEnvironment}
+              destinations={railDestinations(Router)}
+              homeHref={Router.paths()}
+              accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
+              /* No handler where there is no session: the avatar stays a picture rather than
+                 becoming a button that opens a panel offering to end nothing. */
+              onOpenAccount={canSignOut() ? () => setAccountOpen(!accountOpen()) : undefined}
+              accountOpen={accountOpen()}
+              accountPanel={
+                canSignOut() ? (
+                  <AccountMenu
+                    name={session.identity()?.principal.name ?? ""}
+                    authType={session.settings()?.authType}
+                    busy={signOut.busy()}
+                    failure={
+                      signOut.state().kind === "failed" || signOut.state().kind === "forbidden"
+                        ? "Signing out did not work. You are still signed in."
+                        : undefined
+                    }
+                    onSignOut={() => {
+                      void signOut.run().then((outcome) => {
+                        // Only on success. Reloading after a refusal would redraw a signed-in
+                        // shell, which is indistinguishable from a sign-out that worked.
+                        if (outcome.kind === "done") window.location.reload();
+                      });
+                    }}
+                  />
+                ) : undefined
+              }
+            />
+          }
+          drawer={
+            <NavDrawer
+              groups={groups()}
+              currentId={currentFeatureId(props.route.location.pathname, uiPrefix)}
+              cluster={clusterBlock()}
+              /* `brokerStorageOf` and not `facts.storage`: the meter takes an array, and the
+                 reading's `kind` is what tells "still loading" from "could not be read". It is
+                 flattened here, where that distinction has already been used, and the meter goes on
+                 drawing its own "not known" rendering for an empty array — the right picture
+                 for all three of the ways this reading can carry no value, and emphatically not a
+                 row of zeros, which draws an empty bar and reads as "your disks are empty". */
+              storage={brokerStorageOf(facts.storage)}
+              /* The `+` at the head, and the status card's own button when there is no cluster for
+                 the head to describe. They are the only routes to cluster registration in
+                 twenty-three screens, and both take their address from `KuiPaths` rather than
+                 from a literal written here — one page, one spelling. */
+              manageHref={paths.manageClusters()}
+              configureHref={paths.manageClusters()}
+            />
+          }
+          topbar={
+            <TopBar
+              crumbs={topCrumbs(
+                clusters(),
+                clusterForFrame(),
+                props.route.location.pathname,
+                uiPrefix,
+                Router,
+              )}
+              /* What the field *searches* is still the features' to supply, so it stays idle.
+               What it no longer does is advertise a shortcut nobody implements: the `⌘K` hint in
+               its corner is bound below, and `inputRef` is how the binding reaches the element. A
+               hint for a key that does nothing teaches the reader that shortcuts do not work. */
+              search={{
+                value: "",
+                onInput: () => undefined,
+                status: "idle",
+                inputRef: (el) => {
+                  searchInput = el;
+                },
+              }}
+              /* The kernel's own preference singletons, and not a copy of what they currently
+                 say. `SettingsPage` writes the same three, and the popover in the top bar has to
+                 be the *same* control rather than a second one: two spellings of one preference is
+                 how a product ends up with a theme switch that the settings page disagrees with.
+                 Passing the preferences rather than a mode is also what removes the shell's own
+                 read of `data-theme` — that attribute is written *by* the preference, so reading it
+                 back was the frame asking the stylesheet what it had just been told. */
+              appearance={{
+                theme: themePreference,
+                accent: accentPreference,
+                density: densityPreference,
+              }}
+              notificationsOpen={noticesOpen()}
+              onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
+              /* There is no notification service yet. The panel therefore opens and says there is
+               nothing, which is the honest answer — and is deliberately not the same rendering as a
+               request that failed. */
+              notifications={{ kind: "ready", notices: [] }}
+            />
+          }
+        >
+          <Show when={banner()}>
+            {(message) => (
+              <Banner
+                tone="warning"
+                message={message()}
+                testId="capability-banner"
+                /* A cluster that is not answering must not be dismissible: dismissing it makes
+                 every stale number on the page look current. */
+              />
+            )}
+          </Show>
+
+          {props.route.children}
+        </AppFrame>
+
+        <ToastRegion />
+
+        {/* The full-screen states, in the one order that is correct. */}
+        <Show when={health.connectivity().kind === "lost"}>
+          <GatewayUnreachablePage state={health.connectivity()} onRetry={health.retryNow} />
+        </Show>
+        <Show when={health.connectivity().kind === "connected" && session.mustSignIn()}>
+          <SignIn
+            authType={session.settings()?.authType ?? "form"}
+            providerLabel={session.settings()?.providerLabel}
+            api={api}
+            onSignedIn={() => {
+              /*
+               * A reload, deliberately, and not a re-fetch.
+               *
+               * Every store in this shell — the permissions, the capability fold, the cluster
+               * list, each feature's own data — was populated as the *anonymous* principal while
+               * the sign-in screen was on top of it. Re-fetching a few of them by hand is a list
+               * somebody will one day fail to keep up to date, and the failure mode is the worst
+               * kind: a signed-in operator looking at what anonymous was allowed to see, with no
+               * indication that anything is missing. A reload cannot get that list wrong.
+               */
+              window.location.reload();
+            }}
+          />
+        </Show>
+      </>
+    );
+  };
+
   return (
     <Router>
       {(route: RouteSectionProps) => (
         <KuiProvider value={featureContext}>
-          <AppFrame
-            rail={
-              <EnvRail
-                environments={clusters()}
-                currentId={cluster.selected()}
-                onSelect={(id) => cluster.select(id)}
-                destinations={railDestinations(Router)}
-                homeHref={Router.paths()}
-                accountName={session.signedIn() ? session.identity()?.principal.name : undefined}
-                /* No handler where there is no session: the avatar stays a picture rather than
-                   becoming a button that opens a panel offering to end nothing. */
-                onOpenAccount={canSignOut() ? () => setAccountOpen(!accountOpen()) : undefined}
-                accountOpen={accountOpen()}
-                accountPanel={
-                  canSignOut() ? (
-                    <AccountMenu
-                      name={session.identity()?.principal.name ?? ""}
-                      authType={session.settings()?.authType}
-                      busy={signOut.busy()}
-                      failure={
-                        signOut.state().kind === "failed" || signOut.state().kind === "forbidden"
-                          ? "Signing out did not work. You are still signed in."
-                          : undefined
-                      }
-                      onSignOut={() => {
-                        void signOut.run().then((outcome) => {
-                          // Only on success. Reloading after a refusal would redraw a signed-in
-                          // shell, which is indistinguishable from a sign-out that worked.
-                          if (outcome.kind === "done") window.location.reload();
-                        });
-                      }}
-                    />
-                  ) : undefined
-                }
-              />
-            }
-            drawer={
-              <NavDrawer
-                groups={groups()}
-                currentId={currentFeatureId(route.location.pathname, uiPrefix)}
-                cluster={clusters().find((entry) => entry.id === cluster.selected())}
-                /* Per-broker disk is not on the overview's model yet, so the meter is told nothing and
-                 draws its "not known" rendering — a neutral track and a sentence, never a zero.
-                 Wiring it to real figures is the metrics work, not the chrome's. */
-              />
-            }
-            topbar={
-              <TopBar
-                crumbs={topCrumbs(
-                  clusters(),
-                  cluster.selected(),
-                  route.location.pathname,
-                  uiPrefix,
-                  Router,
-                )}
-                /* What the field *searches* is still the features' to supply, so it stays idle. What it
-                 no longer does is advertise a shortcut nobody implements: the `⌘K` hint in its corner
-                 is bound below, and `inputRef` is how the binding reaches the element. A hint for a
-                 key that does nothing teaches the reader that shortcuts here do not work. */
-                search={{
-                  value: "",
-                  onInput: () => undefined,
-                  status: "idle",
-                  inputRef: (el) => {
-                    searchInput = el;
-                  },
-                }}
-                theme={themeMode()}
-                notificationsOpen={noticesOpen()}
-                onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
-                /* There is no notification service yet. The panel therefore opens and says there is
-                 nothing, which is the honest answer — and is deliberately not the same rendering as a
-                 request that failed. */
-                notifications={{ kind: "ready", notices: [] }}
-              />
-            }
-          >
-            <Show when={banner()}>
-              {(message) => (
-                <Banner
-                  tone="warning"
-                  message={message()}
-                  testId="capability-banner"
-                  /* A cluster that is not answering must not be dismissible: dismissing it makes every
-                   stale number on the page look current. */
-                />
-              )}
-            </Show>
-
-            {route.children}
-          </AppFrame>
-
-          <ToastRegion />
-
-          {/* The full-screen states, in the one order that is correct. */}
-          <Show when={health.connectivity().kind === "lost"}>
-            <GatewayUnreachablePage state={health.connectivity()} onRetry={health.retryNow} />
-          </Show>
-          <Show when={health.connectivity().kind === "connected" && session.mustSignIn()}>
-            <SignIn
-              authType={session.settings()?.authType ?? "form"}
-              providerLabel={session.settings()?.providerLabel}
-              api={api}
-              onSignedIn={() => {
-                /*
-                 * A reload, deliberately, and not a re-fetch.
-                 *
-                 * Every store in this shell — the permissions, the capability fold, the cluster
-                 * list, each feature's own data — was populated as the *anonymous* principal while
-                 * the sign-in screen was on top of it. Re-fetching a few of them by hand is a list
-                 * somebody will one day fail to keep up to date, and the failure mode is the worst
-                 * kind: a signed-in operator looking at what anonymous was allowed to see, with no
-                 * indication that anything is missing. A reload cannot get that list wrong.
-                 */
-                window.location.reload();
-              }}
-            />
-          </Show>
+          <Frame route={route} />
         </KuiProvider>
       )}
     </Router>
@@ -721,6 +903,73 @@ function healthOf(status: string): ClusterSummary["health"] {
   }
 }
 
+/** What changing environment amounts to, before anything has been changed. */
+export type EnvironmentSwitch = {
+  readonly title: string;
+  readonly message: string;
+  /**
+   * Whether the address has to be rewritten to the new cluster's dashboard.
+   *
+   * True exactly when the current address names a cluster. Leaving it alone then would put a URL
+   * saying `prod` in front of a frame describing `staging`, and the address is the half of that
+   * pair people copy and paste. When the address names no cluster — `/ui/settings`, say — there is
+   * no contradiction to resolve, and moving somebody off the page they deliberately opened is the
+   * rudeness that `soleClusterChoice` above is careful to avoid for the same reason.
+   */
+  readonly rewriteAddress: boolean;
+};
+
+/**
+ * The decision behind the environment rail, separated from the four side effects that carry it out.
+ *
+ * Selecting a cluster writes a store, raises a toast, resets a signal and may navigate, and none of
+ * those can be asserted without a mounted shell and a capability stream. What is worth asserting is
+ * none of them: it is that switching to the cluster you are already on does nothing at all, that
+ * the sentence names the cluster the way the operator named it, and that the address is rewritten
+ * only when it disagrees. So the decision is a function of plain data and the effects are the
+ * caller's.
+ *
+ * `undefined` for a switch to the current cluster. Not a toast saying nothing changed: the rail
+ * marks the current environment, so this is a misclick, and a confirmation for a misclick teaches
+ * the operator that the toasts are noise.
+ */
+export function environmentSwitch(
+  to: string,
+  from: string | undefined,
+  name: string | undefined,
+  addressNamesCluster: boolean,
+): EnvironmentSwitch | undefined {
+  if (to === from) return undefined;
+  return {
+    /* The operator's own name for the cluster when the gateway reported one, and the identifier
+       when it did not — the same degradation `clusterSummaries` makes, and for the same reason: a
+       blank where a name goes reads as a bug in the toast rather than as a cluster nobody named. */
+    title: `Switched to ${name ?? to}`,
+    message: "Every panel in the frame now describes this cluster.",
+    rewriteAddress: addressNamesCluster,
+  };
+}
+
+/**
+ * The drawer's badge lookup, over whatever the store has learned so far.
+ *
+ * A function of the registration rather than the table itself, because that is what
+ * `navigationGroups` takes and its reason for taking one is worth keeping: the numbers come from a
+ * store that fetches, and the fold over capability states has to stay a pure function of plain
+ * data. The table is keyed by `FeatureId`, so a renamed feature loses its badge as a type error
+ * rather than silently — and a silently missing badge is indistinguishable on screen from a count
+ * that could not be fetched.
+ *
+ * An absent count comes back `undefined`, which the fold draws as no badge at all. It is never
+ * turned into a `0`: `Topics 0` beside a cluster whose topic service did not answer is a statement
+ * about the cluster, and a false one.
+ */
+export function countLookup(
+  counts: NavCounts | undefined,
+): (feature: FeatureRegistration) => NavCount | undefined {
+  return (feature) => counts?.[feature.id];
+}
+
 /** Which navigation entry to mark as current, from the address the browser is on. */
 export function currentFeatureId(pathname: string, uiPrefix: string): string | undefined {
   const relative = pathname.startsWith(uiPrefix) ? pathname.slice(uiPrefix.length) : pathname;
@@ -745,11 +994,6 @@ function safeLocalStorage(): Storage | undefined {
   } catch {
     return undefined;
   }
-}
-
-function themeMode(): ThemeMode {
-  const attribute = document.documentElement.getAttribute("data-theme");
-  return attribute === "light" || attribute === "dark" ? attribute : "auto";
 }
 
 /* A placeholder for the one shell-owned screen that is still to come. It renders something honest

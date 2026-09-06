@@ -9,6 +9,11 @@ import scala.util.matching.Regex
   * their configuration files and the one their existing `rbac.roles[]` blocks are expressed in. A KUI-shaped
   * renaming would buy nothing and would make every migration a translation.
   *
+  * Two resources are KUI's own and have no Kafbat counterpart: [[Resource.Metrics]] and [[Resource.Alerts]]
+  * stand behind screens Kafbat does not have. They are separate resources rather than actions folded onto an
+  * existing one because a role that lets somebody read the dashboard's numbers should not have to hand them
+  * the cluster's configuration to do it.
+  *
   * The `wire` string is the configuration and JSON spelling. It is written out per case rather than derived
   * from the case name so that renaming a case — `ConsumerGroup` reads better in Scala than `CONSUMER` — can
   * never silently change what a deployment's configuration file means.
@@ -48,6 +53,21 @@ enum Resource(val wire: String) {
   /** Kafka client quotas. Not named. */
   case ClientQuotas extends Resource("CLIENT_QUOTAS")
 
+  /** Broker and cluster measurements: throughput, latency, request handlers, record sizes. Not named.
+    *
+    * Unnamed because a measurement is not something an operator names in a role file. The cluster gate
+    * already decides which clusters a person may look at, and a pattern over `throughput` would be a second,
+    * weaker spelling of that same decision.
+    */
+  case Metrics extends Resource("METRICS")
+
+  /** KUI's alert feed: the events it opens and the acknowledgements left on them. Not named.
+    *
+    * Unnamed for [[Resource.Audit]]'s reason. There is one feed per cluster, and an event's id is generated
+    * rather than chosen, so a pattern written against one would match nothing an operator meant by it.
+    */
+  case Alerts extends Resource("ALERTS")
+
   /** Every action this resource has. `ALL` in a configuration file expands to exactly this set. */
   def allActions: Set[Action] = Action.values.filter(_.resource == this).toSet
 
@@ -61,7 +81,7 @@ enum Resource(val wire: String) {
     */
   def isNamed: Boolean = this match {
     case Topic | ConsumerGroup | Schema | Connect | Connector => true
-    case ApplicationConfig | ClusterConfig | Ksql | Acl | Audit | ClientQuotas => false
+    case ApplicationConfig | ClusterConfig | Ksql | Acl | Audit | ClientQuotas | Metrics | Alerts => false
   }
 }
 
@@ -79,9 +99,9 @@ object Resource {
 /** One thing that may be done to a resource.
   *
   * A single flat enum rather than one enum per resource. The per-resource shape reads well in isolation and
-  * then forces every consumer — the evaluator, the JSON codec, the browser's gate — to match on eleven sealed
-  * families instead of one; the `resource` field carries the same information and lets an action be stored in
-  * a plain `Set[Action]`.
+  * then forces every consumer — the evaluator, the JSON codec, the browser's gate — to match on thirteen
+  * sealed families instead of one; the `resource` field carries the same information and lets an action be
+  * stored in a plain `Set[Action]`.
   *
   * @param resource
   *   the resource this action belongs to. `Action.MessagesRead.resource` is `Topic`, and an action can never
@@ -148,6 +168,17 @@ enum Action(val resource: Resource, val wire: String, val isAlter: Boolean) {
   case ConnectorOperate extends Action(Resource.Connector, "OPERATE", true)
   case ConnectorResetOffsets extends Action(Resource.Connector, "RESET_OFFSETS", true)
 
+  /** Listing ksqlDB's streams, tables and queries. A read: `SHOW STREAMS` changes nothing.
+    *
+    * It exists because `EXECUTE` on its own made ksqlDB unreachable on a read-only cluster. The read-only
+    * gate refuses an altering request before any resource is considered, so a resource whose only action
+    * altered could not be *looked at* there — an operator saw an empty screen where the objects are.
+    */
+  case KsqlView extends Action(Resource.Ksql, "VIEW", false)
+
+  /** Running a statement. Altering, because a ksqlDB statement creates and drops streams, tables and the
+    * Kafka topics behind them.
+    */
   case KsqlExecute extends Action(Resource.Ksql, "EXECUTE", true)
 
   case AclView extends Action(Resource.Acl, "VIEW", false)
@@ -157,6 +188,22 @@ enum Action(val resource: Resource, val wire: String, val isAlter: Boolean) {
 
   case ClientQuotasView extends Action(Resource.ClientQuotas, "VIEW", false)
   case ClientQuotasEdit extends Action(Resource.ClientQuotas, "EDIT", true)
+
+  case MetricsView extends Action(Resource.Metrics, "VIEW", false)
+
+  case AlertsView extends Action(Resource.Alerts, "VIEW", false)
+
+  /** Marking an alert acknowledged. Altering, so that an audit level of `ALTER_ONLY` records who silenced an
+    * alert; a silenced alert nobody is named for is the one an incident review cannot reconstruct.
+    *
+    * `isAlter` answers the audit question and the read-only question with the same field, so this is also
+    * refused on a read-only cluster even though an acknowledgement writes to KUI's store rather than to the
+    * cluster. That is the stricter reading and it is the one taken here: it is the only alerts action that
+    * writes at all, and a deployment that has declared a cluster untouchable is not the place to discover the
+    * distinction. Splitting the field is the change to make if M8 finds an operator who has to acknowledge on
+    * a read-only cluster.
+    */
+  case AlertsAcknowledge extends Action(Resource.Alerts, "ACKNOWLEDGE", true)
 
   /** The actions granting this one also grants, one step out.
     *
@@ -198,7 +245,8 @@ enum Action(val resource: Resource, val wire: String, val isAlter: Boolean) {
     case ConnectorCreate | ConnectorEdit | ConnectorDelete | ConnectorOperate | ConnectorResetOffsets =>
       Set(ConnectorView)
 
-    case KsqlExecute => Set.empty
+    case KsqlView => Set.empty
+    case KsqlExecute => Set(KsqlView)
 
     case AclView => Set.empty
     case AclEdit => Set(AclView)
@@ -207,6 +255,11 @@ enum Action(val resource: Resource, val wire: String, val isAlter: Boolean) {
 
     case ClientQuotasView => Set.empty
     case ClientQuotasEdit => Set(ClientQuotasView)
+
+    case MetricsView => Set.empty
+
+    case AlertsView => Set.empty
+    case AlertsAcknowledge => Set(AlertsView)
   }
 
   /** The action on the *parent connect cluster* that this connector action falls back to.
@@ -238,8 +291,9 @@ object Action {
 
   /** Parses one action name against one resource, case-insensitively as Kafbat does.
     *
-    * It is scoped to a resource because the names are not unique on their own: `VIEW` means eleven different
-    * things, and an action parsed without a resource would be a permission granted over the wrong one.
+    * It is scoped to a resource because the names are not unique on their own: `VIEW` means thirteen
+    * different things, and an action parsed without a resource would be a permission granted over the wrong
+    * one.
     */
   def fromWire(resource: Resource, raw: String): Option[Action] = {
     val normalised = raw.trim.toUpperCase

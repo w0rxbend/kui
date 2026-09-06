@@ -35,6 +35,18 @@ object ClusterRig {
 
   val CapabilityInterval: FiniteDuration = 1.hour
 
+  val SweepInterval: FiniteDuration = 60.seconds
+
+  /** Six hours at one minute, exactly as the composition root configures it: a suite that shortened the
+    * window would be asserting against a cadence no deployment runs.
+    */
+  val UptimeWindow: FiniteDuration = 6.hours
+
+  val UptimeStep: FiniteDuration = 1.minute
+
+  val Tuning: ClusterSnapshots.Tuning =
+    ClusterSnapshots.Tuning(RefreshInterval, CapabilityInterval, SweepInterval, UptimeWindow, UptimeStep)
+
   def resource(
       profiles: List[ClusterProfile],
       features: ClusterFeatures = TopologyFixtures.allFeatures,
@@ -54,14 +66,7 @@ object ClusterRig {
       admin <- Resource.eval(FakeClusterAdmin.make[IO](description, features, delay))
       _ <- Resource.eval(setup(admin))
       registry <- ClusterRegistry.make[IO](profiles, store, clockPort(clock), logger)
-      snapshots <- ClusterSnapshots.resource[IO](
-        registry,
-        admin,
-        CacheMetrics.noop[IO],
-        RefreshInterval,
-        CapabilityInterval,
-        logger
-      )
+      snapshots <- ClusterSnapshots.resource[IO](registry, admin, CacheMetrics.noop[IO], Tuning, logger)
       topology = ClusterTopologyUseCase.make[IO](registry, snapshots, logger)
       brokers = BrokerDetailUseCase.make[IO](registry, snapshots, admin, logger)
       capabilities = CapabilityReportUseCase.make[IO](registry, snapshots)
@@ -124,6 +129,12 @@ object ClusterRig {
     for {
       _ <- waitFor("the capability cells were still initializing")(
         loaded(ref => rig.snapshots.capabilitiesOf(ref.id).map(_.map(cell => cell)))
+      )
+      // The partition sweep is waited for beside the probe and for the same reason: the topology load
+      // reads whatever the sweep cell holds *at that moment*, so without this a suite asserting on a
+      // partition count would be asserting on which of three fibers won.
+      _ <- waitFor("the partition sweeps were still initializing")(
+        loaded(ref => rig.snapshots.partitionsOf(ref.id).map(_.map(cell => cell)))
       )
       _ <- waitFor("the snapshot cells were still initializing")(
         loaded(ref => rig.snapshots.topologyOf(ref.id).map(_.map(cell => cell)))

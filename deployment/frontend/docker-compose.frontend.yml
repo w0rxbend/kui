@@ -1,4 +1,4 @@
-# The KUI interface, added to whichever backend stack you are running.
+# The KUI interface, as an overlay on the quickstart's backend stack.
 #
 #   docker compose \
 #     -f deployment/quickstart/docker-compose.quickstart.yml \
@@ -14,6 +14,13 @@
 # interface, or none, drops this file; one that pins a frontend version pins it here without touching
 # the backend stack.
 #
+# It is the quickstart's overlay and not a general one: the `depends_on` and the network below name
+# that stack's service and that stack's network, and Compose has no way to leave either open. Every
+# other stack in `deployment/` therefore declares the interface as a service of its own —
+# `deployment/compose/docker-compose.yml`, `../demo/` and `../secured/` all have one, each pointed
+# at its own gateway. The service block is the same six properties every time; only the address, the
+# network and the published port differ.
+#
 # ## Why nginx and not the browser calling the gateway directly
 #
 # Same origin. The session is a cookie and every mutation carries a CSRF header (ADR-019); a second
@@ -25,7 +32,10 @@ services:
       context: ../..
       dockerfile: deployment/frontend/Dockerfile
     image: kui-frontend:${KUI_VERSION:-0.1.0-SNAPSHOT}
-    container_name: kui-frontend
+    # Named for the stack it joins rather than for the image it runs. `deployment/compose/` now has
+    # a `kui-frontend` container of its own, and two stacks that collide over a container name --
+    # rather than over a port -- is a confusing way to find that out.
+    container_name: kui-quickstart-frontend
     ports:
       - "${KUI_FRONTEND_PORT:-8090}:8082"
     environment:

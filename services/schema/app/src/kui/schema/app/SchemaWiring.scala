@@ -114,7 +114,7 @@ object SchemaWiring {
 
       audit = LoggingAuditSink.make[F](logger)
 
-      subjects = SubjectListUseCase.make[F](registries)
+      subjects = SubjectListUseCase.make[F](registries, logger)
       versions = SubjectVersionsUseCase.make[F](registries)
       schema = SchemaVersionUseCase.make[F](registries)
       compatibility = CompatibilityReadUseCase.make[F](registries, logger)

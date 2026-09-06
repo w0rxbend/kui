@@ -33,11 +33,18 @@ final class TopicResponsesSuite extends FunSuite {
     outOfSyncReplicas = 0,
     offlinePartitions = 0,
     messageCount = Some(1234567L),
-    sizeBytes = Some(9483264L)
+    sizeBytes = Some(9483264L),
+    produceRate = Some(1204.5d),
+    cleanupPolicy = Some("delete")
   )
 
   /** A topic with a partition that has no leader. Its message count is absent, not zero and not the sum of
     * the partitions that did answer: "empty" ends an investigation and "unknown" starts one.
+    *
+    * Its rate is absent for the same reason one level along — a leaderless partition reports no end offset,
+    * so there is no total to difference — and its cleanup policy is absent for an unrelated one: the batched
+    * `describeConfigs` behind the scrape did not cover it. Two absences with two causes on one row is the
+    * shape the list has to be able to render, which is why the golden carries it.
     */
   private val dlqRow = TopicRowDto(
     name = TopicName.unsafe("payments.dlq"),
@@ -47,7 +54,9 @@ final class TopicResponsesSuite extends FunSuite {
     outOfSyncReplicas = 2,
     offlinePartitions = 1,
     messageCount = None,
-    sizeBytes = Some(41984L)
+    sizeBytes = Some(41984L),
+    produceRate = None,
+    cleanupPolicy = None
   )
 
   private val topics =
@@ -106,7 +115,11 @@ final class TopicResponsesSuite extends FunSuite {
           partitionCount = 2,
           outOfSyncReplicas = 1,
           offlinePartitions = 1,
-          messageCount = None
+          messageCount = None,
+          // One partition of this topic has no leader, so there is no end-offset total to difference and
+          // the rate refuses with the count. The policy does not: it comes from `describeConfigs`, which
+          // answered, and losing a field a cluster gave you is a choice with no upside.
+          produceRate = None
         ),
         partitions = List(healthyPartition, offlinePartition),
         cleanupPolicy = Some("delete"),
@@ -155,6 +168,31 @@ final class TopicResponsesSuite extends FunSuite {
   )
 
   private val partitions = PartitionsResponse(Section.Ok(List(healthyPartition), at))
+
+  /** The statistics of a cluster with one topic the scrape could not describe.
+    *
+    * The count is the whole cluster's, because `listTopics` answered and being unable to describe a topic is
+    * not being unable to see it. The two sums are absent, because KUI does not know how many partitions or
+    * bytes that topic has and a sum over the rest is a number that looks measured and is too small.
+    */
+  private val statistics = TopicStatisticsResponse(
+    Section.Ok(
+      TopicStatisticsDto(
+        topicCount = 128,
+        partitionCount = None,
+        sizeBytes = None,
+        incompleteTopics = 1
+      ),
+      at
+    )
+  )
+
+  private val names = TopicNamesResponse(
+    Section.Ok(
+      List("__consumer_offsets", "orders", "payments.dlq").map(TopicName.unsafe),
+      at
+    )
+  )
 
   private val refresh = RefreshAcceptedDto(ClusterId.unsafe("prod-eu"), at)
 
@@ -289,6 +327,26 @@ final class TopicResponsesSuite extends FunSuite {
     )
   }
 
+  test("the statistics count every topic and refuse the sums the scrape could not complete") {
+    assertGolden("topic-statistics.json", GoldenDocuments.topicStatistics, statistics.asJson)
+    assertEquals(
+      parse(GoldenDocuments.topicStatistics).flatMap(_.as[TopicStatisticsResponse]),
+      Right(statistics)
+    )
+
+    // On the text, because this is the pair a screen renders as "128 topics" over two em dashes rather than
+    // as "128 topics, 0 partitions" — and a zero here would be the reassuring wrong number.
+    val json = statistics.asJson.noSpaces
+    assert(json.contains("\"partitionCount\":null"), json)
+    assert(!json.contains("\"partitionCount\":0"), json)
+  }
+
+  test("the names index carries internal topics, because the browser's fold is what hides them") {
+    assertGolden("topic-names.json", GoldenDocuments.topicNames, names.asJson)
+    assertEquals(parse(GoldenDocuments.topicNames).flatMap(_.as[TopicNamesResponse]), Right(names))
+    assertEquals(names.names.toOption.map(_.size), Some(3))
+  }
+
   test("a refresh acceptance carries the time the request was taken") {
     assertGolden("refresh-accepted.json", GoldenDocuments.refreshAccepted, refresh.asJson)
     assertEquals(parse(GoldenDocuments.refreshAccepted).flatMap(_.as[RefreshAcceptedDto]), Right(refresh))
@@ -302,6 +360,8 @@ final class TopicResponsesSuite extends FunSuite {
     assertEquals(config.asJson.as[TopicConfigResponse], Right(config))
     assertEquals(configNotPermitted.asJson.as[TopicConfigResponse], Right(configNotPermitted))
     assertEquals(partitions.asJson.as[PartitionsResponse], Right(partitions))
+    assertEquals(statistics.asJson.as[TopicStatisticsResponse], Right(statistics))
+    assertEquals(names.asJson.as[TopicNamesResponse], Right(names))
     assertEquals(refresh.asJson.as[RefreshAcceptedDto], Right(refresh))
   }
 

@@ -11,10 +11,12 @@
  * ## What "watching" means here
  *
  * {@link QueryCache.watch} returns an accessor and fetches nothing. The request happens when
- * something *reads that accessor inside a reactive scope* — a component's JSX, a memo, an effect —
- * and only if what is held is missing or stale. When the last reader is disposed the entry stops
- * being refreshed and becomes a candidate for eviction. That is what stops a page the user has left
- * behind from continuing to poll.
+ * something *reads that accessor*, and only if what is held is missing or stale. The read has to
+ * be inside a reactive scope — a component's JSX, a memo, an effect — because that is what holds
+ * the subscription open long enough to receive the answer; an untracked read fetches too, and then
+ * lets go, which is a request nobody is left waiting for. When the last reader is disposed the
+ * entry stops being refreshed and becomes a candidate for eviction. That is what stops a page the
+ * user has left behind from continuing to poll.
  *
  * Solid 2 gives this for free and exactly: a `createMemo(..., { lazy: true })` computes on its first
  * subscriber and is torn down when its last one goes away, and it recomputes if somebody watches
@@ -82,8 +84,15 @@ export interface QueryCache<A> {
   /**
    * The state of one key, and the subscription that keeps it fresh.
    *
-   * Read the returned accessor inside a reactive scope. Reading it outside one still answers, but
-   * subscribes nothing and therefore fetches nothing — use {@link peek} when that is what you mean.
+   * Read the returned accessor **inside a reactive scope**, and only there. Outside one the read
+   * still starts the request — the lazy memo underneath computes, acquires the entry and fetches —
+   * and then, having no owner to hold it, releases the entry in the same turn. So the accessor
+   * answers `{pending: true}`, the request goes out with nothing left watching for the answer, and
+   * when the answer lands it settles into an unwatched entry that the next eviction sweep may
+   * discard. Nothing throws and nothing is logged, which is what makes this worth writing down: it
+   * is a caller error whose only symptom is a request that appears to have been ignored.
+   *
+   * {@link peek} is the read that genuinely subscribes to nothing and fetches nothing.
    */
   watch(key: string): Accessor<QueryState<A>>;
   /** The state of one key without subscribing, fetching, or keeping it alive. */

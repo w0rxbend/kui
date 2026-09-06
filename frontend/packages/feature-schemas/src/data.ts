@@ -68,8 +68,24 @@ export interface SubjectQuery {
   readonly pageSize?: number | undefined;
 }
 
+/**
+ * A row is an object, not a bare name.
+ *
+ * The subjects endpoint used to answer with `items: string[]`. It now answers with a summary row
+ * per subject — the name plus the facts a row shows when the registry could be asked for them.
+ * `SubjectListResult.subjects` stays a list of names because that is all the list screen draws
+ * today; the extra fields are declared here so the shape is written down where the mapping is, and
+ * so whoever draws them next does not have to re-derive it from the generated types.
+ */
+interface SubjectRow {
+  readonly subject: string;
+  readonly format?: string;
+  readonly versionCount?: number;
+  readonly compatibility?: { readonly level: string; readonly inheritedFromGlobal: boolean };
+}
+
 interface SubjectsPayload {
-  readonly items?: readonly string[];
+  readonly items?: readonly SubjectRow[];
   readonly page?: {
     readonly page?: number;
     readonly pageSize?: number;
@@ -104,7 +120,7 @@ export async function fetchSubjects(
   return {
     kind: "ready",
     value: {
-      subjects: payload.items ?? [],
+      subjects: (payload.items ?? []).map((row) => row.subject),
       page: {
         page: payload.page?.page ?? 1,
         pageSize: payload.page?.pageSize ?? (payload.items?.length ?? 0),

@@ -1,5 +1,30 @@
 # KUI frontend roadmap (post-Scala.js)
 
+> **This document is superseded by [`docs/plan/ROADMAP.md`](plan/ROADMAP.md) (2026-09-06). It is a
+> historical record; do not plan from it.**
+>
+> Four of its ten milestones were closed out after it was written, by two commits it does not know
+> about — three of them wholly, and **M2** only in part, which this banner previously did not say.
+> `7193d2d` replaced the dead Scala browser suite with a TypeScript one that drives the product as
+> it ships, so M2's **exit criterion** is met: the end-to-end suite is green against the M1 stack
+> and CI runs it (`pnpm e2e`, `.github/workflows/ci.yml`). Two of M2's seven **tasks** are not.
+> Task 6 asked for `e2e/` and its `build.mill` block to be deleted once the replacement was green,
+> and both were still in the tree when this banner was written; wave 2 of `docs/plan/` removes them.
+> Task 7 asked for `ShellSmokeSuite`'s bundle-shape assertion to be replaced by a build-time check
+> of `dist/.vite/manifest.json`, and no such check exists — `TECH_DEBT.md`'s TD-016 says so in the
+> note that closes it, and records that the manifest is re-read by hand instead. A milestone is not
+> its exit criterion alone, and writing "finished" over the difference is how a plan stops being
+> checkable. `b9436f7` wired the endpoints that had no consumer, which is **M4** (the full
+> partition table on its own tab, raising the partition count behind the same plan-then-confirm the
+> purge already used, and the topic's consumers tab), **M6** (server-side smart filters with the
+> preview that makes them usable, and resending a range of records into another topic) and **M7**
+> (incremental lag refresh, and checking a proposed schema before registering it).
+>
+> Its body below is left exactly as it was written. A plan rewritten after the fact is worthless as
+> a record of what was believed at the time, and what this document is now good for is precisely
+> that: the reasoning behind M8, M9 and M10, and the "known gaps that are deliberate" and "not
+> doing" sections, which `docs/plan/ROADMAP.md` inherits rather than repeats.
+
 **Written:** 2026-09-06. This document describes the frontend as it stands after the Scala.js and
 Laminar implementation was deleted and replaced by a pnpm/TypeScript/SolidJS 2 workspace
 (ADR-048). It supersedes the frontend content of `docs/ROADMAP.md`, whose milestone table still

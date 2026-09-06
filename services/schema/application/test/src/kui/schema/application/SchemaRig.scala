@@ -23,15 +23,46 @@ final class FakeRegistry(
     val schemas: Map[(String, String), RegisteredSchema] = Map.empty,
     val globalLevel: CompatibilityLevel = CompatibilityLevel.Backward,
     val subjectLevels: Map[String, CompatibilityLevel] = Map.empty,
+    val formats: Map[String, SchemaFormat] = Map.empty,
+    val unenrichable: Set[String] = Set.empty,
+    val vanished: Set[String] = Set.empty,
     val failure: Option[KuiError] = None,
-    val writes: Ref[IO, List[(String, CompatibilityLevel)]]
+    val writes: Ref[IO, List[(String, CompatibilityLevel)]],
+    val enrichments: Ref[IO, List[String]]
 ) extends SchemaRegistryPort[IO] {
 
   private def answer[A](value: A): IO[Either[KuiError, A]] =
     IO.pure(failure.toLeft(value))
 
+  /** `vanished` names are listed and known to nothing else, which is the shape of a subject deleted between
+    * the list call and the call that would have enriched it.
+    */
   def subjects: IO[Either[KuiError, List[Subject]]] =
-    answer(subjectsByName.keys.toList.sorted.map(Subject.unsafe))
+    answer((subjectsByName.keySet ++ vanished).toList.sorted.map(Subject.unsafe))
+
+  /** Every call is recorded, because the number of them is the promise the list page makes.
+    *
+    * A subject in `unenrichable` refuses the way a registry that stopped answering mid-page does. It is a
+    * per-subject switch rather than the whole-registry `failure` for exactly that reason: the interesting
+    * case is one row failing while the page around it succeeds.
+    */
+  def summary(subject: Subject): IO[Either[KuiError, Option[SubjectSummary]]] =
+    enrichments.update(_ :+ subject.value) *> {
+      if unenrichable.contains(subject.value) then IO.pure(Left(SchemaRig.unreachable))
+      else
+        answer(
+          subjectsByName
+            .get(subject.value)
+            .map(versions =>
+              SubjectSummary(
+                subject = subject,
+                format = formats.get(subject.value),
+                versionCount = Some(versions.size),
+                compatibility = subjectLevels.get(subject.value).map(SubjectCompatibility.own)
+              )
+            )
+        )
+    }
 
   def versions(subject: Subject): IO[Either[KuiError, Option[List[SchemaVersion]]]] =
     answer(subjectsByName.get(subject.value).map(_.map(SchemaVersion.unsafe)))
@@ -108,9 +139,24 @@ object SchemaRig {
       schemas: Map[(String, String), RegisteredSchema] = Map.empty,
       globalLevel: CompatibilityLevel = CompatibilityLevel.Backward,
       subjectLevels: Map[String, CompatibilityLevel] = Map.empty,
+      formats: Map[String, SchemaFormat] = Map.empty,
+      unenrichable: Set[String] = Set.empty,
+      vanished: Set[String] = Set.empty,
       failure: Option[KuiError] = None
   ): IO[FakeRegistry] =
-    Ref
-      .of[IO, List[(String, CompatibilityLevel)]](Nil)
-      .map(new FakeRegistry(subjects, schemas, globalLevel, subjectLevels, failure, _))
+    for {
+      writes <- Ref.of[IO, List[(String, CompatibilityLevel)]](Nil)
+      enrichments <- Ref.of[IO, List[String]](Nil)
+    } yield new FakeRegistry(
+      subjects,
+      schemas,
+      globalLevel,
+      subjectLevels,
+      formats,
+      unenrichable,
+      vanished,
+      failure,
+      writes,
+      enrichments
+    )
 }

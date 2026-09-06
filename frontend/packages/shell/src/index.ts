@@ -25,14 +25,19 @@ export {
 } from "./chrome/SearchField.jsx";
 export { TabStrip, type TabStripProps } from "@kui/kernel";
 export { TopBar, type ThemeMode, type TopBarProps } from "./chrome/TopBar.jsx";
+export { healthWord } from "./chrome/types.js";
 export type {
   BadgeTone,
   ClusterHealth,
   ClusterSummary,
   Crumb,
   NavBadge,
+  NavCount,
+  NavCounts,
   NavDestination,
   NavGroup,
+  NavRank,
+  NavState,
   Tab,
 } from "./chrome/types.js";
 
@@ -52,6 +57,11 @@ export {
 } from "./routing/routes.jsx";
 
 export {
+  CLUSTER_GROUP,
+  ECOSYSTEM_GROUP,
+  NAV_GROUP_ORDER,
+  badgeOf,
+  countBadge,
   degradedLabels,
   destinationFor,
   navigationGroups,
@@ -59,6 +69,55 @@ export {
   type FeatureStatus,
   type NavigationInput,
 } from "./nav/navigation.js";
+
+/**
+ * The drawer's topic tree, and the cluster the frame draws it for.
+ *
+ * Wave 1 wrote all of this and published none of it: nothing outside `nav/` and `data/` could
+ * reach `prefixes`, the count vocabulary or the cluster store, so the drawer went on drawing
+ * skeletons over a fold that was finished and tested. Publishing it is the first act of the packet
+ * that wires the frame, and the split it implies is deliberate: the store's *behaviour* is owned
+ * next to the store, in `data/clusterStore.ts`, and only its name is published here. A consumer
+ * that needs to change what `countsOf` refuses changes that file, not this line.
+ *
+ * `countFor` is not a function and so is not on this list: it is the field on
+ * {@link NavigationInput} through which a caller supplies the figures, and it reaches callers with
+ * that type. `badgeOf` and `countBadge` above are the rules it feeds.
+ */
+export {
+  INTERNAL_GROUP,
+  MAX_PREFIX_GROUPS,
+  OTHER_GROUP,
+  isInternalTopic,
+  prefixes,
+  type PrefixGroup,
+} from "./nav/prefixes.js";
+export { topicTree, type TopicTreeInput } from "./nav/topicTree.js";
+export {
+  brokerStorageOf,
+  createClusterStore,
+  type ClusterFacts,
+} from "./data/clusterStore.js";
+export {
+  StorageMeter,
+  brokerState,
+  type BrokerStorage,
+  type StorageMeterProps,
+} from "./chrome/StorageMeter.jsx";
+export {
+  AppearancePopover,
+  type AppearancePopoverProps,
+  type AppearancePreferences,
+} from "./chrome/AppearancePopover.jsx";
+export {
+  NotificationBell,
+  NotificationPanel,
+  type Notice,
+  type NoticeCategory,
+  type NoticeFeed,
+  type NoticeSeverity,
+} from "./chrome/Notifications.jsx";
+export { EnvRail, tileLetter, type EnvRailProps, type RailDestination } from "./chrome/EnvRail.jsx";
 
 export { featureRegistry, registrationOf } from "./features/registry.js";
 export { FeatureGate, type FeatureGateProps } from "./features/FeatureGate.jsx";

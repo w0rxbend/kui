@@ -10,14 +10,14 @@ deployment/demo/demo.sh
 It prints one line you have to act on:
 
 ```
-  KUI is running:  http://localhost:18080/ui/
+  KUI is running:  http://localhost:18090/ui/
+  the API is at:   http://localhost:18080/api/v1
 ```
 
-**That URL does not currently serve an interface.** ADR-048 made the frontend a separate image and
-the gateway's jar contains none of it, but `demo.sh` and `docker-compose.demo.yml` still start the
-backend alone — unlike `deployment/quickstart/`, which was updated to start the frontend container
-too. Until they are, the demo below is exercised through the API. The walkthrough's value is the
-fault-isolation behaviour it demonstrates, which is observable either way.
+Two addresses because the interface is its own container. ADR-048 made the frontend a separate image
+and the KUI jar contains none of it, so nginx serves `/ui/` on `18090` and proxies `/api/` to KUI —
+one `proxy_pass`, and it is what buys same-origin for the session cookie and the CSRF header. KUI's
+own port stays published so that a `curl` against the API is possible; the browser never uses it.
 
 And when you have finished:
 
@@ -30,8 +30,9 @@ nothing is left in a directory for you to find months later. The downloaded imag
 fetching them again next time would only waste your time; the script tells you how to remove those
 too.
 
-The first run takes a few minutes if KUI's image has to be built (it is compiled inside a
-container, so a machine with only Docker is enough) and about a minute afterwards. Five Kafka
+The first run takes a few minutes if KUI's two images have to be built — the backend is compiled
+inside a container and the interface is bundled in another, so a machine with only Docker is
+enough — and about a minute afterwards. Five Kafka
 brokers plus KUI want roughly 4 GB of memory available to Docker; the script checks and says so
 before it starts, because a broker killed part-way through looks exactly like a cluster failing for
 no reason.
@@ -232,18 +233,18 @@ about KUI's own topology is involved in what you are watching.
 
 ## When the default ports are taken
 
-`18080` is KUI. The development and production brokers are also published, so your own tools —
-`kcat`, an IDE, a console consumer — can reach them on `19092` and `19093`–`19095`. If something is
-already listening, pass your own numbers:
+`18090` is the interface and `18080` is the API. The development and production brokers are also
+published, so your own tools — `kcat`, an IDE, a console consumer — can reach them on `19092` and
+`19093`–`19095`. If something is already listening, pass your own numbers:
 
 ```
-KUI_PORT=28080 KUI_DEMO_DEV_PORT=29092 deployment/demo/demo.sh
+KUI_DEMO_FRONTEND_PORT=28090 KUI_PORT=28080 KUI_DEMO_DEV_PORT=29092 deployment/demo/demo.sh
 ```
 
 The script checks the ports before starting anything and, if one is busy, tells you which and
 suggests free numbers, rather than letting Docker Compose fail halfway through with a message about
-a container that means nothing to you. The variables are `KUI_PORT`, `KUI_DEMO_DEV_PORT` and
-`KUI_DEMO_PROD_PORT_1` … `_3`.
+a container that means nothing to you. The variables are `KUI_DEMO_FRONTEND_PORT`, `KUI_PORT`,
+`KUI_DEMO_DEV_PORT` and `KUI_DEMO_PROD_PORT_1` … `_3`.
 
 Those broker ports are only for tools on *your machine*. KUI reaches the brokers across the private
 Compose network by container name, so it is unaffected by which host port you pick. That is also

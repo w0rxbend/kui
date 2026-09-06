@@ -2,7 +2,7 @@ package kui.topic.infrastructure
 
 import scala.jdk.CollectionConverters.*
 
-import org.apache.kafka.clients.admin.{ConfigEntry, KuiTopicTestSynonyms}
+import org.apache.kafka.clients.admin.{Config, ConfigEntry, KuiTopicTestSynonyms}
 import org.apache.kafka.common.{Node, TopicPartition, TopicPartitionInfo}
 
 import kui.kafka.admin.{LogDir, ReplicaInfo}
@@ -190,6 +190,34 @@ final class KafkaTopicAdminSuite extends KuiSuite {
     assertEquals(entry.defaultValue, Some("-1"))
     assert(entry.isOverridden, "a seven-day retention over a default of -1 is an override")
   }
+
+  test("the list's cleanup column is read out of the batched configuration, and never defaulted") {
+    // The scrape reads `cleanup.policy` for every topic in one batched `describeConfigs`, and this is the
+    // per-topic decision that batch's answer is folded through. `delete` is Kafka's own default, so writing
+    // it in for a topic whose configuration could not be read would turn "KUI does not know" into a
+    // confident statement about a topic that might be `compact` — the difference between a topic that keeps
+    // its records and one that does not.
+    val compacted = new Config(List(entryOf("cleanup.policy", "compact")).asJava)
+    val other = new Config(List(entryOf("retention.ms", "604800000")).asJava)
+    val unreadable = new Config(List(entryOf("cleanup.policy", null)).asJava)
+
+    assertEquals(KafkaTopicAdmin.cleanupPolicyOf(compacted), Some("compact"))
+    assertEquals(KafkaTopicAdmin.cleanupPolicyOf(other), None)
+    assertEquals(KafkaTopicAdmin.cleanupPolicyOf(unreadable), None)
+    assertEquals(KafkaTopicAdmin.cleanupPolicyOf(new Config(List.empty[ConfigEntry].asJava)), None)
+  }
+
+  private def entryOf(name: String, value: String | Null): ConfigEntry =
+    new ConfigEntry(
+      name,
+      value,
+      ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG,
+      false,
+      false,
+      List.empty[ConfigEntry.ConfigSynonym].asJava,
+      ConfigEntry.ConfigType.STRING,
+      null
+    )
 
   test("a sensitive setting reports no value and no default") {
     val raw = new ConfigEntry(

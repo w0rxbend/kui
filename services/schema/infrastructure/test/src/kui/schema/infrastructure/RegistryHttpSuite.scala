@@ -196,4 +196,59 @@ final class RegistryHttpSuite extends KuiIOSuite {
     }.checkCompatibility(orders, VersionSelector.Latest, ProposedSchema(SchemaFormat.Avro, "{}", Nil))
       .assertEquals(Right(Some(CompatibilityVerdict(false, Nil))))
   }
+
+  test("a summary counts the version list rather than reading the latest version's number") {
+    registry {
+      case "/subjects/orders-value/versions" => (StatusCode.Ok, "[1,2,7]")
+      case "/subjects/orders-value/versions/latest" =>
+        (StatusCode.Ok, """{"version":7,"id":11,"schemaType":"PROTOBUF","schema":"syntax = \"proto3\";"}""")
+      case "/config/orders-value" => (StatusCode.Ok, """{"compatibilityLevel":"FULL"}""")
+    }.summary(orders).map {
+      case Right(Some(summary)) =>
+        // Versions 3 to 6 have been deleted. The latest is 7 and there are three of them, and a row
+        // reading "7 versions" would be printing a number the registry never offered as a count.
+        assertEquals(summary.versionCount, Some(3))
+        assertEquals(summary.format, Some(SchemaFormat.Protobuf))
+        assertEquals(summary.compatibility, Some(SubjectCompatibility.own(CompatibilityLevel.Full)))
+      case other => fail(s"expected a summary, got $other")
+    }
+  }
+
+  test("a subject with no level of its own leaves the level absent for the caller to inherit") {
+    // The registry answers 404 to `/config/{subject}` for the overwhelming majority of subjects, and
+    // resolving that into the global level here would be one extra request per row of every page.
+    registry {
+      case "/subjects/orders-value/versions" => (StatusCode.Ok, "[1]")
+      case "/subjects/orders-value/versions/latest" =>
+        (StatusCode.Ok, """{"version":1,"id":1,"schema":"\"string\""}""")
+    }.summary(orders).map(_.map(_.flatMap(_.compatibility))).assertEquals(Right(None))
+  }
+
+  test("a subject that has gone is an absence, and the two decorating requests are never sent") {
+    var asked = List.empty[String]
+    val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF { request =>
+        asked = asked :+ ("/" + request.uri.path.mkString("/"))
+        IO.pure(ResponseStub.adjust("", StatusCode.NotFound): sttp.client4.Response[StubBody])
+      }
+
+    new RegistryHttp[IO](backend, base, RegistryCredentials.anonymous[IO]).summary(orders).map { result =>
+      assertEquals(result, Right(None))
+      // Not three requests for a subject that is no longer there. The version call already answered
+      // the only question the other two were going to decorate.
+      assertEquals(asked, List("/subjects/orders-value/versions"))
+    }
+  }
+
+  test("a decorating request that fails refuses the whole row rather than half of it") {
+    registry {
+      case "/subjects/orders-value/versions" => (StatusCode.Ok, "[1]")
+      case "/subjects/orders-value/versions/latest" =>
+        (StatusCode.Ok, """{"version":1,"id":1,"schema":"\"string\""}""")
+      case "/config/orders-value" => (StatusCode.ServiceUnavailable, "")
+    }.summary(orders).map {
+      case Left(error) => assertEquals(error.code, ErrorCode.UpstreamUnavailable)
+      case Right(found) => fail(s"expected a failure, got $found")
+    }
+  }
 }

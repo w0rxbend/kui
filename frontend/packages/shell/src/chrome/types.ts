@@ -8,7 +8,7 @@
  * product — and those are exactly the states this project's worst defects have lived in.
  */
 
-import type { IconName } from "@kui/kernel";
+import type { FeatureId, IconName } from "@kui/kernel";
 
 /**
  * How a cluster is doing, as four cases rather than a boolean.
@@ -19,6 +19,29 @@ import type { IconName } from "@kui/kernel";
  * can raise.
  */
 export type ClusterHealth = "healthy" | "degraded" | "unreachable" | "unknown";
+
+/**
+ * The four health cases in words, which is where the fact actually lives.
+ *
+ * Every place this product reports a cluster's health draws a coloured dot, and in every one of
+ * them the dot is marked decorative — so the word beside it is not a caption, it is the statement.
+ * One table rather than one per component: the drawer's head and the environment rail's tooltips
+ * name the same four states, and two tables would let a rename change one screen's vocabulary and
+ * not the other's, which is the kind of drift nobody reports because each screen reads correctly on
+ * its own.
+ */
+export function healthWord(health: ClusterHealth): string {
+  return HEALTH_WORDS[health];
+}
+
+const HEALTH_WORDS: Record<ClusterHealth, string> = {
+  healthy: "healthy",
+  degraded: "degraded",
+  /* Not "unreachable": the sentence is about what we observed, and "not answering" says that
+     without asserting the cluster is down — a severed route from KUI is not a dead broker. */
+  unreachable: "not answering",
+  unknown: "health not known yet",
+};
 
 /** A cluster as the chrome needs to know it. */
 export type ClusterSummary = {
@@ -33,6 +56,34 @@ export type ClusterSummary = {
   readonly version?: string | undefined;
   /** Only meaningful when `health` is "unreachable": how long ago the last successful check was. */
   readonly lastSeen?: string | undefined;
+  /**
+   * How many brokers answered the last successful scrape, when one has succeeded.
+   *
+   * Optional for the same reason `version` is, and the drawer head treats it the same way. The head
+   * writes a three-part interpunct list — `1 URP · v3.7.0 · 3 brokers` (`SCREENS-V4.md` §2.1) — and
+   * **each part is dropped when its figure is unknown** rather than printed as a dash beside a
+   * word, which reads as a missing dash and not as a missing figure. That is `BrandBlock`'s own
+   * stated rule, applied to a caption instead of to a version.
+   */
+  readonly brokerCount?: number | undefined;
+  /**
+   * What is currently wrong with the cluster, in the counts the caption's first token comes from.
+   *
+   * The first token of that list is variable *in kind*: the health word when the cluster is clean,
+   * a defect count with an abbreviation when it is not. That is the whole reason the caption
+   * exists — a green dot and the word "healthy" say the same thing twice, whereas "1 URP" says
+   * something the dot cannot.
+   *
+   * An absent count means nobody has told us, and it is emphatically not a zero: a cluster whose
+   * partition counts came back `null` would otherwise be captioned "0 URP", which is an invented
+   * reassurance about data that never arrived — the exact defect `overview/load.ts` documents at
+   * length in `withoutNulls`.
+   */
+  readonly defects?:
+    | {
+        readonly underReplicatedPartitions?: number | undefined;
+      }
+    | undefined;
 };
 
 /**
@@ -55,6 +106,64 @@ export type NavBadge = {
 };
 
 /**
+ * The figure a navigation row carries, in the three shapes the drawer actually draws.
+ *
+ * A shape rather than a formatted string, and that is the whole point. The tone follows what the
+ * figure *means*, and only the figure knows: `2/3` is danger, `128` is neutral, and a caller that
+ * had already flattened both to text could tell them apart only by looking at the digits — which is
+ * how a badge ends up amber because a number happened to be large. Keeping the meaning until the
+ * last moment lets the rule be applied once, in `nav/navigation.ts`, instead of at each row.
+ */
+export type NavCount =
+  /** A plain quantity: `128` topics, `6` subjects. Never a problem, however large it gets. */
+  | {
+      readonly kind: "total";
+      readonly value: number;
+      /** What is counted, for the accessible name. The label beside it already says "Topics". */
+      readonly noun?: string | undefined;
+    }
+  /**
+   * `3/3`: how many of a set are up, out of how many there are.
+   *
+   * The one figure on this list whose tone changes without the row changing, which is exactly why
+   * it is worth a variant of its own. A denominator has to be a number somebody really reported —
+   * see `brokerCount` in `overview/model.ts` for why "the number that answered" is not one.
+   */
+  | {
+      readonly kind: "online";
+      readonly online: number;
+      readonly total: number;
+      readonly noun?: string | undefined;
+    }
+  /**
+   * `1 rebalancing`, `1 failed`: a count of things that are not right, and the word for them.
+   *
+   * The severity is the caller's to state because only the caller knows what the thing counted
+   * does next: a rebalancing consumer group settles by itself and is a warning, a failed connector
+   * task does not and is not.
+   */
+  | {
+      readonly kind: "defect";
+      readonly value: number;
+      readonly noun: string;
+      readonly severity: "warning" | "danger";
+    };
+
+/**
+ * The figure beside each of the drawer's rows, one per feature that has one.
+ *
+ * Keyed by `FeatureId` rather than by a loose string, so a feature that is renamed breaks this
+ * table instead of quietly losing its badge — a missing badge looks exactly like a count that could
+ * not be fetched, and the two would never be told apart by anybody reading the screen.
+ *
+ * Every member is optional and an absent one means *not known*. It never means zero: `Topics 0` on
+ * a cluster whose topic service did not answer is a statement about the cluster, and a false one.
+ */
+export type NavCounts = {
+  readonly [K in FeatureId]?: NavCount | undefined;
+};
+
+/**
  * Which of ADR-032's five states a destination is in.
  *
  * Written to `data-state` on the row, and deliberately not expressed as a class name. Class names
@@ -63,6 +172,20 @@ export type NavBadge = {
  * on something that stays true through a restyle.
  */
 export type NavState = "ready" | "degraded" | "unavailable" | "forbidden" | "not_configured";
+
+/**
+ * Where a nested row sorts among its siblings, in the three kinds the topic tree has.
+ *
+ * A field on the row rather than a rule read off its label. The drawer's tree is assembled from two
+ * sources — favourites, which a person chose, and prefix groups, which `nav/prefixes.ts` folded out
+ * of a name list — and a renderer that recovered the distinction by looking for a trailing `.*`
+ * would file a topic genuinely called `orders.*` as a group and an internal topic somebody
+ * favourited as a favourite. The two sources know which is which; the label does not.
+ *
+ * Absent means "an ordinary row", which sorts with the prefix groups. That is the right default for
+ * a caller that has only one kind of child.
+ */
+export type NavRank = "favourite" | "prefix" | "internal";
 
 export type NavDestination = {
   readonly id: string;
@@ -91,6 +214,35 @@ export type NavDestination = {
    * is a mistake this type cannot prevent but every call site should avoid.
    */
   readonly disabledReason?: string | undefined;
+  /**
+   * The rows nested under this one: the topic tree of `SCREENS-V4.md` §2.2.
+   *
+   * Recursive rather than a flat list with a depth field, because the depth of a row is not a fact
+   * about the row — it is a fact about where it sits, and the two go out of step the moment a
+   * branch is moved. A nested shape cannot express a child at the wrong depth at all.
+   *
+   * Absent and empty are deliberately different. Absent means the row is a leaf; empty means it is
+   * a branch that currently holds nothing, which is a cluster with no topics and is worth drawing
+   * as such rather than as a row that has forgotten it can expand.
+   */
+  readonly children?: readonly NavDestination[] | undefined;
+  /**
+   * Whether the children are on screen.
+   *
+   * Carried on the data rather than held inside the row component, because it has to survive the
+   * row being re-rendered — the drawer is rebuilt whenever a capability frame lands, which on a
+   * struggling cluster is every few seconds, and a tree that collapsed itself each time would be
+   * unusable exactly when somebody most needs it.
+   */
+  readonly expanded?: boolean | undefined;
+  /**
+   * Where this row sorts among its siblings. See {@link NavRank}.
+   *
+   * Only meaningful on a child row; a top-level destination's position is its feature's declared
+   * order, which is fixed for the reason `nav/navigation.ts` gives at length — an entry that moves
+   * when a service goes down is an entry the user clicks by mistake.
+   */
+  readonly rank?: NavRank | undefined;
 };
 
 export type NavGroup = {

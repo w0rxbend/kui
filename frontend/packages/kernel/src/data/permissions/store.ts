@@ -15,7 +15,7 @@
  *
  * 1. **The vocabulary is generated.** `Resources`, `Actions` and `ConnectorFallbackActions` in
  *    `@kui/api` are emitted from the Scala enums by the build, and an action carries its own
- *    resource because `VIEW` alone names eleven different things. Rename an action on the server and
+ *    resource because `VIEW` alone names thirteen different things. Rename an action on the server and
  *    this file stops compiling.
  * 2. **The evaluation is a lookup, not a re-derivation.** The server sends grants with their action
  *    sets *already expanded* — `DELETE` already carries the `VIEW` it implies — so nothing here

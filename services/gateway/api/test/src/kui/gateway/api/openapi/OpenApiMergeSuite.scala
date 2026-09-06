@@ -59,14 +59,16 @@ final class OpenApiMergeSuite extends FunSuite {
   }
 
   test("theTopicServicesPathsAreMerged") {
-    // Five proxied paths, at their public prefix, alongside the two the gateway serves itself: the topic
+    // Seven proxied paths, at their public prefix, alongside the two the gateway serves itself: the topic
     // overview, which it aggregates, and the message browse stream, which it relays. A service's
     // endpoints reaching the published document is what makes an integrator able to find them.
     assertEquals(
       OpenApiMerge.paths(merged(List(gatewayDoc, clusterDoc, topicDoc))).filter(_.contains("/topics")),
       List(
         "/api/v1/clusters/{clusterId}/topics",
+        "/api/v1/clusters/{clusterId}/topics/names",
         "/api/v1/clusters/{clusterId}/topics/refresh",
+        "/api/v1/clusters/{clusterId}/topics/statistics",
         "/api/v1/clusters/{clusterId}/topics/{topicName}",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/config",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream",

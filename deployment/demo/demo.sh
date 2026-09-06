@@ -23,7 +23,7 @@
 #
 # Ports, when any of the defaults is already taken on your machine:
 #
-#   KUI_PORT=28080 KUI_DEMO_DEV_PORT=29092 deployment/demo/demo.sh
+#   KUI_PORT=28080 KUI_DEMO_FRONTEND_PORT=28090 KUI_DEMO_DEV_PORT=29092 deployment/demo/demo.sh
 #
 # Pass the same variables to `down`, or not -- teardown does not care which ports were used.
 
@@ -40,23 +40,29 @@ KUI_IMAGE="kui-allinone:${KUI_VERSION}"
 # The defaults are deliberately NOT 8080 and 9092. The quickstart owns those, and somebody who wants
 # to see both at once should not have to think about it.
 KUI_PORT="${KUI_PORT:-18080}"
+# The interface's port. It is what a person opens; KUI's port above is the API, published only so a
+# curl against it is possible -- the browser reaches it through the frontend container, which
+# proxies /api so that the two share an origin (ADR-019 and the cookie).
+FRONTEND_PORT="${KUI_DEMO_FRONTEND_PORT:-18090}"
 DEV_PORT="${KUI_DEMO_DEV_PORT:-19092}"
 PROD_PORT_1="${KUI_DEMO_PROD_PORT_1:-19093}"
 PROD_PORT_2="${KUI_DEMO_PROD_PORT_2:-19094}"
 PROD_PORT_3="${KUI_DEMO_PROD_PORT_3:-19095}"
 
 export KUI_VERSION KUI_PORT
+export KUI_DEMO_FRONTEND_PORT="${FRONTEND_PORT}"
 export KUI_DEMO_DEV_PORT="${DEV_PORT}"
 export KUI_DEMO_PROD_PORT_1="${PROD_PORT_1}"
 export KUI_DEMO_PROD_PORT_2="${PROD_PORT_2}"
 export KUI_DEMO_PROD_PORT_3="${PROD_PORT_3}"
 
-# How much memory to insist on. Measured on an idle stack, the nine containers hold about 3 GB
-# between them -- roughly 400 MiB per broker with its 512 MiB heap cap, 540 MiB for KUI, and about
-# 120 MiB for each of the three demonstration consumers. 6 GB is that plus room for the JVM heaps to
-# actually reach their cap while you use the thing. Stated rather than discovered, because the
-# failure mode when it is not there is a broker killed by the kernel's out-of-memory reaper mid-run,
-# which surfaces as an unexplained cluster going stale ten minutes in.
+# How much memory to insist on. Measured on an idle stack, the containers hold about 3 GB between
+# them -- roughly 400 MiB per broker with its 512 MiB heap cap, 540 MiB for KUI, about 120 MiB for
+# each of the three demonstration consumers, and a rounding error for the interface's nginx. 6 GB is
+# that plus room for the JVM heaps to actually reach their cap while you use the thing. Stated
+# rather than discovered, because the failure mode when it is not there is a broker killed by the
+# kernel's out-of-memory reaper mid-run, which surfaces as an unexplained cluster going stale ten
+# minutes in.
 readonly MEMORY_NEEDED_GB=6
 
 compose() {
@@ -144,17 +150,19 @@ check_ports() {
     return
   fi
 
-  port_in_use "${KUI_PORT}"     && blocked+=("${KUI_PORT} (KUI, override with KUI_PORT)")
-  port_in_use "${DEV_PORT}"     && blocked+=("${DEV_PORT} (development broker, override with KUI_DEMO_DEV_PORT)")
-  port_in_use "${PROD_PORT_1}"  && blocked+=("${PROD_PORT_1} (production broker 1, override with KUI_DEMO_PROD_PORT_1)")
-  port_in_use "${PROD_PORT_2}"  && blocked+=("${PROD_PORT_2} (production broker 2, override with KUI_DEMO_PROD_PORT_2)")
-  port_in_use "${PROD_PORT_3}"  && blocked+=("${PROD_PORT_3} (production broker 3, override with KUI_DEMO_PROD_PORT_3)")
+  port_in_use "${FRONTEND_PORT}" && blocked+=("${FRONTEND_PORT} (the interface, override with KUI_DEMO_FRONTEND_PORT)")
+  port_in_use "${KUI_PORT}"      && blocked+=("${KUI_PORT} (the KUI API, override with KUI_PORT)")
+  port_in_use "${DEV_PORT}"      && blocked+=("${DEV_PORT} (development broker, override with KUI_DEMO_DEV_PORT)")
+  port_in_use "${PROD_PORT_1}"   && blocked+=("${PROD_PORT_1} (production broker 1, override with KUI_DEMO_PROD_PORT_1)")
+  port_in_use "${PROD_PORT_2}"   && blocked+=("${PROD_PORT_2} (production broker 2, override with KUI_DEMO_PROD_PORT_2)")
+  port_in_use "${PROD_PORT_3}"   && blocked+=("${PROD_PORT_3} (production broker 3, override with KUI_DEMO_PROD_PORT_3)")
   if [ "${#blocked[@]}" -gt 0 ]; then
     say "Something is already listening on:"
     printf '  %s\n' "${blocked[@]}"
     say ""
     say "Choose free ports and pass them in, for example:"
     say "  KUI_PORT=$((KUI_PORT + 10000)) \\"
+    say "  KUI_DEMO_FRONTEND_PORT=$((FRONTEND_PORT + 10000)) \\"
     say "  KUI_DEMO_DEV_PORT=$((DEV_PORT + 10000)) \\"
     say "  KUI_DEMO_PROD_PORT_1=$((PROD_PORT_1 + 10000)) \\"
     say "  KUI_DEMO_PROD_PORT_2=$((PROD_PORT_2 + 10000)) \\"
@@ -210,6 +218,26 @@ ensure_certs() {
   say ""
 }
 
+# And the interface, which is a second container. Reporting the API as ready and then handing over a
+# URL that answers nothing is the worst moment to be imprecise: somebody seeing KUI for the first
+# time reads a blank page as the product being broken.
+wait_for_frontend() {
+  local url="http://localhost:${FRONTEND_PORT}/healthz"
+  local deadline=$((SECONDS + 120))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if curl -fsS -o /dev/null "${url}" 2>/dev/null; then
+      return 0
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+      case "$(docker inspect -f '{{.State.Health.Status}}' kui-demo-frontend 2>/dev/null || echo none)" in
+        healthy) return 0 ;;
+      esac
+    fi
+    sleep 2
+  done
+  return 1
+}
+
 wait_for_kui() {
   local url="http://localhost:${KUI_PORT}/api/v1/health/ready"
   local deadline=$((SECONDS + 240))
@@ -236,7 +264,7 @@ up() {
   ensure_image
   ensure_certs
 
-  say "Starting three Kafka clusters, seeding each of them, and starting KUI."
+  say "Starting three Kafka clusters, seeding each of them, and starting KUI and its interface."
   say "  Each cluster is waited for until it can genuinely serve a client, not merely until its"
   say "  containers have started -- and the three-broker cluster is waited for until its brokers"
   say "  have found each other, which is a stronger condition than one broker answering. Expect"
@@ -250,8 +278,13 @@ up() {
     die "KUI started but never became ready. 'deployment/demo/demo.sh logs' shows why."
   fi
 
+  if ! wait_for_frontend; then
+    die "The interface did not come up. 'deployment/demo/demo.sh logs' shows why."
+  fi
+
   say ""
-  say "  KUI is running:  http://localhost:${KUI_PORT}/ui/"
+  say "  KUI is running:  http://localhost:${FRONTEND_PORT}/ui/"
+  say "  the API is at:   http://localhost:${KUI_PORT}/api/v1"
   say ""
 }
 

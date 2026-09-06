@@ -93,6 +93,28 @@ export function shellRoutes(views: RouteViews) {
             // The parent nodes carry no `component` on purpose: a parent's component is a *layout*
             // that must render `props.children`, and a feature root has no children slot, so a
             // component here would draw the feature and swallow the matched child.
+
+            // `/clusters/<id>` with no page named at all. It is the shortest thing anybody types
+            // and the shape a colleague pastes, and until this node existed it fell through to the
+            // wildcard at the foot of the table and drew the 404 page for a cluster that plainly
+            // exists — with the drawer beside it correctly naming that cluster's topics.
+            //
+            // It resolves to the dashboard rather than redirecting to it. A redirect would rewrite
+            // the address bar, so the next person to copy the link would copy the longer spelling
+            // and the short one would go on being the address nobody has ever seen work.
+            { path: "/", component: views.home },
+
+            // The cluster's own landing page. Its tab is a *parameter*, not a different page, so
+            // `/dashboard` and `/dashboard/overview` are one address under two spellings — and
+            // `paths.dashboard` supplies the default, so no call site has to decide what a missing
+            // tab means and end up spelling the same page differently from the tab strip.
+            {
+              path: "/dashboard",
+              children: [
+                { path: "/", component: views.home },
+                { path: "/:tab", component: views.home },
+              ],
+            },
             {
               path: "/brokers",
               children: [

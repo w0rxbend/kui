@@ -12,15 +12,62 @@ import kui.contracts.KernelSchemas.given
 import kui.contracts.Section
 import kui.kernel.{BrokerId, ClusterId, KafkaClusterId}
 
+/** How much of a stated window a cluster had an active controller.
+  *
+  * The window travels with the figure because the figure is meaningless without it: "99.98 %" is a claim
+  * about a period, and a browser that printed "over the last 6h" from a literal of its own would keep
+  * printing it the day the window was retuned. The label is built from `windowSeconds`.
+  *
+  * @param percent
+  *   the share of the observed scrapes in which a controller was present, to two decimals. `None` until the
+  *   window has been collecting for `windowSeconds` — a percentage computed over the four minutes since a
+  *   restart and printed as a day is a worse answer than no answer, because the reader cannot tell which one
+  *   they are looking at
+  * @param windowSeconds
+  *   the period the percentage is over
+  * @param coverageSeconds
+  *   how long the window has actually been collecting, never more than `windowSeconds`. It exists so that the
+  *   refusal can be explained rather than merely shown: a client with a `None` can say "collecting, 41m of
+  *   6h" instead of drawing an empty ring
+  */
+final case class ControllerUptimeDto(
+    percent: Option[Double],
+    windowSeconds: Long,
+    coverageSeconds: Long
+)
+
+object ControllerUptimeDto {
+
+  given Codec[ControllerUptimeDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        percent <- cursor.get[Option[Double]]("percent")
+        windowSeconds <- cursor.get[Long]("windowSeconds")
+        coverageSeconds <- cursor.getOrElse[Long]("coverageSeconds")(0L)
+      } yield ControllerUptimeDto(percent, windowSeconds, coverageSeconds),
+    (dto: ControllerUptimeDto) =>
+      Json.obj(
+        "percent" -> dto.percent.asJson,
+        "windowSeconds" -> dto.windowSeconds.asJson,
+        "coverageSeconds" -> dto.coverageSeconds.asJson
+      )
+  )
+
+  given Schema[ControllerUptimeDto] = Schema
+    .derived[ControllerUptimeDto]
+    .description("How much of a stated window this cluster had an active controller")
+
+  given CanEqual[ControllerUptimeDto, ControllerUptimeDto] = CanEqual.derived
+}
+
 /** What the cluster looks like from the outside, as of one scrape.
   *
-  * Every number a broker cannot supply is an `Option`, and three of them are always `None` in M1: online,
-  * offline and under-replicated partition counts are not derivable from `describeCluster`, the broker set and
-  * `describeLogDirs` — the reference product aggregates `describeTopics`, `describeLogDirs` and `listOffsets`
-  * to get them, which is the topic sweep that belongs to `services/topic`
-  * (`research/kafka/admin-capabilities.md` §1 "Cluster stats", DEVPLAN §10 D5 as corrected by the M1 gate
-  * review). They have a field because they will be filled by a later milestone without a breaking change;
-  * until then a client renders `—` rather than `0`, which would be a lie.
+  * Every number a broker cannot supply is an `Option`. The three partition counts — online, offline and
+  * under-replicated — come from a `describeTopics` sweep, which the cluster service now makes on a cadence of
+  * its own (`research/kafka/admin-capabilities.md` §1 "Cluster stats"). They are still `Option` and they are
+  * still absent together, because the sweep refuses as a whole: one topic it could not describe and all three
+  * are `None`, since a sum over some of the topics is a number that looks measured and is wrong in the
+  * direction that reassures. A client renders `—` rather than `0`, which would be a lie.
   *
   * @param kafkaClusterId
   *   the id the brokers report (ADR-031), which is not the configured `ClusterId`. `None` before the first
@@ -46,7 +93,12 @@ final case class ClusterSummaryDto(
     underReplicatedPartitionCount: Option[Int],
     totalDiskUsageBytes: Option[Long],
     features: List[String],
-    scrapedAt: Instant
+    scrapedAt: Instant,
+    /** `None` when this deployment keeps no controller-uptime window at all, which is a different statement
+      * from a window that is not yet full — that one is present with a `None` percentage and a stated length.
+      * Defaulted so that a caller written before the field existed still compiles and still means "not kept".
+      */
+    controllerUptime: Option[ControllerUptimeDto] = None
 )
 
 object ClusterSummaryDto {
@@ -70,6 +122,10 @@ object ClusterSummaryDto {
         totalDisk <- cursor.get[Option[Long]]("totalDiskUsageBytes")
         features <- cursor.getOrElse[List[String]]("features")(Nil)
         scrapedAt <- cursor.get[Instant]("scrapedAt")
+        // Read leniently, as `ClusterRowDto` reads its own two later fields: a recorded document or a
+        // gateway from before this field existed decodes to "no window is kept", which is the answer that
+        // draws nothing rather than the one that draws a zero.
+        uptime <- cursor.getOrElse[Option[ControllerUptimeDto]]("controllerUptime")(None)
       } yield ClusterSummaryDto(
         kafkaClusterId,
         version,
@@ -81,7 +137,8 @@ object ClusterSummaryDto {
         underReplicated,
         totalDisk,
         features,
-        scrapedAt
+        scrapedAt,
+        uptime
       ),
     (dto: ClusterSummaryDto) =>
       Json.obj(
@@ -95,7 +152,8 @@ object ClusterSummaryDto {
         "underReplicatedPartitionCount" -> dto.underReplicatedPartitionCount.asJson,
         "totalDiskUsageBytes" -> dto.totalDiskUsageBytes.asJson,
         "features" -> dto.features.asJson,
-        "scrapedAt" -> dto.scrapedAt.asJson
+        "scrapedAt" -> dto.scrapedAt.asJson,
+        "controllerUptime" -> dto.controllerUptime.asJson
       )
   )
 

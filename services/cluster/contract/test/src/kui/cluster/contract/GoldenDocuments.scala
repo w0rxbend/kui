@@ -32,15 +32,20 @@ object GoldenDocuments {
       |          "controllerId" : 1,
       |          "controllerKind" : "kraft",
       |          "brokerCount" : 3,
-      |          "onlinePartitionCount" : null,
-      |          "offlinePartitionCount" : null,
-      |          "underReplicatedPartitionCount" : null,
+      |          "onlinePartitionCount" : 1522,
+      |          "offlinePartitionCount" : 2,
+      |          "underReplicatedPartitionCount" : 12,
       |          "totalDiskUsageBytes" : 549755813888,
       |          "features" : [
       |            "DESCRIBE_LOG_DIRS",
       |            "DESCRIBE_QUORUM"
       |          ],
-      |          "scrapedAt" : "2026-09-03T10:11:12.000Z"
+      |          "scrapedAt" : "2026-09-03T10:11:12.000Z",
+      |          "controllerUptime" : {
+      |            "percent" : 99.98,
+      |            "windowSeconds" : 21600,
+      |            "coverageSeconds" : 21600
+      |          }
       |        },
       |        "fetchedAt" : "2026-09-03T10:11:12.000Z"
       |      },
@@ -82,8 +87,8 @@ object GoldenDocuments {
       |        "port" : 9093,
       |        "rack" : "eu-west-1a",
       |        "isController" : true,
-      |        "partitionCount" : null,
-      |        "leaderCount" : null,
+      |        "partitionCount" : 42,
+      |        "leaderCount" : 14,
       |        "replicaCount" : 42,
       |        "replicaSkewPercent" : 3.5,
       |        "leaderSkewPercent" : null,

@@ -130,9 +130,13 @@ final class TopicProxySuite extends CatsEffectSuite {
     }
 
   test("everyTopicEndpointIsReachableAtApiV1") {
-    // Five endpoints, five public addresses, derived from the contract rather than written out here.
+    // Seven endpoints, seven public addresses, derived from the contract rather than written out here.
+    // `statistics` and `names` are fixed segments in the same position as `{topicName}`, so they are
+    // declared before the detail endpoint and must be listed in that order here too.
     val expected = List(
       "GET /api/v1/clusters/{clusterId}/topics",
+      "GET /api/v1/clusters/{clusterId}/topics/statistics",
+      "GET /api/v1/clusters/{clusterId}/topics/names",
       "GET /api/v1/clusters/{clusterId}/topics/{topicName}",
       "GET /api/v1/clusters/{clusterId}/topics/{topicName}/config",
       "GET /api/v1/clusters/{clusterId}/topics/{topicName}/partitions",

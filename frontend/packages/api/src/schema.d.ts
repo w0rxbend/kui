@@ -459,6 +459,26 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/metrics/throughput": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The cluster's throughput over the requested window
+         * @description Answers 200 with a not_configured section for a cluster that has no kui.metrics.sources entry, which is a deployment choice rather than a failure: the card keeps its 'not measured' sentence. A bucket KUI did not sample carries null rates, so a gap breaks the bar instead of reading as a quiet cluster.
+         */
+        readonly get: operations["metrics.throughput"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -512,7 +532,7 @@ export interface paths {
         };
         /**
          * The subjects registered on this cluster's Schema Registry
-         * @description Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.
+         * @description Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned.
          */
         readonly get: operations["schema.subjects"];
         readonly put?: never;
@@ -883,6 +903,26 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/topics/names": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Every topic name on the cluster, unpaged
+         * @description The drawer's topic tree is a fold over names, so it needs the names and none of the figures. Unpaged on purpose: a page of names would make the tree's counts depend on how far something had scrolled a list it never shows. Topics the scrape could not describe are included — they have no list row, they do exist, and a tree that omitted them would say a topic is gone.
+         */
+        readonly get: operations["topic.names"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/topics/refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -897,6 +937,26 @@ export interface paths {
          * @description Answers 202 with the time the request was taken. It changes nothing on the Kafka cluster: it asks KUI to re-scrape it, and the response exists so a button has something truthful to say.
          */
         readonly post: operations["topic.refresh"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/topics/statistics": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Cluster-wide topic totals: how many topics, partitions and bytes
+         * @description Cluster-wide and unaffected by any list filter: the totals keep reading the whole cluster while the table below them shows a search result. Each sum is absent rather than partial — a scrape that could not describe a topic knows how many topics exist and not how many partitions they hold — and incompleteTopics says how many topics that was, so the screen can explain the gap.
+         */
+        readonly get: operations["topic.statistics"];
+        readonly put?: never;
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1373,8 +1433,11 @@ export interface components {
          */
         readonly GroupDetailDto: {
             readonly assignments: components["schemas"]["AssignmentFreshnessDto"];
+            readonly coordinatorHost?: string;
             /** Format: int32 */
             readonly coordinatorId?: number;
+            /** Format: int32 */
+            readonly coordinatorPort?: number;
             /** Format: int32 */
             readonly excludedPartitions: number;
             /** @description a consumer group id */
@@ -1408,8 +1471,11 @@ export interface components {
          * @description One consumer group as the list shows it; totalLag is null when it could not be computed
          */
         readonly GroupSummaryDto: {
+            readonly coordinatorHost?: string;
             /** Format: int32 */
             readonly coordinatorId?: number;
+            /** Format: int32 */
+            readonly coordinatorPort?: number;
             /** Format: int32 */
             readonly excludedPartitions: number;
             /** @description a consumer group id */
@@ -1622,7 +1688,7 @@ export interface components {
          * @description One page of a list: the items, and where the page sits in the whole
          */
         readonly PageDto_A: {
-            readonly items?: readonly string[];
+            readonly items?: readonly components["schemas"]["SubjectSummaryDto"][];
             readonly page: components["schemas"]["PageInfo"];
         };
         /**
@@ -2105,6 +2171,18 @@ export interface components {
         /** StoreSource */
         readonly StoreSource: components["schemas"]["FromPath"] | components["schemas"]["Inline"];
         /**
+         * SubjectSummaryDto
+         * @description A subject list row: the name, and the facts a row shows when they could be read
+         */
+        readonly SubjectSummaryDto: {
+            readonly compatibility?: components["schemas"]["CompatibilityDto"];
+            readonly format?: string;
+            /** @description a schema registry subject */
+            readonly subject: string;
+            /** Format: int32 */
+            readonly versionCount?: number;
+        };
+        /**
          * SubjectVersionsDto
          * @description A subject's version numbers, ascending
          */
@@ -2112,6 +2190,14 @@ export interface components {
             /** @description a schema registry subject */
             readonly subject: string;
             readonly versions?: readonly number[];
+        };
+        /**
+         * ThroughputResponse
+         * @description The cluster's throughput, or the reason there is none to show
+         */
+        readonly ThroughputResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly throughput: unknown;
         };
         /** TlsConfig */
         readonly TlsConfig: {
@@ -2158,6 +2244,14 @@ export interface components {
             readonly topic: unknown;
         };
         /**
+         * TopicNamesResponse
+         * @description Every topic name on the cluster, for the drawer's tree; no counts and no paging
+         */
+        readonly TopicNamesResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly names: unknown;
+        };
+        /**
          * TopicOverviewDto
          * @description Everything the topic page shows, with each part able to be missing on its own
          */
@@ -2184,6 +2278,14 @@ export interface components {
             readonly incompleteTopics: number;
             /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
             readonly topics: unknown;
+        };
+        /**
+         * TopicStatisticsResponse
+         * @description The topics list's cluster-wide statistics region
+         */
+        readonly TopicStatisticsResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly statistics: unknown;
         };
         /**
          * TopicSubscriptionDto
@@ -3146,6 +3248,39 @@ export interface operations {
             };
         };
     };
+    readonly "metrics.throughput": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How far back to reach: 24h, 7d, 30d */
+                readonly range?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ThroughputResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     readonly "cluster.refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -4096,6 +4231,36 @@ export interface operations {
             };
         };
     };
+    readonly "topic.names": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TopicNamesResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     readonly "topic.refresh": {
         readonly parameters: {
             readonly query?: never;
@@ -4114,6 +4279,36 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["RefreshAcceptedDto1"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "topic.statistics": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TopicStatisticsResponse"];
                 };
             };
             readonly default: {

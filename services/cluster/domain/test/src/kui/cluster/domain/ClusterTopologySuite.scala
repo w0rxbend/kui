@@ -117,12 +117,31 @@ final class ClusterTopologySuite extends KuiSuite {
     assertEquals(built.offlineLogDirCount, 2)
   }
 
-  test("partitionsAndTopicsAndLeadersAreNoneInM1") {
+  test("everyPartitionFigureIsAbsentUntilASweepHasBeenFolded") {
+    // A topology with no census is what a KUI that has just started holds, and what one whose last sweep
+    // was incomplete holds. Both must read as "not counted" and never as zero.
     val built = topology(ref, load = Map(BrokerId.unsafe(1) -> load(3)))
 
     assertEquals(built.partitions, None)
     assertEquals(built.topics, None)
-    assertEquals(built.load(BrokerId.unsafe(1)).leaders, None)
+    assertEquals(built.partitionsOn(BrokerId.unsafe(1)), None)
+    assertEquals(built.leadersOn(BrokerId.unsafe(1)), None)
+  }
+
+  test("aFoldedCensusFillsTheClusterWideCountsAndEveryBrokerRow") {
+    val census = PartitionCensus.of(
+      List(
+        placement(leader = 1, replicas = List(1, 2)),
+        placement(leader = 2, replicas = List(1, 2), inSync = Some(List(2)))
+      )
+    )
+    val built = topology(ref, load = Map(BrokerId.unsafe(1) -> load(2)), census = Some(census))
+
+    assertEquals(built.partitions, Some(PartitionSummary(online = 2, offline = 0, underReplicated = 1)))
+    assertEquals(built.partitionsOn(BrokerId.unsafe(1)), Some(2))
+    assertEquals(built.leadersOn(BrokerId.unsafe(1)), Some(1))
+    // Broker 3 holds nothing and the sweep was complete, so it is a measured zero rather than an absence.
+    assertEquals(built.leadersOn(BrokerId.unsafe(3)), Some(0))
   }
 
   test("belowMinimumVersionDrivesTheBanner") {

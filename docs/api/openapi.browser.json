@@ -2063,6 +2063,59 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/metrics/throughput" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The cluster's throughput over the requested window",
+        "description" : "Answers 200 with a not_configured section for a cluster that has no kui.metrics.sources entry, which is a deployment choice rather than a failure: the card keeps its 'not measured' sentence. A bucket KUI did not sample carries null rates, so a gap breaks the bar instead of reading as a quiet cluster.",
+        "operationId" : "metrics.throughput",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "range",
+            "in" : "query",
+            "description" : "How far back to reach: 24h, 7d, 30d",
+            "required" : false,
+            "schema" : {
+              "default" : "24h",
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ThroughputResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}/schemas/compatibility" : {
       "get" : {
         "tags" : [
@@ -2172,7 +2225,7 @@
           "schema"
         ],
         "summary" : "The subjects registered on this cluster's Schema Registry",
-        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it.",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned.",
         "operationId" : "schema.subjects",
         "parameters" : [
           {
@@ -2701,6 +2754,92 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/CreatedTopicDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/statistics" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Cluster-wide topic totals: how many topics, partitions and bytes",
+        "description" : "Cluster-wide and unaffected by any list filter: the totals keep reading the whole cluster while the table below them shows a search result. Each sum is absent rather than partial — a scrape that could not describe a topic knows how many topics exist and not how many partitions they hold — and incompleteTopics says how many topics that was, so the screen can explain the gap.",
+        "operationId" : "topic.statistics",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicStatisticsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/topics/names" : {
+      "get" : {
+        "tags" : [
+          "topic"
+        ],
+        "summary" : "Every topic name on the cluster, unpaged",
+        "description" : "The drawer's topic tree is a fold over names, so it needs the names and none of the figures. Unpaged on purpose: a page of names would make the tree's counts depend on how far something had scrolled a list it never shows. Topics the scrape could not describe are included — they have no list row, they do exist, and a tree that omitted them would say a topic is gone.",
+        "operationId" : "topic.names",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopicNamesResponse"
                 }
               }
             }
@@ -4310,6 +4449,13 @@
             "type" : "integer",
             "format" : "int32"
           },
+          "coordinatorHost" : {
+            "type" : "string"
+          },
+          "coordinatorPort" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "members" : {
             "type" : "array",
             "items" : {
@@ -4385,6 +4531,13 @@
             "format" : "int32"
           },
           "coordinatorId" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "coordinatorHost" : {
+            "type" : "string"
+          },
+          "coordinatorPort" : {
             "type" : "integer",
             "format" : "int32"
           },
@@ -4867,8 +5020,7 @@
           "items" : {
             "type" : "array",
             "items" : {
-              "description" : "a schema registry subject",
-              "type" : "string"
+              "$ref" : "#/components/schemas/SubjectSummaryDto"
             }
           },
           "page" : {
@@ -5937,6 +6089,30 @@
           }
         ]
       },
+      "SubjectSummaryDto" : {
+        "title" : "SubjectSummaryDto",
+        "description" : "A subject list row: the name, and the facts a row shows when they could be read",
+        "type" : "object",
+        "required" : [
+          "subject"
+        ],
+        "properties" : {
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          },
+          "format" : {
+            "type" : "string"
+          },
+          "versionCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "compatibility" : {
+            "$ref" : "#/components/schemas/CompatibilityDto"
+          }
+        }
+      },
       "SubjectVersionsDto" : {
         "title" : "SubjectVersionsDto",
         "description" : "A subject's version numbers, ascending",
@@ -5955,6 +6131,19 @@
               "type" : "integer",
               "format" : "int32"
             }
+          }
+        }
+      },
+      "ThroughputResponse" : {
+        "title" : "ThroughputResponse",
+        "description" : "The cluster's throughput, or the reason there is none to show",
+        "type" : "object",
+        "required" : [
+          "throughput"
+        ],
+        "properties" : {
+          "throughput" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },
@@ -6057,6 +6246,19 @@
           }
         }
       },
+      "TopicNamesResponse" : {
+        "title" : "TopicNamesResponse",
+        "description" : "Every topic name on the cluster, for the drawer's tree; no counts and no paging",
+        "type" : "object",
+        "required" : [
+          "names"
+        ],
+        "properties" : {
+          "names" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "TopicOverviewDto" : {
         "title" : "TopicOverviewDto",
         "description" : "Everything the topic page shows, with each part able to be missing on its own",
@@ -6088,6 +6290,19 @@
           "generatedAt" : {
             "description" : "RFC 3339 timestamp in UTC",
             "type" : "string"
+          }
+        }
+      },
+      "TopicStatisticsResponse" : {
+        "title" : "TopicStatisticsResponse",
+        "description" : "The topics list's cluster-wide statistics region",
+        "type" : "object",
+        "required" : [
+          "statistics"
+        ],
+        "properties" : {
+          "statistics" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }
       },

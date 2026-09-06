@@ -5,7 +5,6 @@ import cats.syntax.all.*
 import sttp.tapir.server.ServerEndpoint
 
 import kui.contracts.paging.PageDto
-import kui.kernel.Subject
 import kui.schema.application.*
 import kui.schema.contract.SchemaEndpoints
 import kui.schema.contract.dto.*
@@ -56,7 +55,7 @@ object SchemaRoutes {
     secured(SchemaEndpoints.subjects) { _ => (cluster, params) =>
       subjects
         .list(cluster, SchemaMapping.query(params))
-        .map(_.map(page => PageDto.of[Subject, Subject](page)(identity)))
+        .map(_.map(page => PageDto.of(page)(SchemaMapping.summary)))
     }
 
   private def subjectVersions[F[_]: Async](

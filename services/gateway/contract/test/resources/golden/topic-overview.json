@@ -10,7 +10,9 @@
         "outOfSyncReplicas" : 0,
         "offlinePartitions" : 0,
         "messageCount" : 617283,
-        "sizeBytes" : 4741632
+        "sizeBytes" : 4741632,
+        "produceRate" : null,
+        "cleanupPolicy" : null
       },
       "partitions" : [
         {

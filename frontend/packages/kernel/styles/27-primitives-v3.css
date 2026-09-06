@@ -17,10 +17,18 @@
  *
  * ## The rule this file obeys without exception
  *
- * Every colour, radius, duration and weight below is a custom property, and there is not one
- * literal hex. `research/design/SCREENS.md` §0 established that this design introduces no colour —
- * twenty samples from the new screens all came back equal to tokens `10-tokens.css` already
- * declares — so a hex literal in this file would be a token that was not looked for.
+ * Every colour, radius, duration and weight below is a custom property, and — with one stated
+ * exception — there is not one literal hex. `research/design/SCREENS.md` §0 established that that
+ * design introduces no colour — twenty samples from the new screens all came back equal to tokens
+ * `10-tokens.css` already declares — so a hex literal in this file would be a token that was not
+ * looked for.
+ *
+ * The exception is the monogram ramp at the foot of the file, and it is an exception the design
+ * argues for rather than one this file is granting itself: `SCREENS-V4.md` §0.2 says in as many
+ * words that those five hues *may not* be tokenised, because they carry no meaning and a token
+ * names a purpose. They are declared as custom properties all the same, in one block, for the
+ * reason the metrics above are — so that the set is a short list a reviewer can hold against the
+ * screenshot. Read the note there before adding a sixth.
  */
 
 :root {
@@ -591,4 +599,107 @@
 
 .kui-pagination__goto-go {
   border-color: var(--kui-color-border);
+}
+
+/* --- Monogram ---------------------------------------------------------------------------------
+ *
+ * The initials tile at the head of a Top-producers row (`SCREENS-V4.md` §0.2). Its fill is the one
+ * colour in KUI that is chosen by a hash rather than by meaning, and the block below is the one
+ * place in this stylesheet with literal hexes in it.
+ *
+ * ## Why these are not tokens, and why they are still custom properties
+ *
+ * `SCREENS-V4.md` §0.2 is explicit: a token says *what a colour is for*, and "the fourth client
+ * id" is not a purpose. Putting these five in `10-tokens.css` would put a decorative ramp in the
+ * palette every component reads, and the first thing that happens next is that something borrows
+ * `--kui-color-monogram-3` because it is a nice green. So they live here, beside the only
+ * component that may use them, and `Monogram` picks an *index* — no colour is ever computed in
+ * TypeScript (ADR-024, ADR-048 §5).
+ *
+ * They are still custom properties rather than hexes inline in the five rules, so that the whole
+ * ramp is one short list a reviewer can hold against the screenshot, which is the same reason the
+ * metrics block at the top of this file exists.
+ *
+ * ## Each entry carries its own ink, and that is not decoration
+ *
+ * The five fills are sampled from the design and four of them are pale, but `#9e5774` is not:
+ * near-black on it is 3.75:1, under the 4.5:1 body threshold, and two initials at 12px are not
+ * large text. So the ink is chosen per entry rather than once for the ramp — white on the plum
+ * (5.16:1), near-black on the other four (6.6:1 to 15.8:1). Both inks are literal for the same
+ * reason the fills are: the tile does not change with the theme, so neither may the letters on it,
+ * and `--kui-color-text-strong` would be near-white on a pale mint the moment the page went dark.
+ */
+
+:root {
+  --kui-monogram-size: 32px; /* design; M01 x=1035, the Top producers tile */
+  --kui-monogram-size-sm: 24px; /* kui; the same tile inside a table row */
+
+  /* design; `SCREENS-V4.md` §0.2, sampled at M01 x=1035 */
+  --kui-monogram-1-fill: #6797e5;
+  --kui-monogram-1-ink: #0a0e13; /* 6.58:1 */
+  --kui-monogram-2-fill: #b2f5e8;
+  --kui-monogram-2-ink: #0a0e13; /* 15.78:1 */
+  --kui-monogram-3-fill: #c59e57;
+  --kui-monogram-3-ink: #0a0e13; /* 7.74:1 */
+  --kui-monogram-4-fill: #d4c6ef;
+  --kui-monogram-4-ink: #0a0e13; /* 12.09:1 */
+  --kui-monogram-5-fill: #9e5774;
+  /* White, not the near-black the other four take: on this fill near-black is 3.75:1. */
+  --kui-monogram-5-ink: #ffffff; /* 5.16:1 */
+}
+
+/* The base carries the shape and nothing about the size. `Monogram` emits a size modifier on every
+ * tile it draws, `md` included, and the default's rule used to be folded in here — so a reader who
+ * saw `kui-monogram--md` in the DOM and grepped for it found nothing at all and had no way to tell
+ * a defaulted class from a dead one. Both values `size` can take now have a rule of their own. */
+.kui-monogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: var(--kui-radius-md);
+  font-family: var(--kui-font-family-sans);
+  font-weight: var(--kui-font-weight-bold);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  /* A three-letter id can only ever produce two characters, but an unexpected one must clip rather
+   * than stretch the tile: a row of monograms of different widths stops reading as a column. */
+  overflow: hidden;
+}
+
+.kui-monogram--md {
+  width: var(--kui-monogram-size);
+  height: var(--kui-monogram-size);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-monogram--sm {
+  width: var(--kui-monogram-size-sm);
+  height: var(--kui-monogram-size-sm);
+  font-size: var(--kui-font-size-xs);
+}
+
+.kui-monogram--1 {
+  background-color: var(--kui-monogram-1-fill);
+  color: var(--kui-monogram-1-ink);
+}
+
+.kui-monogram--2 {
+  background-color: var(--kui-monogram-2-fill);
+  color: var(--kui-monogram-2-ink);
+}
+
+.kui-monogram--3 {
+  background-color: var(--kui-monogram-3-fill);
+  color: var(--kui-monogram-3-ink);
+}
+
+.kui-monogram--4 {
+  background-color: var(--kui-monogram-4-fill);
+  color: var(--kui-monogram-4-ink);
+}
+
+.kui-monogram--5 {
+  background-color: var(--kui-monogram-5-fill);
+  color: var(--kui-monogram-5-ink);
 }

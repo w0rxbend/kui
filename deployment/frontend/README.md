@@ -1,13 +1,37 @@
 # The KUI interface, as its own image
 
 ```bash
-docker compose \
-  -f deployment/quickstart/docker-compose.quickstart.yml \
-  -f deployment/frontend/docker-compose.frontend.yml \
-  up --build
+deployment/quickstart/quickstart.sh
 
 open http://localhost:8090/ui/
 ```
+
+## Where it runs
+
+Every shape of this product serves an interface, and in each of them it is this image in a container
+of its own beside the backend:
+
+| Stack | Interface | API |
+| --- | --- | --- |
+| `deployment/quickstart/` | `8090` | `8080` |
+| `deployment/compose/docker-compose.allinone.yml` | `8090` | `8080` |
+| `deployment/compose/docker-compose.yml` | `8090` | `8080` |
+| `deployment/demo/` | `18090` | `18080` |
+| `deployment/secured/` | `18091` | `18081` |
+
+`docker-compose.frontend.yml` in this directory is the **quickstart's** overlay and not a general
+one: its `depends_on` and its network name that stack's service and that stack's network, and
+Compose has no way to leave either open. The other three stacks therefore declare the service
+themselves. It is the same six properties each time — the image, the published port,
+`KUI_GATEWAY_URL`, a `depends_on` gated on the gateway being healthy, the read-only root with its
+two tmpfs mounts, and `cap_drop: ALL` with `no-new-privileges` — and only the address, the network
+and the port differ.
+
+The `depends_on` is a hard gate in every one of them, which is the opposite of how the gateway
+depends on its services. nginx resolves the gateway's name once at start, so a gateway that is not
+there yet is a container that answers 502 for ever with nothing to say that waiting would have fixed
+it. The gateway, in turn, gates on nothing — which is what keeps one service's outage from ever
+reaching this page.
 
 ## Why the frontend ships separately
 

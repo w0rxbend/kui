@@ -1,6 +1,6 @@
 /**
  * Rendering, interaction and accessibility for the control primitives: button, text field, select,
- * checkbox, status pill, icon tile, avatar and tooltip.
+ * checkbox, status pill, icon tile, avatar, monogram and tooltip.
  *
  * Every case below is tied either to a statement in `.agent/design/SPEC.md` or to a defect this
  * project has already paid for. Nothing here asserts a colour, a size or a position: jsdom has no
@@ -22,6 +22,7 @@ import { Avatar, initialsOf } from "./Avatar.jsx";
 import { Button } from "./Button.jsx";
 import { Checkbox } from "./Checkbox.jsx";
 import { IconTile } from "./IconTile.jsx";
+import { Monogram, MONOGRAM_RAMP_LENGTH, monogramIndex, monogramInitials } from "./Monogram.jsx";
 import { Select } from "./Select.jsx";
 import { StatusPill } from "./StatusPill.jsx";
 import { TextField } from "./TextField.jsx";
@@ -551,6 +552,101 @@ describe("Avatar", () => {
         <Avatar name="Olena Petrenko" />
         <Avatar name="Olena Petrenko" onClick={() => {}} />
         <Avatar />
+      </>
+    ));
+    await expectNoViolations(container);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+
+describe("Monogram", () => {
+  /** The whole reason it is not `Avatar`: an identifier is read left to right. */
+  it("abbreviates an identifier by its head, not by its last segment", () => {
+    expect(monogramInitials("checkout-svc")).toBe("CS");
+    expect(monogramInitials("orders.payments.v2")).toBe("OP");
+    expect(monogramInitials("consumer_group_7")).toBe("CG");
+    expect(monogramInitials("connect-worker@eu-central-1")).toBe("CW");
+    // One segment, so the first two characters of it.
+    expect(monogramInitials("payments")).toBe("PA");
+    expect(monogramInitials("9")).toBe("9");
+    // `Avatar`'s rule would abbreviate these four by their version suffix and make them alike.
+    expect(initialsOf("orders.payments.v2")).toBe("OV");
+  });
+
+  /** Never a blank square: an empty tile reads as an image that failed to load. */
+  it("draws a question mark for an identifier with nothing to abbreviate", () => {
+    expect(monogramInitials("---")).toBe("?");
+    expect(monogramInitials("")).toBe("?");
+  });
+
+  /**
+   * The property an operator relies on without ever being told about it: they learn that the plum
+   * tile is `checkout-svc`. That only holds if the colour depends on the string and on nothing
+   * else — not on render order, not on which replica served the page, not on when it was loaded.
+   */
+  it("gives one identifier one colour, twice in the same render", () => {
+    const container = render(() => (
+      <>
+        <Monogram id="checkout-svc" testId="first" />
+        <Monogram id="checkout-svc" testId="second" />
+        <Monogram id="analytics-ingest" testId="other" />
+      </>
+    ));
+    const first = container.querySelector('[data-testid="first"]')!;
+    const second = container.querySelector('[data-testid="second"]')!;
+    expect(first.getAttribute("data-ramp")).toBe(second.getAttribute("data-ramp"));
+    expect(first.className).toBe(second.className);
+    // And the ramp is actually being used, rather than every id landing on entry 1.
+    expect(container.querySelector('[data-testid="other"]')!.getAttribute("data-ramp")).not.toBe(
+      first.getAttribute("data-ramp"),
+    );
+  });
+
+  /** The same assertion made against the function rather than the markup, because "stable across
+   * replicas" is a claim about the arithmetic and not about this render. */
+  it("hashes into the ramp and only into the ramp", () => {
+    const ids = [
+      "checkout-svc",
+      "orders.payments.v2",
+      "analytics-ingest",
+      "",
+      "李",
+      "a".repeat(4096),
+    ];
+    for (const id of ids) {
+      const index = monogramIndex(id);
+      expect(Number.isInteger(index)).toBe(true);
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(MONOGRAM_RAMP_LENGTH);
+      expect(monogramIndex(id)).toBe(index);
+    }
+  });
+
+  /** The id is written beside the tile on every screen that uses one, so announcing the tile as
+   * well reads the client out twice — once spelled two letters at a time. */
+  it("is decoration until it is given a name of its own", () => {
+    const hidden = render(() => <Monogram id="checkout-svc" testId="tile" />);
+    const tile = hidden.querySelector('[data-testid="tile"]')!;
+    expect(tile.getAttribute("aria-hidden")).toBe("true");
+    expect(tile.getAttribute("role")).toBeNull();
+
+    const named = render(() => (
+      <Monogram id="checkout-svc" label="Client checkout-svc" testId="named" />
+    ));
+    const announced = named.querySelector('[data-testid="named"]')!;
+    expect(announced.getAttribute("role")).toBe("img");
+    // The whole identifier, never the two letters. "C S" read aloud is not a client.
+    expect(announced.getAttribute("aria-label")).toBe("Client checkout-svc");
+    expect(announced.getAttribute("aria-hidden")).toBeNull();
+  });
+
+  it("has no accessibility violations, hidden or announced", async () => {
+    const container = render(() => (
+      <>
+        <Monogram id="checkout-svc" />
+        <Monogram id="orders.payments.v2" label="Client orders.payments.v2" />
+        <Monogram id="---" />
       </>
     ));
     await expectNoViolations(container);

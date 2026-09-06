@@ -62,8 +62,8 @@ final class RegistryHttp[F[_]: Async](
     * and every schema screen reported "the configured address does not look like a Schema Registry". The
     * message was accurate about the symptom and pointed at the operator's configuration, which was right.
     *
-    * So the path is dropped here and `rebase` puts it back exactly once. The scheme and host are kept only
-    * so that a logged or failed URI reads sensibly; they are replaced before the request is sent.
+    * So the path is dropped here and `rebase` puts it back exactly once. The scheme and host are kept only so
+    * that a logged or failed URI reads sensibly; they are replaced before the request is sent.
     */
   private val root: Uri =
     Uri.parse(baseUrl.value).getOrElse(uri"http://schema-registry.invalid").withWholePath("")
@@ -77,6 +77,41 @@ final class RegistryHttp[F[_]: Async](
         decode[List[String]](body, "a JSON array of subject names")
           .map(_.map(Subject.unsafe))
     })
+
+  /** Three requests, which is the fewest the Confluent API allows for one list row.
+    *
+    * Each of the three is the only source of its fact. The version *list* is the only source of a count that
+    * survives a soft-deleted version — the latest version number is not the number of versions, and a
+    * registry where v2 was deleted answers `latest` with v3 over a list of two. The latest version's own
+    * document is the only source of `schemaType`. `/config/{subject}` is the only source of a level.
+    *
+    * They are sent one after another rather than all at once because this call is already multiplied by the
+    * page size, and the bulkhead in front of the registry is deliberately narrow: the concurrency that
+    * matters is the caller's across rows, not this method's across three requests for one row.
+    *
+    * A subject the list named a moment ago and the version call cannot find is `None` and not an error. A
+    * registry is written to while somebody is reading it, and the other two requests are skipped because
+    * there is nothing left to ask them about.
+    */
+  def summary(subject: Subject): F[Either[KuiError, Option[SubjectSummary]]] =
+    versions(subject).flatMap {
+      case Left(error) => error.asLeft[Option[SubjectSummary]].pure[F]
+      case Right(None) => none[SubjectSummary].asRight[KuiError].pure[F]
+      case Right(Some(numbers)) =>
+        (schema(subject, VersionSelector.Latest), subjectCompatibility(subject)).tupled.map {
+          case (Left(error), _) => error.asLeft[Option[SubjectSummary]]
+          case (_, Left(error)) => error.asLeft[Option[SubjectSummary]]
+          case (Right(latest), Right(ownLevel)) =>
+            SubjectSummary(
+              subject = subject,
+              // Absent when the latest version went away between the two requests. The count still
+              // stands: it was measured, and a row with a count and no format says exactly that.
+              format = latest.map(_.format),
+              versionCount = Some(numbers.size),
+              compatibility = ownLevel.map(SubjectCompatibility.own)
+            ).some.asRight[KuiError]
+        }
+    }
 
   def versions(subject: Subject): F[Either[KuiError, Option[List[SchemaVersion]]]] =
     get(root.addPath("subjects", subject.value, "versions")).map(_.flatMap {

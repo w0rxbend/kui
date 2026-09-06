@@ -18,18 +18,24 @@ import {
   type LogDir,
   brokerHealth,
   controllerNote,
+  inSyncPercent,
   lagPill,
   latencyPercentiles,
+  messageSizes,
   overviewLede,
   partitionHealth,
   partitionTotal,
   productionRate,
   replicationPill,
+  storageBreakdown,
+  storageLede,
   throughputSeries,
   topLag,
   totalLag,
 } from "./model.js";
 import { readPagedSection, readSection, toOverviewModel, loadingData, withoutNulls } from "./load.js";
+import { segmentTone } from "./StorageByBroker.jsx";
+import { INTERNAL_GROUP, OTHER_GROUP } from "../nav/prefixes.js";
 import { pending, unknown, value } from "./reading.js";
 
 const healthy: ClusterSummary = {
@@ -377,5 +383,195 @@ describe("a cluster that reports no partition counts at all", () => {
 
   it("does not tell the operator to sip their coffee", () => {
     expect(overviewLede(silent())).not.toContain("coffee");
+  });
+});
+
+describe("the storage card's attribution", () => {
+  const brokers: readonly Broker[] = [
+    { id: 1, host: "broker-1", port: 9092, isController: true },
+    { id: 2, host: "broker-2", port: 9092, isController: false },
+  ];
+
+  const dir = (over: Partial<LogDir> & { brokerId: number }): LogDir => ({
+    path: "/var/lib/kafka",
+    totalBytes: 1000,
+    usableBytes: 400,
+    ...over,
+  });
+
+  it("folds the names with the drawer's fold, so a group is written the drawer's way", () => {
+    const reading = storageBreakdown(
+      value(brokers),
+      value([
+        dir({
+          brokerId: 1,
+          replicas: [
+            { topic: "orders.payments", sizeBytes: 300 },
+            { topic: "orders.refunds", sizeBytes: 100 },
+            { topic: "__consumer_offsets", sizeBytes: 20 },
+          ],
+        }),
+        dir({ brokerId: 2, replicas: [{ topic: "orders.payments", sizeBytes: 200 }] }),
+      ]),
+    );
+
+    expect(reading.kind).toBe("value");
+    if (reading.kind !== "value") return;
+    // `orders.*` and not `orders`: the group really continues past its segment. `internal` and not
+    // `__consumer_offsets.*`: an underscore name is a group, not a prefix.
+    expect(reading.value.groups.map((group) => group.prefix)).toEqual(["orders.*", "internal"]);
+    expect(reading.value.rows[0]?.segments).toEqual([
+      { prefix: "orders.*", bytes: 400 },
+      { prefix: "internal", bytes: 20 },
+    ]);
+  });
+
+  it("skips a directory that reported no size, in the capacity and in the attribution", () => {
+    // The discriminating case. The unmeasured disk holds more `orders.*` than the measured one, so
+    // counting it produces a share over 100% — which the bar would clamp and draw as ordinary.
+    const reading = storageBreakdown(
+      value([brokers[0] as Broker]),
+      value([
+        dir({ brokerId: 1, replicas: [{ topic: "orders.payments", sizeBytes: 300 }] }),
+        dir({
+          brokerId: 1,
+          path: "/var/lib/kafka-2",
+          totalBytes: undefined,
+          usableBytes: undefined,
+          replicas: [{ topic: "orders.payments", sizeBytes: 900 }],
+        }),
+      ]),
+    );
+
+    expect(reading.kind).toBe("value");
+    if (reading.kind !== "value") return;
+    expect(reading.value.rows[0]?.capacityBytes).toBe(1000);
+    expect(reading.value.rows[0]?.usedBytes).toBe(600);
+    expect(reading.value.rows[0]?.segments).toEqual([{ prefix: "orders.*", bytes: 300 }]);
+  });
+
+  it("gives a broker whose every directory is unmeasured no capacity and no segments", () => {
+    const reading = storageBreakdown(
+      value([brokers[0] as Broker]),
+      value([
+        dir({
+          brokerId: 1,
+          totalBytes: undefined,
+          usableBytes: undefined,
+          replicas: [{ topic: "orders.payments", sizeBytes: 300 }],
+        }),
+      ]),
+    );
+
+    expect(reading.kind).toBe("value");
+    if (reading.kind !== "value") return;
+    // Not a zero. A disk of unknown size drawn as a zero-byte disk is the most reassuring possible
+    // rendering of "we have no idea how full this is".
+    expect(reading.value.rows[0]?.capacityBytes).toBeUndefined();
+    expect(reading.value.rows[0]?.usedBytes).toBeUndefined();
+    expect(reading.value.rows[0]?.segments).toEqual([]);
+  });
+
+  it("waits rather than failing while the directories are still in flight", () => {
+    // `combineReadings`' precedence, which matters here: the broker list landing first must not
+    // turn the card into an error the moment it has half an answer.
+    expect(storageBreakdown(value(brokers), pending()).kind).toBe("pending");
+    expect(storageBreakdown(value(brokers), unknown("no")).kind).toBe("unknown");
+  });
+
+  it("keeps the counts adding up when the cap drops a group", () => {
+    // Seven prefixes and a cap of five: the two smallest have to survive as `other`, or the card's
+    // legend would total less than the disks it is drawn over.
+    const names = ["a", "b", "c", "d", "e", "f", "g"];
+    const reading = storageBreakdown(
+      value([brokers[0] as Broker]),
+      value([
+        dir({
+          brokerId: 1,
+          replicas: names.map((topic, index) => ({ topic: `${topic}.one`, sizeBytes: 100 - index })),
+        }),
+      ]),
+    );
+
+    expect(reading.kind).toBe("value");
+    if (reading.kind !== "value") return;
+    const labels = reading.value.groups.map((group) => group.prefix);
+    expect(labels).toHaveLength(6);
+    expect(labels.at(-1)).toBe("other");
+    const attributed = reading.value.rows[0]?.segments.reduce((sum, s) => sum + s.bytes, 0);
+    expect(attributed).toBe(names.reduce((sum, _, index) => sum + (100 - index), 0));
+  });
+});
+
+describe("the Storage tab's voice", () => {
+  it("promises an attribution only when there is one to see", () => {
+    const disks = storageBreakdown(
+      value([{ id: 1, host: "broker-1", port: 9092, isController: true }]),
+      value([
+        {
+          brokerId: 1,
+          path: "/var/lib/kafka",
+          totalBytes: 1000,
+          usableBytes: 400,
+          replicas: [{ topic: "orders.payments", sizeBytes: 300 }],
+        },
+      ]),
+    );
+    expect(storageLede(disks)).toBe("Disk, retention and the topics eating your budget.");
+  });
+
+  it("says what is missing when no broker reported a disk size", () => {
+    const noSizes = storageBreakdown(
+      value([{ id: 1, host: "broker-1", port: 9092, isController: true }]),
+      value([{ brokerId: 1, path: "/var/lib/kafka" }]),
+    );
+    expect(storageLede(noSizes)).toContain("no capacity to divide up");
+    expect(storageLede(noSizes)).not.toContain("budget");
+  });
+
+  it("does not describe a picture that has not arrived", () => {
+    expect(storageLede(pending())).toBe("Adding up what is on the disks.");
+    expect(storageLede(unknown("the cluster service is not answering"))).not.toContain("budget");
+  });
+});
+
+describe("the in-sync share the gauge draws", () => {
+  it("is the donut's own healthy percentage, not a second subtraction", () => {
+    const summary = value({ ...healthy, onlinePartitionCount: 1000, underReplicatedPartitionCount: 10 });
+    const health = partitionHealth(summary);
+    expect(inSyncPercent(summary)).toEqual(
+      health.kind === "value" ? value(health.value.healthyPercent) : health,
+    );
+  });
+
+  it("is unknown, not 100, when the counts were not reported", () => {
+    const share = inSyncPercent(value({ ...healthy, underReplicatedPartitionCount: undefined }));
+    expect(share.kind).toBe("unknown");
+  });
+});
+
+describe("the fourth figure with no source", () => {
+  it("says the distribution is not recorded rather than drawing empty buckets", () => {
+    const reading = messageSizes();
+    expect(reading.kind).toBe("notCollected");
+    expect(reading.kind === "notCollected" && reading.why).toContain("does not record message sizes");
+  });
+});
+
+describe("the storage legend's inks", () => {
+  it("keeps `internal` and `other` on fixed colours whatever position they land in", () => {
+    // The two rows whose presence varies: a cluster with no internal topics has no `internal` row,
+    // and one whose prefixes all fit has no `other` row. If either took the next ink in the ramp,
+    // every other colour would shift when one of them appeared, and the key would have to be
+    // re-read after a refresh that changed nothing an operator cares about.
+    expect(segmentTone(INTERNAL_GROUP, 1)).toBe(segmentTone(INTERNAL_GROUP, 4));
+    expect(segmentTone(OTHER_GROUP, 2)).toBe(segmentTone(OTHER_GROUP, 5));
+    expect(segmentTone(INTERNAL_GROUP, 1)).not.toBe(segmentTone(OTHER_GROUP, 1));
+  });
+
+  it("gives the five prefix rows five different inks, because the legend has no other key", () => {
+    const inks = [0, 1, 2, 3, 4].map((index) => segmentTone("orders.*", index));
+    expect(new Set(inks).size).toBe(5);
+    expect(inks).not.toContain(segmentTone(INTERNAL_GROUP, 0));
   });
 });

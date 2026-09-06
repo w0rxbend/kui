@@ -67,8 +67,12 @@ object ClusterMapping {
     case ProfileOrigin.StaticThenStored => ClusterRowDto.OriginStaticThenStored
   }
 
-  /** What one scrape found. The three partition counts have no source in M1 and are `None` by construction:
-    * the domain models them as `Option` for exactly this reason (DEVPLAN D5).
+  /** What one scrape found.
+    *
+    * The three partition counts come from `topology.partitions`, which is itself `None` unless the last
+    * `describeTopics` sweep covered every topic. The refusal is made once, in the domain, and read here — a
+    * mapping that re-derived it would be a second place for it to be got wrong, and the whole argument for
+    * the figure is that it is absent rather than partial.
     */
   def summary(topology: ClusterTopology, scrapedAt: Instant): ClusterSummaryDto =
     ClusterSummaryDto(
@@ -91,7 +95,21 @@ object ClusterMapping {
       // anywhere; that is a column somebody has to add, not a reason to keep answering the wrong question.
       totalDiskUsageBytes = topology.usedByKafkaBytes,
       features = topology.features.tokens.toList.sorted,
-      scrapedAt = scrapedAt
+      scrapedAt = scrapedAt,
+      controllerUptime = topology.controllerUptime.map(uptime)
+    )
+
+  /** The uptime window, with its two durations flattened to whole seconds.
+    *
+    * Seconds rather than an ISO-8601 duration string because the browser's use of it is arithmetic — it
+    * formats "6h" and compares coverage against the window — and a client that had to parse `PT6H` first
+    * would be one parser away from printing a window nobody configured.
+    */
+  def uptime(measured: ControllerUptime): ControllerUptimeDto =
+    ControllerUptimeDto(
+      percent = measured.percent,
+      windowSeconds = measured.window.toSeconds,
+      coverageSeconds = measured.coverage.toSeconds
     )
 
   /** The wire spelling of how a cluster is controlled. Lowercase words rather than the enum's own names,
@@ -144,7 +162,9 @@ object ClusterMapping {
       port = row.broker.port.value,
       rack = row.broker.rack.map(_.value),
       isController = row.isController,
-      partitionCount = None,
+      // Both from the same sweep and therefore absent together. A row with a partition count and no leader
+      // count would mean the two were counted separately, which they never are.
+      partitionCount = row.partitions,
       leaderCount = row.leaders,
       // Every replica this broker holds, in-sync or not. Until 2026-09-04 this same number was sent as
       // `inSyncReplicaCount`, which is true only while nothing is broken: stopping one broker of three left

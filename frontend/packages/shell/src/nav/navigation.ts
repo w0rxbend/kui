@@ -33,9 +33,9 @@
  * thing: they aim at the position their muscle memory learned, and something else has moved into it.
  * So a feature going unavailable changes how its entry *looks* and never where it *is*.
  */
-import { isHidden, type FeatureRegistration, type FeatureState } from "@kui/kernel";
+import { formatCount, isHidden, type FeatureRegistration, type FeatureState } from "@kui/kernel";
 import { explanation } from "../messages.js";
-import type { NavDestination, NavGroup } from "../chrome/types.js";
+import type { NavBadge, NavCount, NavDestination, NavGroup } from "../chrome/types.js";
 
 /** One feature's registration paired with what the shell currently knows about it. */
 export type FeatureStatus = {
@@ -67,28 +67,82 @@ export type NavigationInput = {
    * default.
    */
   readonly hideForbidden?: boolean | undefined;
+  /**
+   * The figure each entry carries, when there is one.
+   *
+   * A function of the registration rather than a table of counts, for the reason `landingFor` is
+   * one: the numbers come from a store that fetches, and this module must stay a pure fold over
+   * capability states. Handing it a lookup keeps the fetching on the other side of the seam, so the
+   * interesting cases below — a count beside a dead service, a count nobody could fetch — are still
+   * decided by a function that takes plain data.
+   *
+   * `undefined` for a feature means *the count is not known*, which is a row with no badge. It is
+   * never a zero; see {@link countBadge}.
+   */
+  readonly countFor?: ((feature: FeatureRegistration) => NavCount | undefined) | undefined;
   /** The shell's own destinations, which have no service behind them and are always reachable. */
   readonly shellDestinations?: readonly NavDestination[] | undefined;
 };
 
+/** The heading over the entries that are about one Kafka cluster: brokers, topics, consumers. */
+export const CLUSTER_GROUP = "CLUSTER";
+
+/**
+ * The second heading `SCREENS-V4.md` §2.2 draws — and it has no entries in this wave.
+ *
+ * Kafka Connect and ksqlDB are M9, and until their services exist there is nothing honest to put
+ * under it: ADR-032's rule for a feature whose upstream is not configured is that it is *hidden*,
+ * not drawn as a failure, so a fabricated row would be the exact misreading the rule prevents.
+ *
+ * It is declared anyway, and emitted empty, so that M9 registers two features and changes nothing
+ * else — and so that the state it has today is a state something renders rather than a state
+ * nothing has ever produced. `NavDrawer` draws nothing at all for a group with no destinations,
+ * which is what makes emitting it safe; see the comment there.
+ */
+export const ECOSYSTEM_GROUP = "ECOSYSTEM";
+
+/**
+ * The order the headings appear in, whatever order the features declaring them are registered in.
+ *
+ * The same argument the entries themselves make one paragraph up, one level higher: a heading that
+ * moved because a feature happened to be registered earlier would move every row under it. Both
+ * groups on this list are emitted whether or not anything is registered into them, which is how
+ * `ECOSYSTEM` can be empty and still be a state something draws; a heading a registration invents
+ * that is not on the list keeps its place at the end, in the order it first appeared.
+ */
+export const NAV_GROUP_ORDER: readonly string[] = [CLUSTER_GROUP, ECOSYSTEM_GROUP];
+
 /**
  * Every link in the drawer, grouped and ordered.
  *
- * Groups come out in the order their first entry declares, so the heading order is a consequence of
- * the same product decision that fixes the entries — there is no second list to keep in step.
+ * The heading order is the shell's own OVERVIEW when it has destinations, then `NAV_GROUP_ORDER`,
+ * then any heading a registration declared that is not on it, in the order it first appeared.
+ * Within a group the entries keep their declared order, which is the correctness property the
+ * header argues for at length.
+ *
+ * Headings are uppercased here rather than at each registration. `SCREENS-V4.md` draws CLUSTER and
+ * ECOSYSTEM in capitals, and `NavGroup.heading` says the capitals belong in the markup rather than
+ * in a `text-transform` — so the one place that assembles the groups is the one place that spells
+ * them, and a registration that writes "Cluster" and one that writes "cluster" cannot become two
+ * headings over two halves of one list.
  */
 export function navigationGroups(input: NavigationInput): readonly NavGroup[] {
   const shell = input.shellDestinations ?? [];
   const ordered = [...input.features].sort((a, b) => a.registration.order - b.registration.order);
 
   const groups = new Map<string, NavDestination[]>();
-  if (shell.length > 0) groups.set("Overview", [...shell]);
+  if (shell.length > 0) groups.set("OVERVIEW", [...shell]);
+  /* Seeded empty so that a declared group keeps its place in the order even before anything is
+     registered into it, and so that `ECOSYSTEM` exists as the empty group the drawer must draw
+     nothing for. */
+  for (const heading of NAV_GROUP_ORDER) if (!groups.has(heading)) groups.set(heading, []);
 
   for (const feature of ordered) {
+    const heading = feature.registration.group.toUpperCase();
     const destination = destinationFor(feature, input);
     if (destination === undefined) continue;
-    const existing = groups.get(feature.registration.group);
-    if (existing === undefined) groups.set(feature.registration.group, [destination]);
+    const existing = groups.get(heading);
+    if (existing === undefined) groups.set(heading, [destination]);
     else existing.push(destination);
   }
 
@@ -98,7 +152,7 @@ export function navigationGroups(input: NavigationInput): readonly NavGroup[] {
 /** One feature's entry, or `undefined` when it has none right now. */
 export function destinationFor(
   feature: FeatureStatus,
-  input: Pick<NavigationInput, "landingFor" | "cluster" | "hideForbidden">,
+  input: Pick<NavigationInput, "landingFor" | "cluster" | "hideForbidden" | "countFor">,
 ): NavDestination | undefined {
   const { registration, state } = feature;
   if (!registration.sidebar) return undefined;
@@ -113,6 +167,7 @@ export function destinationFor(
 
   const reason = explanation(state, registration.label);
   const forbidden = state.kind === "forbidden";
+  const badge = badgeOf(state, reason, input.countFor?.(registration));
 
   return {
     id: registration.id,
@@ -121,8 +176,85 @@ export function destinationFor(
     href,
     state: state.kind,
     ...(forbidden ? { disabled: true, disabledReason: reason ?? "" } : {}),
-    ...(badgeFor(state, reason) === undefined ? {} : { badge: badgeFor(state, reason)! }),
+    ...(badge === undefined ? {} : { badge }),
   };
+}
+
+/**
+ * The one badge a row gets, out of the two things that want to put one there.
+ *
+ * **The capability badge wins**, and this is the rule the whole fold exists to enforce. A count is
+ * a number from the last snapshot that arrived; a `down` badge says the service that produces those
+ * numbers is not answering. Drawing `128` beside a dead topic service is a reassuring picture of an
+ * outage — the reader sees a figure, concludes the topics are fine, and the one marker that would
+ * have told them otherwise is the one that was dropped to make room.
+ *
+ * The two states that carry no capability badge are also the two that must carry no count.
+ * `forbidden` would print a figure counting objects this principal is not allowed to see, which is
+ * the leak the disabled row exists to prevent; `not_configured` counts objects that do not exist.
+ * So a count is drawn beside a `ready` feature and nowhere else.
+ */
+export function badgeOf(
+  state: FeatureState,
+  reason: string | undefined,
+  count: NavCount | undefined,
+): NavBadge | undefined {
+  const capability = badgeFor(state, reason);
+  if (capability !== undefined) return capability;
+  if (state.kind !== "ready" || count === undefined) return undefined;
+  return countBadge(count);
+}
+
+/**
+ * A figure as a badge, with the tone the figure's *meaning* asks for.
+ *
+ * Three rules, each of which is a decision rather than a formatting choice:
+ *
+ * - **A quantity is neutral however large.** A cluster with 4,000 topics is a big cluster, not a
+ *   broken one, and an amber `4,000` would train the reader to ignore amber.
+ * - **A fraction is success only while it is whole.** `2/3` is danger the instant it appears; there
+ *   is no amber step, because a broker that is gone is gone.
+ * - **A defect of zero is no badge at all.** "0 rebalancing" is a permanently present marker, and a
+ *   permanently present marker is one nobody looks at — the same argument {@link badgeFor} makes
+ *   for saying nothing about a healthy feature.
+ *
+ * Returning `undefined` for a nonsensical figure — a fraction out of nothing, a negative count — is
+ * the other half of "an unknown count produces no badge". A figure that cannot be true is not
+ * shown, rather than shown as `0/0` and read as a cluster with no brokers.
+ */
+export function countBadge(count: NavCount): NavBadge | undefined {
+  switch (count.kind) {
+    case "total": {
+      if (!Number.isFinite(count.value) || count.value < 0) return undefined;
+      const text = formatCount(count.value);
+      return { text, tone: "neutral", description: withNoun(text, count.noun) };
+    }
+    case "online": {
+      if (!Number.isFinite(count.online) || !Number.isFinite(count.total) || count.total <= 0) {
+        return undefined;
+      }
+      const text = `${formatCount(count.online)}/${formatCount(count.total)}`;
+      const whole = `${formatCount(count.online)} of ${formatCount(count.total)}`;
+      return {
+        text,
+        tone: count.online >= count.total ? "success" : "danger",
+        description: `${withNoun(whole, count.noun)} online`,
+      };
+    }
+    case "defect": {
+      if (!Number.isFinite(count.value) || count.value <= 0) return undefined;
+      const text = `${formatCount(count.value)} ${count.noun}`;
+      /* The text is already a phrase rather than a bare number, so the description repeats it: it
+         is the shortest sentence that is still true, and inventing a longer one here would put
+         words in front of a screen-reader user that no sighted user is shown. */
+      return { text, tone: count.severity, description: text };
+    }
+  }
+}
+
+/** `3 brokers`, or just `3` when the row's own label already names what is counted. */
+function withNoun(text: string, noun: string | undefined): string {
+  return noun === undefined || noun.length === 0 ? text : `${text} ${noun}`;
 }
 
 /**

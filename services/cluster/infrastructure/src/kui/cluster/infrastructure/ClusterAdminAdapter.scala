@@ -37,6 +37,7 @@ import kui.observability.{MetricNames, Telemetry}
   */
 final class ClusterAdminAdapter[F[_]: Async](
     admin: adm.ClusterAdmin[F],
+    sweeper: KafkaPartitionSweeper[F],
     clients: ClusterAdminClients[F],
     tracer: Tracer[F],
     logger: StructuredLogger[F]
@@ -102,6 +103,16 @@ final class ClusterAdminAdapter[F[_]: Async](
           .flatTap(downgradeNoted(profile, "log dirs", _))
     }
   }
+
+  /** Traced and invalidated exactly like the calls that go through `libs/kafka`, which is why it goes through
+    * the same wrapper rather than calling the sweeper directly: a `describeTopics` that times out is as good
+    * a reason to rebuild the client as a `describeCluster` that does, and a sweep that is not in the trace is
+    * a minute of a slow refresh that a trace cannot account for.
+    */
+  def sweepPartitions(profile: ClusterProfile): F[Either[KuiError, dom.TopicSweep]] =
+    traced(profile, Operations.SweepPartitions) { connection =>
+      sweeper.sweep(connection).flatTap(downgradeNoted(profile, "the partition sweep", _))
+    }
 
   /** Never fails, by the port's own contract: "the probe failed" is already a third answer the type carries.
     *
@@ -226,13 +237,14 @@ object ClusterAdminAdapter {
     */
   def create[F[_]: Async](
       admin: adm.ClusterAdmin[F],
+      sweeper: KafkaPartitionSweeper[F],
       clients: ClusterAdminClients[F],
       telemetry: Telemetry[F],
       logger: StructuredLogger[F]
   ): F[ClusterAdminAdapter[F]] =
     telemetry
       .tracer("kui.cluster.admin")
-      .map(tracer => new ClusterAdminAdapter[F](admin, clients, tracer, logger))
+      .map(tracer => new ClusterAdminAdapter[F](admin, sweeper, clients, tracer, logger))
 
   /** The operation names that appear in the span name and in the `operation` metric attribute. They are
     * constants because a dashboard is built on them.
@@ -243,6 +255,7 @@ object ClusterAdminAdapter {
     val DescribeQuorum: String = "describeQuorum"
     val BrokerConfigs: String = "brokerConfigs"
     val DescribeLogDirs: String = "describeLogDirs"
+    val SweepPartitions: String = "sweepPartitions"
     val Capabilities: String = "capabilities"
   }
 

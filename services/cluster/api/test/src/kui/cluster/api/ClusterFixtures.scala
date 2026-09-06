@@ -110,6 +110,21 @@ object ClusterFixtures {
       )
       .getOrElse(throw new IllegalStateException("the fixture log directory is not valid"))
 
+  /** A census with the cluster-wide totals a mapping assertion wants, built directly rather than folded.
+    *
+    * The fold is `PartitionCensusSuite`'s question; what this layer asserts is that the numbers reach the
+    * wire, so stating them is clearer than deriving them from two hundred placements.
+    */
+  def census(online: Int, underReplicated: Int, offline: Int = 0): PartitionCensus =
+    PartitionCensus(
+      partitions = online + offline,
+      online = online,
+      offline = offline,
+      underReplicated = underReplicated,
+      hostedByBroker = Map.empty,
+      ledByBroker = Map.empty
+    )
+
   def topology(cluster: ClusterProfile = profile()): ClusterTopology = {
     val node = broker(1)
 
@@ -128,10 +143,11 @@ object ClusterFixtures {
       quorum = None,
       features = ClusterFeatures(Set(ClusterFeature.LogDirs), Set.empty, Set.empty, At),
       load = Map(
-        node.id -> BrokerLoad(replicas = 3, leaders = None, skewPercent = Some(0.0d), logDirs = List(logDir()))
+        node.id -> BrokerLoad(replicas = 3, skewPercent = Some(0.0d), logDirs = List(logDir()))
       ),
-      partitions = None,
-      topics = None
+      census = None,
+      topics = None,
+      controllerUptime = None
     )
   }
 

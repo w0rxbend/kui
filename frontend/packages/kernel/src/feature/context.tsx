@@ -53,6 +53,15 @@ export interface KuiPaths {
   readonly settings: () => string;
   readonly clusters: () => string;
   readonly manageClusters: () => string;
+  /**
+   * The cluster's dashboard, on the named tab.
+   *
+   * `tab` is optional and the implementation supplies the default, so that every caller that just
+   * wants "the cluster's page" produces the same address as the tab strip's first tab. A default
+   * chosen per call site is how two links to the same page end up spelled differently, and only one
+   * of them then matches whatever the navigation highlights.
+   */
+  readonly dashboard: (cluster: string, tab?: string) => string;
   readonly brokers: (cluster: string) => string;
   readonly broker: (cluster: string, brokerId: number) => string;
   readonly topics: (cluster: string) => string;

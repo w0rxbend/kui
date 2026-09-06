@@ -29,7 +29,9 @@ object GoldenDocuments {
       |          "outOfSyncReplicas" : 0,
       |          "offlinePartitions" : 0,
       |          "messageCount" : 1234567,
-      |          "sizeBytes" : 9483264
+      |          "sizeBytes" : 9483264,
+      |          "produceRate" : 1204.5,
+      |          "cleanupPolicy" : "delete"
       |        },
       |        {
       |          "name" : "payments.dlq",
@@ -39,7 +41,9 @@ object GoldenDocuments {
       |          "outOfSyncReplicas" : 2,
       |          "offlinePartitions" : 1,
       |          "messageCount" : null,
-      |          "sizeBytes" : 41984
+      |          "sizeBytes" : 41984,
+      |          "produceRate" : null,
+      |          "cleanupPolicy" : null
       |        }
       |      ],
       |      "page" : {
@@ -76,7 +80,9 @@ object GoldenDocuments {
       |          "outOfSyncReplicas" : 0,
       |          "offlinePartitions" : 0,
       |          "messageCount" : 1234567,
-      |          "sizeBytes" : 9483264
+      |          "sizeBytes" : 9483264,
+      |          "produceRate" : 1204.5,
+      |          "cleanupPolicy" : "delete"
       |        }
       |      ],
       |      "page" : {
@@ -120,7 +126,9 @@ object GoldenDocuments {
       |        "outOfSyncReplicas" : 1,
       |        "offlinePartitions" : 1,
       |        "messageCount" : null,
-      |        "sizeBytes" : 9483264
+      |        "sizeBytes" : 9483264,
+      |        "produceRate" : null,
+      |        "cleanupPolicy" : "delete"
       |      },
       |      "partitions" : [
       |        {
@@ -243,6 +251,39 @@ object GoldenDocuments {
       |  }
       |}""".stripMargin
 
+  /** The statistics region of the topics list. Two of the three totals are absent because one topic could
+    * not be described: the count is still the whole cluster's, because `listTopics` answered.
+    */
+  val topicStatistics: String =
+    """{
+      |  "statistics" : {
+      |    "status" : "ok",
+      |    "data" : {
+      |      "topicCount" : 128,
+      |      "partitionCount" : null,
+      |      "sizeBytes" : null,
+      |      "incompleteTopics" : 1
+      |    },
+      |    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+      |  }
+      |}""".stripMargin
+
+  /** The drawer's names index. Names and nothing else, unpaged, sorted, internal topics included — the
+    * browser's fold is what puts `__consumer_offsets` under `internal`.
+    */
+  val topicNames: String =
+    """{
+      |  "names" : {
+      |    "status" : "ok",
+      |    "data" : [
+      |      "__consumer_offsets",
+      |      "orders",
+      |      "payments.dlq"
+      |    ],
+      |    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+      |  }
+      |}""".stripMargin
+
   val refreshAccepted: String =
     """{
       |  "clusterId" : "prod-eu",
@@ -258,6 +299,8 @@ object GoldenDocuments {
     "topic-config-response.json" -> topicConfigResponse,
     "topic-config-not-permitted.json" -> topicConfigNotPermitted,
     "partitions-response.json" -> partitionsResponse,
+    "topic-statistics.json" -> topicStatistics,
+    "topic-names.json" -> topicNames,
     "refresh-accepted.json" -> refreshAccepted
   )
 }
