@@ -64,6 +64,25 @@ trait SchemaRegistryPort[F[_]] {
   /** One subject's own level, or `None` when it has none and follows the global one. */
   def subjectCompatibility(subject: Subject): F[Either[KuiError, Option[CompatibilityLevel]]]
 
+  /** Registers a schema under a subject, creating the subject when it does not yet exist.
+    *
+    * The one method here that changes the registry's contents rather than a setting on it, and the only one
+    * whose failure an operator will read as a refusal of *their* document rather than as KUI being broken. So
+    * a registry that rejects the schema — incompatible with what the subject already holds, or not valid in
+    * the language it claims — must arrive as a `Left` carrying the registry's own explanation, and never as a
+    * generic upstream failure: "the registry said no" and "the registry said this drops a field with no
+    * default" are the difference between a screen somebody can act on and one they escalate.
+    *
+    * There is no `None` case. A subject that does not exist is not an absence here, it is the ordinary way a
+    * subject is created, and an implementation that answered `None` for it would make the first registration
+    * of every subject look like a broken link.
+    *
+    * Registering the same schema twice is what the registry calls idempotent: the second call returns the id
+    * and version the first one produced and adds no version. That is the registry's guarantee rather than
+    * KUI's, and it is why this service's retry policy is allowed to repeat this request.
+    */
+  def register(subject: Subject, proposed: ProposedSchema): F[Either[KuiError, RegisteredVersion]]
+
   /** Sets the registry-wide level. */
   def setGlobalCompatibility(level: CompatibilityLevel): F[Either[KuiError, Unit]]
 

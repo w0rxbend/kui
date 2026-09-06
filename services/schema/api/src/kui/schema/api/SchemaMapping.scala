@@ -55,6 +55,37 @@ object SchemaMapping {
   def verdict(verdict: CompatibilityVerdict): CompatibilityCheckDto =
     CompatibilityCheckDto(verdict.compatible, verdict.messages)
 
+  /** What the registry stored. The absent version travels as absent.
+    *
+    * `version.map(_.value)` and never a `getOrElse(0)` or a `-1`: the registry numbers versions from one, so
+    * any number this could invent is a version somebody could go looking for. `None` on the wire is the
+    * screen's cue to say the schema registered and the number could not be read.
+    */
+  def registered(registered: RegisteredVersion): RegisteredVersionDto =
+    RegisteredVersionDto(
+      subject = registered.subject,
+      id = registered.id.value,
+      version = registered.version.map(_.value)
+    )
+
+  /** A schema somebody wants registered.
+    *
+    * The same reading as [[proposed]] and deliberately a separate method over a separate request type: the
+    * two are one shape today and are not one decision, and a shared mapper is how a change meant for a
+    * question ends up changing what gets written.
+    */
+  def toRegister(request: RegisterSchemaRequest): ProposedSchema =
+    ProposedSchema(
+      format = SchemaFormat.fromRegistry(Some(request.schemaType)),
+      definition = request.definition,
+      references = request.references.flatMap(reference =>
+        SchemaVersion
+          .from(reference.version)
+          .toOption
+          .map(version => SchemaReference(reference.name, reference.subject, version))
+      )
+    )
+
   /** The query string as a domain query, with the page size **clamped** rather than refused.
     *
     * Answering "you asked for 900 rows and the limit is 100" with a 400 makes every caller write clamping
@@ -71,7 +102,14 @@ object SchemaMapping {
     * counted, with nothing enriched. Clamping it to one would put back the four registry requests that the
     * caller asked not to pay — see `SchemaEndpoints.CountOnlyPageSize`. The `PageRequest` still carries a
     * legal page size because [[kui.kernel.PageSize]] has no zero; `SubjectQuery.countOnly` is what the
-    * catalogue reads, and the size it carries is never used to cut rows.
+    * catalogue reads. The size it carries is still used — `SubjectCatalog.page` hands it to `Page.of`, which
+    * cuts a page and then has its items replaced by `Nil` — so it is harmless rather than unused, and this
+    * sentence used to claim the second thing.
+    *
+    * **Exactly** zero, and not "zero or less". A negative page size used to fall into the count-only branch
+    * through a `<=`, which made `?pageSize=-1` a wire behaviour no parameter description mentioned and no
+    * case covered: a caller with an off-by-one got a total and no rows and no complaint. A number below the
+    * range is now clamped up to one row, which is the same rule the page *number* follows.
     */
   def query(params: SubjectListParams): SubjectQuery =
     SubjectQuery(
@@ -83,7 +121,7 @@ object SchemaMapping {
           .from(math.min(math.max(params.pageSize, 1), SchemaEndpoints.MaxPageSize))
           .getOrElse(PageSize.Default)
       ),
-      countOnly = params.pageSize <= SchemaEndpoints.CountOnlyPageSize
+      countOnly = params.pageSize == SchemaEndpoints.CountOnlyPageSize
     )
 
   /** The version path segment as a selector.

@@ -41,7 +41,11 @@
 #
 # A marked block that yields no assertion is a failure, not a pass, and a file that was expected to
 # carry a block and does not is a failure too. A gate that can quietly check nothing is the thing
-# this script exists to replace.
+# this script exists to replace -- and for two waves this script could do it itself. The three
+# sections below therefore each close with their own floor, because the whole-run `assertions == 0`
+# check at the foot of the file cannot see one section going quiet while the other two carry the
+# total. Section 3 is where that mattered: it globbed for its inputs, and a glob that matched
+# nothing took the run from 49 claims to 45 and still printed "all true".
 #
 # USAGE
 # -----
@@ -65,10 +69,30 @@ adr048="docs/adr/ADR-048-solidjs-typescript-vite-frontend.md"
 apireadme="frontend/packages/api/README.md"
 deps="DEPENDENCY_MATRIX.md"
 
+# The npm manifests section 3 reads, written out one per line. The sentence below used to be false
+# of this very list, and the way it was false is worth keeping: section 3 fed `jq` the glob
+# `frontend/packages/*/package.json`, and an unmatched glob reaches `jq` as a path it cannot open.
+# jq's complaint goes to stderr from inside a process substitution, where neither `set -e` nor `$?`
+# can see it, so the run simply read fewer manifests. Measured on 2026-09-06 by pointing that glob
+# at a directory that does not exist: 45 claims checked instead of 49, "all true", exit 0. Naming
+# the manifests costs one line when a package is added, and `reconcile_manifests` below fails the
+# run when that line is forgotten, so the cost is paid loudly rather than silently.
+manifests=(
+  frontend/package.json
+  frontend/packages/api/package.json
+  frontend/packages/feature-clusters/package.json
+  frontend/packages/feature-consumers/package.json
+  frontend/packages/feature-messages/package.json
+  frontend/packages/feature-schemas/package.json
+  frontend/packages/feature-topics/package.json
+  frontend/packages/kernel/package.json
+  frontend/packages/shell/package.json
+)
+
 # Every input is named rather than globbed: a glob that matches nothing checks nothing and says so
 # to nobody, which is the failure this script was written to end.
 for required in "$matrix" README.md "$adr048" "$apireadme" "$deps" docs/api/openapi.json \
-                frontend/package.json; do
+                "${manifests[@]}"; do
   if [[ ! -f $required ]]; then
     echo "feature-matrix-check: $required is missing; the check cannot run." >&2
     exit 2
@@ -77,6 +101,28 @@ done
 
 failures=0
 assertions=0
+
+# ---------------------------------------------------------------------------------------------
+# Per-section floors.
+# ---------------------------------------------------------------------------------------------
+#
+# The `assertions == 0` check at the foot of this file is a floor over the whole run, and a floor
+# over the whole run cannot see a section going quiet: sections 1 and 2 read marked blocks that are
+# always present, so the total never reaches zero however much of section 3 disappears. Each
+# section therefore closes with its own count, and a section that asserted nothing is a failure
+# with the section's name on it rather than a shorter list of true things.
+
+declare -A section_claims=()
+section_floor=0
+
+close_section() {
+  local name=$1 counted=$(( assertions - section_floor ))
+  section_claims[$name]=$counted
+  (( counted > 0 )) ||
+    fail "section \`$name\` checked nothing;" \
+         "its inputs are missing or the markers it reads have moved."
+  section_floor=$assertions
+}
 
 # Takes the message in as many arguments as it needs to stay inside 100 columns here; they are
 # joined with a space so a wrapped call still prints one sentence.
@@ -223,6 +269,8 @@ for file in "$matrix" README.md; do
     fail "$file carries no \`<!-- checked: rows -->\` block; its totals are unguarded."
 done
 
+close_section rows
+
 # ---------------------------------------------------------------------------------------------
 # 2. The merged OpenAPI document against the figures published about it.
 # ---------------------------------------------------------------------------------------------
@@ -304,6 +352,8 @@ for file in "$adr048" "$apireadme"; do
     fail "$file carries no \`<!-- checked: merged-document -->\` block; its figures are unguarded."
 done
 
+close_section merged-document
+
 # ---------------------------------------------------------------------------------------------
 # 3. Every pinned npm dependency against DEPENDENCY_MATRIX.md.
 # ---------------------------------------------------------------------------------------------
@@ -314,7 +364,39 @@ done
 # one version (axe-core is pinned differently at the root and in two packages), so the check is that
 # the pinned version appears in the cell rather than that the cell equals it.
 
+# The named list is the input; the workspace on disk is the fact. `frontend/pnpm-workspace.yaml`
+# makes every directory under `packages/` a member, so the two must be the same set. A package
+# added without a line in `manifests` fails here, and so does the mutation that started this: point
+# a glob at a directory that does not exist and the disagreement is printed rather than absorbed.
+reconcile_manifests() {
+  local named present
+  named=$(printf '%s\n' "${manifests[@]}" | sort)
+  present=$(printf '%s\n' frontend/package.json frontend/packages/*/package.json | sort)
+  [[ $named == "$present" ]] && return 0
+  local only
+  only=$(comm -3 <(printf '%s\n' "$named") <(printf '%s\n' "$present") | tr -d '\t' | tr '\n' ' ')
+  fail "this script names ${#manifests[@]} npm manifests and frontend/ holds a different set;" \
+       "the disagreement is over: $only"
+}
+reconcile_manifests
+
+# Under `set -e` an assignment carries the failure out, which the process substitution this used to
+# read from could not: a manifest that cannot be parsed now stops the run instead of shrinking it.
+if ! dep_rows=$(jq -r 'to_entries[] | select(.key == "dependencies" or .key == "devDependencies")
+                       | .value | to_entries[] | "\(.key)\t\(.value)"' \
+                  "${manifests[@]}" | sort -u); then
+  echo "feature-matrix-check: a package manifest under frontend/ could not be read." >&2
+  exit 2
+fi
+
+if [[ -z ${dep_rows//[[:space:]]/} ]]; then
+  fail "no npm dependency was found in any of the ${#manifests[@]} named manifests;" \
+       "the dependency check has nothing to compare $deps against."
+  dep_rows=""
+fi
+
 while IFS=$'\t' read -r name version; do
+  [[ -z $name ]] && continue
   [[ $name == @kui/* ]] && continue
   row=$(awk -F'|' -v n="$name" '
     NF >= 6 {
@@ -329,11 +411,9 @@ while IFS=$'\t' read -r name version; do
   assertions=$(( assertions + 1 ))
   [[ $row == *"$version"* ]] ||
     fail "$deps records \`$name\` as $row; frontend/ pins $version."
-done < <(
-  jq -r 'to_entries[] | select(.key == "dependencies" or .key == "devDependencies")
-         | .value | to_entries[] | "\(.key)\t\(.value)"' \
-    frontend/package.json frontend/packages/*/package.json | sort -u
-)
+done <<< "$dep_rows"
+
+close_section dependencies
 
 # ---------------------------------------------------------------------------------------------
 
@@ -348,6 +428,9 @@ if (( failures > 0 )); then
 fi
 
 printf 'feature-matrix-check: %d claims checked, all true.\n' "$assertions"
+printf '  rows: %d, merged-document: %d, dependencies: %d over %d named manifests.\n' \
+  "${section_claims[rows]}" "${section_claims[merged-document]}" \
+  "${section_claims[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \
   "$matrix" "$rows" "$complete" "$in_scope" "$percent"
 printf '  docs/api/openapi.json: %d paths, %d operations, %d schemas;' \

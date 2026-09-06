@@ -283,133 +283,146 @@ a numeric `underReplicatedPartitionCount` and a `controllerUptime` with a stated
 `…/consumer-groups | jq '.groups.data.items[0].coordinatorHost'` is a host, and
 `…/topics/statistics | jq '.statistics.data.topicCount'` is the cluster total.
 
-## M6 — Every screen that can now be honest  ·  no new service  ·  **NOT CLOSED**
+## M6 — Every screen that can now be honest  ·  no new service  ·  **CLOSED, wave 4**
 
-Nine of the ten bullets shipped and were driven in a browser. The dashboard's Overview and Storage
-tabs, the brokers screen with its four tiles and lazily-fetched configs, the topics list with its
-statistics region and facet bar and bulk bar and Export, the topic object's Overview tab and its
-`host:port` coordinator column, consumer-group paging over the server's total, the schema registry's
-two panes, the message browser's real partition count and typed predicates, the gateway's
-cross-entity search and the top-bar field wired to it, and toasts on destructive successes. The five
-hand-rolled `useFetch` copies are gone: `grep -rn 'function useFetch' frontend/packages/*/src`
-totals zero. Against a stack whose `kui-allinone` and `kui-frontend` images I built from this tree,
-`pnpm -C frontend e2e` is **56 passed** over eight spec files, and
-`curl -s 'localhost:8080/api/v1/search?q=orders'` answers three topics and one subject with
-`"partial":[]`.
+It closed on the third attempt, and the honest account of the third attempt is that **one of its two
+obstacles was real and the other was a `jq` expression in its own exit criterion**.
 
-Two things stop it closing, and the second is the more important one.
+Both real obstacles are gone. `Register schema` has an endpoint behind it: `POST
+…/schemas/subjects/{subject}/versions`, authorized by `Action.SchemaCreate` — declared in wave 1 with
+no caller for two milestones — refused with `KUI-READ-ONLY` on a read-only cluster before the registry
+is asked, and answering a rejection as a 400 `KUI-VALIDATION` carrying the registry's own sentence in
+`details[0]`, which the dialog renders rather than paraphrases. It was driven against the real
+Apicurio registry in `features.spec.ts` and the subjects it wrote are in the quickstart. And the
+twelve rules that could not fail were closed and **re-verified by mutation, one at a time, each
+reverted** — recorded in `TECH_DEBT.md`'s TD-023 with the case each one reddens.
 
-* **One bullet has no backend capability at all.** `Register schema` is drawn, and it is drawn
-  `aria-disabled="true"` with the sentence *"KUI cannot register a schema yet: the gateway serves no
-  endpoint that writes one."* That sentence is true. `docs/api/openapi.json`'s schema paths are
-  `GET subjects`, `GET/PUT compatibility`, `GET/PUT subject compatibility`, `GET versions`,
-  `GET version` and `POST version compatibility` — the compatibility *check*. Nothing registers.
-  The RBAC action for it already exists and is used by nothing: `Action.SchemaCreate` is declared in
-  `libs/security-core/.../Vocabulary.scala:146` and its only other reference in the whole repository
-  is its own implication row. So this is definition-of-done rule 2 unmet — a screen needing a
-  capability that does not exist — and the exit criterion never asked the question, because it asks
-  about screens and this is an endpoint.
+**The clause that failed, and why correcting it is not moving the goalposts.** The criterion said
+`jq -e '.paths["/api/v1/clusters/{clusterId}/schemas/subjects"].post' docs/api/openapi.json`
+succeeds. It does not, and it must not: that path is the subject *collection*, and a POST on it would
+be "register a schema without naming a subject", which is not the Confluent registry API and never
+was. The endpoint that shipped is on the version collection of a named subject, which is the right
+shape. The clause was written from a guess about a path rather than from the design, and it is the
+**third** criterion in this document to be corrected for naming a command that ran without testing the
+claim. Run in its corrected form here, it succeeds and names `schema.subject.version.register`.
 
-* **Eleven rules shipped that no test can fail, in a wave whose fourth house rule was that a gate
-  you cannot make fail is not a gate.** They were found by mutation, packet by packet, and each is
-  named in `WAVE-04.md` against the packet that owns the file. The worst of them is the search
-  field's out-of-order guard: `App.tsx:261`'s `if (episode !== searchEpisode) return;` — the line the
-  packet's own three-sentence comment argues for, and the invariant its report headlines — can be
-  deleted outright and `pnpm -C frontend test packages/shell` still prints 333 passed. I re-ran that
-  one myself. The others: the topics screen's shared row/card selection set and its never-zero
-  consumer-group tile; both `notify` calls in the consumer group route; the schema screen's sort
-  direction, its toasts and its registry total; the resend toast in the message browser, everywhere;
-  the brokers screen's `v4.3 · KRaft` tag, which can be deleted entire with unit, a11y and browser
-  suites all green; the gateway's per-kind search `limit` cap and all four non-`Ok` branches of
-  `SearchSections`; and the schema service's `MaxPageSize`, which is asserted only against itself and
-  ships green at 250.
+**What is closed, verified here rather than read off a report.** `./scripts/run-tests.sh` — 63 modules,
+56 with tests, **3270 cases, all passing**. `pnpm -C frontend test` — 1324. `pnpm -C frontend e2e`
+against the running quickstart — **69 passed, 1 skipped**, with one case failing on a first pass and
+passing in isolation, because the container it reads had been restarted underneath it by this
+verification. `grep -rn 'function useFetch' frontend/packages/*/src` totals zero.
+`curl -s '…/search?q=orders'` answers three topics and one subject with `"partial":[]`.
+`./mill checkArchitecture`, `./mill __.openApiCheck` (1967/1967), `./mill frontend.apiConstants
+--check`, `node frontend/scripts/boundaries.mjs` (367 files), `node frontend/scripts/bundle-shape.mjs`
+and `./scripts/feature-matrix-check.sh` (49 claims) all pass.
 
-  This is not a request for more tests. Nine of the twelve are in a route or a screen — a prop
-  computed in one file, and a case in another that composes the component by hand and so asserts the
-  arrangement the case itself made. The rule is the seam, and a packet that tests the function has
-  tested the wrong thing — the same finding as wave 2's, which is why it is a milestone obstacle this
-  time rather than a note.
+**Two things it closes with, both recorded rather than waved past.** `SR-005`'s two compatibility
+*writes* and the compatibility check have recorded-response tests, seven stories and **no browser
+evidence** — the row says so and stays `REVIEW`; the criterion never asked for it and wave 5 does.
+And the search fold now names topics, consumers and schemas in `partial` when a deployment has no
+clusters at all, which makes "no clusters" distinguishable from "nothing matched" — the thing item 3
+required — but `partial` is defined by ADR-049 §2 as the services the gateway *could not ask*, and on
+a deployment with no clusters all three are perfectly askable. It errs safely and the sentence a user
+reads is not literally true. ADR-049 is where that is settled, and wave 5 settles it.
 
-Two live defects and roughly fifteen orphans came with them; both lists are in `WAVE-04.md` and
-neither is a milestone obstacle on its own. The one worth naming here is `BrokerList.tsx:39`'s
-`loading` prop, which is declared, fed from `BrokersScreen.tsx:193` and read nowhere: with the
-brokers request delayed, the screen states *"The cluster is not answering. Last successful check was
-24s ago"*, `TOTAL LEADERS 0`, `DISK USED — no broker answered` and *"KUI reached the cluster and it
-reported no brokers"* — four claims it cannot make, two of which contradict each other, and a bare
-zero where this milestone's own rule demands a sentence. A wire that looks connected is worse than
-no wire.
-
-**What was wrong with the old exit criterion,** twice over. First: `grep -rl useFetch
-frontend/packages/*/src` can never be empty and never should be, because the three files it now
-matches are the comments explaining why the hook was removed. The runnable form is
-`grep -rn 'function useFetch' frontend/packages/*/src`, which totals zero. Second, and this is the
-one that let the milestone read as done: every clause of the criterion passes today while a bullet
-of the milestone has no endpoint behind it and twelve of its rules cannot fail. A criterion made
-entirely of screen assertions cannot see a missing endpoint, and no criterion anywhere in this
-document has ever asked whether a gate binds.
-
-**Exit:** `pnpm -C frontend test` passes, and against a quickstart stack whose images were built from
-the working tree `pnpm -C frontend e2e` passes a spec per screen;
+**Exit (corrected, third time):** `pnpm -C frontend test` passes, and against a quickstart stack whose
+images were built from the working tree `pnpm -C frontend e2e` passes a spec per screen;
 `grep -rn 'function useFetch' frontend/packages/*/src` totals zero;
 `curl -s '…/search?q=orders' | jq '.results'` answers across topics, groups and subjects; no panel on
 any screen renders an em dash without a sentence beside it, asserted per screen rather than by one
-sweeping regex; `jq -e '.paths["/api/v1/clusters/{clusterId}/schemas/subjects"].post' docs/api/openapi.json`
-succeeds and the `Register schema` control is enabled and asserted in `features.spec.ts`; and each of
-the twelve mutations listed in `WAVE-04.md` reddens a named case — run them, do not assume them.
+sweeping regex;
+`jq -e '.paths["/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions"].post.operationId'
+docs/api/openapi.json` succeeds — **the version collection of a named subject, which is where the
+registry API puts it** — and the `Register schema` control is enabled and asserted in
+`features.spec.ts`; and each of the twelve mutations recorded in `TECH_DEBT.md`'s TD-023 reddens a
+named case — run them, do not assume them.
 
-## M7 — `services/metrics`  ·  the service exists; the adapter does not  ·  **wave 4 starts it**
 
-Nothing in this repository reads a broker metric: there is no JMX client and no Prometheus parser.
-Everything *around* that hole was built in wave 1 and is what this milestone now fills. The service
-exists in all six ADR-041 layers with a Mill module, a container image, a `ServiceContracts` entry,
-an `AllInOneWiring` entry and a regenerated OpenAPI document; `Resource.Metrics` and `MetricsView`
-exist; `kui.metrics` parses with every field defaulted; and `SeriesWindow` in `libs/cache` is the
-retention primitive this used to need and no longer has to write. Its one endpoint answers
-`not_configured` with a 200 today, which is the correct answer and not a placeholder. Six cards and
-four stat cards depend on the adapter that is still missing.
+## M7 — `services/metrics`  ·  the adapter exists; four endpoints and the cards do not  ·  **NOT CLOSED, wave 5 finishes it**
 
-**The seam is one method.** `ConfiguredClusterSources.source` in
-`services/metrics/infrastructure/` returns `None` for every cluster and says so in its own scaladoc:
-*"adding the adapter later is one class and one line in `MetricsWiring`."* Wave 4 takes that at its
-word and will report whether it held.
+**Wave 4 built the half that was hard and it works.** There is now a Prometheus text-exposition
+reader, a retention buffer over `SeriesWindow`, a scrape loop, and one endpoint answering real
+numbers. `ConfiguredClusterSources.source` returns a real source. `MetricsSourceKind.Jmx` stays
+declared and unimplemented behind a stated refusal, for the reason ADR-050 gives: `SafeUrl` is
+`http`/`https` only by `ARCHITECTURE.md` §14, so a JMX service URL cannot be written into
+`MetricsSourceSettings.url` at all — implementing that row means a new settings shape, not a new
+adapter behind the same one.
 
-* An adapter that reads broker metrics — JMX per broker, or a Prometheus/JMX-exporter endpoint the
-  deployment declares. `MetricsSourceKind` already has both cases and `MetricsSourceSettings` already
-  carries the `SafeUrl`, the kind and the call timeout, so the choice is which to *implement* first,
-  not which to model. Whichever, a cluster that configures neither answers `not_configured` and the
-  cards keep their sentence; that is not a failure mode, it is the design.
-* A retention buffer keyed by (cluster, metric, bucket) over `SeriesWindow`, whose three refusals
-  are already the ones this milestone needs: a never-sampled bucket is absent rather than zero, a
-  window shorter than the requested period answers `None` rather than a percentage computed over
-  four minutes and printed as "over the last 24h", and eviction is against a supplied `Instant` so
-  it is testable.
-* The four remaining endpoints, each `Section`-wrapped so one dead exporter costs one card
-  (`…/metrics/throughput?range=` already exists and answers honestly):
-  `…/metrics/latency?window=`, `…/metrics/request-handlers`, `…/metrics/producers?top=`,
-  `…/metrics/record-size`.
-* Then the Traffic tab, the throughput card, the p99 card, the ring gauges, top producers, the
-  message-size histogram, and the four stat-card sparklines.
+**Measured here, on the running quickstart, not read off a report.**
+`curl -s '…/clusters/quickstart/metrics/throughput?range=24h'` answers `"status":"ok"` with **288
+buckets**, which is `ThroughputRange.Last24Hours.bucketCount` and not the number of samples, of which
+46 carried a rate. That is the assertion two waves of this criterion could not make.
 
-**What is wrong with the old exit criterion, found by running it.** It says the throughput status
-prints one of `ok|stale|unavailable|not_configured` and that with no exporter configured it prints
-`not_configured`. Against the quickstart today — with no adapter anywhere in the repository —
-`curl -s '…/metrics/throughput?range=24h'` answers `{"throughput":{"status":"not_configured"}}`, and
-`./mill services.metrics.__.test` and `./mill __.openApiCheck` both pass. **Every clause of M7's exit
-criterion is satisfied by the walking skeleton.** A criterion whose only positive assertion is a
-refusal cannot distinguish a service that measures nothing because nothing is configured from a
-service that measures nothing because nothing was built. The corrected form below requires a
-configured source and a series with real numbers in it, which is why wave 4 also has to put an
-exporter in the quickstart: without one, this milestone has no way to prove itself on any machine.
+**The scrape loop was tested by breaking it, and it is correct.** The claim reached this document
+that the collector "does not survive its first failed pass" — that a cold start against an absent
+exporter leaves a cluster silently unmeasured for the life of the process. It is **false**, and it was
+checked rather than argued: the exporter was stopped for 150 s under a running KUI (five WARN passes,
+one per interval, then `circuit … is now open`, `halfopen`, `closed` and the series resumed); and then
+KUI was restarted with **no exporter at all**, so that its first scrape failed the way it does in the
+distributed stack, and it filled a bucket **26 seconds** after the exporter came back — one scrape
+interval. The loop retries, the circuit breaker recovers, and a failed scrape evicts nothing.
 
-**Exit:** `./mill services.metrics.__.test` and `./mill __.openApiCheck` pass; the quickstart broker
-publishes metrics and `deployment/quickstart/kui-quickstart.yaml` names the source, so that against a
-stack built from the working tree
+**So what stops M7 closing is one deployment and four endpoints.**
+
+* **`./deployment/compose/smoke.sh` fails, deterministically, at the one assertion M7 was written to
+  add.** Two independent runs from a torn-down stack both ended `FAILED: buckets carrying a measured
+  rate was 'no' after 90s`. Everything before it passes, including `the exporter serves both byte-rate
+  families` and `the measured cluster's throughput: ok`. `.github/workflows/ci.yml:342` runs that
+  script, so the compose job is red as shipped. **The cause is not established.** `kui-metrics` has no
+  `depends_on` in `deployment/compose/docker-compose.yml` while the exporter waits on the broker's
+  health, so it certainly starts first — and adding one `depends_on` made the script pass. But the
+  reason given for why that matters is the loop claim disproved above, and a compose stack that
+  produces no traffic serves an exposition of `0.0`, which is a *measured zero* and not a null. A fix
+  that works for a reason nobody can state is how this repository got `degraded` where it meant
+  `available`. Wave 5 reproduces it and explains it before it patches it.
+* **Four endpoints do not exist:** `…/metrics/latency?window=`, `…/metrics/request-handlers`,
+  `…/metrics/producers?top=`, `…/metrics/record-size`, each `Section`-wrapped so one dead exporter
+  costs one card.
+* **The cards that read them do not exist:** the p99 line with the current value in each legend chip,
+  the ring gauges, Top producers — which is what finally gives `Monogram` a caller, four waves after
+  it was built — the message-size histogram, and the four stat-card sparklines. The Traffic tab is
+  built and draws throughput; its last row is three `NotMeasured` sentences.
+* **And two of those four cards may not be measurable at all from the source this product reads,
+  which has to be decided before anything is built rather than discovered halfway.** The exporter
+  beside the quickstart serves six lines, because its ruleset whitelists three families — checked
+  here. Widening it reaches what Kafka's own JMX surface has, and that surface answers some of these
+  questions and not others. `RequestMetrics.TotalTimeMs` carries real percentiles, and
+  `RequestHandlerAvgIdlePercent` and `NetworkProcessorAvgIdlePercent` are real ratios, so the p99 line
+  and two of the three ring gauges are ordinary work. But **§3.4 draws "38% PURGATORY" and
+  `DelayedOperationPurgatory` publishes a queue *size*, not a percentage**; **§4 draws Top producers
+  by `client.id` and a broker publishes no per-`client.id` byte rate unless quotas are configured**,
+  only a per-*topic* one; and **§3.5 draws a twelve-bucket record-size histogram with p50/p99/max
+  chips, and Kafka publishes no record-size distribution of any kind** — only a mean, as
+  bytes-in over messages-in. Each of those three is a design decision taken in the open in an ADR:
+  redraw the card as what can be measured, or keep the drawing and keep the `NotMeasured` sentence.
+  What none of them may become is a figure derived from something else and labelled as the thing the
+  design named, which is definition-of-done rule 1 and the reason this whole service exists.
+* **The two-cluster half of the criterion is only provable on the compose stack.** The quickstart runs
+  one cluster, so `traffic.spec.ts`'s `not_configured` case is `test.skip`ped with a true reason, and
+  the criterion's "a second cluster with no `kui.metrics.sources` entry still answers
+  `not_configured` **on the same deployment**" is asserted by `smoke.sh` alone — the script that
+  fails.
+
+**What is wrong with the old exit criterion, for the second time.** Its corrected form asked for a
+configured source and a series with real numbers, which was right and is now met. What it did not
+say is which deployment proves the *pair*, and the answer turned out to be the one stack no green
+gate covers. The form below names it.
+
+**Exit:** `./mill services.metrics.__.test` and `./mill __.openApiCheck` pass; against a quickstart
+built from the working tree
 `curl -s '…/clusters/quickstart/metrics/throughput?range=24h' | jq -e '.throughput.status == "ok"'`
 succeeds and `jq '.throughput.data.buckets | length'` equals `ThroughputRange.Last24Hours.bucketCount`
-with at least one bucket carrying a non-null rate; a second cluster with no `kui.metrics.sources`
-entry still answers `not_configured` on the same deployment; and `pnpm -C frontend e2e` asserts both —
-the Throughput card drawing a series for the configured cluster, and the `NotMeasured` sentence
-rather than an empty axis for the unconfigured one.
+with at least one bucket carrying a non-null rate; the same four assertions hold for
+`…/metrics/latency?window=`, `…/metrics/request-handlers`, `…/metrics/producers?top=` and
+`…/metrics/record-size`; **`./deployment/compose/smoke.sh` passes three consecutive runs from a
+torn-down stack**, which is the only place the measured and unmeasured clusters are asserted on one
+deployment, and the reason it fails today is written down before it is repaired; and
+`pnpm -C frontend e2e` asserts, for every card whose ADR says it can be measured, a series drawn for
+the configured cluster and the `NotMeasured` sentence — not an empty axis — for a cluster with no
+source; and for every card whose ADR says it cannot, the sentence on **both** clusters, with the ADR
+naming the family that is absent and a captured exposition body from a real broker showing it absent,
+so that the refusal is evidence and not an omission.
+
 
 ## M8 — `services/alerts`  ·  **NEW SERVICE**
 
@@ -483,19 +496,27 @@ the matrix's rows, re-derives the merged document's paths, operations, schemas a
 with `jq`, re-reads the pinned npm versions, and compares each against the prose inside
 `<!-- checked: … -->` regions in six documents. It printed `49 claims checked, all true.` here, it
 is wired into `ci.yml`'s `generated` job, and thirteen single-word mutations across four documents
-each made it exit 1. Two things about it belong in this milestone rather than in a note. Its section
-3 feeds `jq` a glob — `frontend/packages/*/package.json` — with no per-section assertion floor, so a
-glob that matches nothing drops those assertions and the script still prints "all true" and exits 0;
-its own comment at line 66 says *"Every input is named rather than globbed"*, which
-is false as written. And `docs/FEATURE_MATRIX.md:539` publishes a second, unmarked copy of all nine
-state totals that no marker covers.
+each made it exit 1. Wave 4 named the glob and closed it: the manifests are a named array, disk is
+reconciled against that array, and both halves fail loudly when broken.
+
+**And the same hole reopened one line over, which is the finding this milestone should carry rather
+than the fix.** `close_section` floors each section at `counted > 0` and not at a count, so handing
+`jq` the *first* manifest instead of all nine drops the run from 49 assertions to 45 and still prints
+"all true" and exits 0 — byte for byte the output the old glob produced. Three more of the script's
+own assertions can be deleted the same way, and the milestone table `docs/FEATURE_MATRIX.md` publishes
+about itself still sits outside every `<!-- checked: -->` marker while the state totals were brought
+inside one. A gate whose floor is "at least one assertion ran" is a gate that measures its own
+liveness and not its own coverage, and this is the file whose entire job is to guarantee that about
+every other file.
 
 **Exit:** from a clean checkout, with every container image built from it:
 `./scripts/run-tests.sh`, `pnpm -C frontend test`, the a11y sweep (build, serve, sweep — see the
 ordering rule), `pnpm -C frontend e2e`, `./mill __.openApiCheck`, `./mill checkArchitecture` and
-`./deployment/compose/smoke.sh` all pass; `./scripts/feature-matrix-check.sh` exits 0 **and** fails
-when any one input file is made unreadable, which is the assertion-floor its section 3 does not have
-today; and every count `docs/FEATURE_MATRIX.md` publishes about itself sits inside a checked region.
+`./deployment/compose/smoke.sh` all pass; `./scripts/feature-matrix-check.sh` exits 0, fails when any
+one input file is made unreadable, **and fails when any one section is made to check fewer claims
+than it published last time** — a per-section count and not a `> 0` floor, which is the hole the glob
+fix left behind; and every count `docs/FEATURE_MATRIX.md` publishes about itself, the milestone table
+included, sits inside a checked region.
 
 ---
 
@@ -659,3 +680,98 @@ No milestone changed order. Three exit criteria were corrected: M6's, whose `gre
 clause can never be empty because the comments explaining the hook's removal name it; M7's, for the
 reason above; and M10's, which can now name the comparing command it asked for, along with the two
 holes that command still has. M8's was tightened in passing, on M7's lesson.
+
+## What wave 4 actually did
+
+Wave 4 was ten parallel packets over a disjoint file partition, and it closed **one of the two
+milestones it was written against**: M6, on its third attempt, after its criterion was corrected for
+the third time. M7 did not close and was never going to — the wave was written to *start* it — but
+it got further than planned: the adapter, the buffer, the scrape loop and one endpoint answering real
+numbers off a real broker, verified here at 288 buckets of which 46 carry a rate.
+
+What changed. `Register schema` has an endpoint, and `Action.SchemaCreate` — declared in wave 1 and
+referenced by nothing but its own implication row for two milestones — has a caller. The quickstart
+and the distributed stack both run a JMX-exporter sidecar, so for the first time there is something
+in this repository for a metrics adapter to read. The dashboard has a Traffic tab with a real series
+in it, drawn as a gap where nothing was sampled and never as a zero. `smoke.sh`'s image preflight can
+fail on an empty derivation. And `frontend/scripts/bundle-shape.mjs` finally exists: TD-016 was closed
+without it in M2, re-filed as TD-022, carried through two waves, and is now closed on the check
+having been run in both directions rather than on the check existing.
+
+### Did changing the mechanism work? Three numbers, then the answer.
+
+Wave 4's mechanism was to stop repeating the instruction and instead **assign each packet one named
+ungated rule to close**, and to require every packet to disclose a mutation that stayed *green*.
+
+**Ten of ten owned rules were genuinely closed** — every one re-applied by an independent verifier
+who watched the named case go red and then reverted the tree. That is the first mechanism in four
+waves with a perfect hit rate. Naming the rule, in the packet that owns the file, works.
+
+**The same ten packets shipped thirty-five new ungated rules.** Independent verification found them;
+**thirty-one of the thirty-five were not disclosed by the packet that wrote them**, despite house rule
+5 requiring a green mutation from every packet. The green mutations packets *did* disclose were
+mostly pre-existing holes in code they had not written.
+
+**And the first honest measurement of the standing debt says the wave is not anomalous.** Five agents
+mutated **89 rules in code nobody was editing** — `libs/`, the five untouched services, the gateway,
+the kernel, three feature packages — and **26 survived**, 29%. That is the house rate, and it has
+nothing to do with wave 4: those rules were written in M0–M5. The survivors cluster in one shape and
+it is not laziness. `libs/http`'s `RbacGuard` has no suite in `libs/` at all; its *denial* branch
+turns out to be gated anyway, by `services/cluster/api`'s `ServiceRbacGuardSuite` — two named cases
+went red when I made it fail open, which corrects the alarm the census raised — but its
+**fail-closed-on-undecidable** branch is gated by nothing anywhere: made to fail open, the whole
+cluster-api suite is 752/752 green. The pattern is that a rule gets a test when a *consumer inside its
+own module* exercises it, and goes untested when its only consumer is somewhere else.
+
+So: **8, 8, 12, and now 35 — against a standing pool where 29% of everything is ungated.** The rise
+is not a collapse in quality. It is the first wave that looked hard, and the honest reading is that
+waves 2 and 3 shipped at something near the same rate and nobody counted. One number settles the
+mechanism question: assigning a rule closes **one hole per packet**, and a packet opens about
+**three and a half**. The mechanism works and it is losing three to one.
+
+**Recommendation, without hedging: wave 5 runs one adversarial packet per three building packets, and
+they mutate code they did not write.** Nine building packets, three adversarial. The evidence is not a
+preference. Builders found 4 of their own 35 holes; verifiers found 31 — roughly eight to one, on the
+same code, under the same house rule. A packet mutates the thing it just wrote and finds the case it
+just wrote, because the two were authored to one understanding; that is not a discipline failure and
+another instruction will not fix it, because wave 3 was told and wave 4 was told twice. What found
+holes was a second person with no stake in the packet passing. The three adversarial packets are
+therefore scoped to code **no building packet owns this wave** — that constraint is load-bearing, and
+the census learned it the hard way, losing runs to false reds from siblings editing underneath it —
+and they own the *test* directories of what they attack, so that a hole found is a case landed rather
+than a paragraph filed.
+
+What surprised us, in three shapes.
+
+**A root cause can be wrong and its fix can still work, which is the worst combination.** The
+distributed stack's smoke test fails at the one assertion M7 exists to add; the cause was reported as
+a scrape loop that dies on its first failed pass, and the fix — one `depends_on` — made the script
+pass. The loop claim is false. Stopping the exporter under a running KUI produces one WARN per
+interval, then `open`, `halfopen`, `closed`, and the series resumes; restarting KUI with no exporter
+at all, so its first scrape fails exactly as it does in compose, fills a bucket 26 seconds after the
+exporter returns. Both were run here. So the compose failure is real, reproduced twice, and
+**unexplained** — and a patch that works for a stated reason that is false is how `degraded` came to
+be asserted where `available` was meant. Wave 5 explains it before it patches it.
+
+**A verified fact and a scoped fact are not the same fact, and the scope is where the alarm lives.**
+The census reported a fail-open authorization guard as its most severe finding, correctly noting it
+had run only `./mill libs.__.test`. Run against the suite that actually exercises it, the denial
+branch is gated and the alarm dissolves — while the branch beside it, the one that refuses an endpoint
+the policy cannot decide at all, is gated by nothing in the repository. The severe finding was real
+and it was the *other* one. A measurement whose scope is stated honestly can still hand the next wave
+the wrong target, and the only defence is that the next wave re-runs it.
+
+**The rule that cannot fail is now a register entry rather than a wave note, and that is the change
+that will outlast this plan.** `TECH_DEBT.md`'s TD-023 records the class, not a list: twelve of wave
+3's closed and re-verified by mutation, nine of wave 4's left open and named. A wave plan is deleted
+the day its work lands, which is how the same holes were rediscovered twice; a debt register is not.
+The thirty-five and the twenty-six go into it before this file is written, and every one of them is
+assigned to a packet below rather than left to be found a third time.
+
+No milestone changed order. Two exit criteria were corrected: M6's, which asked `jq` for a POST on
+the subject *collection* — a path the registry API does not have and the design deliberately does not
+publish — and M7's, which asked for a series with real numbers in it and did not say which deployment
+proves the measured and unmeasured clusters *together*, the answer being the one stack no green gate
+covers. M10's was tightened on wave 4's own lesson: its comparing script's glob was closed and the
+same hole reopened one line over, because a section floored at "at least one assertion ran" measures
+its own liveness and not its own coverage.

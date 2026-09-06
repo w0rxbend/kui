@@ -85,6 +85,35 @@ test.describe("consumer groups", () => {
     await expect(paging.getByRole("button", { name: "Next page" })).toBeDisabled();
   });
 
+  test("the lag poll asks only about the groups on the page", async ({ page }) => {
+    /*
+     * CG-006's whole saving, and the half of it that is only true over the wire.
+     *
+     * `GET …/consumer-groups/lag` answers cluster-wide when `group` is absent, and this screen
+     * draws one page. Asked unscoped, a cluster with more groups than fit answers about groups the
+     * browser has no row for — and the merge refuses those, so every poll fell back to fetching the
+     * whole list again. Nothing on screen changed, no figure was wrong, and the optimisation was
+     * simply off. The quickstart has three groups and one page, so a unit test is what proves the
+     * merge's behaviour; what this proves is that the request the browser actually sends carries
+     * the scope, with the parameter spelled the way the gateway accepts it.
+     */
+    const poll = page.waitForRequest(
+      (request) => request.url().includes("/consumer-groups/lag"),
+      { timeout: 30_000 },
+    );
+    await page.goto(`/ui/clusters/${CLUSTER}/consumer-groups`);
+    const table = page.getByRole("table", { name: /consumer groups on this cluster/i });
+    await expect(table).toBeVisible();
+
+    const asked = new URL((await poll).url()).searchParams.getAll("group");
+    expect(asked.length).toBeGreaterThan(0);
+
+    // The same names the table is drawing, so this cannot pass against a scope built from anything
+    // other than the rows on screen.
+    const drawn = await page.locator(".kui-cg-name__link").allTextContents();
+    expect([...asked].sort()).toEqual([...drawn].sort());
+  });
+
   test("a group's name opens the group, which is where its offsets can be reset", async ({
     page,
   }) => {

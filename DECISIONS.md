@@ -54,6 +54,8 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 | [ADR-047](docs/adr/ADR-047-mutation-marker-readonly-and-audit-sink.md) | Every mutation ships with a `Mutation` marker, a per-cluster read-only refusal and an audit record, from the first one | Accepted | 2026-09-04 |
 | [ADR-048](docs/adr/ADR-048-solidjs-typescript-vite-frontend.md) | The browser is SolidJS 2, TypeScript and Vite; the shared-contract guarantee is kept by generating the client from the committed OpenAPI documents | Accepted | 2026-09-05 |
 | [ADR-049](docs/adr/ADR-049-cross-entity-search.md) | Cross-entity search is a fold at the gateway over the three services' own list endpoints, and `partial` is a list of service ids | Accepted | 2026-09-06 |
+| [ADR-050](docs/adr/ADR-050-metrics-source.md) | The metrics adapter reads a Prometheus exposition; `MetricsSourceKind.Jmx` stays declared and unimplemented because `SafeUrl` cannot express a JMX service URL | Accepted | 2026-09-06 |
+| [ADR-051](docs/adr/ADR-051-schema-registration.md) | Registering a schema is an endpoint of `kui-schema`, and a registry's rejection is carried to the browser as the registry's own sentence | Accepted | 2026-09-06 |
 
 ADR-039 … ADR-043 were written at and after the architecture review (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded

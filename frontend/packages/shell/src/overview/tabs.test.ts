@@ -20,6 +20,7 @@ const views = { home: noop, settings: noop, forbidden: noop, notFound: noop, fea
 describe("which tab an address means", () => {
   it("reads the tabs the product can draw", () => {
     expect(dashboardTab("overview")).toBe("overview");
+    expect(dashboardTab("traffic")).toBe("traffic");
     expect(dashboardTab("storage")).toBe("storage");
   });
 
@@ -30,7 +31,7 @@ describe("which tab an address means", () => {
   it("resolves a tab nobody has to the default, because the segment is user-editable", () => {
     // A typo, a bookmark to a tab that has been removed, and a tab that has not shipped yet all
     // arrive here. None of them is an error state and none of them is a blank body.
-    for (const nonsense of ["overwiew", "traffic", "alerts", "", "../../etc"]) {
+    for (const nonsense of ["overwiew", "trafic", "alerts", "", "../../etc"]) {
       expect(dashboardTab(nonsense)).toBe(DEFAULT_DASHBOARD_TAB);
     }
   });

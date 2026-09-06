@@ -246,7 +246,7 @@ export function ResendDialog(props: ResendDialogProps): JSX.Element {
                     {...disabledProps(
                       props.partitionCount !== undefined &&
                         draft().ranges.length >= props.partitionCount
-                        ? `${props.topic} has ${String(props.partitionCount)} partitions, ` +
+                        ? `${props.topic} ${describePartitions(props.partitionCount)}, ` +
                           "and there is a range for each of them."
                         : undefined,
                     )}
@@ -280,8 +280,11 @@ export function ResendDialog(props: ResendDialogProps): JSX.Element {
                     </p>
                   }
                 >
-                  <p class="kui-resend__unknown">
-                    {props.topic} has {String(props.partitionCount)} partitions.
+                  {/* `__known`, not `__unknown`. The two sentences are opposite statements and they
+                      were sharing a class, so the styling that says "this is a gap" was applied to
+                      the one that states a measured figure. */}
+                  <p class="kui-resend__known">
+                    {props.topic} {describePartitions(props.partitionCount ?? 0)}.
                   </p>
                 </Show>
               </section>
@@ -430,6 +433,19 @@ function detailOf(reading: ReturnType<typeof readingOf>, outcome: ResendOutcome)
         `check ${outcome.toTopic} before running it again, or you will copy those records twice.`
       );
   }
+}
+
+/**
+ * How many partitions the topic has, as a clause.
+ *
+ * Written out because the dialog said "has 1 partitions" on every single-partition topic, in two
+ * places. A single partition is the ordinary shape of a compacted config topic and of most of what
+ * a scratch cluster holds, so this was not a rare case — and a sentence that cannot count is a
+ * sentence an operator stops reading, on the one screen whose whole job is to be believed about
+ * numbers.
+ */
+function describePartitions(count: number): string {
+  return count === 1 ? "has 1 partition" : `has ${String(count)} partitions`;
 }
 
 /** One range's size, or the honest absence of one while it is still being typed. */

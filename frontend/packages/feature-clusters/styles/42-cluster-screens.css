@@ -553,3 +553,14 @@ a.kui-brkcard__name:hover {
   font-size: var(--kui-font-size-sm);
   font-weight: var(--kui-font-weight-medium);
 }
+
+/* The cluster's opinion of this broker, inside the expansion.
+ *
+ * Muted and small, like the disk note and the uptime note it sits with: it qualifies the figures
+ * above rather than being one of them, and a sentence set at figure weight would compete with the
+ * numbers it is about. */
+.kui-brkcard__skew {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}

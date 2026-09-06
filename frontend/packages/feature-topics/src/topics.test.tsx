@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { Show, createSignal, flush } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { clearToasts, toasts } from "@kui/kernel";
 import { mount } from "./testing.js";
@@ -25,9 +25,16 @@ import {
 import { TopicCards } from "./TopicCards.jsx";
 import { TopicConsumers } from "./TopicConsumers.jsx";
 import { TopicPage, healthChip } from "./TopicPage.jsx";
-import { forgetQueries, settle, topicsHost } from "./harness.jsx";
+import {
+  forgetQueries,
+  restoreMeasuredRows,
+  settle,
+  topicsHost,
+  withMeasuredRows,
+  type StubRequest,
+} from "./harness.jsx";
 import { topicsCsv, topicsVoice } from "./topicList.js";
-import { bulkSentence } from "./TopicsRoute.jsx";
+import { bulkSentence, toTopicQuery } from "./TopicsRoute.jsx";
 import type { TopicRow } from "./types.js";
 
 const rows: readonly TopicRow[] = [
@@ -149,52 +156,48 @@ describe("the topic list", () => {
     dispose();
   });
 
-  test("row selection and card selection share one set", async () => {
+  test("every order the Sort menu offers is one the server can produce", async () => {
     /*
-     * `SCREENS-V4.md` §3.7: the design's two ticks are on cards and the same set has to survive the
-     * switch to the table. Neither treatment may own it — this ticks a row in the *table* and then
-     * reads the *cards*, which is the only arrangement in which a second, private set would fail.
+     * The menu's options and the request's field names are the two ends of one vocabulary, and they
+     * used to be two hand-written lists in two files. The pair had a hole with a direction to it:
+     * *removing* a mapping was caught by a case in `write.test.ts`, and *adding* an option with no
+     * mapping was not — which ships a Sort item that redraws the list in the server's own order
+     * under an ascending arrow, and looks exactly like a sort.
+     *
+     * Driven through the rendered control rather than over `SORTABLE_COLUMNS`, so a menu that stops
+     * being derived from that list fails here instead of passing against its own source.
      */
-    window.localStorage.removeItem("kui.topics.view");
-    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set<string>());
-    const [view, setView] = createSignal<"table" | "cards">("table");
-    const { container, dispose } = mount(() => (
-      <Show
-        when={view() === "cards"}
-        fallback={
-          <TopicListPage
-            topics={rows}
-            onOpen={() => undefined}
-            viewportHeight={480}
-            query={DEFAULT_TOPIC_QUERY}
-            onQueryChange={() => undefined}
-            selected={selected()}
-            onSelectionChange={setSelected}
-          />
-        }
-      >
-        <TopicCards
-          topics={rows}
-          onOpen={() => undefined}
-          formatBytes={formatBytes}
-          selected={selected()}
-          onSelectionChange={setSelected}
-        />
-      </Show>
-    ));
+    const list = listing();
+    const { container, dispose } = mount(() => list.node);
     await flush();
 
-    const tick = container.querySelector<HTMLInputElement>(
-      'tbody input[type="checkbox"]',
-    );
-    tick?.click();
-    await flush();
-    expect([...selected()]).toEqual([rows[0]?.name]);
+    const openSort = async (): Promise<HTMLElement[]> => {
+      const trigger = [...container.querySelectorAll<HTMLElement>('[role="combobox"]')].find(
+        (element) => element.textContent?.includes("Sort ·"),
+      );
+      // Only when it is shut: the trigger toggles, and a click on an open list closes it.
+      if (trigger?.getAttribute("aria-expanded") !== "true") trigger?.click();
+      await flush();
+      return [...container.querySelectorAll<HTMLElement>('[role="option"]')];
+    };
 
-    setView("cards");
-    await flush();
-    const card = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
-    expect(card.filter((box) => box.checked)).toHaveLength(1);
+    // The first option is the server's own order and is not a column, so it is not one of these.
+    const offered = (await openSort()).length;
+    expect(offered).toBeGreaterThan(1);
+
+    for (let index = 1; index < offered; index += 1) {
+      const options = await openSort();
+      const label = options[index]?.textContent?.trim() ?? "";
+      options[index]?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      await flush();
+
+      const asked = list.asked.at(-1);
+      expect(asked?.sort, `choosing "${label}" should have asked for an order`).toBeTruthy();
+      expect(
+        toTopicQuery(asked as TopicListQuery).sort,
+        `the Sort menu offers "${label}", so the request has to carry a field for it`,
+      ).toBeDefined();
+    }
     dispose();
   });
 
@@ -473,7 +476,14 @@ describe("the view toggle", () => {
  * these cases exist to catch.
  */
 describe("the topics screen, wired", () => {
-  afterEach(forgetQueries);
+  /* Toasts are a module-level stack and the view preference is `localStorage`: both outlive a case,
+     and a case that ticked rows in a table would otherwise inherit `cards` from the one before it. */
+  afterEach(() => {
+    clearToasts();
+    forgetQueries();
+    restoreMeasuredRows();
+    window.localStorage.removeItem("kui.topics.view");
+  });
 
   /** One page of three topics, so a page count and a cluster count can differ. */
   const threeRows = {
@@ -691,6 +701,439 @@ describe("the topics screen, wired", () => {
     expect(container.textContent).not.toContain("broker 1");
     // The row with no coordinator says nothing rather than half an address.
     expect(container.textContent).toContain("no coordinator address");
+    dispose();
+  });
+
+  test("the table and the cards the route renders share one selection set", async () => {
+    /*
+     * `SCREENS-V4.md` §3.7: the design's two ticks are on cards and the same set has to survive the
+     * switch to the table. Nothing about that rule lives in either treatment. It lives in the fact
+     * that `TopicsRoute` holds **one** signal and `TopicListPage` forwards it into whichever branch
+     * is drawn — so it can only be asserted where the product makes the arrangement.
+     *
+     * The case that used to claim this built its own signal and handed it to a bare `TopicListPage`
+     * and a bare `TopicCards` side by side, so it asserted the arrangement the case itself made:
+     * giving the cards branch a private `createSignal` left it green, along with all 118 others.
+     * This ticks a row in the table the *route* drew, works the *route's* own view control, and
+     * reads the checkbox on the card the *route* drew.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/one-set-cluster/topics",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const tick = container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]');
+    expect(tick, "the route's table should have drawn rows to tick").not.toBeNull();
+    tick?.click();
+    await settle();
+
+    // The route's own reading of the set, before the switch: one row, and the bar knows it.
+    const bar = container.querySelector('[data-testid="topic-bulk-bar"]');
+    expect(bar?.textContent).toContain("1 topic selected");
+
+    const cards = [...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(
+      (radio) => radio.value === "cards",
+    );
+    cards?.click();
+    await settle();
+
+    // The table is gone and the cards are drawn, so this really is the other treatment.
+    expect(container.querySelector("tbody")).toBeNull();
+    /* Scoped to the card grid: the `Show statistics` switch is a checked checkbox too, and a count
+       over the whole page would be counting a control that has nothing to do with selection. */
+    const ticked = [
+      ...container.querySelectorAll<HTMLInputElement>('.kui-topic-cards input[type="checkbox"]'),
+    ].filter((box) => box.checked);
+    expect(ticked).toHaveLength(1);
+    // And it is the same topic, not merely the same number of ticks.
+    expect(ticked[0]?.getAttribute("aria-label") ?? ticked[0]?.closest("label")?.textContent).toContain(
+      "orders.payments.v2",
+    );
+    // The bar is the route's, and it did not reset when the treatment changed.
+    expect(container.querySelector('[data-testid="topic-bulk-bar"]')?.textContent).toContain(
+      "1 topic selected",
+    );
+
+    dispose();
+  });
+
+  test("the overview says how short its partition table is, and only when it is short", async () => {
+    /*
+     * The notice used to fire on `partitions.length >= 500`, a hand-copy of the gateway's
+     * `TopicDetailResponse.EmbeddedPartitionLimit` with nothing comparing the two — so a topic with
+     * exactly 500 partitions and a complete table was told its table was short, and a topic whose
+     * embedded list was short for any other reason was told nothing. It now subtracts what arrived
+     * from what the topic has, which is the question the sentence claims to answer.
+     */
+    const overviewFor = (partitionCount: number, rows: number) => ({
+      topic: {
+        status: "ok",
+        fetchedAt: "2026-09-06T00:00:00Z",
+        data: {
+          row: {
+            name: "orders.v1",
+            internal: false,
+            partitionCount,
+            replicationFactor: 1,
+            outOfSyncReplicas: 0,
+            offlinePartitions: 0,
+          },
+          partitions: Array.from({ length: rows }, (_unused, index) => ({
+            partition: index,
+            leader: 1,
+            replicas: [{ broker: 1, leader: true, inSync: true }],
+            earliestOffset: 0,
+            latestOffset: 1,
+          })),
+        },
+      },
+    });
+
+    const short = topicsHost({
+      at: "/clusters/short-table-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": overviewFor(9, 4),
+      },
+    });
+    const shortMount = mount(short.view);
+    await settle();
+    expect(shortMount.container.textContent).toContain("This table shows 4 of 9 partitions");
+    shortMount.dispose();
+    forgetQueries();
+
+    const whole = topicsHost({
+      at: "/clusters/whole-table-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": overviewFor(4, 4),
+      },
+    });
+    const wholeMount = mount(whole.view);
+    await settle();
+    // Every partition arrived, so there is nothing to warn about and nothing is said.
+    expect(wholeMount.container.textContent).not.toContain("The Partitions tab");
+    wholeMount.dispose();
+  });
+
+  test("a refused consumer-group count renders the sentence and not 0", async () => {
+    /*
+     * The overview's five sections refuse independently: the consumer service can be down while the
+     * topic service is not. `0` under CONSUMER GROUPS would say "nothing reads this topic", which
+     * is
+     * a real and completely different fact — and it is the fact an operator acts on.
+     *
+     * `data.ts` maps the section, `TopicOverviewTab` draws it, and until now no case fed the route
+     * a
+     * refused one: `consumerGroups: groupCount ?? 0` left the whole suite green.
+     */
+    const host = topicsHost({
+      at: "/clusters/no-groups-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              row: {
+                name: "orders.v1",
+                internal: false,
+                partitionCount: 1,
+                replicationFactor: 1,
+                outOfSyncReplicas: 0,
+                offlinePartitions: 0,
+                messageCount: 16,
+                sizeBytes: 5114,
+              },
+              partitions: [
+                { partition: 0, leader: 1, replicas: [{ broker: 1, leader: true, inSync: true }], earliestOffset: 0, latestOffset: 1 },
+              ],
+            },
+          },
+          // The consumer service did not answer. It said so; it did not say "none".
+          consumerGroups: { status: "unavailable", reason: "circuit_open" },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const tile = container.querySelector('[data-testid="topic-overview-groups"]');
+    expect(tile?.textContent).toContain("not measured");
+    // Not a zero anywhere in the tile, and not the em dash the table uses for a cell either.
+    expect(tile?.textContent).not.toMatch(/\b0\b/);
+    // The tiles that *were* answered still carry their figures: one refusal costs one tile.
+    expect(container.querySelector('[data-testid="topic-overview-partitions"]')?.textContent).toContain("1");
+    dispose();
+  });
+
+  test("a bulk action that partly refused raises a warning toast", async () => {
+    /*
+     * The tone is the whole content of this rendering. A green toast over a set that half refused
+     * is
+     * the reassuring rendering of the state that needs attention, and `tone: "success"` hard-coded
+     * in place of the expression left every case in this package green — only the pure
+     * `bulkSentence` helper was asserted, and it says nothing about colour.
+     *
+     * The refusal is a real one from `eachTopic`: the server plans the delete and withholds the
+     * token, which is ADR-045's own way of saying no. `orders.payments.v2` gets a token and goes
+     * through; `orders.refunds.v1` does not.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/half-refused-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan": (request: StubRequest) => ({
+          topic: request.params.path?.["topicName"] ?? "",
+          partitions: 6,
+          records: 16,
+          autoCreateEnabled: false,
+          warnings: [],
+          ...(request.params.path?.["topicName"] === "orders.payments.v2"
+            ? { token: "tok-1", expiresAt: "2026-09-06T00:05:00Z" }
+            : {}),
+        }),
+        "/api/v1/clusters/{clusterId}/topics/{topicName}": {
+          topic: "orders.payments.v2",
+          partitions: 6,
+          records: 16,
+          warnings: [],
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    /* Re-queried between the two clicks: ticking a row re-renders the windowed rows, so the second
+       element of the first query is a node that is no longer in the document. */
+    const tickRow = async (index: number): Promise<void> => {
+      const boxes = [...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
+      expect(boxes.length).toBeGreaterThan(index);
+      boxes[index]?.click();
+      await settle();
+    };
+    await tickRow(0);
+    await tickRow(1);
+
+    [...(container.querySelector('[data-testid="topic-bulk-bar"]')?.querySelectorAll("button") ?? [])]
+      .find((button) => button.textContent?.trim() === "Delete")
+      ?.click();
+    await settle();
+
+    const gate = document.querySelector<HTMLInputElement>(".kui-confirm__input");
+    expect(gate).not.toBeNull();
+    if (gate !== null) {
+      gate.value = "delete";
+      gate.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await settle();
+
+    [...document.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Delete topics")
+      ?.click();
+    await settle();
+
+    const raised = toasts().at(-1);
+    expect(raised?.title).toContain("1 topic deleted");
+    expect(raised?.title).toContain("1 refused");
+    // The rendering this case exists for.
+    expect(raised?.tone).toBe("warning");
+
+    dispose();
+  });
+
+  test("a bulk action that wholly succeeded raises a success toast", async () => {
+    // The other half of the same expression: with both branches asserted, the tone cannot be a
+    // constant of either value. Same arrangement, and both topics are issued a token.
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/all-deleted-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan": (request: StubRequest) => ({
+          topic: request.params.path?.["topicName"] ?? "",
+          partitions: 6,
+          records: 16,
+          autoCreateEnabled: false,
+          warnings: [],
+          token: "tok-1",
+          expiresAt: "2026-09-06T00:05:00Z",
+        }),
+        "/api/v1/clusters/{clusterId}/topics/{topicName}": {
+          topic: "orders.payments.v2",
+          partitions: 6,
+          records: 16,
+          warnings: [],
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const tickRow = async (index: number): Promise<void> => {
+      const boxes = [...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
+      boxes[index]?.click();
+      await settle();
+    };
+    await tickRow(0);
+    await tickRow(1);
+
+    [...(container.querySelector('[data-testid="topic-bulk-bar"]')?.querySelectorAll("button") ?? [])]
+      .find((button) => button.textContent?.trim() === "Delete")
+      ?.click();
+    await settle();
+
+    const gate = document.querySelector<HTMLInputElement>(".kui-confirm__input");
+    if (gate !== null) {
+      gate.value = "delete";
+      gate.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await settle();
+
+    [...document.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Delete topics")
+      ?.click();
+    await settle();
+
+    const raised = toasts().at(-1);
+    expect(raised?.title).toBe("2 topics deleted");
+    expect(raised?.tone).toBe("success");
+
+    dispose();
+  });
+
+  test("the bulk bar's Export hands over the ticked rows and not the page", async () => {
+    /*
+     * Found by mutation and gated afterwards: `onSelect: () => exportRows(result().topics)` — the
+     * bulk bar exporting the whole page instead of the selection — left every case in this package
+     * green. The header action above the table is the one that exports the page; the bar's is about
+     * the ticks, and the two are one line apart in the same file.
+     */
+    let handed: Blob | undefined;
+    const original = URL.createObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: (blob: Blob) => {
+        handed = blob;
+        return "blob:test";
+      },
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => undefined });
+
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/ticked-export-cluster/topics",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]')?.click();
+    await settle();
+
+    [...(container.querySelector('[data-testid="topic-bulk-bar"]')?.querySelectorAll("button") ?? [])]
+      .find((button) => button.textContent?.trim() === "Export")
+      ?.click();
+
+    expect(handed).toBeDefined();
+    const text = await (handed as Blob).text();
+    expect(text).toContain('"orders.payments.v2"');
+    // The two rows nobody ticked are not in the file, which is the whole difference.
+    expect(text).not.toContain('"orders.refunds.v1"');
+    expect(text).not.toContain('"orders.audit.v1"');
+
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: original });
+    dispose();
+  });
+
+  test("changing the query drops the ticks it can no longer show", async () => {
+    /*
+     * Also found by mutation: deleting `setSelected(new Set())` from `changeQuery` left 124 cases
+     * green, under a three-sentence comment arguing for it. A bar reading "1 topic selected" over a
+     * page holding no such row is a control whose subject the operator cannot see, and the first
+     * thing they would do to find out what it means is press `Delete`.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/requeried-cluster/topics",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]')?.click();
+    await settle();
+    expect(container.querySelector('[data-testid="topic-bulk-bar"]')?.textContent).toContain(
+      "1 topic selected",
+    );
+
+    // Any control that changes the query will do; the chip is the one that needs no debounce.
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Internal")
+      ?.click();
+    await settle();
+
+    /* The bar is absent at zero selection rather than reading "0 selected", so the reading is
+       taken defensively — and the ticks themselves are checked, not only the bar above them. */
+    expect(container.querySelector('[data-testid="topic-bulk-bar"]')?.textContent ?? "").not.toContain(
+      "selected",
+    );
+    expect(
+      [...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')].filter(
+        (box) => box.checked,
+      ),
+    ).toHaveLength(0);
+    dispose();
+  });
+
+  test("a ?q= in the address filters the list", async () => {
+    /*
+     * The drawer's topic-prefix rows link at `…/topics?q=<prefix>`, and this screen used to seed
+     * `DEFAULT_TOPIC_QUERY` and read the address only for `?tab=` — so the link was honest and the
+     * destination listed the whole cluster. W4-06 owns the link; this is the reading.
+     *
+     * Asserted on the *request*, because that is where the filter is applied: a case that read the
+     * search box would pass on a screen that filled the box and asked for everything.
+     */
+    const host = topicsHost({
+      at: "/clusters/addressed-cluster/topics?q=orders.",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const asked = host.stub.requests.find(
+      (request) => request.path === "/api/v1/clusters/{clusterId}/topics",
+    );
+    expect(asked?.params.query?.["q"]).toBe("orders.");
+    // And the box says what was asked for, so the screen and the server agree about the list.
+    expect(container.querySelector<HTMLInputElement>(".kui-textfield__input")?.value).toBe("orders.");
+    dispose();
+  });
+
+  test("a ?showInternal=true in the address lights the Internal chip and asks the server", async () => {
+    // The one facet the wire has, so the one a link can carry. The chip and the parameter are the
+    // same control (`isServerFacet`), which is why this is the facet the address is allowed to set.
+    const host = topicsHost({
+      at: "/clusters/internal-cluster/topics?showInternal=true",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const asked = host.stub.requests.find(
+      (request) => request.path === "/api/v1/clusters/{clusterId}/topics",
+    );
+    expect(asked?.params.query?.["showInternal"]).toBe(true);
+    const lit = [...container.querySelectorAll("button")].find(
+      (button) =>
+        button.getAttribute("aria-pressed") === "true" ||
+        button.getAttribute("aria-checked") === "true" ||
+        button.getAttribute("aria-selected") === "true",
+    );
+    expect(lit?.textContent).toContain("Internal");
     dispose();
   });
 });

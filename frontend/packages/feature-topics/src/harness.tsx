@@ -31,20 +31,56 @@ import type { ApiError, KuiApiClient } from "@kui/api";
 import { KuiProvider, sharedQueries, type KuiContextValue, type KuiPaths } from "@kui/kernel";
 import Topics from "./TopicsRoute.jsx";
 
-/** What a stub gateway was told to say, keyed by the templated path the client is called with. */
+/**
+ * What a stub gateway was told to say, keyed by the templated path the client is called with.
+ *
+ * A value that is a **function** is called with the request instead of being sent as the body. That
+ * form exists for the bulk paths and only for them: `deleteTopics` plans and confirms one topic at
+ * a
+ * time through the same two templated paths, so "a set of which one topic refused" — the state the
+ * bulk toast's tone is decided by — cannot be arranged by path alone.
+ */
 export type StubbedAnswers = Readonly<Record<string, unknown>>;
+
+/** The request a function-valued answer is given. `params.path` is what varies within a bulk run. */
+export interface StubRequest {
+  readonly path: string;
+  readonly params: {
+    readonly path?: Readonly<Record<string, string>>;
+    readonly query?: Readonly<Record<string, unknown>>;
+  };
+  readonly body?: unknown;
+}
 
 export interface StubApi {
   readonly api: KuiApiClient;
   /** Every path asked for, in order. What a "one request per open" assertion counts. */
   readonly calls: readonly string[];
+  /**
+   * The same calls with their parameters.
+   *
+   * A path alone cannot say whether a control reached the server: the topic list is one path and
+   * its
+   * whole state is in the query string, so "did the address filter the list" is a question only
+   * this
+   * can answer. `calls` stays because a count of opens is a different question.
+   */
+  readonly requests: readonly StubRequest[];
 }
 
 export function stubApi(answers: StubbedAnswers): StubApi {
   const calls: string[] = [];
-  const answer = async (path: string): Promise<unknown> => {
+  const requests: StubRequest[] = [];
+  const answer = async (path: string, init?: unknown): Promise<unknown> => {
     calls.push(path);
-    if (Object.hasOwn(answers, path)) return { ok: true, value: answers[path] };
+    const sent = (init ?? {}) as { readonly params?: StubRequest["params"]; readonly body?: unknown };
+    const request: StubRequest = { path, params: sent.params ?? {}, body: sent.body };
+    requests.push(request);
+    if (Object.hasOwn(answers, path)) {
+      const told = answers[path];
+      if (typeof told !== "function") return { ok: true, value: told };
+      return { ok: true, value: (told as (request: StubRequest) => unknown)(request) };
+    }
     const error: ApiError = {
       kind: "unreachable",
       cause: `this test stubbed no answer for ${path}`,
@@ -59,7 +95,7 @@ export function stubApi(answers: StubbedAnswers): StubApi {
     patch: answer,
     raw: {},
   } as unknown as KuiApiClient;
-  return { api: client, calls };
+  return { api: client, calls, requests };
 }
 
 /**
@@ -162,4 +198,40 @@ export async function settle(rounds = 8): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await flush();
   }
+}
+
+/**
+ * Gives every element a height for the length of one case, and puts it back.
+ *
+ * `VirtualizedTable` windows on the height its own scroller reports, and jsdom has no layout engine:
+ * every element is zero pixels tall, the window is empty, and the route's table draws no rows at
+ * all. A case about a *component* sidesteps that with the `viewportHeight` override — a case about
+ * the route cannot, because `TopicsRoute` does not pass one and must not start passing one to suit a
+ * test. So the environment is given the one measurement it is missing, rather than the product being
+ * given a prop it has no use for.
+ *
+ * The undo is {@link restoreMeasuredRows} and belongs in an `afterEach` rather than at the end of a
+ * case: a case that fails before its own restore would leave every element in the file two hundred
+ * pixels tall, and the next failure would be about that instead of about itself.
+ */
+let realClientHeight: PropertyDescriptor | undefined;
+let heightStubbed = false;
+
+export function withMeasuredRows(height = 480): void {
+  if (!heightStubbed) {
+    realClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    heightStubbed = true;
+  }
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => height,
+  });
+}
+
+/** Puts the real `clientHeight` back. Safe to call when nothing was stubbed. */
+export function restoreMeasuredRows(): void {
+  if (!heightStubbed) return;
+  if (realClientHeight === undefined) Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+  else Object.defineProperty(HTMLElement.prototype, "clientHeight", realClientHeight);
+  heightStubbed = false;
 }

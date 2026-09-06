@@ -58,11 +58,23 @@ docker compose -f deployment/compose/docker-compose.yml up -d --wait
 open http://localhost:8090/ui/
 ```
 
-Eight containers: `kui-frontend` and `kui-gateway`, which publish a port each, plus `kui-cluster`,
-`kui-topic`, `kui-message`, `kui-consumer`, `kui-schema` and `kui-metrics`, which publish none. The
-six services are reachable only from inside the compose network, which is the same rule
-`ARCHITECTURE.md` §14 states for a real deployment — a service must not be exposed outside the
-cluster network.
+Eleven containers: `kui-frontend` and `kui-gateway`, which publish a port each, plus `kui-cluster`,
+`kui-topic`, `kui-message`, `kui-consumer`, `kui-schema` and `kui-metrics`, which publish none, plus
+the three things they now have something to say about — a single-node Kafka broker (`kafka`), a
+Prometheus JMX exporter beside it (`kafka-metrics`) and a Schema Registry (`schema-registry`) —
+which publish none either. The six services are reachable only from inside the compose network,
+which is the same rule `ARCHITECTURE.md` §14 states for a real deployment — a service must not be
+exposed outside the cluster network.
+
+**The broker is new, and it is here for one reason.** This stack ran with `clusters: []` for three
+milestones because its subject is process isolation rather than Kafka. M7 ended that: the throughput
+endpoint had to be shown answering `ok` with real numbers, and no assertion about measuring
+something can be made against nothing to measure. `kui-service.yaml` therefore declares two clusters
+on that one broker — `measured`, which has the exporter named under `kui.metrics.sources`, and
+`unmeasured`, which has no entry at all — and `smoke.sh` asserts both answers. The pair is the
+point: whether KUI can measure a cluster is a fact about the deployment's configuration and not
+about the broker, and until now only the refusal could be produced — which is why a metrics
+service containing no adapter satisfied every clause of M7's old exit criterion.
 
 Six is every contract the gateway holds. It used to be five: `services/schema` was in
 `ServiceContracts.byService`, had a `deployment.docker.schema` image target nothing built, and
@@ -71,11 +83,12 @@ and the smoke test could not notice, because a contract with no address is missi
 of an addresses-against-containers comparison. `smoke.sh` now reads the contract set as well, and
 `docker-compose.yml` has no room left for a service that is declared and unreachable.
 
-`kui-metrics` measures nothing: KUI has no JMX client and no Prometheus parser, so every one of its
-answers is a 200 saying `not_configured`, and the dashboard's metrics cards keep their written "not
-measured" sentence (ADR-032). It is here because the gateway derives a service's public routes from
-the contract it holds *and* the address it was given — so a metrics container that is absent is not
-a quiet feature, it is a feature the browser cannot tell apart from an outage.
+`kui-metrics` answers both ways here, which it could not do before: `ok` with a series for the
+`measured` cluster, and a 200 saying `not_configured` for `unmeasured`, whose dashboard cards then
+keep their written "not measured" sentence (ADR-032). It is here whichever way it answers, because
+the gateway derives a service's public routes from the contract it holds *and* the address it was
+given — so a metrics container that is absent is not a quiet feature, it is a feature the browser
+cannot tell apart from an outage.
 
 This is the stack that grows. M8 and M9 each add a service beside those six, and
 `docker-compose.yml` carries a commented slot naming the container and the address each of
@@ -171,7 +184,14 @@ which is the half that check was missing: `kui-metrics`'s defect survived one se
 `services/schema` precisely because a contract with no address is absent from both sides of the
 addresses-against-containers equality. And it checks that every image the stack names is already on
 the machine, so a build step somebody skipped is reported by name instead of as `pull access denied`
-against a registry KUI publishes nothing to.
+against a registry KUI publishes nothing to — a check that now refuses to pass on an empty list,
+which it used to do, because a `for` over nothing runs no iterations and reports no failure.
+
+And it asserts the measurement. The exporter is asked for the two byte-rate families KUI parses,
+`measured`'s throughput is awaited until it answers `ok` with at least one bucket carrying a rate
+that is not null, and `unmeasured`'s is asserted to be `not_configured`. The last of those three is
+the one M7's criterion used to consist of on its own, and on its own it is satisfied by a service
+that was never built.
 
 CI runs it in the end-to-end job, right after the seven backend images are built, so that a broken
 compose file is caught by the same run that builds the artefacts it describes. That list is derived

@@ -68,8 +68,15 @@ test.describe("the partition count", () => {
      * number is a dialog nobody should trust — and this one said "has 0 partitions" beside a
      * control that copies records between topics.
      */
-    await expect(dialog).toContainText(`${TOPIC} has ${count} partitions.`, { timeout: 20_000 });
+    const clause = count === 1 ? "has 1 partition." : `has ${count} partitions.`;
+    await expect(dialog).toContainText(`${TOPIC} ${clause}`, { timeout: 20_000 });
     await expect(dialog).not.toContainText("has 0 partitions");
+    // And it counts. The sentence read "has 1 partitions" on every single-partition topic, which is
+    // most of what a scratch cluster holds; the clause above is the screen's own, not the spec's.
+    await expect(dialog).not.toContainText("has 1 partitions");
+    // The class says which of the two sentences this is. They were sharing `__unknown`, so the one
+    // line on this dialog that states a measured figure was marked up as the absence of one.
+    await expect(dialog.locator(".kui-resend__known")).toBeVisible();
   });
 });
 
@@ -161,5 +168,58 @@ test.describe("writing", () => {
     await expect(toast).toContainText(/partition \d+, offset \d+/i);
 
     await removeTopic(api, name);
+  });
+
+  test("a copy that moved nothing raises a warning toast, not a green tick", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * The state this screen is shaped around, produced against a real broker rather than described:
+     * a range naming offsets that are not in the log answers **200** with `{"read":0,"written":0}`.
+     * No error, no warning, nothing. A source topic that has never been written to is the cheapest
+     * honest way to get there — offset 0 exists in no log — and it is what an operator meets when
+     * retention has eaten the range they chose.
+     *
+     * The tone is the assertion. The wording is what a reader skims; the colour is what they see
+     * from across the room, and a green tick here sends them to look at a destination they believe
+     * now holds their records.
+     */
+    const source = scratchTopic("copy-src");
+    const destination = scratchTopic("copy-dst");
+    await api.post(`/api/v1/clusters/${CLUSTER}/topics`, {
+      name: source,
+      partitions: 1,
+      config: {},
+    });
+    await api.post(`/api/v1/clusters/${CLUSTER}/topics`, {
+      name: destination,
+      partitions: 1,
+      config: {},
+    });
+
+    await page.goto(`/ui/clusters/${CLUSTER}/topics/${source}/messages`);
+    await page.getByRole("button", { name: /copy records out/i }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Copy into topic").fill(destination);
+    await dialog.getByLabel("From offset").fill("0");
+    await dialog.getByLabel("Until offset").fill("1");
+    await dialog.getByLabel(`Type ${destination} to confirm`).fill(destination);
+    await dialog.getByRole("button", { name: /^copy records$/i }).click();
+
+    // The dialog stays open and states it; the toast is what survives the dialog being dismissed.
+    await expect(dialog).toContainText("Nothing was copied", { timeout: 20_000 });
+
+    const toast = page.locator(".kui-notice").first();
+    await expect(toast).toBeVisible({ timeout: 20_000 });
+    await expect(toast).toContainText("Nothing was copied");
+    await expect(toast).not.toContainText("Records copied");
+    // `warning`, and the class is the whole difference between "it worked" and "read this".
+    await expect(toast).toHaveClass(/kui-notice--warning/);
+
+    await removeTopic(api, source);
+    await removeTopic(api, destination);
   });
 });

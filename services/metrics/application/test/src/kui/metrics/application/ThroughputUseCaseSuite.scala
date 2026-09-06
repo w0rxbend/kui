@@ -75,13 +75,31 @@ final class ThroughputUseCaseSuite extends CatsEffectSuite {
   }
 
   test("a cluster that configured a source this build cannot read says so differently") {
-    useCase(List(profile(local, hasSource = true)))
+    val jmx = "kui.metrics.sources.local.kind: jmx, and this build reads Prometheus only"
+
+    useCase(List(SourceProfile(local, local.value, hasSource = true, unreadableReason = Some(jmx))))
       .throughput(local, ThroughputRange.Last24Hours)
       .map {
         case Right(MetricsReading.NotMeasured(explanation)) =>
           // Not "nothing is configured": the operator configured something, and telling them otherwise
-          // would send them to re-read their own YAML instead of to the milestone that adds the collector.
-          assert(explanation.contains("no collector"), explanation)
+          // would send them to re-read their own YAML instead of to the line that says what is missing.
+          // The sentence is the adapter's, carried through unchanged rather than rewritten here — this
+          // layer does not know which protocols exist.
+          assertEquals(explanation, jmx)
+        case other => fail(s"expected NotMeasured, got $other")
+      }
+  }
+
+  test("a configured source with no reason given still does not read as an empty deployment") {
+    // The fallback. A profile that says "configured" and carries no explanation is a bug in an adapter,
+    // and the failure it must not produce is the sentence for a deployment that configured nothing: an
+    // operator sent to re-read a YAML file that is correct.
+    useCase(List(profile(local, hasSource = true)))
+      .throughput(local, ThroughputRange.Last24Hours)
+      .map {
+        case Right(MetricsReading.NotMeasured(explanation)) =>
+          assert(explanation.contains("cannot read"), explanation)
+          assert(!explanation.contains("no metrics source is configured"), explanation)
         case other => fail(s"expected NotMeasured, got $other")
       }
   }

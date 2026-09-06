@@ -152,6 +152,27 @@ object RegisteredSchema {
   given CanEqual[RegisteredSchema, RegisteredSchema] = CanEqual.derived
 }
 
+/** What the registry says after it has accepted a schema: the id it stored it under, and the version it
+  * became.
+  *
+  * ==Why the version is optional and the id is not==
+  *
+  * `POST /subjects/{subject}/versions` answers `{"id": N}` and nothing else — that is the whole of the
+  * Confluent API's registration response, and Apicurio's and Karapace's compatibility layers copy it. The
+  * version number is a second question, asked with the lookup call that reports which version *this* schema
+  * is under, and a second call can fail after the first one has already succeeded.
+  *
+  * When that happens the schema is registered and KUI does not know its number. Reporting the registration as
+  * a failure would send an operator to register it again; inventing a number — the previous latest plus one,
+  * say — would put a version on screen that may not exist. `None` is the third answer, and it is the true
+  * one: it registered, and the number has to be read off the subject's version list.
+  */
+final case class RegisteredVersion(subject: Subject, id: SchemaId, version: Option[SchemaVersion])
+
+object RegisteredVersion {
+  given CanEqual[RegisteredVersion, RegisteredVersion] = CanEqual.derived
+}
+
 /** A schema somebody is proposing, which the registry has never seen.
   *
   * It has no id and no version because it has not been registered — that is the whole point of checking it

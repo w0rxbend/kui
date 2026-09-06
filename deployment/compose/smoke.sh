@@ -22,11 +22,14 @@
 # not a Mill target at all -- Mill never builds a browser bundle -- and `docker compose up` builds
 # it from `deployment/frontend/Dockerfile` on the first run, which takes a few minutes once.
 #
-# Nothing here pulls. Every image this stack names is built locally and published to no registry, so
-# a missing one used to surface as `pull access denied for kui-metrics, repository does not
-# exist` -- a message about a registry, for a build step somebody skipped. The first thing this
-# script does is therefore to check that each of them exists on this machine, and to name the Mill
-# target that makes the missing one.
+# Every `kui-*` image this stack names is built locally and published to no registry, so a missing
+# one used to surface as `pull access denied for kui-metrics, repository does not exist` -- a
+# message about a registry, for a build step somebody skipped. The first thing this script does is
+# therefore to check that each of them exists on this machine, and to name the Mill target that
+# makes the missing one. The three third-party images -- the Kafka broker, the JMX exporter beside
+# it that makes this stack measurable at all, and the Schema Registry -- are pulled by Compose like
+# any other published image and are deliberately not in that check: there is no Mill target it
+# could name.
 
 set -euo pipefail
 
@@ -43,10 +46,16 @@ ui="http://localhost:${KUI_FRONTEND_PORT:-8090}"
 # fix twice. A container that has just been started is waiting for a JVM to boot as well as for a
 # poll, and that first readiness call is slow enough to land above `degradedP95Threshold` (2s). The
 # gateway's latency window is the last fifty samples and its p95 is a nearest-rank percentile, so a
-# single slow sample stays the p95 until the window holds twenty-one of them -- thirteen more polls,
-# or a bit over two minutes at the ten-second interval configured in `kui.yaml`. Waiting for
-# `available` was therefore waiting for a *latency window to drain*, which no ceiling short enough
-# to report a real hang can cover: forty seconds failed two of three runs, ninety failed one.
+# single slow sample stays the p95 until the window holds twenty of them -- twelve more polls, or
+# two minutes at the ten-second interval configured in `kui.yaml`. (Twenty and not twenty-one: the
+# slow sample is the largest, so it sits at index n-1, and `LatencyWindow.percentile` reads index
+# `ceil(95/100 * n) - 1`. At n=19 that is 18, which is still the last element; at n=20 it is 18 and
+# the last element is 19, so twenty is the first window in which the slow sample is no longer the
+# p95. This comment said twenty-one and thirteen, which is the same arithmetic off by one.)
+#
+# Waiting for `available` was therefore waiting for a *latency window to drain*, which no ceiling
+# short enough to report a real hang can cover: forty seconds failed two of three runs, ninety
+# failed one.
 #
 # So that step no longer asks the question. Recovery is asserted as what it means -- a call crosses
 # to the restarted process again, and the gateway has stopped calling it unavailable -- and both of
@@ -91,7 +100,10 @@ await() {
 # the p95 of the gateway's window, and that is a true report about a cold JVM rather than a
 # failure to recover. What has to hold is that the gateway has stopped calling it unavailable --
 # which no amount of latency can produce, because `Unavailable` comes from readiness, the circuit or
-# the service's own verdict and never from a duration (ADR-039 §6).
+# the service's own verdict and never from a duration. That is ADR-039 §1's four inputs and §2's
+# precedence table, `NotConfigured > Unavailable > Degraded > Available`; the citation here used to
+# read §6, which is the rule that business errors must not dim a capability and is about something
+# else entirely.
 await_not() {
   local what="$1" forbidden="$2" command="$3" actual=""
   local deadline=$(( SECONDS + SETTLE_TIMEOUT ))
@@ -113,8 +125,17 @@ await_not() {
 # Selected by service id and never by position in the array. The list has grown from one service to
 # six, and an index that used to name the cluster service silently started naming a different one,
 # which is the kind of test that keeps passing while checking nothing.
+#
+# `.key.cluster == null` is the second half of the selection and it became load-bearing the moment
+# this stack configured a cluster. The capability document carries one row per service *and* one
+# row per (service, cluster) pair, so with two clusters the service filter alone returns three
+# lines, and `await` compares "available\navailable\navailable" against "available" for ninety
+# seconds before failing. The null row is also the right question for this file: it is the
+# gateway's verdict on the *process*, which is what a fault-isolation test is about, while the
+# per-cluster rows answer a different question -- whether that service can serve that cluster,
+# which is how `metrics` is legitimately `available` on one and `not_configured` on the other here.
 status_of() {
-  printf "curl -sf %s/api/v1/capabilities | jq -r '.entries[] | select(.key.service == \"%s\") | .state.status'" \
+  printf "curl -sf %s/api/v1/capabilities | jq -r '.entries[] | select(.key.service == \"%s\" and .key.cluster == null) | .state.status'" \
     "$base" "$1"
 }
 
@@ -166,20 +187,36 @@ routed_services() {
 # 3. The same question asked of the compose file: every container that is a KUI service rather than
 # the gateway or the interface, which are the two that publish a port and the two that are not
 # routed.
+#
+# `^kui-` first, and it is not cosmetic. This stack runs a Kafka broker and a JMX exporter as well,
+# and they are neither routed nor contracted: without the prefix filter `kafka` and `kafka-metrics`
+# arrive in this set, the comparison below sees two container names the gateway holds no contract
+# for, and a stack that is completely correct fails. The prefix is also the naming rule -- every KUI
+# service container is `kui-<service id>` and the id is what the gateway's contract map is keyed by
+# -- so nothing a service could be called escapes the check by being filtered out here.
 service_containers() {
   "${compose[@]}" config --services |
+    grep -E '^kui-' |
     grep -Ev '^kui-(gateway|frontend)$' |
     sed 's/^kui-//' |
     LC_ALL=C sort
 }
 
-# Every image this stack expects to already exist, which is every one it does not build itself.
+# Every image this stack expects to already exist: every KUI image it does not build itself.
 #
-# `kui-frontend` carries a `build:` stanza and is therefore excluded: Compose makes it, and asking
-# whether it is already on the machine would fail a perfectly good first run.
+# Two exclusions and they are for opposite reasons. `kui-frontend` carries a `build:` stanza:
+# Compose makes it, and asking whether it is already on the machine would fail a perfectly good
+# first run. `apache/kafka`, `bitnamilegacy/jmx-exporter` and `apicurio/apicurio-registry` are
+# third-party images published to a registry, so Compose pulls them and there is no Mill target
+# that could make one -- naming them here would print "build them with
+# ./mill deployment.docker.kafka.docker.build", which is advice for a task that does not exist.
+#
+# What is left is exactly the set this check is for: images built from this working tree and
+# published nowhere.
 expected_images() {
   "${compose[@]}" config --format json |
-    jq -r '.services | to_entries[] | select(.value.build == null) | .value.image'
+    jq -r '.services | to_entries[] | select(.value.build == null) | .value.image
+           | select(startswith("kui-"))'
 }
 
 # The Mill target that builds one of them. `kui-metrics` is `deployment.docker.metrics`.
@@ -191,8 +228,23 @@ target_for() { printf 'deployment.docker.%s' "${1#kui-}"; }
 # and `docker compose pull kui-metrics` said `pull access denied, repository does not exist` --
 # which reads as a permissions problem and is not one.
 log "every image this stack names exists on this machine"
+images="$(expected_images)"
+# THE GUARD THIS STEP DID NOT HAVE, AND IT IS THE REASON THE STEP EXISTS.
+#
+# Everything below is a `for` over `$images`. A `for` over nothing runs zero times, leaves `missing`
+# empty, and the step prints `images present:` followed by a space and passes -- over a stack whose
+# images were never checked at all. That is not hypothetical: it was observed doing exactly that
+# during wave 3's verification, when the `jq` filter was being edited, and the only thing that
+# caught the run was the contract check twenty lines below, which happens to read a different file.
+#
+# One line, and it is the same `[[ -n ... ]] || fail` the contract check already has. A gate that
+# cannot fail is not a gate, and a derivation that comes back empty is the way this one stops being
+# one.
+[[ -n "$images" ]] || fail "no kui-* image could be derived from docker-compose.yml.
+  Every service in that file either carries a \`build:\` stanza or names a third-party image, which
+  cannot be true of a stack that runs KUI. Check the \`expected_images\` filter above."
 missing=""
-for image in $(expected_images); do
+for image in $images; do
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     missing="$missing ${image%%:*}"
   fi
@@ -203,7 +255,7 @@ if [[ -n "$missing" ]]; then
   fail "these images are not built:$missing
   build them with: ./mill '{${targets#,}}.docker.build'"
 fi
-printf '  images present: %s\n' "$(expected_images | tr '\n' ' ')"
+printf '  images present: %s\n' "$(echo "$images" | tr '\n' ' ')"
 
 # And the set the gateway holds a contract for, which is the third of the three and the one nothing
 # used to read. It is checked before the stack starts because it is a property of the repository
@@ -220,7 +272,15 @@ and this stack runs [$(echo "$declared" | tr '\n' ' ')].
   Give the missing one a container in docker-compose.yml and an address in kui.yaml, or name it in
   UNROUTED_CONTRACTS above with the reason it is deliberately not routed."
 fi
-printf '  contracts routed: %s\n' "$(echo "$contracts" | tr '\n' ' ')"
+# `$expected` and not `$contracts`. The two are the same list until `UNROUTED_CONTRACTS` names one,
+# and printing the wrong one meant that the moment somebody deliberately left a service out, this
+# line announced it as routed -- a report that is exactly wrong in the one case the variable exists
+# for. The unrouted set is printed beside it rather than folded away, because a decision taken in
+# writing should be visible in the output of the check that honours it.
+printf '  contracts routed: %s\n' "$(echo "$expected" | tr '\n' ' ')"
+if [[ -n "$unrouted" ]]; then
+  printf '  contracts deliberately not routed: %s\n' "$(echo "$unrouted" | tr '\n' ' ')"
+fi
 
 log "starting the distributed stack"
 "${compose[@]}" up -d --wait --wait-timeout 120 || fail "the stack did not become healthy"
@@ -261,6 +321,60 @@ await "the API through the interface's proxy" "ok" \
 # exists.
 await "proxied cluster list" "ok" \
   "curl -sf $base/api/v1/clusters | jq -r .clusters.status"
+
+# ==================================================================================================
+# THE MEASUREMENT, WHICH IS THE HALF M7 SPENT TWO WAVES UNABLE TO PROVE.
+#
+# The throughput endpoint answers one of `ok | stale | unavailable | not_configured`, and with no
+# exporter configured it answers `not_configured`. That was the whole of M7's old exit criterion,
+# and a service containing no adapter -- no JMX client, no Prometheus parser, nothing -- satisfied
+# every clause of it, because the only thing it asserted was a refusal and a refusal is what the
+# absence of the code produces. A criterion whose positive case cannot be distinguished from the
+# missing feature is a criterion that has never tested anything.
+#
+# So both halves are asserted here, on one deployment, and the first one is the one that matters:
+# `measured` has an exporter named under `kui.metrics.sources` and must come back `ok` with a real
+# number in it, and `unmeasured` -- the same broker, no entry -- must come back `not_configured`.
+# ==================================================================================================
+log "the broker beside this stack is measurable, and KUI measures it"
+
+# First the exporter on its own, because the two failures need separating. If this passes and the
+# next one does not, the sidecar is fine and KUI's adapter is the problem; if this fails, no
+# assertion about KUI's adapter means anything. It is asked from inside a container because
+# `kafka-metrics` publishes no port to the host -- the exposition is for KUI, not for a person.
+rates="$("${compose[@]}" exec -T kui-gateway \
+  curl -fsS http://kafka-metrics:5556/metrics 2>/dev/null |
+  grep -cE '^kafka_server_brokertopicmetrics_bytes(in|out)persec_oneminuterate ' || true)"
+[[ "$rates" == "2" ]] || fail "the JMX exporter served $rates of the two byte-rate families.
+  Expected kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate and ..._bytesoutpersec_... .
+  Those names are a contract with the Prometheus reader in services/metrics; they are produced by
+  ../metrics/kafka-jmx-exporter.yml and nothing else in this repository writes them."
+printf '  the exporter serves both byte-rate families\n'
+
+# Then KUI. `await` and not a single call: the scrape loop runs at `kui.metrics.scrapeInterval`, so
+# a stack that came up two seconds ago has correctly sampled nothing yet, and the honest answer at
+# that instant is a series with no values in it. What is asserted is that it fills, not that it was
+# full immediately.
+throughput() {
+  printf "curl -sf '%s/api/v1/clusters/%s/metrics/throughput?range=24h' | jq -r '%s'" \
+    "$base" "$1" "$2"
+}
+await "the measured cluster's throughput" "ok" "$(throughput measured .throughput.status)"
+
+# A status of `ok` over an empty series would still be a chart nobody can read, so the series itself
+# is asserted: at least one bucket carrying a rate that is not null. A bucket that was never sampled
+# is null and stays null -- it is a gap in the line and never a zero -- which is why this counts
+# non-null buckets rather than checking the array's length.
+await "buckets carrying a measured rate" "yes" \
+  "$(throughput measured \
+    'if [.throughput.data.buckets[]? | select(.bytesInPerSecond != null)] | length > 0
+      then "yes" else "no" end')"
+
+# And the other half, on the same deployment and the same broker: a cluster with no
+# `kui.metrics.sources` entry says so. This is the assertion M7's criterion has been passing on
+# alone for two milestones; it is correct and it is worth nothing without the two above it.
+await "the unmeasured cluster's throughput" "not_configured" \
+  "$(throughput unmeasured .throughput.status)"
 
 log "stopping kui-cluster: one real process dies"
 "${compose[@]}" stop kui-cluster >/dev/null

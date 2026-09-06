@@ -51,16 +51,31 @@ object ThroughputRange {
 /** One reading of a cluster's throughput, at the moment the source was scraped.
   *
   * Rates rather than counters. A broker publishes monotonic totals and turning two totals into a rate needs
-  * both samples and the gap between them, which is the adapter's arithmetic (M7); by the time a value is a
-  * `ThroughputSample` that arithmetic has happened, and a consumer of this type can never accidentally chart
-  * a counter that resets when a broker restarts.
+  * both samples and the gap between them, which is the adapter's arithmetic (ADR-050); by the time a value is
+  * a `ThroughputSample` that arithmetic has happened, and a consumer of this type can never accidentally
+  * chart a counter that resets when a broker restarts.
+  *
+  * ==Each rate is separately optional, because an exporter publishes each of them separately==
+  *
+  * A JMX exporter is configured with a whitelist, and a deployment that publishes `BytesInPerSec` and
+  * `BytesOutPerSec` without `MessagesInPerSec` is an ordinary configuration rather than a broken one. Making
+  * the three rates one all-or-nothing tuple would mean refusing the whole card — the two rates the Traffic
+  * screen actually draws included — because a third one nobody asked for was absent. `None` here means the
+  * same thing it means one type down: *not measured*, never zero.
   */
 final case class ThroughputSample(
     at: Instant,
-    bytesInPerSecond: Double,
-    bytesOutPerSecond: Double,
-    recordsPerSecond: Double
-)
+    bytesInPerSecond: Option[Double],
+    bytesOutPerSecond: Option[Double],
+    recordsPerSecond: Option[Double]
+) {
+
+  /** True when the scrape produced no rate at all. A source answering these is a source answering nothing,
+    * and the adapter refuses rather than filing an empty sample that would read as a measured gap.
+    */
+  def isEmpty: Boolean =
+    bytesInPerSecond.isEmpty && bytesOutPerSecond.isEmpty && recordsPerSecond.isEmpty
+}
 
 object ThroughputSample {
   given CanEqual[ThroughputSample, ThroughputSample] = CanEqual.derived
@@ -139,16 +154,17 @@ object ThroughputSeries {
         .groupBy(sample => floorTo(sample.at, stepSeconds))
 
     val buckets = boundaries(from, to, stepSeconds).map { start =>
-      byBucket.get(start) match {
-        case None => ThroughputBucket.absentAt(start)
-        case Some(inBucket) =>
-          ThroughputBucket(
-            startingAt = start,
-            bytesInPerSecond = Some(mean(inBucket.map(_.bytesInPerSecond))),
-            bytesOutPerSecond = Some(mean(inBucket.map(_.bytesOutPerSecond))),
-            recordsPerSecond = Some(mean(inBucket.map(_.recordsPerSecond)))
-          )
-      }
+      // Each rate is folded over the samples that carried *it*, not over the samples in the bucket. An
+      // exporter that started publishing `MessagesInPerSec` halfway through an hour must not make the
+      // bytes it published all hour read as absent, and must not make the first half read as measured.
+      val inBucket = byBucket.getOrElse(start, Nil)
+
+      ThroughputBucket(
+        startingAt = start,
+        bytesInPerSecond = mean(inBucket.flatMap(_.bytesInPerSecond)),
+        bytesOutPerSecond = mean(inBucket.flatMap(_.bytesOutPerSecond)),
+        recordsPerSecond = mean(inBucket.flatMap(_.recordsPerSecond))
+      )
     }
 
     ThroughputSeries(range, from, to, buckets)
@@ -173,5 +189,9 @@ object ThroughputSeries {
   private def floorTo(at: Instant, stepSeconds: Long): Instant =
     Instant.ofEpochSecond(Math.floorDiv(at.getEpochSecond, stepSeconds) * stepSeconds)
 
-  private def mean(values: List[Double]): Double = values.sum / values.size
+  /** `None` for a rate nothing in the bucket measured — which is the one arithmetic mistake this file exists
+    * to prevent, since `0.0 / 0` is `NaN` and a `NaN` serialises to `null` by a route nobody chose.
+    */
+  private def mean(values: List[Double]): Option[Double] =
+    Option.when(values.nonEmpty)(values.sum / values.size)
 }

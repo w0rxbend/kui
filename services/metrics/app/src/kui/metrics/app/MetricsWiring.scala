@@ -1,19 +1,29 @@
 package kui.metrics.app
 
+import java.time.Instant
+
 import cats.Parallel
+import cats.data.NonEmptyList
 import cats.effect.kernel.{Async, Resource}
 import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.otel4s.metrics.Meter
+import sttp.client4.Backend
+import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
-import kui.config.{ClusterConfig, MetricsConfig}
+import kui.cache.CacheMetrics
+import kui.config.{ClusterConfig, MetricsConfig, MetricsSourceSettings, UrlPolicy}
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
+import kui.http.upstream.{UpstreamClient, UpstreamConfig}
+import kui.kernel.{ClusterId, PositiveInt}
 import kui.metrics.api.{MetricsApi, MetricsCapabilities}
-import kui.metrics.application.{SourceProfile, ThroughputUseCase}
-import kui.metrics.infrastructure.ConfiguredClusterSources
+import kui.metrics.application.{SourceAccess, SourceProfile, ThroughputUseCase}
+import kui.metrics.domain.MetricsSourcePort
+import kui.metrics.infrastructure.{ConfiguredClusterSources, PrometheusThroughputScrape, ThroughputBuffer}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 
@@ -33,11 +43,16 @@ final case class MetricsServer[F[_]](
   *
   * ==What it contacts, and when==
   *
-  * Nothing, and today it could not if it wanted to: this build has no collector. When one arrives it is
-  * constructed here, beside the profiles, and every other line in this file stays as it is — which is the
-  * property the whole packet exists to buy. Adding a service to this repository touches seven places outside
-  * the service, and three later milestones each add one; doing it once for a service that measures nothing is
-  * what makes the next three a day's work rather than a week's.
+  * One HTTP connection pool, and only when at least one cluster names a readable metrics source. Building it
+  * dials nothing: an `UpstreamClient` is a circuit breaker, a bulkhead and a failover list around a pool that
+  * connects on first use, so an exporter that is down delays no start-up and fails no start-up. What does
+  * begin here is one scrape fibre per such cluster, under this `Resource`'s lifetime, which is what makes the
+  * first chart after a restart a chart rather than an empty axis.
+  *
+  * A deployment where no cluster names a source builds **no** pool, no breaker and no fibre — the same
+  * argument the schema service makes for a cluster with no registry. An idle upstream publishes a permanently
+  * zero series on every dashboard that charts it, and a metric nothing can make non-zero is one an operator
+  * learns to ignore.
   *
   * ==Why it starts at all with nothing configured==
   *
@@ -52,15 +67,32 @@ object MetricsWiring {
   /** The instrumentation scope this service's tracer and meter are named after. */
   val Instrumentation: String = "kui.metrics"
 
+  /** How many scrapes may be in flight to one exporter at once.
+    *
+    * One, and that is not a typo. There is exactly one caller — this cluster's scrape fibre — and it asks
+    * once per `scrapeInterval`. A wider bulkhead would let a run of slow scrapes overlap into a pile against
+    * a component KUI does not control, which is the failure `kui.topics.scrapeTimeout` exists to prevent one
+    * service over.
+    */
+  val MaxConcurrentPerExporter: PositiveInt = PositiveInt.unsafe(1)
+
+  /** How many times a scrape is repeated when an address refuses a connection.
+    *
+    * Zero. A scrape is a poll: the next one is already scheduled, and a retry inside the interval buys one
+    * sample at the cost of doubling the load on an exporter that is already struggling. The failover list is
+    * still one address long for the same reason — `kui.metrics.sources.<id>.url` is a single address.
+    */
+  val MaxRetries: Int = 0
+
   /** Builds everything except the listener.
     *
     * @param clusters
     *   the configured clusters, from `kui.clusters[]`, read from the same file this process already loaded.
     *   They are the list of rows the capability report has to have an answer for, source or not.
     * @param metrics
-    *   the `kui.metrics` section. Only `sources` is read today — it is what decides whether a cluster has
-    *   anything to measure. The cadence and the retention window are the collector's dials and are read by
-    *   the collector, when there is one.
+    *   the `kui.metrics` section, all four keys of it: `sources` decides which clusters can be measured,
+    *   `scrapeInterval` is both the cadence and the step the samples are bucketed under, and `retention` and
+    *   `maxSamplesPerSeries` bound what each cluster's window keeps.
     */
   def make[F[_]: {Async, Parallel}](
       clusters: List[ClusterConfig],
@@ -77,7 +109,14 @@ object MetricsWiring {
       profiles = ConfiguredClusterSources.profilesOf(clusters, metrics)
       _ <- Resource.eval(startupLog[F](profiles, logger))
 
-      sources = new ConfiguredClusterSources[F](profiles)
+      // The address rule is read here rather than taken as a parameter, so that the all-in-one and the
+      // stand-alone process cannot apply two different ones — and because widening `make` would move a
+      // seam `apps/allinone` codes against. A JMX exporter at `http://kafka-metrics:5556/metrics` inside a
+      // Compose network is the ordinary arrangement, and `KUI_ALLOW_PRIVATE_UPSTREAMS` is what admits it.
+      policy <- Resource.eval(Async[F].delay(UrlPolicy.fromEnv(sys.env)))
+      ports <- collectors[F](clusters, metrics, policy, telemetry, meter, logger)
+
+      sources = new ConfiguredClusterSources[F](profiles, ports)
       throughput = ThroughputUseCase.make[F](sources)
       capabilities = MetricsCapabilities.make[F](sources)
 
@@ -93,6 +132,103 @@ object MetricsWiring {
       capabilities = MetricsApi.capabilityDocument[F](capabilities, logger)
     )
 
+  /** One collector per cluster that names a readable source, or nothing at all.
+    *
+    * The `Resource` returned owns everything the collectors need: the process's one connection pool, one
+    * circuit breaker per exporter, one retention window per cluster and one scrape fibre per cluster. All of
+    * it ends when the process does, which is why a scrape in flight at shutdown is cancelled rather than left
+    * holding a socket.
+    */
+  private def collectors[F[_]: Async](
+      clusters: List[ClusterConfig],
+      metrics: MetricsConfig,
+      policy: UrlPolicy,
+      telemetry: Telemetry[F],
+      meter: Meter[F],
+      logger: StructuredLogger[F]
+  ): Resource[F, Map[ClusterId, MetricsSourcePort[F]]] = {
+    val readable = ConfiguredClusterSources.scrapable(clusters, metrics)
+
+    if readable.isEmpty then Resource.pure[F, Map[ClusterId, MetricsSourcePort[F]]](Map.empty)
+    else
+      for {
+        transport <- HttpClientFs2Backend.resource[F]()
+        cacheMetrics <- Resource.eval(CacheMetrics.otel4s[F](meter))
+        // One instant for every window, taken before any of them collects, so that two clusters
+        // configured together report the same coverage rather than one of them looking a scrape younger.
+        startedAt <- Resource.eval(Async[F].realTimeInstant)
+        ports <- readable.traverse((cluster, settings) =>
+          collectorFor[F](
+            cluster,
+            settings,
+            metrics,
+            startedAt,
+            transport,
+            policy,
+            telemetry,
+            cacheMetrics,
+            logger
+          ).map(cluster -> _)
+        )
+      } yield ports.toMap
+  }
+
+  private def collectorFor[F[_]: Async](
+      cluster: ClusterId,
+      settings: MetricsSourceSettings,
+      metrics: MetricsConfig,
+      startedAt: Instant,
+      transport: Backend[F],
+      policy: UrlPolicy,
+      telemetry: Telemetry[F],
+      cacheMetrics: CacheMetrics[F],
+      logger: StructuredLogger[F]
+  ): Resource[F, MetricsSourcePort[F]] =
+    for {
+      upstream <- UpstreamClient.resource[F](
+        upstreamConfig(cluster, settings, policy),
+        transport,
+        telemetry,
+        MetricsApi.Id,
+        logger
+      )
+      buffer <- Resource.eval(
+        ThroughputBuffer.create[F](
+          cluster = cluster,
+          step = metrics.scrapeInterval,
+          // Passed through as the operator wrote it. A retention shorter than one scrape interval — a
+          // pair the loader accepts, because the two keys are bounded independently — is widened by
+          // `ThroughputBuffer.create`, which is where the window's own invariant lives and where a case
+          // can hold it.
+          retention = metrics.retention,
+          maxSamples = metrics.maxSamplesPerSeries,
+          startedAt = startedAt,
+          metrics = cacheMetrics
+        )
+      )
+      scrape = new PrometheusThroughputScrape[F](upstream.backend, settings.url)
+      _ <- ThroughputScrapeLoop.resource[F](cluster, scrape, buffer, metrics.scrapeInterval, logger)
+    } yield buffer
+
+  /** The resilience an exporter is called behind. One address, one call at a time, no retry — see the two
+    * constants above for why each of those is the number it is.
+    */
+  private def upstreamConfig(
+      cluster: ClusterId,
+      settings: MetricsSourceSettings,
+      policy: UrlPolicy
+  ): UpstreamConfig =
+    UpstreamConfig(
+      name = s"${PrometheusThroughputScrape.UpstreamName}-${cluster.value}",
+      urls = NonEmptyList.one(settings.url),
+      // The whole-call budget the operator configured. It is bounded below the scrape interval by the
+      // loader, so a scrape cannot outlive the interval and overlap the next one.
+      callTimeout = settings.callTimeout,
+      maxConcurrent = MaxConcurrentPerExporter,
+      maxRetries = MaxRetries,
+      urlPolicy = policy
+    )
+
   /** What this process will and will not measure, said out loud once at start-up.
     *
     * "Why is the throughput card showing a sentence?" is the first question this service will be asked, and
@@ -100,7 +236,9 @@ object MetricsWiring {
     * situations need different actions from whoever is reading:
     *
     *   - no cluster configured a source — INFO, because nothing is wrong;
-    *   - a cluster configured one and this build has no collector — WARN, because an operator has written
+    *   - a cluster configured one this process will scrape — INFO, naming it, because "which clusters is this
+    *     process measuring" is otherwise unanswerable after the fact;
+    *   - a cluster configured one this build cannot read — WARN, because an operator has written
     *     configuration that is having no effect, and that is exactly the case ADR-005's "say which keys are
     *     ignored" rule exists for.
     */
@@ -108,20 +246,25 @@ object MetricsWiring {
       profiles: List[SourceProfile],
       logger: StructuredLogger[F]
   ): F[Unit] = {
-    val declared = profiles.filter(_.hasSource).map(_.cluster.value)
+    val measured = profiles.filter(_.isMeasurable).map(_.cluster.value)
+    val unreadable = profiles.filter(profile => profile.hasSource && !profile.isMeasurable)
 
     logger
       .info(
         "no cluster configures kui.metrics.sources, so every cluster reports metrics as not configured " +
           "and the dashboard's metrics cards keep their 'not measured' sentence"
       )
-      .whenA(declared.isEmpty) *>
+      .whenA(profiles.forall(!_.hasSource)) *>
       logger
-        .warn(Map("metrics.declaredSources" -> declared.mkString(",")))(
-          s"${declared.size} cluster(s) configure kui.metrics.sources, but this build has no collector " +
-            "to read them; the JMX and Prometheus adapters arrive with the metrics milestone, and until " +
-            "then those clusters report metrics as not configured"
+        .info(Map("metrics.declaredSources" -> measured.mkString(",")))(
+          s"${measured.size} cluster(s) name a Prometheus metrics source and will be scraped every " +
+            "kui.metrics.scrapeInterval; their throughput cards draw a series rather than a sentence"
         )
-        .whenA(declared.nonEmpty)
+        .whenA(measured.nonEmpty) *>
+      unreadable.traverse_(profile =>
+        logger.warn(Map("metrics.unreadableSource" -> profile.cluster.value))(
+          profile.unreadableReason.getOrElse(SourceAccess.unreadableSource(profile.cluster))
+        )
+      )
   }
 }

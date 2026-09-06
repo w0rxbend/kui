@@ -1,10 +1,10 @@
 /**
  * The schema registry screens' rules, with no DOM under them.
  *
- * ## Why these four live together
+ * ## Why these ten live together
  *
- * Every one of them is a decision about what a *row* says, and a row is where this feature's whole
- * value sits. The subject list used to draw a name and nothing else, which is why a wire change
+ * Every one of them is a decision about what a *row* or the line above it says, and a row is where
+ * this feature's whole value sits. The subject list used to draw a name and nothing else, which is why a wire change
  * that replaced the names with objects rendered `[object Object]` in a link for a day: there was
  * nothing on the row that a test could be wrong about. A row that carries facts is a row whose
  * facts can be asserted, and these are the assertions.
@@ -98,7 +98,18 @@ export const LEVEL_NOT_RECOGNISED = "level KUI does not recognise";
 export function registryVoice(input: {
   readonly subjectCount: number | undefined;
   readonly globalLevel: CompatibilityLevel | null | undefined;
+  /** The subjects request is still out, so nothing has been established yet. */
+  readonly loading?: boolean | undefined;
 }): string {
+  /*
+   * "Still asking" comes before every other branch, and it is the branch that was missing.
+   *
+   * With the request in flight `subjectCount` is `undefined` for the ordinary reason — no answer
+   * has arrived — and the sentence below it made a claim about an answer: that the registry *did
+   * not say*. It had not been asked. An absence this file's own rule says must be spoken is not a
+   * licence to speak about a question nobody has answered yet.
+   */
+  if (input.loading === true) return "Reading this registry's subjects\u2026";
   if (typeof input.subjectCount !== "number") {
     return "The registry did not say how many subjects it holds.";
   }
@@ -114,26 +125,27 @@ export function registryVoice(input: {
   return `${subjects}. ${spoken} compatible, unlike your last migration.`;
 }
 
-/**
- * Why `Register schema` will not press.
- *
- * The design draws the action and the product does not have it: the gateway serves reads, two
- * compatibility settings and a check that registers nothing — there is no endpoint that writes a
- * schema, so nothing this button could call exists. `Button` refuses a disabled control without a
- * reason, and this is that reason. It is stated as an absence in KUI rather than as a permission
- * problem on purpose: an operator told "you may not do this" goes and asks for a grant that would
- * change nothing.
- *
- * When a registration endpoint lands, this constant and the `disabled` it justifies are what gets
- * deleted; nothing else on the screen has to move.
- */
-export const REGISTER_UNAVAILABLE_REASON =
-  "KUI cannot register a schema yet: the gateway serves no endpoint that writes one. Register it " +
-  "with your registry client and it will appear in this list.";
-
 /** The caption under a subject's name: how many versions, and which level it follows and whose. */
 export function rowCaption(row: SubjectRow): string {
   return `${versionCountSentence(row.versionCount)} \u00b7 ${levelPhrase(row.compatibility)}`;
+}
+
+/**
+ * What a screen reader is told the row's link is.
+ *
+ * The row draws four things inside one link — a format badge, the subject, the version count and
+ * the level — as grid items with no text between them, and the accessible name a browser computes
+ * from that runs them together: `AVROorders.avro-value`. A subject name is the one string on this
+ * screen somebody reads out over a call, so it must not arrive fused to the word before it.
+ *
+ * An explicit name fixes it and costs nothing, because every part of it is drawn on the row as
+ * well: the badge's word, the subject, and {@link rowCaption} — which is the same sentence the
+ * caption builds, from the same two helpers, so the two cannot drift into saying different things
+ * about the same row.
+ */
+export function rowLabel(row: SubjectRow): string {
+  const format = row.format === undefined ? "" : `${row.format} `;
+  return `${format}${row.subject}. ${rowCaption(row)}`;
 }
 
 /** The level half of a row's caption. Three different absences, three different sentences. */

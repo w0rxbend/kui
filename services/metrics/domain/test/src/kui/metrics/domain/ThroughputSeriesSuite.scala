@@ -19,7 +19,13 @@ final class ThroughputSeriesSuite extends FunSuite {
   private def at(secondsFromEpoch: Long): Instant = Instant.ofEpochSecond(secondsFromEpoch)
 
   private def sample(at: Instant, bytesIn: Double): ThroughputSample =
-    ThroughputSample(at, bytesIn, bytesIn * 2, bytesIn / 10)
+    ThroughputSample(at, Some(bytesIn), Some(bytesIn * 2), Some(bytesIn / 10))
+
+  /** A scrape that carried the two byte rates and no record rate — an exporter whitelist that named
+    * `BytesInPerSec` and `BytesOutPerSec` and nothing else, which is what a deployment usually configures.
+    */
+  private def bytesOnly(at: Instant, bytesIn: Double): ThroughputSample =
+    ThroughputSample(at, Some(bytesIn), Some(bytesIn * 2), None)
 
   test("a bucket nothing was sampled in is absent, not zero") {
     val endingAt = at(step * 100)
@@ -43,6 +49,35 @@ final class ThroughputSeriesSuite extends FunSuite {
     // The distinction the whole type exists for: this bucket is *not* absent, and a chart must draw a bar
     // of height zero here rather than a break in the line.
     assert(!last.isAbsent)
+  }
+
+  test("a rate the exporter never published is absent while the rates it did publish are measured") {
+    // The failure this rules out is the opposite of the usual one: refusing the whole bucket because a
+    // third rate nobody asked for was missing. The Traffic screen draws bytes in and bytes out, and an
+    // exporter whitelist that publishes only those two is an ordinary configuration.
+    val bucketStart = at(step * 100)
+    val series =
+      ThroughputSeries.over(ThroughputRange.Last24Hours, bucketStart, List(bytesOnly(bucketStart, 10.0)))
+
+    val last = series.buckets.last
+    assertEquals(last.bytesInPerSecond, Some(10.0))
+    assertEquals(last.bytesOutPerSecond, Some(20.0))
+    assertEquals(last.recordsPerSecond, None)
+    assert(!last.isAbsent)
+  }
+
+  test("a rate is averaged over the samples that carried it, not over the samples in the bucket") {
+    // An exporter that starts publishing a family halfway through a step must not have its first reading
+    // halved by the samples that predate it. `10.0` and nothing is `10.0`, never `5.0`.
+    val bucketStart = at(step * 100)
+    val series = ThroughputSeries.over(
+      ThroughputRange.Last24Hours,
+      bucketStart,
+      List(bytesOnly(bucketStart, 4.0), sample(bucketStart.plusSeconds(60), 10.0))
+    )
+
+    assertEquals(series.buckets.last.recordsPerSecond, Some(1.0))
+    assertEquals(series.buckets.last.bytesInPerSecond, Some(7.0))
   }
 
   test("the boundaries are floored to the step, so two polls a minute apart agree") {

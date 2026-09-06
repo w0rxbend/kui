@@ -1,0 +1,12 @@
+# The same body as an exporter configured with no rules at all serves it: the MBean's own type is the
+# metric name and the attribute name travels as a label. The numbers are the same ones as in the
+# lowercased fixture beside this file, so that a suite can assert the two spellings read identically.
+# HELP kafka_server_BrokerTopicMetrics_OneMinuteRate Attribute exposed for management
+# TYPE kafka_server_BrokerTopicMetrics_OneMinuteRate untyped
+kafka_server_BrokerTopicMetrics_OneMinuteRate{name="BytesInPerSec",topic="payments",} 26800.5
+kafka_server_BrokerTopicMetrics_OneMinuteRate{name="BytesInPerSec",} 124800.5
+kafka_server_BrokerTopicMetrics_OneMinuteRate{name="BytesOutPerSec",} 249600.75
+kafka_server_BrokerTopicMetrics_OneMinuteRate{name="MessagesInPerSec",} 1420.75
+kafka_server_BrokerTopicMetrics_OneMinuteRate{name="ReplicationBytesInPerSec",} 61200.0
+kafka_server_BrokerTopicMetrics_OneMinuteRate{name="BytesInPerSec",topic="orders",} 98000.0
+kafka_server_BrokerTopicMetrics_Count{name="BytesInPerSec",} 1.2884901888E10

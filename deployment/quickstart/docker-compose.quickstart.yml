@@ -61,6 +61,29 @@ services:
       # Do not wait three seconds for other consumers to join a group that will never have any.
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
+      # Remote JMX, for the `kafka-metrics` exporter below and for nothing else.
+      #
+      # Kafka publishes its own throughput as JMX meters and offers no other way to read them, so
+      # without these two lines the broker is unmeasurable, `kui.metrics.sources` has nothing to
+      # name, and the dashboard's Throughput card correctly says it cannot measure anything — which
+      # is indistinguishable from KUI not being able to. No port is published to the host: an
+      # unauthenticated JMX server is a remote-code-execution primitive, and this one is reachable
+      # only from the private network at the bottom of this file.
+      #
+      # `KAFKA_JMX_PORT` and `KAFKA_JMX_HOSTNAME` rather than a hand-written `KAFKA_JMX_OPTS`, and
+      # the difference is not style. `kafka-run-class.sh` applies `KAFKA_JMX_OPTS` to *every* tool
+      # it launches, so a hand-written one with a fixed port makes this container's own healthcheck
+      # — which runs `kafka-topics.sh` in here — fail to start on a port the broker already holds.
+      # These two are read by the image's `launch` script, which exports the flags into the broker's
+      # process alone.
+      #
+      # The hostname is the part everybody forgets. An RMI registry answers with a *stub* naming the
+      # address to call back on, and the image defaults that to the container's own bridge IP; the
+      # exporter then connects to the registry and hangs on the second hop. `kafka` is the name that
+      # resolves on this network from both sides.
+      KAFKA_JMX_PORT: 9999
+      KAFKA_JMX_HOSTNAME: kafka
+
       # No log directory is mounted, on purpose: the broker keeps its data inside the container's
       # own writable layer, so removing the container removes the data and there is no volume left
       # behind for anyone to find months later. A quickstart's data is a demonstration, not
@@ -80,6 +103,71 @@ services:
       timeout: 10s
       retries: 24
       start_period: 15s
+    networks:
+      - kui-quickstart
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------------------------
+  # The thing that makes this deployment measurable: a Prometheus JMX exporter, standalone, beside
+  # the broker.
+  #
+  # KUI reads broker throughput from a Prometheus text-exposition endpoint and cannot read JMX
+  # (ADR-050). That is not an omission: `MetricsSourceSettings.url` is a `SafeUrl`, restricted to
+  # `http` and `https` by ARCHITECTURE.md §14, so `service:jmx:rmi:///jndi/rmi://kafka:9999/jmxrmi`
+  # cannot be written into a KUI configuration at all. This container is the bridge, and
+  # `kui-quickstart.yaml` names its address under `kui.metrics.sources.quickstart`.
+  #
+  # `bitnamilegacy/` and not `bitnami/`: the Prometheus project publishes no exporter image of its
+  # own, Bitnami's is the build everybody uses, and in 2025 Bitnami moved its catalogue to the
+  # `bitnamilegacy` namespace leaving only floating `latest` tags behind the old one. A pinned tag
+  # in the moved namespace is preferable to a floating tag in the original, for the same reason
+  # `apache/kafka:4.3.1` is pinned above: a quickstart that pulls whatever was published this
+  # morning breaks for a newcomer without anybody touching KUI.
+  #
+  # NO PUBLISHED PORT. The exposition is for KUI, not for a person; a metrics endpoint on the host
+  # would invite somebody to point their own Prometheus at it and conclude that this is how KUI is
+  # monitored, which is the opposite of what ADR-009 says. To read it by hand:
+  #
+  #   docker compose -f deployment/quickstart/docker-compose.quickstart.yml exec kui curl -s \
+  #     http://kafka-metrics:5556/metrics
+  # ---------------------------------------------------------------------------------------------
+  kafka-metrics:
+    image: bitnamilegacy/jmx-exporter:1.4.0
+    container_name: kui-quickstart-kafka-metrics
+    # Port first, configuration second: that is the standalone jar's argument order, and the image's
+    # own default command is `5556 examples/standalone_sample_config.yml`, which would export a
+    # sample of somebody else's JVM.
+    command: ["5556", "/etc/jmx-exporter/kafka-jmx-exporter.yml"]
+    depends_on:
+      kafka:
+        # The exporter dials JMX at startup and does not retry the initial connection quickly, so
+        # starting it against a broker that is still electing itself costs the first minute of
+        # samples — which is the whole of what a two-minute browser run would have to draw.
+        condition: service_healthy
+    volumes:
+      - ../metrics/kafka-jmx-exporter.yml:/etc/jmx-exporter/kafka-jmx-exporter.yml:ro
+    healthcheck:
+      # The exposition itself, not the port: the jar answers on 5556 before it has connected to
+      # JMX, and a body with no `kafka_server_` family in it is an exporter that is running and
+      # measuring nothing — which is exactly the state this whole packet exists to make visible.
+      #
+      # bash's `/dev/tcp` and not curl, because this image carries neither curl nor wget. It is the
+      # smallest honest HTTP request: open the socket, ask for the document, and require the family
+      # KUI parses to be in the answer.
+      #
+      # `CMD` naming bash explicitly, not `CMD-SHELL`: Compose's shell form runs `/bin/sh -c`, which
+      # on this Debian base is dash, and dash has no `/dev/tcp`. Written as `CMD-SHELL` the check
+      # fails on every deployment and reports the exporter permanently unhealthy while it is serving
+      # perfectly — which is how it was first written here.
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - "exec 3<>/dev/tcp/127.0.0.1/5556 && printf 'GET /metrics HTTP/1.0\r\n\r\n' >&3 && grep -q kafka_server_brokertopicmetrics_bytesinpersec <&3"
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
     networks:
       - kui-quickstart
     restart: unless-stopped

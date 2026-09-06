@@ -23,10 +23,10 @@
  * requests the client is asked to make.
  */
 
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { flush } from "solid-js";
 import { createRouter, memoryHistory } from "@solidjs/router";
-import { KuiProvider, type KuiContextValue, type KuiPaths } from "@kui/kernel";
+import { KuiProvider, clearToasts, toasts, type KuiContextValue, type KuiPaths } from "@kui/kernel";
 import type { KuiApiClient } from "@kui/api";
 
 import { mount } from "./testing.js";
@@ -62,6 +62,11 @@ function fakeApi(options: {
   readonly topicFails?: boolean;
   readonly filterId?: string;
   readonly filterFails?: string;
+  /** What `POST …/messages` answers with. Absent means the endpoint is not part of the case. */
+  readonly produced?: readonly { readonly partition: number; readonly offset: number }[];
+  readonly produceFails?: string;
+  /** What `POST …/messages/resend` answers with: the server's own two figures. */
+  readonly copied?: { readonly toTopic: string; readonly read: number; readonly written: number };
 }): { readonly api: KuiApiClient; readonly calls: Call[] } {
   const calls: Call[] = [];
   const api = {
@@ -94,6 +99,36 @@ function fakeApi(options: {
         }
         return { ok: true, value: { id: options.filterId ?? "0123456789abcdef" } };
       }
+      if (path === "/api/v1/clusters/{clusterId}/topics/{topicName}/messages") {
+        if (options.produceFails !== undefined) {
+          return {
+            ok: false,
+            error: {
+              kind: "envelope",
+              code: "KUI-READ-ONLY",
+              message: options.produceFails,
+              details: [],
+              correlationId: "test",
+              retryable: false,
+            },
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            records: (options.produced ?? [{ partition: 3, offset: 4_812 }]).map((record) => ({
+              ...record,
+              timestamp: "2026-09-05T10:00:08Z",
+            })),
+          },
+        };
+      }
+      if (path === "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/resend") {
+        return {
+          ok: true,
+          value: options.copied ?? { toTopic: "orders.replay", read: 3, written: 3 },
+        };
+      }
       return { ok: false, error: { kind: "unreachable", cause: "nothing answers that here" } };
     },
     put: async () => ({ ok: false, error: { kind: "unreachable", cause: "no" } }),
@@ -115,6 +150,23 @@ function topicWith(partitionCount: number, name: string = TOPIC): unknown {
     },
   };
 }
+
+/**
+ * A topic answer whose section is `ok` and whose partition count is `null`.
+ *
+ * The case `topic.ts`'s most argued-for line exists for, and the one the suite never had: the
+ * section succeeded, so the refused-section path does not cover it, and the count is present and
+ * unreadable, so the happy path does not either. `?? 0` would satisfy the type and turn the server
+ * saying "I could not read this" into the claim that the topic has no partitions.
+ */
+const TOPIC_COUNT_UNREADABLE: unknown = {
+  partitionsTruncated: false,
+  topic: {
+    status: "ok",
+    fetchedAt: "2026-09-05T10:00:00Z",
+    data: { row: { name: "orders.uncounted", internal: false, partitionCount: null } },
+  },
+};
 
 /** A topic answer the gateway could not fill in: the section refuses and carries no data. */
 const TOPIC_UNAVAILABLE: unknown = {
@@ -207,9 +259,85 @@ function press(container: HTMLElement, label: string): void {
   button.click();
 }
 
-function dialogText(): string {
+/**
+ * The overlay this case opened.
+ *
+ * `Dialog` and `Drawer` both render through a `Portal` into `document.body`, and Solid tears a
+ * portal down on its own schedule rather than synchronously in `dispose()` — so a query across the
+ * body can find the previous case's overlay. The last match is the one this case mounted.
+ */
+function overlay(): HTMLElement {
   const all = document.body.querySelectorAll<HTMLElement>("[role='dialog']");
-  return all[all.length - 1]?.textContent ?? "";
+  const last = all[all.length - 1];
+  if (last === undefined) throw new Error("no dialog or drawer is open");
+  return last;
+}
+
+function dialogText(): string {
+  return overlay().textContent ?? "";
+}
+
+/** A button inside one root, by the words on it. Scoped: two overlays can offer the same label. */
+function pressIn(root: HTMLElement, label: RegExp): void {
+  const button = [...root.querySelectorAll("button")].find((candidate) =>
+    label.test((candidate.textContent ?? "").trim()),
+  );
+  if (button === undefined) {
+    const seen = [...root.querySelectorAll("button")]
+      .map((candidate) => (candidate.textContent ?? "").trim())
+      .join(" | ");
+    throw new Error(`no button matching ${String(label)}; this root offers: ${seen}`);
+  }
+  button.click();
+}
+
+/**
+ * Types into the field whose label begins with these words, through a real `input` event.
+ *
+ * `TextField` reads `event.currentTarget.value` rather than being a controlled value the test can
+ * poke, which is the same path a keystroke takes — so setting the value and dispatching the event
+ * is the browser's own sequence and not a shortcut round the component.
+ */
+function type(root: HTMLElement, label: string, value: string): void {
+  const field = [...root.querySelectorAll("label")].find((candidate) =>
+    (candidate.textContent ?? "").trim().startsWith(label),
+  );
+  if (field === undefined) {
+    throw new Error(
+      `no label starting with ${label}; this root offers: ` +
+        [...root.querySelectorAll("label")]
+          .map((one) => (one.textContent ?? "").trim())
+          .join(" | "),
+    );
+  }
+  const id = field.getAttribute("for") ?? "";
+  const input = root.querySelector<HTMLInputElement>(`#${CSS.escape(id)}`);
+  if (input === null) throw new Error(`no field labelled ${label}`);
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+const toastTitles = (): readonly string[] => toasts().map((toast) => toast.title);
+
+/**
+ * Fills the copy dialog in: a destination, one range, and the destination typed back to confirm it.
+ *
+ * A flush between every field, and it is not decoration. The dialog holds one draft and each field
+ * writes `{ ...draft(), one: change }`; Solid 2 commits signal writes on a microtask, so two fields
+ * changed inside one tick both compose their update from the same committed draft and the second
+ * wins. A person typing cannot do that — there are frames between their keystrokes — but a test
+ * that sets four values in a row can, and silently loses three of them.
+ */
+async function fillCopy(dialog: HTMLElement, destination: string): Promise<void> {
+  type(dialog, "Copy into topic", destination);
+  await settle();
+  type(dialog, "From offset", "0");
+  await settle();
+  type(dialog, "Until offset", "3");
+  await settle();
+  // The label carries the destination once there is one, which is why this is typed last.
+  type(dialog, `Type ${destination} to confirm`, destination);
+  await settle();
 }
 
 describe("the partition count the route fetches", () => {
@@ -240,6 +368,29 @@ describe("the partition count the route fetches", () => {
     /* The rule, stated as the thing that must not be on screen: no count at all, and above all not
      * the zero this route supplied for the whole life of the dialog. */
     expect(text).not.toMatch(/has \d+ partitions/);
+    dispose();
+  });
+
+  test("a section answering with a null count draws the sentence, never a zero", async () => {
+    /*
+     * Not the same case as `TOPIC_UNAVAILABLE` above, and that is the point. There the section
+     * refused and carried no data at all; here it succeeded and the *figure* inside it is null —
+     * the server saying it could not read the count for a topic it otherwise described. The three
+     * children below all draw from one `undefined`, so the assertion is on what reaches the screen.
+     */
+    const { api } = fakeApi({ topicAnswer: TOPIC_COUNT_UNREADABLE });
+    const { container, dispose } = routeAt("", api, "orders.uncounted");
+    await settle();
+
+    press(container, "Copy records out");
+    await settle();
+
+    const text = dialogText();
+    expect(text).toContain("KUI has not been told how many partitions");
+    // A topic cannot have zero partitions, so `has 0 partitions` is a claim that is both impossible
+    // and reassuring — which is the pairing this whole screen exists to keep off the page.
+    expect(text).not.toMatch(/has \d+ partitions?\./);
+
     dispose();
   });
 
@@ -428,5 +579,173 @@ describe("the typed predicates", () => {
     // The common browse costs one request, as it did before any of this existed.
     expect(calls.some((call) => call.path.endsWith("/messages/filters"))).toBe(false);
     expect(opened).toHaveLength(1);
+  });
+});
+
+/**
+ * The toasts, at the route, because the route is the only place a mutation's *answer* is seen.
+ *
+ * "A toast on every destructive success" is an M6 bullet and, until this block, it was a rule that
+ * could be deleted from this package without anything noticing: suppressing the produce `notify`
+ * left 142 tests green, and so did suppressing the resend one — including the deliberate
+ * `tone: "warning"` for a copy that moved nothing, which is the most careful line in the file and
+ * the one with the least behind it.
+ *
+ * The assertions are on `toasts()`, the kernel's store, which is what the shell's `ToastRegion`
+ * draws from. This package renders no toast of its own, so asserting against markup here would
+ * assert nothing; mounting the region beside the route would assert that the kernel can draw a
+ * toast it was handed, which is the kernel's own suite's business.
+ *
+ * Every raise has its refusal beside it. A route that raised a toast from the click rather than
+ * from the answer passes the first case of each pair and fails the second, and that is the whole
+ * difference between a confirmation and a decoration.
+ */
+describe("the toasts a write raises", () => {
+  beforeEach(() => {
+    // Module-level state shared by the whole process: one case's confirmation is otherwise the next
+    // case's evidence.
+    clearToasts();
+  });
+
+  test("a produce that lands raises a toast quoting where it landed", async () => {
+    const { api } = fakeApi({
+      topicAnswer: topicWith(12, "orders.produced"),
+      produced: [{ partition: 3, offset: 4_812 }],
+    });
+    const { container, dispose } = routeAt("", api, "orders.produced");
+    await settle();
+
+    press(container, "Produce message");
+    await settle();
+    pressIn(overlay(), /^Produce record$/);
+    await settle();
+
+    /*
+     * A position, not the word "sent". The drawer shows the same receipt and the drawer is
+     * dismissible; the toast is what an operator has afterwards to say the write happened, and a
+     * position is the one thing in it they can go and look at.
+     */
+    expect(toastTitles()).toContain("Record published");
+    const raised = toasts().find((toast) => toast.title === "Record published");
+    expect(raised?.message).toContain("partition 3");
+    expect(raised?.message).toContain("offset 4812");
+    expect(raised?.tone).toBe("success");
+
+    dispose();
+  });
+
+  test("a tombstone is sent as an absent value, not as an empty one", async () => {
+    /*
+     * Not a toast rule, and it is here because this is where the whole path is: the drawer's switch
+     * writes `null` into the draft and `produce.ts` **omits** the field, and it is the omission the
+     * server reads as a tombstone. `value: draft.value ?? ""` satisfies every type in that path and
+     * turns "delete this key, permanently, on a compacted topic" into an ordinary record with no
+     * characters in it. Nothing in this package could tell the two apart before this case.
+     */
+    const { api, calls } = fakeApi({ topicAnswer: topicWith(12, "orders.tombstoned") });
+    const { container, dispose } = routeAt("", api, "orders.tombstoned");
+    await settle();
+
+    press(container, "Produce message");
+    await settle();
+    const drawer = overlay();
+    const tombstone = drawer.querySelector<HTMLInputElement>("input[role='switch']");
+    expect(tombstone).not.toBeNull();
+    tombstone?.click();
+    await settle();
+
+    // The button's own words change with the draft, which is the operator's confirmation that this
+    // is no longer a write. Pressed by that name, so the case cannot pass against an unflipped one.
+    pressIn(overlay(), /^Produce tombstone$/);
+    await settle();
+
+    const write = calls.find(
+      (call) => call.path === "/api/v1/clusters/{clusterId}/topics/{topicName}/messages",
+    );
+    expect(write).toBeDefined();
+    const body = (write?.body ?? {}) as Record<string, unknown>;
+    // Absent, not `null` and not `""`. The contract's own sentence: an absent value is a tombstone.
+    expect(Object.keys(body)).not.toContain("value");
+
+    dispose();
+  });
+
+  test("a produce the cluster refuses raises none", async () => {
+    const { api } = fakeApi({
+      topicAnswer: topicWith(12, "orders.readonly"),
+      produceFails: "cluster 'quickstart' is read-only, so nothing may be published to it",
+    });
+    const { container, dispose } = routeAt("", api, "orders.readonly");
+    await settle();
+
+    press(container, "Produce message");
+    await settle();
+    pressIn(overlay(), /^Produce record$/);
+    await settle();
+
+    expect(toastTitles()).toEqual([]);
+    // And the refusal is in the drawer, in the server's own words, where the operator is looking.
+    expect(dialogText()).toContain("read-only");
+
+    dispose();
+  });
+
+  test("a copy that moved records raises a success toast carrying both figures", async () => {
+    const { api } = fakeApi({
+      topicAnswer: topicWith(12, "orders.copied"),
+      copied: { toTopic: "orders.replay", read: 3, written: 3 },
+    });
+    const { container, dispose } = routeAt("", api, "orders.copied");
+    await settle();
+
+    press(container, "Copy records out");
+    await settle();
+    const dialog = overlay();
+    await fillCopy(dialog, "orders.replay");
+    pressIn(dialog, /^Copy records$/);
+    await settle();
+
+    expect(toastTitles()).toContain("Records copied");
+    const raised = toasts().find((toast) => toast.title === "Records copied");
+    expect(raised?.tone).toBe("success");
+    // `written` of `read`, both of them: the pair is the fact, and one number alone cannot say that
+    // retention removed part of the source underneath the copy.
+    expect(raised?.message).toContain("3 of 3");
+    expect(raised?.message).toContain("orders.replay");
+
+    dispose();
+  });
+
+  test("a copy that moved nothing raises a warning toast, never a success one", async () => {
+    /*
+     * The state this whole screen is shaped around: a range whose offsets retention has already
+     * removed answers **200** with `read: 0, written: 0` — no error, no warning, nothing. A green
+     * tick over that sends an operator to look at a destination they believe now holds their
+     * records. `tone` is the assertion, not the wording: the wording is what a reader skims and the
+     * tone is what they see from across the room.
+     */
+    const { api } = fakeApi({
+      topicAnswer: topicWith(12, "orders.emptied"),
+      copied: { toTopic: "orders.replay", read: 0, written: 0 },
+    });
+    const { container, dispose } = routeAt("", api, "orders.emptied");
+    await settle();
+
+    press(container, "Copy records out");
+    await settle();
+    const dialog = overlay();
+    await fillCopy(dialog, "orders.replay");
+    pressIn(dialog, /^Copy records$/);
+    await settle();
+
+    expect(toastTitles()).toContain("Nothing was copied");
+    const raised = toasts().find((toast) => toast.title === "Nothing was copied");
+    expect(raised?.tone).toBe("warning");
+    expect(toastTitles()).not.toContain("Records copied");
+    // `written`, not `requested`: the request said how many to try for and the answer says how many
+    // arrived. Reporting the first would be reporting the intention.
+    expect(raised?.message).toContain("0 of 0");
+
+    dispose();
   });
 });

@@ -19,18 +19,18 @@
  * resolves to the overview and the strip marks the overview, which is also what the strip's own
  * `aria-current` then tells a screen reader.
  *
- * ## Why there are two tabs and not the design's four
+ * ## Why there are three tabs and not the design's four
  *
  * SCREENS-V4.md §3.1 draws Overview · Traffic · Storage · Alerts, and its own "absent" rule is that
  * a tab whose data is not collected does not get drawn — "do not draw four tabs of the same
- * sentence". Traffic is throughput, latency and top producers, none of which anything in this
- * product samples; Alerts needs an event store that does not exist. Both arrive with the services
- * that measure them, and until then a segment for each would be a control whose every setting
- * produces the same nothing.
+ * sentence". Traffic joined the list in wave 4 because `services/metrics` began answering a real
+ * throughput series: the tab now has one card drawn from a broker metric and three that say what
+ * they cannot measure, which is a tab with something on it rather than four segments of one
+ * sentence. Alerts still needs an event store that does not exist, so it is still not drawn.
  */
 
-/** The tabs the product can honestly draw today. Ordered as the strip draws them. */
-export const DASHBOARD_TABS = ["overview", "storage"] as const;
+/** The tabs the product can honestly draw today. Ordered as the strip draws them (§3.1). */
+export const DASHBOARD_TABS = ["overview", "traffic", "storage"] as const;
 
 export type DashboardTab = (typeof DASHBOARD_TABS)[number];
 

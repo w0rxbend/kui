@@ -578,6 +578,12 @@ describe("the brokers screen", () => {
   const configRequests = (asked: readonly string[]): number =>
     asked.filter((path) => path.endsWith("/configs")).length;
 
+  /** Opens broker 1's card, which is what asks for its settings. */
+  function expand(container: HTMLElement): void {
+    const toggle = container.querySelector('[data-testid="broker-1"] .kui-brkcard__toggle');
+    (toggle as HTMLButtonElement).click();
+  }
+
   it("says zero under-replicated partitions only because the cluster said zero", async () => {
     const { api } = gateway(everything(0));
     const { container, dispose } = open(api, "urp-measured");
@@ -643,6 +649,288 @@ describe("the brokers screen", () => {
     await settle(container);
     expect(describeViolations(await findViolations(container))).toBe("");
     dispose();
+  });
+
+  /* -------------------------------------------------------------------------------------------- */
+  /* What the screen draws while it is still asking, and the props nothing ever asserted           */
+  /* -------------------------------------------------------------------------------------------- */
+
+  /**
+   * A gateway that has not answered yet.
+   *
+   * Every call returns a promise that never settles, which is what the first paint of this screen
+   * actually looks like — and is the state the whole product's central rule is easiest to break in,
+   * because every figure is absent and the tempting rendering of an absent figure is a zero.
+   */
+  function silence(): KuiApiClient {
+    const get = vi.fn(() => new Promise<never>(() => {}));
+    const client = { get, post: get, put: get, delete: get, patch: get, raw: {} };
+    return client as unknown as KuiApiClient;
+  }
+
+  it("draws neither a zero nor a claim about the cluster while the brokers are in flight", async () => {
+    /*
+     * The live defect this packet was written for, at the seam. `BrokerList`'s `loading` prop was
+     * declared in wave 2, fed from `BrokersScreen` in wave 3 and read by nothing, and with the
+     * request delayed the screen stated four things it could not know: that the cluster was not
+     * answering, that its last successful check was 24 seconds ago, that it led 0 partitions, and
+     * that it had reported no brokers. Two of the four contradict each other, and the zero is a
+     * bare figure where this milestone's rule demands a sentence.
+     *
+     * Asserted through the *screen*, over a gateway that has not answered, rather than by handing
+     * `BrokerList` a `loading` prop by hand — which is the composition that let the wire look
+     * connected for two waves.
+     */
+    const { container, dispose } = open(silence(), "brokers-in-flight");
+    await settle(container);
+    try {
+      const page = container.textContent ?? "";
+
+      // Not a claim about the cluster, and not the *scrape's* timestamp dressed up as a check.
+      expect(page).toContain("Reading this cluster's brokers");
+      expect(page).not.toContain("The cluster is not answering");
+      expect(page).not.toContain("Last successful check");
+
+      // Not the empty state: "it reported no brokers" is a claim about an answer that has not come.
+      expect(page).not.toContain("No brokers.");
+      expect(page).not.toContain("reported no brokers");
+      expect(container.querySelector('[data-testid="brokers-pending"]')).not.toBeNull();
+
+      // And no bare figure anywhere in the tiles. Every one of them is pending, which is a
+      // skeleton — not a `0`, not an em dash, and not a chip explaining an absence nobody has
+      // established yet.
+      const tiles = [...container.querySelectorAll(".kui-tile")];
+      expect(tiles.length).toBe(4);
+      for (const tile of tiles) {
+        expect(tile.getAttribute("aria-busy")).toBe("true");
+        expect(tile.querySelector(".kui-tile__value")).toBeNull();
+        expect(tile.querySelector(".kui-tile__absent")).toBeNull();
+        expect(tile.querySelector(".kui-tile__chip")).toBeNull();
+      }
+    } finally {
+      dispose();
+    }
+  });
+
+  it("keeps the figures on screen while a refetch is out, rather than blanking them", async () => {
+    // The other half of the same rule, and the reason `loading` alone is not the condition: rows
+    // that have arrived stay. Blanking figures an operator is reading, to say they are being
+    // fetched again, is the reference product's five-second full-page loader.
+    const { container, dispose } = open(gateway(everything(0)).api, "brokers-refetching");
+    await settle(container);
+    try {
+      expect(container.querySelector('[data-testid="brokers-pending"]')).toBeNull();
+      expect(container.querySelector(".kui-tile__value")).not.toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it("tags an expanded card with the version the cluster's own summary reported", async () => {
+    /*
+     * `versionFor` and `controllerKind` together are the whole `v4.3 · KRaft` tag, and both could
+     * be deleted with every unit, a11y and browser suite green — because the only case about the
+     * tag called `versionTag` directly and the only case about the card handed it a string.
+     */
+    const { container, dispose } = open(gateway(everything(0)).api, "version-tag");
+    await settle(container);
+    try {
+      expand(container);
+      await settle(container);
+      const card = container.querySelector('[data-testid="broker-1"]');
+      expect(card?.textContent).toContain("v4.3 · KRaft");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says how many settings a card is not showing, from the answer's own length", async () => {
+    // `configsMoreFor` was deletable: the card draws eight chips and the sentence saying how many
+    // more there are is what stops the chip row reading as the whole of a broker's configuration.
+    const many = {
+      configs: {
+        status: "ok",
+        data: Array.from({ length: 12 }, (_, index) => ({
+          name: `setting.${index}`,
+          value: `${index}`,
+          source: "default",
+        })),
+        fetchedAt,
+      },
+    };
+    const answers = { ...everything(0) };
+    answers["/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs"] = many;
+    const { container, dispose } = open(gateway(answers).api, "configs-more");
+    await settle(container);
+    try {
+      expand(container);
+      await settle(container);
+      const card = container.querySelector('[data-testid="broker-1"]');
+      // Twelve reported, eight drawn.
+      expect(card?.textContent).toContain("4 more settings");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("dates the picture from the scrape's own timestamp", async () => {
+    // `observedAgo` was deletable with everything green. The freshness line is what makes a page
+    // that never refreshes acceptable: the answer to "how old is this" is always on screen.
+    const answers = { ...everything(0) };
+    answers["/api/v1/clusters/{clusterId}"] = {
+      cluster: {
+        id: "quickstart",
+        name: "Quickstart (local)",
+        readOnly: false,
+        bootstrapServers: "kafka:9092",
+        summary: {
+          status: "ok",
+          data: {
+            version: "4.3",
+            controllerKind: "kraft",
+            brokerCount: 1,
+            underReplicatedPartitionCount: 0,
+            scrapedAt: "2026-09-06T08:58:00.000Z",
+          },
+          fetchedAt,
+        },
+      },
+    };
+    const { container, dispose } = open(gateway(answers).api, "observed-ago");
+    await settle(container);
+    try {
+      // The clock is fixed at 09:00:00 by `open`, and the scrape says 08:58:00.
+      const line = container.querySelector('[data-testid="brokers-freshness"]')?.textContent ?? "";
+      expect(line).toContain("2m ago");
+      expect(line).toContain("Nothing on this page refreshes on its own");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("keeps the disk figure the brokers endpoint sent when no capacity was reported", async () => {
+    /*
+     * `diskFigure`'s held-bytes branch, which is deletable — and deleting it silently reverts the
+     * DISK USED tile to `unknown` on a cluster that reported its usage perfectly, which is the
+     * exact bug the comment above that branch says it exists to fix. So this asserts the figure is
+     * *there*, not merely that the chip explains itself.
+     */
+    const answers = { ...everything(0) };
+    delete (answers as Record<string, unknown>)["/api/v1/clusters/{clusterId}/log-dirs"];
+    const { container, dispose } = open(gateway(answers).api, "disk-held-only");
+    await settle(container);
+    try {
+      const tile = [...container.querySelectorAll(".kui-tile")].find((one) =>
+        one.textContent?.includes("DISK USED"),
+      );
+      // 95,320 bytes of Kafka data, and no filesystem size to read it against.
+      expect(tile?.querySelector(".kui-tile__value")?.textContent).toBe("95.3 kB");
+      expect(tile?.querySelector(".kui-tile__absent")).toBeNull();
+      expect(tile?.textContent).toContain("no disk capacity was reported");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("draws the failure panel through the screen when the brokers endpoint refuses", async () => {
+    /*
+     * The screen's `failure` prop was asserted only through hand-composed `BrokerList` props, which
+     * is the composition blind spot `BrokersScreen`'s own header says the file exists to close: the
+     * question is whether the *route* turns a refused request into that panel, not whether the
+     * panel draws when handed one.
+     */
+    const { container, dispose } = open(gateway({}).api, "brokers-refused");
+    await settle(container);
+    try {
+      const card = container.querySelector('[data-testid="brokers-card"]');
+      expect(card).not.toBeNull();
+      expect(card?.textContent).toContain("The cluster service is not responding");
+      // The code is carried through rather than swallowed, and a retry is offered because this is
+      // the one of the three refusals where pressing again can work.
+      expect(card?.textContent).toContain("UNREACHABLE");
+      const buttons = [...container.querySelectorAll("button")];
+      expect(buttons.some((one) => one.textContent?.includes("Retry"))).toBe(true);
+      // And the head says so rather than saying nothing about the cluster's health.
+      expect(container.querySelector('[data-testid="brokers-head"]')?.textContent).toContain(
+        "Broker data is unavailable",
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says a broker's share of the leaderships, from the figure the cluster service sends", async () => {
+    /*
+     * `leaderSkewPercent` arrived on the wire in September and no screen drew it, which made it a
+     * field no test could be wrong about. It is a *signed* deviation from an even share, so it is
+     * drawn as a sentence: `-25%` beside the word LEADERS reads as a negative partition count.
+     */
+    const answers = { ...everything(0) };
+    answers["/api/v1/clusters/{clusterId}/brokers"] = {
+      brokers: ok([
+        {
+          id: 1,
+          host: "kafka",
+          port: 9092,
+          rack: null,
+          isController: true,
+          leaderCount: 86,
+          replicaCount: 86,
+          diskUsageBytes: 95_320,
+          leaderSkewPercent: -25.4,
+        },
+      ]),
+    };
+    const { container, dispose } = open(gateway(answers).api, "leader-skew");
+    await settle(container);
+    try {
+      expand(container);
+      await settle(container);
+      expect(container.querySelector('[data-testid="broker-1-skew"]')?.textContent).toBe(
+        "Leads 25% fewer partitions than an even share of this cluster's.",
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says an even share is an even share, which is a measurement and not an absence", async () => {
+    // Zero is the answer somebody came to this card for. Folding it into "leads more than" — or
+    // into the sentence for a share that was never measured — throws away the reassurance.
+    const answers = { ...everything(0) };
+    answers["/api/v1/clusters/{clusterId}/brokers"] = {
+      brokers: ok([
+        { id: 1, host: "kafka", port: 9092, rack: null, isController: true, leaderCount: 86,
+          replicaCount: 86, diskUsageBytes: 95_320, leaderSkewPercent: 0 },
+      ]),
+    };
+    const { container, dispose } = open(gateway(answers).api, "leader-skew-even");
+    await settle(container);
+    try {
+      expand(container);
+      await settle(container);
+      expect(container.querySelector('[data-testid="broker-1-skew"]')?.textContent).toBe(
+        "Leads an even share of this cluster's partitions.",
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says the share was not measured rather than drawing it as an even one", async () => {
+    // The quickstart's own answer today: no partition census, so no share to measure against. A
+    // zero here would say the broker is evenly balanced, which nobody established.
+    const { container, dispose } = open(gateway(everything(0)).api, "leader-skew-absent");
+    await settle(container);
+    try {
+      expand(container);
+      await settle(container);
+      const said = container.querySelector('[data-testid="broker-1-skew"]')?.textContent ?? "";
+      expect(said).toContain("did not report this broker's share of the leaderships");
+      expect(said).not.toContain("even share of this cluster's partitions");
+    } finally {
+      dispose();
+    }
   });
 });
 

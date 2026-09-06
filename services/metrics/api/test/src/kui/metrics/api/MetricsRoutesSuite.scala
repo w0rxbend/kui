@@ -82,7 +82,7 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
           ThroughputSeries.over(
             range,
             endingAt,
-            List(ThroughputSample(endingAt.minusSeconds(60L), 1024.0d, 2048.0d, 12.0d))
+            List(ThroughputSample(endingAt.minusSeconds(60L), Some(1024.0d), Some(2048.0d), Some(12.0d)))
           )
         )
       )

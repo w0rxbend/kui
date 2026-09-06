@@ -71,14 +71,33 @@ export interface ClusterFacts {
 /**
  * One page is enough to learn a total.
  *
- * The three count endpoints all answer with a page whose `page.totalItems` is the whole list's
- * size, so asking for one row rather than the default twenty-five is the same answer for a
- * twenty-fifth of the payload — on a cluster with four thousand topics that is the difference
- * between a drawer that costs nothing to draw and one that does not.
+ * The count endpoints all answer with a page whose `page.totalItems` is the whole list's size, so
+ * asking for one row rather than the default twenty-five is the same answer for a twenty-fifth of
+ * the payload — on a cluster with four thousand topics that is the difference between a drawer that
+ * costs nothing to draw and one that does not.
  *
- * The consumer groups are the exception and ask for more; see {@link consumerCount}.
+ * One and not zero, because `PageSize` is 1..500 and the topic list refuses a zero at the edge
+ * (`TopicQueryCodecs.pageSizeOf`). The subjects call is the exception and asks for none at all; see
+ * {@link SUBJECT_COUNT_PAGE_SIZE}. The consumer groups are the other exception and ask for more;
+ * see {@link consumerCount}.
  */
 const COUNT_PAGE_SIZE = 1;
+
+/**
+ * The subject count, with no subjects in it.
+ *
+ * `SchemaEndpoints.CountOnlyPageSize` is `0` and it means "count them, send none". It is not a
+ * micro-optimisation of the one above: the schema service enriches every row it returns with the
+ * subject's format, its version count and its compatibility level, and `CountOnlyPageSize`'s own
+ * scaladoc counts what that costs — the subject list plus four more registry requests, the row's
+ * three and the registry-wide compatibility level. So asking for a single row to read a number
+ * beside the word "Schema Registry" paid for a row that renders nowhere, on every refetch. Zero
+ * asks the registry for the subject list and nothing else.
+ *
+ * The other two count calls cannot take it: only the schema service declares a count-only page
+ * size, and `PageSize` has no zero anywhere else.
+ */
+const SUBJECT_COUNT_PAGE_SIZE = 0;
 
 /**
  * How many consumer groups are read in order to count the ones that are rebalancing.
@@ -155,7 +174,7 @@ export function createClusterStore(clusterId: () => string | undefined): Cluster
   const subjects = createQueryCache({
     fetch: (id: string) =>
       api.get("/api/v1/clusters/{clusterId}/schemas/subjects", {
-        params: { path: { clusterId: id }, query: { pageSize: COUNT_PAGE_SIZE } },
+        params: { path: { clusterId: id }, query: { pageSize: SUBJECT_COUNT_PAGE_SIZE } },
       }),
   });
 

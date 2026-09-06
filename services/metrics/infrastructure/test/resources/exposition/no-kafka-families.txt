@@ -1,0 +1,9 @@
+# An address that answers, serves a valid exposition, and is not in front of a Kafka broker: this is the
+# node exporter, which is what an operator gets when they copy the wrong port out of a compose file.
+# HELP node_cpu_seconds_total Seconds the CPUs spent in each mode.
+# TYPE node_cpu_seconds_total counter
+node_cpu_seconds_total{cpu="0",mode="idle",} 91231.44
+node_cpu_seconds_total{cpu="0",mode="system",} 1120.07
+# HELP node_filesystem_avail_bytes Filesystem space available to non-root users in bytes.
+# TYPE node_filesystem_avail_bytes gauge
+node_filesystem_avail_bytes{device="/dev/sda1",} 4.2949672960E10

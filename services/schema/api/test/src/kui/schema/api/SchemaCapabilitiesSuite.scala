@@ -4,8 +4,8 @@ import cats.effect.IO
 
 import kui.contracts.capability.CapabilityState
 import kui.kernel.error.InfrastructureError
-import kui.kernel.{ClusterId, Subject}
-import kui.schema.application.{ClusterRegistries, RegistryProfile}
+import kui.kernel.{ClusterId, SchemaId, Subject}
+import kui.schema.application.{ClusterRegistries, RegisterSchemaUseCase, RegistryProfile}
 import kui.schema.contract.{SchemaEndpoints, SchemaMutationEndpoints}
 import kui.schema.domain.*
 import kui.security.audit.MutationKind
@@ -34,6 +34,8 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
       def schema(subject: Subject, version: VersionSelector) = answer(None)
       def globalCompatibility = answer(CompatibilityLevel.Backward)
       def subjectCompatibility(subject: Subject) = answer(None)
+      def register(subject: Subject, proposed: ProposedSchema) =
+        answer(RegisteredVersion(subject, SchemaId.unsafe(1), Some(SchemaVersion.unsafe(1))))
       def setGlobalCompatibility(level: CompatibilityLevel) = answer(())
       def setSubjectCompatibility(subject: Subject, level: CompatibilityLevel) = answer(())
       def checkCompatibility(subject: Subject, version: VersionSelector, proposed: ProposedSchema) =
@@ -110,6 +112,7 @@ final class SchemaCapabilitiesSuite extends KuiIOSuite {
       def schema(subject: Subject, version: VersionSelector) = boom
       def globalCompatibility = boom
       def subjectCompatibility(subject: Subject) = boom
+      def register(subject: Subject, proposed: ProposedSchema) = boom
       def setGlobalCompatibility(level: CompatibilityLevel) = boom
       def setSubjectCompatibility(subject: Subject, level: CompatibilityLevel) = boom
       def checkCompatibility(subject: Subject, version: VersionSelector, proposed: ProposedSchema) = boom
@@ -133,10 +136,14 @@ final class SchemaEndpointClassificationSuite extends munit.FunSuite {
     val mutations = published.filter(kui.contracts.KuiEndpoint.isMutation)
     val reads = published.filterNot(kui.contracts.KuiEndpoint.isMutation)
 
-    assertEquals(mutations.flatMap(_.info.name).toSet, Set(
-      "schema.compatibility.global.set",
-      "schema.compatibility.subject.set"
-    ))
+    assertEquals(
+      mutations.flatMap(_.info.name).toSet,
+      Set(
+        "schema.compatibility.global.set",
+        "schema.compatibility.subject.set",
+        "schema.subject.version.register"
+      )
+    )
 
     // The compatibility check carries a body and is deliberately *not* a mutation: it registers nothing.
     // If that ever changes, this assertion is what says so.
@@ -155,6 +162,24 @@ final class SchemaEndpointClassificationSuite extends munit.FunSuite {
     // Two spellings of one operation is how an audit trail comes to have two vocabularies, and this is
     // the only place in the build that can see both.
     assertEquals(fromContract, fromAudit)
+  }
+
+  test("the registration is a mutation the audit vocabulary cannot name, and this is where that is said") {
+    // ADR-047 §3 wants a MutationRecord for every mutation. `MutationKind` is a sealed enum in
+    // libs/security-core and has no case for a registration, so `RegisterSchemaUseCase` writes a log line
+    // instead and this build ships one unaudited mutation. That is a real gap, and it is asserted rather
+    // than described so that it cannot be forgotten: the day somebody adds
+    // `case RegisterSchema extends MutationKind("schema.subject.version.register")`, this goes red and the
+    // use case has to be given an AuditSink.
+    assertEquals(
+      SchemaMutationEndpoints.RegisterVersionOperation,
+      RegisterSchemaUseCase.Operation
+    )
+
+    assert(
+      !MutationKind.values.map(_.operation).contains(SchemaMutationEndpoints.RegisterVersionOperation),
+      "MutationKind now names the registration; give RegisterSchemaUseCase an AuditSink and delete this"
+    )
   }
 
   test("every mutating endpoint declares itself non-destructive: a level can be set back") {

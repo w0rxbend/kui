@@ -226,17 +226,17 @@ describe("NavDrawer", () => {
     dispose();
   });
 
-  it("orders a nested tree by rank: favourites first, internal last", () => {
-    // The fixture is handed over in the wrong order on purpose — `internal` first, the favourite
-    // last — because `nav/topicTree.ts` already emits them sorted and a renderer that merely
-    // preserved its input would pass every test until somebody assembled the children from two
-    // sources the other way round.
+  it("orders a nested tree by rank: the padlocked row last, whatever order it arrived in", () => {
+    // The fixture is handed over in the wrong order on purpose — `internal` first — because
+    // `nav/topicTree.ts` already emits them sorted and a renderer that merely preserved its input
+    // would pass every test until somebody assembled the children from two sources the other way
+    // round.
     const { container, dispose } = mount(() => (
       <NavDrawer groups={NAV_GROUPS_WITH_TREE} currentId="topics" cluster={HEALTHY_CLUSTER} />
     ));
     const subtree = container.querySelector('[data-testid="nav-topics-subtree"]')!;
     const labels = [...subtree.querySelectorAll(".kui-nav-item__label")].map((el) => el.textContent);
-    expect(labels[0]).toBe("orders.payments.v2");
+    expect(labels[0]).toBe("orders.*");
     expect(labels.at(-1)).toBe("internal");
     dispose();
   });

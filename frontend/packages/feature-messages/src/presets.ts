@@ -4,11 +4,13 @@
  * ## Why these are local and not a server list
  *
  * The design draws four named chips — `Declined only`, `Big tickets`, `Refunds`, `Non-UAH` — and
- * §3.12 lists the preset set among the five controls with **no server parameter behind them**. That
- * is exactly right, and the endpoint roster confirms it: `POST …/messages/filters` registers an
- * expression and answers with its id, `POST …/messages/filters/test` tries one against a record, and
- * there is no `GET`. A registered filter is not a saved filter — the id is `sha256(source)`, so
- * registering is a compile and not a write, and nothing on the server holds a name for one.
+ * §3.12 lists the preset set as one of five controls with **no server parameter behind them**. It
+ * is the fourth of the five; three are in `predicates.ts`, which carries the whole accounting,
+ * and the fifth — the status facet — is not built. That is exactly right, and the endpoint roster
+ * confirms it for this one: `POST …/messages/filters` registers an expression and answers with its
+ * id, `POST …/messages/filters/test` tries one against a record, and there is no `GET`. A
+ * registered filter is not a saved filter — the id is `sha256(source)`, so registering is a compile
+ * and not a write, and nothing on the server holds a name for one.
  *
  * So a preset is a name this browser has given to a set of predicates, kept where the rest of this
  * product keeps a per-reader preference. Applying one still goes through the endpoints that exist:

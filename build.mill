@@ -2531,18 +2531,24 @@ object services extends Module {
       }
     }
 
-    /** The adapters: which clusters exist, and which of them declared a metrics source.
+    /** The adapters: which clusters exist, which of them declared a metrics source, and how one is read.
       *
-      * That is the whole layer today. It holds no client of any kind — no Kafka, no HTTP — because there is
-      * nothing yet to adapt: the JMX and Prometheus collectors arrive with the metrics milestone, and they
-      * arrive *here*, behind the domain's port, without any other module changing.
+      * `libs.http` is the resilient backend the Prometheus scrape goes out over, and `libs.cache` is the
+      * `SeriesWindow` the samples are retained in — the two dependencies the collector added (ADR-050). There
+      * is still no Kafka client here: a JMX exporter is an HTTP endpoint, and `MetricsSourceSettings.url` is
+      * a `SafeUrl`, which is http/https only.
       */
     object infrastructure extends KuiJvmModule {
-      def moduleDeps = Seq(domain, application, libs.config, libs.kernel.jvm)
+      def moduleDeps =
+        Seq(domain, application, libs.cache, libs.config, libs.http, libs.observability, libs.kernel.jvm)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",
-        mvn"org.typelevel::cats-effect::${Versions.catsEffect}"
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
       )
 
       object test extends ScalaTests with KuiTests {
@@ -2608,7 +2614,7 @@ object services extends Module {
       * its routes and serve them beside the rest over one port (ADR-010).
       */
     object app extends KuiJvmModule {
-      def moduleDeps = Seq(api, infrastructure, libs.config, libs.observability, libs.http)
+      def moduleDeps = Seq(api, infrastructure, libs.cache, libs.config, libs.observability, libs.http)
 
       def mvnDeps = Seq(
         mvn"org.typelevel::cats-core::${Versions.cats}",

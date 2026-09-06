@@ -73,8 +73,10 @@ object SchemaWiring {
 
   /** How many times a read is repeated when an address refuses a connection.
     *
-    * Everything this service sends is idempotent — the compatibility writes included: setting a level to
-    * `BACKWARD` twice leaves it `BACKWARD` — so a retry can never apply something twice.
+    * Everything this service sends is idempotent — the three writes included. Setting a level to `BACKWARD`
+    * twice leaves it `BACKWARD`, and registering the same schema under the same subject twice is idempotent
+    * by the registry's own definition: the second call answers the id and version the first one produced and
+    * adds no version. So a retry can never apply something twice.
     */
   val MaxRetries: Int = 2
 
@@ -119,6 +121,10 @@ object SchemaWiring {
       schema = SchemaVersionUseCase.make[F](registries)
       compatibility = CompatibilityReadUseCase.make[F](registries, logger)
       set = SetCompatibilityUseCase.make[F](registries, audit, logger)
+      // No audit sink here, and it is not an oversight: `MutationKind` has no case for a registration, so
+      // there is no honest record to write. `RegisterSchemaUseCase` logs the same four facts and its header
+      // names the one-line change that closes the gap.
+      register = RegisterSchemaUseCase.make[F](registries, logger)
       check = CompatibilityCheckUseCase.make[F](registries)
       capabilities = SchemaCapabilities.make[F](registries, logger)
 
@@ -134,6 +140,7 @@ object SchemaWiring {
         schema,
         compatibility,
         set,
+        register,
         check,
         readiness,
         capabilities,

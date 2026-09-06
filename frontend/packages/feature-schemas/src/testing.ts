@@ -15,10 +15,13 @@
  * - Dispose at the end. Reactive primitives need an owner; leaving one alive leaks listeners
  *   between cases, and the symptom is a later test failing because of an earlier one.
  *
- * That is the fourth copy, which is the moment the third one's header said to make a
- * `@kui/testing` package. It is not made here because a package is not this packet's to add:
- * `frontend/package.json` and the workspace list are unowned this wave. Written down so that the
- * next packet needing it does not have to rediscover the reason.
+ * Counted rather than remembered: grepping the workspace for `export function mount(component`
+ * matches **seven** files today — the kernel's, the shell's chrome, and one per feature package.
+ * This header said "the fourth copy" and had said it for two waves while three more were written.
+ * Seven is well past the moment the third one's header said to make a `@kui/testing` package, and
+ * it is still not made here because a package is not this packet's to add: `frontend/package.json`
+ * and the workspace list are unowned this wave. Written down, with the command that produces the
+ * number, so that the next packet neither rediscovers the reason nor inherits a stale count.
  */
 
 import { render } from "@solidjs/web";
@@ -74,15 +77,15 @@ export function describeViolations(violations: axe.Result[]): string {
  * test that drives `GroupList` alone cannot see any of that wiring.
  *
  * The api is supplied by the caller and everything else is the smallest honest answer: `permits`
- * says yes because permissions are not what these cases are about, and `paths` builds the one
- * address this screen links to. There is no `report` behaviour because the shell's connectivity
- * tracker is not mounted.
+ * answers whatever the case asked for — defaulting to yes, so a case about a control's presence is
+ * not silently a case about permissions — and `paths` builds the one address this screen links to.
+ * There is no `report` behaviour because the shell's connectivity tracker is not mounted.
  */
-export function testContext(api: KuiApiClient): KuiContextValue {
+export function testContext(api: KuiApiClient, permits = true): KuiContextValue {
   return {
     api,
     cluster: () => undefined,
-    permits: () => true,
+    permits: () => permits,
     paths: {
       home: () => "/ui",
       settings: () => "/ui/settings",

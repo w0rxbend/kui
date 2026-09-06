@@ -701,10 +701,12 @@ export function App() {
      * through the same store the badges and the meter read, so expanding the tree costs one request
      * and not one per row.
      *
-     * `undefined` rather than an empty array while the names are still in flight, and again for a
-     * cluster with no topics at all: `NavItem` draws a disclosure for a branch and nothing for a
-     * leaf, and a chevron that opens onto nothing is a control that appears broken. The distinction
-     * is `NavDestination.children`'s own, stated there.
+     * `undefined` in all three of the cases below, and the three are genuinely different states
+     * that happen to draw the same row: no cluster is chosen, the names have not arrived, and the
+     * cluster has no topics. `NavItem` draws a disclosure only for a row whose children array is
+     * non-empty, so an empty array would draw the same leaf — the length check is here to keep the
+     * memo from folding an empty list into an empty tree, not to defend the renderer, which defends
+     * itself.
      */
     const topicChildren = createMemo<readonly NavDestination[] | undefined>(() => {
       const chosen = clusterForFrame();
@@ -713,7 +715,6 @@ export function App() {
       if (names === undefined || names.length === 0) return undefined;
       return topicTree({
         names,
-        topicHref: (name) => paths.topic(chosen, name),
         /* The list, asked for the topics this row stands for. `topicGroupHref` owns the three cases
            — a prefix, `internal`, and the `other` residue that is not describable as a search. */
         groupHref: (group) => topicGroupHref(paths.topics(chosen), group),

@@ -27,7 +27,17 @@ interface Section<T> {
 }
 
 interface ClusterDocument {
-  readonly cluster?: { readonly summary?: Section<{ readonly underReplicatedPartitionCount?: number | null }> };
+  readonly cluster?: {
+    readonly summary?: Section<{
+      readonly underReplicatedPartitionCount?: number | null;
+      readonly version?: string | null;
+      readonly controllerKind?: string | null;
+    }>;
+  };
+}
+
+interface BrokersDocument {
+  readonly brokers?: Section<readonly { readonly leaderSkewPercent?: number | null }[]>;
 }
 
 interface LogDirsDocument {
@@ -120,6 +130,105 @@ test.describe("the brokers screen", () => {
       await expect(card).toContainText(/No disk capacity was reported/i);
       // Never a `0%` bar: an unmeasurable disk and an empty one mean opposite things.
       await expect(card).not.toContainText(/\d+%/);
+    }
+  });
+
+  test("says nothing about the cluster, and draws no zero, while the brokers are in flight", async ({
+    page,
+  }) => {
+    /*
+     * The rendering this screen shipped with, in the browser that shipped it. The route has fed
+     * `BrokerList` a `loading` prop since wave 3 and nothing read it, so a slow answer produced four
+     * claims about a request that had not come back — the cluster is not answering, its last check
+     * was N seconds ago, it leads 0 partitions, it reported no brokers — two of which contradict
+     * each other, and a bare zero where this product's central rule demands a sentence.
+     *
+     * The delay is imposed rather than waited for: against a local stack the answer arrives in
+     * milliseconds, so the state that was wrong for two waves is invisible unless it is held open.
+     */
+    await page.route(`**/api/v1/clusters/${CLUSTER}/brokers`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+      await route.continue();
+    });
+
+    await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
+    const head = page.locator('[data-testid="brokers-head"]');
+    await expect(head).toContainText(/Reading this cluster's brokers/);
+    await expect(head).not.toContainText(/is not answering/);
+    await expect(head).not.toContainText(/Last successful check/);
+
+    // Not the empty state, and not a figure anywhere in the tiles.
+    await expect(page.locator("body")).not.toContainText("reported no brokers");
+    await expect(page.locator('[data-testid="brokers-pending"]')).toBeVisible();
+    await expect(page.locator(".kui-brk-tiles .kui-tile__value")).toHaveCount(0);
+    await expect(page.locator(".kui-brk-tiles .kui-tile__absent")).toHaveCount(0);
+
+    // And once it lands, the page is the ordinary one.
+    await expect(page.locator(".kui-brkcard").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-testid="brokers-pending"]')).toHaveCount(0);
+  });
+
+  test("tags an expanded card with the version the cluster's own summary reports", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * `v4.3 · KRaft` is two fields from the cluster scrape, and both could be deleted with every
+     * suite green — the tag has no source on the broker DTO, so a card drawing nothing looks
+     * exactly like a cluster that did not report a version. Asking the gateway which of the two
+     * this deployment is settles it.
+     */
+    const document = (await api.get(`/api/v1/clusters/${CLUSTER}`)) as ClusterDocument;
+    const summary = dataOf(document.cluster?.summary);
+
+    await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
+    const card = page.locator(".kui-brkcard").first();
+    await expect(card).toBeVisible();
+    await card.locator(".kui-brkcard__toggle").click();
+
+    if (typeof summary?.version === "string") {
+      const version = summary.version.startsWith("v") ? summary.version : `v${summary.version}`;
+      await expect(card).toContainText(version);
+      if (typeof summary.controllerKind === "string") {
+        const kind = summary.controllerKind.toLowerCase() === "kraft" ? "KRaft" : summary.controllerKind;
+        await expect(card).toContainText(`${version} · ${kind}`);
+      }
+    } else {
+      // No tag at all where the scrape did not report one: "unknown version" on every card is a row
+      // of noise, and the card already says what it does not know about its own figures.
+      await expect(card).not.toContainText(/^v\d/);
+    }
+  });
+
+  test("says a broker's share of the leaderships, or says it was not measured", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * `leaderSkewPercent` began arriving from the cluster service on 2026-09-06 and no screen drew
+     * it, which made it a field no test could be wrong about. It is a *signed* deviation from an
+     * even share, so the card says it in a sentence: `-25%` beside the word LEADERS reads as a
+     * negative partition count. Both branches are legitimate answers — a cluster whose topic sweep
+     * produced no census reports none — so the gateway decides which one this deployment gives.
+     */
+    const document = (await api.get(`/api/v1/clusters/${CLUSTER}/brokers`)) as BrokersDocument;
+    const skew = (dataOf(document.brokers) ?? [])[0]?.leaderSkewPercent ?? null;
+
+    await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
+    const card = page.locator(".kui-brkcard").first();
+    await expect(card).toBeVisible();
+    await card.locator(".kui-brkcard__toggle").click();
+
+    const said = card.locator('[data-testid$="-skew"]');
+    await expect(said).toBeVisible();
+    if (skew === null) {
+      await expect(said).toContainText(/did not report this broker's share of the leaderships/);
+    } else if (Math.round(skew) === 0) {
+      await expect(said).toContainText("Leads an even share");
+    } else {
+      await expect(said).toContainText(
+        new RegExp(`Leads ${Math.abs(Math.round(skew))}% (more|fewer) partitions`),
+      );
     }
   });
 

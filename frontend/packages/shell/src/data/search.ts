@@ -35,10 +35,18 @@
  * ADR-039's rule applies to a fold the same way it applies to a page: the part that could not be
  * asked says so, and the parts that answered are still shown. A search that silently returned two
  * lists out of three would tell an operator their subject does not exist.
+ *
+ * ## Two exports that were removed rather than left
+ *
+ * `NO_RESULTS` and `searchFailure` were written here for callers that never appeared: the first
+ * described "the answer an empty query is given without asking anybody", which is a path the shell
+ * does not have — emptying the box ends the search and builds no answer at all — and the second was
+ * `userMessage` under another name, which `App.tsx` already calls directly. Both had exactly one
+ * reference in the repository, their own declaration. They are named here so that the next reader
+ * who wants an empty-answer constant knows one was tried and what it cost.
  */
 
 import type { ApiResult, KuiApiClient } from "@kui/api";
-import { userMessage } from "@kui/api";
 
 import type { SearchResultGroup } from "../chrome/SearchField.jsx";
 
@@ -88,9 +96,6 @@ export interface SearchAnswer {
    */
   readonly partial: readonly string[];
 }
-
-/** Nothing found, nothing missing: the answer an empty query is given without asking anybody. */
-export const NO_RESULTS: SearchAnswer = { topics: [], groups: [], subjects: [], partial: [] };
 
 /** How many rows an answer holds, across the three kinds. */
 export function searchHitCount(answer: SearchAnswer): number {
@@ -251,11 +256,6 @@ const SERVICE_LABELS: Readonly<Record<string, string>> = {
 /** The services that could not be asked, in words, for the line under the results. */
 export function unavailableServices(answer: SearchAnswer): readonly string[] {
   return answer.partial.map((service) => SERVICE_LABELS[service] ?? service);
-}
-
-/** The sentence a failed search shows. The gateway's own words when it gave any. */
-export function searchFailure(error: Parameters<typeof userMessage>[0]): string {
-  return userMessage(error);
 }
 
 /* --- Reading the answer ----------------------------------------------------------------------- */

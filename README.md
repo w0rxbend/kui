@@ -73,7 +73,7 @@ reason the architecture is shaped the way it is, and it is tested rather than as
 | Topic administration: create, reconfigure, add partitions, empty, delete | done, with read-only mode, plan-token confirmation and an audit trail |
 | Messages: browsing with every seek mode, streaming, serialization formats, publishing, filters | done except purge from the message screen |
 | Consumer groups: groups, members, assignments, lag, offset reset | done, wizard included |
-| Schema registry: subjects, versions, compatibility levels and checks, registry-backed Avro and JSON Schema decoding | done |
+| Schema registry: subjects, versions, registering a version, compatibility levels and checks, registry-backed Avro and JSON Schema decoding | done |
 | Sign-in and access control: form and OIDC authentication, sessions, CSRF, role-based authorization at the edge | done, and disabled by default |
 | Quickstart, configuration examples, demonstration environment | done |
 
@@ -84,17 +84,23 @@ reason the architecture is shaped the way it is, and it is tested rather than as
   `kui.auth.type` defaults to `disabled`. Until you configure it, anyone who can reach the port can
   do anything KUI can do, including deleting topics. Run it on a network you control.
 - **No Kafka Connect, no ksqlDB, no ACL or quota management.**
-- **No metrics collection**: nothing in the product reads a broker metric, so throughput, request
-  latency and per-client rates render as "not measured" rather than as numbers. There is no JMX
-  client, no Prometheus scraper and no time-series store anywhere in the tree.
+- **One broker metric, and not a metrics system.** KUI reads a Prometheus exposition — a
+  JMX-exporter endpoint the deployment declares under `kui.metrics.sources.<cluster>` — and keeps a
+  bounded series of bytes in and out per second, which the dashboard's Traffic tab draws. That is
+  the whole of it. Request latency, request-handler idle, top producers and record size are four
+  endpoints that do not exist yet, and their cards say they cannot be measured rather than showing a
+  number. A cluster with no configured source answers `not_configured` and its cards say *that*,
+  which is the design rather than a failure. There is still no JMX client: `MetricsSourceKind.Jmx`
+  is declared, refuses with a sentence naming the build, and cannot be configured at all while a
+  metrics source's address is an `http`/`https` URL (ADR-050).
 - **No alerts and no event feed.** No alert definition, threshold, severity or acknowledgement
   exists, and the notification panel is fed an empty list.
 - The masking engine exists and is tested but is not yet reachable from a screen; it is marked
   `IMPLEMENTING` rather than `COMPLETE` in the feature matrix.
 
 <!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -->
-64 of 177 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
-delivered end to end — about 36%.
+68 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
+delivered end to end — about 38%.
 <!-- /checked -->
 
 That figure is recounted from the rows every time it is written down, never adjusted from the

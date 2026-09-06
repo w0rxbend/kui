@@ -7,6 +7,23 @@
  */
 import { test, expect, CLUSTER } from "./fixtures";
 
+interface SubjectsDocument {
+  readonly items?: readonly {
+    readonly subject: string;
+    readonly compatibility?: { readonly inheritedFromGlobal?: boolean };
+  }[];
+  readonly page?: { readonly totalItems?: number | null };
+}
+
+
+/*
+ * The registration case writes to the shared registry and is deliberately *not* marked serial.
+ * `playwright.config.ts` already runs this suite with one worker, so nothing runs beside it; the
+ * only thing `mode: "serial"` would add is skipping the rest of the file after any failure, which
+ * turns one red case into nine unanswered ones. Isolation comes from the scratch subject name
+ * instead — a Confluent-compatible registry has no subject delete in this product, so a name
+ * nothing else uses is what keeps one run out of the next one's way.
+ */
 test.describe("the schema registry", () => {
   test("puts the registry's compatibility level where it cannot be missed", async ({ page }) => {
     await page.goto(`/ui/clusters/${CLUSTER}/schemas`);
@@ -39,18 +56,54 @@ test.describe("the schema registry", () => {
     await expect(page.locator("body")).not.toContainText("[object Object]");
   });
 
-  test("says whether a subject's level is its own or the registry's", async ({ page }) => {
+  test("says whether a subject's level is its own or the registry's", async ({ page, api }) => {
     /*
      * The distinction the whole feature turns on. A subject either has a compatibility level of its
      * own or follows the registry's global one, and the second group moves — every subject in it, at
      * once — the next time anybody changes the global level. A screen that shows the inherited level
      * as though it were the subject's own tells an operator the global change is safe here, when
      * this is exactly the subject it will move.
+     *
+     * The expectation is **asked of the gateway** rather than written down, because this assertion
+     * used to be a disjunction over the only two strings the code can produce —
+     * `/inherited from the registry's global level|set on this subject/` — which passes whichever
+     * one is drawn and therefore cannot tell the two apart. That is the entire distinction, so it
+     * was a case about the feature that could not fail on the feature.
      */
+    const document = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/schemas/subjects?q=orders.avro-value`,
+    )) as SubjectsDocument;
+    const row = (document.items ?? []).find((one) => one.subject === "orders.avro-value");
+    expect(row, "the quickstart's registry should hold orders.avro-value").toBeDefined();
+    const inherited = row?.compatibility?.inheritedFromGlobal === true;
+
     await page.goto(`/ui/clusters/${CLUSTER}/schemas/orders.avro-value`);
-    await expect(page.locator("body")).toContainText(
-      /inherited from the registry's global level|set on this subject/,
-    );
+    const pane = page.locator(".kui-subject");
+    await expect(pane).toBeVisible();
+    if (inherited) {
+      await expect(pane).toContainText("inherited from the registry's global level");
+      await expect(pane).not.toContainText("set on this subject");
+    } else {
+      await expect(pane).toContainText("set on this subject");
+      await expect(pane).not.toContainText("inherited from the registry's global level");
+    }
+  });
+
+  test("counts the registry's subjects and not the rows on this page", async ({ page, api }) => {
+    // The header's figure is the registry's own total. The page holds fifty rows out of however
+    // many the registry has, so the row count dressed up as an inventory is right only on a
+    // registry with one page — which is every registry anybody develops against.
+    const document = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/schemas/subjects`,
+    )) as SubjectsDocument;
+    const total = document.page?.totalItems;
+    expect(typeof total, "the gateway should report a subject total").toBe("number");
+
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas`);
+    const voice = page.locator(".kui-schema-workspace__voice");
+    await expect(voice).toBeVisible();
+    await expect(voice).toContainText(new RegExp(`\\b${total}\\s+subjects?\\b`));
+    await expect(voice).not.toContainText("did not say how many subjects");
   });
 
   test("selecting a subject changes the address and keeps the list beside it", async ({ page }) => {
@@ -68,6 +121,45 @@ test.describe("the schema registry", () => {
     await expect(page).toHaveURL(/\/schemas\/orders\.avro-value/);
     await expect(page.getByRole("heading", { name: "Subjects" })).toBeVisible();
     await expect(page.getByText(/schema id/i).first()).toBeVisible();
+  });
+
+  test("registers a schema, and the registry's answer is what confirms it", async ({ page, api }) => {
+    /*
+     * M6's last bullet, driven. Until this wave the gateway served no endpoint that wrote a schema
+     * and the control was drawn `aria-disabled` beside a sentence saying so; the sentence was true.
+     *
+     * The subject is scratch-named, so a failed run leaves nothing behind that the next one has to
+     * work around — a schema registry has no delete in this product, so the name is the isolation.
+     */
+    const subject = `kui-e2e-register-${Date.now()}-value`;
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas`);
+
+    const control = page.getByRole("button", { name: /register schema/i });
+    await expect(control).toBeVisible();
+    // The control is live, which is the half of the bullet that was missing.
+    await expect(control).not.toHaveAttribute("aria-disabled", "true");
+    await control.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel(/^subject$/i).fill(subject);
+    await dialog
+      .getByLabel(/^schema$/i)
+      .fill('{"type":"record","name":"KuiE2e","fields":[{"name":"id","type":"string"}]}');
+    await dialog.getByRole("button", { name: /^register$/i }).click();
+
+    // The confirmation carries the registry's own figures, and labels them: a version and an id are
+    // different numbers and only the id is written into a record's header.
+    await expect(page.locator(".kui-notice-stack")).toContainText(
+      new RegExp(`Registered a schema under ${subject}`),
+    );
+    await expect(page.locator(".kui-notice-stack")).toContainText(/schema id \d+/);
+
+    // And the registry holds it, asked directly rather than read back off the screen that claimed it.
+    const versions = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/schemas/subjects/${encodeURIComponent(subject)}/versions`,
+    )) as { readonly versions?: readonly number[] };
+    expect(versions.versions ?? []).toContain(1);
   });
 
   test("keeps a subject's schema id apart from its version", async ({ page }) => {

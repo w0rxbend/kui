@@ -27,10 +27,11 @@ import {
   partitionTotal,
   productionRate,
   replicationPill,
+  requestHandlers,
   storageBreakdown,
   storageLede,
-  throughputSeries,
   topLag,
+  topProducers,
   totalLag,
 } from "./model.js";
 import {
@@ -235,7 +236,7 @@ describe("broker health", () => {
 
 describe("the figures this backend does not collect", () => {
   it("marks them not-collected, which is not the same as unavailable", () => {
-    for (const reading of [throughputSeries(), productionRate(), latencyPercentiles()]) {
+    for (const reading of [productionRate(), latencyPercentiles(), topProducers(), requestHandlers()]) {
       expect(reading.kind).toBe("notCollected");
       // The distinction that matters: nothing here should read as a transient failure inviting a
       // retry, because no retry can ever succeed.
@@ -244,10 +245,20 @@ describe("the figures this backend does not collect", () => {
   });
 
   it("explains what is missing in terms of the thing that would have to exist", () => {
-    const throughput = throughputSeries();
     const latency = latencyPercentiles();
-    expect(throughput.kind === "notCollected" && throughput.why).toContain("no history");
     expect(latency.kind === "notCollected" && latency.why).toContain("JMX");
+    const producers = topProducers();
+    const handlers = requestHandlers();
+    expect(producers.kind === "notCollected" && producers.why).toContain("JMX");
+    expect(handlers.kind === "notCollected" && handlers.why).toContain("JMX");
+  });
+
+  it("no longer counts throughput among them, because there is an endpoint for it now", () => {
+    // The model used to carry a `notCollected` throughput reading and the card drew it. Deleting
+    // that reading is half of this wave's change; the other half is that the card asks. If a
+    // `throughput` ever comes back onto the model, it will be a second answer to a question the
+    // query already answers, and the two will disagree the first time one of them is edited.
+    expect(Object.keys(toOverviewModel(loadingData()))).not.toContain("throughput");
   });
 });
 
@@ -279,10 +290,12 @@ describe("the assembled model", () => {
     expect(model.brokerCount.kind).toBe("pending");
     expect(model.partitions.kind).toBe("pending");
     expect(model.brokerPill).toBeUndefined();
-    // Except the three that are never coming, which are known to be absent from the start and
-    // should not spend the page's life pretending to load.
-    expect(model.throughput.kind).toBe("notCollected");
+    // Except the four that are never coming from this build, which are known to be absent from the
+    // start and should not spend the page's life pretending to load.
     expect(model.latency.kind).toBe("notCollected");
+    expect(model.productionRate.kind).toBe("notCollected");
+    expect(model.topProducers.kind).toBe("notCollected");
+    expect(model.requestHandlers.kind).toBe("notCollected");
   });
 });
 
@@ -598,6 +611,41 @@ describe("fetching the overview against a server that answers something else", (
     return { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient;
   };
 
+  /**
+   * A gateway that answers each of the five endpoints separately, and refuses what it was not given.
+   *
+   * The reason this exists is the case below it. `answering` hands the *same* body to all five
+   * calls, so under it every reading is `unknown` whatever `fetchOverview` does — and a
+   * `fetchOverview` that collapsed the whole model into the summary's one failure would look
+   * exactly like a `fetchOverview` that kept the five apart. A case whose four assertions are
+   * satisfied by the correct code and by the defect it is named after has asserted nothing, which
+   * is what it did for a wave. Answering per path is what makes the four readings able to be
+   * `value`, and therefore able to stop being one.
+   */
+  const answeringByPath = (answers: Readonly<Record<string, unknown>>): KuiApiClient => {
+    const get = async (path: string) =>
+      Object.hasOwn(answers, path)
+        ? { ok: true, value: answers[path] }
+        : { ok: false, error: { kind: "unreachable", cause: `this case stubbed no answer for ${path}` } };
+    return { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient;
+  };
+
+  const section = (data: unknown): unknown => ({ status: "ok", data, fetchedAt: "2026-09-05T12:00:00Z" });
+
+  /** The four endpoints that are *not* the cluster summary, all answering perfectly well. */
+  const OTHER_FOUR: Readonly<Record<string, unknown>> = {
+    "/api/v1/clusters/{clusterId}/brokers": {
+      brokers: section([{ id: 1, host: "broker-1.kyiv", port: 9092, isController: true, leaderCount: 512 }]),
+    },
+    "/api/v1/clusters/{clusterId}/log-dirs": {
+      logDirs: section([{ brokerId: 1, path: "/var/lib/kafka", totalBytes: 1000, usableBytes: 390 }]),
+    },
+    "/api/v1/clusters/{clusterId}/consumer-groups": {
+      groups: section({ items: [{ groupId: "clickstream-etl", state: "STABLE", totalLag: 3861 }] }),
+    },
+    "/api/v1/clusters/{clusterId}/topics": { topics: section({ page: { totalItems: 128 } }) },
+  };
+
   it("answers a sentence rather than throwing, when the 200 is not a cluster envelope", async () => {
     // `detail.value.cluster.summary` read two levels into this body. `.summary` off `undefined`
     // throws a `TypeError`, and it throws inside the memo that assembles the model — Solid 2
@@ -615,13 +663,46 @@ describe("fetching the overview against a server that answers something else", (
     // ADR-039 from the other side: one malformed answer blanks its own panels and no others. A
     // guard that turned the whole model into one failure would be a different defect of the same
     // family as the one it replaced.
-    const data = await fetchOverview(answering({ detail: "not a cluster" }), "prod-kyiv-01");
+    //
+    // The four assertions are on `value` and on the values, which is the whole point. The version
+    // of this case that stood for a wave asserted that all four were `unknown` — true under the
+    // correct implementation *and* true under the collapse it was named after, because its stub
+    // answered the same non-envelope body to all five endpoints. Here the other four answer
+    // properly, so the only way they can arrive as figures is if `fetchOverview` really did keep
+    // five requests apart.
+    const data = await fetchOverview(
+      answeringByPath({ ...OTHER_FOUR, "/api/v1/clusters/{clusterId}": { detail: "not a cluster" } }),
+      "prod-kyiv-01",
+    );
 
-    for (const reading of [data.brokers, data.logDirs, data.groups, data.topicCount]) {
-      expect(reading.kind).toBe("unknown");
-    }
-    // And each says something about its own request rather than about the cluster summary.
-    expect(data.brokers.kind === "unknown" ? data.brokers.why : "").not.toContain("cluster summary");
+    expect(data.summary.kind).toBe("unknown");
+    expect(data.brokers).toEqual(value([{ id: 1, host: "broker-1.kyiv", port: 9092, isController: true, leaderCount: 512 }]));
+    expect(data.logDirs).toEqual(
+      value([{ brokerId: 1, path: "/var/lib/kafka", totalBytes: 1000, usableBytes: 390 }]),
+    );
+    expect(data.groups).toEqual(value([{ groupId: "clickstream-etl", state: "STABLE", totalLag: 3861 }]));
+    expect(data.topicCount).toEqual(value(128));
+  });
+
+  it("draws the four panels those readings feed, on a screen whose summary failed", async () => {
+    // The same rule one layer up, where an operator meets it: the panel that failed says so and the
+    // other four carry figures. Asserted on the assembled model rather than on the four readings,
+    // because a fold that dropped a reading on the way into the model would leave the case above
+    // green and the screen blank.
+    const model = toOverviewModel(
+      await fetchOverview(
+        answeringByPath({ ...OTHER_FOUR, "/api/v1/clusters/{clusterId}": { detail: "not a cluster" } }),
+        "prod-kyiv-01",
+      ),
+    );
+
+    expect(model.topicCount).toEqual(value(128));
+    expect(model.brokers.kind).toBe("value");
+    expect(model.storage.kind).toBe("value");
+    expect(model.lag).toEqual(value({ total: 3861, incomplete: 0 }));
+    // And the one that did fail is still saying so, so this is not a case that passes on a model
+    // where nothing failed at all.
+    expect(model.partitions.kind).toBe("unknown");
   });
 
   it("reads the summary out of the envelope when the server does send one", async () => {

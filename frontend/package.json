@@ -17,6 +17,7 @@
     "build-storybook": "storybook build",
     "storybook:ci": "storybook build && npx --yes http-server storybook-static -p 6017 -s",
     "a11y": "node scripts/a11y-stories.mjs",
+    "bundle-shape": "node scripts/bundle-shape.mjs",
     "lint:boundaries": "node scripts/boundaries.mjs"
   },
   "devDependencies": {

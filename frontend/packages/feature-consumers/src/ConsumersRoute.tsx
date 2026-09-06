@@ -32,7 +32,7 @@ import { useKui, useQuery, valueOf } from "@kui/kernel";
 import { GroupList } from "./GroupList.jsx";
 import { GroupRoute } from "./GroupRoute.jsx";
 import { DEFAULT_PAGE_SIZE, fetchGroups, type GroupListResult, type GroupQuery } from "./data.js";
-import { pollLag } from "./lag.js";
+import { pollLag, type ListingFigures } from "./lag.js";
 import type { GroupSummary } from "./model.js";
 
 export default function Consumers(): JSX.Element {
@@ -127,7 +127,10 @@ export function GroupsScreen(props: { readonly clusterId: string }): JSX.Element
         kui.api,
         clusterId,
         rows,
-        (next, listing) => {
+        // Annotated rather than inferred: `null` and a figure block are the two halves of the
+        // contract this callback is holding up, and spelling the type out is what makes the
+        // `null` branch below read as a case rather than as a defensive check.
+        (next: readonly GroupSummary[], listing: ListingFigures | null) => {
           setRows(() => next);
           // `null` is a merge: the delta named no coordinator count and no total, so the screen
           // keeps the ones the list request gave it rather than resetting them to zero.

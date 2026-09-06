@@ -11,7 +11,7 @@
  * So `inheritedFromGlobal` is carried through rather than flattened into a level string, and the
  * screens say "BACKWARD, inherited" and "BACKWARD, set on this subject" as different sentences.
  */
-import type { ApiResult, components, KuiApiClient } from "@kui/api";
+import type { ApiError, ApiResult, components, KuiApiClient } from "@kui/api";
 import { apiFailure, type Fetched } from "@kui/kernel";
 
 /**
@@ -416,4 +416,132 @@ export async function setCompatibility(
     params: { path: { clusterId, subject } },
     body: { level },
   });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Registering a schema
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * What the registry made of a schema it accepted.
+ *
+ * Both figures are optional because the browser must not claim one it was not given. The registry
+ * assigns the version within the subject and the id across the whole registry, and the toast that
+ * confirms a registration says which of the two it is quoting — a confirmation reading "registered
+ * as 4" is exactly the conflation `SubjectPage` exists to prevent.
+ */
+export interface RegisteredSchema {
+  readonly subject: string;
+  readonly version: number | undefined;
+  readonly id: number | undefined;
+}
+
+/**
+ * The register call, and the one hand-written wire shape in this package.
+ *
+ * `POST …/schemas/subjects/{subject}/versions` does not exist in
+ * `frontend/packages/api/src/schema.d.ts` yet: it is being added to `services/schema` in this same
+ * wave, and the merged document the browser's types are generated from is regenerated afterwards by
+ * a different packet. `KuiApiClient.post` is typed by `PathsWithMethod<paths, "post">`, so naming
+ * the path directly does not compile until that regeneration lands.
+ *
+ * So the shape is declared here, at exactly one line, rather than the capability being deferred a
+ * wave. **This interface is deleted the moment `schema.d.ts` carries the path** — at which point
+ * `api.post("…/versions", …)` type-checks on its own and a field the gateway renames fails `tsc`
+ * here again, which is the property the cast is currently suspending. It is deliberately the
+ * narrowest thing that works: one path, the two parameters it takes, and the two figures the answer
+ * is read for.
+ *
+ * It is transcribed from `RegisterSchemaRequest` and `RegisteredVersionDto` in
+ * `services/schema/contract`, not guessed: the body's `references` defaults to `Nil` on the server
+ * and is therefore omitted, `id` is always sent, and `version` genuinely is optional — the
+ * registry's own registration response is `{"id": N}` and the version is a second call that can
+ * fail after the first has succeeded. Both are read defensively anyway, because a cast is exactly
+ * the place where a type stops being evidence.
+ */
+interface RegisterWire {
+  readonly post: (
+    path: "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions",
+    init: {
+      readonly params: {
+        readonly path: { readonly clusterId: string; readonly subject: string };
+      };
+      readonly body: { readonly schemaType: string; readonly definition: string };
+    },
+  ) => Promise<ApiResult<{ readonly version?: number | null; readonly id?: number | null }>>;
+}
+
+/**
+ * The registry's own words for a refusal, or the failure unchanged.
+ *
+ * A registry that rejects a schema answers `KUI-VALIDATION` whose envelope message says that the
+ * registry refused it and whose `details` carry what the registry actually said — the field path,
+ * the reader and writer types, the version it compared against. That second half is the only part
+ * an operator can act on, and `createMutation` keeps only `userMessage(error)`, which is the first.
+ *
+ * So the registry's sentence is lifted into the message here, before the mutation state is built.
+ * Not paraphrased and not summarised: this screen's whole contract with the registry is that a
+ * refusal is reproduced, and "not backward compatible" tells somebody nothing they did not already
+ * know from the fact that it failed.
+ */
+export function registryRefusal(error: ApiError): ApiError {
+  if (error.kind !== "envelope") return error;
+  // `restrictions` is optional on the generated `ErrorDetail`, so a detail carrying only a field
+  // name contributes nothing rather than an `undefined` that would render as the word.
+  const stated = error.details
+    .flatMap((detail) => detail.restrictions ?? [])
+    .filter((restriction) => restriction.trim() !== "");
+  if (stated.length === 0) return error;
+  return { ...error, message: `${error.message} The registry said: ${stated.join(" ")}` };
+}
+
+/**
+ * Registers a schema under a subject, creating the subject if the registry does not hold it.
+ *
+ * A `Promise<ApiResult<…>>` rather than a `Fetched`, because this is a write and the screen needs
+ * the running / done / failed / forbidden machine a `createMutation` gives — including the guard
+ * that stops a double press registering two versions, which for a registry means two ids and a
+ * version number nobody chose.
+ */
+export async function registerSchema(
+  api: KuiApiClient,
+  clusterId: string,
+  subject: string,
+  proposed: ProposedSchema,
+): Promise<ApiResult<RegisteredSchema>> {
+  const wire = api as unknown as RegisterWire;
+  const answer = await wire.post(
+    "/api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions",
+    {
+      params: { path: { clusterId, subject } },
+      body: { schemaType: proposed.schemaType, definition: proposed.definition },
+    },
+  );
+  if (!answer.ok) return { ok: false, error: registryRefusal(answer.error) };
+  return {
+    ok: true,
+    value: {
+      subject,
+      // Never coerced to a number the answer did not carry. A registry that accepted the schema and
+      // did not say which version it became is a real answer — the confirmation then names the
+      // subject and says the version was not reported, rather than printing a zero.
+      version: typeof answer.value.version === "number" ? answer.value.version : undefined,
+      id: typeof answer.value.id === "number" ? answer.value.id : undefined,
+    },
+  };
+}
+
+/**
+ * Why `Register schema` will not press, or `undefined`.
+ *
+ * Only a permission answer now: the endpoint exists, so "KUI cannot do this" is no longer one of
+ * the reasons. A read-only cluster is refused by the server (`KUI-READ-ONLY`, ADR-047) rather than
+ * predicted here, for the same reason every other write on this screen leaves it to the server —
+ * the browser holds no read-only flag, and a control disabled on a guess is a control that is
+ * wrong on the cluster where the guess is stale.
+ */
+export function registerBlockedReason(permitted: boolean): string | undefined {
+  return permitted
+    ? undefined
+    : "You do not have permission to register a schema in this cluster's registry.";
 }

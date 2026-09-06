@@ -111,7 +111,12 @@ export interface GroupListProps {
 export function GroupList(props: GroupListProps): JSX.Element {
   const narrow = createMediaQuery(NARROW_QUERY);
   const health = createMemo(() =>
-    healthOf(props.rows, props.coordinatorsMissing ?? 0, props.totalItems ?? null),
+    healthOf(
+      props.rows,
+      props.coordinatorsMissing ?? 0,
+      props.totalItems ?? null,
+      props.loading === true,
+    ),
   );
 
   /**
@@ -119,11 +124,18 @@ export function GroupList(props: GroupListProps): JSX.Element {
    * template. See `groupsVoice`: SPEC §6.3 rule 3 is that the aside disappears when the state is
    * not healthy, and only a union of whole sentences can guarantee that.
    */
-  const voice = createMemo(() =>
-    props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden"
-      ? "Consumer group data is unavailable."
-      : groupsVoice(health()),
-  );
+  const voice = createMemo(() => {
+    if (props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden") {
+      return "Consumer group data is unavailable.";
+    }
+    // A filtered list's count is the filter's, not the cluster's, and this screen has no figure for
+    // either — so it names the filter instead of publishing a group count that would be read as the
+    // cluster's. The empty state below carries the way out.
+    if (props.failure?.kind === "filtered") {
+      return `No consumer group on this cluster is named like ${props.failure.term}.`;
+    }
+    return groupsVoice(health());
+  });
 
   /*
    * The widths are percentages taken off screenshot `04`, not rem values.
@@ -184,6 +196,25 @@ export function GroupList(props: GroupListProps): JSX.Element {
    */
   const mayHaveMore = (): boolean =>
     props.pageSize !== undefined && props.rows.length >= props.pageSize;
+
+  /**
+   * The paginator, when there is one — and it needs **both** halves, not just a handler.
+   *
+   * `pageSize` used to fall back to `props.rows.length`, which is the array's own length: the
+   * quantity the doc on that prop four lines up forbids, and the one this screen was rewritten to
+   * stop publishing. On the last page of a list it is smaller than the page, so the control's
+   * "showing X to Y" arithmetic and its page count were both computed off how many rows happened to
+   * come back. A caller that can answer `onPage` knows what it asked for, so it supplies both;
+   * a story or a test holding a fixed array supplies neither and gets no control.
+   */
+  const paging = createMemo<
+    { readonly onPage: (page: number) => void; readonly pageSize: number } | undefined
+  >(() => {
+    const onPage = props.onPage;
+    const pageSize = props.pageSize;
+    if (onPage === undefined || pageSize === undefined) return undefined;
+    return { onPage, pageSize };
+  });
 
   return (
     <section class="kui-cg-page" data-testid="consumer-groups">
@@ -263,18 +294,18 @@ export function GroupList(props: GroupListProps): JSX.Element {
           moved through. A story or a test that hands this a fixed array supplies no `onPage` and
           gets no control, rather than one that does nothing.
         */}
-        <Show when={props.onPage}>
-          {(onPage) => (
+        <Show when={paging()}>
+          {(control) => (
             <Pagination
               page={props.page ?? 1}
-              pageSize={props.pageSize ?? props.rows.length}
+              pageSize={control().pageSize}
               // The server's figure, straight through. `undefined` is `Pagination`'s own word for
               // "no total was given", and it then hides the numbered buttons rather than guessing
               // a last page — which is the same refusal the voice line makes in words.
               total={props.totalItems ?? undefined}
               shown={props.rows.length}
               hasNext={mayHaveMore()}
-              onPage={onPage()}
+              onPage={control().onPage}
               onPageSize={props.onPageSize}
               label="Consumer group pages"
               testId="consumer-groups-pagination"

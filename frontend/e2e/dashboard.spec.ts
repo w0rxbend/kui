@@ -81,10 +81,52 @@ test.describe("the cluster dashboard", () => {
        operator looking for their data. */
     await expect(subtree).not.toContainText("__consumer_offsets");
 
-    /* And a group row leads to the list, filtered. The href is asserted rather than the navigation,
-       because what is being checked is that the address was built and not written. */
+    /* That the rows are links at all, and that they carry the list's address. Where they *land* is
+       the next case, and it is a different question — see its header. */
     const group = subtree.getByRole("link").first();
     await expect(group).toHaveAttribute("href", new RegExp(`/clusters/${CLUSTER}/topics`));
+  });
+
+  /**
+   * A prefix row lands on a list that is actually filtered.
+   *
+   * The case above asserts the `href`, which is what the drawer builds, and its comment says so.
+   * That is half the promise: `…/topics?q=orders` is an honest address only if the screen it names
+   * reads the query. Until this wave it did not — `TopicsRoute` seeded its query from a default and
+   * looked at the address only for `?tab=` — so every prefix row led to the unfiltered list, which
+   * looks exactly like a row that worked, because the list it lands on does contain the topics the
+   * row named. An `href` assertion cannot tell those apart; only the destination can.
+   *
+   * So this drives the click and reads three things: the address after it, the request the list
+   * makes, and a topic that does not match being gone from the page.
+   */
+  test("a drawer prefix row lands on a filtered topics list", async ({ page }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    await page.getByRole("button", { name: /Expand Topics/i }).click();
+
+    /* The row's accessible name is its label and then what its badge means — "orders.*, 3 topics"
+       — so the label alone is a prefix match on it. The quickstart seeds three `orders.` topics,
+       and the fold writes a group with children as `<segment>.*`. */
+    const subtree = page.getByTestId("nav-topics-subtree");
+    const orders = subtree.getByRole("link", { name: /^orders\.\*/ });
+    await expect(orders).toBeVisible();
+
+    /* Armed before the click: the list asks the server for the filtered page, which is the whole
+       point of the query — a screen that filtered the rows it happened to hold would be honest on a
+       cluster of ten topics and wrong on one of four thousand. */
+    const filtered = page.waitForRequest(
+      (request) => request.url().includes("/topics?") && request.url().includes("q=orders"),
+    );
+    await orders.click();
+
+    await expect(page).toHaveURL(new RegExp(`/ui/clusters/${CLUSTER}/topics\\?q=orders$`));
+    await filtered;
+
+    /* And the screen shows the filtered answer. `analytics.pageviews` is seeded on the quickstart
+       and is on the unfiltered first page, so its absence is the difference between a list that
+       read the address and one that ignored it. */
+    await expect(page.getByText("orders.v1").first()).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("analytics.pageviews");
   });
 
   test("the head's + is the route to cluster registration", async ({ page }) => {

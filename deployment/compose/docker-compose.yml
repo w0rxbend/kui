@@ -284,9 +284,10 @@ services:
   # survived because the check compared the addresses against the containers and never against the
   # contracts. `smoke.sh` now derives the contract set as well, so the seventh cannot repeat it.
   #
-  # `kui-service.yaml` configures no cluster, so this process reaches no registry and reports every
-  # cluster as not_configured. That is the right answer for this stack, whose subject is process
-  # isolation rather than Kafka, and it is a different answer from the 404 a missing container gave.
+  # `kui-service.yaml` now declares two clusters and names a registry for both, so this process
+  # really reaches one and reports both clusters as available. It used to report `not_configured`
+  # for a deployment with no clusters at all, and that answer -- correct as it was -- is a different
+  # thing again from the 404 a missing container gave.
   kui-schema:
     image: kui-schema:${KUI_VERSION:-0.1.0-SNAPSHOT}
     container_name: kui-schema
@@ -314,13 +315,19 @@ services:
       start_period: 20s
 
   # The metrics service: the cluster's throughput, and the four other measurements the dashboard's
-  # cards need. It is the eighth service and the newest, and it is here even though it measures
-  # nothing yet: KUI has no JMX client and no Prometheus parser, so every cluster answers
-  # `not_configured` and every metrics card keeps its written "not measured" sentence (ADR-032).
+  # cards need. It is the eighth service and the newest, and until M7 it was the only one in this
+  # file that could not be shown doing anything -- there was no exporter anywhere in the repository
+  # for it to read, so every cluster answered `not_configured` and the sentence a card drew when it
+  # could not measure something was indistinguishable from the sentence it would draw if KUI could
+  # never measure anything.
   #
-  # That is exactly why it must run. The gateway derives a service's public routes from the contract
-  # it holds *and* the address it was given, so without this container and its `kui.yaml` entry
-  # there is no `/api/v1/clusters/*/metrics/*` at all and no `metrics` row in the capability
+  # `kafka-metrics` above is what ended that. `kui-service.yaml` names its address under
+  # `kui.metrics.sources.measured` and names nothing for `unmeasured`, so this one process answers
+  # both ways on one deployment and `smoke.sh` asserts both.
+  #
+  # It must run whichever way it answers. The gateway derives a service's public routes from the
+  # contract it holds *and* the address it was given, so without this container and its `kui.yaml`
+  # entry there is no `/api/v1/clusters/*/metrics/*` at all and no `metrics` row in the capability
   # document -- and a card that should have shown its sentence has nothing to read it from. A
   # service that answers honestly and measures nothing is a different thing from a service that is
   # not there, and only one of them is true of this build.
@@ -349,6 +356,122 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+
+  # ===============================================================================================
+  # A BROKER, AND THE EXPORTER THAT MAKES IT MEASURABLE.
+  #
+  # This stack ran with `clusters: []` for three milestones, because its subject is process
+  # isolation rather than Kafka and `deployment/quickstart` is where a broker lived. That stopped
+  # being tenable with M7: `smoke.sh` now has to assert that a configured cluster's throughput comes
+  # back `ok` with real numbers in it, and there is no way to assert that against no broker. A
+  # milestone whose only positive assertion is a refusal is a milestone the absence of the code
+  # satisfies, which is exactly the trap M7 sat in for two waves.
+  #
+  # One node, KRaft, no published port. The quickstart publishes 9092 so a person can point their
+  # own tools at it; this one is for the two containers below it and nothing else, and not
+  # publishing it means this stack and the quickstart can run side by side on one machine.
+  # ===============================================================================================
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: kui-compose-kafka
+    environment:
+      CLUSTER_ID: kui-compose-000000000001
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT
+      # Single node, so every internal topic has to be happy with one replica.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Remote JMX for the exporter beside it. `KAFKA_JMX_PORT`/`KAFKA_JMX_HOSTNAME` and not a
+      # hand-written `KAFKA_JMX_OPTS`, because `kafka-run-class.sh` applies the latter to every tool
+      # it launches — including the healthcheck below, which would then try to bind a port the
+      # broker already holds. The hostname is what an RMI stub tells the exporter to call back on.
+      KAFKA_JMX_PORT: 9999
+      KAFKA_JMX_HOSTNAME: kafka
+    healthcheck:
+      # A real metadata request over the client protocol. A Kafka container reports itself started
+      # well before it can answer one, and anything that connects in that window is refused.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 15s
+    networks:
+      - kui
+    restart: unless-stopped
+
+  # The Prometheus JMX exporter. `../metrics/kafka-jmx-exporter.yml` is the same file the quickstart
+  # mounts, on purpose: two copies of a metric-name list drift, and the first symptom of the drift
+  # is one stack's throughput card filling and the other's staying empty for no visible reason.
+  #
+  # `kui-service.yaml` names this address under `kui.metrics.sources.measured` and says nothing
+  # about the `unmeasured` cluster beside it, which gives `smoke.sh` both halves of the assertion
+  # M7 needs: a cluster that answers `ok` with numbers, and a cluster on the same deployment that
+  # answers `not_configured`.
+  kafka-metrics:
+    image: bitnamilegacy/jmx-exporter:1.4.0
+    container_name: kui-compose-kafka-metrics
+    command: ["5556", "/etc/jmx-exporter/kafka-jmx-exporter.yml"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ../metrics/kafka-jmx-exporter.yml:/etc/jmx-exporter/kafka-jmx-exporter.yml:ro
+    healthcheck:
+      # bash's `/dev/tcp`, because this image carries neither curl nor wget, and `CMD` naming bash
+      # explicitly because Compose's `CMD-SHELL` runs dash, which has no `/dev/tcp` at all.
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - "exec 3<>/dev/tcp/127.0.0.1/5556 && printf 'GET /metrics HTTP/1.0\r\n\r\n' >&3 && grep -q kafka_server_brokertopicmetrics_bytesinpersec <&3"
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    networks:
+      - kui
+    restart: unless-stopped
+
+  # A Schema Registry, because a cluster is now configured and a configured cluster with no registry
+  # makes the schema service report `not_configured` for the whole deployment.
+  #
+  # That report would be correct, and it is why this container is here rather than why it is not.
+  # The capability document folds the per-cluster rows into one verdict per service (ADR-039 §2:
+  # `NotConfigured` beats everything), so without a registry the schema service's service-level row
+  # reads `not_configured` and `smoke.sh`'s "every service the gateway routes is up" loop has to be
+  # told to expect a different answer for one of the six. Bending the check to fit an incomplete
+  # deployment is the wrong repair: the check is right, and what was missing was the registry.
+  #
+  # Storage is in memory, which is right for a stack whose whole lifetime is one `smoke.sh` run.
+  # Apicurio speaks the Confluent-compatible API at `/apis/ccompat/v7` and is Apache-2.0 throughout
+  # (ADR-014 Amendment 1); it is the same image the quickstart already pulls, so this adds no
+  # download to a machine that has run either.
+  schema-registry:
+    image: apicurio/apicurio-registry:3.0.6
+    container_name: kui-compose-schema-registry
+    environment:
+      QUARKUS_PROFILE: prod
+    healthcheck:
+      # A real call to the API KUI uses, not a port check: the process accepts connections well
+      # before Quarkus has finished publishing its routes, and a port check passes in that window.
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8080/apis/ccompat/v7/subjects >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    networks:
+      - kui
+    restart: unless-stopped
 
   # ===============================================================================================
   # THE SLOT FOR THE THREE SERVICES THAT DO NOT EXIST YET.

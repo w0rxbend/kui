@@ -19,7 +19,7 @@ import sttp.tapir.server.stub4.TapirStubInterpreter
 import kui.contracts.KuiEndpoint
 import kui.http.principal.PrincipalVerification
 import kui.kernel.error.{InfrastructureError, KuiError}
-import kui.kernel.{ClusterId, Secret, Subject, UserName}
+import kui.kernel.{ClusterId, SchemaId, Secret, Subject, UserName}
 import kui.observability.Telemetry
 import kui.schema.application.*
 import kui.schema.contract.SchemaEndpoints
@@ -100,6 +100,11 @@ final class SubjectListRoutesSuite extends KuiIOSuite {
 
     def versions(subject: Subject) = IO.pure(Right(None))
     def schema(subject: Subject, version: VersionSelector) = IO.pure(Right(None))
+
+    def register(subject: Subject, proposed: ProposedSchema) =
+      IO.pure(
+        Right(RegisteredVersion(subject, SchemaId.unsafe(1), Some(SchemaVersion.unsafe(1))))
+      )
 
     def globalCompatibility: IO[Either[KuiError, CompatibilityLevel]] =
       globalReads.update(_ + 1) *> IO.pure(Right(CompatibilityLevel.Full))
@@ -264,6 +269,11 @@ final class SubjectListRoutesSuite extends KuiIOSuite {
   test("a page size above this endpoint's maximum is clamped rather than refused") {
     // `PageSize.Max` is 500 and would be answered with 500 rows and 1500 registry requests. The ceiling this
     // endpoint enforces is its own, and the answer's `pageSize` is where a caller reads what they got.
+    //
+    // The numbers are literals, and that is the whole point of this case. Until this wave both sides of
+    // the comparison were `SchemaEndpoints.MaxPageSize`, so the constant was asserted only against itself
+    // and the value **250** shipped green — three quarters of the 500-row registry outage the bound exists
+    // to prevent, because a row costs three registry GETs.
     server().use { (backend, registry) =>
       for {
         response <- get(backend, s"$subjectsPath?pageSize=500")
@@ -272,10 +282,63 @@ final class SubjectListRoutesSuite extends KuiIOSuite {
         val json = body(response).hcursor
 
         assertEquals(response.code.code, 200, response.body)
-        assertEquals(json.downField("page").get[Int]("pageSize"), Right(SchemaEndpoints.MaxPageSize))
-        assertEquals(json.downField("items").as[List[Json]].map(_.size), Right(SchemaEndpoints.MaxPageSize))
+        assertEquals(json.downField("page").get[Int]("pageSize"), Right(100))
+        assertEquals(json.downField("items").as[List[Json]].map(_.size), Right(100))
         // The rows are the promise; the call count is what the ceiling is for.
-        assertEquals(enriched.size, SchemaEndpoints.MaxPageSize)
+        assertEquals(enriched.size, 100)
+      }
+    }
+  }
+
+  test("a page size of 250 is clamped to a hundred rows and three hundred registry requests") {
+    // 250 is not an arbitrary number: it is the value that shipped green last wave, because
+    // `SubjectListRoutesSuite` compared the answer's `pageSize` and its row count to the very constant
+    // that produced them. Both numbers below are written out, and the arithmetic beside them is the
+    // reason the bound is a hundred rather than the kernel's five hundred:
+    //
+    //   a row costs three registry GETs (`RegistryHttp.summary`), and the registry is a single-writer JVM
+    //   in front of a Kafka topic. 100 rows is 300 requests in 13 rounds of eight
+    //   (`SubjectListUseCase.MaxConcurrentRows`). 250 rows is 750, and 500 rows is 1500.
+    //
+    // So the two bounds are 100 and 500 and they must not be the same number.
+    assert(
+      SchemaEndpoints.MaxPageSize < kui.kernel.PageSize.Max.value,
+      s"${SchemaEndpoints.MaxPageSize} is not below the kernel's ${kui.kernel.PageSize.Max.value}"
+    )
+
+    server().use { (backend, registry) =>
+      for {
+        response <- get(backend, s"$subjectsPath?pageSize=250")
+        enriched <- registry.enriched.get
+      } yield {
+        val json = body(response).hcursor
+
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(json.downField("page").get[Int]("pageSize"), Right(100))
+        assertEquals(json.downField("items").as[List[Json]].map(_.size), Right(100))
+        assertEquals(enriched.size, 100)
+        // Three registry GETs per enriched row, which is what the hundred is a bound on.
+        assertEquals(enriched.size * 3, 300)
+      }
+    }
+  }
+
+  test("a negative page size is one row and not a count-only answer") {
+    // `pageSize < 0` used to reach the count-only branch through a `<=`, which made `?pageSize=-1` answer
+    // a total with no rows: a wire behaviour the published parameter description did not mention and no
+    // case covered, so a caller with an off-by-one got silence instead of rows. Below the range is now
+    // clamped up, which is the rule the page *number* already followed.
+    server().use { (backend, registry) =>
+      for {
+        response <- get(backend, s"$subjectsPath?pageSize=-1")
+        enriched <- registry.enriched.get
+      } yield {
+        val json = body(response).hcursor
+
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(json.downField("page").get[Int]("pageSize"), Right(1))
+        assertEquals(json.downField("items").as[List[Json]].map(_.size), Right(1))
+        assertEquals(enriched, List(many.head))
       }
     }
   }

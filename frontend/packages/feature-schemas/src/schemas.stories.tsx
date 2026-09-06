@@ -3,6 +3,7 @@ import { SchemaWorkspace } from "./SchemaWorkspace.jsx";
 import { SubjectList } from "./SubjectList.jsx";
 import { SubjectPage } from "./SubjectPage.jsx";
 import { CompatibilityCheck } from "./CompatibilityCheck.jsx";
+import { RegisterSchemaDialog } from "./RegisterSchemaDialog.jsx";
 import type { Compatibility, SchemaVersion, SubjectRow } from "./data.js";
 
 /**
@@ -157,6 +158,38 @@ export const WorkspaceNoSelection: WorkspaceStory = {
     list: <SubjectList {...listArgs} global={backward} />,
     subjectCount: SUBJECTS.length,
     globalLevel: "BACKWARD",
+    onRegister: () => undefined,
+  },
+};
+
+/**
+ * The first paint, before the subjects request has answered.
+ *
+ * The state this header used to get wrong, and it is worth looking at beside `WorkspaceNoSelection`:
+ * with no count yet, the line here said *"The registry did not say how many subjects it holds"* — a
+ * claim about an answer to a question nobody had answered. Not asked and answered-without-a-count
+ * are different states and this is the one that says so.
+ */
+export const WorkspaceLoading: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: (
+      <SubjectList {...listArgs} subjects={[]} totalItems={undefined} loading global={undefined} />
+    ),
+    loading: true,
+    onRegister: () => undefined,
+  },
+};
+
+/** An operator who may read the registry and not write to it. The reason is on the control. */
+export const WorkspaceCannotRegister: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: <SubjectList {...listArgs} global={backward} />,
+    subjectCount: SUBJECTS.length,
+    globalLevel: "BACKWARD",
+    registerDisabledReason:
+      "You do not have permission to register a schema in this cluster's registry.",
   },
 };
 
@@ -245,7 +278,77 @@ export const WorkspaceWithSubject: WorkspaceStory = {
     ),
     subjectCount: SUBJECTS.length,
     globalLevel: "BACKWARD",
+    onRegister: () => undefined,
   },
+};
+
+/* ------------------------------------------------------------------------------------------------
+ * Registering a schema
+ *
+ * The dialog M6's last bullet needed an endpoint for. The two worth looking at are `Refused` and
+ * `ReadOnlyCluster`: both are ordinary answers rather than accidents — an incompatible field is
+ * exactly what a compatibility level exists to catch, and a cluster KUI is configured read-only for
+ * refuses every write by design — and in both the dialog stays open with the schema still in it.
+ * ---------------------------------------------------------------------------------------------- */
+
+const registerArgs = {
+  open: true,
+  onClose: () => undefined,
+  onRegister: () => undefined,
+  state: idle,
+  knownSubjects: SUBJECTS.map((row) => row.subject),
+};
+
+type RegisterStory = StoryObj<typeof RegisterSchemaDialog>;
+
+/** Nothing typed yet. The Register button is disabled and says which field it is waiting for. */
+export const RegisterEmpty: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: registerArgs,
+};
+
+/**
+ * The registry refused it, in the registry's own words.
+ *
+ * The sentence below is what a Confluent registry says about a field added without a default: it
+ * names the field, the path and the rule. KUI reproduces it rather than summarising, because "not
+ * backward compatible" tells an operator nothing they did not already know from the refusal.
+ */
+export const RegisterRefused: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: {
+    ...registerArgs,
+    state: {
+      kind: "failed",
+      message:
+        "The registry rejected this schema. The registry said: " +
+        "{errorType:'READER_FIELD_MISSING_DEFAULT_VALUE', description:'The field 'channel' at " +
+        "path '/fields/3' in the new schema has no default value and is missing in the old " +
+        "schema'}",
+      code: "KUI-VALIDATION",
+    },
+  },
+};
+
+/**
+ * A cluster KUI is configured read-only for. Not a permission problem, and the sentence says so.
+ */
+export const RegisterOnReadOnlyCluster: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: {
+    ...registerArgs,
+    state: {
+      kind: "failed",
+      message: "This cluster is configured read-only in KUI, so nothing may be written to it.",
+      code: "KUI-READ-ONLY",
+    },
+  },
+};
+
+/** The request is out. Both actions are disabled, and both say why rather than going grey. */
+export const RegisterInFlight: RegisterStory = {
+  render: (args) => <RegisterSchemaDialog {...args} />,
+  args: { ...registerArgs, state: { kind: "running" } },
 };
 
 /* ------------------------------------------------------------------------------------------------

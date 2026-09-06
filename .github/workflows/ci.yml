@@ -173,6 +173,14 @@ jobs:
         run: pnpm lint:boundaries
       - name: Build
         run: pnpm build
+      # The guard TD-016 was closed without and TD-022 has carried since. ADR-012 promises that a
+      # feature's code is fetched only when somebody navigates to it, and until this step that
+      # promise was kept by convention: the shell reaches a feature solely through `registry.ts`'s
+      # `import()`, so a static import would have to be written on purpose — which is a sentence
+      # about intentions rather than a gate. It reads the manifest `pnpm build` just wrote, so it
+      # goes here and nowhere earlier.
+      - name: The features are still loaded on demand
+        run: pnpm bundle-shape
       # The stories are this workspace's stated review surface — 670 of them when this gate was
       # wired, across rather fewer files than that — and no job compiled one of them, so a story
       # could reference a prop that no longer exists and stay green for months. Building Storybook
@@ -270,9 +278,22 @@ jobs:
     name: distributed stack + fault isolation
     runs-on: ubuntu-latest
     # Assembles a jar and builds a container image for the gateway and for each of the six services
-    # the distributed stack runs. Twenty-five minutes is a backstop against a hung build, not a
-    # budget.
-    timeout-minutes: 25
+    # the distributed stack runs, then builds the interface's image inside `docker compose up` and
+    # pulls three third-party ones — the Kafka broker this stack now runs, the JMX exporter beside
+    # it, which is what lets the smoke test assert a measurement rather than a refusal, and the
+    # Schema Registry that keeps the schema service's capability row honest about it.
+    #
+    # Raised from 25, which was written when the job built five images. Measured here rather than
+    # guessed, on a warm Scala compile cache: the seven Mill images take 83s, and `smoke.sh` takes
+    # 126s and 105s on two consecutive runs against images that already exist. Neither figure
+    # includes the two things a cold runner also pays for and this machine did not — the Scala
+    # compile behind those images, and `docker compose` building `kui-frontend` from the pnpm
+    # workspace, which is the single largest cost in the job and the reason the old ceiling was
+    # already close.
+    #
+    # Forty minutes is therefore a backstop against a hung build and not a budget: it is far above
+    # anything measured, and low enough that a genuine hang is still reported inside the hour.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
@@ -289,13 +310,22 @@ jobs:
       # it here too, with nobody remembering anything.
       #
       # `kui-frontend` is excluded because it is the one image Compose builds itself — Mill never
-      # builds a browser bundle — and `smoke.sh` excludes it from its own check for that reason.
+      # builds a browser bundle — and `smoke.sh` excludes it from its own check for that reason. The
+      # broker and the JMX exporter the stack now runs are third-party images with no `kui-` prefix,
+      # so they never reach this list and Compose pulls them.
+      #
+      # `[a-z-]` and not `[a-z]`. The character class used to have no hyphen in it, so
+      # `image: kui-schema-registry:` matched nothing at all and would have been dropped from the
+      # build list in silence — the exact failure a derived list exists to prevent, reintroduced
+      # inside the derivation. Every image the stack names today is one word, which is why nobody
+      # noticed; the first hyphenated one would have been an image CI could not build and could not
+      # report.
       #
       # The braces matter: `./mill a b` passes `b` as an argument to `a` rather than running both,
       # which is the same trap that once made the test job run no tests.
       - name: Build the container images the distributed stack runs
         run: |
-          images=$(grep -oE 'image: kui-[a-z]+:' deployment/compose/docker-compose.yml |
+          images=$(grep -oE 'image: kui-[a-z-]+:' deployment/compose/docker-compose.yml |
                    sed 's/image: kui-//; s/:$//' | grep -v '^frontend$' | sort -u)
           [ -n "$images" ] || { echo "no kui-* image is named in docker-compose.yml"; exit 1; }
           echo "building: $images"

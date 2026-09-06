@@ -15,18 +15,22 @@
  * what they are looking at; a selection held in component state produces a link to the list and a
  * sentence saying "then click orders.payments.v2-value".
  *
- * ## `Register schema` is drawn and disabled, on purpose
+ * ## `Register schema` is a control now, and the reason it can be disabled has changed
  *
- * The design gives this screen a `+ Register schema` action and the product has no endpoint that
- * writes a schema. Hiding the control would say KUI has no opinion about registering schemas;
- * drawing it live would be a button that does nothing. It is drawn, disabled, and carries the
- * reason — the same rule `Button` enforces for an action a principal may not take, applied to an
- * action the product cannot take. See `REGISTER_UNAVAILABLE_REASON`.
+ * For three waves the design's `+ Register schema` action was drawn `aria-disabled` beside a true
+ * sentence: the gateway served no endpoint that wrote a schema. It serves one now, so the only
+ * reason left to refuse the control is a principal without `SCHEMA:CREATE` — and a cluster KUI is
+ * configured read-only for, which is the *server's* answer rather than a prediction made here, for
+ * the reason `registerBlockedReason` gives.
+ *
+ * The dialog itself is not opened from here. This component owns layout and the header, and the
+ * route owns the write, the toast and the refresh — the same split as `list`, and for the same
+ * reason: a component that both arranges a page and issues a `POST` cannot be put in a story.
  */
 import { Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Button, EmptyState } from "@kui/kernel";
-import { REGISTER_UNAVAILABLE_REASON, registryVoice } from "./model.js";
+import { registryVoice } from "./model.js";
 import type { CompatibilityLevel } from "./data.js";
 
 export interface SchemaWorkspaceProps {
@@ -42,6 +46,19 @@ export interface SchemaWorkspaceProps {
    */
   readonly subjectCount?: number | undefined;
   readonly globalLevel?: CompatibilityLevel | null | undefined;
+  /**
+   * The subjects request has not answered yet.
+   *
+   * Its own prop rather than being inferred from an absent `subjectCount`, because the two are
+   * different states and the voice line has different sentences for them: nothing has been asked
+   * yet, versus the registry answered and did not count. Inferring one from the other is what put
+   * *"The registry did not say how many subjects it holds"* on screen during every first paint.
+   */
+  readonly loading?: boolean | undefined;
+  /** Opens the register dialog. Absent when this principal may not register a schema. */
+  readonly onRegister?: (() => void) | undefined;
+  /** Why the control will not press. Required by `Button` whenever `onRegister` is absent. */
+  readonly registerDisabledReason?: string | undefined;
 }
 
 export function SchemaWorkspace(props: SchemaWorkspaceProps): JSX.Element {
@@ -54,12 +71,34 @@ export function SchemaWorkspace(props: SchemaWorkspaceProps): JSX.Element {
             {registryVoice({
               subjectCount: props.subjectCount,
               globalLevel: props.globalLevel,
+              loading: props.loading,
             })}
           </p>
         </div>
-        <Button icon="plus" disabled disabledReason={REGISTER_UNAVAILABLE_REASON}>
-          Register schema
-        </Button>
+        {/* Two branches rather than `disabled={…}`: `Button` makes `disabledReason` mandatory
+            exactly when `disabled` is true, which is the rule that stops a greyed-out control with
+            no explanation beside it. */}
+        <Show
+          when={props.onRegister}
+          fallback={
+            <Button
+              icon="plus"
+              disabled
+              disabledReason={
+                props.registerDisabledReason ??
+                "You do not have permission to register a schema in this cluster's registry."
+              }
+            >
+              Register schema
+            </Button>
+          }
+        >
+          {(open) => (
+            <Button icon="plus" variant="primary" onClick={() => open()()}>
+              Register schema
+            </Button>
+          )}
+        </Show>
       </header>
 
       <div class="kui-schema-workspace__panes">

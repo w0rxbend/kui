@@ -195,10 +195,10 @@ export const CLUSTERS: readonly ClusterSummary[] = [
  * The topic tree of `SCREENS-V4.md` §2.2, in the order the *drawer* is expected to fix rather than
  * the order it is given.
  *
- * Deliberately jumbled: `internal` is written first and a favourite last, so a renderer that merely
- * preserved the caller's order would draw the padlocked row at the top and fail the case. The fold
- * in `nav/topicTree.ts` emits them already sorted; this fixture is what proves the drawer does not
- * depend on that.
+ * Deliberately jumbled: `internal` is written first and the largest prefix group last, so a
+ * renderer that merely preserved the caller's order would draw the padlocked row at the top and
+ * fail the case. The fold in `nav/topicTree.ts` emits them already sorted; this fixture is what
+ * proves the drawer does not depend on that.
  */
 export const TOPIC_TREE: readonly NavDestination[] = [
   {
@@ -224,13 +224,6 @@ export const TOPIC_TREE: readonly NavDestination[] = [
     href: "/topics?prefix=analytics",
     badge: { text: "3", tone: "neutral", description: "3 topics" },
     rank: "prefix",
-  },
-  {
-    id: "topic:orders.payments.v2",
-    label: "orders.payments.v2",
-    icon: "star",
-    href: "/topics/orders.payments.v2",
-    rank: "favourite",
   },
 ];
 

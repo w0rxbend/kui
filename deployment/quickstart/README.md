@@ -51,6 +51,7 @@ here waiting for it.
 | Container | Image | What it is |
 | --- | --- | --- |
 | `kui-quickstart-kafka` | `apache/kafka:4.3.1` | one Kafka node in KRaft mode: it is its own controller and there is no ZooKeeper |
+| `kui-quickstart-kafka-metrics` | `bitnamilegacy/jmx-exporter:1.4.0` | a Prometheus JMX exporter beside the broker, so the cluster's throughput is a number KUI can read. KUI reads a Prometheus endpoint and cannot read JMX: `MetricsSourceSettings.url` is a `SafeUrl`, restricted to `http` and `https` by `ARCHITECTURE.md` §14, so a `service:jmx:` address cannot be configured at all (ADR-050). Without this container every metrics card correctly says it cannot measure the figure — and that sentence is indistinguishable from KUI being unable to measure anything |
 | `kui-quickstart-seed`  | `apache/kafka:4.3.1` | a one-shot container that creates topics, publishes messages and sets consumer-group offsets, then exits |
 | `kui-quickstart-consumer` | `apache/kafka:4.3.1` | a long-lived consumer, so one consumer group is genuinely live rather than merely a set of committed offsets |
 | `kui-quickstart-schema-registry` | `apicurio/apicurio-registry:3.0.6` | a Schema Registry, so one topic holds Avro that KUI has to decode rather than read. Apicurio speaks the same REST API Confluent's registry does, at `/apis/ccompat/v7`, and is Apache-2.0 throughout |

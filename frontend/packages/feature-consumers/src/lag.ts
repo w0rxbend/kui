@@ -43,6 +43,24 @@
  * of a session — it has only one observation and will not divide by a made-up interval — and `0.0`
  * afterwards. Every field is therefore read defensively, and every figure goes through the kernel's
  * `figure`, which is `null` for anything that is not a number. Never `0`.
+ *
+ * ## Why every request names the groups it is about
+ *
+ * The endpoint answers cluster-wide when `group` is absent, and the list above it draws **one
+ * page**. Asked without scoping, a cluster with more groups than a page holds answers about groups
+ * that are not on screen — and `applyLagDelta` has no row for those, so it takes its
+ * `needs-full-list` branch and the caller pays for a whole group list on *every* poll. No wrong
+ * figure is produced; the entire saving is, silently, and the screen looks exactly as it does when
+ * the protocol is working.
+ *
+ * So `fetchLagDelta` takes the group ids it wants and sends them as repeated `group` parameters,
+ * which is what the parameter is for ("Only these groups; repeat the parameter"). Two consequences
+ * worth stating, because they are what make the scoping safe rather than merely cheaper:
+ *
+ * - `gone` is computed by the server over the groups it was asked about, so a group that vanished
+ *   from the page is still reported gone; it is not silently dropped by the filter.
+ * - a `changed` entry for a group with no row is then a genuine surprise rather than the ordinary
+ *   case, which is what lets `applyLagDelta` keep refusing it instead of guessing a row.
  */
 import type { KuiApiClient } from "@kui/api";
 import { apiFailure, figure, type Fetched } from "@kui/kernel";
@@ -121,12 +139,27 @@ export async function fetchLagDelta(
   api: KuiApiClient,
   clusterId: string,
   since?: string | undefined,
+  /**
+   * The groups this answer should be about — the page on screen.
+   *
+   * Omitted or empty means the whole cluster, which is the server's own reading of an absent
+   * `group`. See the header: asking cluster-wide from a screen that draws one page is what turns
+   * the incremental protocol off above one page without anything saying so.
+   */
+  groups?: readonly string[] | undefined,
 ): Promise<Fetched<LagDelta>> {
   const answer = await api.get("/api/v1/clusters/{clusterId}/consumer-groups/lag", {
-    // An absent `since` is the documented way to ask for everything. Sending an empty string
-    // instead would be an *unrecognised* token, which the server also answers in full — but only by
-    // accident of it not matching, and relying on that is relying on an implementation detail.
-    params: { path: { clusterId }, query: since === undefined ? {} : { since } },
+    params: {
+      path: { clusterId },
+      query: {
+        // An absent `since` is the documented way to ask for everything. Sending an empty string
+        // instead would be an *unrecognised* token, which the server also answers in full — but
+        // only by accident of it not matching, and relying on that is relying on an implementation
+        // detail. The same reasoning applies to `group`: an empty list is not "no groups".
+        ...(since === undefined ? {} : { since }),
+        ...(groups === undefined || groups.length === 0 ? {} : { group: [...groups] }),
+      },
+    },
   });
   if (!answer.ok) return apiFailure(answer.error);
 
@@ -151,13 +184,6 @@ export async function fetchLagDelta(
 }
 
 /**
- * What a delta does to the rows the screen already holds.
- *
- * A union rather than a `GroupSummary[]` with a side flag, because the two outcomes are not
- * variations on each other: one updates three fields in place, and the other says the incremental
- * protocol cannot continue and the caller must pay for a whole list.
- */
-/**
  * The two figures only a whole list carries.
  *
  * A lag answer names neither: it does not say how many coordinators failed and it does not count
@@ -169,6 +195,13 @@ export interface ListingFigures {
   readonly totalItems: number | null;
 }
 
+/**
+ * What a delta does to the rows the screen already holds.
+ *
+ * A union rather than a `GroupSummary[]` with a side flag, because the two outcomes are not
+ * variations on each other: one updates three fields in place, and the other says the incremental
+ * protocol cannot continue and the caller must pay for a whole list.
+ */
 export type LagMerge =
   | { readonly kind: "merged"; readonly rows: readonly GroupSummary[] }
   | { readonly kind: "needs-full-list"; readonly reason: string };
@@ -186,9 +219,11 @@ export type LagMerge =
  * Two conditions end the incremental run rather than being papered over:
  *
  * - `full` — the server did not honour the token. See the header: a lag answer cannot rebuild a row.
- * - a `changed` entry for a group with no row here. That is a group that appeared since the list was
- *   fetched, and there is no honest way to invent its topic count, coordinator or partial-read note.
- *   Adding a row with `topics: 0` and `coordinator: null` would print two facts nobody reported.
+ * - a `changed` entry for a group with no row here. Because every request names the page's own
+ *   group ids (see the header), that can only be a group that appeared since the list was
+ *   fetched — not the ordinary case of a cluster with more groups than a page holds — and there is
+ *   no honest way to invent its topic count, coordinator or partial-read note. Adding a row with
+ *   `topics: 0` and `coordinator: null` would print two facts nobody reported.
  */
 export function applyLagDelta(rows: readonly GroupSummary[], delta: LagDelta): LagMerge {
   if (delta.full) {
@@ -233,6 +268,11 @@ export function applyLagDelta(rows: readonly GroupSummary[], delta: LagDelta): L
  *    numbers over it would gain nothing; what the browser does not have is a place in the server's
  *    snapshot sequence, and a token is the only way to get one.
  * 2. From then on every poll carries the token forward and merges what comes back.
+ *
+ * Every one of those requests — the seeding call included — names the group ids currently on
+ * screen, read from `rows()` at the moment the request is made rather than captured once. That is
+ * the whole of the page-scoping described in the header, and reading it late is what keeps it
+ * correct after a `full` answer has replaced the rows with a fresh page.
  * 3. When the server answers in full — the token expired, or was never recognised — the merge
  *    refuses and this fetches the whole list again. That is the expensive call, and it happens when
  *    the cheap protocol has told us it cannot continue, which is the only time it is warranted.
@@ -270,8 +310,11 @@ export function pollLag(
     });
   };
 
+  /** The page, as the request names it. Read per request: the rows are edited in place by polls. */
+  const onScreen = (): readonly string[] => rows().map((row) => row.groupId);
+
   const tick = async (): Promise<void> => {
-    const answer = await fetchLagDelta(api, clusterId, since);
+    const answer = await fetchLagDelta(api, clusterId, since, onScreen());
     if (stopped) return;
     if (answer.kind !== "ready") {
       later(DEFAULT_POLL_MS);
@@ -289,16 +332,31 @@ export function pollLag(
   // The seeding call, step 1 above. It is a normal poll with no token, and the merge it produces is
   // discarded — `applyLagDelta` would answer `needs-full-list` for it, since a first answer is
   // always `full`, and refetching a list the caller fetched a moment ago would be waste.
-  void (async () => {
-    const seed = await fetchLagDelta(api, clusterId, undefined);
+  const seed = async (): Promise<void> => {
+    const answer = await fetchLagDelta(api, clusterId, undefined, onScreen());
     if (stopped) return;
-    if (seed.kind === "ready") {
-      since = seed.value.token ?? undefined;
-      later(seed.value.nextPollMs);
+    if (answer.kind === "ready") {
+      since = answer.value.token ?? undefined;
+      later(answer.value.nextPollMs);
     } else {
       later(DEFAULT_POLL_MS);
     }
-  })();
+  };
+
+  /*
+   * Scheduled rather than issued, and the zero is doing real work.
+   *
+   * `rows()` is a signal the caller writes from a *sibling* effect — the one that reads the list
+   * answer — and Solid 2 commits a write on a microtask. `pollLag` is started from the effect that
+   * runs straight after it, in the same tick, so a request composed here and now names the page as
+   * it stood *before* the answer that started this poll: an empty one, and therefore an unscoped
+   * cluster-wide request. A zero-delay timer runs after those microtasks have settled.
+   *
+   * This was found in a browser and not here. A unit test hands `pollLag` a plain variable that is
+   * already assigned, so the ordering it exercises is not the ordering the route has — which is
+   * exactly the shape of hole a test written beside its own subject leaves.
+   */
+  timer = setTimeout(() => void seed(), 0);
 
   return () => {
     stopped = true;

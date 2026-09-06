@@ -99,6 +99,18 @@
   white-space: nowrap;
 }
 
+/* "not measured" where the percentage would be.
+ *
+ * `ProgressBar`'s value slot is `min-width: 4ch` and right-aligned, sized for `61%`. Two words need
+ * more than four characters and must not wrap onto a second line — a two-line value box makes the
+ * three broker rows different heights, which reads as a fault rather than as an unmeasured disk. So
+ * the slot is allowed to be as wide as its words here and no wider, and the track gives up the
+ * space, which is the right trade on a bar that has nothing to draw. */
+.kui-broker-health .kui-progress__value--unknown {
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .kui-broker-health__why {
   margin: 0;
   font-size: var(--kui-font-size-xs);
@@ -197,4 +209,70 @@
   50% {
     opacity: 0.55;
   }
+}
+
+/* --- The Throughput card -------------------------------------------------------------------------
+ *
+ * Two things live here and neither is decoration.
+ *
+ * The header holds a legend and a range selector on one line, and the legend is also the readout:
+ * SCREENS-V4.md §3.1 puts the current value in the chip, which is what lets the plot have no
+ * y-axis at all. On a narrow card the pair wraps rather than the legend truncating, because a chip
+ * ellipsised to `prod…` is a number nobody can read.
+ *
+ * The coverage strip is the visible half of the never-a-zero rule. A bar of height zero and a bar
+ * that was never measured are the same picture — no ink — so the steps KUI did not sample are
+ * painted underneath the axis, in the same equal division of the same width the plot makes, and the
+ * card's caption counts them in words for anyone not looking at the picture. */
+
+.kui-throughput__controls {
+  display: flex;
+  gap: var(--kui-space-4);
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.kui-throughput {
+  display: flex;
+  flex-direction: column;
+  /* No gap. The strip belongs to the axis above it and a space between them would read as a second
+   * chart rather than as the coverage of the first. */
+  gap: 0;
+}
+
+.kui-throughput__coverage {
+  display: flex;
+  height: 6px;
+  border-radius: var(--kui-radius-xs);
+  /* `hidden` rather than nothing: the runs are square and the strip is rounded, so the first and
+   * last run have to be clipped to the strip's own corners. */
+  overflow: hidden;
+}
+
+.kui-throughput__coverage-run {
+  /* `flex-grow` is set inline, from the run's bucket count. `min-width: 0` so that a one-bucket run
+   * in a 288-bucket series is allowed to be narrower than a pixel rather than forcing the strip
+   * wider than the plot it is describing. */
+  min-width: 0;
+}
+
+/* A sampled step. Deliberately quiet: the interesting runs are the other ones, and a strip of solid
+ * ink under every chart would draw the eye to the chart that has nothing wrong with it. */
+.kui-throughput__coverage-run--measured {
+  background: var(--kui-color-border);
+}
+
+/* A step nothing was sampled in.
+ *
+ * Hatched rather than tinted, because colour is never the only signal (`SCREENS.md` §4.0) and this
+ * mark distinguishes "not measured" from "measured and low" — a pair that a hue alone cannot carry
+ * to a reader who cannot separate two of them. The stripe direction is the same one the product
+ * uses nowhere else, so it reads as its own thing rather than as a disabled control. */
+.kui-throughput__coverage-run--absent {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--kui-color-text-subtle) 0 2px,
+    transparent 2px 4px
+  );
 }

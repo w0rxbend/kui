@@ -170,6 +170,15 @@ export interface GroupSummary {
  * cannot: each branch writes its whole sentence.
  */
 export type GroupsHealth =
+  /**
+   * Nothing has answered yet, so there is no count to state.
+   *
+   * Its own branch rather than an absent total, because the two are different sentences and the
+   * screen was printing the second for the first: `ConsumersRoute` starts `total` at `null`, so the
+   * first paint of every visit said "N groups on this page, of an unstated total" — a confident
+   * sentence about a cluster nobody had asked yet, over a table of skeleton rows.
+   */
+  | { readonly kind: "counting" }
   | { readonly kind: "healthy"; readonly count: GroupCount; readonly rebalancing: number }
   | { readonly kind: "lagging"; readonly count: GroupCount; readonly behind: number }
   | { readonly kind: "incomplete"; readonly count: GroupCount; readonly coordinatorsMissing: number }
@@ -206,6 +215,10 @@ function countClause(count: GroupCount): string {
  */
 export function groupsVoice(health: GroupsHealth): string {
   switch (health.kind) {
+    case "counting":
+      // In words, because there is no figure. A count the browser has not asked for is not zero and
+      // it is not "this page's length, total unstated" — it is a question still in flight.
+      return "Asking this cluster how many consumer groups it has…";
     case "unavailable":
       return "Consumer group data is unavailable.";
     case "incomplete":
@@ -217,6 +230,11 @@ export function groupsVoice(health: GroupsHealth): string {
         health.behind,
       )} ${health.behind === 1 ? "is" : "are"} more than ${formatCount(LAG_WARN_ABOVE)} records behind.`;
     case "healthy":
+      if (health.count.kind === "total" && health.count.total === 0) {
+        // A counted zero, and the one count that takes no aside: "0 groups. Nothing is rebalancing"
+        // is arithmetic about an empty set, and the table under it already says what to do.
+        return "No consumer groups on this cluster.";
+      }
       if (health.rebalancing === 0) {
         return `${countClause(health.count)}. Nothing is rebalancing. Rare, and welcome.`;
       }
@@ -246,7 +264,16 @@ export function healthOf(
   rows: readonly GroupSummary[],
   coordinatorsMissing: number,
   totalItems: number | null,
+  /**
+   * Whether a list request is still out with nothing behind it.
+   *
+   * Defaulted, because every caller that has an answer in hand is describing an answer. It exists
+   * for the one caller that does not: the route's first paint, where `totalItems` is `null` because
+   * the question has not been asked rather than because the server declined to answer it.
+   */
+  waiting: boolean = false,
 ): GroupsHealth {
+  if (waiting && totalItems === null) return { kind: "counting" };
   const count: GroupCount =
     totalItems === null
       ? { kind: "page-only", shown: rows.length }

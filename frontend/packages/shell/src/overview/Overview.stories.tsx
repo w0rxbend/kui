@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { createQueryRegistry } from "@kui/kernel";
 
 import { Overview } from "./Overview.jsx";
 import { toOverviewModel } from "./load.js";
@@ -26,9 +27,15 @@ import type { OverviewData } from "./load.js";
  * Those are the states that are expensive to reach against a real cluster and cheap to get wrong.
  *
  * Every story mounts the product's own router over a memory history, because the tab and the cluster
- * come from the address and from nowhere else. That is what lets the two tabs be two stories rather
+ * come from the address and from nowhere else. That is what lets the tabs be separate stories rather
  * than one story with a control on it — and it is why the Storage stories are honest about what the
  * Storage tab does at that address, rather than about what a prop said it should do.
+ *
+ * The Traffic tab has stories of its own in `Traffic.stories.tsx`, because the states worth drawing
+ * there are states of a *request* rather than of the model these stories vary. The Throughput card
+ * appears on the Overview tab too, and in these stories it draws the not-configured sentence: the
+ * harness's default gateway answers `not_configured`, which is the honest answer for a fixture
+ * cluster that has no exporter behind it.
  */
 const meta = {
   title: "Screens/Overview",
@@ -48,7 +55,13 @@ const DASHBOARD = "/ui/clusters/prod-kyiv-01/dashboard";
 
 const story = (data: OverviewData, at: string = DASHBOARD): Story => ({
   args: { model: toOverviewModel(data) },
-  render: (args) => dashboardHost(at, () => <Overview model={args.model} />, "prod-kyiv-01")(),
+  /* Its own registry per story. The shared one is a browser tab's view of one server, which is
+     right in the product and wrong in a gallery: every story here names the same cluster, so they
+     would otherwise all draw whichever one was opened first. */
+  render: (args) =>
+    dashboardHost(at, () => <Overview model={args.model} queries={createQueryRegistry()} />, {
+      selected: "prod-kyiv-01",
+    })(),
 });
 
 /** Screenshots `01` and `05`: everything answered, everything fine. */
@@ -163,5 +176,6 @@ export const UnknownTab: Story = story(HEALTHY, `${DASHBOARD}/nonsense`);
  */
 export const NoClusterInTheAddress: Story = {
   args: { model: toOverviewModel(HEALTHY) },
-  render: (args) => dashboardHost("/ui", () => <Overview model={args.model} />)(),
+  render: (args) =>
+    dashboardHost("/ui", () => <Overview model={args.model} queries={createQueryRegistry()} />)(),
 };

@@ -574,18 +574,18 @@ export function topLag(groups: Reading<readonly ConsumerGroup[]>, limit = 4): Re
 /* --- The things KUI does not measure ------------------------------------------------------------- */
 
 /**
- * The three figures the design draws that this backend does not collect.
+ * The figures the design draws that this backend still does not collect.
  *
- * These are not failures and they are not empty states. There is no metrics service, no timeseries
- * store and no scrape loop anywhere in the seven services — the gateway's OpenAPI documents publish
- * no endpoint that could answer any of them. The dashboard says so in a sentence and draws no axes,
- * because an empty chart with a labelled time axis is a claim that the data is merely missing right
- * now, and somebody will go looking for the broken exporter.
+ * They are not failures and they are not empty states. `services/metrics` answers one question —
+ * throughput — and the four endpoints behind these are wave 5's; until they exist the gateway's
+ * OpenAPI documents publish nothing that could answer any of them. The dashboard says so in a
+ * sentence and draws no axes, because an empty chart with a labelled time axis is a claim that the
+ * data is merely missing right now, and somebody will go looking for the broken exporter.
+ *
+ * Throughput is deliberately not in this list any more: it has an endpoint, so the card asks for it
+ * and renders whatever comes back — including `not_configured`, which is a different sentence with
+ * a different cause. See `throughput.ts` and `ThroughputCard.tsx`.
  */
-export const throughputSeries = (): Reading<never> =>
-  notCollected(
-    "KUI does not record throughput over time. Nothing samples broker byte rates, so there is no history to draw.",
-  );
 
 export const productionRate = (): Reading<never> =>
   notCollected("KUI does not sample the current produce rate.");
@@ -593,6 +593,25 @@ export const productionRate = (): Reading<never> =>
 export const latencyPercentiles = (): Reading<never> =>
   notCollected(
     "KUI does not record request latency. Produce and fetch percentiles come from broker JMX, which nothing here scrapes.",
+  );
+
+/**
+ * The Traffic tab's last row (SCREENS-V4.md §4.2), two thirds of which have no source.
+ *
+ * `…/metrics/producers?top=` and `…/metrics/request-handlers` are named in M7 and are wave 5's, so
+ * these two cards keep their sentence beside a Throughput card that is now real. That mixture is
+ * the point of the tab: it is what stops the strip being four segments of the same nothing, and it
+ * is also why neither of these may be filled from something the browser happens to hold — a
+ * producer rate computed from a message browse is not a broker metric.
+ */
+export const topProducers = (): Reading<never> =>
+  notCollected(
+    "KUI does not record which clients are producing. Per-client byte rates come from broker JMX, which this build does not yet scrape.",
+  );
+
+export const requestHandlers = (): Reading<never> =>
+  notCollected(
+    "KUI does not record request-handler idle time. It is a broker JMX gauge, which this build does not yet scrape.",
   );
 
 /**

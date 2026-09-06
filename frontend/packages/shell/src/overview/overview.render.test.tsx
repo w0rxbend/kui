@@ -16,8 +16,9 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { createSignal, flush } from "solid-js";
+import { createQueryRegistry } from "@kui/kernel";
 
-import { Overview } from "./Overview.jsx";
+import { Overview, UNMEASURED_DISK } from "./Overview.jsx";
 import { toOverviewModel } from "./load.js";
 import {
   CONSUMERS_UNAVAILABLE,
@@ -26,10 +27,16 @@ import {
   NO_DISK_SIZES,
   PARTIAL_DISKS,
   SPARSE_SUMMARY,
+  THROUGHPUT_ALL_ABSENT,
+  THROUGHPUT_FORBIDDEN,
+  THROUGHPUT_NOT_CONFIGURED,
+  THROUGHPUT_UNAVAILABLE,
+  THROUGHPUT_WITH_A_GAP,
   UNHEALTHY,
   ZERO_BYTE_DISKS,
+  throughputOk,
 } from "./fixtures.js";
-import { dashboardHost } from "./harness.jsx";
+import { AddressProbe, THROUGHPUT_PATH, dashboardHost, stubApi } from "./harness.jsx";
 import { findViolations, mount, type Mounted } from "../chrome/testing.js";
 import type { OverviewData } from "./load.js";
 
@@ -59,6 +66,57 @@ const keep = (m: Mounted): Mounted => {
 
 const show = (data: OverviewData, at: string = DASHBOARD) =>
   keep(mount(dashboardHost(at, () => <Overview model={toOverviewModel(data)} />)));
+
+/**
+ * Lets the throughput request land, then lets the DOM catch up.
+ *
+ * `flush()` drains Solid's queue and does not resolve a promise. The card asks on mount, maps the
+ * answer and then draws, which is three microtask hops; a case that flushed once would assert
+ * against the waiting box and read as a card drawing nothing.
+ */
+const settle = async (rounds = 6): Promise<void> => {
+  for (let round = 0; round < rounds; round += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await flush();
+  }
+};
+
+/**
+ * The dashboard at an address, over a gateway that answers the throughput endpoint with `body`.
+ *
+ * Each case gets its own query registry. The shared one is module state — a browser tab's view of
+ * one server, which is right in the product — so two cases naming the same cluster would otherwise
+ * share an answer and the second would assert against the first one's stub.
+ */
+const showTraffic = async (body: unknown, at: string = `${DASHBOARD}/traffic`) => {
+  const stub = stubApi({ [THROUGHPUT_PATH]: body });
+  const mounted = keep(
+    mount(
+      dashboardHost(
+        at,
+        () => (
+          <>
+            <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />
+            <AddressProbe />
+          </>
+        ),
+        { api: stub.api },
+      ),
+    ),
+  );
+  await settle();
+  return { ...mounted, stub };
+};
+
+/** The card's hidden data table, which is the honest reading of the bars beside it. */
+const throughputTable = (container: HTMLElement): HTMLTableElement | null =>
+  container.querySelector('[data-testid="panel-throughput"] table');
+
+/** One bucket's two cells, by index, as a screen reader would read them. */
+const bucketCells = (container: HTMLElement, index: number): readonly string[] => {
+  const row = throughputTable(container)?.querySelectorAll("tbody tr")[index];
+  return [...(row?.querySelectorAll("td") ?? [])].map((cell) => cell.textContent ?? "");
+};
 
 /** Which segment the strip has marked, read the way a screen reader reads it. */
 const currentTab = (container: HTMLElement): string | null =>
@@ -97,6 +155,7 @@ describe("the tab comes from the route and from nowhere else", () => {
     );
     expect(hrefs).toEqual([
       "/ui/clusters/prod-kyiv-01/dashboard/overview",
+      "/ui/clusters/prod-kyiv-01/dashboard/traffic",
       "/ui/clusters/prod-kyiv-01/dashboard/storage",
     ]);
   });
@@ -116,7 +175,7 @@ describe("the tab comes from the route and from nowhere else", () => {
     // being fetched for. Everywhere else the parameter wins, which is what makes a pasted link show
     // the recipient what the sender saw.
     const { container } = keep(
-      mount(dashboardHost("/ui", () => <Overview model={toOverviewModel(HEALTHY)} />, "prod-kyiv-01")),
+      mount(dashboardHost("/ui", () => <Overview model={toOverviewModel(HEALTHY)} />, { selected: "prod-kyiv-01" })),
     );
     expect(container.querySelector('[data-testid="tab-strip"] a')?.getAttribute("href")).toBe(
       "/ui/clusters/prod-kyiv-01/dashboard/overview",
@@ -177,17 +236,9 @@ describe("the panels this backend cannot fill", () => {
   it("says what is not measured, rather than drawing an empty chart", () => {
     const { container } = show(HEALTHY);
 
-    const throughput = container.querySelector('[data-testid="panel-throughput"]');
-    expect(throughput?.textContent).toContain("does not record throughput");
-    // No axis, no bars, no range selector. An empty plot with a labelled time axis claims the data
-    // is merely missing right now and sends somebody to find a broken exporter. (The card's own
-    // title glyph is an svg too, so the check is for a *plot*, not for the absence of all svg.)
-    expect(throughput?.querySelector(".kui-chart, .kui-bar-chart, [role=\"img\"]")).toBeNull();
-
     const latency = container.querySelector('[data-testid="panel-latency"]');
     expect(latency?.textContent).toContain("does not record request latency");
     expect(latency?.querySelector(".kui-chart, .kui-line-chart, [role=\"img\"]")).toBeNull();
-
   });
 
   it("says the same of the record-size distribution on the storage tab", () => {
@@ -436,6 +487,34 @@ describe("a broker whose disk answered zero", () => {
     expect(container.textContent).not.toContain("0 B of 0 B");
   });
 
+  it("prints words where the percentage would be, not the punctuation for one", () => {
+    // `disk — this broker reported a zero-byte disk` was the rendering: the em dash is
+    // `ProgressBar`'s own default for a value it cannot draw, and it is not *bare* — the sentence is
+    // directly beneath it — but between a caption and a sentence it reads as a missing figure
+    // rather than as an admission. The product's rule is that a figure that cannot be measured says
+    // so in words, and this row was the last place on this screen spelling it with punctuation.
+    const { container } = show(ZERO_BYTE_DISKS);
+    const bars = [...container.querySelectorAll('[data-testid="panel-broker-health"] .kui-progress')];
+
+    expect(bars).toHaveLength(3);
+    for (const bar of bars) {
+      expect(bar.querySelector(".kui-progress__value")?.textContent).toBe(UNMEASURED_DISK);
+      expect(bar.textContent).not.toContain("—");
+      // And the screen-reader rendering says the same thing, rather than announcing a dash.
+      expect(bar.querySelector('[role="progressbar"]')?.getAttribute("aria-valuetext")).toBe(
+        UNMEASURED_DISK,
+      );
+    }
+  });
+
+  it("still prints the percentage where there is one, so the words are not the only thing it can say", () => {
+    const { container } = show(HEALTHY);
+    const values = [
+      ...container.querySelectorAll('[data-testid="panel-broker-health"] .kui-progress__value'),
+    ].map((el) => el.textContent);
+    expect(values).toEqual(["61%", "58%", "83%"]);
+  });
+
   it("says the same thing under the broker-health bar, in the same words", () => {
     const { container } = show(ZERO_BYTE_DISKS);
     const why = [
@@ -468,3 +547,266 @@ describe("a broker whose disk answered zero", () => {
     expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
   });
 });
+
+/**
+ * The Traffic tab, and the first chart in this product drawn from a broker metric.
+ *
+ * Every case here mounts the real route over the real router with a stubbed gateway, so the request
+ * that goes out, the address the selector writes and the picture the card draws are all the
+ * product's own. A case that composed `ThroughputCard` by hand and handed it a state would assert
+ * the arrangement the case itself made — which is the shape twelve of last wave's rules had.
+ */
+describe("the Traffic tab", () => {
+  it("draws the same stat cards as Overview, and its own last row", async () => {
+    // §4.2's composition rule: the tab changes the voice line, the last row and the address, and
+    // nothing else. The stat cards and rows 2 and 3 are identical, which is what makes the strip
+    // cheap enough to be worth having.
+    const traffic = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
+    const overview = show(HEALTHY);
+
+    for (const stat of ["stat-brokers", "stat-topics", "stat-in-sync", "stat-production", "stat-lag"]) {
+      expect(traffic.container.querySelector(`[data-testid="${stat}"]`)).not.toBeNull();
+      expect(overview.container.querySelector(`[data-testid="${stat}"]`)).not.toBeNull();
+    }
+    // Rows 2 and 3, repeated rather than replaced.
+    expect(traffic.container.querySelector('[data-testid="panel-broker-health"]')).not.toBeNull();
+    expect(traffic.container.querySelector('[data-testid="panel-partitions"]')).not.toBeNull();
+    expect(traffic.container.querySelector('[data-testid="panel-latency"]')).not.toBeNull();
+
+    // And the last row is this tab's own: three cards Overview does not draw.
+    for (const panel of ["panel-top-producers", "panel-message-sizes", "panel-request-handlers"]) {
+      expect(traffic.container.querySelector(`[data-testid="${panel}"]`)).not.toBeNull();
+      expect(overview.container.querySelector(`[data-testid="${panel}"]`)).toBeNull();
+    }
+    // Storage belongs to the other two tabs (§4.2: `Storage by broker` is gone here).
+    expect(traffic.container.querySelector('[data-testid="panel-storage"]')).toBeNull();
+  });
+
+  it("keeps the three cards wave 5 will fill saying so, beside a chart that is real", async () => {
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+
+    expect(container.querySelector('[data-testid="panel-top-producers"]')?.textContent).toContain(
+      "does not record which clients are producing",
+    );
+    expect(container.querySelector('[data-testid="panel-request-handlers"]')?.textContent).toContain(
+      "does not record request-handler idle time",
+    );
+    // None of the three may borrow a figure from something the browser happens to hold: a producer
+    // rate computed from a message browse is not a broker metric.
+    for (const panel of ["panel-top-producers", "panel-message-sizes", "panel-request-handlers"]) {
+      const card = container.querySelector(`[data-testid="${panel}"]`);
+      expect(card?.querySelector('[role="img"]')).toBeNull();
+    }
+  });
+
+  it("names the tab in the strip and marks it current at its own address", async () => {
+    const { container } = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
+    expect(currentTab(container)).toBe("Traffic");
+  });
+
+  it("promises only what it measures in the voice line", async () => {
+    const measured = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    expect(measured.container.textContent).toContain("KUI measures the first of those");
+
+    const unconfigured = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
+    // The design's sentence names three things and this cluster measures none of them. Printed
+    // unqualified over three cards that say so, it is the cheerful-line-over-a-broken-cluster
+    // failure in a different hat: a reader who believes the header goes looking for the chart.
+    expect(unconfigured.container.textContent).toContain("no metrics source");
+    expect(unconfigured.container.textContent).not.toContain("KUI measures the first of those");
+  });
+});
+
+describe("a null bucket is a gap and never a zero", () => {
+  it("draws the gap as a gap, beside a measured zero drawn as a zero", async () => {
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+
+    // The fixture is built so the two cases sit in one series: bucket 0 was measured and was zero,
+    // buckets 100..119 were never sampled. As bars they are the same picture — no ink — which is
+    // exactly why the reading that matters is the one a screen reader gets.
+    expect(bucketCells(container, 0)).toEqual(["0 B/s", "0 B/s"]);
+    expect(bucketCells(container, 100)).toEqual(["—", "—"]);
+    expect(bucketCells(container, 119)).toEqual(["—", "—"]);
+    // And a bucket either side of the hole still carries its rate, so this is not a case that
+    // passes over a chart that lost every value.
+    expect(bucketCells(container, 99)).not.toContain("—");
+    expect(bucketCells(container, 120)).not.toContain("—");
+  });
+
+  it("paints the unsampled run on the coverage strip, so the gap is visible and not merely absent", async () => {
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    const runs = [
+      ...container.querySelectorAll('[data-testid="panel-throughput"] .kui-throughput__coverage-run'),
+    ];
+
+    const absent = runs.filter((run) => run.classList.contains("kui-throughput__coverage-run--absent"));
+    expect(absent).toHaveLength(1);
+    // Twenty buckets wide, which is the flex-grow that makes it line up with the twenty columns the
+    // chart drew nothing in. A `0`-filled fold would produce no absent run at all.
+    expect(absent[0]?.getAttribute("style")).toContain("20 0 0%");
+    expect(runs.filter((run) => run.classList.contains("kui-throughput__coverage-run--measured"))).toHaveLength(2);
+  });
+
+  it("counts the gaps in words under the chart", async () => {
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    const caption = container.querySelector('[data-testid="panel-throughput"] .kui-panel__caption');
+    expect(caption?.textContent).toContain("20 of the 288 5-minute steps");
+    expect(caption?.textContent).toContain("rather than as a rate of zero");
+  });
+
+  it("draws the whole axis for a window nothing was sampled in, and says so", async () => {
+    // The other half of the constant-bucket-count rule, seen from the browser: a window with no
+    // samples draws the same 288 steps a busy one does, so a quiet day and a busy day are the same
+    // shape. A card that drew only the buckets it had would draw a short axis for a quiet window.
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_ALL_ABSENT));
+
+    expect(throughputTable(container)?.querySelectorAll("tbody tr")).toHaveLength(288);
+    expect(container.querySelector('[data-testid="panel-throughput"]')?.textContent).toContain(
+      "Nothing has been sampled in this window yet",
+    );
+    // No legend figure either: there is no current rate, and an em dash in a chip reads as a
+    // rendering fault where the sentence in the plot has already said what is missing.
+    const legend = container.querySelectorAll(
+      '[data-testid="panel-throughput"] .kui-chart-legend__value',
+    );
+    expect(legend).toHaveLength(0);
+  });
+
+  it("prints the newest measured rate in each legend chip", async () => {
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    const chips = [
+      ...container.querySelectorAll('[data-testid="panel-throughput"] .kui-chart-legend__item'),
+    ].map((item) => item.textContent?.trim());
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toMatch(/^produce.*\/s$/);
+    expect(chips[1]).toMatch(/^consume.*\/s$/);
+  });
+});
+
+describe("a cluster with no metrics source", () => {
+  it("draws the sentence and no axis", async () => {
+    const { container } = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
+    const card = container.querySelector('[data-testid="panel-throughput"]');
+
+    expect(card?.textContent).toContain("No metrics source is configured for it");
+    // An axis is a claim that the quantity is measured and merely absent right now; this cluster
+    // has nothing measuring it, and a labelled time axis over that sends somebody to go and find a
+    // broken exporter that was never configured.
+    expect(card?.querySelector('[role="img"]')).toBeNull();
+    expect(card?.querySelector("table")).toBeNull();
+    expect(card?.querySelector(".kui-plot__axis")).toBeNull();
+    // And it is not drawn as a failure: no retry, because no retry could ever succeed.
+    expect(card?.querySelector("button")).toBeNull();
+  });
+
+  it("still offers the range control, because the card is the same card", async () => {
+    // `Card` keeps `headerEnd` in every state on purpose. A selector that vanished with the data
+    // would remove the only way out of a window with nothing in it.
+    const { container } = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
+    expect(
+      container.querySelector('[data-testid="panel-throughput"] [role="radiogroup"]'),
+    ).not.toBeNull();
+  });
+
+  it("says which permission is missing rather than drawing an empty card", async () => {
+    // Found by mutation: replacing this branch's sentence with nothing left the whole suite green,
+    // because no case fed the card a `forbidden` section. `MetricsMapping` cannot produce one
+    // today, but `Section` has five statuses and the gateway's capability fold is entitled to any
+    // of them — a status the browser refuses to draw is a blank card on the day a service starts
+    // sending it, which is the failure `Card`'s "the frame never disappears" rule exists to stop.
+    const { container } = await showTraffic(THROUGHPUT_FORBIDDEN);
+    const card = container.querySelector('[data-testid="panel-throughput"]');
+
+    expect(card?.textContent).toContain("You do not have permission");
+    // Not a failure and not a retry: retrying will never help, and offering one teaches an operator
+    // that the button does nothing.
+    expect(card?.querySelector("button")).toBeNull();
+    expect(card?.querySelector('[role="img"]')).toBeNull();
+  });
+
+  it("draws a failed exporter as a failure with a code and a retry, which is a different card", async () => {
+    const { container } = await showTraffic(THROUGHPUT_UNAVAILABLE);
+    const card = container.querySelector('[data-testid="panel-throughput"]');
+    expect(card?.textContent).toContain("The metrics exporter did not answer.");
+    expect(card?.textContent).toContain("KUI-UPSTREAM-UNAVAILABLE");
+    expect(card?.querySelector("button")?.textContent).toContain("Retry");
+  });
+});
+
+describe("the range selector", () => {
+  it("puts the range in the address, so a colleague can be sent one", async () => {
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    expect(container.querySelector('[data-testid="address"]')?.textContent).toBe(
+      "/ui/clusters/prod-kyiv-01/dashboard/traffic",
+    );
+
+    choose7d(container);
+    await settle();
+
+    expect(container.querySelector('[data-testid="address"]')?.textContent).toBe(
+      "/ui/clusters/prod-kyiv-01/dashboard/traffic?range=7d",
+    );
+  });
+
+  it("opens on the window the address names, and asks for that one", async () => {
+    // The other direction, and the one that makes a pasted link worth sending: the address is read
+    // as well as written. A selector that only wrote to it would move the label and leave the
+    // request on the default window.
+    const { container, stub } = await showTraffic(
+      throughputOk(THROUGHPUT_WITH_A_GAP),
+      `${DASHBOARD}/traffic?range=30d`,
+    );
+
+    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=30d`]);
+    expect(container.querySelector('[role="radiogroup"] input[value="30d"]')).toHaveProperty(
+      "checked",
+      true,
+    );
+  });
+
+  it("reaches the request and not only the label", async () => {
+    const { container, stub } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=24h`]);
+
+    choose7d(container);
+    await settle();
+
+    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=24h`, `${THROUGHPUT_PATH}?range=7d`]);
+  });
+
+  it("resolves a window nobody has to the default rather than refusing the page", async () => {
+    // `?range=` is user-editable in the same way the tab segment is, and a typo is not an error
+    // state. Answering `90d` with a day of data under a label the caller chose is the one failure a
+    // chart cannot show its reader, which is why the *request* falls back too.
+    const { container, stub } = await showTraffic(
+      throughputOk(THROUGHPUT_WITH_A_GAP),
+      `${DASHBOARD}/traffic?range=90d`,
+    );
+    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=24h`]);
+    expect(container.querySelector('[role="radiogroup"] input[value="24h"]')).toHaveProperty(
+      "checked",
+      true,
+    );
+  });
+
+  /* Thirty seconds rather than the default five. Axe walks the whole subtree, and a 24h series is
+     288 rows of hidden data table beside 576 bar paths — the cost of the chart drawing every bucket
+     the server sent rather than re-bucketing it, which is the decision `throughput.ts` argues for. */
+  it("has no accessibility violations with a chart on the screen", { timeout: 30_000 }, async () => {
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
+  });
+
+  it("has no accessibility violations when there is nothing to measure", async () => {
+    const { container } = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
+    expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
+  });
+});
+
+/** Picks `7d` the way a pointer does: the label points at the input, so the label is what is hit. */
+function choose7d(container: HTMLElement): void {
+  const input = container.querySelector<HTMLInputElement>('[role="radiogroup"] input[value="7d"]');
+  if (input === null) throw new Error("no 7d segment");
+  input.click();
+  flush();
+}

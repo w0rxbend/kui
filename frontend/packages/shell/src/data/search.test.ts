@@ -13,7 +13,6 @@ import { describe, expect, it } from "vitest";
 import type { KuiApiClient } from "@kui/api";
 
 import {
-  NO_RESULTS,
   SEARCH_LIMIT,
   decodeSearch,
   fetchSearch,
@@ -23,6 +22,16 @@ import {
   unavailableServices,
   type SearchLinks,
 } from "./search.js";
+
+/**
+ * Nothing found and nothing missing.
+ *
+ * A fixture here rather than an export from the module: the product has no path that produces this
+ * answer without asking the gateway — emptying the box ends the search and builds no answer — so a
+ * constant carrying that claim in the source was one more export with no caller. The three cases
+ * below use it as what it is, the value a real answer decodes to when the gateway found nothing.
+ */
+const NOTHING = { topics: [], groups: [], subjects: [], partial: [] } as const;
 
 const ANSWER = {
   results: {
@@ -54,7 +63,7 @@ describe("reading the gateway's answer", () => {
     // Every list is optional and so is `results` itself: a gateway that routes no schema service
     // omits `subjects` entirely, which is a normal answer and not a malformed one.
     for (const body of [undefined, null, 7, "no", {}, { results: {} }, { results: null }]) {
-      expect(decodeSearch(body)).toEqual(NO_RESULTS);
+      expect(decodeSearch(body)).toEqual(NOTHING);
     }
   });
 
@@ -82,13 +91,13 @@ describe("reading the gateway's answer", () => {
 
 describe("what the field is showing", () => {
   it("is empty only when everybody was asked and nobody matched", () => {
-    expect(searchStatus({ kind: "ready", answer: NO_RESULTS })).toBe("empty");
+    expect(searchStatus({ kind: "ready", answer: NOTHING })).toBe("empty");
   });
 
   it("is not empty when a service was never asked, however few rows came back", () => {
     /* "Nothing matches" over a search that never reached the registry is a false negative, and a
        false negative in a search box is indistinguishable from a true one. */
-    const answer = { ...NO_RESULTS, partial: ["schema"] };
+    const answer = { ...NOTHING, partial: ["schema"] };
     expect(searchStatus({ kind: "ready", answer })).toBe("ready");
   });
 
@@ -101,7 +110,7 @@ describe("what the field is showing", () => {
   it("names a service in words, and keeps an id it has never heard of", () => {
     // "schema" under a search box reads as a noun the operator was looking for rather than as the
     // name of a service that was not asked.
-    expect(unavailableServices({ ...NO_RESULTS, partial: ["schema", "ksql"] })).toEqual([
+    expect(unavailableServices({ ...NOTHING, partial: ["schema", "ksql"] })).toEqual([
       "Schema Registry",
       "ksql",
     ]);

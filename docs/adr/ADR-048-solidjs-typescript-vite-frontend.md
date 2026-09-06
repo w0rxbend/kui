@@ -120,14 +120,14 @@ largest cost of leaving Scala.js, and the only acceptable answer is a mechanism 
 
 <!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -->
 **The source document.** The committed OpenAPI documents are the asset: `docs/api/openapi.json`
-(50 paths and 144 schemas, OpenAPI 3.1.0) is emitted by
+(50 paths and 146 schemas, OpenAPI 3.1.0) is emitted by
 `kui.gateway.api.openapi.OpenApiDocument` from the gateway's Tapir endpoints, and each service
 emits its own beside it. They are regenerated and diff-checked by the build already
 (`openApi` / `openApiCheck`), so they cannot drift from the server.
 
 **They cannot be used directly, and finding out why is the reason this section exists.** The
-committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 45 of
-its 60 operations, across 35 of its 50 paths, and `If-Match` on 2 operations more. But ADR-020
+committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 46 of
+its 61 operations, across 35 of its 50 paths, and `If-Match` on 2 operations more. But ADR-020
 makes that header a signed statement the **gateway** mints, and ADR-040 makes the gateway **strip
 every inbound `X-Kui-*` header from browsers at the edge**. Generating a browser client from that
 document produces types that oblige every call site to supply an internal trust header the
@@ -140,7 +140,7 @@ So:
 - The gateway's existing generator gains a second output, **`docs/api/openapi.browser.json`** —
   the *edge view*: the aggregate with every `X-Kui-*` header parameter removed, produced by the
   same projection that `EdgeHeaders.strip` applies at runtime, in the same module, from the
-  same list. `X-Csrf-Token` on 19 operations and `If-Match` on 2 operations **stay**, because the
+  same list. `X-Csrf-Token` on 20 operations and `If-Match` on 2 operations **stay**, because the
   browser genuinely does send those and the types should force it to.
 - It is committed and `--check`ed exactly like the existing documents, so a contract change that
   is not regenerated fails CI.

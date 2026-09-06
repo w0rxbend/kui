@@ -57,7 +57,7 @@ import {
 } from "@kui/kernel";
 import { healthChip } from "./TopicPage.jsx";
 import { TopicCards } from "./TopicCards.jsx";
-import { isCompacted, matchesFilter, type TopicFilter } from "./topicList.js";
+import { SORTABLE_COLUMNS, isCompacted, matchesFilter, type TopicFilter } from "./topicList.js";
 import type { TopicRow } from "./types.js";
 
 /**
@@ -163,20 +163,54 @@ export const DEFAULT_TOPIC_QUERY: TopicListQuery = {
 };
 
 /**
- * The sort control's options, in the column ids the table already sorts by.
+ * The query an address asks for.
  *
- * One vocabulary rather than two, so the `Sort ·` menu and a click on a column heading write the
- * same `Sort` and cannot disagree about which order the list is in. The ids not offered here —
- * health and cleanup policy — are the ones the server sorts by nothing, and they are not marked
- * sortable in the table either, so no control anywhere offers an order the cluster cannot produce.
+ * ## Why the address is read at all
+ *
+ * The drawer's topic tree links its prefix rows at `…/topics?q=orders.`, and until now this screen
+ * seeded `DEFAULT_TOPIC_QUERY` and read the address only for `?tab=` — so every one of those links
+ * was honest about where it was going and landed on an unfiltered list of the whole cluster. The
+ * link and the destination are owned by two different packages, which is exactly how a defect like
+ * that survives: each half is correct on its own.
+ *
+ * `showInternal=true` is here for the same reason and no other: it is the one facet the wire has
+ * (`isServerFacet`), so it is the only one a link can carry and have mean the same thing on the
+ * recipient's cluster.
+ *
+ * ## What is deliberately not read
+ *
+ * The page, the page size and the order. Nothing links to them; they are this reader's own controls
+ * over a list rather than a description of which list, and a page number read out of an address
+ * that
+ * the very next keystroke resets to 1 would be two sources of truth for one number.
+ */
+export function queryFromAddress(search: string): TopicListQuery {
+  const params = new URLSearchParams(search);
+  return {
+    ...DEFAULT_TOPIC_QUERY,
+    search: (params.get("q") ?? "").trim(),
+    // Only `true`. A `?showInternal=1` this screen decided to honour would be a parameter spelling
+    // the wire does not have, invented in the browser.
+    facet: params.get("showInternal") === "true" ? "internal" : DEFAULT_TOPIC_QUERY.facet,
+  };
+}
+
+/**
+ * The sort control's options, derived from the one list that knows which columns the cluster
+ * orders.
+ *
+ * Derived rather than written out, because this menu and `toTopicQuery`'s field map are the two
+ * ends
+ * of one vocabulary and they used to be two hand-kept lists in two files. An option added here with
+ * no field there sorts by nothing and says nothing about it; taking both from `SORTABLE_COLUMNS`
+ * makes that unwritable rather than merely discouraged.
+ *
+ * The empty value is the server's own order and is not a column, which is why it is the one entry
+ * still written here.
  */
 const SORT_OPTIONS: readonly { readonly value: string; readonly label: string }[] = [
   { value: "", label: "the server's order" },
-  { value: "name", label: "topic" },
-  { value: "partitions", label: "partitions" },
-  { value: "replication", label: "replicas" },
-  { value: "records", label: "records" },
-  { value: "size", label: "size" },
+  ...SORTABLE_COLUMNS.map((column) => ({ value: column.columnId, label: column.label })),
 ];
 
 const FACETS: readonly { readonly value: TopicFilter; readonly label: string }[] = [

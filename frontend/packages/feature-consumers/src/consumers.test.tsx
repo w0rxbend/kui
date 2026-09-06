@@ -87,8 +87,35 @@ describe("the voice", () => {
     // Six rows on the page, ninety on the cluster. The sentence is about the cluster: this is
     // screenshot `04`'s own case, where `14 groups` sits over six drawn rows.
     const health = healthOf(SAMPLE_GROUPS, 0, 90);
-    expect(health.kind !== "unavailable" && health.count).toEqual({ kind: "total", total: 90 });
+    // The two branches that carry no count are excluded by name rather than by a truthiness check,
+    // so a third one added later is a type error here instead of a silently skipped assertion.
+    expect(
+      health.kind !== "unavailable" && health.kind !== "counting" && health.count,
+    ).toEqual({ kind: "total", total: 90 });
     expect(groupsVoice(health)).toContain("90 groups");
+  });
+
+  it("says the question is still out rather than stating a count nobody has asked for", () => {
+    /*
+     * `ConsumersRoute` starts its total at `null`, so before this branch existed the first paint of
+     * every visit read "0 groups on this page, of an unstated total" — the sentence a server that
+     * *answered without a total* earns, printed over a request that had not come back. The two are
+     * different facts and the screen now draws them differently.
+     */
+    expect(groupsVoice(healthOf([], 0, null, true))).toContain("Asking this cluster");
+    expect(groupsVoice(healthOf([], 0, null, true))).not.toContain("unstated total");
+    expect(groupsVoice(healthOf([], 0, null, true))).not.toMatch(/\b0 groups\b/);
+  });
+
+  it("keeps stating the count it already has while a refresh is out", () => {
+    // A poll that is in flight must not blank a sentence about figures still on screen: the count
+    // the server gave is the best answer anybody has until a better one arrives.
+    expect(groupsVoice(healthOf(SAMPLE_GROUPS, 0, 90, true))).toContain("90 groups");
+  });
+
+  it("states a counted zero as a sentence, not as an arithmetic aside", () => {
+    // `0 groups. Nothing is rebalancing. Rare, and welcome.` is arithmetic over an empty set.
+    expect(groupsVoice(healthOf([], 0, 0))).toBe("No consumer groups on this cluster.");
   });
 
   it("says the total is unstated rather than printing the page's own length as one", () => {
@@ -267,6 +294,58 @@ describe("the group list", () => {
     dispose();
   });
 
+  it("draws no paginator for a caller that cannot say how big a page is", async () => {
+    /*
+     * The control used to appear on `onPage` alone and take `props.pageSize ?? props.rows.length`
+     * for its page size — the array's own length, which is the one quantity the prop's own doc four
+     * lines above it forbids. On the last page of a list that is smaller than a page, so every
+     * figure the control drew was arithmetic over how many rows happened to come back.
+     *
+     * A caller that can answer "go to page 4" knows what it asked for and supplies both. One that
+     * cannot gets no control, rather than one whose numbers are made up.
+     */
+    const { container, dispose } = mount(() => (
+      <GroupList rows={SAMPLE_GROUPS} totalItems={90} onPage={noop} hrefFor={(id) => `/g/${id}`} />
+    ));
+    await flush();
+    expect(container.querySelector('[data-testid="consumer-groups-pagination"]')).toBeNull();
+    dispose();
+  });
+
+  it("counts rows by the page the screen asked for, not by the rows that came back", async () => {
+    // A short last page: three rows of a page that holds six, on page three of ninety. Read off
+    // `rows.length` the range would say 7–9; read off the request it says 13–15, which is where
+    // these rows actually sit in the list.
+    const { container, dispose } = mount(() => (
+      <GroupList
+        rows={SAMPLE_GROUPS.slice(0, 3)}
+        totalItems={90}
+        page={3}
+        pageSize={6}
+        onPage={noop}
+        hrefFor={(id) => `/g/${id}`}
+      />
+    ));
+    await flush();
+    const paging = container.querySelector('[data-testid="consumer-groups-pagination"]');
+    expect(paging?.textContent).toContain("Showing 13–15 of 90");
+    dispose();
+  });
+
+  it("says the count is still being asked for while the first answer is out", async () => {
+    // The screen's first paint. Skeleton rows, and a sentence that describes a question rather than
+    // a cluster — this is the state `ConsumersRoute` opens in on every visit.
+    const { container, dispose } = mount(() => (
+      <GroupList rows={[]} loading hrefFor={(id) => `/g/${id}`} />
+    ));
+    await flush();
+    const head = container.querySelector('[data-testid="consumer-groups-head"]');
+    const voice = head?.textContent ?? "";
+    expect(voice).toContain("Asking this cluster");
+    expect(voice).not.toContain("unstated total");
+    dispose();
+  });
+
   it("has no axe violations", async () => {
     const { container, dispose } = mount(() => <GroupList rows={SAMPLE_GROUPS} hrefFor={(id) => `/g/${id}`} onOpen={noop} />);
     await flush();
@@ -316,11 +395,20 @@ describe("the consumer groups screen", () => {
   function stubbed(totalItems: number | null = 80): {
     readonly api: KuiApiClient;
     readonly pages: { page?: number; pageSize?: number }[];
+    /** The `group` scope each lag request carried, in order. `[]` for a cluster-wide one. */
+    readonly lagScopes: readonly string[][];
   } {
     const pages: { page?: number; pageSize?: number }[] = [];
+    const lagScopes: string[][] = [];
     const get = vi.fn(
-      async (path: string, init?: { params?: { query?: { page?: number; pageSize?: number } } }) => {
+      async (
+        path: string,
+        init?: {
+          params?: { query?: { page?: number; pageSize?: number; group?: readonly string[] } };
+        },
+      ) => {
         if (path.endsWith("/lag")) {
+          lagScopes.push([...(init?.params?.query?.group ?? [])]);
           const quiet = { changed: [], gone: [], token: "t", nextPollMs: 30_000, full: false };
           return { ok: true, value: quiet };
         }
@@ -332,6 +420,7 @@ describe("the consumer groups screen", () => {
     return {
       api: { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient,
       pages,
+      lagScopes,
     };
   }
 
@@ -397,6 +486,60 @@ describe("the consumer groups screen", () => {
     const voice = container.querySelector('[data-testid="consumer-groups-head"]')?.textContent ?? "";
     expect(voice).toContain("on this page");
     expect(voice).not.toBe("3 groups. Nothing is rebalancing. Rare, and welcome.");
+    dispose();
+  });
+
+  it("does not state a count on its first paint, before anything has answered", async () => {
+    /*
+     * The route holds `total` at `null` until an answer arrives, and `null` was read by the voice
+     * as "the server sent no total" — so the first frame of every visit to this screen carried a
+     * confident sentence about a cluster nobody had asked yet. Driven here through the route rather
+     * than by handing `GroupList` a `loading` prop, because it is the route that owns the `null`.
+     */
+    const never = new Promise<never>(() => undefined);
+    const get = vi.fn(() => never);
+    const api = {
+      get,
+      post: get,
+      put: get,
+      delete: get,
+      patch: get,
+      raw: {},
+    } as unknown as KuiApiClient;
+
+    const { container, dispose } = open(api, "unanswered-cluster");
+    await flush();
+
+    const head = container.querySelector('[data-testid="consumer-groups-head"]');
+    const voice = head?.textContent ?? "";
+    expect(voice).toContain("Asking this cluster");
+    expect(voice).not.toContain("unstated total");
+    expect(voice).not.toMatch(/\d+ groups\./);
+    dispose();
+  });
+
+  it("scopes the very first lag request to the page, not just the ones after it", async () => {
+    /*
+     * The ordering only the route has, and the reason this case is here rather than beside
+     * `pollLag`'s own tests: the rows are written by one effect and the poll is started by the
+     * next, in the same tick, and Solid 2 commits a signal write on a microtask. A first request
+     * composed synchronously therefore named an empty page — which the endpoint reads as "every
+     * group on the cluster", the exact thing the scoping exists to stop. A unit test that hands
+     * `pollLag` an already-assigned variable cannot see it; a browser did.
+     */
+    const { api, lagScopes } = stubbed(80);
+    const { container, dispose } = open(api, "seed-scope-cluster");
+    await settle(container);
+    // A macrotask, because the seeding request is deliberately scheduled onto one. `flush()` drains
+    // microtasks and would read this assertion before the request was made.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(lagScopes.length).toBeGreaterThan(0);
+    const drawn = [...container.querySelectorAll(".kui-cg-name__link")].map(
+      (link) => link.textContent ?? "",
+    );
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(lagScopes[0]).toEqual(drawn);
     dispose();
   });
 

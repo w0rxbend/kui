@@ -72,8 +72,9 @@ function sumFigure(
 }
 
 export function TopicStatisticsRegion(props: TopicStatisticsRegionProps): JSX.Element {
-  /* One accessor read by all four tiles, so a document that arrives replaces four figures in one
-     pass rather than four times. */
+  /* One accessor read by all three tiles, so a document that arrives replaces three figures in one
+     pass rather than three times. The design draws a fourth and the block below the tiles says why
+     it is not built. */
   const document = (): TopicStatistics | undefined => props.statistics;
 
   const pending = (): boolean => props.loading === true && document() === undefined;

@@ -117,6 +117,21 @@ export interface Broker {
    * exist.
    */
   readonly heldBytes: number | null;
+  /**
+   * How far this broker's share of the *leaderships* is from an even one, as a signed percentage.
+   *
+   * `+50` means it leads half again as many partitions as an even share would give it and `-100`
+   * means it leads none; `0` is an even share and is a measurement worth printing. `null` is the
+   * absence of one — the figure is a sum over the topic sweep, so a cluster with one topic KUI
+   * could not describe reports no skew at all rather than a skew computed over the rest.
+   *
+   * It is **not** the PARTITION SKEW tile's figure. That one is the spread of *replica* counts
+   * across the cluster, from the log directories, and answers "are the partitions spread evenly";
+   * this one is one broker's deviation in leadership, from the partition census, and answers "is
+   * this the broker carrying it". The two have different sources and refuse independently, which
+   * is why they are two fields and not one.
+   */
+  readonly leaderSkewPercent: number | null;
 }
 
 export function brokerName(broker: Broker): string {
@@ -135,6 +150,32 @@ export function brokerMeta(broker: Broker): string {
   if (broker.leaderPartitions !== null) parts.push(`${broker.leaderPartitions.toLocaleString("en-US")} leaders`);
   if (broker.rack !== null) parts.push(`rack ${broker.rack}`);
   return parts.join(" · ");
+}
+
+/**
+ * What a broker's leader skew says, in words, or the sentence saying it was not measured.
+ *
+ * A signed percentage is not a figure anybody reads correctly at a glance: `-25%` beside the word
+ * LEADERS invites the reading "this broker leads −25 partitions". So the number is put in a
+ * sentence that says which direction it goes and what it is a share *of*, which is the only form in
+ * which it is worth drawing at all.
+ *
+ * Zero is a measurement and gets its own sentence rather than being folded into "more than": an
+ * evenly balanced broker is the answer somebody came to this card for.
+ */
+export function leaderSkewSentence(percent: number | null): string {
+  if (percent === null) {
+    return (
+      "The cluster did not report this broker's share of the leaderships, so KUI cannot say " +
+      "whether it leads more than its share."
+    );
+  }
+  const rounded = Math.round(percent);
+  if (rounded === 0) return "Leads an even share of this cluster's partitions.";
+  const size = Math.abs(rounded).toLocaleString("en-US");
+  return rounded > 0
+    ? `Leads ${size}% more partitions than an even share of this cluster's.`
+    : `Leads ${size}% fewer partitions than an even share of this cluster's.`;
 }
 
 /**

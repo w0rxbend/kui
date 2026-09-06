@@ -39,7 +39,14 @@ export interface SubjectPageProps {
   readonly onSetCompatibility?: ((level: CompatibilityLevel) => void) | undefined;
   readonly setCompatibilityDisabledReason?: string | undefined;
   readonly state: Mutation<unknown>;
-  readonly failure?: { readonly message: string; readonly code?: string | undefined } | undefined;
+  /** See `SubjectListProps.failure`: `tone` is here because a stale answer is not a failure. */
+  readonly failure?:
+    | {
+        readonly message: string;
+        readonly code?: string | undefined;
+        readonly tone?: "danger" | "warning" | undefined;
+      }
+    | undefined;
   /**
    * Runs the "check a schema" panel's question. Absent leaves the panel off the page entirely, which
    * is what a story showing only the registered schema wants — it is not a permission gate: the
@@ -59,12 +66,18 @@ export function SubjectPage(props: SubjectPageProps): JSX.Element {
         <a href={props.listHref}>All subjects</a>
       </nav>
 
-      {/* An `h2`. This pane sits beside the subject list under the workspace's own `h1`, and a
-          second `h1` on the page would make a screen reader's heading list read as two pages. */}
-      <h2 class="kui-subject__title">
-        {/* The format badge the design puts beside the name (§3.15). It comes from the version on
-            screen rather than from the list row, because it is a property of the schema being read
-            and the pane can be opened at a version whose language differs from the newest. */}
+      {/* The badge sits *beside* the heading and not inside it.
+
+          It was inside, which made the heading's accessible name the two strings run together —
+          `AVROorders.avro-value` — and a heading is the one string a screen reader user navigates
+          this pane by. Keeping the badge a sibling leaves the heading naming the subject and
+          nothing else; the row of the two is laid out by `.kui-subject__heading`, so nothing moves
+          visually.
+
+          The format comes from the version on screen rather than from the list row, because it is a
+          property of the schema being read and the pane can be opened at a version whose language
+          differs from the newest. */}
+      <div class="kui-subject__heading">
         <Show when={props.current?.schemaType}>
           {(format) => (
             <Tag class="kui-subject__format" tone={formatTone(format())}>
@@ -72,13 +85,15 @@ export function SubjectPage(props: SubjectPageProps): JSX.Element {
             </Tag>
           )}
         </Show>
-        <span>{props.subject}</span>
-      </h2>
+        {/* An `h2`. This pane sits beside the subject list under the workspace's own `h1`, and a
+            second `h1` on the page would make a screen reader's heading list read as two pages. */}
+        <h2 class="kui-subject__title">{props.subject}</h2>
+      </div>
 
       <Show when={props.failure}>
         {(problem) => (
           <Banner
-            tone="danger"
+            tone={problem().tone ?? "danger"}
             message={problem().message}
             {...(problem().code === undefined ? {} : { code: problem().code })}
           />

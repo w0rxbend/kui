@@ -28,7 +28,7 @@ import {
   type CompatibilityLevel,
   type SubjectRow,
 } from "./data.js";
-import { formatTone, levelPhrase, versionCountSentence } from "./model.js";
+import { formatTone, levelPhrase, rowLabel, versionCountSentence } from "./model.js";
 
 export interface SubjectListProps {
   readonly subjects: readonly SubjectRow[];
@@ -56,8 +56,23 @@ export interface SubjectListProps {
   readonly onSetGlobal?: ((level: CompatibilityLevel) => void) | undefined;
   readonly setGlobalDisabledReason?: string | undefined;
   readonly state: Mutation<unknown>;
-  /** The registry is not reachable, or not configured. Drawn instead of an empty list. */
-  readonly failure?: { readonly message: string; readonly code?: string | undefined } | undefined;
+  /**
+   * The registry is not reachable, not configured, or answering with something older than the last
+   * attempt. Drawn instead of an empty list.
+   *
+   * `tone` is part of the failure rather than fixed at the banner, because one of these is not a
+   * failure at all: a *stale* answer is real data with a badge on it, and drawing it in the tone
+   * this product reserves for something being wrong tells an operator to stop trusting figures that
+   * are the best anybody has. `danger` remains the default, so a caller that says nothing gets the
+   * loud one.
+   */
+  readonly failure?:
+    | {
+        readonly message: string;
+        readonly code?: string | undefined;
+        readonly tone?: "danger" | "warning" | undefined;
+      }
+    | undefined;
 }
 
 export function SubjectList(props: SubjectListProps): JSX.Element {
@@ -74,7 +89,7 @@ export function SubjectList(props: SubjectListProps): JSX.Element {
       <Show when={props.failure}>
         {(problem) => (
           <Banner
-            tone="danger"
+            tone={problem().tone ?? "danger"}
             message={problem().message}
             {...(problem().code === undefined ? {} : { code: problem().code })}
           />
@@ -209,6 +224,11 @@ export function SubjectList(props: SubjectListProps): JSX.Element {
                      page. That is the fact a screen reader needs, and it is what the fill in the
                      design says; the class above is the same statement for everyone else. */
                   aria-current={props.selected === row.subject ? "page" : undefined}
+                  /* The row's four parts are grid items with no text between them, so the name a
+                     browser computes from them runs the badge into the subject:
+                     `AVROorders.avro-value`. `rowLabel` states the same four facts as a sentence,
+                     built from the same helpers the row draws with. */
+                  aria-label={rowLabel(row)}
                 >
                   {/* A row whose batch did not cover the format shows no badge. Not `AVRO`: the
                       registry holds Protobuf and JSON schemas too, and a guessed language is a

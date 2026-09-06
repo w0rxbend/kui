@@ -3,12 +3,21 @@
  *
  * ## Why these compile to CEL rather than to query parameters
  *
- * `SCREENS-V4.md` §3.12 lists five controls on this bar with no server parameter behind them, and
- * four of them are here: the key match mode, the value match mode, the end of the time window and
- * the end of the offset range. The browse endpoint takes a *start* (`seekTo`) and one plain
- * substring (`q`) that is matched against the whole decoded record — so "the key starts with `ord_`"
- * and "the value contains `UAH`" are two different questions that `q` cannot tell apart, and an
- * upper bound is a question it cannot ask at all.
+ * `SCREENS-V4.md` §3.12 lists five controls on this bar with no server parameter behind them. They
+ * are, in the design's own words, the time window, the offset *end* bound, the key/value match
+ * modes, the status facet and the preset set — and this file holds **three** of them: the key and
+ * value match modes (one item, not two), the end of the time window, and the end of the offset
+ * range. The browse endpoint takes a *start* (`seekTo`) and one plain substring (`q`) that is
+ * matched against the whole decoded record — so "the key starts with `ord_`" and "the value
+ * contains `UAH`" are two different questions `q` cannot tell apart, and an upper bound is a
+ * question it cannot ask at all.
+ *
+ * The other two are accounted for so nobody reads this file as the whole of row 2. The **preset
+ * set** is `presets.ts`, a per-browser list with no server behind it. The **status facet** is not
+ * built here or anywhere, and that is a decision rather than an omission: it filters on a `status`
+ * field inside the payload, which is a property of one company's documents and of no Kafka record.
+ * `SCREENS.md` §3.5 says of its badge "do not build it", `SCREENS-V4.md` §7.1 states the terms on
+ * which it could be, and until those are met the bar has four controls in that row and not five.
  *
  * What the browse *does* take is a smart filter: an expression compiled by the message service and
  * evaluated per record, over the vocabulary in {@link FILTER_VARIABLES}. Every predicate here has an
@@ -160,12 +169,6 @@ export function celFor(
   const written = expression?.trim() ?? "";
   const terms = [...conjunctsOf(predicates), ...(written === "" ? [] : [`(${written})`])];
   return terms.length === 0 ? undefined : terms.join(" && ");
-}
-
-/** One predicate as a sentence, for the chip that says what is applied without opening anything. */
-export function describePredicate(field: "key" | "value", predicate: FieldPredicate): string {
-  const mode = MATCH_MODES.find((candidate) => candidate.value === predicate.mode);
-  return `${field} ${mode?.label ?? predicate.mode} ${predicate.text}`;
 }
 
 // --- The URL ------------------------------------------------------------------------------------

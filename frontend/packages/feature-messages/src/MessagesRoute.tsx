@@ -157,9 +157,17 @@ function BrowserScreen(props: {
    * adds a range as a side effect, because a draft with one range already has "one per partition"
    * when there are none.
    *
-   * `useQuery` rather than a hand-rolled fetch: the topic page asks for the same topic, and a key is
-   * a promise that everything changing the request is in the string, so the two share one answer and
-   * one request. `undefined` while it is loading, refused or failed — never a number.
+   * `useQuery` rather than a hand-rolled fetch, and for the reasons the hook actually gives: one
+   * request per key however many callers ask, the last good answer kept and marked stale rather
+   * than blanked when a refresh fails, and a cache two browsers of one topic in two tabs share.
+   *
+   * It does **not** share an answer with the topic page. That was written here and it is not true:
+   * this key is `messages:topic:<cluster>:<topic>` and the topic page's is its own, and the two ask
+   * different endpoints — `topic.ts` says so twice in its own prose, which is where the claim
+   * should have been checked. One field of one section is what this screen needs, and asking
+   * `/overview` for it would make a partition menu depend on the schema registry's opinion.
+   *
+   * `undefined` while it is loading, refused or failed — never a number.
    */
   const topic = useQuery({
     key: () => topicFactsKey(props.clusterId, props.topicName),

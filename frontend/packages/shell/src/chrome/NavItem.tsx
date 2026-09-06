@@ -184,13 +184,12 @@ export function NavItem(props: NavItemProps) {
 }
 
 /**
- * The children in the order the drawer draws them: favourites, then prefix groups, then `internal`.
+ * The children in the order the drawer draws them: prefix groups, then `internal`.
  *
  * Sorted here as well as in `nav/topicTree.ts` — which already emits them this way — because the
- * rule belongs to the *rendering* and must hold for any caller. A drawer assembled from two sources
- * (a favourites preference and a fold over names) has no natural order of its own, and `internal`
- * arriving before `orders.*` because the two lists were concatenated the other way round would be a
- * bug nobody could see in either list.
+ * rule belongs to the *rendering* and must hold for any caller. A drawer assembled from more than
+ * one source has no natural order of its own, and `internal` arriving before `orders.*` because two
+ * lists were concatenated the other way round would be a bug nobody could see in either list.
  *
  * Stable within a rank: `prefixes()` has already ordered the groups largest-first with ties broken
  * alphabetically, and re-sorting them by anything else here would throw that away.
@@ -201,19 +200,21 @@ function ordered(children: readonly NavDestination[] | undefined): readonly NavD
 }
 
 /**
- * Favourites first, `internal` last, everything else between.
+ * `internal` last, everything else before it.
  *
  * `internal` sits at the foot because an operator looking for `__consumer_offsets` knows where it
  * is and one looking for `orders.*` does not: the padlocked row is the one that never needs to be
  * found by scanning, so it is the one that can afford the worst position.
+ *
+ * The numbers are spaced rather than consecutive because a rank that sorts *above* the groups is
+ * the one this drawer will want next — the design's starred favourites — and it should be able to
+ * arrive without renumbering the two that already exist.
  */
 function rankOf(rank: NavRank | undefined): number {
   switch (rank) {
-    case "favourite":
-      return 0;
     case "internal":
-      return 2;
+      return 20;
     default:
-      return 1;
+      return 10;
   }
 }

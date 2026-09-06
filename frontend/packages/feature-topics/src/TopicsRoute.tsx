@@ -37,10 +37,10 @@ import {
   type Fetched,
   type QueryRegistry,
 } from "@kui/kernel";
-import { DEFAULT_TOPIC_QUERY, TopicListPage, type TopicListQuery } from "./TopicListPage.jsx";
+import { TopicListPage, queryFromAddress, type TopicListQuery } from "./TopicListPage.jsx";
 import { TopicStatisticsRegion } from "./TopicStatisticsRegion.jsx";
 import { TopicOverviewTab } from "./TopicOverviewTab.jsx";
-import { topicsCsv, topicsVoice } from "./topicList.js";
+import { sortFieldFor, topicsCsv, topicsVoice } from "./topicList.js";
 import { TopicPage } from "./TopicPage.jsx";
 import { CreateTopicDialog } from "./CreateTopicDialog.jsx";
 import { PlannedActionDialog } from "./PlannedActionDialog.jsx";
@@ -196,34 +196,20 @@ function tabFailure<T>(
 }
 
 /**
- * The table's column ids, in the server's spelling.
- *
- * A map rather than sending the column id straight through, because the two vocabularies differ and
- * only some columns can be sorted at all. An unmapped column sorts by nothing, which is the right
- * answer: the alternative is sending a field the server does not know, having it ignore the
- * parameter, and drawing an ascending arrow over rows in the server's own order.
- */
-const SORT_FIELDS: Readonly<Record<string, string>> = {
-  name: "name",
-  partitions: "partitions",
-  replication: "replicationFactor",
-  records: "messageCount",
-  size: "size",
-  // `health` and `policy` are absent on purpose: the server sorts by none of them, and this map is
-  // what stops a column offering an order the cluster cannot produce. The two columns are therefore
-  // not marked sortable in the table either, so the header does not invite the click.
-};
-
-/**
  * The screen's query, as the topics endpoint takes it.
  *
  * `showInternal` comes out of the facet chip rather than out of a checkbox of its own, and that is
  * the whole of the mapping between the design's four-chip bar and the one parameter the wire has.
  * `Internal` asks the server for Kafka's bookkeeping topics; the other three do not, and the page
  * says which of them it applies itself — see `isServerFacet`.
+ *
+ * The order goes through `sortFieldFor`, which is the same list the `Sort ·` menu's options are
+ * built from. It used to be a second hand-written map in this file, and the pair could disagree in
+ * one direction without anything noticing: an option offered here with no field sent a request with
+ * no `sort` and drew the arrow anyway.
  */
 export function toTopicQuery(query: TopicListQuery): TopicQuery {
-  const field = query.sort === null ? undefined : SORT_FIELDS[query.sort.columnId];
+  const field = query.sort === null ? undefined : sortFieldFor(query.sort.columnId);
   return {
     showInternal: query.facet === "internal",
     ...(query.search === "" ? {} : { q: query.search }),
@@ -271,7 +257,17 @@ function download(filename: string, text: string, type: string): void {
 
 function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
   const kui = useKui();
-  const [query, setQuery] = createSignal<TopicListQuery>(DEFAULT_TOPIC_QUERY);
+
+  /*
+   * Seeded from the address, not from the default.
+   *
+   * The shell's drawer links its topic-prefix rows at `…/topics?q=<prefix>`. Seeded from
+   * `DEFAULT_TOPIC_QUERY` this screen ignored that and listed the whole cluster, so the link was
+   * honest and the destination was not — a defect neither side's tests could see, because the link
+   * is one package and the reading is another. `queryFromAddress` is where the two meet.
+   */
+  const listLocation = useLocation();
+  const [query, setQuery] = createSignal<TopicListQuery>(queryFromAddress(listLocation.search));
 
   const list = useQuery<TopicListResult>({
     /* Every control on this page is applied by the server. It used to ask for the largest page the
@@ -338,6 +334,22 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
     setSelected(new Set<string>());
     setQuery(next);
   };
+
+  /*
+   * The address keeps being read, not read once.
+   *
+   * The drawer's prefix rows are ordinary links, and clicking a second one while this screen is
+   * already on does not remount the route — it changes the search string underneath it. Guarded on
+   * the two fields the address carries so that typing in the search box, which moves the query and
+   * not the address, is not undone on the next unrelated navigation.
+   */
+  createEffect(
+    () => listLocation.search,
+    (search: string) => {
+      const asked = queryFromAddress(search);
+      if (asked.search !== query().search || asked.facet !== query().facet) changeQuery(asked);
+    },
+  );
 
   /** The rows behind the ticks. A name with no row on this page contributes nothing to the file. */
   const selectedRows = createMemo(() => result().topics.filter((topic) => selected().has(topic.name)));

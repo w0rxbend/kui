@@ -1,0 +1,65 @@
+# What the JMX exporter beside a KUI demonstration broker publishes, and nothing else.
+#
+# KUI's metrics service reads broker throughput from a Prometheus text-exposition endpoint
+# (ADR-050). It cannot read JMX directly and it is not going to be able to:
+# `MetricsSourceSettings.url` is a `SafeUrl`, which ARCHITECTURE.md §14 restricts to `http` and
+# `https`, so
+# `service:jmx:rmi:///jndi/rmi://kafka:9999/jmxrmi` cannot be written into a KUI configuration at
+# all. Something has to stand between the broker's JMX server and an HTTP address, and that
+# something is this exporter.
+#
+# One file, mounted by both stacks that run a broker -- `deployment/quickstart` and
+# `deployment/compose` -- because two copies of a metric-name list are two copies that drift, and
+# the first symptom of the drift is one stack's throughput card filling and the other's staying
+# empty for a reason nobody can see.
+#
+# WHY SO FEW RULES. The stock Kafka JMX ruleset published with the exporter turns roughly four
+# thousand MBean attributes into an exposition body of about a megabyte, per scrape. KUI reads three
+# families. Every rule below is one KUI actually parses, and the exporter drops the rest -- which is
+# also what makes the body small enough to read by eye when somebody is working out why a chart is
+# empty.
+#
+# THE NAMES BELOW ARE A CONTRACT with `services/metrics`'s Prometheus reader. If a rule here is
+# renamed, that reader stops finding the family and the throughput card goes back to saying it
+# cannot measure anything -- honestly, and for the wrong reason. The names are the conventional
+# lower-cased rendering of the MBean's own identity, so they read the same as they do in every other
+# Kafka deployment:
+#
+#   kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate     bytes/second, gauge
+#   kafka_server_brokertopicmetrics_bytesoutpersec_oneminuterate    bytes/second, gauge
+#   kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate  records/second, gauge
+#   kafka_server_brokertopicmetrics_bytesinpersec_total       bytes since start, counter
+#   kafka_server_brokertopicmetrics_bytesoutpersec_total      bytes since start, counter
+#   kafka_server_brokertopicmetrics_messagesinpersec_total    records since start, counter
+#
+# Both shapes are published on purpose. The rate is what the broker itself already computes and is
+# the cheapest correct answer for a chart; the total is monotonic, so an adapter that would rather
+# difference two samples than trust a one-minute moving average can do that without a second
+# exporter. Neither is a KUI invention: they are the `OneMinuteRate` and `Count` attributes of the
+# same Yammer meter.
+
+# The broker's remote JMX server. This is the address the exporter dials, on the Compose network,
+# and it is why the broker sets `-Djava.rmi.server.hostname=kafka`: an RMI registry hands back a
+# stub carrying the hostname the server was told to advertise, so a broker advertising `localhost`
+# is a broker this container connects to and then cannot talk to.
+hostPort: kafka:9999
+
+# The MBean's own words, lower-cased. `BytesInPerSec` becomes `bytesinpersec` rather than
+# `bytes_in_per_sec`: there is no word boundary in the source name to split on, and inventing one
+# means two deployments disagree about where the underscores go.
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+rules:
+  # The broker-wide meters. `type=BrokerTopicMetrics, name=X` with no `topic=` key is the aggregate
+  # across every topic, which is what a cluster throughput chart is about; the per-topic beans carry
+  # a third key and are therefore not matched here.
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=(BytesInPerSec|BytesOutPerSec|MessagesInPerSec)><>OneMinuteRate"
+    name: kafka_server_brokertopicmetrics_$1_oneminuterate
+    type: GAUGE
+    help: "The broker's own one-minute moving average for $1, in units per second."
+
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=(BytesInPerSec|BytesOutPerSec|MessagesInPerSec)><>Count"
+    name: kafka_server_brokertopicmetrics_$1_total
+    type: COUNTER
+    help: "The monotonic total behind $1 since this broker started."

@@ -51,13 +51,18 @@ export const AsDesigned: Story = {
 };
 
 /**
- * `SCREENS-V4.md` §2.2 in full: Topics expanded over its favourites, its prefix groups and the
- * padlocked `internal` row at the foot.
+ * `SCREENS-V4.md` §2.2 as it ships: Topics expanded over its prefix groups, with the padlocked
+ * `internal` row at the foot.
  *
- * The fixture is deliberately in the wrong order — `internal` first, the favourite last — so this
- * story fails if the drawer ever starts trusting the order it is handed instead of the rank on each
- * row. The tree a real deployment gets comes out of `nav/topicTree.ts` already sorted, which is
- * exactly why the rule needs a second home in the renderer.
+ * The design's two starred favourites are not here, and that is the honest picture rather than an
+ * omission — nothing in the product records a favourite, so the fold no longer has the branch that
+ * drew them (`nav/topicTree.ts` says what it would take to bring it back). A story that showed rows
+ * no deployment can produce is a gallery entry that documents a screen nobody has.
+ *
+ * The fixture is deliberately in the wrong order — `internal` first — so this story fails if the
+ * drawer ever starts trusting the order it is handed instead of the rank on each row. The tree a
+ * real deployment gets comes out of `nav/topicTree.ts` already sorted, which is exactly why the
+ * rule needs a second home in the renderer.
  */
 export const TopicTreeExpanded: Story = {
   args: {

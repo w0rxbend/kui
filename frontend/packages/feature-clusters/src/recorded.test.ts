@@ -120,6 +120,34 @@ describe("the recorded broker list", () => {
     expect(broker.diskUsedBytes).toBeNull();
     expect(broker.diskTotalBytes).toBeNull();
     expect(broker.outOfSyncReplicas).toBeNull();
+
+    /*
+     * `leaderSkewPercent` is read from this document rather than ignored, which it was for a wave.
+     *
+     * The recorded answer was captured on 2026-09-05, one day before the cluster service began
+     * deriving the figure from the partition census, so it is `null` here — and `null` is a real
+     * answer on any cluster whose topic sweep did not describe every topic, which is what the card
+     * says in words. What must not happen is the field being dropped on the way through: a mapping
+     * that never reads it renders identically to a cluster that never reported it, and that is
+     * precisely how it went a wave without a caller.
+     */
+    expect(broker.leaderSkewPercent).toBeNull();
+    expect(Object.hasOwn(broker, "leaderSkewPercent")).toBe(true);
+  });
+
+  it("carries a leader skew through when the census produced one", async () => {
+    // The other branch, which the recorded document cannot show because it predates the field being
+    // filled. A signed percentage, kept signed: the sign is which side of an even share it is on.
+    const withCensus = {
+      brokers: {
+        status: "ok",
+        data: [{ id: 1, host: "kafka", port: 9092, replicaCount: 86, leaderSkewPercent: -33.3 }],
+        fetchedAt: "2026-09-06T09:00:00.000Z",
+      },
+    };
+    const answer = await fetchBrokers(client(withCensus), "quickstart");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value[0]?.leaderSkewPercent).toBe(-33.3);
   });
 });
 

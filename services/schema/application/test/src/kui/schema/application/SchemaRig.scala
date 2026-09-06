@@ -6,8 +6,9 @@ import cats.syntax.all.*
 import org.typelevel.log4cats.StructuredLogger
 
 import kui.kernel.ClusterId
+import kui.kernel.SchemaId
 import kui.kernel.Subject
-import kui.kernel.error.{InfrastructureError, KuiError}
+import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
 import kui.schema.domain.*
 import kui.testkit.fakes.FakeStructuredLogger
 import kui.security.audit.{AuditSink, MutationRecord}
@@ -27,9 +28,11 @@ final class FakeRegistry(
     val unenrichable: Set[String] = Set.empty,
     val vanished: Set[String] = Set.empty,
     val failure: Option[KuiError] = None,
+    val rejects: Set[String] = Set.empty,
     val writes: Ref[IO, List[(String, CompatibilityLevel)]],
     val enrichments: Ref[IO, List[String]],
-    val globalReads: Ref[IO, Int]
+    val globalReads: Ref[IO, Int],
+    val registrations: Ref[IO, List[(String, ProposedSchema)]]
 ) extends SchemaRegistryPort[IO] {
 
   private def answer[A](value: A): IO[Either[KuiError, A]] =
@@ -85,6 +88,25 @@ final class FakeRegistry(
   def subjectCompatibility(subject: Subject): IO[Either[KuiError, Option[CompatibilityLevel]]] =
     answer(subjectLevels.get(subject.value))
 
+  /** Every registration is recorded, because whether the registry was contacted at all is the promise the
+    * read-only refusal makes and no answer can show it.
+    *
+    * A subject in `rejects` refuses the way a registry rejects an incompatible schema: a `KUI-VALIDATION`
+    * carrying the registry's own sentence, which is what `RegistryHttp.errorFrom` produces from a 409.
+    */
+  def register(subject: Subject, proposed: ProposedSchema): IO[Either[KuiError, RegisteredVersion]] =
+    registrations.update(_ :+ (subject.value -> proposed)) *> {
+      if rejects.contains(subject.value) then IO.pure(Left(SchemaRig.registryRejection))
+      else
+        answer(
+          RegisteredVersion(
+            subject,
+            SchemaId.unsafe(SchemaRig.RegisteredId),
+            Some(SchemaVersion.unsafe(subjectsByName.get(subject.value).fold(1)(_.size + 1)))
+          )
+        )
+    }
+
   def setGlobalCompatibility(level: CompatibilityLevel): IO[Either[KuiError, Unit]] =
     writes.update(_ :+ ("global" -> level)) *> answer(())
 
@@ -133,6 +155,26 @@ object SchemaRig {
 
   val unreachable: KuiError = InfrastructureError.Unreachable("schema-registry", "connection refused")
 
+  /** The id [[FakeRegistry.register]] hands back, so a case can name the number it expects. */
+  val RegisteredId: Int = 41
+
+  /** What a registry that refuses a schema produces, once `RegistryHttp` has read it: the registry's own
+    * sentence, in the message and beside the field the browser has to mark.
+    */
+  val registryRejection: KuiError =
+    ApplicationError.Invalid(
+      "the schema registry refused the request: Schema being registered is incompatible with an earlier " +
+        "schema for subject 'orders-value'",
+      List(
+        kui.kernel.error.FieldError(
+          Some("definition"),
+          List(
+            "Schema being registered is incompatible with an earlier schema for subject 'orders-value'"
+          )
+        )
+      )
+    )
+
   /** The three clusters every suite here uses: one with a registry, one without, one read-only. */
   def profiles: List[RegistryProfile] =
     List(
@@ -152,12 +194,14 @@ object SchemaRig {
       formats: Map[String, SchemaFormat] = Map.empty,
       unenrichable: Set[String] = Set.empty,
       vanished: Set[String] = Set.empty,
-      failure: Option[KuiError] = None
+      failure: Option[KuiError] = None,
+      rejects: Set[String] = Set.empty
   ): IO[FakeRegistry] =
     for {
       writes <- Ref.of[IO, List[(String, CompatibilityLevel)]](Nil)
       enrichments <- Ref.of[IO, List[String]](Nil)
       globalReads <- Ref.of[IO, Int](0)
+      registrations <- Ref.of[IO, List[(String, ProposedSchema)]](Nil)
     } yield new FakeRegistry(
       subjects,
       schemas,
@@ -167,8 +211,10 @@ object SchemaRig {
       unenrichable,
       vanished,
       failure,
+      rejects,
       writes,
       enrichments,
-      globalReads
+      globalReads,
+      registrations
     )
 }

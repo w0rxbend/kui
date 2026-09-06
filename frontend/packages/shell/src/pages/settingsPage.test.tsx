@@ -23,7 +23,12 @@ import type { RootPreference } from "@kui/kernel";
 
 import { SettingsPage, type Preference } from "./SettingsPage.jsx";
 import { AppearancePopover } from "../chrome/AppearancePopover.jsx";
-import { THEME_OPTIONS, appearanceHelp } from "../chrome/appearance.js";
+import {
+  ACCENT_OPTIONS,
+  DENSITY_OPTIONS,
+  THEME_OPTIONS,
+  appearanceHelp,
+} from "../chrome/appearance.js";
 import { mount, type Mounted } from "../chrome/testing.js";
 
 /**
@@ -81,6 +86,35 @@ function controls(container: HTMLElement): readonly { readonly label: string; re
       el: el as HTMLElement,
     };
   });
+}
+
+/**
+ * Each control, in document order, paired with the help paragraph drawn under it.
+ *
+ * The fields are a flat list — a `Select` wrapper, then its `<p class="kui-settings__help">`, then
+ * the next pair — so "belongs to" is "is the most recent control before it". That is the same
+ * relationship a sighted reader uses and the same one the DOM order gives a screen reader, which is
+ * why it is worth asserting rather than merely counting the paragraphs.
+ */
+function helpByControl(
+  container: HTMLElement,
+): readonly (readonly [string, string | undefined])[] {
+  const pairs: [string, string | undefined][] = [];
+  for (const field of container.querySelectorAll(".kui-settings__fields > *")) {
+    const combobox = field.querySelector('[role="combobox"]') ?? (field.matches('[role="combobox"]') ? field : null);
+    if (combobox !== null) {
+      const id = combobox.getAttribute("aria-labelledby") ?? "";
+      pairs.push([container.querySelector(`#${CSS.escape(id)}`)?.textContent?.trim() ?? "", undefined]);
+      continue;
+    }
+    if (!field.matches(".kui-settings__help")) continue;
+    const last = pairs[pairs.length - 1];
+    // A help paragraph before any control is a real defect and must not be silently attributed to
+    // the control after it, so it is recorded against an empty name and fails the comparison.
+    if (last === undefined) pairs.push(["", field.textContent?.trim()]);
+    else last[1] = field.textContent?.trim();
+  }
+  return pairs;
 }
 
 /** Opens a control and picks the option with this label, the way a pointer does. */
@@ -214,6 +248,43 @@ describe("one vocabulary for the appearance preferences", () => {
   it("names the other two the same way as well, so the agreement is not one lucky string", () => {
     expect(settingsShowsForTheme("light")).toBe(popoverShowsForTheme("light"));
     expect(settingsShowsForTheme("dark")).toBe(popoverShowsForTheme("dark"));
+  });
+
+  /**
+   * Every explanation the vocabulary carries is drawn, beside the control it belongs to.
+   *
+   * The case below this one asserts the theme's sentence and only the theme's, and that is what it
+   * asserted for a wave: the accent's `<Help>` and the density's could both be deleted with this
+   * file green. Two of the three preferences would then have had a sentence in `appearance.ts` that
+   * nothing on this page drew — an explanation that exists in the vocabulary and reaches nobody,
+   * which is worse than not writing it, because a reviewer reading `appearance.ts` sees it there.
+   *
+   * The pairing is what makes it a gate rather than a text search. `expect(text).toContain(help)`
+   * would pass over a page that drew all three sentences under the theme control; this reads the
+   * fields in document order and attributes each help paragraph to the control above it, so a
+   * sentence in the wrong place fails as loudly as a missing one.
+   */
+  it("draws every explanation the vocabulary carries, under the control it belongs to", () => {
+    const { container } = keep(
+      mount(() => (
+        <SettingsPage
+          theme={recorder<ThemeChoice>("auto")}
+          accent={recorder<AccentChoice>("blue")}
+          density={recorder<DensityChoice>("comfortable")}
+        />
+      )),
+    );
+
+    expect(helpByControl(container)).toEqual([
+      ["Theme", appearanceHelp(THEME_OPTIONS)],
+      ["Accent", appearanceHelp(ACCENT_OPTIONS)],
+      ["Density", appearanceHelp(DENSITY_OPTIONS)],
+    ]);
+    // And all three vocabularies really do carry one, so this is not a case that passes on three
+    // `undefined`s agreeing with each other.
+    for (const options of [THEME_OPTIONS, ACCENT_OPTIONS, DENSITY_OPTIONS]) {
+      expect(appearanceHelp(options)).not.toBeUndefined();
+    }
   });
 
   it("explains the default beside the control, in the words the popover uses", () => {

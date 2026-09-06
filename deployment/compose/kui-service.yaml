@@ -66,8 +66,63 @@ kui:
     # rotating the identity key silently invalidated every open confirmation dialog.
     cursorKey: "env:KUI_CURSOR_KEY"
 
-  # No Kafka cluster is configured, so every screen reports "no clusters are configured" rather than
-  # failing. That is the right shape for this topology, whose point is process isolation rather than
-  # Kafka: `deployment/demo` is where real brokers live.
-  clusters: []
+  # Where each cluster's broker metrics are read from, keyed by cluster id.
+  #
+  # `measured` is named and `unmeasured` is deliberately absent. A cluster with no entry here has no
+  # source, which is the common, honest and fully supported case (ADR-032): every metrics card on
+  # its dashboard says it cannot measure the figure rather than drawing a zero or an empty axis.
+  #
+  # `http://` and not a JMX service URL, and it is not a preference: `MetricsSourceSettings.url` is
+  # a `SafeUrl`, restricted to `http` and `https` by ARCHITECTURE.md §14, so
+  # `service:jmx:rmi:///jndi/rmi://kafka:9999/jmxrmi` cannot be written here at all. The exporter in
+  # `docker-compose.yml` is what bridges the two. See ADR-050.
+  metrics:
+    sources:
+      measured:
+        url: "http://kafka-metrics:5556/metrics"
+        kind: prometheus
+        callTimeout: "10s"
+
+  # ---------------------------------------------------------------------------------------------
+  # TWO CLUSTERS ON ONE BROKER, AND ONLY ONE OF THEM MEASURABLE.
+  #
+  # This file said `clusters: []` for three milestones, because this topology's subject is process
+  # isolation rather than Kafka. M7 ended that: `smoke.sh` has to assert that a configured cluster's
+  # throughput comes back `ok` with numbers in it, and no assertion about measuring something can be
+  # made against nothing to measure.
+  #
+  # Both entries point at the same broker, and that is the point rather than a shortcut. Whether
+  # KUI can measure a cluster is a fact about `kui.metrics.sources` and not about the broker:
+  # `measured` has an exporter beside it and `unmeasured` does not, so one draws a series and the
+  # other says in words that it cannot be measured. Those are the two answers M7's exit criterion
+  # needs to see on one deployment, and until now the second was the only one anything could
+  # produce — which is why a service containing no adapter at all satisfied every clause of it.
+  #
+  # Both name the registry `docker-compose.yml` runs, and that container is there for the same
+  # reason this comment is: a configured cluster with no registry makes the schema service report
+  # `not_configured` for the whole deployment, which is correct and would have meant teaching
+  # `smoke.sh` to expect a different answer for one of the six services. The check was right; the
+  # deployment was incomplete.
+  clusters:
+    - name: "Measured"
+      id: "measured"
+      bootstrapServers:
+        - "kafka:9092"
+      # The registry beside the broker. Both clusters name it: the difference this stack is built
+      # to show is about `kui.metrics.sources` and nothing else, so every other capability is the
+      # same on both, and a screen behaving differently between them is a defect not a setting.
+      schemaRegistry:
+        url:
+          - "http://schema-registry:8080/apis/ccompat/v7"
+    - name: "Unmeasured"
+      id: "unmeasured"
+      bootstrapServers:
+        - "kafka:9092"
+      # The registry beside the broker. Both clusters name it: the difference this stack is built
+      # to show is about `kui.metrics.sources` and nothing else, so every other capability is the
+      # same on both, and a screen behaving differently between them is a defect not a setting.
+      schemaRegistry:
+        url:
+          - "http://schema-registry:8080/apis/ccompat/v7"
+
   rbac: {}

@@ -170,6 +170,38 @@ describe("the recorded group detail", () => {
     expect(topics[0]?.partitions).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
+  it("leaves the coordinator absent when the detail carried an id and no address", async () => {
+    /*
+     * The list mapping's twin, and it needed its own case for a reason worth writing down: the
+     * assertion above reads `coordinator === "kafka:9092"` off a recording that carries *both* the
+     * address fields and `coordinatorId`. Restoring the old `` `broker ${coordinatorId}` ``
+     * fallback in the detail mapping changed nothing anybody could see, and the rule that the two
+     * mappings share — a broker id is not an address — held on one of them only.
+     *
+     * The quickstart's coordinator always answers, so the refusal cannot be recorded from it. What
+     * is taken from the document is every other field and its shape; what is removed is exactly the
+     * two fields under test, leaving the id behind for the fallback to reach for.
+     */
+    const stripped = JSON.parse(JSON.stringify(groupDocument)) as Record<string, unknown>;
+    delete stripped["coordinatorHost"];
+    delete stripped["coordinatorPort"];
+    expect(stripped["coordinatorId"]).toBe(1);
+
+    const answer = await fetchGroup(client(stripped), "quickstart", "analytics-indexer");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.coordinator).toBeNull();
+    // Stated as the thing that must not be on screen: a broker id dressed as an address is nowhere
+    // an operator can point a tool, and on the page it looks exactly like a coordinator that spoke.
+    // `String(...)` because the honest answer here is `null`; the point of the second assertion is
+    // that the failure message names what was drawn instead when the fallback comes back.
+    expect(String(answer.value.coordinator)).not.toMatch(/broker/);
+
+    // And the rest of the mapping still worked, so this is a missing coordinator rather than a
+    // document the mapping failed to read at all — which would satisfy the two lines above too.
+    expect(answer.value.groupId).toBe("analytics-indexer");
+    expect(answer.value.offsets.length).toBe(12);
+  });
+
   it("says the pace is not measured rather than inventing one", async () => {
     /*
      * This endpoint does not carry a rate. Computing one from two observations the browser happens
@@ -266,6 +298,84 @@ describe("the recorded lag delta", () => {
     expect(merged.rows.find((row) => row.groupId === "order-fulfilment")?.coordinator).toBe("kafka:9092");
   });
 
+  it("maps an update that carries no lag as unknown, not as caught up", async () => {
+    /*
+     * The most expensive `null` in `lag.ts`, asserted where the mapping applies it.
+     *
+     * There was a case for this rule and it went through `applyLagDelta` with an update written by
+     * hand in this file — so the rule it proved was the test's own arithmetic, and `toUpdate` could
+     * be changed to `payload.totalLag ?? 0` with all 68 of this package's tests green. A group
+     * whose lag the server could not compute would read as a group that had caught up: the two
+     * opposite statements this whole screen turns on telling apart.
+     *
+     * Derived from the recording rather than written: the quickstart's coordinators always answer,
+     * so this state cannot be recorded from it. Every field but the one under test is the server's.
+     */
+    const stripped = JSON.parse(JSON.stringify(deltaDocument)) as {
+      changed: Record<string, unknown>[];
+    };
+    delete stripped.changed[0]?.["totalLag"];
+    expect(stripped.changed[0]?.["groupId"]).toBe("order-fulfilment");
+
+    const answer = await fetchLagDelta(client(stripped), "quickstart", "cXVpY2tzdGFydDo2");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.changed[0]?.totalLag).toBeNull();
+
+    // And through the merge onto the row, which is what the column draws: the row must stop
+    // claiming the 9 it had, and must not claim a 0 either.
+    const merged = applyLagDelta(await baseline(), answer.value);
+    if (merged.kind !== "merged") throw new Error(`expected merged, got ${merged.reason}`);
+    expect(merged.rows.find((row) => row.groupId === "order-fulfilment")?.totalLag).toBeNull();
+  });
+
+  it("treats an answer that did not say whether it is complete as a full one", async () => {
+    /*
+     * `full` decides whether a delta may be merged at all, and the safe reading of "the server did
+     * not say" is "do not merge" — a lag answer carries no topic count, no coordinator and no
+     * partial-read note, so merging one that restates the cluster would guess five columns.
+     *
+     * Every recorded document carries the field, so the absent case cannot come off the wire. It is
+     * produced by removing it, which is exactly what a truncated body or an older server sends.
+     */
+    const withoutFull = JSON.parse(JSON.stringify(deltaDocument)) as Record<string, unknown>;
+    delete withoutFull["full"];
+
+    const answer = await fetchLagDelta(client(withoutFull), "quickstart", "cXVpY2tzdGFydDo2");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.full).toBe(true);
+    expect(applyLagDelta(await baseline(), answer.value).kind).toBe("needs-full-list");
+  });
+
+  it("carries the state and the member count of a group the answer did speak about", async () => {
+    /*
+     * The merge updates three fields, and only one of them had anything watching it. Dropping
+     * `state` or `members` from the write left the suite green — and on screen that is a row whose
+     * lag moves every thirty seconds beside a chip that still says `Stable` for a group the
+     * coordinator has already reported empty, which is worse than a stale row because half of it is
+     * visibly live.
+     *
+     * The rows are seeded away from the delta's own figures on purpose: the recording's
+     * `order-fulfilment` is already `EMPTY` with no members in the list, so a merge that wrote
+     * neither field would agree with the answer by coincidence.
+     */
+    const rows = (await baseline()).map((row) =>
+      row.groupId === "order-fulfilment"
+        ? { ...row, state: "STABLE" as const, members: 4 }
+        : row,
+    );
+    const answer = await fetchLagDelta(client(deltaDocument), "quickstart", "cXVpY2tzdGFydDo2");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+
+    const merged = applyLagDelta(rows, answer.value);
+    if (merged.kind !== "merged") throw new Error(`expected merged, got ${merged.reason}`);
+    const moved = merged.rows.find((row) => row.groupId === "order-fulfilment");
+    expect(moved?.state).toBe("EMPTY");
+    expect(moved?.members).toBe(0);
+    // And a group the answer did not mention keeps both of its own.
+    expect(merged.rows.find((row) => row.groupId === "analytics-indexer")?.state).toBe("STABLE");
+    expect(merged.rows.find((row) => row.groupId === "analytics-indexer")?.members).toBe(1);
+  });
+
   it("reads a quiet answer as nothing changed, not as no groups", async () => {
     // `changed: []` with `full: false` is the server saying the cluster is still. `changed: []` with
     // `full: true` would be a cluster with no groups at all. Reading the first as the second empties
@@ -342,22 +452,32 @@ describe("pollLag", () => {
   function scripted(answers: readonly unknown[]): {
     readonly api: KuiApiClient;
     readonly since: string[];
+    /** The `group` parameters each lag request carried, in order. `[]` for an unscoped request. */
+    readonly scopes: readonly string[][];
     readonly listCalls: () => number;
   } {
     const since: string[] = [];
+    const scopes: string[][] = [];
     let lag = 0;
     let lists = 0;
-    const get = vi.fn(async (path: string, init?: { params?: { query?: { since?: string } } }) => {
-      if (path.endsWith("/lag")) {
-        since.push(init?.params?.query?.since ?? "");
-        return { ok: true, value: answers[Math.min(lag++, answers.length - 1)] };
-      }
-      lists += 1;
-      return { ok: true, value: groupsDocument };
-    });
+    const get = vi.fn(
+      async (
+        path: string,
+        init?: { params?: { query?: { since?: string; group?: readonly string[] } } },
+      ) => {
+        if (path.endsWith("/lag")) {
+          since.push(init?.params?.query?.since ?? "");
+          scopes.push([...(init?.params?.query?.group ?? [])]);
+          return { ok: true, value: answers[Math.min(lag++, answers.length - 1)] };
+        }
+        lists += 1;
+        return { ok: true, value: groupsDocument };
+      },
+    );
     return {
       api: { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient,
       since,
+      scopes,
       listCalls: () => lists,
     };
   }
@@ -405,6 +525,41 @@ describe("pollLag", () => {
       await vi.advanceTimersByTimeAsync(30_000);
       // The next answer was incremental again, so the expensive call does not repeat.
       expect(listCalls()).toBe(1);
+
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks only about the groups on the page, so paging does not defeat the protocol", async () => {
+    /*
+     * The rule CG-006's whole saving rests on, and the one nothing in this repository could see.
+     *
+     * The endpoint answers cluster-wide when `group` is absent, and this list draws one page. Asked
+     * unscoped from page 1 of a cluster with more groups than fit, every poll comes back naming
+     * groups that are not in `rows` — and `applyLagDelta` refuses those, so every poll took the
+     * `needs-full-list` branch and paid for a whole group list. No figure was wrong; the entire
+     * optimisation was off, silently, on exactly the clusters it was written for.
+     *
+     * Asserted at the request, because that is where the scoping either happens or does not: the
+     * merge downstream behaves identically either way, which is why this was invisible.
+     */
+    vi.useFakeTimers();
+    try {
+      const { api, scopes } = scripted([fullDocument, deltaDocument, quietDocument]);
+      let rows = await baseline();
+      const stop = pollLag(api, "quickstart", () => rows, (next) => {
+        rows = next as GroupSummary[];
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      // Every request, the seeding one included: the page's own group ids and nothing else.
+      const onThePage = rows.map((row) => row.groupId);
+      expect(onThePage.length).toBeGreaterThan(0);
+      for (const scope of scopes) expect(scope).toEqual(onThePage);
 
       stop();
     } finally {

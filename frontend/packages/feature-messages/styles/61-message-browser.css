@@ -820,6 +820,16 @@
   line-height: var(--kui-font-line-height-normal);
 }
 
+/* The sentence for a count the topic did give. It carried `__unknown` — the class whose whole job
+ * is to mark an absence — so the one line on this dialog that states a measured figure was drawn as
+ * a gap. Same size and rhythm, ordinary text colour, because it is an ordinary fact. */
+.kui-resend__known {
+  margin: 0;
+  color: var(--kui-color-text);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
+}
+
 .kui-resend__range-actions {
   display: flex;
   flex-wrap: wrap;

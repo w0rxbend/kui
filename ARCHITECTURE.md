@@ -697,6 +697,27 @@ rather than interpolating across them.
 Search: an in-memory prefix/substring/trigram index inside each snapshot (`libs/kernel`
 `NameIndex`); Lucene only if a benchmark on ≥ 50 k names shows p95 > 50 ms (ADR-038).
 
+**Cross-entity search sits one level above those indexes and holds no state of its own** (ADR-049).
+`GET /api/v1/search?q=<1..200>&limit=<1..50>` is answered by the gateway itself, beside the two
+aggregations it already serves — not by a seventh service and not by an index at the edge. It fans
+out one request per searched service per cluster and no request per result: the topic service's
+unpaged `topics/names`, and the consumer and schema list endpoints, which take the caller's `q` and
+narrow on their own side over the 30-second snapshots this table describes. It adds no cache row of
+its own, so a search is exactly as fresh as the rows above it and never fresher.
+
+Its one piece of vocabulary is `partial`: the service ids the gateway could not ask, de-duplicated
+and sorted so that two identical requests produce identical bytes. A service reaches it in four ways
+and they are one fact to whoever is looking — this deployment routes no such service, the call
+failed, the caller may not list that kind of thing, or the service answered with a freshness section
+carrying no rows (`Unavailable`, `Forbidden`, `NotConfigured`; `Stale` carries rows and is read
+exactly like `Ok`, because a search over slightly old names beats a search that says a cluster holds
+nothing). It is a list of ids rather than a boolean because the remedy differs per service, and it
+is never empty by accident: losing the cluster list names `cluster` and all three searched services,
+and a deployment holding no clusters at all names the three, because an empty document with an empty
+`partial` would be byte-identical to "everybody answered and nothing matched". `limit` caps each
+kind separately and is spent in rounds across the clusters, so one busy cluster cannot make another
+cluster's matches unreachable from the field.
+
 ## 10. Configuration ownership and distribution without restart
 
 Typed configuration is loaded by Ciris (ADR-013) from CLI flags → env → YAML

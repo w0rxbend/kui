@@ -21,52 +21,31 @@ const NAMES = [
   "heartbeats",
 ];
 
-const tree = (
-  names: readonly string[] = NAMES,
-  favourites: readonly string[] = [],
-  maxGroups?: number,
-) =>
+const tree = (names: readonly string[] = NAMES, maxGroups?: number) =>
   topicTree({
     names,
-    favourites,
-    topicHref: (name) => `/ui/clusters/prod/topics/${name}`,
     groupHref: (prefix) => `/ui/clusters/prod/topics?prefix=${prefix}`,
     ...(maxGroups === undefined ? {} : { maxGroups }),
   });
 
 describe("the drawer's topic tree", () => {
-  it("puts the favourites first and internal last, whatever the fold produced", () => {
-    const rows = tree(NAMES, ["analytics.clickstream"]);
-    expect(rows[0]?.label).toBe("analytics.clickstream");
-    expect(rows[0]?.rank).toBe("favourite");
+  it("puts the padlocked row last, whatever the fold produced", () => {
+    const rows = tree();
     expect(rows.at(-1)?.label).toBe("internal");
     expect(rows.at(-1)?.rank).toBe("internal");
+    /* And every underscored name is inside it rather than a row of its own, whatever prefix it
+       would otherwise have fallen under. */
+    expect(rows.at(-1)?.badge?.text).toBe("2");
+    expect(rows.map((row) => row.label)).not.toContain("__consumer_offsets");
   });
 
-  it("counts a favourite in its group as well as on its own row", () => {
-    /* The design draws `orders.payments.v2` starred at the top and still counts it in `orders.* 3`,
-     * because the group's figure is "how many topics begin with orders" and starring one has not
-     * changed that. A tree whose children summed to less than its parent is a tree somebody will
-     * spend an afternoon reconciling. */
-    const rows = tree(NAMES, ["orders.payments.v2"]);
-    const orders = rows.find((row) => row.label === "orders.*");
-    expect(orders?.badge?.text).toBe("3");
-  });
-
-  it("drops a favourite the cluster no longer has", () => {
-    // A row that leads to a 404 is worse than a missing row: the drawer would be asserting the
-    // topic exists, which is the one thing it is in a position to know.
-    const rows = tree(NAMES, ["orders.deleted", "orders.refunds"]);
-    expect(rows.filter((row) => row.rank === "favourite").map((row) => row.label)).toEqual([
-      "orders.refunds",
-    ]);
-  });
-
-  it("keeps a starred internal topic at the top and inside the padlocked count", () => {
-    /* Starring is a statement about attention, not about what kind of topic it is. */
-    const rows = tree(NAMES, ["__consumer_offsets"]);
-    expect(rows[0]?.label).toBe("__consumer_offsets");
-    expect(rows.find((row) => row.label === "internal")?.badge?.text).toBe("2");
+  it("emits no row for a topic, only for the groups a name list can be folded into", () => {
+    /* The favourites branch is gone: it produced `topic:<name>` rows with a `favourite` rank from a
+       list nothing in the product records, so a fold over names now produces group rows only. What
+       it would take to bring it back is in the module's own header. */
+    const rows = tree();
+    expect(rows.every((row) => row.id.startsWith("prefix:"))).toBe(true);
+    expect(rows.map((row) => row.rank)).not.toContain("favourite");
   });
 
   it("gives the internal row a padlock and every other row one neutral glyph", () => {
@@ -95,20 +74,20 @@ describe("the drawer's topic tree", () => {
   });
 
   it("builds every address through the caller rather than concatenating one", () => {
-    const rows = tree(NAMES, ["orders.refunds"]);
-    expect(rows[0]?.href).toBe("/ui/clusters/prod/topics/orders.refunds");
+    const rows = tree();
+    expect(rows[0]?.href).toBe("/ui/clusters/prod/topics?prefix=orders.*");
     expect(rows.find((row) => row.label === "internal")?.href).toBe(
       "/ui/clusters/prod/topics?prefix=internal",
     );
   });
 
   it("is empty for a cluster with no topics, rather than a tree of nothing", () => {
-    expect(tree([], ["orders.refunds"])).toEqual([]);
+    expect(tree([])).toEqual([]);
   });
 
   it("honours the fold's cap so four thousand singletons are not four thousand rows", () => {
     const singletons = Array.from({ length: 40 }, (_, index) => `topic-${index}`);
-    const rows = tree(singletons, [], 3);
+    const rows = tree(singletons, 3);
     expect(rows.length).toBe(4);
     expect(rows.at(-1)?.label).toBe("other");
   });

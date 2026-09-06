@@ -79,7 +79,10 @@ export function TopicCards(props: TopicCardsProps): JSX.Element {
     <ul class="kui-topic-cards" aria-label="Topics">
       <For each={props.topics}>
         {(topic) => (
-          <li class="kui-topic-cards__item">
+          /* No class on the item: it is the grid cell and has no rule of its own, and a hook in the
+             markup that no stylesheet answers is a selector somebody later writes against believing
+             it already means something. The card fills the cell through its own `height: 100%`. */
+          <li>
             <article
               class={[
                 "kui-topic-card",

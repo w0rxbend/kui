@@ -193,3 +193,99 @@ export const ZERO_BYTE_DISKS: OverviewData = {
   ...HEALTHY,
   logDirs: value(LOG_DIRS.map((dir) => ({ ...dir, totalBytes: 0, usableBytes: 0 }))),
 };
+
+/* --- Throughput: the states the card has to be right about ------------------------------------- */
+
+/** The step a 24h series is bucketed at, and the count that follows from it. Mirrors the server. */
+const STEP_SECONDS = 300;
+const BUCKETS_24H = 288;
+
+/** The instant the fixture series end at. Fixed so a story looks the same on two days. */
+const SERIES_END = Date.parse("2026-09-05T12:00:00Z");
+
+/**
+ * A day of throughput with a hole in it, and a measured zero right beside the hole.
+ *
+ * The two facts this fixture exists to keep apart are in it deliberately:
+ *
+ *  - bucket 0 is a **measured zero** — the exporter answered and the cluster was idle;
+ *  - buckets 100 to 119 are **absent** — nothing answered, and the chart must show a gap.
+ *
+ * Drawn as bars they are the same picture, which is exactly why the card has a coverage strip, a
+ * hidden data table and a sentence: three renderings, and only the bars are ambiguous. A fold that
+ * turned `null` into `0` would make all three agree with each other and with nothing that happened.
+ */
+export const THROUGHPUT_WITH_A_GAP: unknown = {
+  range: "24h",
+  from: new Date(SERIES_END - BUCKETS_24H * STEP_SECONDS * 1000).toISOString(),
+  to: new Date(SERIES_END).toISOString(),
+  stepSeconds: STEP_SECONDS,
+  buckets: Array.from({ length: BUCKETS_24H }, (_unused, index) => {
+    const startingAt = new Date(
+      SERIES_END - (BUCKETS_24H - index) * STEP_SECONDS * 1000,
+    ).toISOString();
+    if (index >= 100 && index < 120) {
+      return { startingAt, bytesInPerSecond: null, bytesOutPerSecond: null, recordsPerSecond: null };
+    }
+    if (index === 0) {
+      return { startingAt, bytesInPerSecond: 0, bytesOutPerSecond: 0, recordsPerSecond: 0 };
+    }
+    /* A shape rather than a constant, so the story shows a chart with something to look at and the
+       legend's "current" chip is a different number from the first bucket's. */
+    const wave = 1 + Math.sin(index / 12);
+    return {
+      startingAt,
+      bytesInPerSecond: Math.round(4_000_000 + wave * 2_500_000),
+      bytesOutPerSecond: Math.round(9_000_000 + wave * 4_000_000),
+      recordsPerSecond: Math.round(1_200 + wave * 700),
+    };
+  }),
+};
+
+/** A source KUI can reach and has never managed to sample: the full axis, and nothing on it. */
+export const THROUGHPUT_ALL_ABSENT: unknown = {
+  range: "24h",
+  from: new Date(SERIES_END - BUCKETS_24H * STEP_SECONDS * 1000).toISOString(),
+  to: new Date(SERIES_END).toISOString(),
+  stepSeconds: STEP_SECONDS,
+  buckets: Array.from({ length: BUCKETS_24H }, (_unused, index) => ({
+    startingAt: new Date(SERIES_END - (BUCKETS_24H - index) * STEP_SECONDS * 1000).toISOString(),
+    bytesInPerSecond: null,
+    bytesOutPerSecond: null,
+    recordsPerSecond: null,
+  })),
+};
+
+/** The endpoint's whole answer, wrapped as the gateway wraps it. */
+export const throughputBody = (section: unknown): unknown => ({ throughput: section });
+
+/** `ok`, carrying a series. */
+export const throughputOk = (series: unknown): unknown =>
+  throughputBody({ status: "ok", data: series, fetchedAt: "2026-09-05T12:00:00Z" });
+
+/** The common answer for a deployment that has configured no exporter. Not a failure. */
+export const THROUGHPUT_NOT_CONFIGURED: unknown = throughputBody({ status: "not_configured" });
+
+/**
+ * An exporter that stopped answering. A failure, and one a retry might fix.
+ *
+ * `reason` is the code and `message` is its sibling, which is how `Section.Unavailable` is written
+ * on the wire — not a nested `{code, message}`. A fixture that nested them decodes to the reason
+ * `"unknown"` with no message, and the card would draw the generic fallback while the case looked
+ * like it was asserting the registry's own words.
+ */
+export const THROUGHPUT_UNAVAILABLE: unknown = throughputBody({
+  status: "unavailable",
+  reason: "KUI-UPSTREAM-UNAVAILABLE",
+  message: "The metrics exporter did not answer.",
+});
+
+/**
+ * The principal may not read this cluster's metrics.
+ *
+ * `MetricsMapping.sectionOf` cannot produce this today — it maps a reading to `ok`,
+ * `not_configured` or `unavailable` and nothing else — but `Section` has five statuses and the
+ * gateway's capability fold is entitled to any of them, so the browser has to be able to draw all
+ * five. A status this build refuses to draw is a blank card on the day a service starts sending it.
+ */
+export const THROUGHPUT_FORBIDDEN: unknown = throughputBody({ status: "forbidden" });

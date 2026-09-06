@@ -40,10 +40,11 @@ import {
   partitionTotal,
   productionRate,
   replicationPill,
+  requestHandlers,
   storageBreakdown,
   storageLede,
-  throughputSeries,
   topLag,
+  topProducers,
   totalLag,
 } from "./model.js";
 import type { OverviewModel } from "./Overview.jsx";
@@ -280,8 +281,9 @@ export function toOverviewModel(data: OverviewData): OverviewModel {
     topicCount: data.topicCount,
     partitionTotal: partitionTotal(data.summary),
     productionRate: productionRate(),
-    throughput: throughputSeries(),
     latency: latencyPercentiles(),
+    topProducers: topProducers(),
+    requestHandlers: requestHandlers(),
     lag,
     lagPill: lagPill(lag),
     brokers: brokerHealth(data.brokers, data.logDirs),

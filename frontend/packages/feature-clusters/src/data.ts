@@ -95,19 +95,18 @@ interface BrokerPayload {
   readonly partitionCount?: number | null;
   readonly diskUsageBytes?: number | null;
   /*
-   * Two fields this mapping reads and draws nothing from, declared so that the next reader does not
-   * think they were missed.
+   * `leaderSkewPercent` is drawn, since this wave, and it took three to get there: the cluster
+   * service hard-coded it `null` until 2026-09-06, at which point it began deriving it from the
+   * partition census (`ClusterTopology.leaderSkewOn`) and nothing in the browser read it. An
+   * expanded broker card now says it in words — `leaderSkewSentence` — which is the honest form:
+   * a signed percentage beside the word LEADERS reads as a negative partition count, and the
+   * PARTITION SKEW tile a few inches away is a *different* figure (a cluster-wide spread over
+   * replica counts) that this must never be printed under.
    *
-   * `segmentCount` is still `null` on every cluster KUI has been run against — the cluster service
-   * hard-codes it — and the screen has no figure for it, so there is no place a sentence would go.
-   *
-   * `leaderSkewPercent` is the one that changed: since 2026-09-06 the cluster service derives it
-   * from the partition census (`ClusterTopology.leaderSkewOn`), so it now arrives with a figure on
-   * any cluster whose topic sweep described every topic. Nothing here draws it yet, and that is a
-   * screen this package still owes rather than a field that was missed. The honest change is a
-   * figure on the card with a sentence for its absence, not a number computed in the browser: the
-   * skew the PARTITION SKEW tile draws is a *cluster* spread over replica counts, which is a
-   * different question from a broker's own deviation and must not be printed under this name.
+   * `segmentCount` is the one field this mapping still reads nothing from, declared so the next
+   * reader does not think it was missed: it is `null` on every cluster KUI has been run against,
+   * because the cluster service hard-codes it, so there is no figure to draw and no absence worth
+   * a sentence.
    */
   readonly leaderSkewPercent?: number | null;
   readonly segmentCount?: number | null;
@@ -199,6 +198,7 @@ function toBroker(payload: BrokerPayload): Broker {
      */
     diskUsedBytes: null,
     diskTotalBytes: null,
+    leaderSkewPercent: figure(payload.leaderSkewPercent),
   };
 }
 

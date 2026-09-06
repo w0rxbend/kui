@@ -94,6 +94,21 @@ export function BrokersScreen(props: BrokersScreenProps): JSX.Element {
     },
   );
 
+  /*
+   * The scrape is asked for at mount, and not when something happens to read it.
+   *
+   * `useQuery` binds when its state is first read in a reactive scope, and every reader of this one
+   * is a prop the list draws — the voice line's under-replication count, the freshness line, the
+   * cards' version tag. The moment the list stopped drawing those while the brokers were still in
+   * flight, the cluster stopped being *requested* until the brokers landed, and the page took two
+   * round trips in series to say something it takes three in parallel to say. The header above
+   * promises three requests; this is what keeps that true regardless of what the list is drawing.
+   */
+  createEffect(
+    () => cluster.state(),
+    () => {},
+  );
+
   /** Which cards are open, and therefore which settings have been asked for. */
   const [expanded, setExpanded] = createSignal<readonly number[]>([]);
 

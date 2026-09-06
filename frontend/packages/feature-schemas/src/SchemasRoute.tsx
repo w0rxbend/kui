@@ -38,6 +38,7 @@ import {
   writeBlockedReason,
   type Fetched,
 } from "@kui/kernel";
+import { RegisterSchemaDialog } from "./RegisterSchemaDialog.jsx";
 import { SchemaWorkspace } from "./SchemaWorkspace.jsx";
 import { SubjectList } from "./SubjectList.jsx";
 import { SubjectPage } from "./SubjectPage.jsx";
@@ -48,10 +49,13 @@ import {
   fetchSubjectCompatibility,
   fetchSubjects,
   fetchVersions,
+  registerBlockedReason,
+  registerSchema,
   setCompatibility,
   type Compatibility,
   type CompatibilityLevel,
   type ProposedSchema,
+  type RegisteredSchema,
   type SchemaVersion,
   type SubjectListResult,
 } from "./data.js";
@@ -81,23 +85,43 @@ function NoCluster(): JSX.Element {
 }
 
 /**
- * A failure in the screen's own words.
+ * A failure in the screen's own words, and how loudly to say it.
  *
  * The registry is the one upstream in this product that is routinely *absent* rather than broken —
  * plenty of clusters have none — so "not configured" is a different sentence from "not answering",
  * and neither is an empty subject list.
+ *
+ * ## `stale` is not a failure, and it never had a code
+ *
+ * A stale query is a real answer with a badge on it: the figures below the banner are the ones the
+ * registry gave, they are simply older than the last attempt. This drew them under `tone="danger"`
+ * — the tone this product reserves for something that is wrong — beside an invented error code,
+ * `KUI-STALE`, which exists in no generated constant, in no `docs/api/error-codes.md` and in no
+ * service. `Banner`'s `code` prop is documented as *"the stable code, for whoever the operator
+ * escalates to"*, and escalating a code nobody has ever heard of wastes the afternoon of whoever
+ * receives it.
+ *
+ * So stale is a warning with no code. That is this repository's written rule — *data that is real
+ * and out of date is still the best answer anybody has* — and it is the same rule `optional()`
+ * below exists to keep.
  */
-function failureOf(state: Fetched<unknown>): { message: string; code?: string } | undefined {
+function failureOf(
+  state: Fetched<unknown>,
+): { message: string; code?: string; tone?: "danger" | "warning" } | undefined {
   switch (state.kind) {
     case "failed":
-      return { message: state.message, code: state.code };
+      return { message: state.message, code: state.code, tone: "danger" };
     case "stale":
-      return { message: state.reason, code: "KUI-STALE" };
+      return { message: state.reason, tone: "warning" };
     case "forbidden":
-      return { message: "You do not have permission to read this cluster's schema registry." };
+      return {
+        message: "You do not have permission to read this cluster's schema registry.",
+        tone: "danger",
+      };
     case "not-configured":
       return {
         message: "This cluster has no schema registry configured, so there are no subjects to list.",
+        tone: "danger",
       };
     default:
       return undefined;
@@ -119,9 +143,11 @@ function optional<T>(state: Fetched<T>): T | undefined {
 /** A failed write, in the shape the screens' banner takes. */
 function mutationFailure(
   state: ReturnType<ReturnType<typeof createMutation<[CompatibilityLevel], unknown>>["state"]>,
-): { message: string; code?: string } | undefined {
-  if (state.kind === "forbidden") return { message: state.message, code: "KUI-FORBIDDEN" };
-  if (state.kind === "failed") return { message: state.message, code: state.code };
+): { message: string; code?: string; tone?: "danger" | "warning" } | undefined {
+  if (state.kind === "forbidden") {
+    return { message: state.message, code: "KUI-FORBIDDEN", tone: "danger" };
+  }
+  if (state.kind === "failed") return { message: state.message, code: state.code, tone: "danger" };
   return undefined;
 }
 
@@ -143,6 +169,28 @@ function notifyLevelSet(level: CompatibilityLevel, scope: string): void {
     return;
   }
   notify(`Compatibility for ${scope} set to ${level}`, { tone: "success" });
+}
+
+/**
+ * The confirmation for a schema the registry accepted.
+ *
+ * The version and the id are stated separately and labelled, because they are different numbers and
+ * only one of them is written into a record's header — the same distinction `SubjectPage` draws in
+ * its fact list. Either can be absent from the answer, and an absence is said rather than filled
+ * with the other one: "registered as 4" over a registry that reported an id and no version would
+ * send somebody looking for version 4 of a subject that has two.
+ */
+function notifyRegistered(registered: RegisteredSchema): void {
+  const figures: string[] = [];
+  if (registered.version !== undefined) figures.push(`version ${registered.version}`);
+  if (registered.id !== undefined) figures.push(`schema id ${registered.id}`);
+  notify(`Registered a schema under ${registered.subject}`, {
+    tone: "success",
+    message:
+      figures.length === 0
+        ? "The registry accepted it and did not say which version or id it became."
+        : `The registry accepted it as ${figures.join(", ")}.`,
+  });
 }
 
 function Registry(props: {
@@ -180,6 +228,13 @@ function Registry(props: {
   const setGlobal = createMutation((level: CompatibilityLevel) =>
     setCompatibility(kui.api, props.clusterId, level),
   );
+
+  const [registering, setRegistering] = createSignal(false);
+  const register = createMutation((subject: string, proposed: ProposedSchema) =>
+    registerSchema(kui.api, props.clusterId, subject, proposed),
+  );
+
+  const mayRegister = (): boolean => kui.permits(Actions.SchemaCreate);
 
   createEffect(
     () => subjects.state(),
@@ -251,16 +306,73 @@ function Registry(props: {
   );
 
   return (
-    <SchemaWorkspace
-      list={list}
-      subjectCount={result().page.totalItems}
-      globalLevel={global()?.level}
-      detail={
-        props.subject === undefined ? undefined : (
-          <SubjectPane clusterId={props.clusterId} subject={props.subject} listHref={listHref()} />
-        )
-      }
-    />
+    <>
+      <SchemaWorkspace
+        list={list}
+        /*
+         * The registry's total, and never `result().subjects.length`.
+         *
+         * The page holds fifty rows out of however many the registry has, so the row count is the
+         * page's size dressed up as an inventory — right only on a registry with one page, which is
+         * every registry anybody develops against. It is character for character the defect the
+         * consumer groups screen was rewritten to remove.
+         */
+        subjectCount={result().page.totalItems}
+        globalLevel={global()?.level}
+        loading={subjects.state().kind === "loading"}
+        onRegister={mayRegister() ? () => setRegistering(true) : undefined}
+        registerDisabledReason={registerBlockedReason(mayRegister())}
+        detail={
+          props.subject === undefined ? undefined : (
+            <SubjectPane
+              clusterId={props.clusterId}
+              subject={props.subject}
+              listHref={listHref()}
+            />
+          )
+        }
+      />
+
+      {/* Mounted only while it is open, so that each opening is a fresh form.
+
+          `Dialog` already unmounts its own *surface* when closed, but the fields' signals live in
+          `RegisterSchemaDialog` itself and would outlive it — which means the dialog reopens
+          holding the schema that was just registered, one press away from registering it twice.
+          A `Show` here is the same rule applied one level up, and it is why the component needs no
+          reset logic of its own. */}
+      <Show when={registering()}>
+        <RegisterSchemaDialog
+          open
+          onClose={() => {
+            setRegistering(false);
+            // The mutation outlives the dialog, so its state is cleared here rather than there:
+            // without this the *next* opening would draw the previous attempt's refusal above a
+            // box nobody has typed in yet.
+            register.reset();
+          }}
+          state={register.state()}
+          knownSubjects={result().subjects.map((row) => row.subject)}
+          onRegister={(subject, proposed) => {
+            void register.run(subject, proposed).then((outcome) => {
+              if (outcome.kind !== "done") return;
+              setRegistering(false);
+              register.reset();
+              /*
+               * The refresh and the toast, in that order and both of them here.
+               *
+               * The list is paged and searched by the registry, so a newly registered subject is
+               * on screen only if this page is where the registry puts it — which is why the toast
+               * says what happened rather than the list being left to imply it. `reload` re-asks
+               * with the query that is in force; it does not reset the search or the page, because
+               * throwing away somebody's filter is a worse surprise than a row one page away.
+               */
+              subjects.reload();
+              notifyRegistered(outcome.value);
+            });
+          }}
+        />
+      </Show>
+    </>
   );
 }
 

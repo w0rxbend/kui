@@ -174,18 +174,21 @@ export type NavCounts = {
 export type NavState = "ready" | "degraded" | "unavailable" | "forbidden" | "not_configured";
 
 /**
- * Where a nested row sorts among its siblings, in the three kinds the topic tree has.
+ * Where a nested row sorts among its siblings, in the two kinds the topic tree has.
  *
- * A field on the row rather than a rule read off its label. The drawer's tree is assembled from two
- * sources — favourites, which a person chose, and prefix groups, which `nav/prefixes.ts` folded out
- * of a name list — and a renderer that recovered the distinction by looking for a trailing `.*`
- * would file a topic genuinely called `orders.*` as a group and an internal topic somebody
- * favourited as a favourite. The two sources know which is which; the label does not.
+ * A field on the row rather than a rule read off its label. `internal` is every topic whose name
+ * begins with an underscore, folded into one padlocked row by `nav/prefixes.ts`, and a renderer
+ * that recovered that by looking at the label would file a genuine prefix called `internal.*` as
+ * the padlocked row. The fold knows which is which; the label does not.
+ *
+ * There was a third kind, `favourite`, sorting above both. It went with the fold's favourites
+ * branch — nothing in the product records a favourite, so no row ever carried it outside a fixture
+ * — and it comes back with whatever finally records one. See `nav/topicTree.ts`.
  *
  * Absent means "an ordinary row", which sorts with the prefix groups. That is the right default for
  * a caller that has only one kind of child.
  */
-export type NavRank = "favourite" | "prefix" | "internal";
+export type NavRank = "prefix" | "internal";
 
 export type NavDestination = {
   readonly id: string;
@@ -221,9 +224,11 @@ export type NavDestination = {
    * about the row — it is a fact about where it sits, and the two go out of step the moment a
    * branch is moved. A nested shape cannot express a child at the wrong depth at all.
    *
-   * Absent and empty are deliberately different. Absent means the row is a leaf; empty means it is
-   * a branch that currently holds nothing, which is a cluster with no topics and is worth drawing
-   * as such rather than as a row that has forgotten it can expand.
+   * Absent and empty draw the same thing, and that is `NavItem`'s decision rather than an accident:
+   * a row is a branch when it has children, so an empty array gets no disclosure. A chevron that
+   * opens onto nothing is a control that appears broken, and a cluster with no topics is better
+   * described by the row's own badge than by a disclosure holding an empty list. Callers may still
+   * distinguish the two in their own data; the drawer does not.
    */
   readonly children?: readonly NavDestination[] | undefined;
   /**

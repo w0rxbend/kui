@@ -76,13 +76,10 @@ object ThroughputUseCase {
 
           case Some(profile) =>
             sources.source(cluster).flatMap {
-              // No collector to ask. Which of the two sentences applies is decided by what the operator
-              // configured, not by what this build happens to have implemented — see `SourceAccess`.
+              // No collector to ask. Which sentence applies is decided by what the operator configured and
+              // by what the adapter could make of it, never by this layer — see `SourceAccess.explain`.
               case None =>
-                val explanation =
-                  if profile.hasSource then SourceAccess.noCollector(cluster)
-                  else SourceAccess.noSource(cluster)
-                (MetricsReading.NotMeasured(explanation): MetricsReading[ThroughputSeries])
+                (MetricsReading.NotMeasured(SourceAccess.explain(profile)): MetricsReading[ThroughputSeries])
                   .asRight[KuiError]
                   .pure[F]
 

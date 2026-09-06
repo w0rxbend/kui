@@ -258,6 +258,88 @@ object CompatibilityCheckRequest {
   given CanEqual[CompatibilityCheckRequest, CompatibilityCheckRequest] = CanEqual.derived
 }
 
+/** A schema somebody wants registered under a subject.
+  *
+  * The same three fields as [[CompatibilityCheckRequest]] and deliberately a separate type. They are two
+  * different requests with two different consequences — one asks a question and one changes the registry —
+  * and a shared body would put one schema name on both operations in every generated client, which is how a
+  * caller ends up sending the wrong one. It is also the field a refusal points at: a rejection arrives as
+  * `KUI-VALIDATION` whose `details[0]` names `definition` and carries the registry's own sentence.
+  */
+final case class RegisterSchemaRequest(
+    schemaType: String,
+    definition: String,
+    references: List[SchemaReferenceDto]
+)
+
+object RegisterSchemaRequest {
+
+  given Codec[RegisterSchemaRequest] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        // Absent means Avro, which is the registry's own convention and therefore what a client that
+        // copied a registry payload will send. Same rule as the compatibility check's.
+        schemaType <- cursor.getOrElse[String]("schemaType")("AVRO")
+        definition <- cursor.get[String]("definition")
+        references <- cursor.getOrElse[List[SchemaReferenceDto]]("references")(Nil)
+      } yield RegisterSchemaRequest(schemaType, definition, references),
+    (request: RegisterSchemaRequest) =>
+      Json.obj(
+        "schemaType" -> request.schemaType.asJson,
+        "definition" -> request.definition.asJson,
+        "references" -> request.references.asJson
+      )
+  )
+
+  given TapirSchema[RegisterSchemaRequest] = TapirSchema
+    .derived[RegisterSchemaRequest]
+    .description("The schema to register under this subject, and what it is written in")
+
+  given CanEqual[RegisterSchemaRequest, RegisterSchemaRequest] = CanEqual.derived
+}
+
+/** What the registry stored: the id it gave the schema, and the version the subject is now on.
+  *
+  * ==Why `version` is nullable and `id` is not==
+  *
+  * The registry's registration response is `{"id": N}` and carries no version at all; the number is a second
+  * question, and a second call can fail once the first has already succeeded. When it does, the schema **is**
+  * registered and KUI does not know its number. Reporting a failure would send an operator to register it
+  * again, and inventing "the previous latest plus one" would print a version that may not exist — so the
+  * field is absent and the screen says the number could not be read, which is this product's rule about an
+  * unmeasured figure arriving on a wire for the first time.
+  *
+  * It is the uncommon branch: both calls go to the same registry over the same connection pool, one
+  * immediately after the other.
+  */
+final case class RegisteredVersionDto(subject: Subject, id: Int, version: Option[Int])
+
+object RegisteredVersionDto {
+
+  given Codec[RegisteredVersionDto] = Codec.from(
+    (cursor: HCursor) =>
+      for {
+        subject <- cursor.get[Subject]("subject")
+        id <- cursor.get[Int]("id")
+        version <- cursor.get[Option[Int]]("version")
+      } yield RegisteredVersionDto(subject, id, version),
+    (dto: RegisteredVersionDto) =>
+      Json.obj(
+        "subject" -> dto.subject.asJson,
+        "id" -> dto.id.asJson,
+        "version" -> dto.version.asJson
+      )
+  )
+
+  given TapirSchema[RegisteredVersionDto] = TapirSchema
+    .derived[RegisteredVersionDto]
+    .description(
+      "The registered schema's id, and the version it became where the registry reported one"
+    )
+
+  given CanEqual[RegisteredVersionDto, RegisteredVersionDto] = CanEqual.derived
+}
+
 /** The registry's verdict on a proposed schema.
   *
   * `messages` are the **registry's** explanations, passed through rather than summarised: they name the field

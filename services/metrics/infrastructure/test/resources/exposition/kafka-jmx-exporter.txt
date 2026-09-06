@@ -1,0 +1,46 @@
+# An exposition body in the shape a jmx_exporter serves in httpserver mode in front of a Kafka broker,
+# with the lowercaseOutputName rule set. The line shapes are the format's; the numbers are chosen rather
+# than measured, and nothing in this repository claims otherwise.
+#
+# It holds one family of each kind this parser has to survive: the three broker-wide rates it reads, the
+# per-topic slices of the same MBeans it must not double-count, the replication family whose name contains
+# one of the names it reads, four of the several hundred families it knows nothing about, and a NaN.
+#
+# The slices are written BEFORE the aggregate they belong to, deliberately. Nothing in the exposition
+# format orders a family's lines, and a parser that took the first line matching a name would read
+# `98000.0` here — which is a real number, from a real topic, and not the cluster's throughput. Put the
+# aggregate first and the skip-the-slices rule cannot be made to fail.
+# HELP jmx_exporter_build_info JMX Exporter build information
+# TYPE jmx_exporter_build_info gauge
+jmx_exporter_build_info{version="1.4.0",name="jmx_prometheus_javaagent",} 1.0
+# HELP jvm_memory_bytes_used Used bytes of a given JVM memory area.
+# TYPE jvm_memory_bytes_used gauge
+jvm_memory_bytes_used{area="heap",} 5.36870912E8
+# HELP kafka_server_brokertopicmetrics_bytesinpersec Attribute exposed for management
+# TYPE kafka_server_brokertopicmetrics_bytesinpersec untyped
+kafka_server_brokertopicmetrics_bytesinpersec_count 1.2884901888E10
+kafka_server_brokertopicmetrics_bytesinpersec_meanrate 91234.5
+kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate{topic="orders",} 98000.0
+kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate{topic="payments",} 26800.5
+kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate 124800.5
+kafka_server_brokertopicmetrics_bytesinpersec_fiveminuterate 118400.25
+# HELP kafka_server_brokertopicmetrics_bytesoutpersec Attribute exposed for management
+# TYPE kafka_server_brokertopicmetrics_bytesoutpersec untyped
+kafka_server_brokertopicmetrics_bytesoutpersec_count 2.5769803776E10
+kafka_server_brokertopicmetrics_bytesoutpersec_oneminuterate{topic="orders",} 196000.0
+kafka_server_brokertopicmetrics_bytesoutpersec_oneminuterate 249600.75
+# HELP kafka_server_brokertopicmetrics_messagesinpersec Attribute exposed for management
+# TYPE kafka_server_brokertopicmetrics_messagesinpersec untyped
+kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate 1420.75
+# HELP kafka_server_brokertopicmetrics_replicationbytesinpersec Attribute exposed for management
+# TYPE kafka_server_brokertopicmetrics_replicationbytesinpersec untyped
+kafka_server_brokertopicmetrics_replicationbytesinpersec_oneminuterate 61200.0
+# HELP kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent Attribute exposed for management
+# TYPE kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent untyped
+kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate 0.8912
+# HELP kafka_controller_kafkacontroller_activecontrollercount Attribute exposed for management
+# TYPE kafka_controller_kafkacontroller_activecontrollercount untyped
+kafka_controller_kafkacontroller_activecontrollercount 1.0
+# A JMX attribute that has never been populated since the broker started reads as NaN, which is not a
+# measurement and must not become one.
+kafka_network_requestmetrics_totaltimems{request="Produce",quantile="0.99",} NaN

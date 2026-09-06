@@ -580,7 +580,11 @@ export interface paths {
          */
         readonly get: operations["schema.versions"];
         readonly put?: never;
-        readonly post?: never;
+        /**
+         * Register a schema under this subject
+         * @description Mutation (schema.subject.version.register). This call adds a version to the subject and cannot be undone from KUI. The registry decides whether the schema is accepted; a rejection comes back as 400 KUI-VALIDATION carrying the registry's own explanation in details[0], because that sentence names the field that broke the rule and is the only part of the answer anybody can act on. Registering a schema that is already registered under this subject is what the registry calls idempotent: it answers the existing id and version and adds no version. The answer's version is absent when the registry stored the schema and then would not say which version it became, which is a registration that succeeded and a number KUI does not know.
+         */
+        readonly post: operations["schema.subject.version.register"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -2038,6 +2042,27 @@ export interface components {
             readonly requestedAt: string;
         };
         /**
+         * RegisteredVersionDto
+         * @description The registered schema's id, and the version it became where the registry reported one
+         */
+        readonly RegisteredVersionDto: {
+            /** Format: int32 */
+            readonly id: number;
+            /** @description a schema registry subject */
+            readonly subject: string;
+            /** Format: int32 */
+            readonly version?: number;
+        };
+        /**
+         * RegisterSchemaRequest
+         * @description The schema to register under this subject, and what it is written in
+         */
+        readonly RegisterSchemaRequest: {
+            readonly definition: string;
+            readonly references?: readonly components["schemas"]["SchemaReferenceDto"][];
+            readonly schemaType: string;
+        };
+        /**
          * ResendRequestDto
          * @description Copy offset ranges into another topic, byte for byte
          */
@@ -3452,7 +3477,7 @@ export interface operations {
                 readonly direction?: string;
                 /** @description Which page, numbered from one */
                 readonly page?: number;
-                /** @description How many rows a page holds, up to 100. A value above that is clamped, not refused. 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment */
+                /** @description How many rows a page holds, up to 100. A value above that is clamped, not refused. Exactly 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment; anything below that is clamped up to one row rather than read as a count */
                 readonly pageSize?: number;
                 /** @description Case-insensitive substring match over the subject name. Not a regular expression */
                 readonly q?: string;
@@ -3575,6 +3600,45 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["SubjectVersionsDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "schema.subject.version.register": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The subject, as the registry knows it */
+                readonly subject: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["RegisterSchemaRequest"];
+            };
+        };
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RegisteredVersionDto"];
                 };
             };
             readonly default: {

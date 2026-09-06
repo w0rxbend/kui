@@ -26,9 +26,11 @@
  * ## The partition table is the overview's, not the tab's
  *
  * `fetchTopicOverview` already carries the partitions, so this draws them rather than issuing a
- * second request for the same rows. The gateway caps that list at 500, which is why the Partitions
- * tab exists and reads the uncapped endpoint instead — and why the note under this table points at
- * it rather than pretending the table is the topic.
+ * second request for the same rows. The gateway caps that list, which is why the Partitions tab
+ * exists and reads the uncapped endpoint instead — and why the note under this table points at it
+ * rather than pretending the table is the topic. The note fires on the *difference* between the
+ * topic's partition count and the rows that arrived, so this file holds no copy of the server's cap
+ * to go stale.
  */
 import { Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
@@ -37,9 +39,6 @@ import { TopicPartitions } from "./TopicPartitions.jsx";
 import { formatBytes } from "./TopicListPage.jsx";
 import { healthChip } from "./TopicPage.jsx";
 import type { TopicOverview } from "./data.js";
-
-/** How many partitions the overview's list is capped at by the gateway. See the header. */
-export const OVERVIEW_PARTITION_CAP = 500;
 
 export interface TopicOverviewTabProps {
   /** `undefined` while the overview is still coming, or when it did not come at all. */
@@ -65,6 +64,22 @@ export function TopicOverviewTab(props: TopicOverviewTabProps): JSX.Element {
 
   /** Pending only while there is genuinely nothing yet; an arrived overview is never "pending". */
   const pending = (): boolean => props.loading === true && props.overview === undefined;
+
+  /**
+   * How many of this topic's partitions the overview's table does not carry.
+   *
+   * Measured — the topic's own partition count against the rows that actually arrived — rather than
+   * compared against a copy of the gateway's `TopicDetailResponse.EmbeddedPartitionLimit`. The
+   * constant that used to live here was a hand-copy of a Scala number with nothing comparing the
+   * two, and it had already drifted in effect: the notice fired on `length >= 500`, so a topic with
+   * exactly 500 partitions and a complete table was told its table was short. Subtracting is both
+   * the honest test and the one that cannot go stale when the server's cap moves.
+   */
+  const missingPartitions = (): number => {
+    const held = topic()?.partitions;
+    if (held === undefined) return 0;
+    return Math.max(0, held - partitions().length);
+  };
 
   const figureOf = (
     value: number | undefined,
@@ -144,12 +159,13 @@ export function TopicOverviewTab(props: TopicOverviewTabProps): JSX.Element {
           a topic is a decision, and offering it twice on one page is how it gets taken twice. */}
       <TopicPartitions partitions={partitions()} loading={props.loading === true} />
 
-      <Show when={partitions().length >= OVERVIEW_PARTITION_CAP}>
+      <Show when={missingPartitions() > 0}>
         <p class="kui-topic-overview__capped" role="status">
-          {/* The one thing this table can be wrong about, said out loud. The overview's partition
-              list stops at {OVERVIEW_PARTITION_CAP}, and a reader who concluded that partition 700
-              does not exist would have concluded it from a table that never said it was short. */}
-          This table stops at {formatCount(OVERVIEW_PARTITION_CAP)} partitions.{" "}
+          {/* The one thing this table can be wrong about, said out loud, with both numbers in it. A
+              reader who concluded that partition 700 does not exist would have concluded it from a
+              table that never said it was short. */}
+          This table shows {formatCount(partitions().length)} of{" "}
+          {formatCount(topic()?.partitions ?? 0)} partitions.{" "}
           <a href={props.partitionsHref}>The Partitions tab</a> reads them all.
         </p>
       </Show>

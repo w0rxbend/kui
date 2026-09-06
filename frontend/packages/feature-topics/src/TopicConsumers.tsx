@@ -298,9 +298,10 @@ export function TopicConsumers(props: TopicConsumersProps): JSX.Element {
  *
  * A topic nothing consumes is completely ordinary — a topic written to by one service and read by a
  * connector that is not a consumer group, or one that nothing has got round to reading yet — so the
- * empty rendering is a statement of fact and not a problem to solve. It is the *other* three that
- * must never be drawn this way: "nobody reads this topic" and "the consumer service is down" would
- * send an operator in opposite directions.
+ * empty rendering is a statement of fact and not a problem to solve. It is the *other* two —
+ * unavailable and forbidden, the two `ConsumersFailure` carries — that must never be drawn this
+ * way: "nobody reads this topic", "the consumer service is down" and "you may not see who reads
+ * it" send an operator in three different directions.
  */
 function ConsumersEmpty(props: { readonly failure?: ConsumersFailure | undefined }): JSX.Element {
   const failure = (): ConsumersFailure | undefined => props.failure;

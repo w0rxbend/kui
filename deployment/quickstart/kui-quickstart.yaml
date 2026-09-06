@@ -54,6 +54,35 @@ kui:
     hashUserIds: true
 
   # ---------------------------------------------------------------------------------------------
+  # Where this cluster's broker metrics are read from.
+  #
+  # `docker-compose.quickstart.yml` runs a Prometheus JMX exporter beside the broker and this is the
+  # line that tells KUI about it. Without it every metrics card on the dashboard answers
+  # `not_configured` and says so — which is the correct rendering for a deployment that has no
+  # exporter, and was for two milestones indistinguishable from KUI not being able to measure
+  # anything at all. That is the hole this key closes.
+  #
+  # `http://` and not a JMX service URL, and it is not a preference: `MetricsSourceSettings.url`
+  # is a `SafeUrl`, which ARCHITECTURE.md §14 restricts to `http` and `https`, so
+  # `service:jmx:rmi:///jndi/rmi://kafka:9999/jmxrmi` cannot be written here at all. See ADR-050.
+  #
+  # `kind` is `prometheus`, which is also the default; it is written out because the other value
+  # (`jmx`) is declared and deliberately unimplemented, and a reader who finds only one of the two
+  # spelled anywhere should be able to see which one this is.
+  #
+  # `callTimeout` must be shorter than `kui.metrics.scrapeInterval` (30s by default) or the loader
+  # refuses the file: a scrape that outlives its interval overlaps the next one.
+  metrics:
+    sources:
+      # The member name is the cluster id below, not a label. A name that does not match a cluster
+      # is a source that measures nothing, and the loader says so at start-up rather than leaving a
+      # card empty.
+      quickstart:
+        url: "http://kafka-metrics:5556/metrics"
+        kind: prometheus
+        callTimeout: "10s"
+
+  # ---------------------------------------------------------------------------------------------
   # The broker this quickstart starts.
   #
   # `kafka:9092` and not `localhost:9092`: KUI reaches the broker across the Compose network by

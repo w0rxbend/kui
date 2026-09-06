@@ -10,15 +10,19 @@ export { SubjectList, type SubjectListProps } from "./SubjectList.jsx";
 export { SubjectPage, type SubjectPageProps } from "./SubjectPage.jsx";
 export { CompatibilityCheck, type CompatibilityCheckProps } from "./CompatibilityCheck.jsx";
 export {
+  RegisterSchemaDialog,
+  type RegisterSchemaDialogProps,
+} from "./RegisterSchemaDialog.jsx";
+export {
   LEVEL_NOT_READ,
   LEVEL_NOT_RECOGNISED,
-  REGISTER_UNAVAILABLE_REASON,
   formatTone,
   levelPhrase,
   levelSourceSentence,
   levelSourceWord,
   registryVoice,
   rowCaption,
+  rowLabel,
   versionCountSentence,
 } from "./model.js";
 export {
@@ -31,11 +35,15 @@ export {
   fetchSubjects,
   fetchVersions,
   levelOf,
+  registerBlockedReason,
+  registerSchema,
+  registryRefusal,
   setCompatibility,
   type Compatibility,
   type CompatibilityLevel,
   type CompatibilityVerdict,
   type ProposedSchema,
+  type RegisteredSchema,
   type SchemaVersion,
   type SubjectListResult,
   type SubjectRow,

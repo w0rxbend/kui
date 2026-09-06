@@ -30,19 +30,32 @@
  * tab-invariant and the body below them belongs to the tab. That is exactly how this file is laid
  * out, so a third tab is a case in one switch rather than a rearrangement.
  *
- * ## The panels that are not real
+ * ## The panels that are not real, and the one that stopped being one
  *
- * Throughput over time, the current produce rate, latency percentiles and the record-size
- * distribution are drawn in the design and are not collected by this backend — `services/metrics`
- * answers `not_configured` by design, and no other endpoint could answer any of them. They render as
- * a sentence saying so. See `NotMeasured.tsx` for why that is a `ready` card and not an
- * `unavailable` one, and `model.ts` for the sentences themselves.
+ * The current produce rate, latency percentiles, the record-size distribution, top producers and
+ * request-handler idle time are drawn in the design and are not collected by this backend: the four
+ * endpoints behind them are wave 5's. They render as a sentence saying so. See `NotMeasured.tsx`
+ * for why that is a `ready` card and not an `unavailable` one, and `model.ts` for the sentences.
+ *
+ * **Throughput is no longer one of them.** `services/metrics` answers a real series, so the card
+ * asks for one — which is the single thing on this screen that this component fetches rather than
+ * receives.
+ *
+ * ## Why this file fetches exactly one thing
+ *
+ * Everything else arrives as a finished view model, and the header above says why. Throughput is
+ * the exception because its request is a function of the *address*: the range lives in `?range=`
+ * so a colleague can be sent a link to the window somebody is looking at, and the shell's single
+ * overview fetch is keyed on the cluster alone and reads no query parameter. Folding the range into
+ * it would mean refetching five endpoints to change one axis. So the query is opened here, beside
+ * the reading of the address it depends on, and the card below is handed a finished state exactly
+ * like every other panel — which keeps every state of the card reachable from a story and a test.
  */
 
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import { Dynamic } from "@solidjs/web";
 import type { JSX } from "@solidjs/web";
-import { useParams } from "@solidjs/router";
+import { useParams, useSearchParams } from "@solidjs/router";
 
 import {
   Button,
@@ -58,13 +71,26 @@ import {
   formatCount,
   formatPercent,
   useKui,
+  useQuery,
+  type Fetched,
   type MagnitudeEntry,
+  type QueryRegistry,
   type StatFigure,
   type Tab,
 } from "@kui/kernel";
 
 import { NotMeasured } from "./NotMeasured.jsx";
 import { StorageByBroker, topicsCounted } from "./StorageByBroker.jsx";
+import { ThroughputCard } from "./ThroughputCard.jsx";
+import {
+  RANGE_PARAM,
+  fetchThroughput,
+  hasMeasuredBucket,
+  throughputKey,
+  throughputRange,
+  type ThroughputRange,
+  type ThroughputSeries,
+} from "./throughput.js";
 import { DASHBOARD_TABS, dashboardTab, type DashboardTab } from "./tabs.js";
 import {
   DISK_CRITICAL_PERCENT,
@@ -94,9 +120,11 @@ export interface OverviewModel {
   readonly partitionTotal: Reading<number>;
   readonly inSync: Reading<number>;
   readonly productionRate: Reading<never>;
-  readonly throughput: Reading<never>;
   readonly latency: Reading<never>;
   readonly messageSizes: Reading<never>;
+  /** The Traffic tab's last row, both of which wave 5's endpoints fill (SCREENS-V4.md §4.2). */
+  readonly topProducers: Reading<never>;
+  readonly requestHandlers: Reading<never>;
   readonly lag: Reading<{ total: number; incomplete: number }>;
   readonly lagPill: { text: string; tone: Tone } | undefined;
   readonly brokers: Reading<readonly BrokerBar[]>;
@@ -109,11 +137,21 @@ export interface OverviewModel {
 export interface OverviewProps {
   readonly model: OverviewModel;
   readonly onCreateTopic?: (() => void) | undefined;
+  /**
+   * Which shared answers the throughput query reads.
+   *
+   * Omitted in the product, where the shared registry is the right one: a browser tab has one view
+   * of one server. A test passes its own, for the same reason `SettingsPage` takes its preferences
+   * as props — module state outlives a case, and a second case asking for the same cluster would
+   * otherwise read the first one's stub and pass for the wrong reason.
+   */
+  readonly queries?: QueryRegistry | undefined;
 }
 
 /** What each tab's segment says and shows. The icons are the design's (§3.1). */
 const TAB_LABELS: Readonly<Record<DashboardTab, { readonly label: string; readonly icon: Tab["icon"] }>> = {
   overview: { label: "Overview", icon: "dashboard" },
+  traffic: { label: "Traffic", icon: "stream" },
   storage: { label: "Storage", icon: "disk" },
 };
 
@@ -157,6 +195,43 @@ export function Overview(props: OverviewProps): JSX.Element {
    */
   const cluster = (): string | undefined => params.clusterId ?? kui.cluster();
 
+  /**
+   * The window the throughput card is drawing, read from the address and written back to it.
+   *
+   * A search parameter rather than component state, for the reason the tab is a path segment: the
+   * address is what somebody pastes into a message, and a range held in a signal would make every
+   * link land on the default window whatever the sender was looking at. An unrecognised spelling
+   * resolves to the default rather than being an error, exactly as `dashboardTab` does — `?range=90d`
+   * is a typo, not a page that does not exist.
+   */
+  const [search, setSearch] = useSearchParams<{ readonly range?: string }>();
+  const range = (): ThroughputRange => throughputRange(search[RANGE_PARAM]);
+
+  /**
+   * The throughput series, keyed on the cluster and the window.
+   *
+   * `createMemo` around the key rather than a bare accessor so that a re-render on any other part
+   * of the model does not re-derive it; `useQuery` does the rest — one request per key, shared, and
+   * a failing refetch that keeps the last good answer and marks it stale rather than blanking a
+   * chart that was showing real bytes a second ago.
+   */
+  const key = createMemo<string | undefined>(() => {
+    const id = cluster();
+    return id === undefined ? undefined : throughputKey(id, range());
+  });
+  const throughput = useQuery<ThroughputSeries>({
+    key,
+    load: async () => {
+      const id = cluster();
+      /* Unreachable: the key is `undefined` without a cluster, and `useQuery` asks nothing for an
+         undefined key. It is a value rather than a throw because a loader that rejects takes the
+         page down, which is what `ApiResult` exists to prevent. */
+      if (id === undefined) return { kind: "failed", message: "No cluster is selected.", code: "NO_CLUSTER" };
+      return fetchThroughput(kui.api, id, range());
+    },
+    ...(props.queries === undefined ? {} : { registry: props.queries }),
+  });
+
   const tabs = (): readonly Tab[] => {
     const id = cluster();
     if (id === undefined) return [];
@@ -182,7 +257,7 @@ export function Overview(props: OverviewProps): JSX.Element {
         /* The voice line, chosen by the tab. Conditional on the cluster actually being healthy —
            see `overviewLede` and `storageLede`. A cheerful sentence over a broken cluster is worse
            than a plain one. */
-        voice={ledeFor(tab(), props.model)}
+        voice={ledeFor(tab(), props.model, throughput.state())}
         actions={
           <Button variant="primary" icon="plus" onClick={() => props.onCreateTopic?.()}>
             Create topic
@@ -211,7 +286,18 @@ export function Overview(props: OverviewProps): JSX.Element {
           across as a prop instead leaves it a getter the children read, so the only thing this
           container tracks is `tab()`, and the panels below update in place. That is what makes
           `BrokerHealth`'s keying argument below true rather than merely written. */}
-      <Dynamic component={bodyFor(tab())} model={props.model} />
+      <Dynamic
+        component={bodyFor(tab())}
+        model={props.model}
+        throughput={throughput.state()}
+        range={range()}
+        onRange={(chosen: ThroughputRange) => {
+          /* `setSearchParams` and not a `navigate`: this replaces one parameter and leaves the
+             path, the tab and anything else in the query alone. */
+          setSearch({ [RANGE_PARAM]: chosen });
+        }}
+        onRetry={throughput.reload}
+      />
     </div>
   );
 }
@@ -225,12 +311,50 @@ export function Overview(props: OverviewProps): JSX.Element {
  * would produce — a new segment in the strip that draws the overview under a different name — is
  * one nothing else in this package would notice.
  */
-function ledeFor(tab: DashboardTab, model: OverviewModel): string {
+function ledeFor(
+  tab: DashboardTab,
+  model: OverviewModel,
+  throughput: Fetched<ThroughputSeries>,
+): string {
   switch (tab) {
     case "overview":
       return model.lede;
+    case "traffic":
+      return trafficLede(throughput);
     case "storage":
       return model.storageLede;
+  }
+}
+
+/**
+ * The Traffic tab's voice line, and why it is not the design's sentence unaltered.
+ *
+ * SCREENS-V4.md §4.2 gives this tab the line *"Throughput, latency and who is producing all of
+ * it."* — a promise of three things, of which this build measures one. Printed unqualified over a
+ * tab whose last row is three cards saying they cannot measure anything, it is the cheerful-line-
+ * over-a-broken-cluster failure `overviewLede` exists to avoid, wearing a different hat: a reader
+ * who believes the header goes looking for the latency chart.
+ *
+ * So the design's sentence is kept and a second one is added saying what of it is true here. The
+ * second sentence is chosen by what the throughput request actually answered, which is the only
+ * thing on this tab that can vary.
+ */
+function trafficLede(throughput: Fetched<ThroughputSeries>): string {
+  const promise = "Throughput, latency and who is producing all of it.";
+  switch (throughput.kind) {
+    case "loading":
+      return "Asking this cluster how much is going through it.";
+    case "not-configured":
+      return `${promise} This cluster has no metrics source, so KUI is measuring none of them.`;
+    case "forbidden":
+      return `${promise} You may not read this cluster's metrics, so none of it is drawn here.`;
+    case "failed":
+      return `${promise} The throughput reading did not arrive, so nothing here is measured.`;
+    case "ready":
+    case "stale":
+      return hasMeasuredBucket(throughput.value)
+        ? `${promise} KUI measures the first of those.`
+        : `${promise} Nothing has been sampled in this window yet.`;
   }
 }
 
@@ -245,12 +369,29 @@ function bodyFor(tab: DashboardTab): BodyComponent {
   switch (tab) {
     case "overview":
       return OverviewBody;
+    case "traffic":
+      return TrafficBody;
     case "storage":
       return StorageBody;
   }
 }
 
-type BodyComponent = (props: { readonly model: OverviewModel }) => JSX.Element;
+/**
+ * What every tab's body is handed.
+ *
+ * One shape for all three rather than a union, so that the `Dynamic` above passes one set of props
+ * and `bodyFor` stays a dispatch over the tab alone. The Storage body reads only `model`, which is
+ * what it means for the throughput query to belong to the two tabs that draw the card.
+ */
+interface BodyProps {
+  readonly model: OverviewModel;
+  readonly throughput: Fetched<ThroughputSeries>;
+  readonly range: ThroughputRange;
+  readonly onRange: (range: ThroughputRange) => void;
+  readonly onRetry: () => void;
+}
+
+type BodyComponent = (props: BodyProps) => JSX.Element;
 
 /** The row of stat cards, which every tab carries unchanged. */
 function StatRow(props: { readonly model: OverviewModel }): JSX.Element {
@@ -313,44 +454,97 @@ function StatRow(props: { readonly model: OverviewModel }): JSX.Element {
 }
 
 /** Rows 2, 3 and 4 of `M01`: the two chart cards, the three panels, and the storage card. */
-function OverviewBody(props: { readonly model: OverviewModel }): JSX.Element {
+function OverviewBody(props: BodyProps): JSX.Element {
   return (
     <>
-      <div class="kui-overview__charts">
-        <Card
-          title="Throughput"
-          icon="chart-bars"
-          testId="panel-throughput"
-          /* No `RangeSelector`. The design puts 24h / 7d / 30d here, and offering a range control
-             over data that does not exist is a control whose every setting produces the same
-             nothing — the same defect class as the `⌘K` hint that was bound to nothing. */
-        >
-          <NotMeasured why={props.model.throughput.kind === "notCollected" ? props.model.throughput.why : ""} />
-        </Card>
-
-        <Card title="Broker health" icon="brokers" testId="panel-broker-health" caption={props.model.controllerNote}>
-          <BrokerHealth reading={props.model.brokers} />
-        </Card>
-      </div>
-
-      <div class="kui-overview__panels">
-        <Card title="Partition health" icon="topology" testId="panel-partitions">
-          <PartitionDonut reading={props.model.partitions} />
-        </Card>
-
-        <Card title="Top consumer lag" icon="lag" testId="panel-top-lag">
-          <TopLag reading={props.model.topLag} />
-        </Card>
-
-        <Card title="Latency · p99" icon="chart-line" testId="panel-latency">
-          <NotMeasured why={props.model.latency.kind === "notCollected" ? props.model.latency.why : ""} />
-        </Card>
-      </div>
+      <ChartsRow {...props} />
+      <PanelsRow model={props.model} />
 
       <div class="kui-overview__charts">
         <StorageCard reading={props.model.storage} />
       </div>
     </>
+  );
+}
+
+/**
+ * The Traffic tab (`M03`): the same stat cards, the same rows 2 and 3, and a last row of its own.
+ *
+ * §4.2's composition rule, and the reason the two shared rows are components rather than markup
+ * repeated here: *the tab selects the last row only*. Written out twice, the two tabs would be two
+ * places for the broker-health card to drift, and the rule the design proves would be a comment.
+ *
+ * Every card in the last row keeps its `NotMeasured` sentence. `…/metrics/producers`,
+ * `…/metrics/record-size` and `…/metrics/request-handlers` are wave 5's, and none of them may be
+ * filled from something this browser happens to hold: a producer rate computed from a message
+ * browse is not a broker metric, and a card that quietly became a different measurement would be
+ * the most expensive kind of wrong on a screen whose whole promise is that it says what it knows.
+ */
+function TrafficBody(props: BodyProps): JSX.Element {
+  return (
+    <>
+      <ChartsRow {...props} />
+      <PanelsRow model={props.model} />
+
+      <div class="kui-overview__panels">
+        <Card title="Top producers · client.id" icon="person" testId="panel-top-producers">
+          <NotMeasured
+            why={props.model.topProducers.kind === "notCollected" ? props.model.topProducers.why : ""}
+          />
+        </Card>
+
+        <Card title="Message size distribution" icon="chart-bars" testId="panel-message-sizes">
+          <NotMeasured
+            why={props.model.messageSizes.kind === "notCollected" ? props.model.messageSizes.why : ""}
+          />
+        </Card>
+
+        <Card title="Request handlers" icon="stream" testId="panel-request-handlers">
+          <NotMeasured
+            why={
+              props.model.requestHandlers.kind === "notCollected" ? props.model.requestHandlers.why : ""
+            }
+          />
+        </Card>
+      </div>
+    </>
+  );
+}
+
+/** Row 2, on both tabs that have one: the throughput chart and the broker-health list. */
+function ChartsRow(props: BodyProps): JSX.Element {
+  return (
+    <div class="kui-overview__charts">
+      <ThroughputCard
+        state={props.throughput}
+        range={props.range}
+        onRange={props.onRange}
+        onRetry={props.onRetry}
+      />
+
+      <Card title="Broker health" icon="brokers" testId="panel-broker-health" caption={props.model.controllerNote}>
+        <BrokerHealth reading={props.model.brokers} />
+      </Card>
+    </div>
+  );
+}
+
+/** Row 3, on both tabs that have one: partition health, top consumer lag, latency. */
+function PanelsRow(props: { readonly model: OverviewModel }): JSX.Element {
+  return (
+    <div class="kui-overview__panels">
+      <Card title="Partition health" icon="topology" testId="panel-partitions">
+        <PartitionDonut reading={props.model.partitions} />
+      </Card>
+
+      <Card title="Top consumer lag" icon="lag" testId="panel-top-lag">
+        <TopLag reading={props.model.topLag} />
+      </Card>
+
+      <Card title="Latency · p99" icon="chart-line" testId="panel-latency">
+        <NotMeasured why={props.model.latency.kind === "notCollected" ? props.model.latency.why : ""} />
+      </Card>
+    </div>
   );
 }
 
@@ -362,7 +556,7 @@ function OverviewBody(props: { readonly model: OverviewModel }): JSX.Element {
  * rather than repeated. A tab that repeated the Overview's panels under a different name would make
  * the strip a control whose settings mostly agree with each other.
  */
-function StorageBody(props: { readonly model: OverviewModel }): JSX.Element {
+function StorageBody(props: BodyProps): JSX.Element {
   return (
     <div class="kui-overview__charts">
       <StorageCard reading={props.model.storage} />
@@ -482,6 +676,15 @@ function BrokerHealth(props: { readonly reading: Reading<readonly BrokerBar[]> }
 }
 
 /**
+ * What the disk bar prints when there is no percentage to print.
+ *
+ * Exported so that a case can assert the words rather than a string it typed itself, and so that
+ * the two renderings of an unmeasurable disk on this screen — this bar and the storage card's
+ * detail line — cannot drift into two different admissions.
+ */
+export const UNMEASURED_DISK = "not measured";
+
+/**
  * One broker's row.
  *
  * A component rather than the body of the `For` above, because a keyed `For` hands its child an
@@ -512,10 +715,17 @@ function BrokerRow(props: { readonly broker: BrokerBar }): JSX.Element {
         value={props.broker.diskPercent.kind === "value" ? props.broker.diskPercent.value : undefined}
         max={100}
         thresholds={{ warn: DISK_WARN_PERCENT, critical: DISK_CRITICAL_PERCENT }}
+        /* Words, not a dash. `ProgressBar`'s own default for an unmeasurable value is
+           `formatPercent(undefined)`, which is an em dash — correct for a bare bar in a table, and
+           wrong here: this row reads `disk — this broker reported a zero-byte disk`, and the dash
+           between the caption and the sentence reads as a missing figure rather than as the
+           admission it is. The product's rule is that a figure that cannot be measured says so in
+           words, and this is the one place on this screen that was still spelling it with
+           punctuation. The sentence below still says *why*; this says *that*. */
         valueText={
           props.broker.diskPercent.kind === "value"
             ? formatPercent(props.broker.diskPercent.value)
-            : undefined
+            : UNMEASURED_DISK
         }
       />
       {/* The reason a bar is empty, in words, for the one case where it matters: an operator

@@ -35,6 +35,7 @@ import { Actions, CapabilityStatuses, Resources, SseEventNames } from "@kui/api"
 
 import { App } from "./App.jsx";
 import { SEARCH_DEBOUNCE_MS } from "./data/search.js";
+import { FailuresBeforeGivingUp } from "./health.js";
 import { featureRegistry } from "./features/registry.js";
 
 /**
@@ -605,6 +606,212 @@ describe("the search field", () => {
       flush();
     }
   }
+
+  /**
+   * A gateway whose searches are held open until the case chooses to answer them.
+   *
+   * The two cases below are about *when* an answer lands, and neither is reachable through the stub
+   * above: it resolves every search on the microtask queue, so two searches are never in flight at
+   * once and nothing can arrive out of order. That is why the guard this file now gates went
+   * unnoticed for a wave — deleting `if (episode !== searchEpisode) return;` from `App.tsx` left
+   * all 333 shell tests green, because no test had ever had two answers to lose a race with.
+   *
+   * Keyed by the query, because that is what the case knows and what the shell sends.
+   */
+  function stubHeldSearch(): {
+    readonly asked: readonly string[];
+    readonly answer: (query: string, body: unknown) => void;
+  } {
+    const asked: string[] = [];
+    const held = new Map<string, (body: unknown) => void>();
+    vi.stubGlobal("EventSource", SilentEventSource);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const href =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url = new URL(href, "http://kui.test");
+        if (url.pathname.includes("/auth/me")) {
+          return new Response(JSON.stringify(SESSION), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.pathname === "/api/v1/search") {
+          const query = url.searchParams.get("q") ?? "";
+          asked.push(query);
+          return new Promise<Response>((resolve) => {
+            held.set(query, (body) =>
+              resolve(
+                new Response(JSON.stringify(body), {
+                  status: 200,
+                  headers: { "content-type": "application/json" },
+                }),
+              ),
+            );
+          });
+        }
+        return new Response(JSON.stringify({ authType: "disabled", providers: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    return {
+      asked,
+      answer: (query, body) => {
+        const settle = held.get(query);
+        if (settle === undefined) throw new Error(`no search for "${query}" is in flight`);
+        held.delete(query);
+        settle(body);
+      },
+    };
+  }
+
+  /** One answer, with one topic in it, so two answers are told apart by what they carry. */
+  const found = (topic: string) => ({
+    results: { topics: [{ cluster: "prod-kyiv-01", name: topic }] },
+    partial: [],
+  });
+
+  /** Waits out the debounce so the request is out, without answering it. */
+  async function requested(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 80));
+    flush();
+  }
+
+  /** Lets a released answer land and the reactive graph catch up. */
+  async function landed(): Promise<void> {
+    for (let turn = 0; turn < 4; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+    }
+  }
+
+  /**
+   * The out-of-order guard, at the seam it defends.
+   *
+   * `GET /api/v1/search` is a fold over three services across every cluster, so two searches in
+   * flight can finish in either order and the slower one is usually the *earlier* one — a shorter
+   * prefix matches more, and matching more is what takes the time. The loser landing last would put
+   * the results for `ord` under a box that reads `orders`, which is the one failure mode a search
+   * box has that a user cannot see: the rows look like an answer, and they are an answer to a
+   * question that was withdrawn.
+   */
+  it("keeps the newer query's rows when an older search lands after them", async () => {
+    const gateway = stubHeldSearch();
+    const app = mountApp();
+    await settle();
+
+    type(app, "ord");
+    await requested();
+    type(app, "orders");
+    await requested();
+    // Both are out. Neither has been answered.
+    expect(gateway.asked).toEqual(["ord", "orders"]);
+
+    gateway.answer("orders", found("orders.payments.v2"));
+    await landed();
+    const results = () => app.host.querySelector("[data-testid='search']")?.textContent ?? "";
+    expect(results()).toContain("orders.payments.v2");
+
+    // And now the loser, arriving late with a wider answer to a question nobody is asking.
+    gateway.answer("ord", found("ord-legacy.audit"));
+    await landed();
+
+    expect(results()).not.toContain("ord-legacy.audit");
+    expect(results()).toContain("orders.payments.v2");
+
+    app.dispose();
+  });
+
+  /**
+   * Emptying the box is the end of searching, not a search for nothing.
+   *
+   * The same guard, from the other side: the episode is stepped when the box is cleared, so an
+   * answer already in flight cannot reopen the overlay behind the caret. Without it a person who
+   * types, thinks better of it and clears the field gets a list of results a second later over an
+   * empty box — with no query to explain what they are.
+   */
+  it("drops an answer already in flight when the box is emptied", async () => {
+    const gateway = stubHeldSearch();
+    const app = mountApp();
+    await settle();
+
+    type(app, "orders");
+    await requested();
+    expect(gateway.asked).toEqual(["orders"]);
+
+    const input = app.host.querySelector<HTMLInputElement>("[data-testid='search-input']")!;
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    flush();
+
+    gateway.answer("orders", found("orders.payments.v2"));
+    await landed();
+
+    expect(app.host.querySelector("[data-testid='search']")?.textContent).not.toContain(
+      "orders.payments.v2",
+    );
+    /* And the overlay is not merely empty of that row: the field is back to `idle`, which is what
+       takes the listbox out of the accessibility tree rather than leaving an empty one behind. */
+    expect(app.host.querySelector("[role='listbox']")).toBeNull();
+
+    app.dispose();
+  });
+
+  /**
+   * A search that nobody answers is evidence about the gateway.
+   *
+   * The `report("shell", …)` beside the guard is the third line in this handler that no test could
+   * see. It is what makes the search field count towards the connectivity tracker, and the tracker
+   * is what takes the whole application to its "cannot reach the server" screen after three
+   * consecutive transport failures with no success between them — which is exactly the situation a
+   * person discovers by typing in a box and getting nothing back.
+   */
+  it("counts unanswered searches towards the connection, not towards the query", async () => {
+    vi.stubGlobal("EventSource", SilentEventSource);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const href =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url = new URL(href, "http://kui.test");
+        if (url.pathname === "/api/v1/search") throw new TypeError("Failed to fetch");
+        if (url.pathname.includes("/auth/me")) {
+          return new Response(JSON.stringify(SESSION), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ authType: "disabled", providers: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const app = mountApp();
+    await settle();
+    /* Start-up succeeded, so the tracker is connected and the count is at zero: what follows is
+       three failures in a row and nothing else. */
+    expect(app.host.querySelector("[data-testid='gateway-unreachable']")).toBeNull();
+
+    for (const query of ["o", "or", "ord"]) {
+      type(app, query);
+      await requested();
+      await landed();
+    }
+
+    /* `FailuresBeforeGivingUp` of them, and the shell says so once rather than drawing a failed
+       overlay under a box that still looks like it is working. */
+    expect(FailuresBeforeGivingUp).toBe(3);
+    const unreachable = app.host.querySelector("[data-testid='gateway-unreachable']");
+    expect(unreachable).not.toBeNull();
+    expect(unreachable?.textContent).toContain("KUI cannot reach the server");
+
+    app.dispose();
+  });
 
   it("asks the gateway once for a typed word and draws what came back", async () => {
     const searched = stubSearch();

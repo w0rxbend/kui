@@ -438,6 +438,65 @@ describe("the four badges down the drawer's side", () => {
 });
 
 /**
+ * What the drawer's count requests actually ask the gateway for.
+ *
+ * Every other case in this file looks at the answer. These two look at the *request*, because the
+ * cost of drawing a badge is not visible in the number that comes back: the schema service enriches
+ * every subject row it returns with three further registry calls, so a badge that renders no rows
+ * at all was paying for a row it discarded. `SchemaEndpoints.CountOnlyPageSize`'s own scaladoc
+ * counts it: the subject list plus four more requests — the row's three and the registry-wide
+ * compatibility level. W3-10 added the zero for exactly this and nothing changed the call; the
+ * handoff is inside one packet this time, and this is the half that can go red.
+ *
+ * The topics request is asserted beside it and deliberately: zero is not a page size the rest of
+ * KUI has. `PageSize` is 1..500 and the topic list refuses a zero at the edge, so a well-meant
+ * sweep that made all three count calls agree would turn the drawer's topic badge into a 400.
+ */
+describe("what the drawer's count requests ask the gateway for", () => {
+  /** A client that answers from the table above and records what it was asked. */
+  function recording(calls: { path: string; query: Record<string, unknown> }[]): KuiApiClient {
+    return {
+      get: (path: string, init?: { params?: { query?: Record<string, unknown> } }) => {
+        calls.push({ path, query: init?.params?.query ?? {} });
+        const body = WHOLE_CLUSTER[path];
+        return Promise.resolve(
+          body === undefined
+            ? { ok: false, error: { kind: "unreachable", cause: "no stub for this path" } }
+            : { ok: true, value: body },
+        );
+      },
+    } as unknown as KuiApiClient;
+  }
+
+  it("asks the registry for the subject total and for none of its rows", async () => {
+    const calls: { path: string; query: Record<string, unknown> }[] = [];
+    const store = probeWith(recording(calls));
+    await settle();
+
+    /* `SchemaEndpoints.CountOnlyPageSize`, which is 0 and means "count them, send none". A 1 here
+       is a request for one enriched row nothing renders. */
+    expect(calls.find((call) => call.path === SUBJECTS)?.query).toEqual({ pageSize: 0 });
+    /* And the number still arrives, so the badge is not paid for with an absent count. */
+    expect(readingValue(store.counts())?.schemas).toEqual({ kind: "total", value: 6 });
+    store.dispose();
+  });
+
+  it("keeps the topic count at one row, because that endpoint has no zero", async () => {
+    const calls: { path: string; query: Record<string, unknown> }[] = [];
+    const store = probeWith(recording(calls));
+    await settle();
+
+    expect(calls.find((call) => call.path === TOPICS)?.query).toEqual({
+      pageSize: 1,
+      /* Internal topics included: the tree counts them under its own row, and a total that left
+         them out would not match the sum of the rows beneath it. */
+      showInternal: true,
+    });
+    store.dispose();
+  });
+});
+
+/**
  * The topic names the drawer's tree is folded from.
  *
  * A seventh request, and a separate one on purpose: the badge above it asks for a single row and

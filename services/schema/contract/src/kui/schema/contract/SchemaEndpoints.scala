@@ -62,14 +62,21 @@ object SchemaEndpoints {
     *
     * ADR-026's ceiling is `PageSize.Max`, 500, and it is the right ceiling for a list KUI holds in memory.
     * This list is not that: every row costs three requests to a Schema Registry, which is a single-writer
-    * JVM. Five hundred rows is 1500 requests, and the use case enriches eight rows at a time — 188 sequential
+    * JVM. Five hundred rows is 1500 requests, and the use case enriches eight rows at a time — 63 sequential
     * rounds behind one bulkhead, with the registry answering nothing else for the duration. A hundred is 300
-    * requests in 38 rounds, four times the default page and more rows than this screen has ever been drawn
+    * requests in 13 rounds, four times the default page and more rows than this screen has ever been drawn
     * with.
     *
     * The value is clamped rather than refused, like every other page size in KUI: a caller that asks for more
     * gets a hundred rows and a `pageSize` of a hundred in the answer, which says the same thing as a 400 and
     * still works.
+    *
+    * ==The number is pinned as a literal, and it has to be==
+    *
+    * `SubjectListRoutesSuite` writes `100` out rather than reading this constant. It used to read it — both
+    * sides of the comparison were `MaxPageSize` — so the constant was asserted against itself and the value
+    * **250** shipped green, which is 750 registry requests for one screen. A constant compared to itself
+    * bounds nothing.
     */
   val MaxPageSize: Int = 100
 
@@ -112,8 +119,9 @@ object SchemaEndpoints {
         query[Int](PageSizeParam)
           .description(
             s"How many rows a page holds, up to $MaxPageSize. A value above that is clamped, not refused. " +
-              s"$CountOnlyPageSize asks for the total with no rows, which is the only way to read the " +
-              "subject count without paying for a page of enrichment"
+              s"Exactly $CountOnlyPageSize asks for the total with no rows, which is the only way to read " +
+              "the subject count without paying for a page of enrichment; anything below that is clamped " +
+              "up to one row rather than read as a count"
           )
           .default(DefaultPageSize)
       )

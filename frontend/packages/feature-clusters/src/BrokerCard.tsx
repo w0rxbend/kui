@@ -15,10 +15,11 @@
  *
  * ## The configuration is inside the disclosure, and that is deliberate
  *
- * A broker has around two hundred settings. Collapsed, the card answers "is this broker all right?";
- * expanded, it answers "why is it behaving like that?". Those are different questions asked at
- * different moments, and putting the second one's answer on screen permanently is what makes the
- * first one hard.
+ * `describeConfigs` on an ordinary broker is **340 rows and 61,531 bytes** — measured against the
+ * quickstart's own broker, not estimated; this said "around two hundred" for two waves. Collapsed,
+ * the card answers "is this broker all right?"; expanded, it answers "why is it behaving like
+ * that?". Those are different questions asked at different moments, and putting the second one's
+ * answer on screen permanently is what makes the first one hard.
  *
  * ## Every figure can be absent, and absent is never zero
  *
@@ -45,7 +46,14 @@ import {
   formatBytes,
   formatCount,
 } from "@kui/kernel";
-import { DISK_THRESHOLDS, brokerName, diskNote, diskPercent, type Broker } from "./model.js";
+import {
+  DISK_THRESHOLDS,
+  brokerName,
+  diskNote,
+  diskPercent,
+  leaderSkewSentence,
+  type Broker,
+} from "./model.js";
 
 /** One setting, as the broker-configs endpoint reports it. */
 export type BrokerConfig = {
@@ -75,9 +83,9 @@ export type BrokerCardProps = {
   /**
    * How many more settings the broker has than the card is drawing.
    *
-   * A card shows the handful an operator scans for; a broker has around two hundred. Without this
-   * the chip row looks like the whole of a broker's configuration, which is the reading that sends
-   * somebody to file a bug about a setting KUI "does not show".
+   * A card shows the handful an operator scans for; the quickstart's broker reports 340. Without
+   * this the chip row looks like the whole of a broker's configuration, which is the reading that
+   * sends somebody to file a bug about a setting KUI "does not show".
    */
   readonly configsMore?: number | undefined;
   /** Why the settings could not be read. Shown in place of them; never an empty list. */
@@ -243,6 +251,18 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
             <Show when={props.version}>{(version) => <Tag tone="neutral">{version()}</Tag>}</Show>
             <Show when={props.uptime}>{(uptime) => <Tag tone="neutral">{uptime()}</Tag>}</Show>
           </div>
+
+          {/* The one figure on this card that is about the *cluster's* opinion of this broker.
+
+              It is in the expansion, where "why is it behaving like that" is answered, and it is a
+              sentence rather than a signed percentage in the figures row above: `-25%` beside the
+              word LEADERS reads as a negative partition count, and the PARTITION SKEW tile a few
+              inches up the page is a different measurement entirely. `leaderSkewSentence` says
+              which direction it goes, what it is a share of, and — when the topic sweep produced
+              no census — that it was not measured at all. */}
+          <p class="kui-brkcard__skew" data-testid={`broker-${broker().id}-skew`}>
+            {leaderSkewSentence(broker().leaderSkewPercent)}
+          </p>
 
           {/* The design's tag row carries an uptime and this product has no source for one:
               neither the admin protocol nor any endpoint KUI serves reports when a broker

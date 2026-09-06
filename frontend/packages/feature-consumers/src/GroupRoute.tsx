@@ -8,7 +8,7 @@
  */
 import { Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { useParams } from "@solidjs/router";
+import { useNavigate, useParams } from "@solidjs/router";
 import { Actions } from "@kui/api";
 import { ConfirmDialog, createMutation, notify, useKui, valueOf, type Fetched } from "@kui/kernel";
 import { GroupDetail as GroupDetailPage } from "./GroupDetail.jsx";
@@ -43,6 +43,20 @@ function NoSubject(props: { readonly what: string }): JSX.Element {
 
 function GroupScreen(props: { readonly clusterId: string; readonly groupId: string }): JSX.Element {
   const kui = useKui();
+  /*
+   * The router's navigation, not `window.location.assign`.
+   *
+   * `assign` is a *document* navigation: it tears down the application and loads a new one. The
+   * toast raised on the line above it therefore went into a module-level store that ceased to exist
+   * a moment later, so "a toast on every destructive success" was, for this success, a toast nobody
+   * could ever have seen — while the comment beside it argued that the shell's region survives the
+   * route change. It does; the reload was what did not let it.
+   *
+   * `resolve: false` for the reason `App.tsx` names: a `KuiPaths` address has already had the
+   * deployment's base applied, and `useNavigate`'s default would apply it a second time and land on
+   * `/ui/ui/clusters/…`, which matches no route.
+   */
+  const navigate = useNavigate();
   const [state, setState] = createSignal<Fetched<GroupDetail>>({ kind: "loading" });
   const [attempt, setAttempt] = createSignal(0);
   const [confirmingDelete, setConfirmingDelete] = createSignal(false);
@@ -149,7 +163,7 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
                     `${props.groupId} and its committed offsets are gone. ` +
                     "No records were deleted.",
                 });
-                window.location.assign(kui.paths.consumerGroups(props.clusterId));
+                navigate(kui.paths.consumerGroups(props.clusterId), { resolve: false });
               });
             }}
           />

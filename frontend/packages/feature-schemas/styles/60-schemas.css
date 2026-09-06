@@ -77,14 +77,22 @@
   font-weight: var(--kui-font-weight-bold);
 }
 
-/* The subject's own name is the heading and is copied into a command line, so it keeps the
- * registry's exact spelling in a monospaced face. The format badge beside it is prose and is left
- * in the text face by `.kui-tag`'s own rule. */
-.kui-subject__title {
+/* The badge and the heading, on one line.
+ *
+ * The row is the wrapper rather than the `h2` itself: a badge inside the heading becomes part of the
+ * heading's accessible name, and `AVROorders.avro-value` is what a screen reader then announces for
+ * the one string a reader navigates this pane by. */
+.kui-subject__heading {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--kui-space-2);
+}
+
+/* The subject's own name is the heading and is copied into a command line, so it keeps the
+ * registry's exact spelling in a monospaced face. The format badge beside it is prose and is left
+ * in the text face by `.kui-tag`'s own rule. */
+.kui-subject__title {
   font-family: var(--kui-font-family-mono);
   overflow-wrap: anywhere;
 }
@@ -405,4 +413,30 @@
   margin-top: var(--kui-space-2);
   padding-top: var(--kui-space-2);
   border-top: 1px solid var(--kui-color-border);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Registering a schema
+ *
+ * One column, because every field is answered top to bottom and a two-column form invites somebody
+ * to paste a schema before naming the subject it belongs to. The editor reuses
+ * `.kui-schema-check__editor` rather than getting a second rule: it is the same control asking a
+ * different question, and two rules for one box is how the two boxes end up different sizes.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-schema-register {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-schema-register__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-schema-register__label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
 }

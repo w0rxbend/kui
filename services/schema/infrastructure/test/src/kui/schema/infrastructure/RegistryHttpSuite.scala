@@ -163,6 +163,77 @@ final class RegistryHttpSuite extends KuiIOSuite {
       }
   }
 
+  test("a registration answers the id the registry stored and the version the lookup reports") {
+    // Two requests, because the Confluent API's registration response is `{"id": N}` and carries no
+    // version. The second is the registry's "which version is *this* schema" lookup and not
+    // `versions/latest`, which would be a race: somebody else's registration in between would hand this
+    // operator back a version that is not theirs.
+    var asked: List[String] = Nil
+    val client = registry {
+      case "/subjects/orders-value/versions" =>
+        asked = asked :+ "/subjects/orders-value/versions"
+        (StatusCode.Ok, """{"id":41}""")
+      case "/subjects/orders-value" =>
+        asked = asked :+ "/subjects/orders-value"
+        (StatusCode.Ok, """{"subject":"orders-value","id":41,"version":3,"schema":"{}"}""")
+    }
+
+    client.register(orders, ProposedSchema(SchemaFormat.Avro, """{"type":"record"}""", Nil)).map {
+      case Right(registered) =>
+        assertEquals(registered.id.value, 41)
+        assertEquals(registered.version.map(_.value), Some(3))
+        assertEquals(registered.subject.value, "orders-value")
+        assertEquals(asked, List("/subjects/orders-value/versions", "/subjects/orders-value"))
+      case Left(error) => fail(s"expected a registration, got $error")
+    }
+  }
+
+  test("a registry that rejects the schema says so as a validation failure beside the field") {
+    // The whole point of the endpoint. A 409 from a Schema Registry means "incompatible with what this
+    // subject already holds", and the sentence after it names the field that broke the rule — which is the
+    // only part of the answer an operator can act on. It must not arrive as a 500 and must not be
+    // swallowed into "the upstream is unavailable", both of which send them to the wrong person.
+    val explanation =
+      "Schema being registered is incompatible with an earlier schema for subject 'orders-value'"
+
+    registry { case "/subjects/orders-value/versions" =>
+      (StatusCode.Conflict, s"""{"error_code":409,"message":"$explanation"}""")
+    }.register(orders, ProposedSchema(SchemaFormat.Avro, "{}", Nil)).map {
+      case Left(error) =>
+        assertEquals(error.code, ErrorCode.Validation)
+        assert(clue(error.message).contains(explanation))
+        // `details[0]` is where a form reads the text it puts beside the input somebody typed into.
+        assertEquals(error.details.map(_.field), List(Some("definition")))
+        assertEquals(error.details.flatMap(_.restrictions), List(explanation))
+      case Right(registered) => fail(s"expected a refusal, got $registered")
+    }
+  }
+
+  test("a registration whose version lookup does not answer is still a registration, with no version") {
+    // The schema is in the registry by the time the second call is made. Answering `Left` here would tell
+    // an operator to register it again, and inventing "the previous latest plus one" would print a version
+    // number that may not exist. Absent is the true third answer.
+    registry { case "/subjects/orders-value/versions" =>
+      (StatusCode.Ok, """{"id":41}""")
+    }.register(orders, ProposedSchema(SchemaFormat.Avro, "{}", Nil)).map {
+      case Right(registered) =>
+        assertEquals(registered.id.value, 41)
+        assertEquals(registered.version, None)
+      case Left(error) => fail(s"expected a registration, got $error")
+    }
+  }
+
+  test("a 404 on the registration itself is an address that is not a registry") {
+    // A subject that does not exist is *created* by this call, so there is nothing here that a 404 could
+    // honestly mean an absence of. It is the same misconfigured ingress `GET /subjects` reports.
+    registry(nothing).register(orders, ProposedSchema(SchemaFormat.Avro, "{}", Nil)).map {
+      case Left(error) =>
+        assertEquals(error.code, ErrorCode.UpstreamUnavailable)
+        assert(clue(error.message).contains("does not look like a Schema Registry"))
+      case Right(registered) => fail(s"expected a failure, got $registered")
+    }
+  }
+
   test("a 401 is an authentication failure and not a generic upstream error") {
     registry { case "/subjects" => (StatusCode.Unauthorized, "nope") }.subjects.map {
       case Left(error) => assertEquals(error.code, ErrorCode.UpstreamAuth)

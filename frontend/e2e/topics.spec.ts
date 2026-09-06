@@ -68,7 +68,22 @@ test.describe("creating a topic", () => {
 });
 
 test.describe("emptying a topic", () => {
-  test("quotes the server's measured warning, and only once", async ({ page }) => {
+  /*
+   * One record, produced over HTTP before the dialog is opened.
+   *
+   * The sentence this case is about is the server's *measured* warning, and the server has nothing
+   * to measure on an empty topic — it answers `warnings: []` and the dialog falls back to
+   * `describePurge`, which is the correct rendering of a different state. So the case used to depend
+   * on whatever the shared quickstart happened to hold, and it failed on a cluster whose seed had
+   * been consumed: 14 later cases in this serial file never ran, for a reason that had nothing to do
+   * with any of them. Arranging over HTTP rather than through the screen is this suite's own rule —
+   * see `fixtures.ts`.
+   */
+  test("quotes the server's measured warning, and only once", async ({ page, api }) => {
+    await api.post(`/api/v1/clusters/${CLUSTER}/topics/orders.v1/messages`, {
+      count: 1,
+      value: "kui-e2e: a record, so the purge plan has something to measure",
+    });
     await page.goto(`/ui/clusters/${CLUSTER}/topics/orders.v1`);
     await page.getByRole("button", { name: /empty topic/i }).first().click();
 
@@ -156,6 +171,25 @@ test.describe("the topic list", () => {
     await expect(page.locator("body")).not.toContainText("orders.v1");
   });
 
+  test("a ?q= in the address arrives at a filtered list", async ({ page }) => {
+    /*
+     * The drawer's topic-prefix rows link here (`…/topics?q=<prefix>`), and this screen used to
+     * seed its query from a default and read the address only for `?tab=` — so the link was honest
+     * and the destination listed the whole cluster. The shell owns the link; this asserts arrival.
+     *
+     * The request is waited for rather than the rows, because that is where the filter is applied:
+     * a screen that filled the search box and asked for everything would look the same on arrival.
+     */
+    const asked = page.waitForRequest((request) => request.url().includes("q=orders"));
+    await page.goto(`/ui/clusters/${CLUSTER}/topics?q=orders`);
+    await asked;
+
+    await expect(page.getByPlaceholder("Search topics…")).toHaveValue("orders");
+    await expect(page.getByText("orders.v1").first()).toBeVisible();
+    // And the server really narrowed it: a topic that does not match is not on the page.
+    await expect(page.locator("body")).not.toContainText("analytics.pageviews");
+  });
+
   test("remembers whether the reader prefers cards", async ({ page }) => {
     // The design is explicit that the choice persists per user: an operator who prefers cards and
     // gets a table on every navigation concludes the control does not work.
@@ -202,13 +236,47 @@ test.describe("the topics list's statistics region", () => {
     expect(await figureOf()).toBe(before);
   });
 
-  test("the partition total is the cluster's and not the page's", async ({ page }) => {
-    // A page of eight topics cannot sum to the cluster's 86 partitions, so this is a figure the
-    // page could not have produced from what it is showing.
+  test("the partition total is the cluster's and not the page's", async ({ page, api }) => {
+    /*
+     * The case said "a page of eight topics cannot sum to the cluster's 86" and then asserted only
+     * that the tile did not read "not measured" — so a tile that summed the page would have passed
+     * it, which is the one failure the name describes. The number is now read off the screen and
+     * compared twice: against the cluster's own total, and against the page's sum, which is a
+     * different number and is what a fold over the rows would have drawn.
+     */
+    const statistics = (await api.get(`/api/v1/clusters/${CLUSTER}/topics/statistics`)) as {
+      readonly statistics?: { readonly data?: { readonly partitionCount?: number | null } };
+    };
+    const clusterTotal = statistics.statistics?.data?.partitionCount ?? null;
+    expect(
+      clusterTotal,
+      "the quickstart measures this; a null here is a broken fixture rather than a passing test",
+    ).not.toBeNull();
+
+    const listing = (await api.get(`/api/v1/clusters/${CLUSTER}/topics?page=1&pageSize=32`)) as {
+      readonly topics?: {
+        readonly data?: { readonly items?: readonly { readonly partitionCount?: number }[] };
+      };
+    };
+    const pageSum = (listing.topics?.data?.items ?? []).reduce(
+      (sum, topic) => sum + (topic.partitionCount ?? 0),
+      0,
+    );
+    expect(
+      pageSum,
+      "the list excludes Kafka's own bookkeeping topics, so its sum must differ from the cluster's",
+    ).not.toBe(clusterTotal);
+
     await page.goto(`/ui/clusters/${CLUSTER}/topics`);
     const partitions = page.getByTestId("topic-stat-partitions");
     await expect(partitions).toBeVisible();
     await expect(partitions).not.toContainText("not measured");
+
+    /* The figure alone, out of the label and the chip around it — the same reading the case above
+       uses, and the reason the tile carries a testId at all. */
+    const drawn = Number((await partitions.innerText()).replace(/[^\d]/g, ""));
+    expect(drawn).toBe(clusterTotal);
+    expect(drawn).not.toBe(pageSum);
   });
 
   test("the switch closes the region and the list stays", async ({ page }) => {
