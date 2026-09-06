@@ -171,3 +171,137 @@ test.describe("the topic list", () => {
     await expect(page.locator("table").first()).toBeVisible();
   });
 });
+
+test.describe("the topics list's statistics region", () => {
+  test("reads the cluster's totals and does not follow the search box", async ({ page }) => {
+    /*
+     * `SCREENS-V4.md` §4.6 calls this the load-bearing fact of the screen: the capture shows the
+     * cluster's topic count above a table narrowed to three rows. Against the quickstart the
+     * cluster holds ten topics and the list excludes Kafka's bookkeeping ones, so the tile and the
+     * table already disagree before anything is typed — and typing must not move the tile.
+     */
+    await page.goto(`/ui/clusters/${CLUSTER}/topics`);
+
+    const total = page.getByTestId("topic-stat-topics");
+    await expect(total).toBeVisible();
+    /* The figure alone, out of the label and the chip around it. A real number, not the sentence:
+       the quickstart measures this one, and a tile reading "not measured" here would mean the
+       assertion below was comparing two absences. */
+    const figureOf = async (): Promise<string> =>
+      (await total.innerText()).replace(/[^\d]/g, "");
+    const before = await figureOf();
+    expect(before).not.toBe("");
+    await expect(total).not.toContainText("not measured");
+
+    const search = page.waitForRequest((request) => request.url().includes("q=orders"));
+    await page.getByPlaceholder("Search topics…").fill("orders");
+    await search;
+    await expect(page.getByText("analytics.pageviews")).toHaveCount(0);
+
+    // The table moved; the cluster did not.
+    expect(await figureOf()).toBe(before);
+  });
+
+  test("the partition total is the cluster's and not the page's", async ({ page }) => {
+    // A page of eight topics cannot sum to the cluster's 86 partitions, so this is a figure the
+    // page could not have produced from what it is showing.
+    await page.goto(`/ui/clusters/${CLUSTER}/topics`);
+    const partitions = page.getByTestId("topic-stat-partitions");
+    await expect(partitions).toBeVisible();
+    await expect(partitions).not.toContainText("not measured");
+  });
+
+  test("the switch closes the region and the list stays", async ({ page }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/topics`);
+    await expect(page.getByTestId("topic-stat-topics")).toBeVisible();
+    await page.getByTestId("topic-statistics-switch").click({ force: true });
+    await expect(page.getByTestId("topic-stat-topics")).toHaveCount(0);
+    await expect(page.getByText("orders.v1").first()).toBeVisible();
+  });
+});
+
+test.describe("the topics list's chips and selection", () => {
+  test("a chip the cluster cannot apply says that it narrowed the page", async ({ page }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/topics`);
+    await page.getByRole("button", { name: /^compacted$/i }).click();
+    await expect(page.getByText(/narrows the \d+ topics on this page/i)).toBeVisible();
+  });
+
+  test("selecting rows raises the bulk bar, and Delete keeps its place", async ({ page }) => {
+    /*
+     * §3.7: an action the principal may not take is disabled with its reason, never hidden — if
+     * `Delete` disappeared, `Empty` would move into its place and the same gesture would do two
+     * different irreversible things to two different people. Here the principal may do both, so the
+     * assertion is that the bar appears with both of them on it and counts what was ticked.
+     */
+    await page.goto(`/ui/clusters/${CLUSTER}/topics`);
+    await expect(page.getByText("orders.v1").first()).toBeVisible();
+
+    const ticks = page.locator("tbody input[type=checkbox]");
+    await ticks.first().click({ force: true });
+    await ticks.nth(1).click({ force: true });
+
+    const bar = page.getByTestId("topic-bulk-bar");
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText("2 topics selected");
+    await expect(bar.getByRole("button", { name: /^delete$/i })).toBeVisible();
+    await expect(bar.getByRole("button", { name: /^empty$/i })).toBeVisible();
+  });
+});
+
+test.describe("the topic's Overview tab", () => {
+  test("draws a body: four figures and the partition table", async ({ page }) => {
+    /*
+     * The tab the strip opens by default, and the one that rendered nothing at all before this
+     * wave: `TopicsRoute` declared `id: "overview"` and had no body for it anywhere in the file.
+     */
+    await page.goto(`/ui/clusters/${CLUSTER}/topics/orders.v1`);
+
+    await expect(page.getByTestId("topic-overview-partitions")).toContainText("6");
+    await expect(page.getByTestId("topic-overview-groups")).toBeVisible();
+    await expect(page.getByTestId("topic-partitions-table")).toBeVisible();
+
+    /*
+     * The quickstart's single broker reports no per-topic log-directory size and no produce rate.
+     * Both must say so in words — `0 B` and `0 /s` are what a topic legitimately measures at, and
+     * the whole promise of this product is that the two never look alike.
+     */
+    await expect(page.getByTestId("topic-overview-size")).toContainText("not measured");
+
+    // And the trail inside the content, which is how somebody gets back to the list.
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Topics");
+  });
+
+  test("Produce message goes to the browser that can produce", async ({ page }) => {
+    await page.goto(`/ui/clusters/${CLUSTER}/topics/orders.v1`);
+    await page.getByRole("button", { name: /produce message/i }).first().click();
+    await expect(page).toHaveURL(new RegExp(`/topics/orders.v1/messages$`), { timeout: 20_000 });
+  });
+});
+
+test.describe("the topic's Consumers tab", () => {
+  test("prints the coordinator as an address and not as a broker id", async ({ page }) => {
+    /*
+     * `coordinatorHost` and `coordinatorPort` are on the wire beside `coordinatorId`. Against the
+     * quickstart the group's coordinator is `kafka:9092`; `broker 1` is not something an operator
+     * can connect to, ping, or find in a log, which is the whole reason the column is an address.
+     */
+    await page.goto(`/ui/clusters/${CLUSTER}/topics/orders.v1?tab=consumers`);
+    const table = page.getByTestId("topic-consumers-table");
+    await expect(table).toBeVisible();
+    await expect(table).toContainText("order-fulfilment", { timeout: 20_000 });
+    await expect(table).toContainText(/[a-z0-9.-]+:\d+/);
+    await expect(table).not.toContainText(/broker \d/i);
+  });
+
+  test("no column heading is blank", async ({ page }) => {
+    // The heading that shipped as `""` and produced all fourteen of the a11y sweep's violations.
+    // A screen reader announces a cell by its column, and this column had nothing to announce.
+    await page.goto(`/ui/clusters/${CLUSTER}/topics/orders.v1?tab=consumers`);
+    const headings = page.getByTestId("topic-consumers-table").locator("th");
+    await expect(headings.first()).toBeVisible();
+    for (const text of await headings.allInnerTexts()) {
+      expect(text.trim()).not.toBe("");
+    }
+  });
+});

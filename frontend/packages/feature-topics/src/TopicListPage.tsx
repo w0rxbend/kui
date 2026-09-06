@@ -14,59 +14,92 @@
  * measuring once drew five rows for a twelve-partition topic, because at mount the container had
  * not been laid out. The table also scrolls inside its own box, so the page never scrolls sideways.
  *
- * ## Internal topics are hidden by default and the switch says so
+ * ## Where each control is applied, and why the screen says so
  *
- * `__consumer_offsets` and its friends are Kafka's own bookkeeping. They are in every cluster, they
- * are never what somebody opened this page to find, and they are not secret — so they are hidden
- * behind a switch that is visible from the start, not behind a preference somebody has to discover.
- * The count beside the switch always counts what is *shown*, so it agrees with the table under it.
+ * The search, the page, the page size and the order are the **server's**. That is the whole reason
+ * `TopicListQuery` exists: a search that only looks at the twenty-five rows it was handed is a
+ * search that lies, and it lies in the most convincing way — by finding nothing and saying so.
  *
- * ## Filtering happens here, not on the server
+ * Two of the four facet chips have no counterpart on the wire. `Out of sync` and `Compacted` are
+ * derived from fields the list carries but does not index, so they narrow the page and **the page
+ * says they do**, in a sentence next to the count. Hiding that would reproduce the defect the
+ * server-side search was built to remove, one control over. `All` and `Internal` are the server's:
+ * they are the `showInternal` parameter, which is what makes those two honest at any cluster size.
  *
- * The search box narrows the rows the page already has. That is a deliberate limit and it is stated
- * on screen when it bites: with a page of topics loaded, "no match" means "no match on this page",
- * and a box that silently searched only what it could see would be a box that lies. See
- * `matchCount`.
+ * ## One selection, two treatments
+ *
+ * The selected set is the caller's, and the table and the cards are two renderings of it
+ * (`SCREENS-V4.md` §3.7: the design's two ticks are on cards and the same set must survive the
+ * switch to the table). Neither list owns it, because a list that owned it would clear it every
+ * time the operator changed how the rows are drawn.
  */
 
 import type { JSX } from "@solidjs/web";
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import {
+  BulkActionBar,
   Button,
-  Checkbox,
   EmptyState,
   Icon,
   Pagination,
   SegmentedControl,
+  Select,
+  SingleSelectChips,
   StatusPill,
+  Switch,
+  Tag,
   TextField,
   VirtualizedTable,
+  formatRate,
+  type BulkAction,
   type Column,
   type Sort,
 } from "@kui/kernel";
 import { healthChip } from "./TopicPage.jsx";
 import { TopicCards } from "./TopicCards.jsx";
+import { isCompacted, matchesFilter, type TopicFilter } from "./topicList.js";
 import type { TopicRow } from "./types.js";
 
 /**
  * What the list is currently showing, and what the operator has asked for.
  *
- * The whole of it is the *server's* to apply, and that is the point of this type existing. This page
- * used to filter, search and sort the rows it happened to hold, which is honest for one page and
- * wrong for a cluster with four thousand topics: a search that only looks at the twenty-five rows it
- * was handed is a search that lies, and it lies in the most convincing way — by finding nothing and
- * saying so.
+ * The whole of it is the *server's* to apply except `facet`, which is half and says so — see the
+ * header. This page used to filter, search and sort the rows it happened to hold, which is honest
+ * for one page and wrong for a cluster with four thousand topics.
  */
 export interface TopicListQuery {
   /** Substring match on the name. */
   readonly search: string;
-  /** Kafka's own bookkeeping topics. Excluded by the server unless this is on. */
-  readonly showInternal: boolean;
+  /**
+   * Which of the four chips is lit.
+   *
+   * `all` and `internal` become the `showInternal` request parameter; `out-of-sync` and `compacted`
+   * narrow the page the server sent. {@link isServerFacet} is the one place that distinction lives.
+   */
+  readonly facet: TopicFilter;
   /** `null` is the server's own order. */
   readonly sort: Sort | null;
   /** One-based, like the buttons. */
   readonly page: number;
   readonly pageSize: number;
+}
+
+/**
+ * Whether a facet is one the cluster can apply.
+ *
+ * One function rather than two conditions, because the two things that depend on it must not be
+ * able to disagree: the rows are narrowed here only when it is `false`, and the sentence saying so
+ * is drawn only when it is `false`. Split into two `facet === …` tests, a chip added to `FACETS`
+ * would end up narrowing the page silently or announcing a narrowing that did not happen — and a
+ * filter that quietly narrows a page while looking like it narrows a cluster is the defect this
+ * screen already fixed once, for the search box.
+ *
+ * Exported so a caller can ask the same question without re-deriving it. `toTopicQuery` deliberately
+ * does not: it maps the one facet the wire has (`internal` → `showInternal`) and would answer the
+ * remaining two identically whichever way this went.
+ */
+export function isServerFacet(facet: TopicFilter): boolean {
+  return facet === "all" || facet === "internal";
 }
 
 /** Table or cards. Persisted per user, for the reason `SCREENS.md` §2.12 gives. */
@@ -82,6 +115,9 @@ export type TopicView = "table" | "cards";
  * should show the recipient the recipient's own preferred view.
  */
 const VIEW_STORAGE_KEY = "kui.topics.view";
+
+/** The same, for the statistics switch. The design draws it on; a reader who turns it off means it. */
+const STATISTICS_STORAGE_KEY = "kui.topics.statistics";
 
 export function storedView(): TopicView {
   try {
@@ -101,16 +137,57 @@ export function rememberView(view: TopicView): void {
   }
 }
 
+/** The statistics switch is **on** unless this reader has turned it off. `SCREENS-V4.md` §4.6. */
+export function storedStatistics(): boolean {
+  try {
+    return window.localStorage.getItem(STATISTICS_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function rememberStatistics(on: boolean): void {
+  try {
+    window.localStorage.setItem(STATISTICS_STORAGE_KEY, on ? "on" : "off");
+  } catch {
+    /* As above: the region still opens and closes, it just will not be remembered. */
+  }
+}
+
 export const DEFAULT_TOPIC_QUERY: TopicListQuery = {
   search: "",
-  showInternal: false,
+  facet: "all",
   sort: null,
   page: 1,
   pageSize: 32,
 };
 
+/**
+ * The sort control's options, in the column ids the table already sorts by.
+ *
+ * One vocabulary rather than two, so the `Sort ·` menu and a click on a column heading write the
+ * same `Sort` and cannot disagree about which order the list is in. The ids not offered here —
+ * health and cleanup policy — are the ones the server sorts by nothing, and they are not marked
+ * sortable in the table either, so no control anywhere offers an order the cluster cannot produce.
+ */
+const SORT_OPTIONS: readonly { readonly value: string; readonly label: string }[] = [
+  { value: "", label: "the server's order" },
+  { value: "name", label: "topic" },
+  { value: "partitions", label: "partitions" },
+  { value: "replication", label: "replicas" },
+  { value: "records", label: "records" },
+  { value: "size", label: "size" },
+];
+
+const FACETS: readonly { readonly value: TopicFilter; readonly label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "internal", label: "Internal" },
+  { value: "out-of-sync", label: "Out of sync" },
+  { value: "compacted", label: "Compacted" },
+];
+
 export interface TopicListPageProps {
-  /** This page of rows, exactly as the server sent them. Not filtered again here. */
+  /** This page of rows, exactly as the server sent them. Narrowed only by a page-scoped facet. */
   readonly topics: readonly TopicRow[];
   readonly loading?: boolean | undefined;
   readonly query: TopicListQuery;
@@ -128,6 +205,30 @@ export interface TopicListPageProps {
   readonly onOpen: (topic: TopicRow) => void;
   readonly onCreate?: (() => void) | undefined;
   readonly createDisabledReason?: string | undefined;
+  /**
+   * The cluster-wide statistics region, built by the caller.
+   *
+   * A slot rather than a document, because this component must not be able to compute those totals:
+   * it holds the page's rows and the region's whole point is that its figures are not about them.
+   * See `TopicStatisticsRegion`.
+   */
+  readonly statistics?: JSX.Element | undefined;
+  /**
+   * The line above the controls, already composed — see `topicsVoice`.
+   *
+   * A string rather than the figures, because it is written from *two* documents: the match count
+   * is this page's and the partition total is the cluster's, and only the caller holds both. A
+   * component handed the page's rows and asked to write the sentence would have to guess at the
+   * half it cannot see, which is how the count in it would come to track the search box.
+   */
+  readonly voice?: string | undefined;
+  /** The selected topic names. One set, shared by the table and the cards — see the header. */
+  readonly selected?: ReadonlySet<string> | undefined;
+  readonly onSelectionChange?: ((next: ReadonlySet<string>) => void) | undefined;
+  /** What the bulk bar offers. Empty or absent draws no bar, whatever is selected. */
+  readonly bulkActions?: readonly BulkAction[] | undefined;
+  /** Downloads the rows on screen. Absent hides the control entirely. */
+  readonly onExport?: (() => void) | undefined;
   /**
    * How many topics KUI could not describe.
    *
@@ -157,6 +258,7 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
    */
   const [typed, setTyped] = createSignal(props.query.search);
   const [view, setView] = createSignal<TopicView>(storedView());
+  const [statisticsOpen, setStatisticsOpen] = createSignal(storedStatistics());
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   // A query the operator abandoned by navigating away must not arrive afterwards and re-fetch.
@@ -179,11 +281,33 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
     props.onQueryChange({ ...props.query, page: 1, ...change });
   };
 
-  const search = () => props.query.search;
-  const showInternal = () => props.query.showInternal;
-  /* The rows the server sent, drawn in the order it sent them. The page no longer decides which
-     topics exist — see `TopicListQuery` for why it must not. */
-  const visible = createMemo(() => props.topics);
+  const facet = () => props.query.facet;
+
+  /*
+   * The rows the server sent, narrowed only where the server could not narrow them itself.
+   *
+   * `matchesFilter` is `topicList.ts`'s, not a second copy: `compact,delete` is a real and common
+   * value of `cleanup.policy`, and a membership test rather than an equality one is the difference
+   * between "compacted" meaning what it says and quietly excluding every topic that also deletes.
+   */
+  const visible = createMemo(() =>
+    isServerFacet(facet())
+      ? props.topics
+      : props.topics.filter((topic) => matchesFilter(topic, facet())),
+  );
+
+  const selected = (): ReadonlySet<string> => props.selected ?? new Set<string>();
+
+  /** The selection, in `DataTable`'s vocabulary. Absent when the caller does not want selection. */
+  const selection = () => {
+    const onChange = props.onSelectionChange;
+    if (onChange === undefined) return undefined;
+    return {
+      selectedKeys: selected(),
+      onChange,
+      rowLabel: (key: string) => key,
+    };
+  };
 
   const columns: readonly Column<TopicRow>[] = [
     {
@@ -250,18 +374,123 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
       render: (topic) => <Quantity value={topic.bytes} format={formatBytes} />,
     },
     {
+      id: "rate",
+      header: "Msg/s",
+      align: "numeric",
+      /* Absent far more often than present: the rate is differenced from two snapshots, so a topic
+         KUI has scraped once has no rate yet. `0` is the figure a silent topic legitimately has, so
+         the two must never render alike — hence the dash with its word rather than a zero. */
+      render: (topic) => <Quantity value={topic.messagesPerSecond} format={formatRate} />,
+    },
+    {
       id: "policy",
       header: "Cleanup",
-      render: (topic) => <span class="kui-table__cell-muted">{topic.cleanupPolicy ?? "—"}</span>,
+      /*
+       * Nothing at all when the batch that reads `cleanup.policy` did not cover this topic.
+       *
+       * Not `delete`, which is Kafka's default and would be this screen guessing at a setting it
+       * was not told; and not an em dash either, which in every other column on this page means "a
+       * figure nobody could measure". A cleanup policy is not a figure — it is a word the topic
+       * either has or has not been described with — so the honest rendering of "not described" is
+       * an empty cell beside a health chip that already says the topic was not described.
+       */
+      render: (topic) => (
+        <Show when={topic.cleanupPolicy}>
+          {(policy) => (
+            <Tag tone={isCompacted(topic) ? "info" : "neutral"} class="kui-topic-list__policy">
+              {policy()}
+            </Tag>
+          )}
+        </Show>
+      ),
     },
   ];
 
   return (
     <section class="kui-topic-list" aria-label="Topics">
+      <Show when={props.voice}>
+        {(line) => (
+          /* A list carries a voice line and an object page does not (`SCREENS.md` §5.2). `role` is
+             deliberately absent: the figures are repeated in the statistics tiles and in the count
+             beside the controls, and announcing this line on every keystroke would talk over the
+             search box. */
+          <p class="kui-topic-list__voice">{line()}</p>
+        )}
+      </Show>
+
       {/* The controls are outside everything that re-renders when rows arrive. The search box must
           not be rebuilt while somebody is typing in it; keeping it out of the boundary that the
           table lives in is the whole fix. */}
       <div class="kui-topic-list__controls">
+        <SegmentedControl<TopicView>
+          label="View"
+          size="sm"
+          value={view()}
+          segments={[
+            { value: "table", label: "Table", icon: "table" },
+            { value: "cards", label: "Cards", icon: "cards" },
+          ]}
+          onChange={(next: TopicView) => {
+            setView(next);
+            rememberView(next);
+          }}
+        />
+
+        <Select<string>
+          label="Sort topics by"
+          labelHidden
+          prefix="Sort ·"
+          size="sm"
+          value={props.query.sort?.columnId ?? ""}
+          options={SORT_OPTIONS}
+          onChange={(columnId) =>
+            ask({
+              // Keeping the direction across a change of field: an operator who asked for
+              // descending and then changed the column meant descending by the new one.
+              sort:
+                columnId === ""
+                  ? null
+                  : { columnId, order: props.query.sort?.order ?? "asc" },
+            })
+          }
+        />
+
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="sort"
+          {...(props.query.sort === null
+            ? {
+                disabled: true as const,
+                disabledReason:
+                  "There is no direction to reverse while the list is in the server's own order.",
+              }
+            : {})}
+          onClick={() =>
+            ask({
+              sort:
+                props.query.sort === null
+                  ? null
+                  : {
+                      columnId: props.query.sort.columnId,
+                      order: props.query.sort.order === "asc" ? "desc" : "asc",
+                    },
+            })
+          }
+        >
+          {props.query.sort?.order === "desc" ? "Descending" : "Ascending"}
+        </Button>
+
+        <Switch
+          label="Show statistics"
+          checked={statisticsOpen()}
+          onChange={(on) => {
+            setStatisticsOpen(on);
+            rememberStatistics(on);
+          }}
+          testId="topic-statistics-switch"
+        />
+
         <TextField
           label="Search topics"
           labelHidden
@@ -277,25 +506,23 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
             searchTimer = setTimeout(() => ask({ search: text.trim() }), 300);
           }}
         />
-        <SegmentedControl<TopicView>
-          label="View"
-          size="sm"
-          value={view()}
-          segments={[
-            { value: "table", label: "Table", icon: "table" },
-            { value: "cards", label: "Cards", icon: "cards" },
-          ]}
-          onChange={(next: TopicView) => {
-            setView(next);
-            rememberView(next);
-          }}
-        />
-        <Checkbox
-          label="Show internal topics"
-          checked={showInternal()}
-          onChange={(on) => ask({ showInternal: on })}
-        />
-        <span class="kui-topic-list__count">{matchCount(visible().length, props.totalItems)}</span>
+
+        <span class="kui-topic-list__count">
+          {matchCount(
+            visible().length,
+            props.totalItems,
+            isServerFacet(facet()) ? undefined : props.topics.length,
+          )}
+        </span>
+
+        <Show when={props.onExport}>
+          {(exportRows) => (
+            <Button variant="secondary" icon="download" onClick={() => exportRows()()}>
+              Export
+            </Button>
+          )}
+        </Show>
+
         <Show when={props.onCreate}>
           {(create) => (
             <Button
@@ -311,6 +538,31 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
           )}
         </Show>
       </div>
+
+      {/* The region is the caller's; the switch is the page's. Behind `Show` rather than hidden
+          with CSS, so a reader who turned it off is not paying for a fetch's worth of DOM they
+          cannot see — and so the tab order matches what is on screen. */}
+      <Show when={statisticsOpen()}>{props.statistics}</Show>
+
+      <SingleSelectChips<TopicFilter>
+        label="Filter topics"
+        options={FACETS}
+        value={facet()}
+        onChange={(next) => ask({ facet: next })}
+        testId="topic-facets"
+      />
+
+      <Show when={!isServerFacet(facet())}>
+        <p class="kui-topic-list__scope" role="status">
+          {/* The sentence the server-side search exists to make unnecessary, printed exactly where
+              it is still true. KUI's topic index has no column for either of these, so the chip
+              narrows the page it was handed — and a filter that narrows a page while looking like
+              it narrows a cluster is the defect this page already fixed once, for the search box. */}
+          “{FACETS.find((one) => one.value === facet())?.label}” narrows the{" "}
+          {props.topics.length.toLocaleString()} topics on this page. The cluster is not searched for
+          it, so a matching topic on another page is not shown.
+        </p>
+      </Show>
 
       <Show when={props.incomplete !== undefined && props.incomplete > 0}>
         <p class="kui-topic-list__incomplete" role="status">
@@ -333,48 +585,25 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
         rowKey={(topic) => topic.name}
         caption="Topics on this cluster"
         onRowClick={props.onOpen}
+        selection={selection()}
         /* Sorted by the server, for the same reason it searches: re-sorting one page of a list that
            the server paginated shows the right rows in an order no page boundary matches. */
         sort={props.query.sort}
         onSortChange={(sort) => ask({ sort })}
         {...(props.viewportHeight === undefined ? {} : { viewportHeight: props.viewportHeight })}
-        empty={
-          <Show
-            when={search().trim() !== ""}
-            fallback={
-              <EmptyState
-                kind="empty"
-                title="No topics yet."
-                description="A topic appears here as soon as one is created, by this page or by anything else that talks to the cluster."
-              />
-            }
-          >
-            <EmptyState
-              kind="filtered"
-              title="No topic matches that text."
-              /* It searches the whole cluster now, not the rows on screen, so the sentence that
-                 said otherwise would have been telling the operator to distrust a true answer. */
-              description="No topic on this cluster has that in its name. Clearing the search shows them all."
-            />
-          </Show>
-        }
+        empty={<ListEmpty query={props.query} />}
       />
       }>
-        <Show
-          when={visible().length > 0}
-          fallback={
-            <EmptyState
-              kind={search().trim() === "" ? "empty" : "filtered"}
-              title={search().trim() === "" ? "No topics yet." : "No topic matches that text."}
-              description={
-                search().trim() === ""
-                  ? "A topic appears here as soon as one is created, by this page or by anything else that talks to the cluster."
-                  : "No topic on this cluster has that in its name. Clearing the search shows them all."
-              }
-            />
-          }
-        >
-          <TopicCards topics={visible()} onOpen={props.onOpen} formatBytes={formatBytes} />
+        <Show when={visible().length > 0} fallback={<ListEmpty query={props.query} />}>
+          <TopicCards
+            topics={visible()}
+            onOpen={props.onOpen}
+            formatBytes={formatBytes}
+            selected={selected()}
+            {...(props.onSelectionChange === undefined
+              ? {}
+              : { onSelectionChange: props.onSelectionChange })}
+          />
         </Show>
       </Show>
 
@@ -385,24 +614,84 @@ export function TopicListPage(props: TopicListPageProps): JSX.Element {
         shown={visible().length}
         onPage={(page: number) => props.onQueryChange({ ...props.query, page })}
         onPageSize={(pageSize: number) => ask({ pageSize })}
+        pageSizes={[8, 16, 32]}
         /* When the server did not count, a full page is the only evidence that another exists. It
            can be wrong by one — a cluster with exactly two pages' worth offers a third that turns
            out to be empty — which is a smaller lie than hiding a page that is there. */
-        hasNext={props.totalItems === undefined && visible().length === props.query.pageSize}
+        hasNext={props.totalItems === undefined && props.topics.length === props.query.pageSize}
         label="Topic list pages"
       />
+
+      {/* Floating, so it does not move the list underneath it, and absent at zero selection: a bar
+          that is always in the document is a strip of the window nobody can use. */}
+      <Show when={props.bulkActions !== undefined && props.bulkActions.length > 0}>
+        <BulkActionBar
+          count={selected().size}
+          actions={props.bulkActions ?? []}
+          noun="topic"
+          onDismiss={() => props.onSelectionChange?.(new Set<string>())}
+          testId="topic-bulk-bar"
+        />
+      </Show>
     </section>
   );
 }
 
 /**
- * The count beside the switch.
+ * The four kinds of nothing this list can show, told apart.
+ *
+ * Written once and used by both treatments, because the table's empty slot and the cards' fallback
+ * had drifted into two copies of the same three sentences — and the copy in the cards branch was
+ * the one that never learned about the facets.
+ */
+function ListEmpty(props: { readonly query: TopicListQuery }): JSX.Element {
+  const searched = () => props.query.search.trim() !== "";
+  const faceted = () => props.query.facet !== "all";
+  return (
+    <Show
+      when={searched() || faceted()}
+      fallback={
+        <EmptyState
+          kind="empty"
+          title="No topics yet."
+          description="A topic appears here as soon as one is created, by this page or by anything else that talks to the cluster."
+        />
+      }
+    >
+      <EmptyState
+        kind="filtered"
+        title={searched() ? "No topic matches that text." : "No topic matches that filter."}
+        description={
+          searched()
+            ? /* It searches the whole cluster now, not the rows on screen, so the sentence that
+                 said otherwise would have been telling the operator to distrust a true answer. */
+              "No topic on this cluster has that in its name. Clearing the search shows them all."
+            : "No topic on this page matches. Choosing “All” shows every topic the cluster listed."
+        }
+      />
+    </Show>
+  );
+}
+
+/**
+ * The count beside the controls.
  *
  * It always names both numbers when they differ, because "12 topics" over a table of twelve rows
  * that is really a cluster of four thousand is the most confidently wrong sentence this page could
  * write.
+ *
+ * @param onPage present only while a chip the cluster cannot apply is narrowing what was sent. The
+ *   comparison then has to be against the page rather than against the cluster: "2 of 4,000" would
+ *   claim the server found two, when what happened is that this page kept two of thirty-two.
  */
-export function matchCount(shown: number, total: number | undefined): string {
+export function matchCount(
+  shown: number,
+  total: number | undefined,
+  onPage?: number | undefined,
+): string {
+  if (onPage !== undefined) {
+    return `${shown.toLocaleString()} of ${onPage.toLocaleString()} on this page`;
+  }
   /*
    * The server did not count. Saying "25 topics" here would be a claim about the cluster made from
    * the size of one page — the exact sentence this function exists to avoid — so it says what is

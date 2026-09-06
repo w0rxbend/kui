@@ -648,29 +648,33 @@
   --kui-monogram-5-ink: #ffffff; /* 5.16:1 */
 }
 
-/* The base carries the shape and nothing about the size. `Monogram` emits a size modifier on every
- * tile it draws, `md` included, and the default's rule used to be folded in here — so a reader who
- * saw `kui-monogram--md` in the DOM and grepped for it found nothing at all and had no way to tell
- * a defaulted class from a dead one. Both values `size` can take now have a rule of their own. */
+/* The base carries the shape **and the default size**, and `--sm` is the only override.
+ *
+ * It was briefly the other way round — the size lived in a `.kui-monogram--md` modifier that the
+ * component emitted on every tile — on the theory that a class in the DOM should always have a rule
+ * to grep for. The theory was right and the arrangement was wrong: it made the whole default size
+ * depend on a class name being emitted, and a tile that ever lost that class had no width, no
+ * height and no font size at all. A default belongs in the thing that is always there. The grep
+ * problem is now solved at the other end instead — the component emits no `--md` class, so there
+ * is nothing to grep for that is not here. `controls.test.tsx` holds both halves against each
+ * other: it puts this file in a document and asks what the cascade declares for the classes the
+ * component actually emits. */
 .kui-monogram {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
   border-radius: var(--kui-radius-md);
+  width: var(--kui-monogram-size);
+  height: var(--kui-monogram-size);
   font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
   font-weight: var(--kui-font-weight-bold);
   line-height: 1;
   letter-spacing: 0.02em;
   /* A three-letter id can only ever produce two characters, but an unexpected one must clip rather
    * than stretch the tile: a row of monograms of different widths stops reading as a column. */
   overflow: hidden;
-}
-
-.kui-monogram--md {
-  width: var(--kui-monogram-size);
-  height: var(--kui-monogram-size);
-  font-size: var(--kui-font-size-sm);
 }
 
 .kui-monogram--sm {

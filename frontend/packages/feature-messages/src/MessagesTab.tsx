@@ -59,12 +59,19 @@ import {
   type SmartFilterSlot,
 } from "./MessageFilterBar.jsx";
 import type { BrowseQuery, SeekMode } from "./browse.js";
+import { isEmpty, type Predicates } from "./predicates.js";
+import type { FilterPreset } from "./presets.js";
 import type { BrowseSession } from "./session.js";
 
 export interface MessagesTabProps {
   readonly topic: string;
-  /** How many partitions the topic has, for the selector and its summary. */
-  readonly partitionCount: number;
+  /**
+   * How many partitions the topic has, or `undefined` when KUI has not been told.
+   *
+   * Passed straight to the bar, which draws the difference. This screen never substitutes a number
+   * for the absence: a count is a measurement, and the one thing it must not become is a zero.
+   */
+  readonly partitionCount?: number | undefined;
   /** The browse the URL describes. This component never writes it; it asks. */
   readonly query: BrowseQuery;
   /**
@@ -88,6 +95,51 @@ export interface MessagesTabProps {
    * and not a form here.
    */
   readonly smartFilter?: SmartFilterSlot | undefined;
+
+  /**
+   * The typed predicates and the upper bounds, and the way to change them.
+   *
+   * Required rather than optional, unlike everything else on this component, because they are not a
+   * decoration: the bar draws two controls for them and a screen that rendered those controls with
+   * nowhere for their changes to go would be a screen whose filters silently do nothing.
+   */
+  readonly predicates: Predicates;
+  readonly onPredicatesChange: (predicates: Predicates) => void;
+
+  /**
+   * What Read does.
+   *
+   * The default is `session.start(query)` — which is right for a browse with nothing to compile, and
+   * wrong the moment there is: a predicate has to be registered with the service before a browse can
+   * quote it, and that is a request, which this component has no client for. The route supplies this
+   * and does the registration first.
+   */
+  readonly onRead?: (() => void) | undefined;
+
+  /**
+   * Why the last Read did not start a browse at all.
+   *
+   * Distinct from the session's own failure, which is a browse that started and went wrong. This one
+   * is shown *instead* of a browse — a filter the cluster's engine refused to compile, most often —
+   * and it must be said out loud, because the alternative is a Read button that appears to do
+   * nothing.
+   */
+  readonly refusal?: string | undefined;
+
+  /**
+   * Whether {@link MessagesTabProps.onRead} is still getting ready.
+   *
+   * A Read that has to register a filter first is a round trip before a single record can arrive,
+   * and a button that looked idle through it is a button somebody presses twice. The second press
+   * is refused by the mutation's own guard, so what they see is a control that does nothing.
+   */
+  readonly readBusy?: boolean | undefined;
+
+  /** The saved arrangements this browser holds, and what may be done with them. */
+  readonly presets?: readonly FilterPreset[] | undefined;
+  readonly onApplyPreset?: ((preset: FilterPreset) => void) | undefined;
+  readonly onRemovePreset?: ((preset: FilterPreset) => void) | undefined;
+  readonly onSavePreset?: (() => void) | undefined;
 
   /** Copy a range of these records into another topic. */
   readonly onResend?: (() => void) | undefined;
@@ -116,6 +168,13 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
   const failure = createMemo(() => session.progress().failure);
 
   function read(): void {
+    /* The route's Read, when there is one: it compiles and registers the typed predicates before a
+       browse quotes them. Falling back to starting the session directly keeps this component
+       usable on its own, which every story and every test in this package relies on. */
+    if (props.onRead !== undefined) {
+      props.onRead();
+      return;
+    }
     session.start(props.query);
   }
 
@@ -157,13 +216,33 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
         }
         live={props.query.live}
         onLiveChange={setLive}
+        predicates={props.predicates}
+        /* Changing a predicate stops a running browse for exactly the reason changing the seek
+           does: the records still arriving were selected by the expression the browse was started
+           with, and mixing them with the ones the new predicate would keep is two answers in one
+           list with nothing on screen to say so. */
+        onPredicatesChange={(predicates) => {
+          session.stop();
+          props.onPredicatesChange(predicates);
+        }}
+        {...(props.now === undefined ? {} : { now: props.now })}
+        {...(props.presets === undefined ? {} : { presets: props.presets })}
+        {...(props.onApplyPreset === undefined ? {} : { onApplyPreset: props.onApplyPreset })}
+        {...(props.onRemovePreset === undefined ? {} : { onRemovePreset: props.onRemovePreset })}
+        {...(props.onSavePreset === undefined ? {} : { onSavePreset: props.onSavePreset })}
         {...(props.liveAvailability === undefined ? {} : { liveAvailability: props.liveAvailability })}
         {...(props.smartFilter === undefined ? {} : { smartFilter: props.smartFilter })}
       >
         <Show
           when={session.running()}
           fallback={
-            <Button variant="primary" size="sm" icon="refresh" onClick={read}>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="refresh"
+              busy={props.readBusy === true}
+              onClick={read}
+            >
               Read
             </Button>
           }
@@ -191,6 +270,16 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
 
       <BrowseStatus session={session} />
 
+      {/* A browse that never started. It sits above the failure, because it is about the request
+          the operator just made rather than about the one that is still running. */}
+      <Show when={props.refusal}>
+        {(refused) => (
+          <p class="kui-browse__failure" role="alert">
+            <span class="kui-browse__failure-text">{refused()}</span>
+          </p>
+        )}
+      </Show>
+
       {/* The failure sits beside the records rather than replacing them. The records that did
           arrive are still what the user asked for, and clearing the list to show an error would
           throw away the evidence they were reading. */}
@@ -208,7 +297,11 @@ export function MessagesTab(props: MessagesTabProps): JSX.Element {
           <BrowseEmpty
             running={session.running()}
             everRan={session.progress().connection.phase !== "idle"}
-            filtered={props.query.contains !== undefined || props.query.filterId !== undefined}
+            filtered={
+              props.query.contains !== undefined ||
+              props.query.filterId !== undefined ||
+              !isEmpty(props.predicates)
+            }
             byExpression={props.query.filterSource}
             onRead={read}
           />

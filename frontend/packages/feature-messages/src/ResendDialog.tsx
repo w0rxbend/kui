@@ -59,8 +59,19 @@ export interface ResendDialogProps {
   readonly onClose: () => void;
   /** The topic the records are read from. */
   readonly topic: string;
-  /** How many partitions the source has, so a range cannot name one that is not there. */
-  readonly partitionCount: number;
+  /**
+   * How many partitions the source has, or `undefined` when KUI has not been told.
+   *
+   * Optional, and this is the field that made it worth being careful. It was a required `number`,
+   * the route above supplied a hard-coded `0`, and the sentence below therefore read
+   * "`orders.payments.v2` has 0 partitions, and there is a range for each of them" on every copy
+   * dialog this product has drawn — a false statement about somebody's cluster, sitting beside a
+   * control that copies records between topics, and disabling that control as a side effect.
+   *
+   * `undefined` is not a smaller number. It means the dialog may not bound the range list and may
+   * not say anything about how many partitions there are; it says *that* instead.
+   */
+  readonly partitionCount?: number | undefined;
   /** The range to open with — the selection on screen, when the screen has one. */
   readonly initial?: ResendDraft | undefined;
   readonly onSend: (draft: ResendDraft) => void;
@@ -233,8 +244,10 @@ export function ResendDialog(props: ResendDialogProps): JSX.Element {
                     size="sm"
                     icon="plus"
                     {...disabledProps(
-                      draft().ranges.length >= props.partitionCount
-                        ? `${props.topic} has ${String(props.partitionCount)} partitions, and there is a range for each of them.`
+                      props.partitionCount !== undefined &&
+                        draft().ranges.length >= props.partitionCount
+                        ? `${props.topic} has ${String(props.partitionCount)} partitions, ` +
+                          "and there is a range for each of them."
                         : undefined,
                     )}
                     onClick={() =>
@@ -251,6 +264,26 @@ export function ResendDialog(props: ResendDialogProps): JSX.Element {
                   </Button>
                   <span class="kui-resend__total">{describeTotal(total())}</span>
                 </div>
+
+                {/* How many partitions there are to write ranges for, or a sentence saying nobody
+                    has measured it. Both are said out loud, because an operator writing ranges
+                    needs to know whether they have covered the topic — and the thing this dialog
+                    shipped instead was worse than silence: a hard-coded zero, stated as a fact,
+                    with the control that adds a range disabled to match it. */}
+                <Show
+                  when={props.partitionCount !== undefined}
+                  fallback={
+                    <p class="kui-resend__unknown">
+                      KUI has not been told how many partitions {props.topic} has, so it cannot say
+                      when the ranges cover all of them. The server checks every range and refuses
+                      one that names a partition the topic does not have.
+                    </p>
+                  }
+                >
+                  <p class="kui-resend__unknown">
+                    {props.topic} has {String(props.partitionCount)} partitions.
+                  </p>
+                </Show>
               </section>
 
               <section class="kui-resend__warnings" aria-label="What a copy does">

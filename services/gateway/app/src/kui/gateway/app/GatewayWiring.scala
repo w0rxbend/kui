@@ -18,6 +18,7 @@ import kui.gateway.api.auth.SessionMiddleware
 import kui.gateway.api.client.SttpServiceClient
 import kui.gateway.api.openapi.DocsRoutes
 import kui.gateway.api.routing.{ContractRouting, PolicyRbacPreCheck, RbacPreCheck, ServiceContracts}
+import kui.gateway.api.search.{GroupSearchSource, SubjectSearchSource, TopicSearchSource}
 import kui.gateway.api.{
   CapabilityRoutes,
   ClusterOverviewRoutes,
@@ -25,6 +26,7 @@ import kui.gateway.api.{
   GatewayApi,
   InfoRoutes,
   MessageStreamRoutes,
+  SearchRoutes,
   TopicOverviewRoutes
 }
 import kui.gateway.application.capability.{
@@ -34,8 +36,9 @@ import kui.gateway.application.capability.{
   ReadinessPoller,
   RegistryConfig
 }
-import kui.gateway.application.client.ServiceClients
+import kui.gateway.application.client.{ServiceClient, ServiceClients}
 import kui.gateway.application.cluster.ClusterOverviewUseCase
+import kui.gateway.application.search.{SearchSource, SearchUseCase}
 import kui.gateway.application.session.{InMemorySessionStore, SessionConfig}
 import kui.gateway.application.topic.{ConsumerGroupsSource, TopicOverviewUseCase}
 import kui.http.health.ReadinessCheck
@@ -210,6 +213,14 @@ object GatewayWiring {
       topicOverview <- topicClient.traverse(
         TopicOverviewUseCase.resource[F](_, signals, telemetry, overviewSources)
       )
+      // Cross-entity search (ADR-049), on the same terms as the dashboard: it needs the cluster list to
+      // know what to search, so a deployment with no cluster service has no route rather than an
+      // endpoint that answers an empty document to every query. The three services it folds over are
+      // each optional, and one that is missing is named in `partial` rather than silently dropped —
+      // which is the whole reason the fold walks `SearchUseCase.Services` instead of whatever happens
+      // to be configured.
+      searchSources = SearchUseCase.Services.flatMap(clients.get).flatMap(searchSourceOf[F])
+      search = clients.all.find(_.service == ClusterServiceId).map(SearchUseCase.of[F](_, searchSources))
       // The message browse stream, relayed rather than proxied. A deployment with no message service
       // configured has no client and therefore no route, so the address 404s instead of opening a
       // stream that could only ever end in an error.
@@ -229,6 +240,7 @@ object GatewayWiring {
         CapabilityRoutes[F](registry, trigger, telemetry, logger) ++
           overview.toList.flatMap(ClusterOverviewRoutes[F](_)) ++
           topicOverview.toList.flatMap(TopicOverviewRoutes[F](_)) ++
+          search.toList.flatMap(SearchRoutes[F](_)) ++
           messages.toList.flatMap(MessageStreamRoutes[F](_)) ++
           proxied ++
           DocsRoutes[F](docs, BasePath.normalize(config.server.basePath)),
@@ -368,6 +380,20 @@ object GatewayWiring {
     * re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.
     */
   val MessageServiceId: ServiceId = ServiceId.unsafe("message")
+
+  /** Which search source a client answers for, or none when the search does not fold over that service.
+    *
+    * A `match` on the id rather than a map built at the call site, so that adding a fourth searchable service
+    * is one case here and one entry in `SearchUseCase.Services` — and so that the compiler, rather than a
+    * reader, is what notices when the two lists stop agreeing.
+    */
+  def searchSourceOf[F[_]: Async](client: ServiceClient[F]): Option[SearchSource[F]] =
+    client.service match {
+      case SearchUseCase.TopicService => Some(TopicSearchSource[F](client))
+      case SearchUseCase.ConsumerService => Some(GroupSearchSource[F](client))
+      case SearchUseCase.SchemaService => Some(SubjectSearchSource[F](client))
+      case _ => None
+    }
 
   /** The service that decides who somebody is. Its endpoints are never proxied: `ServiceContracts` says so at
     * the one place they would otherwise be registered, and `AuthRoutes` calls them itself so that a

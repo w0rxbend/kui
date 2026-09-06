@@ -1,12 +1,18 @@
 /**
- * The four cards across the top of the dashboard: a label, one large number, and a verdict.
+ * The stat cards across the top of the dashboard: a label, one large number, and a verdict.
  *
  * ## What it is for
  *
  * A stat card answers a question the operator asks before they ask anything else — how many
  * brokers, how many topics, how fast, how far behind. It is read in about a second, from across a
- * desk, so it has exactly three parts and no more: what this is (the small-caps label and the
- * tinted tile), the number, and whether the number is all right (the pill).
+ * desk, so it has three parts that carry meaning and no more: what this is (the small-caps label
+ * and the tinted tile), the number, and whether the number is all right (the pill). The fourth
+ * thing on it, the visual slot at the foot of this comment, carries no meaning of its own — it
+ * redraws the figure the card has already printed, which is why it is `aria-hidden`.
+ *
+ * `SCREENS-V4.md` §4.1 puts eight of them across the top of the dashboard, 6 across then 2, and
+ * the same eight are on every tab of that screen — §4.2 records that the tab strip selects the
+ * body below the cards and never the cards themselves.
  *
  * ## The tile's tone and the pill's tone are different decisions
  *
@@ -47,9 +53,19 @@
  * It goes **beside the figure**, and it does **not** replace the pill. The two answer different
  * questions and a card that swapped one for the other would lose an answer: the pill says whether
  * the number is all right *now* ("all in sync", "metrics unavailable") and the visual says how the
- * number got here. Six of the design's eight cards carry both. So the figure and the visual share
- * one row, the pill keeps the line below it, and a card with a visual is the same height as a card
- * without one.
+ * number got here. So the figure and the visual share one row, the pill keeps the line below it,
+ * and a card with a visual is the same height as a card without one. `surfaces.test.tsx` is where
+ * that is pinned: the visual is in `.kui-stat__row` beside the figure and the pill is still on its
+ * own line under it.
+ *
+ * A sentence claiming "six of the design's eight cards carry both" stood here and was a measurement
+ * of nothing. **The design's cards carry no pill at all**: §3.2 lists four parts — icon tile,
+ * figure with unit, label, micro-visual — and a pill is not among them, and the word does not
+ * appear in that section. The pill is KUI's own, and it is here because §3.2's third state has
+ * nowhere else to go: *a figure nothing collects is the `NotMeasured` sentence and not an em dash*.
+ * A sentence needs a line to be written on, and the em dash already means something else. So the
+ * `WithVisuals` story drawing both on all eight is the correct reading of the two documents
+ * together, and it was the count in this paragraph that was wrong.
  *
  * Two rules come with the slot:
  *

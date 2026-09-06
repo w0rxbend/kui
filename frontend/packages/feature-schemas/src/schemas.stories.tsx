@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { SchemaWorkspace } from "./SchemaWorkspace.jsx";
 import { SubjectList } from "./SubjectList.jsx";
 import { SubjectPage } from "./SubjectPage.jsx";
 import { CompatibilityCheck } from "./CompatibilityCheck.jsx";
-import type { Compatibility, SchemaVersion } from "./data.js";
+import type { Compatibility, SchemaVersion, SubjectRow } from "./data.js";
 
 /**
  * The subject list, whose headline is the registry's global compatibility level.
@@ -21,11 +22,40 @@ const listMeta: Meta<typeof SubjectList> = {
 export default listMeta;
 type ListStory = StoryObj<typeof listMeta>;
 
-const SUBJECTS = [
-  "orders.payments.v2-value",
-  "orders.payments.v2-key",
-  "analytics.pageviews-value",
-  "inventory.stock-levels-value",
+/*
+ * Four rows, chosen so that every absence the wire allows is on screen at once.
+ *
+ * The first two differ only in `inheritedFromGlobal`, which is the whole point of the screen: the
+ * first moves the next time anybody changes the registry's global level and the second does not.
+ * The third's format and version count were not read — the endpoint documents that the per-subject
+ * call filling them may not answer while the row is still returned — and the fourth's level is a
+ * word the registry named and this browser does not know.
+ */
+const SUBJECTS: readonly SubjectRow[] = [
+  {
+    subject: "orders.payments.v2-value",
+    format: "AVRO",
+    versionCount: 3,
+    compatibility: { level: "BACKWARD", inherited: true },
+  },
+  {
+    subject: "orders.payments.v2-key",
+    format: "AVRO",
+    versionCount: 1,
+    compatibility: { level: "FULL", inherited: false },
+  },
+  {
+    subject: "analytics.pageviews-value",
+    format: undefined,
+    versionCount: undefined,
+    compatibility: undefined,
+  },
+  {
+    subject: "inventory.stock-levels-value",
+    format: "PROTOBUF",
+    versionCount: 12,
+    compatibility: { level: null, inherited: false },
+  },
 ];
 
 const idle = { kind: "idle" } as const;
@@ -34,6 +64,8 @@ const listArgs = {
   subjects: SUBJECTS,
   search: "",
   onSearch: () => undefined,
+  direction: "asc" as const,
+  onDirection: () => undefined,
   page: 1,
   pageSize: 50,
   totalItems: SUBJECTS.length,
@@ -47,6 +79,18 @@ const backward: Compatibility = { level: "BACKWARD", inherited: false };
 
 export const Listed: ListStory = {
   args: { ...listArgs, global: backward },
+};
+
+/**
+ * The row the address names.
+ *
+ * The fill is `--kui-color-selected` and the text is `--kui-color-selected-contrast`, which is what
+ * that token pair is for: `text-muted` over the selected fill measures 4.15:1 in the dark palette,
+ * under what a caption at this size needs. The inline-start rule and `aria-current="page"` are the
+ * two non-colour halves of the same statement.
+ */
+export const SubjectSelected: ListStory = {
+  args: { ...listArgs, global: backward, selected: "orders.payments.v2-key" },
 };
 
 /** The registry checks nothing. Said in words, because a colour is not a distinction to everyone. */
@@ -94,6 +138,26 @@ export const NoSubjects: ListStory = {
 
 export const SearchMatchedNothing: ListStory = {
   args: { ...listArgs, subjects: [], totalItems: 0, global: backward, search: "nothing-like-this" },
+};
+
+/* ------------------------------------------------------------------------------------------------
+ * The workspace: both panes at once
+ *
+ * The screen as it actually ships. Reading a registry is comparing one subject's level against the
+ * next one's, so the list stays on screen while a subject is open — and the selection is the address
+ * rather than a signal, which is what makes a pasted link open the pane it names.
+ * ---------------------------------------------------------------------------------------------- */
+
+type WorkspaceStory = StoryObj<typeof SchemaWorkspace>;
+
+/** Nothing selected. The right-hand pane says what it is for; it is not half a blank page. */
+export const WorkspaceNoSelection: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: <SubjectList {...listArgs} global={backward} />,
+    subjectCount: SUBJECTS.length,
+    globalLevel: "BACKWARD",
+  },
 };
 
 /* ------------------------------------------------------------------------------------------------
@@ -161,6 +225,26 @@ export const SubjectWithReferences: SubjectStory = {
         { name: "orders.common.Money", subject: "orders.common.Money", version: 1 },
       ],
     },
+  },
+};
+
+/**
+ * Both panes, which is how this screen is reached in the product.
+ *
+ * The selected row on the left and its subject on the right, at once. Worth looking at for one
+ * thing in particular: the row's caption and the pane's sentence say the same fact about where the
+ * level comes from, because both read `levelSourceWord` and `levelSourceSentence` from the same
+ * module. When they were written separately they disagreed.
+ */
+export const WorkspaceWithSubject: WorkspaceStory = {
+  render: (args) => <SchemaWorkspace {...args} />,
+  args: {
+    list: <SubjectList {...listArgs} global={backward} selected="orders.payments.v2-value" />,
+    detail: (
+      <SubjectPage {...subjectArgs} compatibility={{ level: "BACKWARD", inherited: true }} />
+    ),
+    subjectCount: SUBJECTS.length,
+    globalLevel: "BACKWARD",
   },
 };
 

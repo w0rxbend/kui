@@ -42,7 +42,7 @@ object GoldenDocuments {
       |          ],
       |          "scrapedAt" : "2026-09-03T10:11:12.000Z",
       |          "controllerUptime" : {
-      |            "percent" : 99.98,
+      |            "percent" : 99.72,
       |            "windowSeconds" : 21600,
       |            "coverageSeconds" : 21600
       |          }

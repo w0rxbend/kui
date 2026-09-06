@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { MessagesTab } from "./MessagesTab.jsx";
 import { DEFAULT_BROWSE, type BrowseQuery } from "./browse.js";
 import { LONG_TOPIC, NOW, RECORDS } from "./fixtures.js";
+import { NO_PREDICATES, type Predicates } from "./predicates.js";
 import { scriptedSession, startedSession } from "./storyHarness.js";
 
 /**
@@ -27,6 +28,8 @@ const base = {
   partitionCount: 12,
   query: DEFAULT_BROWSE,
   onQueryChange: () => undefined,
+  predicates: NO_PREDICATES as Predicates,
+  onPredicatesChange: () => undefined,
   now: NOW,
 } as const;
 
@@ -149,5 +152,112 @@ export const Extreme: Story = {
     onProduce: () => undefined,
     produceDisabledReason: "You do not hold a role that permits producing to this topic.",
     session: startedSession({ records: RECORDS, finish: { cursor: "c1" } }, DEFAULT_BROWSE),
+  },
+};
+
+/**
+ * The two typed predicates, filled in.
+ *
+ * Neither of them is a query parameter. Together they compile to
+ * `record.keyAsText.startsWith("ord_") && record.valueAsText.contains("UAH")`, which the route
+ * registers before it starts a browse — which is why the state worth looking at is the *controls*,
+ * not the expression: an operator who has to read CEL to know what their filter does has been given
+ * a text box, not a control.
+ */
+export const TypedPredicates: Story = {
+  args: {
+    ...base,
+    predicates: {
+      key: { mode: "starts", text: "ord_" },
+      value: { mode: "contains", text: "UAH" },
+    },
+    session: startedSession({ records: RECORDS.slice(0, 3), finish: {} }, DEFAULT_BROWSE),
+  },
+};
+
+/**
+ * A bounded offset range: a start the endpoint takes, and an end it does not.
+ *
+ * The arrow between the two boxes is the only thing on the bar that says they are one control. The
+ * upper bound is a predicate — `record.offset <= 18442900` — because the browse endpoint has a
+ * start position and no stop, which is exactly the gap `SCREENS-V4.md` §3.12 records.
+ */
+export const OffsetRange: Story = {
+  args: {
+    ...base,
+    query: { ...DEFAULT_BROWSE, seek: { kind: "offset", offset: "18442800" } } as BrowseQuery,
+    predicates: { untilOffset: "18442900" },
+    session: scriptedSession({}),
+  },
+};
+
+/**
+ * A time window, chosen from a chip.
+ *
+ * `NOW` minus fifteen minutes, so the `15m` chip is the lit one on every screenshot. A window is a
+ * *start*: it can be lit while LIVE is on, which is a forward read that begins fifteen minutes ago
+ * and then follows, and not the invalid request it looks like.
+ */
+export const TimeWindow: Story = {
+  args: {
+    ...base,
+    query: {
+      ...DEFAULT_BROWSE,
+      seek: { kind: "timestamp", epochMillis: NOW - 15 * 60_000 },
+    } as BrowseQuery,
+    session: scriptedSession({}),
+  },
+};
+
+/**
+ * The `PRESETS` row, with the four the design draws.
+ *
+ * Every other story here is the *absent* state of this row, which is the point: a preset set that is
+ * not configured draws no row rather than an empty one with a heading.
+ */
+export const Presets: Story = {
+  args: {
+    ...base,
+    predicates: { value: { mode: "contains", text: "DECLINED" } },
+    presets: [
+      { name: "Declined only", predicates: { value: { mode: "contains", text: "DECLINED" } } },
+      { name: "Big tickets", predicates: {}, expression: "record.value.amount > 1000" },
+      { name: "Refunds", predicates: { key: { mode: "starts", text: "rfnd_" } } },
+      { name: "Non-UAH", predicates: {}, expression: 'record.value.currency != "UAH"' },
+    ],
+    onApplyPreset: () => undefined,
+    onRemovePreset: () => undefined,
+    onSavePreset: () => undefined,
+    session: scriptedSession({}),
+  },
+};
+
+/**
+ * A topic whose partition count KUI has not been told.
+ *
+ * The selector is disabled and reads `all partitions` — words, no figure. It read `all 0` and
+ * offered an empty menu for as long as the route above it hard-coded a zero, which is the same
+ * screen as a topic that has no partitions, which is not a thing a topic can be.
+ */
+export const PartitionCountUnknown: Story = {
+  args: { ...base, partitionCount: undefined, session: scriptedSession({}) },
+};
+
+/**
+ * A Read that started no browse at all.
+ *
+ * Distinct from a browse that failed: this one never opened a stream, because the cluster would not
+ * compile the filter the controls describe. Starting anyway would return the unfiltered topic under
+ * a bar that says a filter is applied — the message service drops a `filterSource` that has no
+ * `filterId` beside it, in silence.
+ */
+export const FilterRefused: Story = {
+  args: {
+    ...base,
+    predicates: { key: { mode: "starts", text: "ord_" } },
+    refusal:
+      "KUI did not start the browse: this cluster would not compile the filter these controls " +
+      "describe. cluster 'quickstart' has no filter engine, so a smart filter cannot be run",
+    session: scriptedSession({}),
   },
 };

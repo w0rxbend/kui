@@ -281,11 +281,6 @@
   min-width: 0;
 }
 
-.kui-topic-card__glyph {
-  flex: none;
-  color: var(--kui-color-text-muted);
-}
-
 /* The topic's real name, never shortened: an operator copies it out of here into a command line.
  * It wraps rather than being truncated, because a truncated name is a name you cannot copy. */
 .kui-topic-card__name {
@@ -296,28 +291,76 @@
   overflow-wrap: anywhere;
 }
 
-.kui-topic-card__figures {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+/* `M13` draws the selected cards with a primary ring rather than a fill. A ring rather than a
+ * border so the card does not change size when it is picked — a grid that reflows on every tick is
+ * a grid where the next tick lands on a different card. */
+.kui-topic-card--selected {
+  box-shadow: 0 0 0 2px var(--kui-color-primary);
+}
+
+/* Top right, as the design draws it, and out of the name's flow so a long name does not push it
+ * off the card. */
+.kui-topic-card__select {
+  flex: none;
+  align-self: start;
+}
+
+/* `12 partitions`, `RF 3`, `delete`. Wraps rather than scrolling: a card is already the narrowest
+ * surface in the product and a tag that slid out of sight is a fact nobody reads. */
+.kui-topic-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kui-space-2);
+  margin: 0;
+}
+
+/* Size on the left, rate on the right — `SCREENS-V4.md` §4.7 — pushed to the bottom of the card so
+ * that cards of different heights still line their footers up along a row. */
+.kui-topic-card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: var(--kui-space-2) var(--kui-space-4);
   margin: 0;
+  margin-block-start: auto;
+  font-size: var(--kui-font-size-sm);
 }
 
-.kui-topic-card__figure dt {
+.kui-topic-card__figure {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-topic-card__figure-dot {
+  align-self: center;
+  color: var(--kui-color-text-subtle);
+}
+
+.kui-topic-card__figure-label {
   color: var(--kui-color-text-muted);
-  font-size: var(--kui-font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
-.kui-topic-card__figure dd {
-  margin: 0;
+.kui-topic-card__figure-value {
   font-variant-numeric: tabular-nums;
   font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
 }
 
-.kui-topic-card__foot {
-  margin-block-start: auto;
+/* Words rather than a figure, and drawn as words: the same weight as the label beside it, so it
+ * does not read as a measurement. "not measured" in the value's own weight would look like a
+ * quantity spelled out. */
+.kui-topic-card__figure-absent {
+  color: var(--kui-color-text-muted);
+  font-style: italic;
+}
+
+/* The thin bar under the footer (§4.7). Full width and no label: the card above it already names
+ * the topic, and the figure is already printed in the footer. */
+.kui-topic-card__bar {
+  width: 100%;
 }
 
 /* --- The partitions tab ------------------------------------------------------------------------
@@ -425,4 +468,93 @@
   display: flex;
   flex-direction: column;
   gap: var(--kui-space-4);
+}
+
+
+/* ------------------------------------------------------------------------------------------------
+ * The topics list's statistics region  (`SCREENS-V4.md` §4.6)
+ *
+ * Cluster-wide, and unaffected by the filter under it. The layout says so as much as the figures
+ * do: it is a band above the chip bar rather than a footer under the table, because a summary that
+ * sits below a filtered list reads as a summary *of* it.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-topic-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+/* `auto-fit` with a minimum: three tiles across a wide window, one under the other on a narrow one,
+ * and no breakpoint to keep in step with the drawer's width. */
+.kui-topic-stats__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--kui-space-4);
+}
+
+/* The reason a sum is missing, under the tiles that are missing it. Warning-coloured and small: it
+ * is a footnote about completeness, not an incident. */
+.kui-topic-stats__incomplete {
+  margin: 0;
+  color: var(--kui-color-warning);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The voice line above the controls. A list carries one and an object page does not (SPEC §5.2). */
+.kui-topic-list__voice {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Said only while a chip the cluster cannot apply is lit. Muted rather than warning-coloured: the
+ * page is doing the right thing and saying so, which is not a problem to be alarmed about. */
+.kui-topic-list__scope {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The cleanup policy's tag in the table. `max-content` so a two-word policy — `compact,delete` —
+ * keeps its own line rather than wrapping inside a cell that is already narrow. */
+.kui-topic-list__policy {
+  max-width: max-content;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The topic's Overview tab  (`SCREENS-V4.md` §4.9)
+ *
+ * Four tiles and the partition table. The same grid as the list's statistics region, deliberately:
+ * they are the same kind of band read in the same place on the page, and two spacings for one idea
+ * is how a product stops looking like one product.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-topic-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  min-height: 0;
+}
+
+.kui-topic-overview__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--kui-space-4);
+}
+
+.kui-topic-overview__capped {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* The coordinator's address on the topic's Consumers tab. Monospaced because it is a `host:port`
+ * somebody pastes into a terminal, and because a column of addresses only lines up in a font whose
+ * digits are one width. */
+.kui-topic-consumers__coordinator {
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  overflow-wrap: anywhere;
 }

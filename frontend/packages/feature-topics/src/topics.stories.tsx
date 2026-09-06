@@ -8,6 +8,8 @@ import {
   type TopicListQuery,
 } from "./TopicListPage.jsx";
 import { TopicPage } from "./TopicPage.jsx";
+import { TopicStatisticsRegion } from "./TopicStatisticsRegion.jsx";
+import { TopicOverviewTab } from "./TopicOverviewTab.jsx";
 import type { TopicRow } from "./types.js";
 
 /**
@@ -76,18 +78,24 @@ const TOPICS: readonly TopicRow[] = [
  * cluster of four thousand topics.
  *
  * A story has no server to ask, so this plays one. It keeps the query and applies it to the whole
- * fixture — which is what makes the search box, the internal-topics switch and the paginator all
- * work in Storybook without pretending `TopicListPage` does any of it itself.
+ * fixture — which is what makes the search box, the facet chips and the paginator all work in
+ * Storybook without pretending `TopicListPage` does any of it itself.
+ *
+ * `showInternal` is `facet === "internal"` here for the same reason `toTopicQuery` computes it that
+ * way: the chip bar is single-select, so `Internal` means Kafka's bookkeeping topics *instead of*
+ * the user's rather than as well as. The two page-scoped chips are the page's own business and this
+ * stub deliberately leaves them alone, so a story exercises the real narrowing.
  */
 function ControlledList(
   props: Omit<TopicListPageProps, "query" | "onQueryChange" | "totalItems">,
 ): JSX.Element {
   const [query, setQuery] = createSignal<TopicListQuery>(DEFAULT_TOPIC_QUERY);
+  const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set<string>());
 
   const matching = () =>
     props.topics.filter(
       (topic) =>
-        (query().showInternal || !topic.internal) &&
+        (query().facet === "internal" ? topic.internal : !topic.internal) &&
         (query().search === "" || topic.name.toLowerCase().includes(query().search.toLowerCase())),
     );
 
@@ -101,8 +109,15 @@ function ControlledList(
       {...props}
       topics={page()}
       query={query()}
-      onQueryChange={setQuery}
+      onQueryChange={(next) => {
+        // The screen clears the ticks when the question changes, for the reason `TopicsRoute`
+        // gives: a bulk bar acting on rows nobody can see is a control with a hidden subject.
+        setSelected(new Set<string>());
+        setQuery(next);
+      }}
       totalItems={matching().length}
+      selected={selected()}
+      onSelectionChange={setSelected}
     />
   );
 }
@@ -243,5 +258,166 @@ export const Cards: ListStory = {
   play: async ({ canvasElement }) => {
     const cards = canvasElement.querySelector<HTMLInputElement>('input[value="cards"]');
     cards?.click();
+  },
+};
+
+// --- The statistics region -----------------------------------------------------------------------
+
+/*
+ * These render `TopicStatisticsRegion` directly rather than through `ControlledList`, and that is
+ * the point rather than a shortcut: the region takes a *document* and cannot see the page's rows at
+ * all, which is what makes "128 topics above a table of three" a state a story can draw and a
+ * screen cannot fake. One `meta` per file is CSF's rule, so these are `render` stories under the
+ * file's own meta, as `partitions.stories.tsx` does for the same reason.
+ */
+type StatsStory = StoryObj<typeof TopicStatisticsRegion>;
+
+/** Every total measured. The design's `128 / 1,536 / 842 GB`, on a cluster nothing is wrong with. */
+export const Statistics: StatsStory = {
+  render: (args) => <TopicStatisticsRegion {...args} />,
+  args: {
+    statistics: { topics: 128, partitions: 1536, bytes: 842_000_000_000, incompleteTopics: 0 },
+  },
+};
+
+/**
+ * Three topics the scrape could not describe.
+ *
+ * The count survives — it comes from the listing — and both sums are withheld, because a sum over
+ * the topics that *did* answer is a smaller number wearing the confidence of a complete one. Words,
+ * never `0`: `0 B` under TOTAL STORAGE is the most reassuring possible rendering of the least
+ * reassuring possible state.
+ */
+export const StatisticsRefused: StatsStory = {
+  render: (args) => <TopicStatisticsRegion {...args} />,
+  args: {
+    statistics: { topics: 128, partitions: undefined, bytes: undefined, incompleteTopics: 3 },
+  },
+};
+
+/** The whole document missing: the service that answers for it did not. Still not three zeroes. */
+export const StatisticsUnavailable: StatsStory = {
+  render: (args) => <TopicStatisticsRegion {...args} />,
+  args: {
+    unavailableReason: "KUI could not read this cluster's topic totals. The list below is still this cluster's.",
+  },
+};
+
+/** The first paint, before anything has answered. Placeholders at the size the figures will be. */
+export const StatisticsLoading: StatsStory = {
+  render: (args) => <TopicStatisticsRegion {...args} />,
+  args: { loading: true },
+};
+
+// --- Selection, and the bar it raises ------------------------------------------------------------
+
+/**
+ * Two topics ticked (`M13`).
+ *
+ * The set is the *page's*, not the table's: the same two ticks are on the cards in the design's own
+ * capture, and switching treatment here keeps them. `Delete` is disabled with its reason rather
+ * than hidden — if it disappeared for a principal without the grant, `Empty` would move into its
+ * place and one gesture would do two different irreversible things to two different people.
+ */
+export const Selected: ListStory = {
+  args: { topics: TOPICS, onOpen: () => undefined, onCreate: () => undefined, viewportHeight: 420 },
+  play: async ({ canvasElement }) => {
+    const ticks = [...canvasElement.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
+    ticks[0]?.click();
+    ticks[1]?.click();
+  },
+};
+
+/**
+ * A chip the cluster cannot apply.
+ *
+ * `Out of sync` and `Compacted` are derived from fields the topic index does not carry, so they
+ * narrow the page — and the page says so. A filter that narrows a page while looking like it
+ * narrows a cluster is the defect this list already fixed once, for the search box.
+ */
+export const PageScopedFacet: ListStory = {
+  args: { topics: TOPICS, onOpen: () => undefined, viewportHeight: 420 },
+  play: async ({ canvasElement }) => {
+    [...canvasElement.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Compacted")
+      ?.click();
+  },
+};
+
+// --- The topic's Overview tab --------------------------------------------------------------------
+
+type OverviewStory = StoryObj<typeof TopicOverviewTab>;
+
+const OVERVIEW_PARTITIONS = Array.from({ length: 6 }, (_, partition) => ({
+  partition,
+  leader: 1,
+  replicas: [1, 2, 3],
+  inSync: [1, 2, 3],
+  earliestOffset: 0,
+  latestOffset: 1_204 + partition,
+  messageCount: 1_204 + partition,
+  sizeBytes: 48_200_000 + partition,
+}));
+
+/** The tab the strip opens by default, which drew nothing at all before this wave. */
+export const TopicOverview: OverviewStory = {
+  render: (args) => <TopicOverviewTab {...args} />,
+  args: {
+    partitionsHref: "/ui/clusters/quickstart/topics/orders.payments.v2?tab=partitions",
+    overview: {
+      topic: {
+        name: "orders.payments.v2",
+        internal: false,
+        partitions: 12,
+        replicationFactor: 3,
+        health: "in-sync",
+        records: 18_442_901,
+        bytes: 48_200_000_000,
+        messagesPerSecond: 1_204,
+        cleanupPolicy: "delete",
+      },
+      partitions: OVERVIEW_PARTITIONS,
+      consumerGroups: 2,
+    },
+  },
+};
+
+/**
+ * The same tab on a cluster that measures less of itself.
+ *
+ * No log-directory size, no produce rate — both genuinely `null` on the quickstart's single broker
+ * — and no answer from the consumer service. Three sentences, no zeroes: a topic with no bytes on
+ * disk, a topic nobody produces to and a topic nothing reads are all real states and none of them
+ * is what these tiles are showing.
+ */
+export const TopicOverviewNotMeasured: OverviewStory = {
+  render: (args) => <TopicOverviewTab {...args} />,
+  args: {
+    partitionsHref: "/ui/clusters/quickstart/topics/orders.v1?tab=partitions",
+    overview: {
+      topic: {
+        name: "orders.v1",
+        internal: false,
+        partitions: 6,
+        replicationFactor: 1,
+        health: "in-sync",
+        records: 16,
+      },
+      partitions: OVERVIEW_PARTITIONS.slice(0, 3).map((row) => ({
+        ...row,
+        sizeBytes: null,
+        messageCount: null,
+      })),
+      consumerGroups: undefined,
+    },
+  },
+};
+
+/** The first paint of the tab: placeholders where the four figures will be. */
+export const TopicOverviewLoading: OverviewStory = {
+  render: (args) => <TopicOverviewTab {...args} />,
+  args: {
+    partitionsHref: "/ui/clusters/quickstart/topics/orders.v1?tab=partitions",
+    loading: true,
   },
 };

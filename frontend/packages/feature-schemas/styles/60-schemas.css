@@ -8,6 +8,61 @@
  * well as in a colour.
  * ---------------------------------------------------------------------------------------------- */
 
+/* ------------------------------------------------------------------------------------------------
+ * The workspace: two panes, one address
+ *
+ * Reading a registry is comparing — this subject's level against the one below it — so the list
+ * stays on screen while a subject is open (§3.15). The grid collapses to one column below the
+ * breakpoint because two 320px panes side by side is two unreadable panes; when it collapses the
+ * subject pane comes second, which is the order the reader arrived in.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-schema-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-schema-workspace__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kui-space-3);
+}
+
+.kui-schema-workspace__title {
+  margin: 0;
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-bold);
+}
+
+.kui-schema-workspace__voice {
+  margin: var(--kui-space-1) 0 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-schema-workspace__panes {
+  display: grid;
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+  gap: var(--kui-space-4);
+  align-items: start;
+}
+
+/* `minmax(0, …)` above and this here: a `<pre>` of an unwrapped Avro schema is wider than the
+ * viewport, and a grid track sized `auto` grows to fit its content rather than scrolling it, which
+ * pushes the subject list off the left of the page. */
+.kui-schema-workspace__detail {
+  min-width: 0;
+}
+
+@media (max-width: 60rem) {
+  .kui-schema-workspace__panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .kui-schemas,
 .kui-subject {
   display: flex;
@@ -23,8 +78,13 @@
 }
 
 /* The subject's own name is the heading and is copied into a command line, so it keeps the
- * registry's exact spelling in a monospaced face. */
+ * registry's exact spelling in a monospaced face. The format badge beside it is prose and is left
+ * in the text face by `.kui-tag`'s own rule. */
 .kui-subject__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-2);
   font-family: var(--kui-font-family-mono);
   overflow-wrap: anywhere;
 }
@@ -82,13 +142,62 @@
   border-block-end: 1px solid var(--kui-color-border);
 }
 
-/* The whole row is the target. A subject name is the only thing in it, and a link that is exactly
- * as wide as its text is a link people miss. */
+/* The whole row is the target: the badge, the name and the caption. A link exactly as wide as its
+ * text is a link people miss, and here the text is only part of what the row says. */
 .kui-schemas__link {
-  display: block;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--kui-space-1) var(--kui-space-2);
   padding: var(--kui-space-3);
+}
+
+/* The registry's exact spelling, because this is what gets pasted into a command line. The caption
+ * under it is prose and stays in the text face. */
+.kui-schemas__name {
   font-family: var(--kui-font-family-mono);
   overflow-wrap: anywhere;
+}
+
+.kui-schemas__format {
+  grid-row: span 2;
+}
+
+.kui-schemas__facts {
+  grid-column: 2;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* A row with no format badge still lines its name and caption up with the rows that have one. */
+.kui-schemas__link > .kui-schemas__name:first-child,
+.kui-schemas__link > .kui-schemas__name:first-child + .kui-schemas__facts {
+  grid-column: 1 / -1;
+}
+
+/* An inherited level is the one fact on the row that will change without anybody touching this
+ * subject, so it is not left to sit in the same grey as the version count. */
+.kui-schemas__inherited {
+  color: var(--kui-color-text);
+}
+
+/* The selected row. A background alone would be a colour-only distinction and would vanish in a
+ * high-contrast mode that drops backgrounds, so the inline start border carries it too — and
+ * `aria-current="page"` carries it for a screen reader.
+ *
+ * Both the name and the caption take `selected-contrast`, which is the colour that token exists to
+ * be read against. `text-muted` over `--kui-color-selected` measures 4.15:1 in the dark palette —
+ * under the 4.5 this caption needs at `font-size-sm`, and invisible in review because the row is
+ * only selected on one screen out of the set. */
+.kui-schemas__link--selected,
+.kui-schemas__link--selected .kui-schemas__facts,
+.kui-schemas__link--selected .kui-schemas__inherited {
+  color: var(--kui-color-selected-contrast);
+}
+
+.kui-schemas__link--selected {
+  background: var(--kui-color-selected);
+  box-shadow: inset 3px 0 0 0 var(--kui-color-accent);
 }
 
 .kui-subject__trail {

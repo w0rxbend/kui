@@ -16,7 +16,13 @@ import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, FailuresBeforeGivingUp, backoffAfter, MaxBackoffMs } from "./health.js";
 import { destinationFor, navigationGroups, stillWorking, type FeatureStatus } from "./nav/navigation.js";
 import { clusterInUrl, createShellRouter, landingFor } from "./routing/routes.jsx";
-import { clusterSummaries, countLookup, currentFeatureId, environmentSwitch } from "./App.jsx";
+import {
+  clusterSummaries,
+  countLookup,
+  currentFeatureId,
+  environmentSwitch,
+  topCrumbs,
+} from "./App.jsx";
 import type { NavCounts } from "./chrome/types.js";
 
 const topics: FeatureRegistration = {
@@ -541,9 +547,59 @@ describe("which navigation entry is current", () => {
     expect(currentFeatureId("/ui/", "/ui")).toBe("overview");
     expect(currentFeatureId("/ui/settings", "/ui")).toBe("settings");
     expect(currentFeatureId("/ui/clusters", "/ui")).toBe("clusters");
+    expect(currentFeatureId("/ui/clusters/manage", "/ui")).toBe("clusters");
     expect(currentFeatureId("/ui/clusters/prod/brokers", "/ui")).toBe("clusters");
     expect(currentFeatureId("/kui/ui/clusters/prod/topics/orders", "/kui/ui")).toBe("topics");
     expect(currentFeatureId("/ui/clusters/prod/consumer-groups", "/ui")).toBe("consumers");
+  });
+
+  /**
+   * The address the product opens on, which was marking the wrong entry.
+   *
+   * `/clusters/<id>/dashboard/overview` fell through to the `clusters` fall-through, so the drawer
+   * highlighted **Brokers** and the top band's trail read "Brokers" over a page headed "Cluster
+   * overview" — three signals about where you are, two of them wrong, on the first screen anybody
+   * sees. The registry's screen had the same defect one row down.
+   */
+  it("marks the dashboard and the registry as themselves rather than as Brokers", () => {
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/overview", "/ui")).toBe("overview");
+    expect(currentFeatureId("/ui/clusters/prod/dashboard", "/ui")).toBe("overview");
+    // The shortest thing anybody types, which resolves to the same page.
+    expect(currentFeatureId("/ui/clusters/prod", "/ui")).toBe("overview");
+    expect(currentFeatureId("/ui/clusters/prod/schemas", "/ui")).toBe("schemas");
+    const deep = currentFeatureId("/kui/ui/clusters/prod/schemas/orders-value", "/kui/ui");
+    expect(deep).toBe("schemas");
+  });
+});
+
+/**
+ * The trail in the top band, which is the *installation* trail: which deployment, which cluster,
+ * which section.
+ *
+ * The section crumb comes from the same reading as the drawer's highlight, so the two cannot
+ * disagree — and "overview" deliberately adds no crumb, because the cluster crumb already links
+ * there and a trail that repeats itself is a trail nobody reads.
+ */
+describe("the top band's trail", () => {
+  const clusters = [{ id: "prod", name: "prod-kyiv-01", health: "healthy" as const }];
+  const router = createShellRouter("", {
+    home: () => null,
+    settings: () => null,
+    forbidden: () => null,
+    notFound: () => null,
+    feature: () => () => null,
+  });
+
+  it("names the cluster and the section, and says nothing twice", () => {
+    const at = "/ui/clusters/prod/dashboard/overview";
+    const dashboard = topCrumbs(clusters, "prod", at, "/ui", router);
+    expect(dashboard.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01"]);
+
+    const schemas = topCrumbs(clusters, "prod", "/ui/clusters/prod/schemas", "/ui", router);
+    expect(schemas.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Schema Registry"]);
+
+    const brokers = topCrumbs(clusters, "prod", "/ui/clusters/prod/brokers", "/ui", router);
+    expect(brokers.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Brokers"]);
   });
 });
 

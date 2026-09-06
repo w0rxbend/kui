@@ -23,6 +23,12 @@ final case class BrokerListRow(
     leaders: Option[Int],
     replicas: Option[Int],
     skewPercent: Option[Double],
+    /** How far this broker's share of the leaderships is from an even one. It comes from the census and
+      * therefore refuses with `leaders`, while `skewPercent` above comes from the log directories and refuses
+      * with `replicas` — two sources, two refusals, and the pair of columns can honestly disagree about
+      * whether it knows.
+      */
+    leaderSkewPercent: Option[Double],
     totalBytes: Option[Long],
     usableBytes: Option[Long],
     /** What Kafka's own data occupies on this broker. Distinct from `totalBytes - usableBytes`, which is the

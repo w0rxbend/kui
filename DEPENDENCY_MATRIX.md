@@ -3,6 +3,10 @@
 Finalized 2026-09-03 from `research/scala/ecosystem-mapping.md` (versions verified against
 Maven Central metadata and GitHub on that date). Every row cites the ADR that admits it.
 Adding a dependency requires the review procedure in [CONTRIBUTING.md](CONTRIBUTING.md) and a row here.
+`./scripts/feature-matrix-check.sh` enforces the second half of that for the browser build: it reads
+every `dependencies` and `devDependencies` entry under `frontend/` and fails when one has no row, or
+has a row naming a different version. Until it was written, "and a row here" was a convention that
+two dependencies had already slipped past.
 
 This file covers **two builds**. The JVM half is Maven coordinates resolved by Mill; the browser
 half is npm packages resolved by pnpm, and its versions live in `frontend/package.json` and the
@@ -145,6 +149,7 @@ which had not reached a final release when it was chosen; the upgrade row below 
 | node | 22.13.0 (floor) | npm | `.tool-versions` | ADR-048 |
 | pnpm | 11.25.0 (exact) | npm | `.tool-versions`, `frontend/package.json` `packageManager` | ADR-048 |
 | typescript | 5.9.3 | npm (dev) | workspace root | ADR-048 |
+| @types/node | 22.13.0 | npm (dev) | workspace root — the Node typings `tsc` needs for the Vite and Vitest configuration files | ADR-048 |
 | vite | 8.2.2 | npm (dev) | workspace root | ADR-048 |
 | vite-plugin-solid | 3.0.0-next.27 | npm (dev) | workspace root | ADR-048 |
 
@@ -172,6 +177,7 @@ which had not reached a final release when it was chosen; the upgrade row below 
 | @testing-library/user-event | 14.6.1 | npm (dev) | workspace root, kernel, shell | ADR-018 |
 | axe-core | 4.13.0 (root), 4.11.0 (kernel, shell) | npm (dev) | accessibility assertions | ADR-018 |
 | playwright | 1.63.0 | npm (dev) | workspace root | ADR-018 |
+| @playwright/test | 1.63.0 | npm (dev) | workspace root — the runner `pnpm e2e` drives; versioned as a set with `playwright` above | ADR-018 |
 | storybook | 10.6.0 | npm (dev) | workspace root, kernel, shell | ADR-024 |
 | storybook-solidjs-vite | 10.7.1 | npm (dev) | workspace root, kernel, shell | ADR-024 |
 | @storybook/addon-a11y | 10.6.0 | npm (dev) | workspace root, kernel, shell | ADR-024 |

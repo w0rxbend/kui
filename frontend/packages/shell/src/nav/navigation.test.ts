@@ -202,6 +202,63 @@ describe("the headings the drawer is given", () => {
     expect(drawn().map((group) => group.heading)).toContain("CLUSTER");
   });
 
+  /**
+   * The fold, over registrations that do not already agree.
+   *
+   * The case above cannot fail on its own: both its registrations declare `group: "Cluster"`, so a
+   * fold that did nothing at all would still produce one group — and the heading would read
+   * "Cluster", which nothing here was looking at. Removing `.toUpperCase()` from `navigationGroups`
+   * left the whole suite green, which is how a rule ships that no test can break.
+   *
+   * So this fixture disagrees with itself the way a real registration table eventually will: one
+   * feature writes `"cluster"`, the other `"Cluster"`. Both belong in **one** group with **one**
+   * heading, and the heading is the capitals the design draws.
+   */
+  it("folds registrations that spell their group differently into one heading", () => {
+    const groups = navigationGroups({
+      features: [
+        { registration: { ...clusters, group: "cluster" }, state: ready },
+        { registration: { ...topics, group: "Cluster" }, state: ready },
+      ],
+      landingFor: landing,
+      cluster: "prod",
+    });
+
+    const cluster = groups.filter((group) => group.heading.toUpperCase() === "CLUSTER");
+    expect(cluster).toHaveLength(1);
+    expect(cluster[0]?.heading).toBe("CLUSTER");
+    /* Both rows under it, and not one under each of two headings that read like two sections. */
+    expect(cluster[0]?.destinations.map((destination) => destination.id)).toEqual([
+      "clusters",
+      "topics",
+    ]);
+  });
+
+  /**
+   * The tree, at the seam where a destination is built.
+   *
+   * `childrenFor` is what the frame hands `nav/topicTree.ts`'s fold through, and the rule that is
+   * worth pinning is the one that is invisible on a healthy cluster: a row whose service is not
+   * answering carries no tree. Every child would be a link to a page that will not load, and the
+   * `down` badge that says so is on the parent the reader has already scrolled past.
+   */
+  it("nests children under a ready row and under no other", () => {
+    const child = {
+      id: "prefix:orders.*",
+      label: "orders.*",
+      icon: "topics" as const,
+      href: "/ui/clusters/prod/topics?q=orders",
+    };
+    const nested = (state: FeatureState) =>
+      destinationFor(
+        { registration: topics, state },
+        { landingFor: landing, cluster: "prod", childrenFor: () => [child] },
+      );
+
+    expect(nested(ready)?.children).toEqual([child]);
+    expect(nested(down)?.children).toBeUndefined();
+  });
+
   it("declares ECOSYSTEM and emits it empty until M9 registers something into it", () => {
     /* Its only state today. It is emitted rather than skipped so that adding Kafka Connect and
      * ksqlDB registers two features and changes nothing else — and so that the empty case is a

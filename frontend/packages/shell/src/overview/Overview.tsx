@@ -40,6 +40,7 @@
  */
 
 import { For, Show } from "solid-js";
+import { Dynamic } from "@solidjs/web";
 import type { JSX } from "@solidjs/web";
 import { useParams } from "@solidjs/router";
 
@@ -202,7 +203,15 @@ export function Overview(props: OverviewProps): JSX.Element {
           who switches tabs is not made to re-read them. */}
       <StatRow model={props.model} />
 
-      {bodyFor(tab(), props.model)}
+      {/* `Dynamic` rather than a call, and this is not a style choice. The JSX compiler treats an
+          expression container holding a call as dynamic and wraps it in a tracked computation, so
+          `{bodyFor(tab(), props.model)}` read the model *at the dispatch* — and every model change
+          re-ran the switch and replaced the whole body. Measured: moving LOADING → HEALTHY kept the
+          tab-invariant stat row's DOM node and replaced the broker-health card's. Handing the model
+          across as a prop instead leaves it a getter the children read, so the only thing this
+          container tracks is `tab()`, and the panels below update in place. That is what makes
+          `BrokerHealth`'s keying argument below true rather than merely written. */}
+      <Dynamic component={bodyFor(tab())} model={props.model} />
     </div>
   );
 }
@@ -225,14 +234,23 @@ function ledeFor(tab: DashboardTab, model: OverviewModel): string {
   }
 }
 
-function bodyFor(tab: DashboardTab, model: OverviewModel): JSX.Element {
+/**
+ * Which component draws the body — the component itself, not its rendering.
+ *
+ * Returning the component keeps the exhaustive switch that the header argues for (a third tab is a
+ * compile error here) while keeping the model out of this function entirely, which is the half that
+ * matters: a dispatch that also read the model would rebuild the body on every poll.
+ */
+function bodyFor(tab: DashboardTab): BodyComponent {
   switch (tab) {
     case "overview":
-      return <OverviewBody model={model} />;
+      return OverviewBody;
     case "storage":
-      return <StorageBody model={model} />;
+      return StorageBody;
   }
 }
+
+type BodyComponent = (props: { readonly model: OverviewModel }) => JSX.Element;
 
 /** The row of stat cards, which every tab carries unchanged. */
 function StatRow(props: { readonly model: OverviewModel }): JSX.Element {
@@ -447,47 +465,65 @@ function BrokerHealth(props: { readonly reading: Reading<readonly BrokerBar[]> }
       {(brokers) => (
         <Show when={brokers().length > 0} fallback={<p class="kui-overview__blank">No brokers answered.</p>}>
           <ul class="kui-broker-health">
-            {/* Keyed by identity (the default), so a broker that keeps its place keeps its DOM node
-                and its bar does not restart its transition on every poll. */}
-            <For each={brokers()}>
-              {(broker) => (
-                <li class="kui-broker-health__row">
-                {/* The broker's name, drawn. `ProgressBar` puts its `label` on `aria-label` and
-                    nowhere else — correct for a bare bar, wrong here — so a row that relied on it
-                    would name every broker to a screen reader and none to anybody looking at the
-                    screen. The design draws the name and its detail on a line above the bar, which
-                    is what this is. */}
-                <p class="kui-broker-health__head">
-                  <span class="kui-broker-health__name">{broker.name}</span>
-                  <span class="kui-broker-health__detail">{broker.detail}</span>
-                </p>
-                <ProgressBar
-                  /* The accessible name still says which broker, because a screen-reader user
-                     reaching the bar alone has not necessarily just read the line above it. */
-                  label={`${broker.name} disk usage`}
-                  caption="disk"
-                  /* `undefined`, not `0`, when the disk is unmeasurable. This is the brief's "a
-                     quantity bar must not draw zero as a full-width track" rule seen from the
-                     other side: an unknown drawn as zero is an empty track that reads as an empty
-                     disk, which is the most reassuring possible rendering of "we have no idea". */
-                  value={broker.diskPercent.kind === "value" ? broker.diskPercent.value : undefined}
-                  max={100}
-                  thresholds={{ warn: DISK_WARN_PERCENT, critical: DISK_CRITICAL_PERCENT }}
-                  valueText={broker.diskPercent.kind === "value" ? formatPercent(broker.diskPercent.value) : undefined}
-                />
-                {/* The reason a bar is empty, in words, for the one case where it matters: an
-                    operator comparing three brokers needs to know that the blank one is
-                    unmeasured rather than idle. */}
-                <Show when={broker.diskPercent.kind === "unknown" ? broker.diskPercent.why : undefined}>
-                  {(why) => <p class="kui-broker-health__why">{why()}</p>}
-                </Show>
-              </li>
-              )}
+            {/* Keyed by the broker's id, not by the default identity of the row object. `model.ts`
+                builds a fresh `BrokerBar` on every read, so identity keying replaced all three rows
+                on every poll — measured — and the sentence that used to sit here claiming a broker
+                keeps its DOM node was simply false. With the id as the key it is true: the row
+                stays, its accessor changes, and the bar animates from where it was rather than
+                restarting its transition from empty. */}
+            <For each={brokers()} keyed={(broker) => broker.id}>
+              {(broker) => <BrokerRow broker={broker()} />}
             </For>
           </ul>
         </Show>
       )}
     </Show>
+  );
+}
+
+/**
+ * One broker's row.
+ *
+ * A component rather than the body of the `For` above, because a keyed `For` hands its child an
+ * *accessor* and TypeScript cannot narrow a discriminated union across two calls of one — the disk
+ * reading is read four times here. Through a prop it is one reference chain, narrows once, and the
+ * JSX compiler still makes it a getter, so the row stays as fine-grained as it was.
+ */
+function BrokerRow(props: { readonly broker: BrokerBar }): JSX.Element {
+  return (
+    <li class="kui-broker-health__row">
+      {/* The broker's name, drawn. `ProgressBar` puts its `label` on `aria-label` and nowhere else
+          — correct for a bare bar, wrong here — so a row that relied on it would name every broker
+          to a screen reader and none to anybody looking at the screen. The design draws the name
+          and its detail on a line above the bar, which is what this is. */}
+      <p class="kui-broker-health__head">
+        <span class="kui-broker-health__name">{props.broker.name}</span>
+        <span class="kui-broker-health__detail">{props.broker.detail}</span>
+      </p>
+      <ProgressBar
+        /* The accessible name still says which broker, because a screen-reader user reaching the
+           bar alone has not necessarily just read the line above it. */
+        label={`${props.broker.name} disk usage`}
+        caption="disk"
+        /* `undefined`, not `0`, when the disk is unmeasurable. This is the brief's "a quantity bar
+           must not draw zero as a full-width track" rule seen from the other side: an unknown drawn
+           as zero is an empty track that reads as an empty disk, which is the most reassuring
+           possible rendering of "we have no idea". */
+        value={props.broker.diskPercent.kind === "value" ? props.broker.diskPercent.value : undefined}
+        max={100}
+        thresholds={{ warn: DISK_WARN_PERCENT, critical: DISK_CRITICAL_PERCENT }}
+        valueText={
+          props.broker.diskPercent.kind === "value"
+            ? formatPercent(props.broker.diskPercent.value)
+            : undefined
+        }
+      />
+      {/* The reason a bar is empty, in words, for the one case where it matters: an operator
+          comparing three brokers needs to know that the blank one is unmeasured rather than idle. */}
+      <Show when={props.broker.diskPercent.kind === "unknown" ? props.broker.diskPercent.why : undefined}>
+        {(why) => <p class="kui-broker-health__why">{why()}</p>}
+      </Show>
+    </li>
   );
 }
 

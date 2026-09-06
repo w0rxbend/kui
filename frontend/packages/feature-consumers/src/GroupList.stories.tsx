@@ -29,6 +29,50 @@ export const TheScreenshot: Story = {
 };
 
 /**
+ * One page of a cluster with more groups than fit on it.
+ *
+ * The sentence over the table reads `90 groups` and the table draws six. That is the state
+ * screenshot `04` is in — `14 groups` over six rows — and it is what the screen got wrong until
+ * this wave: the voice counted the array, so it agreed with the table and lied about the cluster.
+ * The range line under the table is the other half of the answer: which six of the ninety.
+ */
+export const OnePageOfMany: Story = {
+  render: () => (
+    <GroupList
+      rows={SAMPLE_GROUPS}
+      totalItems={90}
+      page={3}
+      pageSize={6}
+      onPage={noop}
+      onPageSize={noop}
+      hrefFor={href}
+      onOpen={noop}
+    />
+  ),
+};
+
+/**
+ * A server that did not say how many groups there are.
+ *
+ * The sentence says so rather than publishing the page's own length as the cluster's figure, and
+ * the paginator drops its numbered buttons and its `last` step — a last page cannot be computed and
+ * a guessed one sends the operator to an address that does not exist.
+ */
+export const TotalUnstated: Story = {
+  render: () => (
+    <GroupList
+      rows={SAMPLE_GROUPS}
+      totalItems={null}
+      page={1}
+      pageSize={6}
+      onPage={noop}
+      hrefFor={href}
+      onOpen={noop}
+    />
+  ),
+};
+
+/**
  * Every way a row can be incomplete, in one table.
  *
  * Look for four things: the em dash where a lag could not be computed (never a `0`), the em dash

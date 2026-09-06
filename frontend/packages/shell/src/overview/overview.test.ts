@@ -33,7 +33,15 @@ import {
   topLag,
   totalLag,
 } from "./model.js";
-import { readPagedSection, readSection, toOverviewModel, loadingData, withoutNulls } from "./load.js";
+import {
+  fetchOverview,
+  readPagedSection,
+  readSection,
+  toOverviewModel,
+  loadingData,
+  withoutNulls,
+} from "./load.js";
+import type { KuiApiClient } from "@kui/api";
 import { segmentTone } from "./StorageByBroker.jsx";
 import { INTERNAL_GROUP, OTHER_GROUP } from "../nav/prefixes.js";
 import { pending, unknown, value } from "./reading.js";
@@ -573,5 +581,57 @@ describe("the storage legend's inks", () => {
     const inks = [0, 1, 2, 3, 4].map((index) => segmentTone("orders.*", index));
     expect(new Set(inks).size).toBe(5);
     expect(inks).not.toContain(segmentTone(INTERNAL_GROUP, 0));
+  });
+});
+
+describe("fetching the overview against a server that answers something else", () => {
+  /**
+   * A client whose every call succeeds and whose every body is `body`.
+   *
+   * The point of the case below is a **200**. A failure is already handled — `fetchOverview` folds
+   * `ok: false` into a sentence on every one of the five readings — and a transport error would
+   * therefore prove nothing. What was unguarded was a success whose body is not the envelope: a
+   * reverse proxy's own 200, a gateway that matched a different route, a build whose envelope moved.
+   */
+  const answering = (body: unknown): KuiApiClient => {
+    const get = async () => ({ ok: true, value: body });
+    return { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient;
+  };
+
+  it("answers a sentence rather than throwing, when the 200 is not a cluster envelope", async () => {
+    // `detail.value.cluster.summary` read two levels into this body. `.summary` off `undefined`
+    // throws a `TypeError`, and it throws inside the memo that assembles the model — Solid 2
+    // answers a throw in a computation by halting the graph, so the whole dashboard's skeletons
+    // would never resolve. The rejection is what this case is really watching for.
+    const data = await fetchOverview(answering({ detail: "not a cluster" }), "prod-kyiv-01");
+
+    expect(data.summary.kind).toBe("unknown");
+    expect(data.summary.kind === "unknown" ? data.summary.why : "").toContain(
+      "something other than a cluster",
+    );
+  });
+
+  it("still lands the other four readings, because they are separate requests", async () => {
+    // ADR-039 from the other side: one malformed answer blanks its own panels and no others. A
+    // guard that turned the whole model into one failure would be a different defect of the same
+    // family as the one it replaced.
+    const data = await fetchOverview(answering({ detail: "not a cluster" }), "prod-kyiv-01");
+
+    for (const reading of [data.brokers, data.logDirs, data.groups, data.topicCount]) {
+      expect(reading.kind).toBe("unknown");
+    }
+    // And each says something about its own request rather than about the cluster summary.
+    expect(data.brokers.kind === "unknown" ? data.brokers.why : "").not.toContain("cluster summary");
+  });
+
+  it("reads the summary out of the envelope when the server does send one", async () => {
+    // The guard has to still let the good case through — a check that refuses everything is a
+    // dashboard that never draws, and is the way a guard like this is usually got wrong.
+    const data = await fetchOverview(
+      answering({ cluster: { summary: { status: "ok", data: healthy, fetchedAt: "" } } }),
+      "prod-kyiv-01",
+    );
+
+    expect(data.summary).toEqual(value(healthy));
   });
 });

@@ -17,9 +17,12 @@ import kui.kernel.search.NameIndex
   * constructor is private and [[TopicSnapshot.of]] builds both halves from one input, so they cannot drift.
   *
   * @param incomplete
-  *   topics the scrape could not read, with the reason, so the list can say "9 998 of 10 000 topics; 2 could
-  *   not be read" instead of quietly showing fewer. It explains, it does not remove: a topic here is still in
-  *   `topics` if the scrape managed a row for it at all.
+  *   topics the scrape listed and could not describe, with the reason, so the list can say "9 998 of 10 000
+  *   topics; 2 could not be read" instead of quietly showing fewer. It is disjoint from `topics`: the adapter
+  *   keys it by `listings.keySet.diff(described.keySet)`, so a topic here has no row at all, which is exactly
+  *   why it needs naming. [[TopicSnapshot.names]] and `TopicStatistics.topicCount` both rest on that
+  *   disjointness — they concatenate the two halves rather than merging them, and a topic counted twice would
+  *   inflate the cluster total the topics screen prints above its table.
   */
 final case class TopicSnapshot private (
     topics: Vector[TopicSummary],

@@ -7,9 +7,10 @@
  * explained.
  */
 
-import { describe, expect, test, vi } from "vitest";
-import { createSignal, flush } from "solid-js";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { Show, createSignal, flush } from "solid-js";
 import type { JSX } from "@solidjs/web";
+import { clearToasts, toasts } from "@kui/kernel";
 import { mount } from "./testing.js";
 import {
   DEFAULT_TOPIC_QUERY,
@@ -22,7 +23,11 @@ import {
   type TopicListQuery,
 } from "./TopicListPage.jsx";
 import { TopicCards } from "./TopicCards.jsx";
+import { TopicConsumers } from "./TopicConsumers.jsx";
 import { TopicPage, healthChip } from "./TopicPage.jsx";
+import { forgetQueries, settle, topicsHost } from "./harness.jsx";
+import { topicsCsv, topicsVoice } from "./topicList.js";
+import { bulkSentence } from "./TopicsRoute.jsx";
 import type { TopicRow } from "./types.js";
 
 const rows: readonly TopicRow[] = [
@@ -88,21 +93,108 @@ function listing(overrides: Partial<TopicListPageProps> = {}): {
 }
 
 describe("the topic list", () => {
-  test("asks the server for internal topics rather than filtering them out of a page", async () => {
+  test("the Internal chip changes the request rather than filtering a page", async () => {
     /*
      * The control used to filter rows the page already held — and the server excludes Kafka's
      * bookkeeping topics by default, so the data it filtered had never contained one and the
-     * checkbox could not do anything at all. Now it changes the request.
+     * checkbox could not do anything at all. The chip that replaced it changes the *query*, which
+     * `toTopicQuery` turns into `showInternal` (asserted in `write.test.ts`).
      */
     const list = listing();
     const { container, dispose } = mount(() => list.node);
     await flush();
 
-    const toggle = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
-    toggle?.click();
+    const internal = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Internal",
+    );
+    internal?.click();
     await flush();
 
-    expect(list.asked.at(-1)?.showInternal).toBe(true);
+    expect(list.asked.at(-1)?.facet).toBe("internal");
+    dispose();
+  });
+
+  test("a chip the cluster cannot apply says that it narrowed the page", async () => {
+    /*
+     * The honest half of the four-chip bar. KUI's topic index has no column for compaction, so the
+     * chip filters the rows the server sent — and a filter that narrows a page while looking like
+     * it narrows a cluster is the exact defect the server-side search box was rebuilt to remove.
+     */
+    const list = listing({ query: { ...DEFAULT_TOPIC_QUERY, facet: "compacted" } });
+    const { container, dispose } = mount(() => list.node);
+    await flush();
+    expect(container.textContent).toContain("narrows the 3 topics on this page");
+    // And it really narrowed: only the row whose policy includes `compact` survives.
+    expect(container.textContent).not.toContain("__consumer_offsets");
+    dispose();
+  });
+
+  test("a row whose cleanupPolicy is absent renders nothing in that column", async () => {
+    /*
+     * Not `delete`, which is Kafka's default and would be the screen inventing a setting it was not
+     * told; and not the em dash either, which everywhere else on this page means "a figure nobody
+     * could measure". `shipments.v1` has no policy on it and `orders.payments.v2` has `delete`, so
+     * this asserts one tag exists and the other cell is empty rather than asserting a global count.
+     */
+    const list = listing({ topics: [rows[0] as TopicRow, rows[2] as TopicRow] });
+    const { container, dispose } = mount(() => list.node);
+    await flush();
+
+    /* `.kui-table__row` and not `tbody tr`: a windowed table pads its scroll height with two
+       `role="presentation"` spacer rows, which are layout rather than topics. */
+    const cells = [...container.querySelectorAll(".kui-table__row")].map((row) =>
+      [...row.querySelectorAll("td")].at(-1)?.textContent?.trim(),
+    );
+    expect(cells).toEqual(["delete", ""]);
+    dispose();
+  });
+
+  test("row selection and card selection share one set", async () => {
+    /*
+     * `SCREENS-V4.md` §3.7: the design's two ticks are on cards and the same set has to survive the
+     * switch to the table. Neither treatment may own it — this ticks a row in the *table* and then
+     * reads the *cards*, which is the only arrangement in which a second, private set would fail.
+     */
+    window.localStorage.removeItem("kui.topics.view");
+    const [selected, setSelected] = createSignal<ReadonlySet<string>>(new Set<string>());
+    const [view, setView] = createSignal<"table" | "cards">("table");
+    const { container, dispose } = mount(() => (
+      <Show
+        when={view() === "cards"}
+        fallback={
+          <TopicListPage
+            topics={rows}
+            onOpen={() => undefined}
+            viewportHeight={480}
+            query={DEFAULT_TOPIC_QUERY}
+            onQueryChange={() => undefined}
+            selected={selected()}
+            onSelectionChange={setSelected}
+          />
+        }
+      >
+        <TopicCards
+          topics={rows}
+          onOpen={() => undefined}
+          formatBytes={formatBytes}
+          selected={selected()}
+          onSelectionChange={setSelected}
+        />
+      </Show>
+    ));
+    await flush();
+
+    const tick = container.querySelector<HTMLInputElement>(
+      'tbody input[type="checkbox"]',
+    );
+    tick?.click();
+    await flush();
+    expect([...selected()]).toEqual([rows[0]?.name]);
+
+    setView("cards");
+    await flush();
+    const card = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(card.filter((box) => box.checked)).toHaveLength(1);
     dispose();
   });
 
@@ -201,7 +293,9 @@ describe("the topic list", () => {
     const list = listing({ query: { ...DEFAULT_TOPIC_QUERY, page: 7 } });
     const { container, dispose } = mount(() => list.node);
     await flush();
-    container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Internal")
+      ?.click();
     await flush();
     expect(list.asked.at(-1)?.page).toBe(1);
     dispose();
@@ -345,19 +439,474 @@ describe("the view toggle", () => {
     Object.defineProperty(window.localStorage, "getItem", { configurable: true, value: original });
   });
 
-  test("draws every figure the table draws, and a missing one as a dash", async () => {
-    // The constraint that stops the cards view being a prettier, less useful list: an operator who
-    // switches to cards and can no longer see out-of-sync replicas has been given decoration in
-    // exchange for information.
+  test("a card carries the topic's shape, its health and its measurements", async () => {
+    /*
+     * `SCREENS-V4.md` §4.7's composition — the three tags, the size and the rate — plus the health
+     * pill, which the design leaves off cards and this keeps: an operator who switches to cards and
+     * can no longer see that a topic is offline has been given decoration in exchange for
+     * information. The deviation is argued at the top of `TopicCards.tsx`.
+     */
     const { container, dispose } = mount(() => (
       <TopicCards topics={rows} onOpen={() => undefined} formatBytes={formatBytes} />
     ));
     await flush();
-    for (const label of ["Partitions", "Replicas", "Records", "Size"]) {
-      expect(container.textContent).toContain(label);
-    }
-    // `rows[2]` has no records and no size: a dash with the words beside it, never a zero.
-    expect(container.textContent).toContain("not known");
+    expect(container.textContent).toContain("12 partitions");
+    expect(container.textContent).toContain("RF 3");
+    expect(container.textContent).toContain("delete");
+    // The health the design omits, kept.
+    expect(container.textContent).toContain("in sync");
+    expect(container.textContent).toContain("not described");
+    // `rows[2]` has no size and none of them has a rate: words, never a zero.
+    expect(container.textContent).toContain("not measured");
+    expect(container.textContent).not.toContain("0 B");
     dispose();
+  });
+});
+
+/**
+ * The seam, rather than the components.
+ *
+ * Everything below mounts the real route over the real router and a stubbed gateway, because every
+ * rule here is about *which document reaches which component*. A case that handed `TopicListPage` a
+ * `statistics` element would assert the arrangement the case itself made, and would keep passing if
+ * `TopicsRoute` started computing those totals from the rows on screen — which is the one change
+ * these cases exist to catch.
+ */
+describe("the topics screen, wired", () => {
+  afterEach(forgetQueries);
+
+  /** One page of three topics, so a page count and a cluster count can differ. */
+  const threeRows = {
+    topics: {
+      status: "ok",
+      fetchedAt: "2026-09-06T00:00:00Z",
+      data: {
+        items: [
+          {
+            name: "orders.payments.v2",
+            internal: false,
+            partitionCount: 12,
+            replicationFactor: 3,
+            outOfSyncReplicas: 0,
+            offlinePartitions: 0,
+            messageCount: 18_442_901,
+            sizeBytes: 128_000_000_000,
+            cleanupPolicy: "delete",
+          },
+          {
+            name: "orders.refunds.v1",
+            internal: false,
+            partitionCount: 6,
+            replicationFactor: 3,
+            outOfSyncReplicas: 0,
+            offlinePartitions: 0,
+            messageCount: 12,
+            sizeBytes: 4096,
+            cleanupPolicy: "compact",
+          },
+          {
+            name: "orders.audit.v1",
+            internal: false,
+            partitionCount: 3,
+            replicationFactor: 3,
+            outOfSyncReplicas: 0,
+            offlinePartitions: 0,
+            messageCount: 4,
+            sizeBytes: 512,
+          },
+        ],
+        page: { page: 1, pageSize: 32, totalItems: 3 },
+      },
+    },
+    incompleteTopics: 0,
+  };
+
+  test("the statistics region shows the cluster total and not the page's", async () => {
+    /*
+     * `SCREENS-V4.md` §4.6 calls this the load-bearing fact of the screen: the capture shows 128
+     * under TOTAL TOPICS while the table below it holds three. The stub answers three rows and a
+     * statistics document saying 128, so a region that folded the rows would print `3` and this
+     * would fail — which is exactly what the mutation line asks for.
+     */
+    const host = topicsHost({
+      at: "/clusters/stats-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}/topics/statistics": {
+          statistics: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: { topicCount: 128, partitionCount: 1536, sizeBytes: 842_000_000_000, incompleteTopics: 0 },
+          },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const tile = container.querySelector('[data-testid="topic-stat-topics"]');
+    expect(tile?.textContent).toContain("128");
+    // And it is not the page's three, dressed as a cluster total.
+    expect(tile?.textContent).not.toContain("3");
+    /* And the page really did hold three, so the two figures genuinely disagree rather than the
+       stub having answered the same number twice. The count beside the controls is the page's own
+       — the windowed table draws no rows in a DOM with no layout engine, which is what
+       `viewportHeight` exists for and is not what this case is about. */
+    expect(container.querySelector(".kui-topic-list__count")?.textContent).toBe("3 topics");
+    dispose();
+  });
+
+  test("a refused total renders the sentence and not 0", async () => {
+    /*
+     * `partitionCount` and `sizeBytes` are each `Option` on the wire and each refuses on its own: a
+     * topic the scrape could not describe removes both sums and leaves the count. `0 B` under TOTAL
+     * STORAGE is the most reassuring possible rendering of the least reassuring possible state.
+     */
+    const host = topicsHost({
+      at: "/clusters/refused-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}/topics/statistics": {
+          statistics: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: { topicCount: 10, partitionCount: null, sizeBytes: null, incompleteTopics: 2 },
+          },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const partitions = container.querySelector('[data-testid="topic-stat-partitions"]');
+    const storage = container.querySelector('[data-testid="topic-stat-storage"]');
+    expect(partitions?.textContent).toContain("not measured");
+    expect(storage?.textContent).toContain("not measured");
+    expect(partitions?.textContent).not.toContain("0");
+    expect(storage?.textContent).not.toContain("0 B");
+    // The count survives its own sums, and the screen says why they are gone.
+    expect(container.querySelector('[data-testid="topic-stat-topics"]')?.textContent).toContain("10");
+    expect(container.textContent).toContain("2 topics on this cluster could not be described");
+    dispose();
+  });
+
+  test("the Overview tab renders a body", async () => {
+    /*
+     * The tab the strip opens by default, and until now the one that drew nothing at all: the route
+     * declared `id: "overview"` and had no `<Show when={tab() === \"overview\"}>` anywhere in it.
+     * Mounted at the topic's bare address, which is the address that tab lives at.
+     */
+    const host = topicsHost({
+      at: "/clusters/overview-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              row: {
+                name: "orders.v1",
+                internal: false,
+                partitionCount: 6,
+                replicationFactor: 3,
+                outOfSyncReplicas: 0,
+                offlinePartitions: 0,
+                messageCount: 16,
+                sizeBytes: null,
+                produceRate: null,
+                cleanupPolicy: "delete",
+              },
+              partitions: [
+                { partition: 0, leader: 1, replicas: [{ broker: 1, leader: true, inSync: true }], earliestOffset: 0, latestOffset: 1 },
+              ],
+            },
+          },
+          consumerGroups: { status: "ok", fetchedAt: "2026-09-06T00:00:00Z", data: [{}, {}] },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    // The four tiles the design names, and the partition table under them.
+    expect(container.querySelector('[data-testid="topic-overview-partitions"]')?.textContent).toContain("6");
+    expect(container.querySelector('[data-testid="topic-overview-groups"]')?.textContent).toContain("2");
+    expect(container.querySelector('[data-testid="topic-partitions-table"]')).not.toBeNull();
+    // The two figures this cluster does not report say so in words. Never `0 B` and never `0 /s`.
+    expect(container.querySelector('[data-testid="topic-overview-size"]')?.textContent).toContain("not measured");
+    expect(container.querySelector('[data-testid="topic-overview-rate"]')?.textContent).toContain("not measured");
+    // And the trail the design draws inside the content.
+    expect(container.querySelector("nav[aria-label='Breadcrumb']")?.textContent).toContain("Topics");
+    dispose();
+  });
+
+  test("the consumers tab prints host:port", async () => {
+    /*
+     * `coordinatorHost` and `coordinatorPort` are on the wire together with `coordinatorId`, and the
+     * screen printed `broker 1` — an id is not an address. Driven at `?tab=consumers`, so the tab's
+     * own request is the one that produces the row.
+     */
+    const host = topicsHost({
+      at: "/clusters/coord-cluster/topics/orders.v1?tab=consumers",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: { row: { name: "orders.v1", internal: false, partitionCount: 6, replicationFactor: 1, outOfSyncReplicas: 0, offlinePartitions: 0 }, partitions: [] },
+          },
+        },
+        "/api/v1/clusters/{clusterId}/topics/{topic}/consumer-groups": {
+          rows: [
+            {
+              group: {
+                groupId: "order-fulfilment",
+                state: "EMPTY",
+                members: 0,
+                topics: 1,
+                coordinatorId: 1,
+                coordinatorHost: "kafka",
+                coordinatorPort: 9092,
+                totalLag: 9,
+              },
+              topicLag: 9,
+              partitions: 6,
+              dormant: true,
+            },
+            {
+              // The coordinator could not be described. No address, and no invented broker id.
+              group: { groupId: "nightly-batch", state: "EMPTY", members: 0, topics: 1, totalLag: 0 },
+              topicLag: 0,
+              partitions: 1,
+              dormant: true,
+            },
+          ],
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    expect(container.textContent).toContain("kafka:9092");
+    expect(container.textContent).not.toContain("broker 1");
+    // The row with no coordinator says nothing rather than half an address.
+    expect(container.textContent).toContain("no coordinator address");
+    dispose();
+  });
+});
+
+describe("the consumers tab's columns", () => {
+  test("no column heading is empty, and the dormant column's is Activity", async () => {
+    /*
+     * The a11y sweep is a whole-tree gate: it says *a* table somewhere has a blank `<th>`, and it
+     * says it over 694 stories. This is the case that says which column — and it is the column that
+     * shipped `header: \"\"` and produced all fourteen of the sweep's violations. See the long note
+     * on the column itself for why the string is visible rather than visually hidden.
+     */
+    const { container, dispose } = mount(() => (
+      <TopicConsumers
+        rows={[
+          {
+            groupId: "order-fulfilment",
+            state: "STABLE",
+            members: 2,
+            topicLag: 4,
+            partitions: 6,
+            dormant: true,
+            totalLag: 4,
+            topics: 1,
+            coordinator: "kafka:9092",
+          },
+        ]}
+        hrefFor={(groupId) => `/ui/consumer-groups/${groupId}`}
+      />
+    ));
+    await flush();
+
+    const headings = [...container.querySelectorAll("th")].map((cell) => cell.textContent?.trim());
+    expect(headings).not.toContain("");
+    expect(headings).toContain("Activity");
+    expect(headings).toContain("Coordinator");
+    dispose();
+  });
+});
+
+describe("the export, and the sentence above the list", () => {
+  afterEach(forgetQueries);
+
+  test("a figure nobody measured is an empty cell and never a zero", () => {
+    /*
+     * A spreadsheet sums a column without asking. A `0` written for a topic whose size could not be
+     * read becomes a cluster total that is quietly short — and unlike the screen, the file carries
+     * no dash and no sentence to say so.
+     */
+    const csv = topicsCsv([rows[2] as TopicRow]);
+    const cells = (csv.split("\r\n")[1] ?? "").split(",");
+    // name, internal, partitions, RF, health, records, size, rate, policy.
+    expect(cells).toEqual(['"shipments.v1"', '"no"', '"6"', '"2"', '"unknown"', '""', '""', '""', '""']);
+  });
+
+  test("a policy containing a comma does not shift every column after it", () => {
+    // `compact,delete` is a real and common value of `cleanup.policy`, and an unquoted comma there
+    // silently moves the rest of the row one column left. RFC 4180 quoting is what stops it.
+    const csv = topicsCsv([
+      { name: 'odd"name', internal: false, partitions: 1, replicationFactor: 1, health: "in-sync", cleanupPolicy: "compact,delete" },
+    ]);
+    expect(csv).toContain('"odd""name"');
+    expect(csv).toContain('"compact,delete"');
+    expect(csv.split("\r\n")[1]?.split('","')).toHaveLength(9);
+  });
+
+  test("the Export control hands the browser the rows it is showing", async () => {
+    /*
+     * The seam, rather than the formatter: the button is wired to the *page's* rows and to
+     * `topicsCsv`, and a control that produced an empty file would look identical in a screenshot.
+     * `createObjectURL` does not exist in a DOM with no layout engine, so it is supplied here and
+     * the blob it is handed is read back.
+     */
+    let handed: Blob | undefined;
+    const original = URL.createObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: (blob: Blob) => {
+        handed = blob;
+        return "blob:test";
+      },
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => undefined });
+
+    const host = topicsHost({
+      at: "/clusters/export-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": {
+          topics: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              items: [
+                {
+                  name: "orders.v1",
+                  internal: false,
+                  partitionCount: 6,
+                  replicationFactor: 1,
+                  outOfSyncReplicas: 0,
+                  offlinePartitions: 0,
+                  messageCount: 16,
+                  sizeBytes: 5114,
+                  cleanupPolicy: "delete",
+                },
+              ],
+              page: { page: 1, pageSize: 32, totalItems: 1 },
+            },
+          },
+          incompleteTopics: 0,
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Export")
+      ?.click();
+
+    expect(handed).toBeDefined();
+    const text = await (handed as Blob).text();
+    expect(text).toContain('"orders.v1"');
+    expect(text).toContain('"delete"');
+    // The header row, so a file with rows and no columns is not mistaken for a working export.
+    expect(text.split("\r\n")[0]).toContain('"cleanup policy"');
+
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: original });
+    dispose();
+  });
+
+  test("the voice line drops a clause it cannot measure rather than filling it with zero", () => {
+    // Three figures from three documents, and each can be missing. `0 partitions` on a cluster
+    // whose sweep was incomplete would be the never-zero rule broken in the most readable place on
+    // the screen.
+    expect(topicsVoice(3, 128, 1536)).toBe("3 of 128 topics match · 1,536 partitions");
+    expect(topicsVoice(128, 128, 1536)).toBe("128 topics · 1,536 partitions");
+    expect(topicsVoice(3, 128, undefined)).toBe("3 of 128 topics match");
+    expect(topicsVoice(undefined, undefined, undefined)).toBe("");
+  });
+});
+
+describe("a destructive success says so", () => {
+  afterEach(() => {
+    clearToasts();
+    forgetQueries();
+  });
+
+  test("deleting a topic raises a toast naming it", async () => {
+    /*
+     * The rule this package owes every destructive path: an action that worked says so. A screen
+     * that navigates away in silence leaves the operator wondering whether the click registered,
+     * and the answer they reach for is to do it again — which on a delete is the one repetition
+     * that must never be encouraged.
+     *
+     * Driven through the real dialog: plan, type the name, confirm. A case that called `notify`
+     * itself would assert that a toast library works.
+     */
+    const plan = {
+      topic: "orders.v1",
+      partitions: 6,
+      records: 16,
+      autoCreateEnabled: true,
+      warnings: [],
+      token: "tok-1",
+      expiresAt: "2026-09-06T00:05:00Z",
+    };
+    const host = topicsHost({
+      at: "/clusters/toast-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              row: { name: "orders.v1", internal: false, partitionCount: 6, replicationFactor: 1, outOfSyncReplicas: 0, offlinePartitions: 0 },
+              partitions: [],
+            },
+          },
+        },
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan": plan,
+        "/api/v1/clusters/{clusterId}/topics/{topicName}": plan,
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Delete topic"))
+      ?.click();
+    await settle();
+
+    const confirmation = document.querySelector('[data-testid="planned-action-confirm"], [role="dialog"]');
+    const field = confirmation?.querySelector<HTMLInputElement>('input[type="text"]');
+    if (field !== null && field !== undefined) {
+      field.value = "orders.v1";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+
+    const confirm = [...(confirmation?.querySelectorAll("button") ?? [])].find(
+      (button) => button.textContent?.trim() === "Delete topic",
+    );
+    confirm?.click();
+    await settle();
+
+    expect(toasts().map((toast) => toast.title)).toContain("orders.v1 deleted");
+    // The sentence an operator is least likely to have thought of, carried into the confirmation.
+    expect(toasts()[0]?.message).toContain("recreate");
+    dispose();
+  });
+
+  test("a bulk outcome names both halves, because a set can fail in the middle", () => {
+    // "3 topics deleted" over a selection of five leaves the operator to discover the other two.
+    expect(bulkSentence("deleted", { done: ["a", "b"], failed: [] })).toBe("2 topics deleted");
+    expect(
+      bulkSentence("deleted", { done: ["a"], failed: [{ topic: "b", reason: "Not permitted." }] }),
+    ).toBe("1 topic deleted. 1 refused: b — Not permitted.");
   });
 });

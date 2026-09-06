@@ -88,6 +88,48 @@ export {
 export { toRecord, toDto, LARGE_VALUE_BYTES, type MessageDto } from "./wire.js";
 
 /**
+ * The controls with no query parameter behind them, and the expression they compile to.
+ *
+ * `SCREENS-V4.md` §3.12 lists five such controls; four of them are here. They are not part of
+ * `BrowseQuery` on purpose — that type is the server's own grammar, and a field in it that no
+ * endpoint accepts is a filter nothing applies. `MessagesRoute` compiles these, registers the
+ * result through the filter endpoint that already exists, and quotes the id the service minted.
+ */
+export {
+  MATCH_MODES,
+  NO_PREDICATES,
+  TIME_WINDOWS,
+  celFor,
+  celString,
+  conjunctsOf,
+  describePredicate,
+  isEmpty,
+  predicateParams,
+  predicatesFrom,
+  windowOf,
+  windowStart,
+  PREDICATE_PARAM,
+  type FieldPredicate,
+  type MatchMode,
+  type Predicates,
+  type TimeWindow,
+} from "./predicates.js";
+
+/** The named arrangements this browser keeps for a cluster, and the row that draws them. */
+export {
+  MAX_PRESETS,
+  presetsKey,
+  readPresets,
+  withPreset,
+  withoutPreset,
+  writePresets,
+  type FilterPreset,
+} from "./presets.js";
+
+/** The one thing the browser needs to know about the topic itself: how many partitions it has. */
+export { fetchTopicFacts, topicFactsKey, type TopicFacts } from "./topic.js";
+
+/**
  * The real transport, and the reason it is not `openEventSource`: a browse must be cancellable, and
  * the native `EventSource` cannot be aborted — a stopped browse would leave a Kafka consumer
  * assigned on the message service until its budget expired.

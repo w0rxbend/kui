@@ -53,5 +53,9 @@ project's caching rules allow caches only with TTL, invalidation, bounds, metric
 
 ## Reversibility
 
-High. Each primitive sits behind a small trait; `SeriesWindow`'s arithmetic is an
-immutable value that `SeriesWindowCell` only holds and instruments.
+High. Each *holder* sits behind a small trait — `SnapshotCell`, `SeriesWindowCell`,
+`BoundedCache` — so an implementation can be replaced without touching a caller. The values
+they hold do not: `Snapshot` and `SeriesWindow` are `final case class`es behind no trait,
+because arithmetic on an immutable value has nothing to substitute and a trait over it would
+be an interface with one implementation for ever. `SeriesWindow`'s arithmetic is such a value,
+and `SeriesWindowCell` only holds and instruments it.

@@ -16,7 +16,7 @@
  */
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { Banner, Select, StatusPill, type Mutation } from "@kui/kernel";
+import { Banner, Select, StatusPill, Tag, type Mutation } from "@kui/kernel";
 import { CompatibilityCheck } from "./CompatibilityCheck.jsx";
 import {
   COMPATIBILITY_LEVELS,
@@ -26,6 +26,7 @@ import {
   type ProposedSchema,
   type SchemaVersion,
 } from "./data.js";
+import { formatTone, levelSourceSentence } from "./model.js";
 
 export interface SubjectPageProps {
   readonly subject: string;
@@ -51,11 +52,28 @@ export interface SubjectPageProps {
 export function SubjectPage(props: SubjectPageProps): JSX.Element {
   return (
     <section class="kui-subject" aria-label={`Subject ${props.subject}`}>
+      {/* Not "Schema registry": that is the page's own heading two lines above this, and a trail
+          whose only rung repeats the title says nothing. It is kept rather than dropped because
+          below the workspace's breakpoint the panes stack and the list is a screen away. */}
       <nav class="kui-subject__trail" aria-label="Breadcrumb">
-        <a href={props.listHref}>Schema registry</a>
+        <a href={props.listHref}>All subjects</a>
       </nav>
 
-      <h1 class="kui-subject__title">{props.subject}</h1>
+      {/* An `h2`. This pane sits beside the subject list under the workspace's own `h1`, and a
+          second `h1` on the page would make a screen reader's heading list read as two pages. */}
+      <h2 class="kui-subject__title">
+        {/* The format badge the design puts beside the name (§3.15). It comes from the version on
+            screen rather than from the list row, because it is a property of the schema being read
+            and the pane can be opened at a version whose language differs from the newest. */}
+        <Show when={props.current?.schemaType}>
+          {(format) => (
+            <Tag class="kui-subject__format" tone={formatTone(format())}>
+              {format()}
+            </Tag>
+          )}
+        </Show>
+        <span>{props.subject}</span>
+      </h2>
 
       <Show when={props.failure}>
         {(problem) => (
@@ -78,11 +96,7 @@ export function SubjectPage(props: SubjectPageProps): JSX.Element {
                 follows the registry's. Changing the global one moves every subject in the second
                 group, and an operator who cannot see which group a subject is in cannot know what
                 they are about to change. */}
-            <span class="kui-subject__compat-source">
-              {level().inherited
-                ? "inherited from the registry's global level"
-                : "set on this subject"}
-            </span>
+            <span class="kui-subject__compat-source">{levelSourceSentence(level())}</span>
 
             <Show
               when={props.onSetCompatibility !== undefined}

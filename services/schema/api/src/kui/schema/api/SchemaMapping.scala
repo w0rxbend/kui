@@ -2,8 +2,8 @@ package kui.schema.api
 
 import kui.kernel.error.{ApplicationError, KuiError}
 import kui.kernel.{PageRequest, PageSize, PositiveInt, Subject}
-import kui.schema.contract.SubjectListParams
 import kui.schema.contract.dto.*
+import kui.schema.contract.{SchemaEndpoints, SubjectListParams}
 import kui.schema.domain.*
 
 /** Application types to wire types, and wire types to application types (ADR-033).
@@ -57,10 +57,21 @@ object SchemaMapping {
 
   /** The query string as a domain query, with the page size **clamped** rather than refused.
     *
-    * Answering "you asked for 900 rows and the limit is 500" with a 400 makes every caller write clamping
-    * code the server could have written once. Answering with 500 rows and a `pageSize` of 500 in the response
+    * Answering "you asked for 900 rows and the limit is 100" with a 400 makes every caller write clamping
+    * code the server could have written once. Answering with 100 rows and a `pageSize` of 100 in the response
     * tells them the same thing and still works. A page *number* below one is clamped to one for the same
     * reason.
+    *
+    * The ceiling is `SchemaEndpoints.MaxPageSize` and not `PageSize.Max`, because this list's page size is
+    * not a slice of a list KUI already holds — it is the number of registry requests the answer costs, three
+    * per row. The kernel's 500 is the bound on how much memory a page is; a hundred is the bound on what one
+    * screen may ask of a single-writer registry.
+    *
+    * Zero rows is the one page size that is not clamped up. It is the drawer badge's request: the total,
+    * counted, with nothing enriched. Clamping it to one would put back the four registry requests that the
+    * caller asked not to pay — see `SchemaEndpoints.CountOnlyPageSize`. The `PageRequest` still carries a
+    * legal page size because [[kui.kernel.PageSize]] has no zero; `SubjectQuery.countOnly` is what the
+    * catalogue reads, and the size it carries is never used to cut rows.
     */
   def query(params: SubjectListParams): SubjectQuery =
     SubjectQuery(
@@ -68,8 +79,11 @@ object SchemaMapping {
       order = params.direction,
       page = PageRequest(
         PositiveInt.from(math.max(params.page, 1)).getOrElse(PositiveInt.One),
-        PageSize.from(math.min(math.max(params.pageSize, 1), PageSize.Max.value)).getOrElse(PageSize.Default)
-      )
+        PageSize
+          .from(math.min(math.max(params.pageSize, 1), SchemaEndpoints.MaxPageSize))
+          .getOrElse(PageSize.Default)
+      ),
+      countOnly = params.pageSize <= SchemaEndpoints.CountOnlyPageSize
     )
 
   /** The version path segment as a selector.

@@ -33,14 +33,109 @@
  * (`--kui-color-surface-hover`) — a resting input and a hovered surface share one value in this
  * palette, which is §2 of the spec rather than a coincidence.
  *
- * It **wraps**; it never scrolls sideways. A control that has slid off the right edge of a bar is a
- * control nobody finds, and the seek modes that reveal a second input are exactly the case that
- * makes the bar too long. */
+ * Three rows, as `SCREENS-V4.md` §3.12 draws them, and each **wraps**; none scrolls sideways. A
+ * control that has slid off the right edge of a bar is a control nobody finds, and the seek modes
+ * that reveal a second input are exactly the case that makes a row too long. The rows are a column
+ * rather than one long wrapping line so that the division survives the wrap: the second row is
+ * "what to keep", and a predicate that had wrapped up onto the end of the first row would read as
+ * another way of saying where to start. */
 .kui-browse-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse-bar__row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--kui-space-2);
+}
+
+/* The arrow between the two ends of a range. Decorative: the two inputs carry their own accessible
+ * names ("Start at offset", "Until offset"), and a reader that announced an arrow between them
+ * would be reading out a picture. */
+.kui-browse-bar__to {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* One typed predicate: a glyph, the match mode and the text, grouped so the three read as one
+ * control rather than as three that happen to be adjacent. */
+.kui-browse-bar__predicate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-2);
+}
+
+.kui-browse-bar__predicate-glyph {
+  color: var(--kui-color-text-muted);
+  flex: none;
+}
+
+/* Saving a preset is a quiet action beside the controls it saves — a ghost affordance rather than
+ * a button, because it competes with Read, which is the thing on this bar people press. */
+.kui-browse-bar__save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kui-space-1);
+  height: 26px;
+  padding-inline: var(--kui-space-2);
+  border: none;
+  border-radius: var(--kui-radius-md);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  font-family: var(--kui-font-family-sans);
+  font-size: var(--kui-font-size-sm);
+  cursor: pointer;
+}
+
+.kui-browse-bar__save:hover {
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-strong);
+}
+
+/* The presets row. It is absent rather than empty when nothing is saved — that is the component's
+ * rule, not this sheet's, and there is no `:empty` fallback here on purpose: a rule that hid an
+ * empty row would let the component ship one and nobody would notice. */
+.kui-browse-bar__presets {
+  align-items: center;
+}
+
+.kui-browse-bar__presets-label {
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+  /* The same 0.04em `60-messages.css` uses for a spaced-out label. There is no letter-spacing token
+   * and this is not a colour, a space or a radius, so writing it is not reaching around the token
+   * set — it is a value the set does not carry. */
+  letter-spacing: 0.04em;
+}
+
+.kui-browse-bar__preset {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Forgetting a preset is its own control and never a second meaning for pressing the chip — the
+ * same rule the smart-filter chip follows, and for the same reason: a control whose effect depends
+ * on state the operator cannot see is a control they stop trusting. */
+.kui-browse-bar__preset-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-inline-start: calc(-1 * var(--kui-space-1));
+  border: none;
+  border-radius: var(--kui-radius-pill);
+  background: transparent;
+  color: var(--kui-color-text-muted);
+  cursor: pointer;
+}
+
+.kui-browse-bar__preset-remove:hover {
+  background: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-strong);
 }
 
 /* Everything after this is pushed to the right edge: the read/pause/stop control and the LIVE
@@ -713,6 +808,16 @@
   font-size: var(--kui-font-size-sm);
   /* Sits on the baseline of the inputs beside it rather than on the labels above them. */
   padding-block-end: var(--kui-space-1);
+}
+
+/* The sentence the dialog shows instead of a partition count it does not have. Muted rather than a
+ * warning tone: nothing is wrong, KUI simply has not been told, and drawing it in amber would put a
+ * fault in front of an operator who has none. */
+.kui-resend__unknown {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+  line-height: var(--kui-font-line-height-normal);
 }
 
 .kui-resend__range-actions {

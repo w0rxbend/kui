@@ -6,11 +6,17 @@
  * `createQueryCache` was finished, tested and called by nothing, while six route files each grew
  * their own `useFetch` — a signal, an attempt counter, an effect, and a cancellation flag, written
  * out again every time. Two of those six say in their own comments that they are a copy. The cost
- * is not the twenty lines; it is that ADR-032's four-state rendering has to be got right in each
- * of them, and it never is. A hand-rolled `useFetch` starts every attempt at `loading`, so a
- * refetch that fails blanks a panel that was showing real figures a second ago, and a refetch that
- * fails *while succeeding elsewhere* asks the same endpoint once per component. Neither is visible
- * in review: both look exactly like the version that works.
+ * is not the twenty lines; it is the ADR-032 rendering rule each of them has to get right and none
+ * of them does — the last one in its Decision: *stale data from the session stays on screen greyed
+ * with its timestamp, actions disabled*. Named rather than counted, because no count fits: ADR-032
+ * defines a five-member `FeatureState` and lists rendering rules for four of them plus that one,
+ * while the answer this module hands back has the six kinds `Fetched` declares. A sentence about
+ * "four states" is about neither list, and it stood here for a wave.
+ *
+ * A hand-rolled `useFetch` starts every attempt at `loading`, so a refetch that fails blanks a
+ * panel that was showing real figures a second ago, and a refetch that fails *while succeeding
+ * elsewhere* asks the same endpoint once per component. Neither is visible in review: both look
+ * exactly like the version that works.
  *
  * So the behaviour lives once, here, and it is the behaviour none of the six have:
  *

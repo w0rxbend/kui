@@ -58,6 +58,30 @@ object SchemaEndpoints {
   val DefaultPage: Int = 1
   val DefaultPageSize: Int = 25
 
+  /** How many rows the subject list will enrich at once, whatever the caller asked for.
+    *
+    * ADR-026's ceiling is `PageSize.Max`, 500, and it is the right ceiling for a list KUI holds in memory.
+    * This list is not that: every row costs three requests to a Schema Registry, which is a single-writer
+    * JVM. Five hundred rows is 1500 requests, and the use case enriches eight rows at a time — 188 sequential
+    * rounds behind one bulkhead, with the registry answering nothing else for the duration. A hundred is 300
+    * requests in 38 rounds, four times the default page and more rows than this screen has ever been drawn
+    * with.
+    *
+    * The value is clamped rather than refused, like every other page size in KUI: a caller that asks for more
+    * gets a hundred rows and a `pageSize` of a hundred in the answer, which says the same thing as a 400 and
+    * still works.
+    */
+  val MaxPageSize: Int = 100
+
+  /** The page size that means "count them, send none".
+    *
+    * The drawer's schema badge reads `page.totalItems` and draws no rows at all. Asking for one row to get it
+    * costs the subject list plus four more registry requests — the row's three and the registry-wide
+    * compatibility level — every time the badge refreshes, to fill in a row nothing renders. Zero is the
+    * caller saying so.
+    */
+  val CountOnlyPageSize: Int = 0
+
   /** The word the registry itself uses for "whichever version is current".
     *
     * It is a legal value of the version path parameter, and it is not a number: resolving it in the browser
@@ -86,7 +110,11 @@ object SchemaEndpoints {
       .and(query[Int](PageParam).description("Which page, numbered from one").default(DefaultPage))
       .and(
         query[Int](PageSizeParam)
-          .description("How many rows a page holds. A value above the maximum is clamped, not refused")
+          .description(
+            s"How many rows a page holds, up to $MaxPageSize. A value above that is clamped, not refused. " +
+              s"$CountOnlyPageSize asks for the total with no rows, which is the only way to read the " +
+              "subject count without paying for a page of enrichment"
+          )
           .default(DefaultPageSize)
       )
       .map(SubjectListParams.apply.tupled)(params =>
@@ -126,7 +154,9 @@ object SchemaEndpoints {
         "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice " +
           "rather than a failure: the capability document reports that cluster as not_configured and the " +
           "browser hides the feature for it. A row's format, versionCount and compatibility are absent " +
-          "when the per-subject call that fills them did not answer; the row itself is still returned."
+          "when the per-subject call that fills them did not answer; the row itself is still returned. " +
+          s"pageSize=$CountOnlyPageSize answers the total with no rows and asks the registry nothing " +
+          "beyond the subject list."
       )
       .tag("schema")
 

@@ -80,6 +80,22 @@ export type NavigationInput = {
    * never a zero; see {@link countBadge}.
    */
   readonly countFor?: ((feature: FeatureRegistration) => NavCount | undefined) | undefined;
+  /**
+   * The rows nested under an entry, when it has any — the drawer's topic tree.
+   *
+   * A lookup for the same reason {@link countFor} is one: the names the tree is folded from come
+   * from a store that fetches, and this module has to stay a pure fold over capability states. It
+   * is also the seam that keeps the fold out of the components — `nav/topicTree.ts` turns a name
+   * list into these rows and `NavItem` draws them, and neither of them re-folds what the other did.
+   *
+   * `undefined` means "this row is a leaf", which is what every row that is not Topics is, and
+   * what Topics itself is until the names have arrived. It is deliberately different from an empty
+   * array: an empty array is a branch that currently holds nothing, and `NavDestination.children`
+   * says at length why that distinction is worth keeping.
+   */
+  readonly childrenFor?:
+    | ((feature: FeatureRegistration) => readonly NavDestination[] | undefined)
+    | undefined;
   /** The shell's own destinations, which have no service behind them and are always reachable. */
   readonly shellDestinations?: readonly NavDestination[] | undefined;
 };
@@ -138,7 +154,7 @@ export function navigationGroups(input: NavigationInput): readonly NavGroup[] {
   for (const heading of NAV_GROUP_ORDER) if (!groups.has(heading)) groups.set(heading, []);
 
   for (const feature of ordered) {
-    const heading = feature.registration.group.toUpperCase();
+    const heading = headingOf(feature.registration.group);
     const destination = destinationFor(feature, input);
     if (destination === undefined) continue;
     const existing = groups.get(heading);
@@ -149,10 +165,30 @@ export function navigationGroups(input: NavigationInput): readonly NavGroup[] {
   return [...groups].map(([heading, destinations]) => ({ heading, destinations }));
 }
 
+/**
+ * A registration's declared group, as the heading the drawer draws.
+ *
+ * `SCREENS-V4.md` §2.2 draws CLUSTER and ECOSYSTEM in capitals, and `NavGroup.heading` says the
+ * capitals belong in the markup rather than in a `text-transform` — a screen reader handed an
+ * acronym-shaped string that CSS made uppercase sometimes spells it out letter by letter, and one
+ * that is uppercase in the markup is a word.
+ *
+ * A named function rather than a `.toUpperCase()` inlined at the one call site, because it is the
+ * second half of the rule that matters and is easy to lose: a registration that declares "Cluster"
+ * and one that declares "cluster" must land in **one** group. Without the fold they become two
+ * headings over two halves of one list, and each half reads correctly on its own.
+ */
+function headingOf(group: string): string {
+  return group.toUpperCase();
+}
+
 /** One feature's entry, or `undefined` when it has none right now. */
 export function destinationFor(
   feature: FeatureStatus,
-  input: Pick<NavigationInput, "landingFor" | "cluster" | "hideForbidden" | "countFor">,
+  input: Pick<
+    NavigationInput,
+    "landingFor" | "cluster" | "hideForbidden" | "countFor" | "childrenFor"
+  >,
 ): NavDestination | undefined {
   const { registration, state } = feature;
   if (!registration.sidebar) return undefined;
@@ -168,6 +204,13 @@ export function destinationFor(
   const reason = explanation(state, registration.label);
   const forbidden = state.kind === "forbidden";
   const badge = badgeOf(state, reason, input.countFor?.(registration));
+  /* Nested rows are drawn for a `ready` feature and for nothing else, which is the rule the badge
+     above already obeys one line up and for the same reason. A tree of topic names under a topic
+     service that is not answering is last-known-good data presented as a navigable structure: every
+     row is a link to a page that will not load, and the `down` badge that would have said so is on
+     the parent the reader has already scrolled past. A forbidden row's tree would additionally name
+     objects this principal may not see, which is the leak the disabled row exists to prevent. */
+  const children = state.kind === "ready" ? input.childrenFor?.(registration) : undefined;
 
   return {
     id: registration.id,
@@ -177,6 +220,7 @@ export function destinationFor(
     state: state.kind,
     ...(forbidden ? { disabled: true, disabledReason: reason ?? "" } : {}),
     ...(badge === undefined ? {} : { badge }),
+    ...(children === undefined ? {} : { children }),
   };
 }
 

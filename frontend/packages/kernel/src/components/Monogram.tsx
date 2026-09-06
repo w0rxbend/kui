@@ -42,7 +42,6 @@
  * written passes the `label` it should be announced by.
  */
 import type { JSX } from "@solidjs/web";
-import { merge } from "solid-js";
 
 /** How many hues the decorative ramp in `27-primitives-v3.css` declares. */
 export const MONOGRAM_RAMP_LENGTH = 5;
@@ -87,23 +86,30 @@ export interface MonogramProps {
    * and is hidden, because the id it abbreviates is written beside it.
    */
   readonly label?: string | undefined;
+  /**
+   * `md` — 32px, the design's Top-producers tile — is the default and is what `.kui-monogram`
+   * itself declares, so it is spelled by emitting no modifier at all. `sm` is the one override.
+   */
   readonly size?: "sm" | "md" | undefined;
   readonly class?: string | undefined;
   readonly testId?: string | undefined;
 }
 
 export function Monogram(props: MonogramProps): JSX.Element {
-  const p = merge({ size: "md" } as const, props);
   // 1-based in the class name, so the stylesheet's five rules read as a list rather than as an
-  // array index somebody has to remember is zero-based. The size modifier is emitted for `md` as
-  // well as `sm`, and `27-primitives-v3.css` declares both: a class in the DOM that matches no
-  // rule anywhere is a false lead for whoever greps for it next.
+  // array index somebody has to remember is zero-based.
   const ramp = (): number => monogramIndex(props.id) + 1;
   const named = (): boolean => props.label !== undefined;
+  /* Only `sm` gets a class, because only `sm` is an override: `27-primitives-v3.css` puts the 32px
+   * default in `.kui-monogram` itself, so the size a tile has does not depend on a modifier being
+   * emitted. Emitting `kui-monogram--md` as well would put a class in the DOM that matches no rule
+   * anywhere — a false lead for whoever greps for it next, and the reason the default was moved
+   * out of the base in the first place. `controls.test.tsx` asserts both halves of that. */
+  const sized = (): string | undefined => (props.size === "sm" ? "kui-monogram--sm" : undefined);
 
   return (
     <span
-      class={["kui-monogram", `kui-monogram--${ramp()}`, `kui-monogram--${p.size}`, props.class]}
+      class={["kui-monogram", `kui-monogram--${ramp()}`, sized(), props.class]}
       data-testid={props.testId}
       /* `data-ramp` is what a test asserts on: two monograms for one id must agree, and asserting
          that through a class name would be asserting the class-name scheme instead of the rule. */

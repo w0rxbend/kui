@@ -123,6 +123,7 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
       leaders = Some(50),
       replicas = Some(hosted),
       skewPercent = Some(0.0d),
+      leaderSkewPercent = Some(0.0d),
       totalBytes = None,
       usableBytes = None,
       usedByKafkaBytes = Some(1024L),

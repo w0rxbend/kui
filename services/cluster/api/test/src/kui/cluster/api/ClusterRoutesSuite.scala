@@ -206,6 +206,7 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
           leaders = Some(2),
           replicas = Some(3),
           skewPercent = Some(0.0d),
+          leaderSkewPercent = Some(-33.3d),
           totalBytes = Some(100L),
           usableBytes = Some(40L),
           usedByKafkaBytes = Some(60L),
@@ -225,9 +226,12 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
         assertEquals(broker.get[Option[String]]("rack"), Right(Some("eu-west-1a")))
         assertEquals(broker.get[Boolean]("isController"), Right(true))
         assertEquals(broker.get[Option[Long]]("diskUsageBytes"), Right(Some(60L)))
-        // Both come from the same sweep and both reach the wire as numbers when it was complete.
+        // All three come from the same sweep and all three reach the wire as numbers when it was complete.
+        // `leaderSkewPercent` was hard-coded `null` in the mapping until 2026-09-06, so the browser drew the
+        // NotMeasured sentence beside a leader count it had; this is the assertion that it is a figure now.
         assertEquals(broker.get[Option[Int]]("partitionCount"), Right(Some(4)))
         assertEquals(broker.get[Option[Int]]("leaderCount"), Right(Some(2)))
+        assertEquals(broker.get[Option[Double]]("leaderSkewPercent"), Right(Some(-33.3d)))
       }
   }
 
@@ -350,6 +354,7 @@ final class ClusterRoutesSuite extends CatsEffectSuite {
           Some(4),
           Some(2),
           Some(3),
+          Some(0.0d),
           Some(0.0d),
           Some(1L),
           Some(0L),

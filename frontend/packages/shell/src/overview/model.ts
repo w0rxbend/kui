@@ -310,8 +310,39 @@ function diskPercentOf(dirs: readonly LogDir[], logDirs: Reading<readonly LogDir
   if (measured === 0) {
     return unknown("this broker's log directories do not report a disk size (Kafka 3.3 and later do)");
   }
-  if (total <= 0) return unknown("this broker reported a zero-byte disk");
-  return value((used / total) * 100);
+  return diskShare(used, total);
+}
+
+/**
+ * A share, or the one reason there is not one.
+ *
+ * Narrower than `Reading<number>` on purpose. `diskShare` can only answer those two ways, and a
+ * caller made to handle `pending` and `notCollected` would be writing branches that cannot run —
+ * which is how a dead arm ends up carrying a sentence nobody has ever read.
+ */
+export type DiskShare = Extract<Reading<number>, { readonly kind: "value" | "unknown" }>;
+
+/**
+ * The one place `used / total` becomes a percentage, or refuses to.
+ *
+ * Exported and shared rather than repeated because the storage card prints the same quantity beside
+ * the same disk. It used to do its own division, and on a zero-byte disk the two disagreed in the
+ * worst available way: the broker-health bar drew no fill and said "this broker reported a zero-byte
+ * disk", while the storage row two cards away printed `0 B of 0 B` with no percentage and no
+ * explanation — the product's own rule against rendering an unmeasurable figure as a zero, broken by
+ * the one function whose comment claimed it could not disagree with this one. One arithmetic, one
+ * sentence, and now the claim is structural rather than aspirational.
+ *
+ * `total <= 0` rather than `total === 0`, because a directory reporting a negative size is the same
+ * question and a worse answer: dividing by it would draw a bar pointing the other way instead of
+ * saying that the figure makes no sense.
+ *
+ * The two results are written as literals rather than through `value` and `unknown`, whose return
+ * type is the whole of `Reading` — see {@link DiskShare} for why the narrower one is worth having.
+ */
+export function diskShare(used: number, total: number): DiskShare {
+  if (total <= 0) return { kind: "unknown", why: "this broker reported a zero-byte disk" };
+  return { kind: "value", value: (used / total) * 100 };
 }
 
 /**

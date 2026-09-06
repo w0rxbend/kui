@@ -54,19 +54,31 @@ object BrokerLoad {
     * page they are shown on together.
     */
   def withSkew(perBroker: Map[BrokerId, BrokerLoad]): Map[BrokerId, BrokerLoad] = {
-    val counts = perBroker.values.map(_.replicas.toLong).toList
-    val total = counts.sum
+    val total = perBroker.values.map(_.replicas.toLong).sum
 
-    if perBroker.isEmpty || total == 0L then perBroker.map((id, load) => id -> load.copy(skewPercent = None))
-    else {
-      val mean = total.toDouble / perBroker.size.toDouble
-
-      perBroker.map { (id, load) =>
-        val skew = (load.replicas.toDouble - mean) / mean * 100.0
-        id -> load.copy(skewPercent = Some(round1(skew)))
-      }
+    perBroker.map { (id, load) =>
+      id -> load.copy(skewPercent = skewOf(load.replicas, total, perBroker.size))
     }
   }
+
+  /** How far one broker's share is from an even one: `(count - mean) / mean * 100`, to one decimal, where the
+    * mean is `total / brokers`.
+    *
+    * Shared rather than written twice. [[ClusterTopology.leaderSkewOn]] is the second caller, and the two
+    * numbers sit in adjacent columns of the same table: a replica skew and a leader skew computed by two
+    * expressions that had drifted apart would be two scales the reader has no way to tell apart. `-100.0` is
+    * a broker holding none of something every other broker holds, and `0.0` is a perfectly even spread; both
+    * are measurements.
+    *
+    * `None` when there is nothing to be skewed away from — no brokers, or a cluster holding none of the
+    * quantity at all, where every distance from a zero mean is a division by zero rather than a figure.
+    */
+  def skewOf(count: Int, total: Long, brokers: Int): Option[Double] =
+    if brokers <= 0 || total == 0L then None
+    else {
+      val mean = total.toDouble / brokers.toDouble
+      Some(round1((count.toDouble - mean) / mean * 100.0))
+    }
 
   private def round1(value: Double): Double = math.round(value * 10.0).toDouble / 10.0
 
@@ -105,6 +117,13 @@ final case class ClusterTopology(
     census: Option[PartitionCensus],
     /** How many topics the sweep listed. Present even when the census is not: a listing that succeeded and a
       * describe that partly failed are different failures, and the topic count survives the second.
+      *
+      * It has no consumer today, which is stated here rather than left for a reader to discover: nothing on
+      * the wire carries it, and the "described 3,998 of 4,000" line an operator sees is logged by
+      * `ClusterSnapshots` from the `TopicSweep` itself, before the topology is built. It is kept because it
+      * is the denominator that makes `census = None` legible — a screen that wanted to say *why* the
+      * partition figures are absent needs it and cannot recompute it — and because the field costs one
+      * `Option[Int]` per cluster per scrape.
       */
     topics: Option[Int],
     /** The controller-uptime window, when this deployment keeps one. `None` means no window is being kept at
@@ -127,6 +146,21 @@ final case class ClusterTopology(
   def partitionsOn(broker: BrokerId): Option[Int] = census.map(_.hosted(broker))
 
   def leadersOn(broker: BrokerId): Option[Int] = census.map(_.led(broker))
+
+  /** How far this broker's share of the *leaderships* is from an even one, on the same scale and through the
+    * same function as [[BrokerLoad.skewOf]] computes the replica skew.
+    *
+    * The denominator is every broker the cluster describes, not every broker that appears in the census: a
+    * broker that leads nothing leads nothing, and leaving it out of the mean would report the brokers that do
+    * lead as evenly balanced. The total is [[PartitionCensus.online]], because an online partition has
+    * exactly one leader and an offline one has none — so the leaderships and the online partitions are the
+    * same count, arrived at from two directions.
+    *
+    * It refuses with `leadersOn` and with every other partition figure, because all of them are sums over one
+    * sweep: if a topic in it could not be described, none of them is a total.
+    */
+  def leaderSkewOn(broker: BrokerId): Option[Double] =
+    census.flatMap(counted => BrokerLoad.skewOf(counted.led(broker), counted.online.toLong, brokerCount))
 
   def totalDiskBytes: Option[Long] = sumOf(_.totalBytes)
 

@@ -9,12 +9,20 @@
  * because "correct in the accessibility tree and invisible to everyone else" is a shape of defect
  * this project has shipped three times and no assertion below could have caught.
  *
+ * `Monogram`'s last case is the one apparent exception and is not one. It loads the shipped
+ * stylesheet and asks what the cascade *declares* for the classes the component emits — a question
+ * about two files agreeing, which jsdom answers exactly. It never asks how wide anything came out,
+ * which is the question jsdom would make an answer up for.
+ *
  * Two Solid 2 rules run through the whole file. `flush()` before asserting, because a setter
  * queues and the DOM catches up on the next microtask. And dispose at the end, because reactive
  * primitives need an owner and leaving them alive leaks listeners into the next case.
  */
 
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createSignal, flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -560,6 +568,49 @@ describe("Avatar", () => {
 
 /* ------------------------------------------------------------------------------------------- */
 
+/**
+ * The shipped stylesheet, read from disk because nothing else in this suite loads CSS.
+ *
+ * `vitest.config.ts` deliberately loads none — every other case here is about markup — and that
+ * decision is what let a size rule be deleted with the whole suite green. Rather than reverse it
+ * for one component, the two cases that need CSS put the file in the document themselves and take
+ * it out again, so no other case can start depending on a stylesheet being present.
+ */
+const PRIMITIVES_CSS = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "..", "styles", "27-primitives-v3.css"),
+  "utf8",
+);
+
+/** Every custom property the same sheet declares. jsdom does not substitute `var()` itself. */
+const PRIMITIVES_PROPERTIES = new Map<string, string>(
+  Array.from(PRIMITIVES_CSS.matchAll(/(--[\w-]+)\s*:\s*([^;{}]+);/g), (match) => [
+    match[1]!,
+    match[2]!.trim(),
+  ]),
+);
+
+const LENGTH = /^\d+(\.\d+)?(px|rem|em)$/;
+const TOKEN = /^var\(--kui-[\w-]+\)$/;
+
+/** One level of `var()` substitution, which is all these declarations use. */
+function resolved(value: string): string {
+  return value.replace(/var\((--[\w-]+)\)/g, (whole, name: string) =>
+    PRIMITIVES_PROPERTIES.get(name) ?? whole,
+  );
+}
+
+/** Runs `body` with the sheet in the document, and removes it however `body` ends. */
+function withPrimitives(body: (sheet: CSSStyleSheet) => void): void {
+  const style = document.createElement("style");
+  style.textContent = PRIMITIVES_CSS;
+  document.head.append(style);
+  try {
+    body(style.sheet!);
+  } finally {
+    style.remove();
+  }
+}
+
 describe("Monogram", () => {
   /** The whole reason it is not `Avatar`: an identifier is read left to right. */
   it("abbreviates an identifier by its head, not by its last segment", () => {
@@ -639,6 +690,95 @@ describe("Monogram", () => {
     // The whole identifier, never the two letters. "C S" read aloud is not a client.
     expect(announced.getAttribute("aria-label")).toBe("Client checkout-svc");
     expect(announced.getAttribute("aria-hidden")).toBeNull();
+  });
+
+  /**
+   * The size, checked where the component and the stylesheet actually meet.
+   *
+   * This is the one rule in the kernel that was demonstrably ungated: `.kui-monogram--md` could be
+   * deleted whole and 399 tests, a Storybook build and nine axe sweeps all stayed green, because
+   * `vitest.config.ts` loads no CSS by design and axe does not measure size. The gate cannot be
+   * "does it come out 32px wide" — jsdom has no layout engine and would invent the answer. It is
+   * the question one file down from that: **for the classes this component actually emits, does the
+   * shipped stylesheet declare a size?** Two files, one cascade, and jsdom parses CSS exactly.
+   *
+   * So the size lives in `.kui-monogram` and `--sm` is the only override, and these two cases pin
+   * both ends: a tile with no modifier has a size, and the component emits no class the sheet has
+   * forgotten. Between them, deleting the size from the base, deleting the `--sm` block, renaming
+   * either custom property, and re-emitting a `--md` class that nothing styles are all red.
+   */
+  it("takes its size from the stylesheet for every way of asking for one", () => {
+    withPrimitives(() => {
+      const container = render(() => (
+        <>
+          <Monogram id="checkout-svc" testId="default" />
+          <Monogram id="checkout-svc" size="md" testId="md" />
+          <Monogram id="checkout-svc" size="sm" testId="sm" />
+        </>
+      ));
+      const sizeOf = (testId: string): CSSStyleDeclaration =>
+        getComputedStyle(container.querySelector(`[data-testid="${testId}"]`)!);
+
+      for (const testId of ["default", "md", "sm"]) {
+        const style = sizeOf(testId);
+        // Declared, and declared through a custom property: `27-primitives-v3.css`'s own header
+        // says no component writes a literal length, and every rule this assertion inspects obeys
+        // it. Not the whole file does — `.kui-pagination__goto-input` writes `width: 48px` at
+        // `27-primitives-v3.css:587`, which predates this test and is out of its reach. A
+        // declaration that has gone missing shows up here as jsdom's initial value (`auto`,
+        // `16px`) instead.
+        for (const [property, value] of [
+          ["width", style.width],
+          ["height", style.height],
+          ["font-size", style.fontSize],
+        ] as const) {
+          expect(value, `${testId} ${property}`).toMatch(TOKEN);
+        }
+        // And a real length behind the two whose properties this sheet declares: `var(--typo)`
+        // would satisfy the test above and leave the tile with no size on a screen. The font size
+        // is not resolvable here on purpose — its token lives in `10-tokens.css`, which this case
+        // does not load, because loading the whole palette to check one tile is how a unit test
+        // turns into the a11y sweep.
+        expect(resolved(style.width), `${testId} width`).toMatch(LENGTH);
+        expect(resolved(style.height), `${testId} height`).toMatch(LENGTH);
+      }
+
+      // `md` is the default and is spelled by emitting nothing, so the two must be the same tile.
+      expect(sizeOf("md").width).toBe(sizeOf("default").width);
+      // And `--sm` has to be an override rather than a second copy of the same numbers, or the
+      // small tile inside a table row is the large one and nobody notices until it is on screen.
+      expect(sizeOf("sm").width).not.toBe(sizeOf("default").width);
+      expect(sizeOf("sm").fontSize).not.toBe(sizeOf("default").fontSize);
+    });
+  });
+
+  it("emits no monogram class the stylesheet has no rule for", () => {
+    withPrimitives((sheet) => {
+      // Every `.kui-monogram…` class name the sheet styles, taken from the selectors themselves so
+      // that a rule which is deleted stops being in the set rather than having to be remembered.
+      const styled = new Set<string>();
+      for (const rule of Array.from(sheet.cssRules)) {
+        const selector = (rule as CSSStyleRule).selectorText;
+        if (typeof selector !== "string") continue;
+        for (const [, name] of selector.matchAll(/\.(kui-monogram[\w-]*)/g)) styled.add(name!);
+      }
+
+      const container = render(() => (
+        <>
+          <Monogram id="checkout-svc" testId="default" />
+          <Monogram id="checkout-svc" size="md" testId="md" />
+          <Monogram id="checkout-svc" size="sm" testId="sm" />
+        </>
+      ));
+      for (const tile of Array.from(container.querySelectorAll("[data-testid]"))) {
+        for (const name of Array.from(tile.classList)) {
+          if (!name.startsWith("kui-monogram")) continue;
+          // A class in the DOM that matches no rule anywhere is a false lead for whoever greps for
+          // it next — which is exactly what `kui-monogram--md` became once the size moved.
+          expect(styled, `${tile.getAttribute("data-testid")} emits .${name}`).toContain(name);
+        }
+      }
+    });
   });
 
   it("has no accessibility violations, hidden or announced", async () => {

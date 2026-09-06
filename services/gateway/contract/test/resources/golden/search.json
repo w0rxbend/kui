@@ -1,0 +1,21 @@
+{
+  "results" : {
+    "topics" : [
+      {
+        "cluster" : "prod-eu",
+        "name" : "orders.v1"
+      }
+    ],
+    "groups" : [
+      {
+        "cluster" : "prod-eu",
+        "groupId" : "orders-consumer"
+      }
+    ],
+    "subjects" : [
+    ]
+  },
+  "partial" : [
+    "schema"
+  ]
+}

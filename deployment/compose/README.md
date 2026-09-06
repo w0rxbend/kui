@@ -18,7 +18,7 @@ never builds the browser bundle — but both compose files carry a `build:` stan
 | File                            | What runs                                       | What it demonstrates                     |
 | ------------------------------- | ----------------------------------------------- | ---------------------------------------- |
 | `docker-compose.allinone.yml`   | The backend in one container, and the interface  | The fastest possible start               |
-| `docker-compose.yml`            | The gateway and all five services, apart, and the interface | Fault isolation between real processes |
+| `docker-compose.yml`            | The gateway and all six services, apart, and the interface | Fault isolation between real processes |
 
 They run the same code. That is ADR-005's whole argument, and it is why the distributed environment
 is worth having even though the all-in-one one starts faster: the all-in-one process is a single
@@ -58,10 +58,18 @@ docker compose -f deployment/compose/docker-compose.yml up -d --wait
 open http://localhost:8090/ui/
 ```
 
-Seven containers: `kui-frontend` and `kui-gateway`, which publish a port each, plus `kui-cluster`,
-`kui-topic`, `kui-message`, `kui-consumer` and `kui-metrics`, which publish none. The five services
-are reachable only from inside the compose network, which is the same rule `ARCHITECTURE.md` §14
-states for a real deployment — a service must not be exposed outside the cluster network.
+Eight containers: `kui-frontend` and `kui-gateway`, which publish a port each, plus `kui-cluster`,
+`kui-topic`, `kui-message`, `kui-consumer`, `kui-schema` and `kui-metrics`, which publish none. The
+six services are reachable only from inside the compose network, which is the same rule
+`ARCHITECTURE.md` §14 states for a real deployment — a service must not be exposed outside the
+cluster network.
+
+Six is every contract the gateway holds. It used to be five: `services/schema` was in
+`ServiceContracts.byService`, had a `deployment.docker.schema` image target nothing built, and
+appeared in neither `kui.yaml` nor this compose file — so the gateway published none of its routes
+and the smoke test could not notice, because a contract with no address is missing from both sides
+of an addresses-against-containers comparison. `smoke.sh` now reads the contract set as well, and
+`docker-compose.yml` has no room left for a service that is declared and unreachable.
 
 `kui-metrics` measures nothing: KUI has no JMX client and no Prometheus parser, so every one of its
 answers is a 200 saying `not_configured`, and the dashboard's metrics cards keep their written "not
@@ -69,7 +77,7 @@ measured" sentence (ADR-032). It is here because the gateway derives a service's
 the contract it holds *and* the address it was given — so a metrics container that is absent is not
 a quiet feature, it is a feature the browser cannot tell apart from an outage.
 
-This is the stack that grows. M8 and M9 each add a service beside those five, and
+This is the stack that grows. M8 and M9 each add a service beside those six, and
 `docker-compose.yml` carries a commented slot naming the container and the address each of
 `kui-alerts`, `kui-connect` and `kui-ksql` will take, so that adding one is a copy of `kui-consumer`
 and two more edits rather than a reshaping of the file. `kui-metrics` is that recipe already
@@ -83,6 +91,7 @@ cluster available
 consumer available
 message available
 metrics available
+schema available
 topic available
 $ curl -s localhost:8080/api/v1/clusters | jq -r .clusters.status
 ok
@@ -109,12 +118,13 @@ cluster unavailable
 consumer available
 message available
 metrics available
+schema available
 topic available
 $ curl -s localhost:8080/api/v1/info | jq -r .authType
 disabled
 ```
 
-Note what did *not* change: the other four services are untouched, because they are four other
+Note what did *not* change: the other five services are untouched, because they are five other
 processes. The topics screen, the message browser and the consumer-group screens all keep working
 while the cluster list degrades. That is the statement the all-in-one shape cannot make at all, and
 it is why these services have `main`s and images of their own rather than only running inside the
@@ -155,10 +165,19 @@ Runs the whole sequence and exits non-zero if any step does not produce what it 
 capability check is derived from `/api/v1/capabilities` rather than from a list written into the
 script, so a service added to `kui.yaml` and to the compose file is checked without anybody
 remembering this line — which is how `kui-metrics` stayed unreachable through a whole milestone
-while the script passed. CI runs it in the end-to-end job, right after the six backend images are
-built, so that a broken compose file is caught by the same run that builds the artefacts it
-describes. The interface's image is not one of those six and Compose builds it here, which adds a
-few minutes to a cold run and nothing to a warm one.
+while the script passed. It also reads the gateway's *contract* set out of
+`ServiceContracts.byService` and refuses to start a stack that declares a service it does not run,
+which is the half that check was missing: `kui-metrics`'s defect survived one service over in
+`services/schema` precisely because a contract with no address is absent from both sides of the
+addresses-against-containers equality. And it checks that every image the stack names is already on
+the machine, so a build step somebody skipped is reported by name instead of as `pull access denied`
+against a registry KUI publishes nothing to.
+
+CI runs it in the end-to-end job, right after the seven backend images are built, so that a broken
+compose file is caught by the same run that builds the artefacts it describes. That list is derived
+from this compose file rather than written into the workflow, because it was written into the
+workflow, said five, and was wrong for a milestone. The interface's image is not one of the seven
+and Compose builds it here, which adds a few minutes to a cold run and nothing to a warm one.
 
 The interface is unaffected throughout. It is a static file server that proxies `/api/`, so it has
 nothing to lose when a KUI service dies: the page still loads, and what an operator sees is the

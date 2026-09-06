@@ -92,7 +92,7 @@ export {
   prefixes,
   type PrefixGroup,
 } from "./nav/prefixes.js";
-export { topicTree, type TopicTreeInput } from "./nav/topicTree.js";
+export { topicGroupHref, topicTree, type TopicTreeInput } from "./nav/topicTree.js";
 export {
   brokerStorageOf,
   createClusterStore,
@@ -109,6 +109,23 @@ export {
   type AppearancePopoverProps,
   type AppearancePreferences,
 } from "./chrome/AppearancePopover.jsx";
+/**
+ * The words for the three appearance preferences, published once.
+ *
+ * There are two controls over these three preferences — the top bar's popover and the settings page
+ * — and each carried its own option list until now. They had already drifted on the option that
+ * most needed explaining: the popover called the default theme "Auto" and the settings page called
+ * it "Match the system", which is one preference under two names and no way for a reader to tell
+ * that it is one preference. Both draw this table now, and a third control added later takes it
+ * too.
+ */
+export {
+  ACCENT_OPTIONS,
+  DENSITY_OPTIONS,
+  THEME_OPTIONS,
+  appearanceHelp,
+  type AppearanceOption,
+} from "./chrome/appearance.js";
 export {
   NotificationBell,
   NotificationPanel,

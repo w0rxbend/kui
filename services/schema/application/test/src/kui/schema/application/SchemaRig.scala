@@ -28,7 +28,8 @@ final class FakeRegistry(
     val vanished: Set[String] = Set.empty,
     val failure: Option[KuiError] = None,
     val writes: Ref[IO, List[(String, CompatibilityLevel)]],
-    val enrichments: Ref[IO, List[String]]
+    val enrichments: Ref[IO, List[String]],
+    val globalReads: Ref[IO, Int]
 ) extends SchemaRegistryPort[IO] {
 
   private def answer[A](value: A): IO[Either[KuiError, A]] =
@@ -70,7 +71,16 @@ final class FakeRegistry(
   def schema(subject: Subject, version: VersionSelector): IO[Either[KuiError, Option[RegisteredSchema]]] =
     answer(schemas.get(subject.value -> version.path))
 
-  def globalCompatibility: IO[Either[KuiError, CompatibilityLevel]] = answer(globalLevel)
+  /** Counted, for the same reason the per-subject calls are.
+    *
+    * The registry-wide compatibility level is one call the list page makes on top of its rows, and whether it
+    * is made is the difference between a page that short-circuited and one that did not. Nothing about the
+    * rows shows it: an empty page has no rows either way. Until this counter existed, the case named "a page
+    * with no rows asks the registry nothing beyond the list itself" asserted only that no *row* was enriched,
+    * and turning the short-circuit off left it green.
+    */
+  def globalCompatibility: IO[Either[KuiError, CompatibilityLevel]] =
+    globalReads.update(_ + 1) *> answer(globalLevel)
 
   def subjectCompatibility(subject: Subject): IO[Either[KuiError, Option[CompatibilityLevel]]] =
     answer(subjectLevels.get(subject.value))
@@ -147,6 +157,7 @@ object SchemaRig {
     for {
       writes <- Ref.of[IO, List[(String, CompatibilityLevel)]](Nil)
       enrichments <- Ref.of[IO, List[String]](Nil)
+      globalReads <- Ref.of[IO, Int](0)
     } yield new FakeRegistry(
       subjects,
       schemas,
@@ -157,6 +168,7 @@ object SchemaRig {
       vanished,
       failure,
       writes,
-      enrichments
+      enrichments,
+      globalReads
     )
 }

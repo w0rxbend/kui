@@ -37,7 +37,7 @@
  */
 
 import { createMemo } from "solid-js";
-import { userMessage } from "@kui/api";
+import { userMessage, type components } from "@kui/api";
 import { createQueryCache, useKui, type QueryCache, type QueryState } from "@kui/kernel";
 
 import type { BrokerStorage } from "../chrome/StorageMeter.jsx";
@@ -51,11 +51,21 @@ import type {
 } from "../overview/model.js";
 import { pending, unknown, value, type Reading } from "../overview/reading.js";
 
-/** What the frame is given. Three answers, each of which can be missing for its own reason. */
+/** What the frame is given. Four answers, each of which can be missing for its own reason. */
 export interface ClusterFacts {
   readonly summary: Reading<ClusterSummary>;
   readonly storage: Reading<readonly BrokerStorage[]>;
   readonly counts: Reading<NavCounts>;
+  /**
+   * Every topic name on the cluster, for the drawer's tree.
+   *
+   * The names-only index and not a page of the topic list, which is the whole reason that endpoint
+   * exists: the tree's group counts are counts of the *cluster*, and folding them out of whichever
+   * twenty-five rows a list happened to return would produce a drawer whose figures changed when
+   * somebody sorted a table. Unpaged is affordable because a name is a name — four thousand of them
+   * is a few hundred kilobytes, once, shared by every screen through the same cache as the rest.
+   */
+  readonly topicNames: Reading<readonly string[]>;
 }
 
 /**
@@ -130,6 +140,18 @@ export function createClusterStore(clusterId: () => string | undefined): Cluster
       }),
   });
 
+  /* The tree's names. A seventh cache rather than a second reading off `topics` above: that one
+     asks for a single row and reads only `page.totalItems`, and widening it to carry the names
+     would make the badge — which every deployment draws — pay for the tree, which only a reader who
+     expands it ever sees. Each getter below reads only the caches it needs, so an unexpanded drawer
+     never asks for this at all. */
+  const names = createQueryCache({
+    fetch: (id: string) =>
+      api.get("/api/v1/clusters/{clusterId}/topics/names", {
+        params: { path: { clusterId: id } },
+      }),
+  });
+
   const subjects = createQueryCache({
     fetch: (id: string) =>
       api.get("/api/v1/clusters/{clusterId}/schemas/subjects", {
@@ -143,6 +165,7 @@ export function createClusterStore(clusterId: () => string | undefined): Cluster
   const topicState = watcher(topics, clusterId);
   const groupState = watcher(groups, clusterId);
   const subjectState = watcher(subjects, clusterId);
+  const nameState = watcher(names, clusterId);
 
   /*
    * Getters rather than fields, so that reading `facts.summary` inside a component's JSX is a
@@ -166,6 +189,11 @@ export function createClusterStore(clusterId: () => string | undefined): Cluster
         groups: groupState(),
         subjects: subjectState(),
       });
+    },
+    get topicNames(): Reading<readonly string[]> {
+      return readingOf(nameState(), (body) =>
+        readSection<readonly string[]>(body.names, "the topic names"),
+      );
     },
   };
 }
@@ -229,9 +257,36 @@ interface ClusterRow {
  * Each optional field is omitted rather than set to `undefined`, because the components below treat
  * a present-but-undefined field and an absent one identically only by accident — and because the
  * caption drops the parts it does not have rather than writing a dash beside a word.
+ *
+ * ## Why the argument is `unknown` and not the row's own type
+ *
+ * The generated type says `ClusterDetailResponse.cluster` is required, and it is — of every answer
+ * this endpoint produces. It is not required of every **200** the browser can receive: a reverse
+ * proxy that answers an authentication challenge with its own JSON, a gateway rewritten to a
+ * different route, or a deployment served an `index.html` under a `content-type` the client
+ * believes, all reach this line with a body that decodes and is not the envelope. This function
+ * used to read `row.summary` as its first statement, so `undefined` threw a `TypeError` inside a
+ * memo — which Solid reports as a halted reactive graph, not as a failed request, and which takes
+ * the **whole frame** away rather than the one panel that could not be read.
+ *
+ * So the identity is checked before it is used, exactly as the neighbouring readings check their
+ * sections through `readSection`. A body that is not the envelope is a reading with no value, and
+ * the drawer draws the cluster block's own "not known" rendering over it.
  */
-function summaryOf(row: ClusterRow): Reading<ClusterSummary> {
-  const section = readSection<ClusterSummaryDto>(row.summary, "the cluster summary");
+function summaryOf(row: unknown): Reading<ClusterSummary> {
+  if (typeof row !== "object" || row === null) {
+    return unknown("The cluster's own record could not be read.");
+  }
+  const record = row as Partial<ClusterRow>;
+  /* The id and the name are the head's *identity*, and the head cannot draw without them: a block
+     titled with an empty string is a rendering fault on screen, where "this cluster could not be
+     read" is a fact. The name falls back to the id — the same degradation `clusterSummaries` makes
+     — and the id falls back to nothing at all. */
+  if (typeof record.id !== "string" || record.id.length === 0) {
+    return unknown("The cluster's own record could not be read.");
+  }
+
+  const section = readSection<ClusterSummaryDto>(record.summary, "the cluster summary");
   if (section.kind !== "value") {
     /* The identity is known even when the scrape is not — it came with the row — but the head is
      * still told this is a reading it does not have, so it can draw the cluster with an unknown dot
@@ -243,8 +298,8 @@ function summaryOf(row: ClusterRow): Reading<ClusterSummary> {
   const scraped = section.value;
   const under = scraped.underReplicatedPartitionCount;
   return value({
-    id: row.id,
-    name: row.name,
+    id: record.id,
+    name: typeof record.name === "string" && record.name.length > 0 ? record.name : record.id,
     health: healthOf(scraped),
     ...(scraped.version === undefined ? {} : { version: scraped.version }),
     ...(scraped.brokerCount === undefined ? {} : { brokerCount: scraped.brokerCount }),
@@ -334,17 +389,18 @@ interface CountStates {
   readonly subjects: QueryState<SubjectPage> | undefined;
 }
 
-/** The subjects endpoint answers with the page directly: a subject list has nothing to be partial
- *  about, so it is not wrapped in a section (see `fetchSubjects` in `feature-schemas`).
+/**
+ * The subjects endpoint answers with the page directly: a subject list has nothing to be partial
+ * about, so it is not wrapped in a section (see `fetchSubjects` in `feature-schemas`).
  *
- *  A row is an object, not a bare name: the subjects endpoint was widened from `string[]` to a
- *  summary row (subject, format, version count, compatibility) and the generated types followed. The
- *  store reads only `page.totalItems` — `subject` is declared so this stays assignable from the
- *  generated page and so the next shape change is a type error here rather than an empty badge. */
-interface SubjectPage {
-  readonly items?: readonly { readonly subject: string }[] | undefined;
-  readonly page?: { readonly totalItems?: number | undefined } | undefined;
-}
+ * The **generated** page, and not a hand-written mirror of it. There was one here — an
+ * `interface SubjectPage { items?: { subject: string }[]; page?: { totalItems?: number } }` — and
+ * it is the standing example of what not to write in this repository: the subjects endpoint was
+ * widened from `string[]` to a summary row while that interface went on compiling, so the one thing
+ * a wire-shape change is supposed to do here, break, is the one thing it could not. An alias onto
+ * the generated schema costs nothing and cannot drift.
+ */
+type SubjectPage = components["schemas"]["PageDto_A"];
 
 /**
  * The counts, with a member present only for a question that has been answered.

@@ -229,11 +229,42 @@ object GoldenDocuments {
       |  "generatedAt" : "2026-09-03T10:11:13.000Z"
       |}""".stripMargin
 
+  /** A cross-entity search on a deployment that routes no schema service: two kinds of hit, one kind that
+    * could not be asked about at all, and a `subjects` key that is present and empty rather than missing.
+    *
+    * That last detail is the whole reason this document is committed. `partial` naming `schema` beside an
+    * empty `subjects` is what tells the browser to say "subjects unavailable" instead of "no subjects
+    * matched", and it is the shape the frontend's search field codes against without reading this module.
+    */
+  val search: String =
+    """{
+      |  "results" : {
+      |    "topics" : [
+      |      {
+      |        "cluster" : "prod-eu",
+      |        "name" : "orders.v1"
+      |      }
+      |    ],
+      |    "groups" : [
+      |      {
+      |        "cluster" : "prod-eu",
+      |        "groupId" : "orders-consumer"
+      |      }
+      |    ],
+      |    "subjects" : [
+      |    ]
+      |  },
+      |  "partial" : [
+      |    "schema"
+      |  ]
+      |}""".stripMargin
+
   /** Every sample, by file name, for the JVM suite to walk. */
   val all: Map[String, String] =
     Map(
       "app-info.json" -> appInfo,
       "cluster-overview.json" -> clusterOverview,
+      "search.json" -> search,
       "topic-overview.json" -> topicOverview
     )
 }

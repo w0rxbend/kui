@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { AccountMenu } from "./AccountMenu.jsx";
 import { AppearancePopover, type AppearancePreferences } from "./AppearancePopover.jsx";
+import { ACCENT_OPTIONS, DENSITY_OPTIONS, THEME_OPTIONS, appearanceHelp } from "./appearance.js";
 import { BrandBlock } from "./BrandBlock.jsx";
 import { Breadcrumb } from "./Breadcrumb.jsx";
 import { ClusterSelector } from "./ClusterSelector.jsx";
@@ -20,6 +21,7 @@ import { ClusterStatusCard } from "./ClusterStatusCard.jsx";
 import { EnvRail } from "./EnvRail.jsx";
 import { NavDrawer } from "./NavDrawer.jsx";
 import { NavItem } from "./NavItem.jsx";
+import { NotificationPanel, type Notice } from "./Notifications.jsx";
 import { SearchField } from "./SearchField.jsx";
 import { StorageMeter } from "./StorageMeter.jsx";
 import { TabStrip, createRootPreference } from "@kui/kernel";
@@ -402,11 +404,207 @@ describe("SearchField", () => {
     }
   });
 
+  /**
+   * Half an answer, reported as half an answer.
+   *
+   * The search is a fold at the gateway over three services and the distributed stack routes only
+   * two of them, so a `partial` naming the schema service is a *normal* answer. Showing the two
+   * lists that came back and nothing else would tell an operator their subject does not exist, and
+   * a false negative in a search box is indistinguishable from a true one.
+   */
+  it("names a service that could not be asked, beside the results that did arrive", () => {
+    const { container, dispose } = mount(() => (
+      <SearchField
+        value="orders"
+        onInput={() => {}}
+        status="ready"
+        results={[
+          {
+            heading: "TOPICS",
+            items: [{ id: "t", label: "orders.v1", href: "/ui/clusters/prod/topics/orders.v1" }],
+          },
+        ]}
+        unavailable={["Schema Registry"]}
+        platform="other"
+      />
+    ));
+    container.querySelector("input")!.focus();
+    flush();
+
+    expect(container.textContent).toContain("orders.v1");
+    expect(container.textContent).toContain("Schema Registry");
+    /* "missing, not empty" is the whole sentence: the reader has to know the difference between a
+       search that found nothing and a search that never asked. */
+    expect(container.textContent).toContain("missing, not empty");
+    dispose();
+  });
+
+  it("says who was not asked even when nobody answered at all", () => {
+    const { container, dispose } = mount(() => (
+      <SearchField
+        value="orders"
+        onInput={() => {}}
+        status="ready"
+        results={[]}
+        unavailable={["Schema Registry", "Topics"]}
+        platform="other"
+      />
+    ));
+    container.querySelector("input")!.focus();
+    flush();
+    expect(container.textContent).toContain("Schema Registry, Topics");
+    dispose();
+  });
+
+  it("claims the listbox role on the rows and never on the panel around them", async () => {
+    /* The sentence above sits in the same overlay as the options. A listbox whose children are not
+       options is `aria-required-children`, and it leaves a screen-reader user with a list box whose
+       announced count does not match what is in it. */
+    const { container, dispose } = mount(() => (
+      <SearchField
+        value="orders"
+        onInput={() => {}}
+        status="ready"
+        results={[{ heading: "TOPICS", items: [{ id: "t", label: "orders.v1", href: "/t" }] }]}
+        unavailable={["Schema Registry"]}
+        platform="other"
+      />
+    ));
+    container.querySelector("input")!.focus();
+    flush();
+
+    const listbox = container.querySelector('[role="listbox"]')!;
+    expect(listbox).not.toBeNull();
+    expect(listbox.textContent).not.toContain("Schema Registry");
+    // And the input still points at it, which is what makes it a combobox rather than a text field.
+    const input = container.querySelector("input")!;
+    expect(input.getAttribute("aria-controls")).toBe(listbox.id);
+
+    expect(describeViolations(await findViolations(container))).toBe("");
+    dispose();
+  });
+
+  it("does not claim the listbox role while it is showing a sentence", async () => {
+    for (const status of ["searching", "empty", "failed"] as const) {
+      const { container, dispose } = mount(() => (
+        <SearchField value="q" onInput={() => {}} status={status} platform="other" />
+      ));
+      container.querySelector("input")!.focus();
+      flush();
+      expect(container.querySelector('[role="listbox"]')).toBeNull();
+      // The element is still there, so `aria-controls` never points at nothing.
+      const input = container.querySelector("input")!;
+      const controls = CSS.escape(input.getAttribute("aria-controls")!);
+      expect(container.querySelector(`#${controls}`)).not.toBeNull();
+      dispose();
+    }
+  });
+
+  it("holds a query to the length the endpoint accepts", () => {
+    /* A 201-character `q` is a 400, and the only failure this overlay can draw says "search is not
+       answering" — a sentence that sends somebody to look at a gateway that is working. */
+    const { container, dispose } = mount(() => (
+      <SearchField value="" onInput={() => {}} maxLength={200} platform="other" />
+    ));
+    expect(container.querySelector("input")!.getAttribute("maxlength")).toBe("200");
+    dispose();
+  });
+
   it("has a real label and not only a placeholder", () => {
     const { container, dispose } = mount(() => <SearchField value="" onInput={() => {}} platform="other" />);
     const input = container.querySelector("input")!;
     const label = container.querySelector(`label[for="${input.id}"]`);
     expect(label?.textContent).toContain("Search topics");
+    dispose();
+  });
+});
+
+/**
+ * The notification panel's two axes.
+ *
+ * Everything else about this component is checked in a story, and a story is not an assertion: the
+ * shipped component picked its glyph from the *severity*, `SCREENS-V4.md` §3.9 says why that cannot
+ * draw the design, wave 2 repaired it — and replacing `glyphOf` with `SEVERITY_GLYPH[…]` afterwards
+ * left every one of the 281 shell tests green, because nothing but a Storybook page had ever looked
+ * at a glyph. These cases look at one.
+ */
+describe("the notifications panel", () => {
+  const at = new Date("2026-09-06T09:00:00.000Z");
+  const now = new Date("2026-09-06T09:05:00.000Z");
+
+  const glyphOf = (container: Element, id: string): string | null | undefined =>
+    container.querySelector(`[data-testid="notice-${id}"] [data-icon]`)?.getAttribute("data-icon");
+
+  it("draws two notices of one severity with the glyphs their categories ask for", () => {
+    /* This is `M06`'s own pair: two warnings, a rebalance and a filling disk. A component that
+       derived the glyph from the severity draws the same triangle twice and loses the half an
+       operator scans for — the severity is already in the colour. */
+    const notices: readonly Notice[] = [
+      { id: "a", severity: "warning", category: "rebalance", title: "Group is rebalancing", at },
+      { id: "b", severity: "warning", category: "storage", title: "Log directory is filling", at },
+    ];
+    const { container, dispose } = mount(() => (
+      <NotificationPanel feed={{ kind: "ready", notices }} now={now} />
+    ));
+
+    expect(glyphOf(container, "a")).toBe("refresh");
+    expect(glyphOf(container, "b")).toBe("disk");
+    expect(glyphOf(container, "a")).not.toBe(glyphOf(container, "b"));
+    dispose();
+  });
+
+  it("falls back to the severity's glyph only for a notice that recorded no category", () => {
+    /* Not a placeholder to be removed later: a notification whose category nothing recorded is a
+       real case, and inventing one for it would be worse than the generic mark — a disk icon over a
+       rebalance is a confident lie about what broke. */
+    const notices: readonly Notice[] = [
+      { id: "c", severity: "warning", title: "Something is not right", at },
+      { id: "d", severity: "warning", category: "topic", title: "Topic created", at },
+    ];
+    const { container, dispose } = mount(() => (
+      <NotificationPanel feed={{ kind: "ready", notices }} now={now} />
+    ));
+
+    expect(glyphOf(container, "c")).toBe("warning");
+    expect(glyphOf(container, "d")).toBe("topics");
+    dispose();
+  });
+
+  it("takes the tile's tone from the severity, which is the other axis", () => {
+    // The two axes are separate in both directions: one severity with two categories above, and
+    // here two severities with one category, which must not draw the same tone.
+    const notices: readonly Notice[] = [
+      { id: "e", severity: "warning", category: "cluster", title: "A broker is slow", at },
+      { id: "f", severity: "danger", category: "cluster", title: "A broker is gone", at },
+    ];
+    const { container, dispose } = mount(() => (
+      <NotificationPanel feed={{ kind: "ready", notices }} now={now} />
+    ));
+
+    const tone = (id: string) =>
+      container.querySelector(`[data-testid="notice-${id}"] .kui-icon-tile`)?.className;
+    expect(tone("e")).toContain("kui-icon-tile--warning");
+    expect(tone("f")).toContain("kui-icon-tile--danger");
+    expect(glyphOf(container, "e")).toBe(glyphOf(container, "f"));
+    dispose();
+  });
+
+  it("has no accessibility violations with a mixed feed", async () => {
+    const notices: readonly Notice[] = [
+      { id: "g", severity: "warning", category: "rebalance", title: "Group is rebalancing", at },
+      {
+        id: "h",
+        severity: "success",
+        category: "schema",
+        title: "Schema registered",
+        at,
+        read: true,
+      },
+    ];
+    const { container, dispose } = mount(() => (
+      <NotificationPanel feed={{ kind: "ready", notices }} now={now} onMarkAllRead={() => {}} />
+    ));
+    expect(describeViolations(await findViolations(container))).toBe("");
     dispose();
   });
 });
@@ -698,6 +896,34 @@ describe("the appearance popover", () => {
       }),
     };
   };
+
+  /**
+   * One vocabulary, drawn rather than duplicated.
+   *
+   * The words were written twice — here and in `pages/SettingsPage.tsx` — and had already drifted
+   * on the one option that most needed explaining: this control said "Auto" and the settings said
+   * "Match the system", which is one preference under two names with no way for a reader to tell
+   * that it is one preference. The table is published from `chrome/appearance.ts` now, and this is
+   * the case that fails if a copy grows back here.
+   */
+  it("draws the published appearance vocabulary and no words of its own", () => {
+    const chosen = preferences();
+    const { container, dispose } = mount(() => <AppearancePopover preferences={chosen} />);
+
+    const labels = (testId: string) =>
+      [...container.querySelectorAll(`[data-testid="${testId}"] label`)].map((label) =>
+        label.textContent?.trim(),
+      );
+
+    expect(labels("appearance-theme")).toEqual(THEME_OPTIONS.map((option) => option.label));
+    expect(labels("appearance-accent")).toEqual(ACCENT_OPTIONS.map((option) => option.label));
+    expect(labels("appearance-density")).toEqual(DENSITY_OPTIONS.map((option) => option.label));
+
+    /* And the sentence the short label leaves out. "Auto" is a segment, not an explanation, and
+       nobody guesses that it keeps following the system rather than resolving once at load. */
+    expect(container.textContent).toContain(appearanceHelp(THEME_OPTIONS));
+    dispose();
+  });
 
   it("offers three theme segments, because the preference has three values", async () => {
     // `SCREENS-V4.md` §7.4, settled in favour of keeping `auto`: it is the default, and it is the

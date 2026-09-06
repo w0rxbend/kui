@@ -17,7 +17,10 @@ controls consistently with the server without re-implementing the rules in anoth
   Connect, Connector, Ksql, Acl, Audit, ClientQuotas — Kafbat's eleven, verbatim; plus `Metrics`
   and `Alerts`, which are KUI's own and were added by Amendment 3, so the vocabulary is thirteen
   resources and is no longer Kafbat's verbatim; actions and `implies` per
-  `research/scala/security-research.md` §2.2), including `defaultRole`, regex `value`,
+  `research/scala/security-research.md` §2.2, with the same two qualifications — §2.2 gives `Ksql`
+  a single `EXECUTE` with no dependencies and the code has `KsqlView` as well, implied by
+  `KsqlExecute`, and the actions of `Metrics` and `Alerts` have no counterpart in §2.2 at all,
+  both by Amendment 3 below), including `defaultRole`, regex `value`,
   subject `provider/type/value/isRegex`, the connector → connect fallback and the "audit topic
   requires `Audit.View`" rule. The config keys are Kafbat's under `kui.rbac`.
 - `Rbac` in `libs/security-core` is pure and cross-compiled: `resolveRoles` (login time),

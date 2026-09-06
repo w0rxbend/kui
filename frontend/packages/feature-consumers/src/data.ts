@@ -19,6 +19,12 @@ interface GroupRowPayload {
   readonly topics?: number | null;
   readonly partitions?: number | null;
   readonly coordinatorId?: number | null;
+  /**
+   * The coordinator's address. Both halves travel together or neither does — the contract has a
+   * property asserting it — so the mapping below reads them as a pair rather than filling one in.
+   */
+  readonly coordinatorHost?: string | null;
+  readonly coordinatorPort?: number | null;
   readonly totalLag?: number | null;
   readonly excludedPartitions?: number | null;
   /**
@@ -38,13 +44,15 @@ interface GroupRowPayload {
   } | null;
 }
 
+interface GroupListPagePayload {
+  readonly page?: number;
+  readonly pageSize?: number;
+  readonly totalItems?: number;
+}
+
 interface GroupListPayload {
   readonly items: readonly GroupRowPayload[];
-  readonly page?: {
-    readonly page?: number;
-    readonly pageSize?: number;
-    readonly totalItems?: number;
-  } | null;
+  readonly page?: GroupListPagePayload | null;
 }
 
 /** The states Kafka reports. Anything else is `null` — an unknown state is not a state. */
@@ -74,6 +82,26 @@ function figure(value: number | null | undefined): number | null {
   return typeof value === "number" ? value : null;
 }
 
+/**
+ * The coordinating broker's address, as the screen prints it.
+ *
+ * `host:port` or nothing. The wire also carries `coordinatorId`, and the previous mapping fell back
+ * to `broker ${id}` when the address was absent — which reads as an address, is not one, and is
+ * indistinguishable on screen from a coordinator that answered. A broker id is not somewhere an
+ * operator can point a tool, so a row with no address says it has none and the column draws its
+ * reason.
+ */
+export function coordinatorAddress(
+  host: string | null | undefined,
+  port: number | null | undefined,
+): string | null {
+  // Both or neither: the contract asserts the two arrive together, and half an address — `kafka:`
+  // or `:9092` — is worse than none, because it looks like a value that got truncated in transit.
+  if (typeof host !== "string" || host === "") return null;
+  if (typeof port !== "number") return null;
+  return `${host}:${port}`;
+}
+
 function toGroupSummary(payload: GroupRowPayload): GroupSummary {
   return {
     groupId: payload.groupId,
@@ -82,13 +110,7 @@ function toGroupSummary(payload: GroupRowPayload): GroupSummary {
     // `topics` is not nullable on the row: a group with no subscriptions genuinely has zero, and
     // that is a fact worth printing rather than a gap.
     topics: payload.topics ?? 0,
-    // The wire gives a broker *id*; the screen wants `host:port`, which this endpoint does not
-    // carry. `null` says the coordinator is not named here rather than printing a bare number that
-    // reads like a count.
-    coordinator:
-      payload.coordinatorId === null || payload.coordinatorId === undefined
-        ? null
-        : `broker ${payload.coordinatorId}`,
+    coordinator: coordinatorAddress(payload.coordinatorHost, payload.coordinatorPort),
     // The most expensive `0` on this screen: a group with no lag is caught up, and a group whose
     // lag could not be computed is a group nobody knows about. They must not look alike.
     totalLag: figure(payload.totalLag),
@@ -105,18 +127,45 @@ function toGroupSummary(payload: GroupRowPayload): GroupSummary {
   };
 }
 
+/**
+ * Which page was asked for, and what the server said about the whole list.
+ *
+ * `totalItems` is `null` when the server did not carry one. That is not `0` and it is not the
+ * number of rows in hand: the screen has to say it does not know the cluster's figure rather than
+ * publish this page's length as if it were the total, which is what it did before this existed.
+ */
+export interface GroupPage {
+  readonly page: number;
+  readonly pageSize: number;
+  readonly totalItems: number | null;
+}
+
+/** What one page of the list costs to ask for. The server's default is 25; the screen picks 16. */
+export const DEFAULT_PAGE_SIZE = 16;
+
 export interface GroupListResult {
   readonly groups: readonly GroupSummary[];
   /** How many coordinators did not answer. Drives the voice line and the incomplete chips. */
   readonly coordinatorsMissing: number;
+  /** The server's own account of where this page sits. Never derived from `groups.length`. */
+  readonly page: GroupPage;
 }
+
+export interface GroupQuery {
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+/** The query a page-one request makes, so callers that do not page still name a page. */
+export const FIRST_PAGE: GroupQuery = { page: 1, pageSize: DEFAULT_PAGE_SIZE };
 
 export async function fetchGroups(
   api: KuiApiClient,
   clusterId: string,
+  query: GroupQuery = FIRST_PAGE,
 ): Promise<Fetched<GroupListResult>> {
   const answer = await api.get("/api/v1/clusters/{clusterId}/consumer-groups", {
-    params: { path: { clusterId } },
+    params: { path: { clusterId }, query: { page: query.page, pageSize: query.pageSize } },
   });
   if (!answer.ok) return apiFailure(answer.error);
 
@@ -131,7 +180,24 @@ export async function fetchGroups(
   return fromSection(section, (listing) => ({
     groups: listing.items.map(toGroupSummary),
     coordinatorsMissing: missing,
+    page: pageOf(listing.page, query),
   }));
+}
+
+/**
+ * The server's page block, or the request's own figures where it said nothing.
+ *
+ * The request's `page` and `pageSize` are safe to fall back on: they are what this browser asked
+ * for, so they describe the request even when the answer does not. `totalItems` has no such
+ * fallback — nothing in this response knows how many groups the cluster has — so it stays `null`
+ * and the screen says so in words.
+ */
+function pageOf(payload: GroupListPagePayload | null | undefined, query: GroupQuery): GroupPage {
+  return {
+    page: figure(payload?.page) ?? query.page,
+    pageSize: figure(payload?.pageSize) ?? query.pageSize,
+    totalItems: figure(payload?.totalItems),
+  };
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -180,6 +246,8 @@ interface GroupDetailPayload {
   readonly isSimple?: boolean;
   readonly partitionAssignor?: string | null;
   readonly coordinatorId?: number | null;
+  readonly coordinatorHost?: string | null;
+  readonly coordinatorPort?: number | null;
   readonly members?: readonly MemberPayload[];
   readonly topics?: readonly GroupTopicPayload[];
   readonly totalLag?: number | null;
@@ -239,12 +307,7 @@ export async function fetchGroup(
     value: {
       groupId: payload.groupId,
       state: stateOf(payload.state),
-      // The wire gives a broker id, not a `host:port`; saying "broker 1" is honest where printing a
-      // bare number would read as a count.
-      coordinator:
-        payload.coordinatorId === null || payload.coordinatorId === undefined
-          ? null
-          : `broker ${payload.coordinatorId}`,
+      coordinator: coordinatorAddress(payload.coordinatorHost, payload.coordinatorPort),
       partitionAssignor: payload.partitionAssignor ?? "",
       protocol: payload.protocol ?? "UNKNOWN",
       isSimple: payload.isSimple === true,

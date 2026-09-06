@@ -46,7 +46,7 @@
  */
 import type { KuiApiClient } from "@kui/api";
 import { apiFailure, figure, type Fetched } from "@kui/kernel";
-import { fetchGroups, stateOf } from "./data.js";
+import { FIRST_PAGE, fetchGroups, stateOf, type GroupQuery } from "./data.js";
 import type { GroupSummary } from "./model.js";
 
 /** One group's changed figures. Everything is nullable here because everything can be unreadable. */
@@ -157,6 +157,18 @@ export async function fetchLagDelta(
  * variations on each other: one updates three fields in place, and the other says the incremental
  * protocol cannot continue and the caller must pay for a whole list.
  */
+/**
+ * The two figures only a whole list carries.
+ *
+ * A lag answer names neither: it does not say how many coordinators failed and it does not count
+ * the cluster's groups. So a merge hands back `null` here and the screen keeps what it had, rather
+ * than resetting a total to zero every thirty seconds.
+ */
+export interface ListingFigures {
+  readonly coordinatorsMissing: number;
+  readonly totalItems: number | null;
+}
+
 export type LagMerge =
   | { readonly kind: "merged"; readonly rows: readonly GroupSummary[] }
   | { readonly kind: "needs-full-list"; readonly reason: string };
@@ -234,7 +246,8 @@ export function pollLag(
   api: KuiApiClient,
   clusterId: string,
   rows: () => readonly GroupSummary[],
-  onRows: (next: readonly GroupSummary[], coordinatorsMissing: number | null) => void,
+  onRows: (next: readonly GroupSummary[], listing: ListingFigures | null) => void,
+  query: GroupQuery = FIRST_PAGE,
 ): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -246,9 +259,15 @@ export function pollLag(
   };
 
   const fullList = async (): Promise<void> => {
-    const answer = await fetchGroups(api, clusterId);
+    // The page on screen, not the first one. A refetch that silently went back to page 1 would
+    // replace the rows the operator is reading with different groups and leave the paginator
+    // saying they are still on page 4.
+    const answer = await fetchGroups(api, clusterId, query);
     if (stopped || answer.kind !== "ready") return;
-    onRows(answer.value.groups, answer.value.coordinatorsMissing);
+    onRows(answer.value.groups, {
+      coordinatorsMissing: answer.value.coordinatorsMissing,
+      totalItems: answer.value.page.totalItems,
+    });
   };
 
   const tick = async (): Promise<void> => {

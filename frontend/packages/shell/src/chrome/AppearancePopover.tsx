@@ -13,6 +13,11 @@
  * They arrive as props for the reason the settings page states: a test that drove the singletons
  * would share `localStorage` with the next suite and would need a browser that has one.
  *
+ * The *words* are shared too, and separately: the option lists come from `chrome/appearance.ts`
+ * rather than being written here. They were written here once, and the copy drifted — this popover
+ * called the default theme "Auto" and the settings page called it "Match the system", which is one
+ * preference under two names and no way for a reader to tell that it is one preference.
+ *
  * ## There is no OK and no Cancel
  *
  * `SCREENS-V4.md` §3.10 draws neither, and that is right rather than an omission. Each control is
@@ -41,8 +46,15 @@
  * colour-blind operator can actually operate.
  */
 import type { JSX } from "@solidjs/web";
+import { Show } from "solid-js";
 import { SegmentedControl } from "@kui/kernel";
 import type { AccentChoice, DensityChoice, RootPreference, ThemeChoice } from "@kui/kernel";
+import {
+  ACCENT_OPTIONS,
+  DENSITY_OPTIONS,
+  THEME_OPTIONS,
+  appearanceHelp,
+} from "./appearance.js";
 
 /**
  * The three preferences the popover writes.
@@ -63,25 +75,6 @@ export interface AppearancePopoverProps {
   readonly onClose?: (() => void) | undefined;
 }
 
-const THEMES = [
-  /* `auto` first, because it is the default and the right answer for most people. The label says
-     what it does rather than what it is called: "Auto" alone is a word nobody can act on. */
-  { value: "auto", label: "Auto" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-] as const satisfies readonly { readonly value: ThemeChoice; readonly label: string }[];
-
-const ACCENTS = [
-  { value: "blue", label: "Blue" },
-  { value: "teal", label: "Teal" },
-  { value: "green", label: "Green" },
-  { value: "amber", label: "Amber" },
-] as const satisfies readonly { readonly value: AccentChoice; readonly label: string }[];
-
-const DENSITIES = [
-  { value: "comfortable", label: "Comfortable" },
-  { value: "compact", label: "Compact" },
-] as const satisfies readonly { readonly value: DensityChoice; readonly label: string }[];
 
 export function AppearancePopover(props: AppearancePopoverProps): JSX.Element {
   return (
@@ -107,7 +100,7 @@ export function AppearancePopover(props: AppearancePopoverProps): JSX.Element {
         </p>
         <SegmentedControl
           label="Accent colour"
-          segments={ACCENTS}
+          segments={ACCENT_OPTIONS}
           value={props.preferences.accent.choice()}
           onChange={(chosen) => props.preferences.accent.select(chosen)}
           size="sm"
@@ -122,18 +115,20 @@ export function AppearancePopover(props: AppearancePopoverProps): JSX.Element {
         </p>
         <SegmentedControl
           label="Theme"
-          segments={THEMES}
+          segments={THEME_OPTIONS}
           value={props.preferences.theme.choice()}
           onChange={(chosen) => props.preferences.theme.select(chosen)}
           size="sm"
           stretch
           testId="appearance-theme"
         />
-        {/* Worth the line: nobody guesses that "Auto" keeps following the system rather than
-            resolving once at load, and it is the default, so it is the one most people are on. */}
-        <p class="kui-appearance__help">
-          Auto follows the system, including when it changes at sunset.
-        </p>
+        {/* The sentence comes from the shared vocabulary rather than being written here, so that
+            this popover and the settings page explain `auto` in the same words. See
+            `chrome/appearance.ts` for why the segment says "Auto" and the sentence has the rest.
+        */}
+        <Show when={appearanceHelp(THEME_OPTIONS)}>
+          {(help) => <p class="kui-appearance__help">{help()}</p>}
+        </Show>
       </div>
 
       <div class="kui-appearance__field">
@@ -142,7 +137,7 @@ export function AppearancePopover(props: AppearancePopoverProps): JSX.Element {
         </p>
         <SegmentedControl
           label="Density"
-          segments={DENSITIES}
+          segments={DENSITY_OPTIONS}
           value={props.preferences.density.choice()}
           onChange={(chosen) => props.preferences.density.select(chosen)}
           size="sm"

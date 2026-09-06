@@ -14,7 +14,7 @@ import kui.kernel.{BrokerId, ClusterId, KafkaClusterId}
 
 /** How much of a stated window a cluster had an active controller.
   *
-  * The window travels with the figure because the figure is meaningless without it: "99.98 %" is a claim
+  * The window travels with the figure because the figure is meaningless without it: "99.72 %" is a claim
   * about a period, and a browser that printed "over the last 6h" from a literal of its own would keep
   * printing it the day the window was retuned. The label is built from `windowSeconds`.
   *

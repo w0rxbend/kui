@@ -58,6 +58,18 @@ kui:
         url: "http://kui-metrics:8080"
         timeout: "10s"
         maxConcurrent: 32
+      # The sixth and last contract the gateway holds. It was missing from this list for a whole
+      # milestone: `services/schema` was in `ServiceContracts.byService`, had a container image
+      # nothing built, and appeared in neither this file nor `docker-compose.yml` — so the gateway
+      # published none of its routes and every schema screen reached a 404. That is the same defect
+      # the `metrics` block above was written to close, one service over, and it survived because
+      # the smoke test compared the configured addresses against the running containers and never
+      # against the contracts. It now derives all three sets, so an unaddressed contract fails the
+      # stack rather than quietly costing a screen.
+      schema:
+        url: "http://kui-schema:8080"
+        timeout: "10s"
+        maxConcurrent: 32
 
     # How often the gateway asks each service whether it is ready, to keep the capability registry
     # (and therefore the greyed-out parts of the UI) current.

@@ -178,3 +178,18 @@ export const SPARSE_SUMMARY: OverviewData = {
     }),
   ),
 };
+
+/**
+ * Directories that answered, and answered zero.
+ *
+ * The state that sits between `HEALTHY` and `NO_DISK_SIZES` and belongs to neither: both figures
+ * are present, so the skip rule does not skip anything, and the disk is nevertheless a quantity
+ * nothing can be divided by. It is a real answer — a directory read while a volume was being
+ * remounted reports it — and it is the fixture the storage card and the broker-health bar have to
+ * agree about, because they used to disagree here and nowhere else: the bar refused with a reason
+ * while the card printed `0 B of 0 B`.
+ */
+export const ZERO_BYTE_DISKS: OverviewData = {
+  ...HEALTHY,
+  logDirs: value(LOG_DIRS.map((dir) => ({ ...dir, totalBytes: 0, usableBytes: 0 }))),
+};

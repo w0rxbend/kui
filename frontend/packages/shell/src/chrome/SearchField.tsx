@@ -26,6 +26,23 @@ import { Icon } from "@kui/kernel";
  * If the search service is unavailable, the field stays enabled and typing produces a single row
  * saying so, with a retry. Disabling the box would teach the operator that the shortcut is broken
  * and they would stop reaching for it; a box that explains itself is a box they will try again.
+ *
+ * ## Half an answer says which half is missing
+ *
+ * The search is a fold at the gateway over three services, and one of them not being routed is a
+ * *normal* deployment rather than a failure — the distributed stack has no schema service. So the
+ * overlay can hold results and a line naming what was not asked at the same time, which is what
+ * {@link SearchFieldProps.unavailable} is for. Dropping the line and showing the two lists that did
+ * answer would tell an operator their subject does not exist, and there is no way to tell that
+ * answer from a true one.
+ *
+ * ## The listbox is the results element, not the panel
+ *
+ * `role="listbox"` sits on the element that holds the option rows and nothing else. It used to be
+ * on the whole overlay, which was fine while the overlay held only rows and stops being fine the
+ * moment there is a sentence beside them: a listbox whose children are not options is what
+ * `aria-required-children` reports, and it leaves a screen-reader user with a list box that
+ * announces a count that does not match what is in it.
  */
 export type SearchResultGroup = {
   readonly heading: string;
@@ -45,6 +62,15 @@ export type SearchFieldProps = {
   readonly onInput: (value: string) => void;
   readonly placeholder?: string | undefined;
   /**
+   * The longest query the box accepts, when the caller has a limit.
+   *
+   * The shell passes the search endpoint's own maximum. It is a `maxlength` on the input rather
+   * than a validation message because the endpoint answers a longer `q` with a 400, and the only
+   * failure this overlay can draw says "search is not answering" — which is a sentence that sends
+   * somebody to look at a gateway that is working.
+   */
+  readonly maxLength?: number | undefined;
+  /**
    * What to show under the field once it is focused and has text. `undefined` means "nothing has
    * been asked for yet"; an empty array means "we asked and there is nothing", and those are
    * different pictures — see the `status` prop.
@@ -57,6 +83,14 @@ export type SearchFieldProps = {
    * so — and each of those wants a different next action.
    */
   readonly status?: "idle" | "searching" | "ready" | "empty" | "failed" | undefined;
+  /**
+   * The services that could not be asked, in words — "Schema Registry", not "schema".
+   *
+   * Reported rather than omitted, and reported *beside* the results rather than instead of them:
+   * the two lists that answered are still worth showing, and a reader who searched for a subject
+   * has to know that the registry was not among them. Empty or absent means everybody answered.
+   */
+  readonly unavailable?: readonly string[] | undefined;
   readonly onRetry?: (() => void) | undefined;
   /** Overrides platform detection. Stories set it; the product does not. */
   readonly platform?: "apple" | "other" | undefined;
@@ -115,6 +149,7 @@ export function SearchField(props: SearchFieldProps) {
           type="search"
           autocomplete="off"
           spellcheck={false}
+          maxlength={props.maxLength}
           placeholder={props.placeholder ?? "Search topics, groups, anything…"}
           value={props.value}
           role="combobox"
@@ -146,13 +181,6 @@ export function SearchField(props: SearchFieldProps) {
 
       <div
         class={["kui-global-search__results", { "kui-global-search__results--open": open() }]}
-        id={listboxId}
-        /* The listbox role is claimed only when there are options to put in it. A listbox whose
-         * children are a spinner or a sentence is a lie to the accessibility tree, and it is the
-         * kind of lie that makes a screen reader announce "list box, zero items" over a panel that
-         * plainly says why it is empty. */
-        role={status() === "ready" ? "listbox" : undefined}
-        aria-label="Search results"
         hidden={!open()}
       >
         <Show when={status() === "failed"}>
@@ -178,24 +206,54 @@ export function SearchField(props: SearchFieldProps) {
             Nothing matches “{props.value}”.
           </p>
         </Show>
-        <Show when={status() === "ready"}>
-          <For each={props.results ?? []}>
-            {(group) => (
-              <div class="kui-global-search__group" role="group" aria-label={group.heading}>
-                <p class="kui-global-search__group-heading">{group.heading}</p>
-                <For each={group.items}>
-                  {(item) => (
-                    <a class="kui-global-search__result" href={item.href} role="option" aria-selected="false">
-                      <span class="kui-global-search__result-label">{item.label}</span>
-                      <Show when={item.detail}>
-                        <span class="kui-global-search__result-detail">{item.detail}</span>
-                      </Show>
-                    </a>
-                  )}
-                </For>
-              </div>
-            )}
-          </For>
+        {/* Always present, so that the `aria-controls` above never points at an element that is not
+            in the document. The listbox *role* is claimed only when there are options to put in it:
+            a listbox whose children are a spinner or a sentence is a lie to the accessibility tree,
+            and it is the kind of lie that makes a screen reader announce "list box, zero items"
+            over a panel that plainly says why it is empty. */}
+        {/* A plain block with no styling of its own: the overlay above is the box, and this exists
+            only to draw the boundary the accessibility tree needs. */}
+        <div
+          id={listboxId}
+          role={status() === "ready" ? "listbox" : undefined}
+          /* Named only while it is a listbox. `aria-label` on a plain `div` is
+             `aria-prohibited-attr`: an element with no role has nothing for a name to be the name
+             of, and axe reports it as a violation rather than as a nicety. */
+          aria-label={status() === "ready" ? "Search results" : undefined}
+        >
+          <Show when={status() === "ready"}>
+            <For each={props.results ?? []}>
+              {(group) => (
+                <div class="kui-global-search__group" role="group" aria-label={group.heading}>
+                  <p class="kui-global-search__group-heading">{group.heading}</p>
+                  <For each={group.items}>
+                    {(item) => (
+                      <a
+                        class="kui-global-search__result"
+                        href={item.href}
+                        role="option"
+                        aria-selected="false"
+                      >
+                        <span class="kui-global-search__result-label">{item.label}</span>
+                        <Show when={item.detail}>
+                          <span class="kui-global-search__result-detail">{item.detail}</span>
+                        </Show>
+                      </a>
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
+          </Show>
+        </div>
+
+        {/* Outside the listbox, for the reason the header gives, and outside the `ready` guard as
+            well: a search that reached nobody at all still has to say who was not reached. */}
+        <Show when={(props.unavailable ?? []).length > 0}>
+          <p class="kui-global-search__partial" role="status">
+            Not searched: {(props.unavailable ?? []).join(", ")}. Results from{" "}
+            {(props.unavailable ?? []).length === 1 ? "it" : "them"} are missing, not empty.
+          </p>
         </Show>
       </div>
     </div>

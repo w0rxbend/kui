@@ -176,6 +176,17 @@
   outline-offset: 2px;
 }
 
+/* The line under the results naming a service the fold could not ask. A rule above it rather than
+ * a tone: it is not a failure — the distributed stack routes no schema service by design — and
+ * colouring it amber would teach the reader that a normal deployment is broken. */
+.kui-global-search__partial {
+  padding: var(--kui-space-2) var(--kui-space-3);
+  margin: var(--kui-space-2) 0 0;
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+  border-top: 1px solid var(--kui-color-border);
+}
+
 /* The search overlay's skeleton rows. The `.kui-skeleton` block itself belongs to the kernel
  * (`28-surfaces.css`) and is used here rather than redeclared: two skeletons in one stylesheet
  * means two shimmer speeds on one screen, and the second one always looks like a fault. Only the

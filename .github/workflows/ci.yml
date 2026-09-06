@@ -72,6 +72,11 @@ jobs:
     # so all three checks run on every push. When one fails, the fix is to run the matching
     # generator and commit the result: `./mill __.openApi`, `./mill docs.errorCodes` and
     # `./mill frontend.apiConstants`.
+    #
+    # The fourth step is here for the same reason with a different mechanism: a count a document
+    # publishes about itself is derived from the repository as surely as a generated file is; it
+    # just happens to be maintained by hand. Its repair is an edit rather than a generator run, and
+    # the script prints the figure that would make each disagreeing sentence true.
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
@@ -84,6 +89,14 @@ jobs:
       # them, so a rename on the server becomes a diff here rather than a 403 nobody can explain.
       - name: Check the committed browser constants
         run: ./mill frontend.apiConstants --check
+      # Not a generated file, but the same failure: a figure a document publishes about itself, and
+      # nothing comparing it to the thing it counts. `docs/FEATURE_MATRIX.md`'s state totals, the
+      # percentage `README.md` repeats, the merged document's operation and path counts in ADR-048
+      # and `frontend/packages/api/README.md`, and `DEPENDENCY_MATRIX.md`'s row per dependency were
+      # all correct when written and all drifted, because the commands offered for checking them
+      # printed numbers for a person to compare rather than comparing them.
+      - name: Check every count the repository publishes about itself
+        run: ./scripts/feature-matrix-check.sh
 
   test:
     name: unit + property + contract tests
@@ -256,20 +269,38 @@ jobs:
   compose:
     name: distributed stack + fault isolation
     runs-on: ubuntu-latest
-    # Assembles five jars and builds five container images before it runs anything. Twenty-five
-    # minutes is a backstop against a hung build, not a budget.
+    # Assembles a jar and builds a container image for the gateway and for each of the six services
+    # the distributed stack runs. Twenty-five minutes is a backstop against a hung build, not a
+    # budget.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build
 
-      # The smoke test stops one container of the distributed stack, so all five images have to
-      # exist. They are built here rather than pulled: the point is to check the artefacts this
-      # commit produces, and a pulled image would be somebody else's commit. Note the braces —
-      # `./mill a b` passes `b` as an argument to `a` rather than running both, which is the same
-      # trap that once made the test job run no tests.
+      # Every image the stack names, derived from the file that names them rather than listed here.
+      #
+      # This step used to carry a literal list of five while `docker-compose.yml` ran six, and the
+      # sixth — `kui-metrics` — has an `image:` and no `build:` and is published to no registry, so
+      # the job could not get it at all: `docker compose pull kui-metrics` answers `pull access
+      # denied, repository does not exist`. The stack came up on the machine of whoever had run
+      # `./mill deployment.docker.metrics.docker.build` by hand and nowhere else. The packet that
+      # added the container and the packet that owned this file were different packets, which is
+      # precisely the situation a derived list is for: adding a service to the compose file now adds
+      # it here too, with nobody remembering anything.
+      #
+      # `kui-frontend` is excluded because it is the one image Compose builds itself — Mill never
+      # builds a browser bundle — and `smoke.sh` excludes it from its own check for that reason.
+      #
+      # The braces matter: `./mill a b` passes `b` as an argument to `a` rather than running both,
+      # which is the same trap that once made the test job run no tests.
       - name: Build the container images the distributed stack runs
-        run: ./mill '{deployment.docker.gateway,deployment.docker.cluster,deployment.docker.topic,deployment.docker.message,deployment.docker.consumer}.docker.build'
+        run: |
+          images=$(grep -oE 'image: kui-[a-z]+:' deployment/compose/docker-compose.yml |
+                   sed 's/image: kui-//; s/:$//' | grep -v '^frontend$' | sort -u)
+          [ -n "$images" ] || { echo "no kui-* image is named in docker-compose.yml"; exit 1; }
+          echo "building: $images"
+          targets=$(for image in $images; do printf 'deployment.docker.%s,' "$image"; done)
+          ./mill "{${targets%,}}.docker.build"
 
       # The script's own `fail` prints the stack's state before it exits, so this job's diagnostics
       # are its stdout and there is no artifact upload here. The one that used to sit here pointed

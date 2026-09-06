@@ -7,8 +7,21 @@ import kui.kernel.{Page, PageRequest, SortOrder, Subject}
   * Search is a case-insensitive substring match over the subject name and nothing else. It is not a regular
   * expression and not a fuzzy match, because a subject name is a machine-generated string an operator pastes
   * — `orders-value` — and the search that surprises them least is the one that finds exactly what they typed.
+  *
+  * @param countOnly
+  *   the caller wants the total and no rows. It is a separate flag rather than a page size of zero because
+  *   [[kui.kernel.PageSize]] is 1..500 by construction, and widening that type so one endpoint could express
+  *   "none" would let every other list ask for a page that cannot be rendered. The rows a page carries are
+  *   what bounds this endpoint's fan-out — three registry requests each — so a caller that only wants
+  *   `totalItems` (the drawer's schema badge is the one in this product) can say so and pay for the subject
+  *   list alone.
   */
-final case class SubjectQuery(search: Option[String], order: SortOrder, page: PageRequest)
+final case class SubjectQuery(
+    search: Option[String],
+    order: SortOrder,
+    page: PageRequest,
+    countOnly: Boolean = false
+)
 
 object SubjectQuery {
 
@@ -87,7 +100,11 @@ object SubjectCatalog {
       case SortOrder.Desc => matching.sortBy(_.value).reverse
     }
 
-    Page.of(sorted, query.page)
+    // A count-only request is still counted after filtering: the total is the whole point of it, and it is
+    // the same number the first page of the same query would have reported. The echoed page size is the zero
+    // that was asked for, which `PageInfo.pageCount` already reads as "one page" rather than dividing by it.
+    if query.countOnly then Page.of(sorted, query.page).copy(items = Nil, pageSize = 0)
+    else Page.of(sorted, query.page)
   }
 
   /** The subject a topic's keys or values are registered under, by the default `TopicNameStrategy`.

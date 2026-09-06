@@ -12,6 +12,8 @@
                     "topics": 1,
                     "partitions": 12,
                     "coordinatorId": 1,
+                    "coordinatorHost": "kafka",
+                    "coordinatorPort": 9092,
                     "totalLag": 0,
                     "pace": 0.0,
                     "excludedPartitions": 0,
@@ -26,6 +28,8 @@
                     "topics": 1,
                     "partitions": 6,
                     "coordinatorId": 1,
+                    "coordinatorHost": "kafka",
+                    "coordinatorPort": 9092,
                     "totalLag": 9,
                     "pace": 0.0,
                     "excludedPartitions": 0,
@@ -40,6 +44,8 @@
                     "topics": 1,
                     "partitions": 3,
                     "coordinatorId": 1,
+                    "coordinatorHost": "kafka",
+                    "coordinatorPort": 9092,
                     "totalLag": 0,
                     "pace": 0.0,
                     "excludedPartitions": 0,
@@ -54,7 +60,7 @@
                 "nextPageToken": null
             }
         },
-        "fetchedAt": "2026-09-05T15:59:46.514Z"
+        "fetchedAt": "2026-09-06T15:37:33.358Z"
     },
     "incompleteCoordinators": 0
 }

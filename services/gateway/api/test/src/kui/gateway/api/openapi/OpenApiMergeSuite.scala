@@ -53,7 +53,10 @@ final class OpenApiMergeSuite extends FunSuite {
         "/api/v1/clusters/{clusterId}/refresh",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream",
         "/api/v1/clusters/{clusterId}/topics/{topicName}/overview",
-        "/api/v1/info"
+        "/api/v1/info",
+        // Cross-entity search: the gateway's own endpoint, with no service behind it at all — it folds
+        // over three services' list endpoints rather than proxying any of them (ADR-049).
+        "/api/v1/search"
       )
     )
   }

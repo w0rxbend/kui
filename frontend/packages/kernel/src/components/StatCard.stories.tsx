@@ -7,9 +7,11 @@ import { Sparkline } from "./charts/Sparkline.jsx";
 /**
  * The four cards across the top of the dashboard.
  *
- * The stories that matter here are the last five: a zero, an unknown, a pending value and the two
- * extremes. `0` and `—` mean opposite things, and the whole point of this component is that they
- * cannot be confused — which is only checkable by looking at them next to each other.
+ * The stories that matter here are `ZeroPendingAndUnknown` and `TheExtremes`: a zero, an unknown,
+ * a pending value and the two ends of the range. `0` and `—` mean opposite things, and the whole
+ * point of this component is that they cannot be confused — which is only checkable by looking at
+ * them next to each other. (They were the last stories in the file when this was written; the
+ * micro-visual stories have since been added after them, so they are named rather than counted.)
  */
 const meta: Meta<typeof StatCard> = {
   title: "Surfaces/StatCard",
@@ -229,7 +231,13 @@ const STRIP = "60px";
  *
  * The thing to check is that the pill did not go anywhere. The visual and the pill answer
  * different questions — the pill says whether the number is all right now, the visual says how it
- * got here — and six of the design's eight cards carry both.
+ * got here — so all eight drawn here carry both.
+ *
+ * A sentence claiming "six of the design's eight cards carry both" stood in this paragraph and
+ * counted nothing. `SCREENS-V4.md` §3.2 lists four parts — icon tile, figure with unit, label,
+ * micro-visual — and a pill is not among them, so none of the design's cards carries one and no
+ * count of them can be right. The pill is KUI's own; `StatCard.tsx` is where that is argued, and
+ * this story drawing both on all eight is the reading that argument arrives at.
  */
 export const WithVisuals: Story = {
   parameters: { layout: "fullscreen" },

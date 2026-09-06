@@ -20,6 +20,56 @@ test.describe("the schema registry", () => {
     await expect(page.locator("body")).toContainText(/accept a schema that breaks existing readers/i);
   });
 
+  test("draws the subject's name, and never the object the wire now sends", async ({ page }) => {
+    /*
+     * The regression this file caught and nothing else did. `GET …/schemas/subjects` was widened
+     * from `items: string[]` to a summary row per subject; the browser's mapping went on handing the
+     * list whatever `items` held, and for a day the screen rendered `[object Object]` — in the link
+     * text and in its href. `tsc` could not see it because the answer was cast, and the package's
+     * own tests could not see it because the recorded fixture still held strings.
+     *
+     * So this asserts both halves: the name is on the page, and the object is nowhere on it. The
+     * second half is what fails when a mapping starts passing rows through, because a row stringifies
+     * to something that reads as a value.
+     */
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas`);
+    const link = page.getByRole("link", { name: /orders\.avro-value/ }).first();
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", /orders\.avro-value/);
+    await expect(page.locator("body")).not.toContainText("[object Object]");
+  });
+
+  test("says whether a subject's level is its own or the registry's", async ({ page }) => {
+    /*
+     * The distinction the whole feature turns on. A subject either has a compatibility level of its
+     * own or follows the registry's global one, and the second group moves — every subject in it, at
+     * once — the next time anybody changes the global level. A screen that shows the inherited level
+     * as though it were the subject's own tells an operator the global change is safe here, when
+     * this is exactly the subject it will move.
+     */
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas/orders.avro-value`);
+    await expect(page.locator("body")).toContainText(
+      /inherited from the registry's global level|set on this subject/,
+    );
+  });
+
+  test("selecting a subject changes the address and keeps the list beside it", async ({ page }) => {
+    /*
+     * Two panes, not two pages (§3.15). Reading a registry is comparing one subject's level against
+     * the next one's, and a subject screen that replaces the list turns every comparison into a
+     * navigation. The address carrying the selection is what makes a pasted link open the pane it
+     * names rather than the list with instructions attached.
+     */
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas`);
+    await expect(page.getByText("No subject selected.")).toBeVisible();
+
+    await page.getByRole("link", { name: /orders\.avro-value/ }).first().click();
+
+    await expect(page).toHaveURL(/\/schemas\/orders\.avro-value/);
+    await expect(page.getByRole("heading", { name: "Subjects" })).toBeVisible();
+    await expect(page.getByText(/schema id/i).first()).toBeVisible();
+  });
+
   test("keeps a subject's schema id apart from its version", async ({ page }) => {
     // They are different numbers, and it is the *id* a record's header carries — a record carries no
     // version at all. Conflating them sends somebody looking for "version 5" in a registry whose

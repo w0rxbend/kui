@@ -345,6 +345,28 @@ a.kui-brkcard__name:hover {
   min-width: 0;
 }
 
+/* The sentence under a disk bar with no percentage in it.
+ *
+ * Small and muted, and always beneath the bar rather than beside it: an empty track next to an em
+ * dash reads as an empty disk, and this is the line that says which of the two silences it is. It
+ * wraps, so the card grows rather than the sentence being clipped — a truncated explanation is
+ * worse than none, because the reader believes they have read it. */
+.kui-brkcard__disk-note {
+  margin: var(--kui-space-1) 0 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
+}
+
+/* Where the design's `uptime 41d` tag would be, saying why there is not one. Sits under the tag row
+ * rather than in it: a tag is this product's shape for a fact about the broker, and "we cannot
+ * measure this" is a fact about KUI. */
+.kui-brkcard__tag-note {
+  margin: calc(-1 * var(--kui-space-2)) 0 var(--kui-space-4);
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-muted);
+}
+
 .kui-brkcard__toggle {
   display: flex;
   align-items: center;

@@ -8,6 +8,7 @@ import {
   fetchBrokerConfigs,
   fetchBrokerLogDirs,
   fetchBrokers,
+  fetchClusterDisks,
   fetchClusters,
 } from "./data.js";
 
@@ -107,13 +108,16 @@ describe("the recorded broker list", () => {
     // `replicaCount` on the wire, not `replicaPartitions`. This is the assertion that fails if
     // somebody "tidies" the field names back to the plausible ones.
     expect(broker.replicaPartitions).toBe(86);
-    // `diskUsageBytes`, not `diskUsedBytes`.
-    expect(broker.diskUsedBytes).toBe(58949);
+    // `diskUsageBytes`, and it is what Kafka *holds* — not how full the disk is. The two live in
+    // separate fields because the second needs a capacity this endpoint does not carry.
+    expect(broker.heldBytes).toBe(58949);
 
-    // Genuinely absent on this cluster, and absent for two different reasons: `leaderCount` is null
-    // on a single-broker cluster, and the endpoint carries no disk total or per-broker out-of-sync
-    // count at all. All three must be `null` — a `0` would be a claim nobody made.
+    // Genuinely absent on this cluster, and absent for three different reasons: `leaderCount` is
+    // null on a single-broker cluster, the endpoint carries no per-broker out-of-sync count at all,
+    // and the disk's size and usage come from the log directories rather than from here. All four
+    // must be `null` — a `0` would be a claim nobody made.
     expect(broker.leaderPartitions).toBeNull();
+    expect(broker.diskUsedBytes).toBeNull();
     expect(broker.diskTotalBytes).toBeNull();
     expect(broker.outOfSyncReplicas).toBeNull();
   });
@@ -206,6 +210,29 @@ describe("the recorded log directories", () => {
      */
     expect(dir?.sizeBytes).toBeGreaterThan(1_000_000);
     expect(dir?.sizeBytes).toBeLessThan(1_000_000_000);
+  });
+
+  it("reads a broker's disk capacity out of the same document", async () => {
+    /*
+     * The other half of this document, and the half that turns a bar into a percentage.
+     *
+     * `totalBytes` and `usableBytes` describe the *filesystem*, so `totalBytes - usableBytes` is
+     * how full the disk is — everything on it, not only Kafka's 32 MB. That is the right numerator
+     * for "is this broker about to run out of disk", which is the question the card's 75% and 90%
+     * thresholds exist to answer, and it is the same arithmetic the shell's storage meter does, so
+     * the percentage here and the percentage in the drawer cannot disagree.
+     *
+     * Recorded, because the field names are the whole risk: `sizeBytes` is a replica's, `totalBytes`
+     * is the filesystem's, and reading the wrong one draws a broker sitting on half a terabyte of
+     * Kafka data or one that is permanently 0% full.
+     */
+    const answer = await fetchClusterDisks(client(logDirsDocument), "development");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+
+    const [disk] = answer.value;
+    expect(disk?.brokerId).toBe(1);
+    expect(disk?.capacityBytes).toBe(503_316_811_776);
+    expect(disk?.usedBytes).toBe(503_316_811_776 - 199_708_225_536);
   });
 
   it("gives an unreadable directory no size at all", async () => {

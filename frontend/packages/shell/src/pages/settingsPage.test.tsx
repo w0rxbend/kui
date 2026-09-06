@@ -15,12 +15,33 @@
  * observable without sharing `localStorage` with the next suite.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { flush } from "solid-js";
 import type { AccentChoice, DensityChoice, ThemeChoice } from "@kui/kernel";
 
+import type { RootPreference } from "@kui/kernel";
+
 import { SettingsPage, type Preference } from "./SettingsPage.jsx";
-import { mount } from "../chrome/testing.js";
+import { AppearancePopover } from "../chrome/AppearancePopover.jsx";
+import { THEME_OPTIONS, appearanceHelp } from "../chrome/appearance.js";
+import { mount, type Mounted } from "../chrome/testing.js";
+
+/**
+ * Every container this file mounted, torn down after the case whatever the case did.
+ *
+ * The cases below that predate it dispose by hand at the end of the body, which stops happening the
+ * moment one of them fails. `afterEach` runs after a throw.
+ */
+const mounted: Mounted[] = [];
+
+afterEach(() => {
+  for (const each of mounted.splice(0)) each.dispose();
+});
+
+const keep = (m: Mounted): Mounted => {
+  mounted.push(m);
+  return m;
+};
 
 /** A preference that records what it was told, so a case can assert who wrote to it. */
 function recorder<A extends string>(initial: A): Preference<A> & { readonly written: A[] } {
@@ -121,5 +142,98 @@ describe("the settings page's controls", () => {
       "not reported",
     ]);
     dispose();
+  });
+});
+
+describe("one vocabulary for the appearance preferences", () => {
+  /**
+   * The rule, asserted where both controls draw it rather than on the constant they share.
+   *
+   * There are two controls over the same three preferences — this page and the top bar's
+   * `AppearancePopover` — and each used to carry its own option table. They had drifted on the one
+   * option that matters: the popover called the default theme "Auto" and this page called it "Match
+   * the system". An operator who set "Match the system" here and then opened the popover saw a
+   * control whose selected segment said something else, and the only way to find out whether those
+   * were the same setting was to change one and watch the other.
+   *
+   * Asserting `THEME_OPTIONS[0].label === THEME_OPTIONS[0].label` would pass over two components
+   * that had each gone back to a table of their own, which is the state this case exists to catch.
+   * So it mounts both and compares what each *renders* for the preference the browser is actually
+   * on. The comparison is to the other screen, not to a string written here, because the label is
+   * allowed to change — what is not allowed is for it to change in one place.
+   */
+  const settingsShowsForTheme = (chosen: ThemeChoice): string => {
+    const { container } = keep(
+      mount(() => (
+        <SettingsPage
+          theme={recorder<ThemeChoice>(chosen)}
+          accent={recorder<AccentChoice>("blue")}
+          density={recorder<DensityChoice>("comfortable")}
+        />
+      )),
+    );
+    const theme = controls(container).find((entry) => entry.label === "Theme");
+    return theme?.el.textContent?.trim() ?? "";
+  };
+
+  /**
+   * A `RootPreference` that holds a value and paints nothing.
+   *
+   * The real one writes `localStorage` and an attribute on `<html>`, both of which would be shared
+   * with the next suite. Neither is what this case is about: it is about the word the control
+   * draws for the value it is on.
+   */
+  const held = <A extends string>(chosen: A): RootPreference<A> => ({
+    choice: () => chosen,
+    select: () => undefined,
+    install: () => undefined,
+  });
+
+  const popoverShowsForTheme = (chosen: ThemeChoice): string => {
+    const { container } = keep(
+      mount(() => (
+        <AppearancePopover
+          preferences={{
+            theme: held<ThemeChoice>(chosen),
+            accent: held<AccentChoice>("blue"),
+            density: held<DensityChoice>("comfortable"),
+          }}
+        />
+      )),
+    );
+    const checked = container.querySelector('[data-testid="appearance-theme"] input:checked');
+    return checked?.closest("label")?.textContent?.trim() ?? "";
+  };
+
+  it("names the default theme the same way on this page and in the popover", () => {
+    const here = settingsShowsForTheme("auto");
+    expect(here).not.toBe("");
+    expect(here).toBe(popoverShowsForTheme("auto"));
+  });
+
+  it("names the other two the same way as well, so the agreement is not one lucky string", () => {
+    expect(settingsShowsForTheme("light")).toBe(popoverShowsForTheme("light"));
+    expect(settingsShowsForTheme("dark")).toBe(popoverShowsForTheme("dark"));
+  });
+
+  it("explains the default beside the control, in the words the popover uses", () => {
+    // The sentence "Match the system" used to carry moved into `help` when the label shortened, and
+    // it is drawn here rather than inside a segment because it is a sentence and a segment is a
+    // name. If it stopped being drawn, `auto` would be a two-word label with nothing explaining
+    // that it keeps following the system rather than resolving once at load.
+    const { container } = keep(
+      mount(() => (
+        <SettingsPage
+          theme={recorder<ThemeChoice>("auto")}
+          accent={recorder<AccentChoice>("blue")}
+          density={recorder<DensityChoice>("comfortable")}
+        />
+      )),
+    );
+    const help = [...container.querySelectorAll(".kui-settings__help")].map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(help).toContain(appearanceHelp(THEME_OPTIONS));
+    expect(appearanceHelp(THEME_OPTIONS)).not.toBeUndefined();
   });
 });

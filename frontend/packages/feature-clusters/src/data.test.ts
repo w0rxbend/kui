@@ -172,14 +172,17 @@ describe("fetchBrokers", () => {
 
     expect(brokers[0]).toMatchObject({ id: 1, isController: true, leaderPartitions: 512, health: "healthy" });
     expect(brokers[0]?.replicaPartitions).toBe(1536);
-    expect(brokers[0]?.diskUsedBytes).toBe(100);
-    // Neither is on the wire at all: the endpoint carries no per-broker out-of-sync count and no
-    // disk total. `null` says so; a `0` would be a claim nobody made, and a total of `0` would make
-    // every disk bar read as full.
+    // `diskUsageBytes` is what Kafka's own replicas occupy, and it lands on `heldBytes`. It is not
+    // the disk's usage: the disk under it also carries whatever else the machine keeps there.
+    expect(brokers[0]?.heldBytes).toBe(100);
+    // None of these is on the wire at all: the endpoint carries no per-broker out-of-sync count and
+    // no disk capacity, so a percentage is not knowable from this document alone. `null` says so; a
+    // `0` would be a claim nobody made, and a total of `0` would make every disk bar read as full.
     expect(brokers[0]?.outOfSyncReplicas).toBeNull();
+    expect(brokers[0]?.diskUsedBytes).toBeNull();
     expect(brokers[0]?.diskTotalBytes).toBeNull();
 
-    expect(brokers[1]?.diskUsedBytes).toBeNull();
+    expect(brokers[1]?.heldBytes).toBeNull();
     expect(brokers[1]?.leaderPartitions).toBeNull();
     expect(brokers[1]?.isController).toBe(false);
     expect(brokers[1]?.health).toBe("unknown");

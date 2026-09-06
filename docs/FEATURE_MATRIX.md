@@ -74,15 +74,18 @@ component that is built, tested, green and wired into nothing. `MS-007` (the CEL
 state today. They are marked `IMPLEMENTING`, never `COMPLETE`, because what they need is wiring
 rather than a new implementation.
 
+<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -->
 **Counts as of the 2026-09-06 recount** (188 capability rows): 64 `COMPLETE`, 20 `REVIEW`,
 8 `IMPLEMENTING`, 1 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 82 `RESEARCHING` (not started),
 7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row. Excluding the 11 deferred and rejected rows,
 **64 of 177 in-scope capabilities are delivered — 36%**.
+<!-- /checked -->
 
-These are what the recount command at the end of this file prints. The paragraph that stood here
-before them did not: it reasoned backwards from a count delta to a story about which rows moved
-when, and re-counting the rows commit by commit disproves every clause of it. Counting the State
-column per commit gives `e3ebf4d` 63/13, `f4a914c` 63/13, `09a1806` 64/17, `c92fe12` 64/17 and
+These are what `./scripts/feature-matrix-check.sh` recounts out of the rows, and it fails the build
+rather than merely printing them when the paragraph above and the rows below disagree. The paragraph
+that stood here before them did neither: it reasoned backwards from a count delta to a story about
+which rows moved when, and re-counting the rows commit by commit disproves every clause of it.
+Counting the State column per commit gives `e3ebf4d` 63/13, `f4a914c` 63/13, `09a1806` 64/17, `c92fe12` 64/17 and
 `25176c0` 63/18, as `COMPLETE`/`REVIEW`. At `09a1806` — the 2026-09-05 pass — the prose said 64 and
 17 and the rows said 64 and 17, so nothing had drifted there; that pass moved four rows into
 `REVIEW` and one into `COMPLETE` and moved none out. `MS-011` left `COMPLETE` two commits earlier
@@ -111,6 +114,14 @@ The rule at the top of this file — that `COMPLETE` means a person can do the t
 is the only thing that would have caught either, and it only catches them when somebody actually
 goes and does it.
 
+**Wave 3's row moves are outstanding as of 2026-09-06.** The counts above are the tree at
+`4135850`, recounted and checked. Wave 3 finishes screens in every feature package, and each row it
+finishes has to be moved by somebody who has done the thing from a browser against a running KUI —
+that is what `COMPLETE` means in this file, and it is the one thing a script cannot do. When those
+moves happen the paragraph above stops matching the rows and `./scripts/feature-matrix-check.sh`
+goes red until it is rewritten from what the checker prints. That is the intended order: move the
+rows on evidence, then take the totals from the recount, never the other way round.
+
 Behavior descriptions, edge cases and source citations are deliberately not repeated here; they
 live in the research reports (`research/kafbat/feature-matrix.md` row of the same number,
 `research/kafbat/ui-analysis.md`, `research/kouncil/ui-analysis.md`,
@@ -137,7 +148,7 @@ live in the research reports (`research/kafbat/feature-matrix.md` row of the sam
 
 | ID | Feature | Source | Priority | Owner | MFE | Milestone | Cx | State | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| BR-001 | List brokers with rack, leader counts, skew %, throughput | Kafbat, Provectus, Kouncil | P0 | cluster | feature-clusters | M1 | M | COMPLETE | Audited 2026-09-04. Broker, host, port, rack, disk and replica count render. `leaderCount`, `leaderSkewPercent`, `partitionCount` and `segmentCount` are hard-coded `None` (`BrokerViews`) and render `—`: leadership needs a topic sweep the cluster service does not do. Throughput needs M8. The `inSyncReplicaCount` → `replicaCount` rename (147461d) is source-only; no running image has it. The broker list's `DISK` column had the same defect and the same fix (`147461d`). |
+| BR-001 | List brokers with rack, leader counts, skew %, throughput | Kafbat, Provectus, Kouncil | P0 | cluster | feature-clusters | M1 | M | COMPLETE | Audited 2026-09-04. Broker, host, port, rack, disk and replica count render. **Corrected 2026-09-06: `leaderSkewPercent` is filled.** `ClusterTopology.leaderSkewOn` derives it from the partition census through the same `BrokerLoad.skewOf` that produces the replica skew in the adjacent column, and `ClusterMapping` carries it onto the wire (`row.leaderSkewPercent`); no screen draws it yet, so the browser still shows nothing for it. `leaderCount` and `partitionCount` come from that same census (`ClusterTopology.leadersOn`/`partitionsOn`) and render `—` only when the topic sweep could not describe every topic. `segmentCount` alone is still hard-coded `None` (`ClusterMapping`) and always renders `—`. Throughput needs M8. The `inSyncReplicaCount` → `replicaCount` rename (147461d) is source-only; no running image has it. The broker list's `DISK` column had the same defect and the same fix (`147461d`). |
 | BR-002 | Broker configs with source, sensitivity, read-only flag, synonyms | Kafbat, Provectus, Kouncil | P0 | cluster | feature-clusters | M1 | S | COMPLETE | Audited 2026-09-04. 340 config entries with source, sensitivity, read-only and synonyms. Redaction is proved by `SecretLeakSuite`, never observed on a live broker (none reported a sensitive setting). Synonyms are carried and rendered nowhere (TD-019). |
 | BR-003 | Update a single broker config (inline edit) | Kafbat, Provectus | P1 | cluster | feature-clusters | M5 | S | RESEARCHING | Audited; blocked in read-only mode (RB-005). |
 | BR-004 | Per-broker metrics (JMX/Prometheus), Kouncil OS metrics | Kafbat, Provectus, Kouncil | P1 | metrics | feature-clusters (metrics tab via FeaturePanel) | M8 | M | RESEARCHING | Broker page is a partial aggregation: metrics tab falls back independently. |
@@ -525,14 +536,34 @@ TD-017's half-close, and neither row was re-read until 2026-09-06 — so BR-005'
 rather than a field, and PA-003 is not blocked by anything. M0's own rows are not re-stated here;
 this pass moved M1's scope only.
 
-**After the 2026-09-06 recount:** 82 `RESEARCHING`, 64 `COMPLETE`, 20 `REVIEW`, 8 `IMPLEMENTING`,
-2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row. This pass
-built nothing; it read the tree against the rows and moved the four that were wrong.
+**A record of the 2026-09-06 recount, not a live figure:** 82 `RESEARCHING`, 64 `COMPLETE`,
+20 `REVIEW`, 8 `IMPLEMENTING`, 2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`, 4 `REJECTED`, and
+no `BLOCKED` row. This pass built nothing; it read the tree against the rows and moved the four that
+were wrong. These nine totals sit outside every `<!-- checked: -->` marker and nothing compares them
+with the rows: the paragraph at the top of this file carries the same nine inside one, and
+`./scripts/feature-matrix-check.sh` is what holds *those* to the State column. When the two
+paragraphs disagree, the checked one is current and this one is the history of a pass.
 
-Every P0 and P1 row has a milestone. Recount after editing rows with:
+Every P0 and P1 row has a milestone. After editing rows, run the checker rather than recounting by
+hand:
 
 ```
-awk -F'|' '/^\| [A-Z]{2}-[0-9]{3} \|/ {gsub(/ /,"",$8); n[$8]++} END {for (m in n) print m, n[m]}' docs/FEATURE_MATRIX.md
+./scripts/feature-matrix-check.sh
+```
+
+It recounts the State column, compares the totals with the paragraph at the top of this file and
+with `README.md`, and exits non-zero on any disagreement, printing the figure that would make each
+sentence true. Nothing did that before 2026-09-06, which is how `25176c0` moved a row and left four
+published statements false.
+
+The command this file used to publish here counted `$8` — the **Milestone** column — while the
+paragraph it was offered to recompute is about **State**. That is the exact column confusion the
+header of this file warns readers about, printed in the file they were told to trust. State is the
+ninth column and therefore `$10` once the leading pipe has given awk an empty first field. To print
+the states alone, without the comparison:
+
+```
+awk -F'|' 'NF>=12 && $2 ~ /^ *[A-Z][A-Z]-[0-9]/ {gsub(/ /,"",$10); print $10}' docs/FEATURE_MATRIX.md | sort | uniq -c
 ```
 
 If this table and the rows disagree, the rows win.

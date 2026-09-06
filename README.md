@@ -45,10 +45,10 @@ documentation, and — through the committed OpenAPI documents the browser's typ
 **It streams instead of accumulating.** Browsing records, following a query, watching metrics: all
 of it flows from Kafka to the browser without buffering whole topics in memory.
 
-**It can be one process or five.** The same modules compose into a single JVM for local use, or
-into a gateway and four services in separate containers for production. No code changes between the
+**It can be one process or seven.** The same modules compose into a single JVM for local use, or
+into a gateway and six services in separate containers for production. No code changes between the
 two: `deployment/compose/docker-compose.yml` runs the second shape, and
-`deployment/compose/smoke.sh` stops one of its containers and shows the other four carrying on.
+`deployment/compose/smoke.sh` stops one of its containers and shows the other five carrying on.
 
 ## What is built, and what is not
 
@@ -92,12 +92,17 @@ reason the architecture is shaped the way it is, and it is tested rather than as
 - The masking engine exists and is tested but is not yet reachable from a screen; it is marked
   `IMPLEMENTING` rather than `COMPLETE` in the feature matrix.
 
+<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -->
 64 of 177 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
-delivered end to end — about 36%. That figure is recounted from the rows every time it is written
-down, never adjusted from the previous figure. Every row there was set by reading the code and
-driving the running application, not by asking whether the work had been scheduled.
-[docs/ROADMAP.md](docs/ROADMAP.md) says what lands when, and [docs/plan/](docs/plan/) holds the
-plan for the rest.
+delivered end to end — about 36%.
+<!-- /checked -->
+
+That figure is recounted from the rows every time it is written down, never adjusted from the
+previous figure, and `./scripts/feature-matrix-check.sh` fails the build when the sentence above
+and the rows it summarises disagree — which, until this wave, nothing did. Every row there was set
+by reading the code and driving the running application, not by asking whether the work had been
+scheduled. [docs/ROADMAP.md](docs/ROADMAP.md) says what lands when, and [docs/plan/](docs/plan/)
+holds the plan for the rest.
 
 ## Quick start
 
@@ -361,7 +366,7 @@ rather than saying "build failed". Every one of them is a command you can run yo
 | `compile` | Every module compiles, with warnings treated as errors | `./mill __.compile` |
 | `style` | Formatting and lint rules are clean | `./mill __.checkFormat` then `./mill __.fix --check` |
 | `architecture` | No module dependency breaks the layering rules of ADR-041 | `./mill checkArchitecture` |
-| `generated` | The committed OpenAPI documents and error-code table still match the code they were generated from | `./mill __.openApiCheck` then `./mill docs.errorCodes --check` |
+| `generated` | The committed OpenAPI documents and error-code table still match the code they were generated from, and every count this repository publishes about itself still matches what it counts | `./mill __.openApiCheck` then `./mill docs.errorCodes --check` then `./scripts/feature-matrix-check.sh` |
 | `test` | Every unit, property and contract suite passes on the JVM | `./scripts/run-tests.sh` |
 | `frontend` | The interface's own build, with no JDK and no Mill: `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and a check that the committed browser types have not drifted from the OpenAPI document they are generated from | — |
 | `compose` | The five container images build and the Compose stack survives one service dying | `./deployment/compose/smoke.sh` |
@@ -376,8 +381,14 @@ that form, MUnit matched nothing, every suite was reported "ignored", and the st
 having executed no tests at all. The script asks Mill which test modules exist, names them with
 selector syntax — `./mill '{a.test,b.test}'`, which really does run them all — and then counts
 `<testcase>` elements in the JUnit reports rather than trusting the number Mill prints at the end,
-which is a count of *build tasks* and roughly twice the number of tests. Today that is **4140 test
-cases across 57 modules**.
+which is a count of *build tasks* and roughly twice the number of tests. `./mill resolve '__.test'`
+answers **63 test modules** today, and the script prints how many of them actually contain test
+sources, and how many cases ran, at the end of every run.
+
+That sentence used to publish a case count and a module count — "4140 test cases across 57
+modules" — and the module half was already wrong when it was read again: 63 modules resolve, not 57.
+A case total moves on almost every commit and nothing compares it with this file, so it is left to
+the script that measures it rather than restated here.
 
 Planned stages that have no build task yet are deliberately not in the workflow. The task that
 creates each one adds its own job. A job that cannot fail is not a check.

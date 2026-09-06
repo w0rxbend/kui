@@ -65,9 +65,9 @@ import kui.security.rbac.{ClusterFlags, RbacPolicy}
   *   where each cluster's broker metrics are read from. Carried for the same reason as `clusters`: the
   *   metrics service runs in this JVM. Nothing observable differs while this build has no collector — every
   *   cluster answers `not_configured` either way — but the capability row's *reason* does, and the reason is
-  *   the only thing that separates "you configured nothing" from "we cannot measure what you configured".
-  *   An operator who wrote `kui.metrics.sources` and is told nothing is configured goes and re-reads their
-  *   own YAML
+  *   the only thing that separates "you configured nothing" from "we cannot measure what you configured". An
+  *   operator who wrote `kui.metrics.sources` and is told nothing is configured goes and re-reads their own
+  *   YAML
   */
 final case class AllInOneConfig(
     server: ServerConfig,

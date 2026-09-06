@@ -94,9 +94,12 @@ object SeriesWindowCell {
         .modify { window =>
           val updated = window.record(at, value)
           // `record` keeps its verdict to itself — it returns a window, not a window and a reason — so the
-          // question is put a second time. Both askings are of the same immutable `window` inside one
-          // atomic `modify`, so they cannot disagree; what would disagree is asking the *updated* window,
-          // which by then holds the sample and would report every refusal as a success.
+          // question is put a second time, of the window `record` actually decided on. Asking `updated`
+          // would give the same answer in every case, because `record` returns `this` untouched when it
+          // refuses and inserting an accepted sample cannot move the horizon past its own bucket; but that
+          // is a fact about `record`'s body rather than about `accepts`, and it would stop being true the
+          // day a refusal returned anything other than the window it was given. Both readings are of the
+          // same immutable value inside one atomic `modify`, so neither can race the other.
           (updated, window.accepts(at))
         }
         .flatMap(kept => if kept then Sync[F].unit else metrics.refreshFailed(name, cluster))

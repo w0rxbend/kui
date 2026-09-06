@@ -32,10 +32,17 @@
  * own zone while the setting says otherwise. `docs/FEATURE_MATRIX.md` records the absence as an
  * absence rather than as a gap. They arrive with the code that reads them.
  */
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Card, Select } from "@kui/kernel";
 import type { AccentChoice, DensityChoice, RootPreference, ThemeChoice } from "@kui/kernel";
+
+import {
+  ACCENT_OPTIONS,
+  DENSITY_OPTIONS,
+  THEME_OPTIONS,
+  appearanceHelp,
+} from "../chrome/appearance.js";
 
 /** One preference, as this page needs it: what it is now, and how to change it. */
 export interface Preference<A extends string> {
@@ -53,26 +60,6 @@ export interface SettingsPageProps {
   readonly apiBase?: string | undefined;
 }
 
-const THEMES: readonly { readonly value: ThemeChoice; readonly label: string }[] = [
-  // `auto` first, because it is the default and the one that is right for most people: a laptop
-  // switching to dark at sunset re-themes an open tab without anybody choosing anything.
-  { value: "auto", label: "Match the system" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-];
-
-const ACCENTS: readonly { readonly value: AccentChoice; readonly label: string }[] = [
-  { value: "blue", label: "Blue" },
-  { value: "teal", label: "Teal" },
-  { value: "green", label: "Green" },
-  { value: "amber", label: "Amber" },
-];
-
-const DENSITIES: readonly { readonly value: DensityChoice; readonly label: string }[] = [
-  { value: "comfortable", label: "Comfortable" },
-  { value: "compact", label: "Compact" },
-];
-
 export function SettingsPage(props: SettingsPageProps): JSX.Element {
   return (
     <div class="kui-settings" data-testid="page-settings">
@@ -83,35 +70,32 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
           <Select
             label="Theme"
             value={props.theme.choice()}
-            options={THEMES}
+            options={THEME_OPTIONS}
             onChange={(value) => props.theme.select(value as ThemeChoice)}
           />
-          {/* `Select` carries no help text of its own, so the explanation is a sibling. It is worth
-              the line: "auto" is the default and nobody guesses that it keeps following the system
-              rather than resolving once at load. */}
-          <p class="kui-settings__help">
-            Match the system follows the operating system, including when it changes at sunset.
-          </p>
+          {/* `Select` carries no help text of its own, so the explanation is a sibling — and it
+              comes out of the shared table rather than being written here. This page used to spell
+              the sentence itself, and its option "Match the system" while the popover's said
+              "Auto": one preference with two names, which an operator can only reconcile by
+              changing one control and watching the other. */}
+          <Help of={appearanceHelp(THEME_OPTIONS)} />
           <Select
             label="Accent"
             value={props.accent.choice()}
-            options={ACCENTS}
+            options={ACCENT_OPTIONS}
             onChange={(value) => props.accent.select(value as AccentChoice)}
           />
-          {/* Not "colour scheme": the accent is one hue used for selection and primary actions, and
-              it does not change whether the interface is light or dark. */}
-          <p class="kui-settings__help">
-            The colour used for the selected item and the primary action.
-          </p>
+          {/* The sentence is "the colour used for the selected item and the primary action" and not
+              "colour scheme": the accent is one hue for selection and primary actions, and it does
+              not change whether the interface is light or dark. */}
+          <Help of={appearanceHelp(ACCENT_OPTIONS)} />
           <Select
             label="Density"
             value={props.density.choice()}
-            options={DENSITIES}
+            options={DENSITY_OPTIONS}
             onChange={(value) => props.density.select(value as DensityChoice)}
           />
-          <p class="kui-settings__help">
-            Compact fits more rows on screen by tightening the tables, and changes nothing else.
-          </p>
+          <Help of={appearanceHelp(DENSITY_OPTIONS)} />
         </div>
       </Card>
 
@@ -142,6 +126,19 @@ export function SettingsPage(props: SettingsPageProps): JSX.Element {
         </dl>
       </Card>
     </div>
+  );
+}
+
+/**
+ * The sentence under a control, drawn only when the vocabulary carries one.
+ *
+ * `Show` rather than an empty paragraph, because `.kui-settings__help` has margins: an element with
+ * no text still moves the control below it, and a preference whose options all explain themselves
+ * would open a gap that reads as a missing line.
+ */
+function Help(props: { readonly of: string | undefined }): JSX.Element {
+  return (
+    <Show when={props.of}>{(help) => <p class="kui-settings__help">{help()}</p>}</Show>
   );
 }
 

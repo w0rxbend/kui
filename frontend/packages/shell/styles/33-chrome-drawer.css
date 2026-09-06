@@ -22,6 +22,20 @@
    * A missing custom property fails silently — no console warning, no build error — which is why
    * this went unnoticed until the frame was assembled around it. */
   width: var(--kui-drawer-width);
+  /* One column, and it may not grow past the drawer.
+   *
+   * A grid with no `grid-template-columns` gets one implicit `auto` column, whose *minimum* is the
+   * widest min-content among its items — and when that is larger than the fixed width above, the
+   * column simply exceeds it. It did: the drawer measured 182px and its column 201px, so nineteen
+   * pixels of every row hung over the content column, where `<main>` paints on top of them. Nobody
+   * saw it while the rightmost thing in a row was a badge that ended well before the edge; the
+   * topic tree's disclosure sits hard against it, and the chevron came out *underneath* the page —
+   * visible, and impossible to click.
+   *
+   * `minmax(0, 1fr)` is the fix for exactly this: the track is allowed to be narrower than its
+   * content, and each child then applies its own truncation rule — the cluster name ellipsises, the
+   * caption wraps — which is what those rules were written for. */
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--kui-color-surface-raised);

@@ -18,22 +18,40 @@ import {
   Pagination,
   Select,
   StatusPill,
+  Tag,
   TextField,
   type Mutation,
 } from "@kui/kernel";
-import { COMPATIBILITY_LEVELS, type Compatibility, type CompatibilityLevel } from "./data.js";
+import {
+  COMPATIBILITY_LEVELS,
+  type Compatibility,
+  type CompatibilityLevel,
+  type SubjectRow,
+} from "./data.js";
+import { formatTone, levelPhrase, versionCountSentence } from "./model.js";
 
 export interface SubjectListProps {
-  readonly subjects: readonly string[];
+  readonly subjects: readonly SubjectRow[];
   readonly loading?: boolean | undefined;
   readonly global: Compatibility | undefined;
   readonly search: string;
   readonly onSearch: (text: string) => void;
+  /**
+   * Which way the registry orders the page.
+   *
+   * The *registry* orders it, not the browser: this is a page of a list that may be four thousand
+   * long, so sorting here would order fifty rows out of four thousand and call it a sort. The
+   * service has ordered the page since M5 and, until this control existed, nothing asked it to.
+   */
+  readonly direction: "asc" | "desc";
+  readonly onDirection: (direction: "asc" | "desc") => void;
   readonly page: number;
   readonly pageSize: number;
   readonly totalItems: number | undefined;
   readonly onPage: (page: number) => void;
   readonly hrefFor: (subject: string) => string;
+  /** The subject the right-hand pane is showing, so the row it came from reads as selected. */
+  readonly selected?: string | undefined;
   /** Absent when this principal may not change the global level. */
   readonly onSetGlobal?: ((level: CompatibilityLevel) => void) | undefined;
   readonly setGlobalDisabledReason?: string | undefined;
@@ -47,8 +65,11 @@ export function SubjectList(props: SubjectListProps): JSX.Element {
   const [chosen, setChosen] = createSignal<CompatibilityLevel>("BACKWARD");
 
   return (
-    <section class="kui-schemas" aria-label="Schema registry">
-      <h1 class="kui-schemas__title">Schema registry</h1>
+    <section class="kui-schemas" aria-label="Subjects">
+      {/* An `h2`, not the page's `h1`: this card is the left pane of the workspace and the page's
+          heading is above both panes. Rendered alone in a story it is still the first heading in the
+          container, which is what the sweep checks. */}
+      <h2 class="kui-schemas__title">Subjects</h2>
 
       <Show when={props.failure}>
         {(problem) => (
@@ -141,6 +162,16 @@ export function SubjectList(props: SubjectListProps): JSX.Element {
           value={props.search}
           onInput={props.onSearch}
         />
+        <Select
+          label="Order subjects"
+          labelHidden
+          value={props.direction}
+          options={[
+            { value: "asc", label: "Name A→Z" },
+            { value: "desc", label: "Name Z→A" },
+          ]}
+          onChange={(value) => props.onDirection(value === "desc" ? "desc" : "asc")}
+        />
         <span class="kui-schemas__count">
           {props.totalItems === undefined
             ? `${props.subjects.length} shown`
@@ -166,10 +197,44 @@ export function SubjectList(props: SubjectListProps): JSX.Element {
       >
         <ul class="kui-schemas__list">
           <For each={props.subjects}>
-            {(subject) => (
+            {(row) => (
               <li class="kui-schemas__item">
-                <a class="kui-schemas__link" href={props.hrefFor(subject)}>
-                  {subject}
+                <a
+                  class={[
+                    "kui-schemas__link",
+                    { "kui-schemas__link--selected": props.selected === row.subject },
+                  ]}
+                  href={props.hrefFor(row.subject)}
+                  /* The selected row is the one the address names, so the link to it is the current
+                     page. That is the fact a screen reader needs, and it is what the fill in the
+                     design says; the class above is the same statement for everyone else. */
+                  aria-current={props.selected === row.subject ? "page" : undefined}
+                >
+                  {/* A row whose batch did not cover the format shows no badge. Not `AVRO`: the
+                      registry holds Protobuf and JSON schemas too, and a guessed language is a
+                      worse answer than a missing one. */}
+                  <Show when={row.format}>
+                    {(format) => (
+                      <Tag class="kui-schemas__format" tone={formatTone(format())}>
+                        {format()}
+                      </Tag>
+                    )}
+                  </Show>
+                  <span class="kui-schemas__name">{row.subject}</span>
+                  {/* The caption the design draws as `3 versions · BACKWARD`, with the one word it
+                      does not draw and this screen exists for: whether that level is the subject's
+                      own or the registry's. A subject showing the global level as if it were its
+                      own tells an operator the global setting is safe to change here, when this is
+                      exactly the subject it will move. */}
+                  <span class="kui-schemas__facts">
+                    {versionCountSentence(row.versionCount)}
+                    {" \u00b7 "}
+                    <span
+                      class={[{ "kui-schemas__inherited": row.compatibility?.inherited === true }]}
+                    >
+                      {levelPhrase(row.compatibility)}
+                    </span>
+                  </span>
                 </a>
               </li>
             )}

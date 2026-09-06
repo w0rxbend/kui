@@ -91,26 +91,33 @@ is half a check.
 
 ### What the topic sweep fills, and when it refuses
 
-These three used to be declared and always `None`, because the cluster service did not sweep
-topics. It does now — `KafkaPartitionSweeper` runs `listTopics` + `describeTopics` — so each is a
-value whenever the sweep was complete, and `None` now means *this sweep was incomplete*, not *this
-milestone cannot answer*.
+Three of the four below used to be declared and always `None`, because the cluster service did not
+sweep topics. It does now — `KafkaPartitionSweeper` runs `listTopics` + `describeTopics` — so each
+is a value whenever the sweep was complete, and `None` now means *this sweep was incomplete*, not
+*this milestone cannot answer*. The fourth, `leaderSkewOn`, is newer still: it was `None` on the
+wire for as long as `leaderCount` was, and it was left `None` for a while after `leaderCount` was
+filled, which is why it is worth a row rather than a footnote.
 
 | Field | Where it comes from, and what `None` means now |
 | --- | --- |
 | `ClusterTopology.leadersOn(broker)` | The sweep's census. Replaced `BrokerLoad.leaders`: leadership is a property of the whole assignment, so it is answered from the census that holds it rather than stored per broker. |
 | `ClusterTopology.partitions` | The census's summary — online, offline and under-replicated counts, aggregated from `describeTopics` over the listed topics. `None` when one topic in the sweep could not be described: a partial sweep is not a total. |
-| `ClusterTopology.topics` | What the sweep *listed*. Survives a describe that partly failed, because a listing that succeeded and a describe that did not are different failures. |
+| `ClusterTopology.leaderSkewOn(broker)` | The same census, through the same `BrokerLoad.skewOf` the replica skew goes through. The mean is over *every* broker the cluster describes, not over the brokers that appear in the census: a broker leading nothing is the row an operator is looking for, and leaving it out of the mean would report the rest as evenly balanced. |
+| `ClusterTopology.topics` | What the sweep *listed*. Survives a describe that partly failed, because a listing that succeeded and a describe that did not are different failures. It has no consumer: nothing on the wire carries it, and the "described 3,998 of 4,000" log line is written from the `TopicSweep` before the topology is built. |
 
-The three refuse together where they are sums over one sweep (`partitions`, `partitionsOn`,
-`leadersOn`) and separately where they are not (`topics`). That is the point of holding the census
-in one optional field: the refusal is decided once and cannot be forgotten at a call site.
+They refuse together where they are sums over one sweep (`partitions`, `partitionsOn`, `leadersOn`,
+`leaderSkewOn`) and separately where they are not (`topics`). That is the point of holding the
+census in one optional field: the refusal is decided once and cannot be forgotten at a call site.
 
-Per-broker **replica** counts and the skew percentage *are* derivable — `describeLogDirs` reports
-one replica entry per replica per directory, which is a disk fact needing no topic sweep — and they
-do ship. `BrokerLoad.withSkew` computes every broker's skew from the whole set at once, so two
-brokers' numbers cannot be computed against different denominators and fail to add up on the page
-they are shown on together.
+Per-broker **replica** counts and the replica skew *are* derivable without a sweep —
+`describeLogDirs` reports one replica entry per replica per directory, which is a disk fact — and
+they do ship. So the two skew columns on the broker table have two sources and two refusals: the
+replica skew is absent when the broker's disks could not be read, and the leader skew is absent when
+the topic sweep was incomplete. They can honestly disagree about whether they know. Both go through
+`BrokerLoad.skewOf`, which is one function rather than two expressions, so the adjacent columns
+cannot end up on two scales; and `BrokerLoad.withSkew` computes every broker's replica skew from the
+whole set at once, so two brokers' numbers cannot be computed against different denominators and
+fail to add up on the page they are shown on together.
 
 ### What the dashboard therefore draws
 
@@ -153,8 +160,11 @@ single command-line invocation.
 Four rules, because a user who sees `—` where they expected a number needs to be able to find out
 why:
 
-1. **Only reported above the mean.** A broker carrying less than its share is not a problem, so it
-   shows nothing rather than a negative number the reader has to work out is good news.
+1. **A number below the mean is negative and is still sent.** `-50 %` is a broker holding half the
+   share of its neighbours and `-100 %` is one holding none of what they all hold; both are
+   measurements, and the service does not withhold them. Whether a table draws the negative ones is
+   the table's decision to take, and it is a different decision from this one — a figure suppressed
+   at the source cannot be recovered by a client that wants it.
 2. **A mean of zero reports nothing.** A cluster with no partitions is an ordinary state on a fresh
    install, and it must produce a dash rather than a division by zero, an `Infinity` or a `NaN`.
 3. **A single broker is `0 %`, not nothing.** With one broker the mean *is* that broker, so zero is

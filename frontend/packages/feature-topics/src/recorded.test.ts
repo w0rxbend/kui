@@ -5,9 +5,16 @@ import overviewDocument from "./recorded/overview.json" with { type: "json" };
 import configDocument from "./recorded/config.json" with { type: "json" };
 import partitionsDocument from "./recorded/partitions.json" with { type: "json" };
 import consumersDocument from "./recorded/topic-consumers.json" with { type: "json" };
+import statisticsDocument from "./recorded/statistics.json" with { type: "json" };
 import planDocument from "./recorded/partition-plan.json" with { type: "json" };
 import { fetchTopicConfig, sourceOf } from "./config.js";
-import { fetchPartitions, fetchTopicConsumers, fetchTopicOverview, fetchTopics } from "./data.js";
+import {
+  fetchPartitions,
+  fetchTopicConsumers,
+  fetchTopicOverview,
+  fetchTopicStatistics,
+  fetchTopics,
+} from "./data.js";
 import { planPartitionIncrease } from "./write.js";
 
 /**
@@ -52,9 +59,34 @@ describe("the recorded topic list", () => {
     expect(pageviews.partitions).toBe(12);
     expect(pageviews.replicationFactor).toBe(1);
     expect(pageviews.records).toBe(36);
-    expect(pageviews.bytes).toBe(2180);
+    expect(pageviews.bytes).toBe(2162);
     expect(pageviews.internal).toBe(false);
     expect(pageviews.health).toBe("in-sync");
+  });
+
+  it("carries the two fields M5 added, which the previous recording predates", async () => {
+    /*
+     * `produceRate` and `cleanupPolicy` were absent from the document this file replayed until this
+     * wave, and both are on the wire now — checked by re-cutting the recording against a running
+     * quickstart rather than by adding the fields by hand. A fixture edited to match the code
+     * asserts the code against itself, which is how a mapping stays green over a wire the service
+     * no longer sends.
+     */
+    const answer = await fetchTopics(client(topicsDocument), "quickstart");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+
+    const policies = answer.value.topics.map((topic) => topic.cleanupPolicy);
+    expect(policies).toContain("delete");
+    expect(policies).toContain("compact");
+
+    /*
+     * `produceRate` is `0.0` on this cluster, and `0` is a *measurement*: nothing is producing to
+     * these topics. It must therefore survive the mapping as the number zero and not be folded into
+     * "absent" by a truthiness test, which is the mistake `figure` exists to prevent and the one a
+     * `?? undefined` would make here.
+     */
+    const rates = answer.value.topics.map((topic) => topic.messagesPerSecond);
+    expect(rates.every((rate) => rate === 0)).toBe(true);
   });
 
   it("does not decode the whole list to nothing", async () => {
@@ -284,7 +316,7 @@ describe("the recorded consumer groups for one topic", () => {
     // The figure the recording holds. It is `topicLag` and not `group.totalLag`; on this group the
     // two happen to be equal, because it reads one topic — which is why the assertion below that it
     // reads exactly one topic is part of reading this one.
-    expect(row.topicLag).toBe(21);
+    expect(row.topicLag).toBe(9);
     expect(row.topics).toBe(1);
     expect(row.partitions).toBe(6);
     expect(row.dormant).toBe(true);
@@ -374,5 +406,85 @@ describe("the recorded partition-increase plan", () => {
     if (!answer.ok) throw new Error("expected a plan");
     expect(answer.value.token).toBeNull();
     expect(answer.value.expiresAt).toBeNull();
+  });
+});
+
+describe("the recorded topic statistics", () => {
+  it("reads the cluster's totals, which are not the list page's", async () => {
+    /*
+     * The document behind the statistics region. It is deliberately checked against the *same*
+     * recording session as `topics.json`: the list's page holds eight rows and this says ten
+     * topics, because the list excludes Kafka's bookkeeping topics by default and this counts every
+     * topic the scrape learned of. Two numbers about two different things, which is the whole
+     * reason the region reads a second endpoint.
+     */
+    const answer = await fetchTopicStatistics(client(statisticsDocument), "quickstart");
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+
+    expect(answer.value.topics).toBe(10);
+    expect(answer.value.partitions).toBe(86);
+    expect(typeof answer.value.bytes).toBe("number");
+    expect(answer.value.incompleteTopics).toBe(0);
+
+    const list = await fetchTopics(client(topicsDocument), "quickstart");
+    if (list.kind !== "ready") throw new Error("expected ready");
+    expect(list.value.topics.length).toBeLessThan(answer.value.topics);
+  });
+
+  it("keeps a refused sum absent rather than turning it into a zero", async () => {
+    // The same document with the two `Option` sums withheld, which is what a cluster with an
+    // undescribed topic answers. `0` here would be a capacity figure nobody measured.
+    const refused = {
+      statistics: {
+        status: "ok",
+        fetchedAt: "2026-09-06T00:00:00Z",
+        data: { topicCount: 10, partitionCount: null, sizeBytes: null, incompleteTopics: 3 },
+      },
+    };
+    const answer = await fetchTopicStatistics(client(refused), "quickstart");
+    if (answer.kind !== "ready") throw new Error("expected ready");
+    expect(answer.value.topics).toBe(10);
+    expect(answer.value.partitions).toBeUndefined();
+    expect(answer.value.bytes).toBeUndefined();
+    expect(answer.value.incompleteTopics).toBe(3);
+  });
+});
+
+describe("the recorded topic consumers", () => {
+  it("composes the coordinator's address from the two fields that make one", async () => {
+    /*
+     * `coordinatorHost` and `coordinatorPort` arrive beside `coordinatorId`, and the screen prints
+     * the address rather than the id: `broker 1` is not something an operator can connect to. This
+     * recording predated both fields until this wave, which is precisely why it is re-cut rather
+     * than edited.
+     */
+    const answer = await fetchTopicConsumers(client(consumersDocument), "quickstart", "orders.v1");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value[0]?.coordinator).toBe("kafka:9092");
+  });
+
+  it("has no address at all when the coordinator could not be described", async () => {
+    // Half an address is not an address, and an id dressed as one is a fabrication. Both halves
+    // absent and one half absent must produce the same nothing.
+    const partial = {
+      rows: [
+        { group: { groupId: "a", state: "EMPTY", coordinatorId: 1, coordinatorHost: "kafka" }, topicLag: 0 },
+        { group: { groupId: "b", state: "EMPTY" }, topicLag: 0 },
+      ],
+    };
+    const answer = await fetchTopicConsumers(client(partial), "quickstart", "orders.v1");
+    if (answer.kind !== "ready") throw new Error("expected ready");
+    expect(answer.value[0]?.coordinator).toBeUndefined();
+    expect(answer.value[1]?.coordinator).toBeUndefined();
+  });
+
+  it("reads the group count out of the overview rather than asking a second time", async () => {
+    // The Overview tab's CONSUMER GROUPS tile. The count is in the response the page already has,
+    // so filling it costs no request; a section that did not answer leaves it absent, which is not
+    // the same fact as "nothing reads this topic".
+    const answer = await fetchTopicOverview(client(overviewDocument), "quickstart", "orders.v1");
+    if (answer.kind !== "ready") throw new Error("expected ready");
+    expect(answer.value.consumerGroups).toBe(1);
   });
 });

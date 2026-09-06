@@ -150,7 +150,7 @@
           "schema"
         ],
         "summary" : "The subjects registered on this cluster's Schema Registry",
-        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned.",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned. pageSize=0 answers the total with no rows and asks the registry nothing beyond the subject list.",
         "operationId" : "schema.subjects",
         "parameters" : [
           {
@@ -203,7 +203,7 @@
           {
             "name" : "pageSize",
             "in" : "query",
-            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "description" : "How many rows a page holds, up to 100. A value above that is clamped, not refused. 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment",
             "required" : false,
             "schema" : {
               "default" : 25,

@@ -97,8 +97,26 @@ export interface Broker {
   readonly replicaPartitions: number | null;
   /** Replicas it holds that are not in sync. Zero is the healthy answer and is worth printing. */
   readonly outOfSyncReplicas: number | null;
+  /**
+   * How much of the filesystem beneath this broker's log directories is in use, and how large that
+   * filesystem is. **Not** what Kafka holds — see {@link Broker.heldBytes}.
+   *
+   * Both come from `describeLogDirs`, which reports `totalBytes` and `usableBytes` per directory,
+   * and both are `null` until that endpoint has answered. A percentage can only be measured against
+   * a capacity, and this pair is the only capacity Kafka's admin protocol exposes anywhere.
+   */
   readonly diskUsedBytes: number | null;
   readonly diskTotalBytes: number | null;
+  /**
+   * What Kafka's own data occupies on this broker: the sum of its replicas, which the brokers
+   * endpoint sends as `diskUsageBytes`.
+   *
+   * Kept apart from the pair above because the two answer different questions and are wrong as
+   * each other. A broker holding 95 kB of Kafka data on a disk that is 60% full is a normal
+   * machine; printing either figure under the other's label describes a cluster that does not
+   * exist.
+   */
+  readonly heldBytes: number | null;
 }
 
 export function brokerName(broker: Broker): string {
@@ -154,6 +172,62 @@ export function partitionSkew(brokers: readonly Broker[]): number | undefined {
   return (Math.max(...counts) - Math.min(...counts)) / mean;
 }
 
+/**
+ * The sentence under a broker's disk bar, or `undefined` where the bar speaks for itself.
+ *
+ * This is the packet's own instance of the product's central promise, at the one place it is
+ * easiest to break: a bar with no fill and a dash beside it is indistinguishable from an empty
+ * disk, and the three states behind it are not remotely the same.
+ *
+ *   - a capacity was reported — the percentage *is* the sentence, so there is none;
+ *   - no capacity, but Kafka's own usage is known — say which figure is on screen and why there is
+ *     no percentage, because Kafka's admin protocol does not expose the size of the disk under a
+ *     log directory and an operator should not be left wondering whether KUI simply failed;
+ *   - neither — say that nothing was measured, rather than drawing an empty track.
+ */
+export function diskNote(broker: Broker): string | undefined {
+  if (diskPercent(broker.diskUsedBytes, broker.diskTotalBytes) !== undefined) return undefined;
+  if (broker.heldBytes !== null) {
+    return "No disk capacity was reported for this broker, so this is what Kafka holds here rather than how full the disk is.";
+  }
+  return "This broker's disks were not measured, so KUI cannot say how full they are.";
+}
+
+/**
+ * The three disk figures for a whole cluster, each refusing on its own.
+ *
+ * Separate sums rather than one, because they come from two endpoints with two different fates: the
+ * capacity pair from `describeLogDirs` and the held bytes from the brokers list. A cluster whose
+ * log directories were refused still knows what its brokers hold, and a tile that answered
+ * "unknown" for the pair would be throwing away a figure the server had just sent.
+ *
+ * A broker is counted in the capacity sums only when *both* halves are known, which is the same
+ * rule the shell's storage meter applies for the same reason: half a broker's capacity produces a
+ * plausible-looking percentage that is simply wrong.
+ */
+export interface ClusterDisk {
+  readonly usedBytes: number | null;
+  readonly capacityBytes: number | null;
+  readonly heldBytes: number | null;
+  /** How many brokers contributed a capacity, out of how many are on screen. */
+  readonly measured: number;
+  readonly brokers: number;
+}
+
+export function summariseDisk(brokers: readonly Broker[]): ClusterDisk {
+  const withCapacity = brokers.filter(
+    (broker) => broker.diskUsedBytes !== null && (broker.diskTotalBytes ?? 0) > 0,
+  );
+  const held = brokers.filter((broker) => broker.heldBytes !== null);
+  return {
+    usedBytes: withCapacity.length === 0 ? null : withCapacity.reduce((sum, b) => sum + (b.diskUsedBytes ?? 0), 0),
+    capacityBytes: withCapacity.length === 0 ? null : withCapacity.reduce((sum, b) => sum + (b.diskTotalBytes ?? 0), 0),
+    heldBytes: held.length === 0 ? null : held.reduce((sum, b) => sum + (b.heldBytes ?? 0), 0),
+    measured: withCapacity.length,
+    brokers: brokers.length,
+  };
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* Clusters                                                                                     */
 /* ------------------------------------------------------------------------------------------ */
@@ -164,6 +238,14 @@ export interface ClusterSummary {
   readonly health: Health;
   /** The Kafka version the brokers report, or `null` when nothing answered. */
   readonly version: string | null;
+  /**
+   * `kraft` or `zookeeper`, as the scrape reports the cluster running. `null` when it did not say.
+   *
+   * On the wire beside the version, and read here because the broker card's version tag is the two
+   * of them together (`v4.3 · KRaft`) and a tag that named only half of it would be answering the
+   * less interesting half of the question.
+   */
+  readonly controllerKind: string | null;
   readonly brokersOnline: number | null;
   readonly brokersTotal: number | null;
   readonly topics: number | null;
@@ -176,6 +258,24 @@ export interface ClusterSummary {
 }
 
 /**
+ * The version tag on an expanded broker card: `v4.3 · KRaft`, or nothing.
+ *
+ * The version is the *cluster's* — `describeCluster` reports one version for the cluster and the
+ * brokers endpoint carries none per broker — so this is a fact about the deployment drawn on each
+ * card, not a claim that KUI asked this machine what it is running. Where the scrape did not report
+ * one there is no tag at all: a tag reading "unknown version" is a row of noise on every card, and
+ * the card already says what it does not know about the figures that are its own.
+ */
+export function versionTag(version: string | null, controllerKind: string | null): string | undefined {
+  if (version === null) return undefined;
+  const prefixed = version.startsWith("v") ? version : `v${version}`;
+  if (controllerKind === null) return prefixed;
+  // `kraft` on the wire; `KRaft` is how the project spells it, and the design's tag reads that way.
+  const kind = controllerKind.toLowerCase() === "kraft" ? "KRaft" : controllerKind;
+  return `${prefixed} · ${kind}`;
+}
+
+/**
  * The sentence under "Clusters", and under "Brokers".
  *
  * A discriminated union of whole sentences, per SPEC §6.3 rule 3, so the cheerful branch is
@@ -184,19 +284,50 @@ export interface ClusterSummary {
  * they stop reading the line.
  */
 export type ClusterVoice =
-  | { readonly kind: "healthy"; readonly brokers: number }
-  | { readonly kind: "degraded"; readonly online: number; readonly total: number; readonly underReplicated: number }
-  | { readonly kind: "failing"; readonly offline: readonly number[]; readonly underReplicated: number }
+  | { readonly kind: "healthy"; readonly brokers: number; readonly underReplicated: number | null }
+  | { readonly kind: "degraded"; readonly online: number; readonly total: number; readonly underReplicated: number | null }
+  | { readonly kind: "failing"; readonly offline: readonly number[]; readonly underReplicated: number | null }
   | { readonly kind: "unreachable"; readonly lastSeen: string | null };
+
+/**
+ * What the line says about under-replication, which is **three** sentences and not two.
+ *
+ * `0` is a measurement: the partition sweep ran, and it found nothing under-replicated. Saying so
+ * is the whole reassurance this line exists to give. `null` is the absence of a measurement, and
+ * the two must not share a sentence — a cluster nobody has managed to scrape reading "Zero
+ * under-replicated partitions" is the product telling an operator that everything is fine on
+ * evidence it does not have, which is the one failure this design treats as unrecoverable.
+ *
+ * The count is on the wire as `underReplicatedPartitionCount` and is genuinely `0` on a healthy
+ * cluster, so this is not a hypothetical distinction: both branches are reached in production.
+ */
+function underReplication(count: number | null): string {
+  if (count === null) {
+    return "KUI has not read an under-replicated partition count, so it is not claiming there are none.";
+  }
+  if (count === 0) return "Zero under-replicated partitions.";
+  return `${count} ${count === 1 ? "partition is" : "partitions are"} under-replicated.`;
+}
+
+/** The same figure where a broker is already down, so the stakes are the sentence. */
+function atRisk(count: number | null): string {
+  if (count === null) {
+    return "KUI has not read an under-replicated partition count, so how much is at risk is not known.";
+  }
+  if (count === 0) return "No partition has lost its last in-sync replica.";
+  return `${count} ${count === 1 ? "partition has" : "partitions have"} no in-sync replica and ${count === 1 ? "is" : "are"} not accepting writes.`;
+}
 
 export function clusterVoice(voice: ClusterVoice): string {
   switch (voice.kind) {
     case "healthy":
-      return `${voice.brokers} ${voice.brokers === 1 ? "broker" : "brokers"} online. Zero under-replicated partitions. You may sip your coffee.`;
+      // The aside is attached to the measured zero and to nothing else: it is the reward for a
+      // cluster KUI has actually looked at and found nothing wrong with.
+      return `${voice.brokers} ${voice.brokers === 1 ? "broker" : "brokers"} online. ${underReplication(voice.underReplicated)}${voice.underReplicated === 0 ? " You may sip your coffee." : ""}`;
     case "degraded":
-      return `${voice.online} of ${voice.total} brokers online. ${voice.underReplicated} ${voice.underReplicated === 1 ? "partition is" : "partitions are"} under-replicated.`;
+      return `${voice.online} of ${voice.total} brokers online. ${underReplication(voice.underReplicated)}`;
     case "failing":
-      return `${voice.offline.length === 1 ? `Broker ${voice.offline[0]} is` : `Brokers ${voice.offline.join(", ")} are`} down. ${voice.underReplicated} ${voice.underReplicated === 1 ? "partition has" : "partitions have"} no in-sync replica and ${voice.underReplicated === 1 ? "is" : "are"} not accepting writes.`;
+      return `${voice.offline.length === 1 ? `Broker ${voice.offline[0]} is` : `Brokers ${voice.offline.join(", ")} are`} down. ${atRisk(voice.underReplicated)}`;
     case "unreachable":
       return voice.lastSeen === null
         ? "The cluster is not answering, and KUI has never reached it."
@@ -215,12 +346,15 @@ export function voiceOf(brokers: readonly Broker[], underReplicated: number | nu
   if (brokers.length === 0) return { kind: "unreachable", lastSeen };
   const offline = brokers.filter((broker) => broker.health === "offline").map((broker) => broker.id);
   const unreadable = brokers.filter((broker) => broker.health === "unknown").length;
-  if (offline.length > 0) return { kind: "failing", offline, underReplicated: underReplicated ?? 0 };
+  // `underReplicated` is carried through every branch exactly as it arrived, `null` included. It
+  // used to be coalesced to `0` here, which put "0 partitions have no in-sync replica" under a
+  // broker that was down — a reassurance about the one number nobody had managed to read.
+  if (offline.length > 0) return { kind: "failing", offline, underReplicated };
   if (underReplicated !== null && underReplicated > 0) {
     return { kind: "degraded", online: brokers.length - unreadable, total: brokers.length, underReplicated };
   }
-  if (unreadable > 0) return { kind: "degraded", online: brokers.length - unreadable, total: brokers.length, underReplicated: 0 };
-  return { kind: "healthy", brokers: brokers.length };
+  if (unreadable > 0) return { kind: "degraded", online: brokers.length - unreadable, total: brokers.length, underReplicated };
+  return { kind: "healthy", brokers: brokers.length, underReplicated };
 }
 
 /**

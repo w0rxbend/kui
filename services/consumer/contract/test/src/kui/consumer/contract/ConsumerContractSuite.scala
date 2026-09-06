@@ -160,9 +160,16 @@ final class ConsumerContractSuite extends ScalaCheckSuite {
     )
 
   property("theCoordinatorsThreeFieldsAreOnTheWireTogetherOrNotAtAll") {
-    // An encoder that dropped the port while keeping the host would put `broker-2:undefined` on the screen,
-    // and the round-trip property below would still pass — it compares whole records, so it never asks
-    // which of the three went missing on the way out.
+    // An encoder that dropped the port while keeping the host would put `broker-2:undefined` on the screen.
+    // The round-trip property below does catch *that* — it compares whole records, so a dropped port fails
+    // it, which was checked by mutation. What it cannot catch is a rename: an encoder and a decoder that
+    // agreed on `coordinator_port` round-trip perfectly and put nothing on a screen expecting
+    // `coordinatorPort`. A rename is caught elsewhere too, and the earlier wording here denied it:
+    // `assertMatchesGolden` compares encodings against committed strings that spell the three keys out, so
+    // renaming the encoder and decoder keys together fails the golden cases as well as this one — checked by
+    // mutation (`coordinatorPort` -> `coordinator_port` fails five cases in this class). What this property
+    // adds is the part a golden cannot state: over every generated summary, and not over the handful of
+    // samples the goldens fix, the three keys are present or absent *together*.
     forAll(summaries) { summary =>
       val cursor = summary.asJson.hcursor
       val present = List(

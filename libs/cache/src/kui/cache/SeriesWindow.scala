@@ -36,7 +36,7 @@ object SeriesBucket {
   *   - **A bucket nobody sampled is absent, not zero.** `bucketsOver` returns `Option` per bucket, the
   *     frontend's `LineChart` already treats `null` as a gap, and interpolating across a gap would invent a
   *     reading for a minute in which the exporter was down.
-  *   - **A window shorter than the period asked for answers `None`.** "99.98 % over the last 24h" computed
+  *   - **A window shorter than the period asked for answers `None`.** "99.72 % over the last 24h" computed
   *     over the four minutes since the process booted is a worse answer than no answer, because the reader
   *     cannot tell the difference. `coverage` is what a caller asks when it wants to know why.
   *   - **Age is measured against an `Instant` the caller supplies**, never `System.currentTimeMillis`. The

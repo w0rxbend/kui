@@ -11,6 +11,7 @@ import cats.syntax.all.*
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
   AuthConfig,
+  ClusterConfig,
   ConsumersConfig,
   GatewayConfig,
   KuiConfig,
@@ -27,6 +28,7 @@ import kui.config.{
 import kui.gateway.api.routing.ContractRouting
 import kui.gateway.app.GatewayServer
 import kui.http.KuiServer
+import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
 import kui.kernel.{ClusterId, Host, Port, PositiveInt, Secret, ServiceId}
 import kui.observability.Telemetry
 import kui.security.rbac.RbacPolicy
@@ -203,11 +205,10 @@ final class AllInOneWiringSuite extends KuiIOSuite {
 
   test("theMetricsSectionSurvivesTheSliceRatherThanBecomingItsDefault") {
     // The shape of the defect this closes is the one `kui.clusters[]` already had: a section that loads,
-    // and a slice that quietly drops it. Nothing observable differs while this build has no collector —
-    // every cluster answers `not_configured` either way — but the capability row's *reason* does, and the
-    // reason is the only thing separating "you configured nothing" from "we cannot measure what you
-    // configured". An operator who wrote the key and was told nothing was configured would go and read
-    // their own YAML again.
+    // and a slice that quietly drops it. This case is about the slice only, which its name says and which
+    // is half the journey: `AllInOneConfig.from` is one of the two places the section can be lost. The
+    // other is the wiring's call, and it is gated by the case below — this one passes whatever `resource`
+    // does with the value, which is exactly why it was not enough on its own.
     val configured = MetricsConfig.Default.copy(
       sources = Map(
         ClusterId.unsafe("prod-eu") -> MetricsSourceSettings(SafeUrl.unsafe("http://exporter:9404/metrics"))
@@ -219,6 +220,82 @@ final class AllInOneWiringSuite extends KuiIOSuite {
     // like one that configured something.
     assertEquals(AllInOneConfig.Default.metrics, MetricsConfig.Default)
   }
+
+  test("theConfiguredMetricsSectionReachesTheMetricsServiceAndNotJustTheSlice") {
+    // The seam, mounted rather than composed. `AllInOneWiring.resource` is what the process runs, and the
+    // only thing between the operator's `kui.metrics` and the metrics service is the argument `resource`
+    // passes to `services`. Replacing it with `MetricsConfig.Default` — the defect this repository already
+    // shipped once — leaves every other case in this file green, including the slice case above, because
+    // none of them mounts the wiring with a configured section and then asks what the service made of it.
+    //
+    // What is asserted is the start-up line, and it is worth saying why that rather than the capability
+    // row. `MetricsCapabilities.stateOf` puts the distinction in `reason`, and neither `CapabilityState`
+    // nor `Section` carries a reason for `not_configured` on the wire — both encode that case as the
+    // status alone — so the gateway's public API genuinely cannot tell the two situations apart today.
+    // The start-up log is where the product does tell them apart, and it is the one an operator reads
+    // when the answer they get is "nothing is configured" and their YAML says otherwise (ADR-005's
+    // say-which-keys-are-ignored rule). It is produced inside `MetricsWiring` from the section that
+    // crossed the seam, so it cannot be true of a wiring that dropped it.
+    wire(configuredWithAMetricsSource).use { (_, logger) =>
+      logger.entries.map { entries =>
+        val declared = entries.flatMap(_.context.get("metrics.declaredSources"))
+
+        assertEquals(
+          declared,
+          List("prod-eu"),
+          s"the metrics service was not told which cluster configures a source; entries were $entries"
+        )
+      }
+    }
+  }
+
+  test("aDeploymentThatConfiguredNoMetricsSourceIsNotMadeToLookLikeOneThatDid") {
+    // The other half, and the reason the case above cannot be satisfied by always reporting a source: a
+    // deployment that configured nothing has to keep saying so. This is the sentence that is true of every
+    // stack in the repository today, and it is INFO rather than WARN because nothing is wrong.
+    wire(AllInOneConfig.Default.copy(clusters = List(unmeasuredCluster))).use { (_, logger) =>
+      logger.entries.map { entries =>
+        assertEquals(
+          entries.flatMap(_.context.get("metrics.declaredSources")),
+          Nil,
+          s"nothing configured a metrics source, so nothing should be reported as declaring one: $entries"
+        )
+        assert(
+          entries.exists(_.message.startsWith("no cluster configures kui.metrics.sources")),
+          s"the no-source sentence is what a card's 'not measured' rendering rests on; got $entries"
+        )
+      }
+    }
+  }
+
+  /** One cluster, so that the metrics service has a row to have an answer about.
+    *
+    * `ConfiguredClusterSources.profilesOf` maps over `kui.clusters[]`, so a deployment with no cluster
+    * reports nothing about metrics whatever `kui.metrics.sources` says — which would make the two cases
+    * above pass for the wrong reason. Nothing here contacts the broker: the address exists to be a legal
+    * `ClusterConfig`, and the metrics section is keyed by this cluster's id.
+    */
+  private val unmeasuredCluster: ClusterConfig =
+    ClusterConfig(
+      id = ClusterId.unsafe("prod-eu"),
+      name = "Production EU",
+      bootstrapServers = BootstrapServers.unsafe("localhost:9092"),
+      security = ClusterSecurity.Plaintext,
+      properties = ClientProperties.empty,
+      readOnly = false,
+      admin = AdminTuning.default
+    )
+
+  /** The same deployment, with an exporter written against that cluster — an operator's own YAML. */
+  private val configuredWithAMetricsSource: AllInOneConfig =
+    AllInOneConfig.Default.copy(
+      clusters = List(unmeasuredCluster),
+      metrics = MetricsConfig.Default.copy(
+        sources = Map(
+          unmeasuredCluster.id -> MetricsSourceSettings(SafeUrl.unsafe("http://exporter:9404/metrics"))
+        )
+      )
+    )
 
   /** A configuration written for the distributed deployment and handed to this one by mistake — which is
     * exactly what happens when someone points the all-in-one image at `deployment/compose/kui.yaml`.

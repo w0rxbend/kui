@@ -1590,6 +1590,65 @@
         }
       }
     },
+    "/api/v1/search" : {
+      "get" : {
+        "tags" : [
+          "search",
+          "gateway"
+        ],
+        "summary" : "Topics, consumer groups and subjects matching one query, across every cluster",
+        "description" : "Answers 200 whenever the query is well formed, however many of the three services could be asked. A service this deployment does not route, or one that did not answer, contributes its id to `partial` and no results; the other two still answer. A `q` outside 1 to 200 characters is a 400 KUI-VALIDATION naming the field, because a search box with no term is a request the browser should not have made rather than a cluster with nothing in it.",
+        "operationId" : "gateway.search",
+        "parameters" : [
+          {
+            "name" : "q",
+            "in" : "query",
+            "description" : "What to look for: a case-insensitive substring of a topic, group or subject name",
+            "required" : true,
+            "schema" : {
+              "type" : "string",
+              "maxLength" : 200,
+              "minLength" : 1
+            }
+          },
+          {
+            "name" : "limit",
+            "in" : "query",
+            "description" : "How many hits of each kind to return",
+            "required" : false,
+            "schema" : {
+              "default" : 10,
+              "type" : "integer",
+              "format" : "int32",
+              "minimum" : 1,
+              "maximum" : 50
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SearchAnswerDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/stream" : {
       "get" : {
         "tags" : [
@@ -2433,7 +2492,7 @@
           "schema"
         ],
         "summary" : "The subjects registered on this cluster's Schema Registry",
-        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned.",
+        "description" : "Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned. pageSize=0 answers the total with no rows and asks the registry nothing beyond the subject list.",
         "operationId" : "schema.subjects",
         "parameters" : [
           {
@@ -2486,7 +2545,7 @@
           {
             "name" : "pageSize",
             "in" : "query",
-            "description" : "How many rows a page holds. A value above the maximum is clamped, not refused",
+            "description" : "How many rows a page holds, up to 100. A value above that is clamped, not refused. 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment",
             "required" : false,
             "schema" : {
               "default" : 25,
@@ -4848,6 +4907,25 @@
           }
         }
       },
+      "GroupHitDto" : {
+        "title" : "GroupHitDto",
+        "description" : "A consumer group the query matched",
+        "type" : "object",
+        "required" : [
+          "cluster",
+          "groupId"
+        ],
+        "properties" : {
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "groupId" : {
+            "description" : "a consumer group id",
+            "type" : "string"
+          }
+        }
+      },
       "GroupSummaryDto" : {
         "title" : "GroupSummaryDto",
         "description" : "One consumer group as the list shows it; totalLag is null when it could not be computed",
@@ -6351,6 +6429,51 @@
           }
         }
       },
+      "SearchAnswerDto" : {
+        "title" : "SearchAnswerDto",
+        "description" : "Everything one query found, with the services that could not be asked named",
+        "type" : "object",
+        "required" : [
+          "results"
+        ],
+        "properties" : {
+          "results" : {
+            "$ref" : "#/components/schemas/SearchResultsDto"
+          },
+          "partial" : {
+            "type" : "array",
+            "items" : {
+              "description" : "a KUI service: cluster, topic, message, ...",
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "SearchResultsDto" : {
+        "title" : "SearchResultsDto",
+        "description" : "What the query found, grouped by kind",
+        "type" : "object",
+        "properties" : {
+          "topics" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TopicHitDto"
+            }
+          },
+          "groups" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/GroupHitDto"
+            }
+          },
+          "subjects" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SubjectHitDto"
+            }
+          }
+        }
+      },
       "Sensitive" : {
         "title" : "Sensitive",
         "type" : "object",
@@ -6448,6 +6571,25 @@
             "$ref" : "#/components/schemas/Inline"
           }
         ]
+      },
+      "SubjectHitDto" : {
+        "title" : "SubjectHitDto",
+        "description" : "A subject the query matched",
+        "type" : "object",
+        "required" : [
+          "cluster",
+          "subject"
+        ],
+        "properties" : {
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "subject" : {
+            "description" : "a schema registry subject",
+            "type" : "string"
+          }
+        }
       },
       "SubjectSummaryDto" : {
         "title" : "SubjectSummaryDto",
@@ -6603,6 +6745,25 @@
           },
           "partitionsTruncated" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "TopicHitDto" : {
+        "title" : "TopicHitDto",
+        "description" : "A topic the query matched",
+        "type" : "object",
+        "required" : [
+          "cluster",
+          "name"
+        ],
+        "properties" : {
+          "cluster" : {
+            "description" : "a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "type" : "string"
+          },
+          "name" : {
+            "description" : "a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..'",
+            "type" : "string"
           }
         }
       },

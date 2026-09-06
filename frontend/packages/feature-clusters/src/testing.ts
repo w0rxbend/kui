@@ -20,9 +20,12 @@
  * than done here, because it touches every package's `tsconfig` references.
  */
 
+import { flush } from "solid-js";
 import { render } from "@solidjs/web";
 import type { JSX } from "@solidjs/web/jsx-runtime";
 import axe from "axe-core";
+import type { KuiApiClient } from "@kui/api";
+import type { KuiContextValue } from "@kui/kernel";
 
 export interface Mounted {
   readonly container: HTMLElement;
@@ -56,4 +59,65 @@ export async function findViolations(container: HTMLElement): Promise<axe.Result
 
 export function describeViolations(violations: axe.Result[]): string {
   return violations.map((v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.html).join(", ")})`).join("\n");
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The feature context                                                                              */
+/* ---------------------------------------------------------------------------------------------- */
+
+/**
+ * What `useKui()` answers inside a test.
+ *
+ * `useKui`'s own error message points here: the shell provides the context around every route, so a
+ * test that mounts a *screen* rather than a component has to provide one. Mounting the screen is
+ * the whole point — `BrokersScreen` is where the cluster's under-replication count, the log
+ * directories' capacity and the settings' laziness meet, and a test that drives `BrokerList` alone
+ * hands all three in by hand and can therefore see none of them.
+ *
+ * The api is the caller's and everything else is the smallest honest answer: `permits` says yes
+ * because permissions are not what these cases are about, and `paths` builds the addresses these
+ * screens link to.
+ */
+export function testContext(api: KuiApiClient): KuiContextValue {
+  return {
+    api,
+    cluster: () => undefined,
+    permits: () => true,
+    paths: {
+      home: () => "/ui",
+      settings: () => "/ui/settings",
+      clusters: () => "/ui/clusters",
+      manageClusters: () => "/ui/clusters/manage",
+      dashboard: (cluster, tab) => `/ui/clusters/${cluster}/dashboard/${tab ?? "overview"}`,
+      brokers: (cluster) => `/ui/clusters/${cluster}/brokers`,
+      broker: (cluster, brokerId) => `/ui/clusters/${cluster}/brokers/${brokerId}`,
+      topics: (cluster) => `/ui/clusters/${cluster}/topics`,
+      topic: (cluster, name) => `/ui/clusters/${cluster}/topics/${encodeURIComponent(name)}`,
+      topicMessages: (cluster, name) =>
+        `/ui/clusters/${cluster}/topics/${encodeURIComponent(name)}/messages`,
+      trackMessages: (cluster) => `/ui/clusters/${cluster}/messages/track`,
+      consumerGroups: (cluster) => `/ui/clusters/${cluster}/consumer-groups`,
+      consumerGroup: (cluster, groupId) =>
+        `/ui/clusters/${cluster}/consumer-groups/${encodeURIComponent(groupId)}`,
+    },
+    report: () => {},
+  };
+}
+
+/**
+ * Waits for a screen to stop moving.
+ *
+ * One `flush()` is not enough, and the reason is worth writing down: an answer travels through the
+ * query cache, so it crosses two promises and two of Solid's scheduling turns before it reaches the
+ * DOM. A fixed number of flushes chosen by trial is the shape that starts passing for the wrong
+ * reason later, so this drives it until the markup stops changing.
+ */
+export async function settle(container: HTMLElement): Promise<void> {
+  let previous = "";
+  for (let turn = 0; turn < 20; turn += 1) {
+    await flush();
+    const now = container.innerHTML;
+    if (now === previous && turn > 1) return;
+    previous = now;
+  }
 }

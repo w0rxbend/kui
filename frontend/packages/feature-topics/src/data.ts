@@ -24,6 +24,7 @@ interface TopicRowPayload {
   readonly offlinePartitions?: number | null;
   readonly messageCount?: number | null;
   readonly sizeBytes?: number | null;
+  readonly produceRate?: number | null;
   readonly cleanupPolicy?: string | null;
 }
 
@@ -102,6 +103,15 @@ interface TopicDetailPayload {
 export interface TopicOverview {
   readonly topic: TopicRow;
   readonly partitions: readonly PartitionRow[];
+  /**
+   * How many consumer groups read this topic.
+   *
+   * `undefined` when the overview's `consumerGroups` section did not answer — the consumer service
+   * can be down while the topic service is not, which is the whole point of the response being
+   * five independent sections. The Overview tab draws the sentence for it rather than a `0`, which
+   * would say "nothing reads this topic": a real and completely different fact.
+   */
+  readonly consumerGroups: number | undefined;
 }
 
 function figure(value: number | null | undefined): number | undefined {
@@ -139,6 +149,13 @@ function toTopicRow(payload: TopicRowPayload): TopicRow {
     health: healthOf(payload),
     ...(figure(payload.messageCount) === undefined ? {} : { records: figure(payload.messageCount) }),
     ...(figure(payload.sizeBytes) === undefined ? {} : { bytes: figure(payload.sizeBytes) }),
+    /* `produceRate` is `null` far more often than it is a number: it is differenced from two
+       snapshots, so a topic KUI has scraped once has no rate yet and a broker restart resets the
+       pair. `undefined` is what the row's `messagesPerSecond` means by "not measured", and a `0`
+       here would be indistinguishable from a topic nobody is producing to. */
+    ...(figure(payload.produceRate) === undefined
+      ? {}
+      : { messagesPerSecond: figure(payload.produceRate) }),
     ...(payload.cleanupPolicy === null || payload.cleanupPolicy === undefined
       ? {}
       : { cleanupPolicy: payload.cleanupPolicy }),
@@ -233,9 +250,77 @@ export async function fetchTopicOverview(
   // first is required to draw the page. The others belong to the tabs, and a page that failed
   // whole because the schema registry is down would be the opposite of ADR-039.
   const section = decodeSection<TopicDetailPayload>(answer.value.topic);
+
+  /* The group count comes out of the *same* response rather than out of the consumers tab's own
+     request, because it is already here: the Overview tab draws a `CONSUMER GROUPS` tile and
+     fetching the tab's endpoint to fill one number would be a second call for a length. It is read
+     independently of the topic section — a consumer service that is down leaves the tile saying so
+     while the other three tiles still carry their figures. */
+  const groups = decodeSection<readonly unknown[]>(answer.value.consumerGroups);
+  const groupCount =
+    groups.status === "ok" || groups.status === "stale" ? groups.data.length : undefined;
+
   return fromSection(section, (detail) => ({
     topic: toTopicRow(detail.row),
     partitions: (detail.partitions ?? []).map(toPartition),
+    consumerGroups: groupCount,
+  }));
+}
+
+/**
+ * The cluster-wide totals above the topic list.
+ *
+ * ## Why this is a second request and not a fold over the page
+ *
+ * `SCREENS-V4.md` §4.6 calls this the load-bearing fact of the screen: `TOTAL TOPICS` reads 128
+ * while the table under it shows the three that match `orders.`. A total computed from the rows on
+ * screen would track the search box, and the number an operator opens this region for is precisely
+ * the one that must not move when they type. So the figures come from a document about the whole
+ * snapshot, and the page below it is a different question with a different answer.
+ *
+ * ## Each total refuses on its own
+ *
+ * `topicCount` is a plain `Int` — a scrape with no listing has no document at all and the section
+ * is `unavailable` instead — while `partitionCount` and `sizeBytes` are each `Option`. A topic the
+ * scrape could not describe removes both sums and leaves the count, and `incompleteTopics` says how
+ * many topics that was, so the screen can explain the gap rather than printing an unexplained
+ * absence under a count of 128. Never a `0`: a cluster with no measurable partitions and a cluster
+ * with none at all are opposite facts.
+ */
+export interface TopicStatistics {
+  readonly topics: number;
+  /** `undefined` when any topic could not be described. Not a sum over the ones that answered. */
+  readonly partitions: number | undefined;
+  /** `undefined` for the reason above, and for its own: `describeLogDirs` can fail on its own. */
+  readonly bytes: number | undefined;
+  /** How many topics the scrape could not describe. `0` here is a fact and prints as one. */
+  readonly incompleteTopics: number;
+}
+
+interface TopicStatisticsPayload {
+  readonly topicCount?: number | null;
+  readonly partitionCount?: number | null;
+  readonly sizeBytes?: number | null;
+  readonly incompleteTopics?: number | null;
+}
+
+export async function fetchTopicStatistics(
+  api: KuiApiClient,
+  clusterId: string,
+): Promise<Fetched<TopicStatistics>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}/topics/statistics", {
+    params: { path: { clusterId } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+
+  const section = decodeSection<TopicStatisticsPayload>(answer.value.statistics);
+  return fromSection(section, (payload) => ({
+    // `?? 0` on the count alone, and only because the count is not an `Option` on the wire: a
+    // document that reached this line has a listing behind it. The two sums keep `undefined`.
+    topics: figure(payload.topicCount) ?? 0,
+    partitions: figure(payload.partitionCount),
+    bytes: figure(payload.sizeBytes),
+    incompleteTopics: figure(payload.incompleteTopics) ?? 0,
   }));
 }
 
@@ -296,6 +381,17 @@ export interface TopicConsumerRow {
   readonly totalLag: number | null;
   /** How many topics the group reads in total, which is what makes `totalLag` readable. */
   readonly topics: number;
+  /**
+   * The broker coordinating the group, as `host:port`.
+   *
+   * `undefined` when the coordinator could not be described. The wire carries `coordinatorId`,
+   * `coordinatorHost` and `coordinatorPort`, and the contract asserts the three arrive together or
+   * not at all — so this is composed from the two that make an address and is absent whenever
+   * either is. Deliberately **not** falling back to `broker {coordinatorId}`: `SCREENS-V4.md`
+   * §4.11 draws a host and a port, an id is not an address, and a screen that invented
+   * `broker 1` where the cluster said nothing would be the fabrication the column exists to end.
+   */
+  readonly coordinator?: string | undefined;
 }
 
 interface TopicConsumerPayload {
@@ -305,6 +401,8 @@ interface TopicConsumerPayload {
     readonly members?: number;
     readonly topics?: number;
     readonly totalLag?: number | null;
+    readonly coordinatorHost?: string | null;
+    readonly coordinatorPort?: number | null;
   } | null;
   readonly topicLag?: number | null;
   readonly partitions?: number;
@@ -358,7 +456,27 @@ function toTopicConsumer(payload: TopicConsumerPayload): TopicConsumerRow {
     dormant: payload.dormant === true,
     totalLag: typeof group.totalLag === "number" ? group.totalLag : null,
     topics: typeof group.topics === "number" ? group.topics : 0,
+    ...(coordinatorOf(group) === undefined ? {} : { coordinator: coordinatorOf(group) }),
   };
+}
+
+/**
+ * The coordinator's address, or nothing.
+ *
+ * A host with no port is not an address and neither half is drawn alone: `kafka` on its own would
+ * read as a broker name an operator could connect to, and `:9092` says nothing at all. The service
+ * sends the three coordinator fields together or not at all, so in practice this is absent only
+ * when the whole group could not be described — but it is composed defensively here, because the
+ * one thing this column must never do is print half an address as if it were one.
+ */
+function coordinatorOf(group: {
+  readonly coordinatorHost?: string | null;
+  readonly coordinatorPort?: number | null;
+}): string | undefined {
+  const host = group.coordinatorHost;
+  const port = group.coordinatorPort;
+  if (typeof host !== "string" || host === "" || typeof port !== "number") return undefined;
+  return `${host}:${port}`;
 }
 
 /*

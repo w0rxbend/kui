@@ -36,9 +36,14 @@ describe("the recorded consumer group list", () => {
     expect(answer.kind).toBe("ready");
     if (answer.kind !== "ready") return;
 
-    const { groups, coordinatorsMissing } = answer.value;
+    const { groups, coordinatorsMissing, page } = answer.value;
     expect(groups.length).toBeGreaterThan(0);
     expect(coordinatorsMissing).toBe(0);
+    // The server's own page block, read rather than derived. `totalItems` is the figure the voice
+    // line prints; on this recording it agrees with the row count, and on a cluster with more
+    // groups than a page holds it must not.
+    expect(page.totalItems).toBe(3);
+    expect(page.pageSize).toBe(25);
 
     const indexer = groups.find((group) => group.groupId === "analytics-indexer");
     expect(indexer).toBeDefined();
@@ -52,8 +57,43 @@ describe("the recorded consumer group list", () => {
     expect(indexer.totalLag).toBe(0);
     expect(indexer.excludedPartitions).toBe(0);
     expect(indexer.incomplete).toBeNull();
-    // The wire gives a broker id, not a `host:port`.
-    expect(indexer.coordinator).toBe("broker 1");
+    // `host:port`, from the two fields the wire carries together. Not `broker 1`, which is a
+    // number dressed as an address and is nowhere an operator can point a tool.
+    expect(indexer.coordinator).toBe("kafka:9092");
+  });
+
+  it("leaves the coordinator absent when the wire carried an id and no address", async () => {
+    /*
+     * Derived from the recording rather than written: the quickstart's coordinator always answers,
+     * so the refusal path cannot be recorded from it. What is taken from the document is every
+     * other field and the document's shape; what is removed is exactly the two fields under test.
+     *
+     * The old mapping filled this in as `broker 1` from `coordinatorId`, which is a broker id
+     * printed where an address goes — nowhere to point a tool, and on screen indistinguishable
+     * from a coordinator that answered.
+     */
+    const stripped = JSON.parse(JSON.stringify(groupsDocument)) as {
+      groups: { data: { items: Record<string, unknown>[] } };
+    };
+    for (const item of stripped.groups.data.items) {
+      delete item["coordinatorHost"];
+      delete item["coordinatorPort"];
+    }
+    expect(stripped.groups.data.items[0]?.["coordinatorId"]).toBe(1);
+
+    const answer = await fetchGroups(client(stripped), "quickstart");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.groups.every((group) => group.coordinator === null)).toBe(true);
+  });
+
+  it("falls back to the request's own page when the server sent no page block", async () => {
+    // `page` and `pageSize` describe the request, so echoing them back is honest. `totalItems` has
+    // no such fallback — nothing in the answer knows the cluster's figure — so it stays `null` and
+    // the screen says so in words rather than publishing this page's length.
+    const withoutPage = { groups: { status: "ok", data: { items: [] } }, incompleteCoordinators: 0 };
+    const answer = await fetchGroups(client(withoutPage), "quickstart", { page: 4, pageSize: 8 });
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.page).toEqual({ page: 4, pageSize: 8, totalItems: null });
   });
 
   it("does not decode the whole list to nothing", async () => {
@@ -95,7 +135,7 @@ describe("the recorded group detail", () => {
     expect(group.state).toBe("STABLE");
     expect(group.partitionAssignor).toBe("range");
     expect(group.protocol).toBe("CLASSIC");
-    expect(group.coordinator).toBe("broker 1");
+    expect(group.coordinator).toBe("kafka:9092");
 
     // The wire nests partitions under `topics`; the table wants one flat list.
     expect(group.offsets.length).toBe(12);
@@ -112,7 +152,7 @@ describe("the recorded group detail", () => {
     return fetchGroup(client(groupDocument), "quickstart", "analytics-indexer").then((answer) => {
       if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
       const member = answer.value.members[0];
-      expect(member?.host).toBe("172.21.0.4");
+      expect(member?.host).toBe("172.18.0.4");
       expect(member?.clientId).toBe("kui-quickstart-indexer");
       // `null` here is a real answer — this group does not use static membership.
       expect(member?.groupInstanceId).toBeNull();
@@ -223,7 +263,7 @@ describe("the recorded lag delta", () => {
     expect(lagOf("order-fulfilment")).toBe(21);
     // And the row's other five columns, which a lag answer does not carry, are untouched.
     expect(merged.rows.find((row) => row.groupId === "order-fulfilment")?.topics).toBe(1);
-    expect(merged.rows.find((row) => row.groupId === "order-fulfilment")?.coordinator).toBe("broker 1");
+    expect(merged.rows.find((row) => row.groupId === "order-fulfilment")?.coordinator).toBe("kafka:9092");
   });
 
   it("reads a quiet answer as nothing changed, not as no groups", async () => {

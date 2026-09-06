@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { BrokerDetail } from "./BrokerDetail.jsx";
 import { BrokerList } from "./BrokerList.jsx";
 import { ClusterList } from "./ClusterList.jsx";
-import { DEGRADED_BROKERS, RACKED_BROKERS, SAMPLE_BROKERS, SAMPLE_CLUSTERS, SAMPLE_CONFIGS, SAMPLE_LOG_DIRS } from "./fixtures.js";
+import { DEGRADED_BROKERS, RACKED_BROKERS, SAMPLE_BROKERS, SAMPLE_CLUSTERS, SAMPLE_CONFIGS, SAMPLE_LOG_DIRS, UNMEASURED_BROKERS } from "./fixtures.js";
 
 /**
  * The cluster and broker screens.
@@ -101,6 +101,7 @@ export const BrokersExpanded: Story = {
               { name: "compression.type", value: "producer" },
             ]
       }
+      configsMoreFor={(id) => (id === 1 ? 332 : undefined)}
       configsErrorFor={(id) => (id === 3 ? "The cluster refused describeConfigs" : undefined)}
     />
   ),
@@ -109,6 +110,29 @@ export const BrokersExpanded: Story = {
       (toggle as HTMLButtonElement).click();
     }
   },
+};
+
+/**
+ * A single-broker cluster nothing has finished scraping — which is what a stack looks like for the
+ * first minute of its life, and what the quickstart answers today.
+ *
+ * Two refusals are on screen at once and neither is drawn as a failure. The disk bar has no
+ * percentage, because Kafka reports what a broker holds and not how large the disk under it is, and
+ * says so underneath. The voice line does **not** say "Zero under-replicated partitions": the count
+ * is `null`, not `0`, and the line's whole value is that it can tell those apart.
+ */
+export const BrokersUnmeasured: Story = {
+  render: () => (
+    <BrokerList
+      clusterName="quickstart"
+      brokers={UNMEASURED_BROKERS}
+      underReplicatedPartitions={null}
+      observedAgo="2s ago"
+      clustersHref="#/clusters"
+      hrefFor={brokerHref}
+      onOpen={noop}
+    />
+  ),
 };
 
 /** A rack-aware cluster, which is the only case where the RACK figure is drawn at all. */

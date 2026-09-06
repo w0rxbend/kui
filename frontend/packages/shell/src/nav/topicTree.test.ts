@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { topicTree } from "./topicTree.js";
+import { topicGroupHref, topicTree } from "./topicTree.js";
 
 const NAMES = [
   "orders.payments.v2",
@@ -111,5 +111,40 @@ describe("the drawer's topic tree", () => {
     const rows = tree(singletons, [], 3);
     expect(rows.length).toBe(4);
     expect(rows.at(-1)?.label).toBe("other");
+  });
+});
+
+/**
+ * Where a prefix row goes.
+ *
+ * Three cases, and the reason they are three is that only one of them is a search. Getting this
+ * wrong is silent: a link that lands on the unfiltered list looks exactly like a link that worked,
+ * because the list it lands on does contain the topics the row named.
+ */
+describe("the address a prefix row leads to", () => {
+  const list = "/ui/clusters/prod/topics";
+
+  it("asks the list for the prefix, without the star the row is written with", () => {
+    /* `q` is a name search, not a glob: `orders.*` sent literally matches nothing at all, and a
+       search that matches nothing renders as "no topics" over a cluster that has three. */
+    expect(topicGroupHref(list, "orders.*")).toBe(`${list}?q=orders`);
+  });
+
+  it("uses the list's own switch for internal topics rather than searching for a name", () => {
+    // `internal` is every topic beginning with an underscore, whatever its own prefix is. There is
+    // no name to search for; there is a switch, and this is what it is for.
+    expect(topicGroupHref(list, "internal")).toBe(`${list}?showInternal=true`);
+  });
+
+  it("sends the capped remainder to the whole list, which no query can express", () => {
+    // `other` is what the group cap left over — several prefixes at once — so no `q` can express
+    // it. The unfiltered list is wider than the row and is at least true.
+    expect(topicGroupHref(list, "other")).toBe(list);
+  });
+
+  it("encodes a prefix that is not URL-safe", () => {
+    // A topic segment may hold anything Kafka allows, and a hand-built query string is how a search
+    // for `a b` becomes a request for two parameters.
+    expect(topicGroupHref(list, "a b.*")).toBe(`${list}?q=a%20b`);
   });
 });

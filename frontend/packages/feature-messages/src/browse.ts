@@ -377,8 +377,16 @@ export function seekFor(
  * Never `0 selected`. An empty selection means every partition — that is what the server means by
  * the parameter being absent — and a control that read "0" for "all" would be a control that says
  * the opposite of what it does.
+ *
+ * `total` is `undefined` while KUI has not been told how many partitions the topic has, and then the
+ * summary says `all partitions` — words, and no figure. It read `all 0` for the whole life of the
+ * route that hard-coded a zero: a count nobody had measured, drawn as a quantity, on a control whose
+ * menu was empty for the same reason.
  */
-export function partitionSummary(selected: readonly number[], total: number): string {
+export function partitionSummary(selected: readonly number[], total: number | undefined): string {
+  if (total === undefined) {
+    return selected.length === 0 ? "all partitions" : `${String(selected.length)} chosen`;
+  }
   if (selected.length === 0 || selected.length === total) return `all ${String(total)}`;
   if (selected.length === 1) return `p ${String(selected[0])}`;
   return `${String(selected.length)} of ${String(total)}`;

@@ -173,7 +173,11 @@ object ClusterMapping {
       // does not sweep topics - so the field is named for what it actually holds.
       replicaCount = row.replicas,
       replicaSkewPercent = row.skewPercent,
-      leaderSkewPercent = None,
+      // Filled since 2026-09-06. It was `None` while `leaderCount` was, and it is derived from the filled
+      // count by the same `BrokerLoad.skewOf` the replica skew above goes through — one function, so the two
+      // adjacent columns cannot end up on two scales. It refuses with `leaderCount` and not with
+      // `replicaCount`: the leaderships come from the topic sweep and the replicas from the log directories.
+      leaderSkewPercent = row.leaderSkewPercent,
       // What Kafka's own data occupies on this broker: the sum of the replica sizes its log directories
       // report. It used to be `totalBytes - usableBytes`, the filesystem's used space, which on any shared
       // disk is mostly other people's files - the quickstart's broker holds about a hundred records and that

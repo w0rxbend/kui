@@ -134,6 +134,9 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
         assertEquals(result.map(_.brokers.flatMap(_.partitions)), Right(List(4, 4, 4)))
         assertEquals(result.map(_.brokers.flatMap(_.leaders)), Right(List(2, 1, 1)))
         assertEquals(result.map(_.brokers.flatMap(_.leaders).sum), Right(4))
+        // The leader skew comes off the same census: four leaderships over three brokers is 1.33 each, so
+        // broker 1's two are half again over its share and the other two are a quarter under theirs.
+        assertEquals(result.map(_.brokers.flatMap(_.leaderSkewPercent)), Right(List(50.0d, -25.0d, -25.0d)))
       }
     }
   }
@@ -148,7 +151,11 @@ final class BrokerDetailUseCaseSuite extends munit.CatsEffectSuite {
       built.brokers.brokers(prod.id).map { result =>
         assertEquals(result.map(_.brokers.flatMap(_.partitions)), Right(Nil))
         assertEquals(result.map(_.brokers.flatMap(_.leaders)), Right(Nil))
+        // It refuses with the count it is derived from, and not with the replica skew beside it, which
+        // comes from the log directories and is still a number.
+        assertEquals(result.map(_.brokers.flatMap(_.leaderSkewPercent)), Right(Nil))
         assertEquals(result.map(_.brokers.flatMap(_.replicas)), Right(List(2, 2, 2)))
+        assertEquals(result.map(_.brokers.flatMap(_.skewPercent)), Right(List(0.0d, 0.0d, 0.0d)))
       }
     }
   }

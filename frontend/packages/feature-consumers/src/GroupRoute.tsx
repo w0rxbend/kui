@@ -10,7 +10,7 @@ import { Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useParams } from "@solidjs/router";
 import { Actions } from "@kui/api";
-import { ConfirmDialog, createMutation, useKui, valueOf, type Fetched } from "@kui/kernel";
+import { ConfirmDialog, createMutation, notify, useKui, valueOf, type Fetched } from "@kui/kernel";
 import { GroupDetail as GroupDetailPage } from "./GroupDetail.jsx";
 import { fetchGroup } from "./data.js";
 import { applyReset, deleteGroup, planReset } from "./write.js";
@@ -95,7 +95,18 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
                 // The group's committed offsets have just moved. Everything on the page behind the
                 // wizard — the lag, the per-partition positions — now describes the state before the
                 // reset, which is the one state it must not be showing.
-                if (outcome.ok) setAttempt(attempt() + 1);
+                if (outcome.ok) {
+                  setAttempt(attempt() + 1);
+                  /*
+                   * The wizard's receipt is on screen and says what the broker wrote, so this is not
+                   * the only confirmation — but the wizard closes and the page behind it looks
+                   * exactly as it did before, only with different numbers. The toast is what
+                   * survives that transition and names the group the offsets belong to.
+                   */
+                  notify("Offsets reset", {
+                    message: `${props.groupId} now starts from the offsets in the plan you applied.`,
+                  });
+                }
                 return outcome;
               },
               permitted: mayReset(),
@@ -129,6 +140,15 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
               void remove.run().then((outcome) => {
                 if (outcome.kind !== "done") return;
                 setConfirmingDelete(false);
+                // Raised before the navigation, deliberately: the toast region lives in the shell
+                // and survives a route change, and the list this lands on has no other trace of
+                // what just happened — the group is simply not there any more, which is
+                // indistinguishable from having mistyped the address.
+                notify("Consumer group deleted", {
+                  message:
+                    `${props.groupId} and its committed offsets are gone. ` +
+                    "No records were deleted.",
+                });
                 window.location.assign(kui.paths.consumerGroups(props.clusterId));
               });
             }}

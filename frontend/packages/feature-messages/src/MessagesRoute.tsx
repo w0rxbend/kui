@@ -25,10 +25,10 @@
  * link every abandoned browse leaves a consumer assigned on the message service until its budget
  * expires — see `transport.ts` for why `openEventSource` could not do this.
  */
-import { Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { useLocation, useParams } from "@solidjs/router";
-import { createMutation, useKui, type KafkaRecord } from "@kui/kernel";
+import { useLocation, useNavigate, useParams } from "@solidjs/router";
+import { createMutation, notify, useQuery, useKui, type KafkaRecord } from "@kui/kernel";
 import { Actions } from "@kui/api";
 import { MessagesTab } from "./MessagesTab.jsx";
 import { ProduceDrawer } from "./ProduceDrawer.jsx";
@@ -43,6 +43,21 @@ import { produce, type RecordDraft } from "./produce.js";
 import { createBrowseSession } from "./session.js";
 import { createBrowseTransport } from "./transport.js";
 import { fromParams, queryString, type BrowseQuery } from "./browse.js";
+import {
+  celFor,
+  isEmpty,
+  predicateParams,
+  predicatesFrom,
+  type Predicates,
+} from "./predicates.js";
+import {
+  readPresets,
+  withPreset,
+  withoutPreset,
+  writePresets,
+  type FilterPreset,
+} from "./presets.js";
+import { fetchTopicFacts, topicFactsKey } from "./topic.js";
 
 export default function Messages(): JSX.Element {
   const params = useParams<{
@@ -94,6 +109,7 @@ function BrowserScreen(props: {
 }): JSX.Element {
   const kui = useKui();
   const location = useLocation();
+  const navigate = useNavigate();
 
   /**
    * The browse the address describes.
@@ -121,10 +137,74 @@ function BrowserScreen(props: {
     session.stop();
   });
 
-  const [partitionCount] = createSignal(0);
+  /**
+   * What the operator typed that the browse endpoint has no parameter for.
+   *
+   * Read from the address, exactly like {@link query}, and for the same reason: a browse is a link,
+   * and a colleague opening one has to see the *predicates* in the controls rather than the
+   * expression they compiled to. They are stripped before a request is made — see {@link start}.
+   */
+  const predicates = createMemo<Predicates>(() =>
+    predicatesFrom(new URLSearchParams(location.search)),
+  );
+
+  /**
+   * The topic's real partition count.
+   *
+   * This route held a signal hard-coded to zero and handed that zero to three children — `topic.ts`
+   * spells out the shape it was. `ResendDialog` spends it in a sentence, so every copy dialog this
+   * product has ever drawn said the source topic has 0 partitions — and disabled the control that
+   * adds a range as a side effect, because a draft with one range already has "one per partition"
+   * when there are none.
+   *
+   * `useQuery` rather than a hand-rolled fetch: the topic page asks for the same topic, and a key is
+   * a promise that everything changing the request is in the string, so the two share one answer and
+   * one request. `undefined` while it is loading, refused or failed — never a number.
+   */
+  const topic = useQuery({
+    key: () => topicFactsKey(props.clusterId, props.topicName),
+    load: () => fetchTopicFacts(kui.api, props.clusterId, props.topicName),
+  });
+  const partitionCount = (): number | undefined => {
+    const state = topic.state();
+    return state.kind === "ready" || state.kind === "stale" ? state.value.partitionCount : undefined;
+  };
+
+  /**
+   * The address this route last asked for, until the location agrees with it.
+   *
+   * `query()` and `predicates()` read the *location*, and the router updates that on its own
+   * schedule. A control that changes both halves at once — the time-window chips set a start and
+   * drop the window's end — would therefore compose its second write from the state before its
+   * first, and land an address holding one half of the change.
+   *
+   * A plain variable rather than a signal, and read only by the two functions that compose an
+   * address: nothing renders from it. The effect below drops it the moment the location catches up,
+   * so a Back button, a pasted link and a reload all go through the location as they always did.
+   */
+  let written: { readonly query: BrowseQuery; readonly predicates: Predicates } | undefined;
+  createEffect(
+    () => location.search,
+    () => {
+      written = undefined;
+    },
+  );
+
+  const currentQuery = (): BrowseQuery => written?.query ?? query();
+  const currentPredicates = (): Predicates => written?.predicates ?? predicates();
+
   const [producing, setProducing] = createSignal(false);
   const [editingFilter, setEditingFilter] = createSignal(false);
   const [resending, setResending] = createSignal(false);
+
+  /** The saved arrangements this browser holds for this cluster. */
+  const [presets, setPresets] = createSignal<readonly FilterPreset[]>(
+    readPresets(props.clusterId),
+    { ownedWrite: true },
+  );
+
+  /** Why the last Read started no browse at all. Cleared by the next one. */
+  const [refusal, setRefusal] = createSignal<string | undefined>(undefined, { ownedWrite: true });
 
   const write = createMutation((draft: RecordDraft) =>
     produce(kui.api, props.clusterId, props.topicName, draft),
@@ -143,17 +223,90 @@ function BrowserScreen(props: {
     resend(kui.api, props.clusterId, props.topicName, draft),
   );
 
+  /* Registering what Read compiles, and deliberately *not* the same mutation as `compile`. That one
+   * drives the editor's apply button; sharing it would put a Read's refusal inside a dialog nobody
+   * has open, and would blank the editor's own error the next time somebody pressed Read. */
+  const prepare = createMutation((source: string) =>
+    registerFilter(kui.api, props.clusterId, source),
+  );
+
   /**
    * The one writer of the address.
    *
-   * `replaceState` rather than `pushState`: adjusting a filter is refining one view, not visiting a
-   * new page, and pushing every keystroke would make the Back button walk backwards through a
-   * sentence somebody typed.
+   * `replace` rather than a push: adjusting a filter is refining one view, not visiting a new page,
+   * and pushing every keystroke would make the Back button walk backwards through a sentence
+   * somebody typed.
+   *
+   * ## Why this goes through the router and not through `window.history`
+   *
+   * It was `window.history.replaceState(null, "", url)`. The URL in the bar changed and **nothing
+   * else did**: the router's history adapter learns about a navigation from `popstate`, which the
+   * browser does not fire for a `replaceState` the page made itself, so `useLocation()` never saw
+   * the write. `query()` is a memo over `location.search`, so it went on answering with the browse
+   * the page was first opened with — every control on this bar wrote an address and then read the
+   * old one back, and the next Read read the range from before the change.
+   *
+   * ## And why the argument is a bare query string
+   *
+   * `navigate` resolves a `to` that begins with `/` against the deployment's base, and
+   * `location.pathname` **already carries** that base — so passing the pathname back produces
+   * `/ui/ui/clusters/…`, and the route stops matching on the next reload. That is not a guess: it
+   * is what a browser did, against the quickstart, with the first version of this function.
+   *
+   * A `to` starting with `?` takes the URL-relative path instead (`new URL(to, …current…)`), which
+   * keeps the path exactly as it is and replaces only the query. That is precisely what this writer
+   * means — the address of a browse is its query — so it is also the honest spelling.
    */
-  function writeQuery(next: BrowseQuery): void {
-    const search = queryString(next);
-    const url = `${location.pathname}${search === "" ? "" : `?${search}`}`;
-    window.history.replaceState(null, "", url);
+  function writeQuery(next: BrowseQuery, nextPredicates: Predicates = currentPredicates()): void {
+    written = { query: next, predicates: nextPredicates };
+    const search = [
+      queryString(next),
+      ...predicateParams(nextPredicates).map(
+        ([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`,
+      ),
+    ]
+      .filter((part) => part !== "")
+      .join("&");
+    navigate(`?${search}`, { replace: true });
+  }
+
+  /**
+   * Start a browse for what the controls now say.
+   *
+   * The predicates are the reason this is not `session.start(query())`. They have no query parameter
+   * — the browse endpoint takes a start position and one plain substring — so they are compiled to
+   * one CEL expression and **registered** first, and the browse quotes the id the service minted.
+   * The id and the source travel together, as they must: a replica that never saw this registration
+   * compiles the source beside it rather than refusing the filter.
+   *
+   * A registration the cluster refuses stops the browse rather than starting one that silently
+   * ignores every predicate on the bar. `filterSource` without a `filterId` is *dropped* by the
+   * message service — deliberately, and documented there — so a browse started anyway would return
+   * the unfiltered topic while the controls said otherwise, which is the most expensive way this
+   * screen can be wrong.
+   */
+  function start(): void {
+    setRefusal(undefined);
+    const asked = currentQuery();
+    const source = celFor(currentPredicates(), asked.filterSource);
+    if (source === undefined) {
+      session.start({ ...asked, filterId: undefined, filterSource: undefined });
+      return;
+    }
+    void prepare.run(source).then((state) => {
+      if (state.kind === "done") {
+        session.start({ ...asked, filterId: state.value.id, filterSource: state.value.source });
+        return;
+      }
+      /* `running` is the re-entry guard answering a second press while the first is still out, and
+         `idle` is unreachable from `run`. Neither is a refusal, and drawing one for them would put
+         a red sentence under a browse that is about to start. */
+      if (state.kind === "running" || state.kind === "idle") return;
+      setRefusal(
+        "KUI did not start the browse: this cluster would not compile the filter these " +
+          `controls describe. ${state.message}`,
+      );
+    });
   }
 
   /**
@@ -166,7 +319,7 @@ function BrowserScreen(props: {
    * replica, which is the worst possible time to find out.
    */
   function applyFilter(filter: RegisteredFilter | undefined): void {
-    const next = query();
+    const next = currentQuery();
     writeQuery(
       filter === undefined
         ? { ...next, filterId: undefined, filterSource: undefined }
@@ -181,17 +334,69 @@ function BrowserScreen(props: {
   const mayResend = () =>
     kui.permits(Actions.TopicMessagesRead) && kui.permits(Actions.TopicMessagesProduce);
 
+  /**
+   * Name a preset for what is on the bar right now.
+   *
+   * `prompt` and not a dialog, and the reason is worth stating rather than defending later: a preset
+   * is a private label this browser keeps, it takes one word, and a modal for it would be the fourth
+   * overlay on a screen that already has three. Cancelling saves nothing, which is what an empty
+   * answer means.
+   */
+  function savePreset(): void {
+    const name = window.prompt("Name this filter", "")?.trim() ?? "";
+    if (name === "") return;
+    const expression = currentQuery().filterSource;
+    const next = withPreset(presets(), {
+      name,
+      predicates: currentPredicates(),
+      ...(expression === undefined || expression === "" ? {} : { expression }),
+    });
+    setPresets(next);
+    writePresets(props.clusterId, next);
+    notify("Filter saved", { message: `${name} is on this browser only.`, tone: "info" });
+  }
+
+  function applyPreset(preset: FilterPreset): void {
+    session.stop();
+    /* Both halves at once, in one address write. Applying the predicates and then the expression
+       would be two navigations, and the second would be computed from a location the first had not
+       finished writing — which lands as a browse holding one half of the preset. */
+    writeQuery(
+      preset.expression === undefined
+        ? { ...currentQuery(), filterId: undefined, filterSource: undefined }
+        : { ...currentQuery(), filterId: undefined, filterSource: preset.expression },
+      preset.predicates,
+    );
+  }
+
   return (
     <>
       <MessagesTab
         topic={props.topicName}
-        /* Not known here: the partition count comes from the topic overview, which this route does
-         not fetch. `0` makes the selector offer "all partitions" and nothing else, which is honest
-         — it cannot offer a list of partitions it has not been told about. Fetching the overview
-         alongside the stream is the next step. */
+        /* The topic's own figure, fetched beside the stream. `undefined` while it is loading or if
+         the answer refused: the children below each draw a sentence for that, and none of them
+         draws a zero — a topic cannot have no partitions, so a zero here would be a claim that
+         is both impossible and reassuring. */
         partitionCount={partitionCount()}
         query={query()}
         onQueryChange={writeQuery}
+        predicates={predicates()}
+        onPredicatesChange={(next) => writeQuery(currentQuery(), next)}
+        onRead={start}
+        readBusy={prepare.busy()}
+        {...(refusal() === undefined ? {} : { refusal: refusal() })}
+        presets={presets()}
+        onApplyPreset={applyPreset}
+        onRemovePreset={(preset) => {
+          const next = withoutPreset(presets(), preset.name);
+          setPresets(next);
+          writePresets(props.clusterId, next);
+        }}
+        /* Offered only when there is something to save. A "save as preset" that saves the empty
+           arrangement is a chip that does nothing, named after nothing. */
+        {...(isEmpty(predicates()) && (query().filterSource ?? "") === ""
+          ? {}
+          : { onSavePreset: savePreset })}
         session={session}
         mayProduce={mayProduce()}
         produceDisabledReason={
@@ -270,25 +475,60 @@ function BrowserScreen(props: {
       <ResendDialog
         open={resending()}
         onClose={() => setResending(false)}
+        {...(partitionCount() === undefined ? {} : { partitionCount: partitionCount() })}
         topic={props.topicName}
-        partitionCount={partitionCount()}
         state={copy.state()}
         /* Stays open on success, like the produce drawer and for a stronger reason: the answer is
            two figures, and a copy that read and wrote nothing is a 200 whose whole meaning is in
            them. Closing on success would show the operator nothing at all. */
-        onSend={(draft) => void copy.run(draft)}
+        onSend={(draft) => {
+          void copy.run(draft).then((state) => {
+            if (state.kind !== "done") return;
+            /* The dialog already shows the figures; the toast is what survives it being closed.
+               A copy is not reversible and the operator has to be able to say afterwards that it
+               happened, which a panel they dismissed cannot do.
+
+               `written`, not `requested`: the request said how many records to try for and the
+               answer says how many arrived, and on a range that retention has eaten those are
+               different numbers. Reporting the first would be reporting the intention. */
+            notify(state.value.written === 0 ? "Nothing was copied" : "Records copied", {
+              tone: state.value.written === 0 ? "warning" : "success",
+              message:
+                `${state.value.written.toLocaleString()} of ${state.value.read.toLocaleString()} ` +
+                `records read from ${props.topicName} reached ${state.value.toTopic}.`,
+            });
+          });
+        }}
       />
 
       <ProduceDrawer
         open={producing()}
         onClose={() => setProducing(false)}
         topic={props.topicName}
-        partitionCount={partitionCount()}
+        {...(partitionCount() === undefined ? {} : { partitionCount: partitionCount() })}
         state={write.state()}
         onSend={(draft) => {
           /* The drawer deliberately stays open on success: it shows the partition and offset the
            broker assigned. "Sent" is not something an operator can go and check; a position is. */
-          void write.run(draft);
+          void write.run(draft).then((state) => {
+            if (state.kind !== "done" || state.value.length === 0) return;
+            /* A produce cannot be undone either, and the drawer is dismissible. The toast quotes a
+               position rather than saying "sent", for the reason the drawer does: a position is
+               something the operator can go and look at. */
+            const first = state.value[0];
+            notify(
+              state.value.length === 1
+                ? "Record published"
+                : `${String(state.value.length)} records published`,
+              {
+                message:
+                  state.value.length === 1 && first !== undefined
+                    ? `${props.topicName} partition ${String(first.partition)}, ` +
+                      `offset ${String(first.offset)}.`
+                    : `Written to ${props.topicName}.`,
+              },
+            );
+          });
         }}
       />
     </>

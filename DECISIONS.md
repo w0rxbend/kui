@@ -53,6 +53,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 | [ADR-046](docs/adr/ADR-046-cluster-profile-seam.md) | Cluster credentials travel on `/internal/v1` and exactly one shared module, `services/cluster/client`, consumes them | Accepted | 2026-09-04 |
 | [ADR-047](docs/adr/ADR-047-mutation-marker-readonly-and-audit-sink.md) | Every mutation ships with a `Mutation` marker, a per-cluster read-only refusal and an audit record, from the first one | Accepted | 2026-09-04 |
 | [ADR-048](docs/adr/ADR-048-solidjs-typescript-vite-frontend.md) | The browser is SolidJS 2, TypeScript and Vite; the shared-contract guarantee is kept by generating the client from the committed OpenAPI documents | Accepted | 2026-09-05 |
+| [ADR-049](docs/adr/ADR-049-cross-entity-search.md) | Cross-entity search is a fold at the gateway over the three services' own list endpoints, and `partial` is a list of service ids | Accepted | 2026-09-06 |
 
 ADR-039 … ADR-043 were written at and after the architecture review (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded

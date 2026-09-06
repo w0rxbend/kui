@@ -27,6 +27,10 @@
  * configuration. Each draws an em dash with a title saying what could not be read. A `0` here would
  * claim the broker leads no partitions, which on a live cluster is an emergency rather than a
  * missing figure.
+ *
+ * The disk is the one with a sentence rather than a dash, because it has two ways of being absent
+ * and they are not the same: no capacity was reported (so there is no percentage, but what Kafka
+ * holds is known), or nothing was measured at all. `diskNote` in `model.ts` decides which.
  */
 import { For, Show, createSignal, createUniqueId } from "solid-js";
 import type { JSX } from "@solidjs/web";
@@ -41,7 +45,7 @@ import {
   formatBytes,
   formatCount,
 } from "@kui/kernel";
-import { DISK_THRESHOLDS, brokerName, diskPercent, type Broker } from "./model.js";
+import { DISK_THRESHOLDS, brokerName, diskNote, diskPercent, type Broker } from "./model.js";
 
 /** One setting, as the broker-configs endpoint reports it. */
 export type BrokerConfig = {
@@ -68,6 +72,14 @@ export type BrokerCardProps = {
    * settings", which is never true.
    */
   readonly configs?: readonly BrokerConfig[] | undefined;
+  /**
+   * How many more settings the broker has than the card is drawing.
+   *
+   * A card shows the handful an operator scans for; a broker has around two hundred. Without this
+   * the chip row looks like the whole of a broker's configuration, which is the reading that sends
+   * somebody to file a bug about a setting KUI "does not show".
+   */
+  readonly configsMore?: number | undefined;
   /** Why the settings could not be read. Shown in place of them; never an empty list. */
   readonly configsError?: string | undefined;
   /**
@@ -116,8 +128,8 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
   const diskText = (): string | undefined => {
     const fraction = percent();
     if (fraction !== undefined) return `${Math.round(fraction)}%`;
-    const used = broker().diskUsedBytes;
-    return used === null ? undefined : formatBytes(used);
+    const held = broker().heldBytes;
+    return held === null ? undefined : formatBytes(held);
   };
 
   const toggle = (): void => {
@@ -180,16 +192,17 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
         </div>
 
         <div class="kui-brkcard__disk">
-          {/* Two different absences, and the bar drew the same dash for both.
+          {/* Three different states, and the bar once drew the same dash for two of them.
              *
-             * A *percentage* needs a capacity, and Kafka's admin protocol does not expose the size
-             * of the disk under a log directory — so on almost every cluster `percent()` is
-             * undefined while `diskUsedBytes` is perfectly well known. Printing a dash there threw
-             * away a figure the server had just sent.
+             * A *percentage* needs a capacity, and the brokers endpoint carries none: it reports
+             * what Kafka holds. The capacity comes from the log directories, which fail separately
+             * and on some deployments are refused outright — so `percent()` can be undefined while
+             * `heldBytes` is perfectly well known, and printing a dash there threw away a figure
+             * the server had just sent.
              *
-             * So the bar keeps its track empty when there is no denominator to fill it against, and
-             * the text beside it says what *is* known: the bytes held. Only when neither is known
-             * does it read as absent. */}
+             * So the bar keeps its track empty when there is no denominator to fill it against, the
+             * text beside it says what *is* known, and `diskNote` below says which silence this is.
+             * Only when neither figure exists does the whole thing read as absent. */}
           <ProgressBar
             label={`${brokerName(broker())} disk usage`}
             caption="disk"
@@ -198,6 +211,12 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
             thresholds={DISK_THRESHOLDS}
             valueText={diskText()}
           />
+          {/* The sentence, whenever there is no percentage. A bar with no fill beside a dash is
+              indistinguishable from an empty disk, and the two mean opposite things; `diskNote`
+              carries which of the two silences this is. */}
+          <Show when={diskNote(broker())}>
+            {(note) => <p class="kui-brkcard__disk-note">{note()}</p>}
+          </Show>
         </div>
 
         <button
@@ -224,6 +243,16 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
             <Show when={props.version}>{(version) => <Tag tone="neutral">{version()}</Tag>}</Show>
             <Show when={props.uptime}>{(uptime) => <Tag tone="neutral">{uptime()}</Tag>}</Show>
           </div>
+
+          {/* The design's tag row carries an uptime and this product has no source for one:
+              neither the admin protocol nor any endpoint KUI serves reports when a broker
+              started. Saying so where the tag would have been is the alternative to a plausible
+              invention, and it is inside the disclosure, so only somebody looking reads it. */}
+          <Show when={props.uptime === undefined}>
+            <p class="kui-brkcard__tag-note">
+              Kafka reports no broker uptime, so this card cannot show one.
+            </p>
+          </Show>
 
           {/* `h3` under the card's own `h2` below, not under the page's `h1`: heading levels may
               only increase by one, and a card that jumps straight to `h3` makes the document
@@ -259,6 +288,12 @@ export function BrokerCard(props: BrokerCardProps): JSX.Element {
                     )}
                   </For>
                 </ConfigChips>
+                <Show when={(props.configsMore ?? 0) > 0}>
+                  <p class="kui-brkcard__config-state">
+                    {formatCount(props.configsMore ?? 0)} more settings. Open this broker to see all
+                    of them.
+                  </p>
+                </Show>
               </Show>
             </Show>
           </Show>

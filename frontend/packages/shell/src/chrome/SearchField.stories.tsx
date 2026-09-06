@@ -91,6 +91,51 @@ export const Failed: Story = {
   },
 };
 
+/**
+ * Half an answer, and the half that is missing named.
+ *
+ * The search is a fold at the gateway over three services, and the distributed stack routes only
+ * two of them — `/api/v1/capabilities` answers `cluster consumer message metrics topic`. So a
+ * `partial` naming the schema service is the **ordinary** answer rather than a failure, and it is
+ * drawn beside the rows that did arrive rather than instead of them: two lists out of three with no
+ * explanation tells an operator their subject does not exist, and there is no way to tell that
+ * answer from a true one.
+ */
+export const PartiallySearched: Story = {
+  args: {
+    value: "orders",
+    onInput: () => {},
+    status: "ready",
+    results: RESULTS,
+    unavailable: ["Schema Registry"],
+    platform: "other",
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByTestId("search-input"));
+  },
+};
+
+/**
+ * Nobody could be asked at all.
+ *
+ * Not the empty state: "Nothing matches" over a search that reached no service is a false negative,
+ * and the operator's next action — retry, or go and look at the registry — depends entirely on
+ * which of the two it is.
+ */
+export const NothingCouldBeSearched: Story = {
+  args: {
+    value: "orders",
+    onInput: () => {},
+    status: "ready",
+    results: [],
+    unavailable: ["Topics", "Consumer groups", "Schema Registry"],
+    platform: "other",
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByTestId("search-input"));
+  },
+};
+
 /** The extreme case: a query and results made of the longest names this product meets. */
 export const LongestResults: Story = {
   args: {

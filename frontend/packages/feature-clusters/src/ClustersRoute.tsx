@@ -21,6 +21,15 @@
  * when the data lands. A failure is the screen's own failure panel with the reason and a retry that
  * works — not a thrown error, and never an empty list, which reads as "this cluster has no brokers"
  * when it means "nobody answered".
+ *
+ * ## How it reads
+ *
+ * Through `useQuery`, and not through the twenty-line `useFetch` this file used to carry. The
+ * kernel's version is the one with the behaviour the copy did not have: a refetch that fails keeps
+ * the last good value and marks it stale rather than blanking a panel that was showing real
+ * figures, and two components asking for the same key share one request — which is what makes the
+ * broker page below draw a broker's identity immediately when it is opened from the list, off the
+ * document the list already has.
  */
 import { Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
@@ -30,14 +39,17 @@ import {
   EmptyState,
   PageHeader,
   createMutation,
+  notify,
+  sharedQueries,
   useKui,
+  useQuery,
   valueOf,
   type Fetched,
 } from "@kui/kernel";
 import { Actions } from "@kui/api";
 import { useLocation, useNavigate, useParams } from "@solidjs/router";
 import { ClusterList } from "./ClusterList.jsx";
-import { BrokerList } from "./BrokerList.jsx";
+import { BrokersScreen, failureOf } from "./BrokersScreen.jsx";
 import { BrokerDetail, type BrokerTabKey, type Loaded } from "./BrokerDetail.jsx";
 import { ClusterAdmin, type Connectivity } from "./ClusterAdmin.jsx";
 import { EMPTY_CLUSTER_FORM, formFor, toRequest, type ClusterForm } from "./clusterForm.js";
@@ -53,6 +65,26 @@ import {
   type ManagedClusterRow,
 } from "./data.js";
 import type { Broker, ClusterSummary, ConfigEntry, LogDir } from "./model.js";
+
+/**
+ * The keys this route's queries are held under.
+ *
+ * Spelled out in one place because a key is a promise — everything that changes the request is in
+ * the string — and because two of these ask the same endpoint for different mappings. `clusters`
+ * and `managed-clusters` are both `GET /clusters`; one produces the list screen's rows and the
+ * other the administration screen's registrations, and sharing a key would hand one screen the
+ * other's answer. The manage key is not `clusters/manage` for the same reason the path check below
+ * is not route ordering: a cluster may perfectly well be called `manage`.
+ */
+const CLUSTERS_KEY = "clusters";
+const MANAGED_KEY = "managed-clusters";
+
+/** Everything about clusters is out of date after a registration changes. */
+function forgetClusters(): void {
+  sharedQueries.invalidateWhere(
+    (key) => key === CLUSTERS_KEY || key === MANAGED_KEY || key.startsWith("clusters/"),
+  );
+}
 
 export default function Clusters(): JSX.Element {
   const params = useParams<{ readonly clusterId?: string; readonly brokerId?: string }>();
@@ -70,7 +102,7 @@ export default function Clusters(): JSX.Element {
     <Show when={!managing()} fallback={<ManageScreen />}>
       <Show when={params.clusterId} fallback={<ClustersScreen />}>
         {(clusterId) => (
-          <Show when={params.brokerId} fallback={<BrokersScreen clusterId={clusterId()} />}>
+          <Show when={params.brokerId} fallback={<BrokersRoute clusterId={clusterId()} />}>
             {(brokerId) => <BrokerScreen clusterId={clusterId()} brokerId={brokerId()} />}
           </Show>
         )}
@@ -85,13 +117,18 @@ export default function Clusters(): JSX.Element {
  * This screen is about KUI's *own* configuration rather than about a Kafka cluster's settings, which
  * is why it asks for `ApplicationConfig` rather than `ClusterConfig`: the difference is the list of
  * which clusters exist and how to reach them, versus a broker's own configuration.
+ *
+ * Exported because it is where the write path ends: the mutation resolves here, and so does the
+ * toast that is the only thing on screen saying a removal happened. A test that reaches it through
+ * the route would need a router it has nothing to say about; a test that reaches it directly is
+ * still driving the product's own component and its own handlers.
  */
-function ManageScreen(): JSX.Element {
+export function ManageScreen(): JSX.Element {
   const kui = useKui();
-  const { state, reload } = useFetch<readonly ManagedClusterRow[]>(
-    () => fetchManagedClusters(kui.api),
-    () => "managed",
-  );
+  const { state, reload } = useQuery<readonly ManagedClusterRow[]>({
+    key: () => MANAGED_KEY,
+    load: () => fetchManagedClusters(kui.api),
+  });
 
   const [editing, setEditing] = createSignal<
     { readonly id: string | undefined; readonly form: ClusterForm } | undefined
@@ -169,11 +206,18 @@ function ManageScreen(): JSX.Element {
         // The button is disabled while this is false; the check is here as well because a form can
         // also be submitted with Enter.
         if (!built.ok) return;
+        const adding = current.id === undefined;
         void save
           .run(current.id ?? current.form.id.trim(), built.request, version())
           .then((outcome) => {
             if (outcome.kind !== "done") return;
             setEditing(undefined);
+            /* The form closing is the only thing on screen that changes, and that is also what
+               cancelling looks like. The toast distinguishes "saved" from "gave up". */
+            notify(adding ? "Cluster added" : "Cluster saved", {
+              message: `KUI now reaches ${current.form.name} at ${current.form.bootstrapServers}.`,
+            });
+            forgetClusters();
             reload();
           });
       }}
@@ -189,7 +233,15 @@ function ManageScreen(): JSX.Element {
       }}
       onDelete={(cluster) => {
         void remove.run(cluster).then((outcome) => {
-          if (outcome.kind === "done") reload();
+          if (outcome.kind !== "done") return;
+          /* A destructive success is the one case with nothing left on screen to confirm it: the
+             row is gone, and a row that is gone looks exactly like one that was never there. */
+          notify("Cluster removed", {
+            message:
+              `${cluster.name} is no longer registered. Its Kafka cluster and its data are untouched.`,
+          });
+          forgetClusters();
+          reload();
         });
       }}
       connectivity={connectivity()}
@@ -205,50 +257,12 @@ function ManageScreen(): JSX.Element {
   );
 }
 
-/**
- * A small fetch-and-hold.
- *
- * Deliberately not `createResource`: this returns the feature's own `Fetched` union, which
- * distinguishes `forbidden` and `not-configured` from `failed` — three states a resource's
- * `error` slot cannot tell apart, and which need three different renderings because only one of
- * them has a retry that would do anything.
- *
- * `reload` is returned rather than exposed as a signal write, so a screen's retry button cannot
- * accidentally be wired to something that sets state without asking again.
- */
-function useFetch<T>(
-  load: () => Promise<Fetched<T>>,
-  deps: () => unknown,
-): { readonly state: () => Fetched<T>; readonly reload: () => void } {
-  const [state, setState] = createSignal<Fetched<T>>({ kind: "loading" });
-  const [attempt, setAttempt] = createSignal(0);
-
-  createEffect(
-    () => [deps(), attempt()] as const,
-    () => {
-      let cancelled = false;
-      setState({ kind: "loading" });
-      void load().then((next) => {
-        // A second cluster chosen while the first is in flight must not land on the new screen.
-        // This is the defect that produces the most convincing wrong data there is: real figures,
-        // for a cluster the user is no longer looking at.
-        if (!cancelled) setState(() => next);
-      });
-      return () => {
-        cancelled = true;
-      };
-    },
-  );
-
-  return { state, reload: () => setAttempt(attempt() + 1) };
-}
-
 function ClustersScreen(): JSX.Element {
   const kui = useKui();
-  const { state, reload } = useFetch<readonly ClusterSummary[]>(
-    () => fetchClusters(kui.api),
-    () => "clusters",
-  );
+  const { state, reload } = useQuery<readonly ClusterSummary[]>({
+    key: () => CLUSTERS_KEY,
+    load: () => fetchClusters(kui.api),
+  });
 
   createEffect(
     () => state(),
@@ -269,26 +283,19 @@ function ClustersScreen(): JSX.Element {
   );
 }
 
-function BrokersScreen(props: { readonly clusterId: string }): JSX.Element {
+/**
+ * The brokers screen.
+ *
+ * Two lines, because everything the screen does — three requests, the settings fetched on
+ * expansion, the disks folded into the brokers — lives in `BrokersScreen.tsx`, where a test can
+ * mount it with nothing but an API client. What is left here is what only the router knows: which
+ * cluster, and where its links go.
+ */
+function BrokersRoute(props: { readonly clusterId: string }): JSX.Element {
   const kui = useKui();
-  const { state, reload } = useFetch<readonly Broker[]>(
-    () => fetchBrokers(kui.api, props.clusterId),
-    () => props.clusterId,
-  );
-
-  createEffect(
-    () => state(),
-    (current) => {
-      if (current.kind !== "loading") kui.report("feature", current.kind === "failed");
-    },
-  );
-
   return (
-    <BrokerList
-      clusterName={props.clusterId}
-      brokers={valueOf(state(), [])}
-      loading={state().kind === "loading"}
-      failure={failureOf(state(), reload)}
+    <BrokersScreen
+      clusterId={props.clusterId}
       clustersHref={kui.paths.clusters()}
       hrefFor={(brokerId) => kui.paths.broker(props.clusterId, brokerId)}
     />
@@ -339,25 +346,28 @@ function BrokerScreen(props: {
       ? "configuration"
       : "logdirs";
 
-  const brokers = useFetch<readonly Broker[]>(
-    () => fetchBrokers(kui.api, props.clusterId),
-    () => props.clusterId,
-  );
+  /* The same key the brokers screen holds this cluster's list under, so arriving from that screen
+     draws the identity at once rather than asking again for a document already in hand. */
+  const brokers = useQuery<readonly Broker[]>({
+    key: () => `clusters/${props.clusterId}/brokers`,
+    load: () => fetchBrokers(kui.api, props.clusterId),
+  });
 
-  const logDirs = useFetch<readonly LogDir[]>(
-    () => fetchBrokerLogDirs(kui.api, props.clusterId, brokerId()),
-    () => `${props.clusterId}/${props.brokerId}`,
-  );
+  const logDirs = useQuery<readonly LogDir[]>({
+    key: () => `clusters/${props.clusterId}/brokers/${props.brokerId}/log-dirs`,
+    load: () => fetchBrokerLogDirs(kui.api, props.clusterId, brokerId()),
+  });
 
-  const configs = useFetch<readonly ConfigEntry[]>(
-    () =>
+  const configs = useQuery<readonly ConfigEntry[]>({
+    /* `undefined` until the tab is selected, which is `useQuery`'s way of saying "not yet": nothing
+       is bound, nothing is fetched, and the state stays `loading`. The panel this feeds is only
+       built once the tab is on screen, and `describeConfigs` is sixty kilobytes. */
+    key: () =>
       tab() === "configuration"
-        ? fetchBrokerConfigs(kui.api, props.clusterId, brokerId())
-        : // Not "there is nothing to show": nothing has been asked for yet, and the tab is not on
-          // screen to show it. The panel this feeds is only built once the tab is selected.
-          Promise.resolve<Fetched<readonly ConfigEntry[]>>({ kind: "loading" }),
-    () => `${props.clusterId}/${props.brokerId}/${tab()}`,
-  );
+        ? `clusters/${props.clusterId}/brokers/${props.brokerId}/configs`
+        : undefined,
+    load: () => fetchBrokerConfigs(kui.api, props.clusterId, brokerId()),
+  });
 
   createEffect(
     () => brokers.state(),
@@ -495,38 +505,5 @@ function loadedOf<T>(state: Fetched<T>, onRetry: () => void): Loaded<T> {
       };
     case "failed":
       return { kind: "unavailable", message: state.message, code: state.code, onRetry };
-  }
-}
-
-/**
- * The failure panel's props, or `undefined` when there is nothing to report.
- *
- * `forbidden` and `not-configured` produce a panel too, and each says its own thing — a retry on
- * either would be a button that cannot work, so neither gets one that pretends otherwise. They are
- * given `reload` all the same because the screen's type requires a handler; the sentence is what
- * tells the operator not to press it.
- */
-function failureOf<T>(
-  state: Fetched<T>,
-  reload: () => void,
-): { readonly message: string; readonly code: string; readonly onRetry: () => void } | undefined {
-  switch (state.kind) {
-    case "failed":
-      return { message: state.message, code: state.code, onRetry: reload };
-    case "forbidden":
-      return {
-        message:
-          "You do not have permission to see this. Ask an administrator for the cluster view grant.",
-        code: "FORBIDDEN",
-        onRetry: reload,
-      };
-    case "not-configured":
-      return {
-        message: "This deployment has no cluster configured yet.",
-        code: "NOT_CONFIGURED",
-        onRetry: reload,
-      };
-    default:
-      return undefined;
   }
 }

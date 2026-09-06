@@ -43,7 +43,7 @@ final class ClusterResponsesSuite extends FunSuite {
         totalDiskUsageBytes = Some(549755813888L),
         features = List("DESCRIBE_LOG_DIRS", "DESCRIBE_QUORUM"),
         scrapedAt = at,
-        controllerUptime = Some(ControllerUptimeDto(Some(99.98d), 21600L, 21600L))
+        controllerUptime = Some(ControllerUptimeDto(Some(99.72d), 21600L, 21600L))
       ),
       at
     )

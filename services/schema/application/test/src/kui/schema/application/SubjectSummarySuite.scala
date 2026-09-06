@@ -8,7 +8,7 @@ import kui.testkit.KuiIOSuite
 
 /** What a subject list row costs, and what it says when it could not be filled in.
   *
-  * Two promises are defended here, and neither of them is about arithmetic:
+  * Three promises are defended here, and none of them is about arithmetic:
   *
   *   - **the page bounds the calls.** A registry with two thousand subjects must not become two thousand
   *     calls because somebody opened a list, so the enrichment runs over the page and not over the registry.
@@ -17,6 +17,11 @@ import kui.testkit.KuiIOSuite
   *     whether there are rows; everything after it decorates one row, and losing a decoration must cost that
   *     row three cells and not its existence. A subject that vanished from a screen is a subject an operator
   *     goes looking for.
+  *   - **a page with no rows costs one call.** The empty page and the count-only request both short-circuit
+  *     the enrichment, and the registry-wide compatibility call is the half of that a row count cannot see:
+  *     an empty page enriches no rows whether the short-circuit fires or not. `FakeRegistry.globalReads` is
+  *     what makes the difference observable, and without it this suite stayed green with the short-circuit
+  *     turned off.
   */
 final class SubjectSummarySuite extends KuiIOSuite {
 
@@ -25,6 +30,12 @@ final class SubjectSummarySuite extends KuiIOSuite {
 
   private def query(page: Int, size: Int): SubjectQuery =
     SubjectQuery(None, SortOrder.Asc, PageRequest(PositiveInt.unsafe(page), PageSize.unsafe(size)))
+
+  /** The badge's request: the total, and no rows to pay for. The page request it carries is never used to
+    * cut anything, which is why it can be the default.
+    */
+  private val countOnly: SubjectQuery =
+    SubjectQuery(None, SortOrder.Asc, PageRequest.Default, countOnly = true)
 
   /** Forty subjects, three versions each, so that a page of ten is visibly a quarter of the registry. */
   private val fortySubjects: Map[String, List[Int]] =
@@ -77,10 +88,45 @@ final class SubjectSummarySuite extends KuiIOSuite {
         SubjectQuery(Some("nothing-like-this"), SortOrder.Asc, PageRequest.Default)
       )
       asked <- registry.enrichments.get
+      globalReads <- registry.globalReads.get
     } yield {
       assertEquals(result.map(_.items), Right(List.empty[SubjectSummary]))
       assertEquals(asked, Nil)
+      // "Nothing beyond the list" is two calls, not one, and the second is the one the row count cannot
+      // see: the registry-wide compatibility level. Without this line the short-circuit `enrich` opens
+      // with can be turned off — `if page.isEmpty` to `if false` — and every other assertion in this case
+      // still holds, because a page with no rows enriches no rows either way.
+      assertEquals(globalReads, 0)
     }
+  }
+
+  test("a count-only request answers the total, sends no rows and enriches nothing") {
+    for {
+      registry <- SchemaRig.registry(subjects = fortySubjects)
+      useCase <- listing(registry)
+      result <- useCase.list(SchemaRig.WithRegistry, countOnly)
+      asked <- registry.enrichments.get
+      globalReads <- registry.globalReads.get
+    } yield {
+      // What the drawer's schema badge is for: the number of subjects, and no page of rows behind it.
+      assertEquals(result.map(_.totalItems), Right(Some(40L)))
+      assertEquals(result.map(_.items), Right(List.empty[SubjectSummary]))
+      assertEquals(result.map(_.pageSize), Right(0))
+      // One request to the registry — the subject list — and none of the five a page of one used to cost.
+      assertEquals(asked, Nil)
+      assertEquals(globalReads, 0)
+    }
+  }
+
+  test("a count-only request counts what the search matched, not the whole registry") {
+    for {
+      registry <- SchemaRig.registry(subjects = fortySubjects)
+      useCase <- listing(registry)
+      result <- useCase.list(SchemaRig.WithRegistry, countOnly.copy(search = Some("orders-1")))
+    } yield
+      // orders-10-value through orders-19-value. A count taken before the filter is the reference
+      // product's defect, and a count-only answer is nothing *but* that number.
+      assertEquals(result.map(_.totalItems), Right(Some(10L)))
   }
 
   test("one row's enrichment failing costs that row its facts and costs the page nothing") {
@@ -134,6 +180,7 @@ final class SubjectSummarySuite extends KuiIOSuite {
       )
       useCase <- listing(registry)
       result <- useCase.list(SchemaRig.WithRegistry, SubjectQuery.Default)
+      globalReads <- registry.globalReads.get
     } yield {
       val rows = rowsOf(result)
 
@@ -144,6 +191,9 @@ final class SubjectSummarySuite extends KuiIOSuite {
         Some(SubjectCompatibility.inherited(CompatibilityLevel.ForwardTransitive))
       )
       assertEquals(rows.last.compatibility, Some(SubjectCompatibility.own(CompatibilityLevel.Full)))
+      // "Read once for the page" is the other half of this case's name, and it is the half that the rows
+      // cannot show: two rows inheriting the same level look identical whether it was fetched once or twice.
+      assertEquals(globalReads, 1)
     }
   }
 

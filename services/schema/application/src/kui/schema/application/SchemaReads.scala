@@ -65,7 +65,9 @@ object RegistryQuery {
   * its own, so the whole list crosses the wire on every request and [[SubjectCatalog]] cuts the page. That is
   * fine at the sizes registries actually reach — a few thousand names is a few hundred kilobytes — and it is
   * the only option the API offers, but it is why this call has the shortest timeout budget of the four and
-  * why the page size is bounded like every other list in KUI.
+  * why this endpoint's page size is bounded below the kernel's: `SchemaEndpoints.MaxPageSize` is a hundred
+  * and `PageSize.Max` is five hundred, because a row here is three registry requests rather than a slice of a
+  * list KUI already holds.
   *
   * ==The page is cut before anything is enriched==
   *
@@ -115,6 +117,13 @@ object SubjectListUseCase {
 
       /** The page's rows, filled in. The pagination metadata is carried across untouched: it was computed
         * over the filtered list and nothing here adds or removes a row.
+        *
+        * The empty-page branch is the whole of this service's cheap path, and it is load bearing twice over.
+        * A search that matched nothing must not still pay for the registry-wide compatibility call, and
+        * `pageSize=0` — the drawer badge asking for the total and no rows — arrives here as an empty page for
+        * exactly that reason. Both are one request to the registry and no more; `SubjectSummarySuite` counts
+        * the calls, the global one included, because the two branches produce identical rows and only the
+        * call count tells them apart.
         */
       private def enrich(
           port: SchemaRegistryPort[F],

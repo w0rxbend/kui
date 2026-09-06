@@ -38,7 +38,13 @@ export interface ProduceDrawerProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly topic: string;
-  /** How many partitions the topic has, for the field's help text. `0` means "not known here". */
+  /**
+   * How many partitions the topic has, for the field's help text.
+   *
+   * `undefined` means KUI has not been told — never `0`, which would be a claim, and which is what
+   * the route above passed for the whole life of this drawer. The help text says which of the two
+   * it is, because "leave it empty" is good advice and "0 to -1" is not.
+   */
   readonly partitionCount?: number | undefined;
   readonly onSend: (draft: RecordDraft) => void;
   readonly state: Mutation<readonly ProducedRecord[]>;
@@ -179,8 +185,9 @@ export function ProduceDrawer(props: ProduceDrawerProps): JSX.Element {
           placeholder="chosen by Kafka"
           help={
             props.partitionCount !== undefined && props.partitionCount > 0
-              ? `0 to ${props.partitionCount - 1}. Leave it empty to let the key decide.`
-              : "Leave it empty to let the key decide."
+              ? `0 to ${String(props.partitionCount - 1)}. Leave it empty to let the key decide.`
+              : "KUI has not been told how many partitions this topic has. " +
+                "Leave it empty to let the key decide."
           }
         />
 

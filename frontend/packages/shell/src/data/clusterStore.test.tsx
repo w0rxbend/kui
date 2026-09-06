@@ -43,6 +43,7 @@ const LOG_DIRS = "/api/v1/clusters/{clusterId}/log-dirs";
 const TOPICS = "/api/v1/clusters/{clusterId}/topics";
 const GROUPS = "/api/v1/clusters/{clusterId}/consumer-groups";
 const SUBJECTS = "/api/v1/clusters/{clusterId}/schemas/subjects";
+const NAMES = "/api/v1/clusters/{clusterId}/topics/names";
 
 const ok = (data: unknown) => ({ status: "ok", data, fetchedAt: "2026-09-05T15:35:58.778Z" });
 
@@ -103,13 +104,15 @@ const WHOLE_CLUSTER: Readonly<Record<string, unknown>> = {
     }),
     incompleteCoordinators: 0,
   },
-  [SUBJECTS]: { items: ["orders-value"], page: { totalItems: 6 } },
+  [SUBJECTS]: { items: [{ subject: "orders-value" }], page: { totalItems: 6 } },
+  [NAMES]: { names: ok(["orders.v1", "orders.v2", "__consumer_offsets"]) },
 };
 
 interface Probe {
   readonly summary: () => Reading<ClusterSummary>;
   readonly storage: () => Reading<readonly BrokerStorage[]>;
   readonly counts: () => Reading<NavCounts>;
+  readonly topicNames: () => Reading<readonly string[]>;
   readonly dispose: () => void;
 }
 
@@ -143,6 +146,7 @@ function probeWith(api: KuiApiClient): Probe {
       summary: createMemo(() => facts.summary),
       storage: createMemo(() => facts.storage),
       counts: createMemo(() => facts.counts),
+      topicNames: createMemo(() => facts.topicNames),
     };
     return null;
   };
@@ -430,5 +434,83 @@ describe("the four badges down the drawer's side", () => {
     expect(counts?.().kind).toBe("pending");
     dispose();
     host.remove();
+  });
+});
+
+/**
+ * The topic names the drawer's tree is folded from.
+ *
+ * A seventh request, and a separate one on purpose: the badge above it asks for a single row and
+ * reads only `page.totalItems`, so widening that call to carry four thousand names would make every
+ * deployment pay for a tree only a reader who expands it ever sees.
+ */
+describe("the topic names behind the drawer's tree", () => {
+  it("reads the names-only index, and not a page of the topic list", async () => {
+    const store = probe(WHOLE_CLUSTER);
+    await settle();
+
+    expect(readingValue(store.topicNames())).toEqual([
+      "orders.v1",
+      "orders.v2",
+      "__consumer_offsets",
+    ]);
+    store.dispose();
+  });
+
+  it("has no names rather than an empty tree when the section refuses", async () => {
+    /* `unknown` and not `value([])`. An empty array is a cluster with no topics, which draws a
+       branch that holds nothing; a refusal is a cluster whose topics could not be read, and the
+       drawer draws no disclosure at all rather than a chevron that opens onto nothing. */
+    const store = probe({
+      ...WHOLE_CLUSTER,
+      [NAMES]: { names: { status: "unavailable", reason: { code: "upstream_unavailable" } } },
+    });
+    await settle();
+
+    expect(store.topicNames().kind).toBe("unknown");
+    store.dispose();
+  });
+});
+
+/**
+ * A 200 that is not the answer this endpoint documents.
+ *
+ * The generated type says `ClusterDetailResponse.cluster` is required, and it is — of every answer
+ * the *cluster service* produces. It is not required of every 200 a browser can receive: a reverse
+ * proxy answering with its own JSON, or a gateway rewritten to a different route, both reach this
+ * store with a body that decodes and is not the envelope.
+ *
+ * `summaryOf` read `row.summary` as its first statement, so `undefined` threw a `TypeError` inside
+ * a memo — which Solid reports as a halted reactive graph rather than as a failed request, and which
+ * takes the whole frame away rather than the one panel that could not be read. A blank page, from a
+ * request that answered 200.
+ */
+describe("a cluster detail body that is not the envelope", () => {
+  const bodies = (cluster: unknown) => ({ ...WHOLE_CLUSTER, [DETAIL]: { cluster } });
+
+  it("answers a reading with no value rather than throwing inside the memo", async () => {
+    for (const shape of [undefined, null, "not an object", 7, {}, { name: "prod" }]) {
+      const store = probe(bodies(shape));
+      await settle();
+
+      expect(store.summary().kind).toBe("unknown");
+      /* And the rest of the drawer is untouched: six failures are six failures, and a body the head
+         could not read says nothing about the disks or the counts. */
+      expect(readingValue(store.storage())).not.toBeUndefined();
+      expect(readingValue(store.counts())?.topics).toEqual({ kind: "total", value: 128 });
+      store.dispose();
+    }
+  });
+
+  it("falls back to the identifier when the row carries no name", async () => {
+    // The same degradation `clusterSummaries` makes: a blank where a name goes reads as a bug in
+    // the drawer rather than as a cluster nobody named.
+    const store = probe(
+      bodies({ id: "prod", summary: ok({ version: "3.7.0", underReplicatedPartitionCount: 0 }) }),
+    );
+    await settle();
+
+    expect(readingValue(store.summary())?.name).toBe("prod");
+    store.dispose();
   });
 });

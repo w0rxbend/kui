@@ -7,9 +7,11 @@
  * sensitive setting is neither blank nor a dash, and that one failing tab leaves the other alone.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { flush } from "solid-js";
-import { describeViolations, findViolations, mount } from "./testing.js";
+import { KuiProvider, clearToasts, toasts } from "@kui/kernel";
+import type { KuiApiClient } from "@kui/api";
+import { describeViolations, findViolations, mount, settle, testContext } from "./testing.js";
 import {
   DISK_CRITICAL_PERCENT,
   DISK_WARN_PERCENT,
@@ -17,18 +19,23 @@ import {
   clusterVoice,
   configMatches,
   controllerCaption,
+  diskNote,
   diskPercent,
   healthLabel,
   partitionSkew,
   sortConfigs,
+  summariseDisk,
   totalLogDirBytes,
+  versionTag,
   voiceOf,
   type Broker,
 } from "./model.js";
 import { ClusterList } from "./ClusterList.jsx";
 import { BrokerList } from "./BrokerList.jsx";
+import { BrokersScreen } from "./BrokersScreen.jsx";
 import { BrokerDetail } from "./BrokerDetail.jsx";
-import { DEGRADED_BROKERS, RACKED_BROKERS, SAMPLE_BROKERS, SAMPLE_CLUSTERS, SAMPLE_CONFIGS, SAMPLE_LOG_DIRS } from "./fixtures.js";
+import { ManageScreen } from "./ClustersRoute.jsx";
+import { DEGRADED_BROKERS, RACKED_BROKERS, SAMPLE_BROKERS, SAMPLE_CLUSTERS, SAMPLE_CONFIGS, SAMPLE_LOG_DIRS, UNMEASURED_BROKERS } from "./fixtures.js";
 
 const noop = (): void => {};
 
@@ -111,6 +118,60 @@ describe("the voice", () => {
     expect(healthLabel("offline")).toBe("offline");
     expect(healthLabel("unknown")).toBe("unreachable");
   });
+
+  it("tells a measured zero from a count nobody read", () => {
+    // `underReplicatedPartitionCount` is a number on the wire and is genuinely `0` on a healthy
+    // cluster, so both branches are reached in production. Sharing one sentence between them is the
+    // product announcing that everything is fine on evidence it does not have.
+    const measured = clusterVoice(voiceOf(SAMPLE_BROKERS, 0, "2s ago"));
+    expect(measured).toContain("Zero under-replicated partitions");
+
+    const unmeasured = clusterVoice(voiceOf(SAMPLE_BROKERS, null, "2s ago"));
+    expect(unmeasured).not.toContain("Zero");
+    expect(unmeasured).not.toContain("coffee");
+    expect(unmeasured).toContain("not claiming there are none");
+  });
+
+  it("does not tell an operator with a broker down that zero partitions are at risk", () => {
+    const line = clusterVoice(voiceOf(DEGRADED_BROKERS, null, "2s ago"));
+    expect(line).toContain("down");
+    expect(line).not.toContain("0 partitions");
+    expect(line).toContain("not known");
+  });
+});
+
+describe("the disk", () => {
+  it("says which of the two silences it is, and says nothing where the percentage speaks", () => {
+    // Three states behind one empty bar: measured, no capacity to measure against, and nothing
+    // measured at all. The first needs no sentence; the other two are not each other.
+    expect(diskNote(SAMPLE_BROKERS[0]!)).toBeUndefined();
+    expect(diskNote(UNMEASURED_BROKERS[0]!)).toContain("No disk capacity was reported");
+    expect(diskNote({ ...UNMEASURED_BROKERS[0]!, heldBytes: null })).toContain("were not measured");
+  });
+
+  it("sums a capacity only over the brokers that reported one", () => {
+    const summary = summariseDisk([SAMPLE_BROKERS[0]!, UNMEASURED_BROKERS[0]!]);
+    // Half a cluster's capacity produces a percentage that looks perfectly plausible and is wrong,
+    // so the pair counts only the broker that answered — and says how many did.
+    expect(summary.measured).toBe(1);
+    expect(summary.brokers).toBe(2);
+    expect(summary.capacityBytes).toBe(1_000_000_000_000);
+    // What Kafka holds is a different sum with a different fate, and both brokers report it.
+    expect(summary.heldBytes).toBe(128_000_000_000 + 95_320);
+  });
+
+  it("has no capacity at all to report when nothing answered", () => {
+    const summary = summariseDisk([{ ...UNMEASURED_BROKERS[0]!, heldBytes: null }]);
+    expect(summary.usedBytes).toBeNull();
+    expect(summary.capacityBytes).toBeNull();
+    expect(summary.heldBytes).toBeNull();
+  });
+
+  it("tags a version the scrape reported and nothing where it did not", () => {
+    expect(versionTag("4.3", "kraft")).toBe("v4.3 · KRaft");
+    expect(versionTag("v3.7.0", null)).toBe("v3.7.0");
+    expect(versionTag(null, "kraft")).toBeUndefined();
+  });
 });
 
 describe("the cluster list", () => {
@@ -141,6 +202,8 @@ describe("the cluster list", () => {
 
 describe("the broker list", () => {
   function list(brokers: readonly Broker[], underReplicated: number | null = 0) {
+    /* `null` is a real argument here and not a default: it is what the wire answers before the
+       first sweep lands, and the voice line has a third sentence for it. */
     return mount(() => (
       <BrokerList
         clusterName="prod-kyiv-01"
@@ -209,6 +272,39 @@ describe("the broker list", () => {
     await flush();
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(container.textContent).toContain("CONFIGURATION");
+    dispose();
+  });
+
+  it("shows a sentence, and no percentage, for a disk that was not measured", async () => {
+    // The quickstart's own shape: Kafka's usage is known and the disk beneath it is not, which is
+    // the ordinary answer from a broker whose log directories KUI cannot read. An empty bar beside
+    // a dash is indistinguishable from an empty disk, and the two mean opposite things.
+    const { container, dispose } = list(UNMEASURED_BROKERS, null);
+    await flush();
+    const card = container.querySelector('[data-testid="broker-1"]')!;
+    expect(card.textContent).toContain("No disk capacity was reported");
+    expect(card.textContent).not.toContain("%");
+    dispose();
+  });
+
+  it("draws a percentage where the log directories did report a capacity", async () => {
+    const { container, dispose } = list(SAMPLE_BROKERS);
+    await flush();
+    expect(container.querySelector('[data-testid="broker-1"]')?.textContent).toContain("61%");
+    expect(container.querySelector('[data-testid="broker-1"]')?.textContent).not.toContain(
+      "No disk capacity",
+    );
+    dispose();
+  });
+
+  it("says it cannot show an uptime rather than inventing one", async () => {
+    // The design's tag row carries `uptime 41d` and no endpoint in this product reports when a
+    // broker started, which SCREENS-V4 §4.5 says in as many words.
+    const { container, dispose } = list(SAMPLE_BROKERS);
+    await flush();
+    (container.querySelector('[data-testid="broker-1"] .kui-brkcard__toggle') as HTMLButtonElement).click();
+    await flush();
+    expect(container.textContent).toContain("Kafka reports no broker uptime");
     dispose();
   });
 
@@ -362,3 +458,266 @@ function detail(overrides: DetailOverrides, tab: "logdirs" | "configuration") {
   ));
 }
 
+
+/**
+ * The brokers screen, fetching.
+ *
+ * These are the cases the last wave could not have had. `BrokerList` takes an
+ * `underReplicatedPartitions` prop and every case above hands it in by hand, so all of them pass
+ * over a route that never passes it — which is exactly what shipped: the voice line announced
+ * "Zero under-replicated partitions" on every cluster in the product, including the ones nothing
+ * had scraped. So these mount the screen, give it nothing but a gateway, and assert on what the
+ * screen asks for and what it draws.
+ *
+ * Every case uses a cluster id of its own. The query registry is shared across the whole browser
+ * tab by design, and two cases sharing a key would have the second one reading the first's answer
+ * out of the cache and issuing no request at all — which would make the request counts below pass
+ * for the wrong reason.
+ */
+describe("the brokers screen", () => {
+  const fetchedAt = "2026-09-06T09:00:00.000Z";
+  const ok = (data: unknown) => ({ status: "ok", data, fetchedAt });
+
+  /** One broker, in the fields the gateway really sends. See `recorded/brokers.json`. */
+  const BROKERS = {
+    brokers: ok([
+      {
+        id: 1,
+        host: "kafka",
+        port: 9092,
+        rack: null,
+        isController: true,
+        leaderCount: 86,
+        replicaCount: 86,
+        diskUsageBytes: 95_320,
+      },
+    ]),
+  };
+
+  /** The cluster's own document, whose summary carries the count the voice line reads. */
+  const cluster = (underReplicated: number | null) => ({
+    cluster: {
+      id: "quickstart",
+      name: "Quickstart (local)",
+      readOnly: false,
+      bootstrapServers: "kafka:9092",
+      summary: ok({
+        version: "4.3",
+        controllerKind: "kraft",
+        brokerCount: 1,
+        underReplicatedPartitionCount: underReplicated,
+        scrapedAt: fetchedAt,
+      }),
+    },
+  });
+
+  /** 1 TB of filesystem with 400 GB free: 60% used, which is the percentage the card must draw. */
+  const LOG_DIRS = {
+    logDirs: ok([
+      {
+        brokerId: 1,
+        path: "/tmp/kafka-logs",
+        error: null,
+        totalBytes: 1_000_000_000_000,
+        usableBytes: 400_000_000_000,
+        partitionCount: 58,
+        replicas: [{ sizeBytes: 95_320 }],
+      },
+    ]),
+  };
+
+  const CONFIGS = {
+    configs: ok([
+      { name: "log.retention.hours", value: "72", source: "dynamic-broker" },
+      { name: "compression.type", value: "producer", source: "default" },
+    ]),
+  };
+
+  /**
+   * A gateway that answers by endpoint template and records what it was asked.
+   *
+   * Keyed by the path as the client names it — `/api/v1/clusters/{clusterId}/brokers` — because
+   * that is the string the mapping passes, and asserting on it is asserting that the screen called
+   * the endpoint it meant to.
+   */
+  function gateway(answers: Readonly<Record<string, unknown>>) {
+    const asked: string[] = [];
+    const get = vi.fn(async (path: string) => {
+      asked.push(path);
+      const answer = answers[path];
+      return answer === undefined
+        ? { ok: false, error: { kind: "unreachable", cause: `nothing stubbed for ${path}` } }
+        : { ok: true, value: answer };
+    });
+    return {
+      asked,
+      api: { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient,
+    };
+  }
+
+  const everything = (underReplicated: number | null) => ({
+    "/api/v1/clusters/{clusterId}/brokers": BROKERS,
+    "/api/v1/clusters/{clusterId}": cluster(underReplicated),
+    "/api/v1/clusters/{clusterId}/log-dirs": LOG_DIRS,
+    "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs": CONFIGS,
+  });
+
+  function open(api: KuiApiClient, clusterId: string) {
+    return mount(() => (
+      <KuiProvider value={testContext(api)}>
+        <BrokersScreen
+          clusterId={clusterId}
+          clustersHref="/ui/clusters"
+          hrefFor={(brokerId) => `/ui/clusters/${clusterId}/brokers/${brokerId}`}
+          now={() => new Date(fetchedAt)}
+        />
+      </KuiProvider>
+    ));
+  }
+
+  const configRequests = (asked: readonly string[]): number =>
+    asked.filter((path) => path.endsWith("/configs")).length;
+
+  it("says zero under-replicated partitions only because the cluster said zero", async () => {
+    const { api } = gateway(everything(0));
+    const { container, dispose } = open(api, "urp-measured");
+    await settle(container);
+    const voice = container.querySelector('[data-testid="brokers-head"]')?.textContent ?? "";
+    expect(voice).toContain("Zero under-replicated partitions");
+    dispose();
+  });
+
+  it("does not claim zero over a cluster whose under-replication was never measured", async () => {
+    /*
+     * The mutation case. A freshly started stack answers `null` here until the first partition
+     * sweep lands, and the screen used to print the cheerful line over it — the product telling an
+     * operator everything is fine about the one number nobody had managed to read.
+     */
+    const { api } = gateway(everything(null));
+    const { container, dispose } = open(api, "urp-unmeasured");
+    await settle(container);
+    const voice = container.querySelector('[data-testid="brokers-head"]')?.textContent ?? "";
+    expect(voice).not.toContain("Zero");
+    expect(voice).not.toContain("coffee");
+    expect(voice).toContain("not claiming there are none");
+    dispose();
+  });
+
+  it("asks for a broker's settings when its card is opened, and not before", async () => {
+    // `describeConfigs` is three hundred and forty rows and sixty kilobytes per broker. A page
+    // nobody expands must not pay for it, and expanding one broker must not fetch the others'.
+    const { api, asked } = gateway(everything(0));
+    const { container, dispose } = open(api, "lazy-configs");
+    await settle(container);
+    expect(configRequests(asked)).toBe(0);
+
+    (container.querySelector('[data-testid="broker-1"] .kui-brkcard__toggle') as HTMLButtonElement).click();
+    await settle(container);
+    expect(configRequests(asked)).toBe(1);
+    expect(container.textContent).toContain("log.retention.hours");
+    dispose();
+  });
+
+  it("draws the disk percentage against the capacity the log directories reported", async () => {
+    const { container, dispose } = open(gateway(everything(0)).api, "disk-measured");
+    await settle(container);
+    // 600 GB of a 1 TB filesystem. The brokers endpoint's `diskUsageBytes` is 95 kB of Kafka data
+    // on that disk, and reading the second as the first would draw a broker at 0%.
+    expect(container.querySelector('[data-testid="broker-1"]')?.textContent).toContain("60%");
+    dispose();
+  });
+
+  it("keeps drawing every card when the log directories are refused", async () => {
+    const answers = { ...everything(0) };
+    delete (answers as Record<string, unknown>)["/api/v1/clusters/{clusterId}/log-dirs"];
+    const { container, dispose } = open(gateway(answers).api, "disk-refused");
+    await settle(container);
+    const card = container.querySelector('[data-testid="broker-1"]');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("No disk capacity was reported");
+    dispose();
+  });
+
+  it("has no axe violations over a real answer", async () => {
+    const { container, dispose } = open(gateway(everything(0)).api, "axe-brokers");
+    await settle(container);
+    expect(describeViolations(await findViolations(container))).toBe("");
+    dispose();
+  });
+});
+
+/**
+ * The registration screen's writes.
+ *
+ * A destructive success is the one outcome with nothing left on screen to confirm it: the row is
+ * gone, and a row that is gone looks exactly like a row that was never there.
+ */
+describe("removing a cluster", () => {
+  afterEach(() => clearToasts());
+
+  const REGISTERED = {
+    clusters: {
+      status: "ok",
+      fetchedAt: "2026-09-06T09:00:00.000Z",
+      data: [
+        {
+          cluster: {
+            id: "spare",
+            name: "spare",
+            readOnly: false,
+            bootstrapServers: "spare:9092",
+            origin: "stored",
+            version: 4,
+            summary: { status: "unavailable", reason: { code: "UPSTREAM_UNAVAILABLE" } },
+          },
+        },
+      ],
+    },
+  };
+
+  it("raises a toast the operator can read after the row has gone", async () => {
+    const removed: string[] = [];
+    const get = vi.fn(async () => ({ ok: true, value: REGISTERED }));
+    const del = vi.fn(async (path: string) => {
+      removed.push(path);
+      return { ok: true, value: {} };
+    });
+    const api = { get, post: get, put: get, delete: del, patch: get, raw: {} } as unknown as KuiApiClient;
+
+    const { container, dispose } = mount(() => (
+      <KuiProvider value={testContext(api)}>
+        <ManageScreen />
+      </KuiProvider>
+    ));
+    await settle(container);
+
+    const remove = [...container.querySelectorAll("button")].find(
+      (button) => (button.textContent ?? "").trim() === "Remove",
+    ) as HTMLButtonElement;
+    remove.click();
+    await flush();
+
+    // The confirmation is type-to-confirm, so the click below is not enough on its own — which is
+    // the point of the gate, and the reason this case drives it rather than calling the handler.
+    // The dialog is portalled to the document, not nested in the screen — which is why this looks
+    // outside the container the screen was mounted into.
+    const gate = document.querySelector(".kui-confirm__input") as HTMLInputElement;
+    gate.value = "spare";
+    gate.dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+    const confirm = [...document.querySelectorAll("button")].find((button) =>
+      (button.textContent ?? "").includes("Remove cluster"),
+    ) as HTMLButtonElement;
+    confirm.click();
+    /* Twice, deliberately: the toast is raised on the promise chain behind the mutation, and
+       nothing in *this* screen re-renders when it lands — the toast region belongs to the shell —
+       so the first settle returns as soon as the dialog has closed, which is before the answer has
+       been handled. */
+    await settle(container);
+    await settle(container);
+
+    expect(removed).toHaveLength(1);
+    expect(toasts().map((toast) => toast.title)).toContain("Cluster removed");
+    dispose();
+  });
+});

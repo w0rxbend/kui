@@ -16,7 +16,7 @@ serves the built interface and proxies `/api/` to the gateway, so the browser se
 | `kui-topic`    | Topics, their partitions, their settings and their administration | 8080 | `/health/live` |
 | `kui-message`  | Browsing records, producing, resending and purging    | 8080       | `/health/live`         |
 | `kui-consumer` | Consumer groups, their lag and the offset reset       | 8080       | `/health/live`         |
-| `kui-schema`   | Subjects, versions, schemas and compatibility. Optional: a deployment that configures no registry can simply not run it | 8080 | `/health/live` |
+| `kui-schema`   | Subjects, versions, schemas and compatibility. Optional in the sense that a cluster with no registry answers `not_configured`; the distributed stack still runs it, because the gateway holds its contract and a contract with no address is a screen that 404s | 8080 | `/health/live` |
 | `kui-metrics`  | Broker throughput. It measures nothing in this build and says so per cluster, which is the answer a dashboard card needs rather than a service that is missing | 8080 | `/health/live` |
 
 The gateway serves its health probes under the public `/api/v1` prefix and a service serves them at

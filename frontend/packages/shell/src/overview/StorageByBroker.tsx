@@ -45,7 +45,7 @@ import {
 } from "@kui/kernel";
 
 import { INTERNAL_GROUP, OTHER_GROUP } from "../nav/prefixes.js";
-import type { StorageBreakdown, StorageRow } from "./model.js";
+import { diskShare, type StorageBreakdown, type StorageRow } from "./model.js";
 
 /**
  * The ink each prefix row is painted in.
@@ -147,18 +147,20 @@ function StorageBar(props: StorageBarProps): JSX.Element {
 }
 
 /**
- * `347 GB of 1.0 TB · 83%`, or the part of it that is known.
+ * `347 GB of 1.0 TB · 83%`, or the sentence that says why there is no such line.
  *
  * The percentage is included because it is the figure an operator reads first and the one the two
- * byte counts make them compute. It is the same arithmetic `diskPercentOf` does, over the same
- * skipped directories, so the number here and the bar on the Overview tab's broker-health card
- * cannot disagree.
+ * byte counts make them compute. It is `diskShare` — literally the function the broker-health bar's
+ * fill comes from, over the same skipped directories — so the number here and the bar on the
+ * Overview tab cannot disagree. That sentence used to be written here and be false: this line did
+ * its own division and answered a zero-byte disk with `0 B of 0 B` and no percentage, while the bar
+ * refused with a reason. A quantity that cannot be computed is a sentence, never a pair of zeroes.
  */
 function detailOf(row: StorageRow): string {
   if (row.capacityBytes === undefined || row.usedBytes === undefined) return "no disk size reported";
-  const percent = row.capacityBytes > 0 ? (row.usedBytes / row.capacityBytes) * 100 : undefined;
-  const share = percent === undefined ? "" : ` · ${formatPercent(percent)}`;
-  return `${formatBytes(row.usedBytes)} of ${formatBytes(row.capacityBytes)}${share}`;
+  const share = diskShare(row.usedBytes, row.capacityBytes);
+  if (share.kind === "unknown") return share.why;
+  return `${formatBytes(row.usedBytes)} of ${formatBytes(row.capacityBytes)} · ${formatPercent(share.value)}`;
 }
 
 /** How many topics the fold counted, for the card's caption. Absent when there are none. */

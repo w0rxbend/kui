@@ -199,9 +199,7 @@ export async function fetchOverview(api: KuiApiClient, clusterId: string): Promi
   ]);
 
   return {
-    summary: detail.ok
-      ? readSection<ClusterSummary>(detail.value.cluster.summary, "the cluster summary")
-      : unknown(userMessage(detail.error)),
+    summary: detail.ok ? clusterSummaryOf(detail.value) : unknown(userMessage(detail.error)),
     brokers: brokers.ok
       ? readSection<readonly Broker[]>(brokers.value.brokers, "the broker list")
       : unknown(userMessage(brokers.error)),
@@ -220,6 +218,27 @@ export async function fetchOverview(api: KuiApiClient, clusterId: string): Promi
       ? topicCountOf(topics.value)
       : unknown(userMessage(topics.error)),
   };
+}
+
+/**
+ * The cluster summary, out of the envelope this endpoint is documented to send.
+ *
+ * This used to be written `detail.value.cluster.summary`: two dereferences into a 200 body nothing
+ * had checked. The generated type says the envelope is there, and the generated type is a statement
+ * about the contract rather than about the bytes that arrived — a proxy's own 200, a gateway that
+ * matched a different route, or a build whose envelope moved all produce a body without `cluster`,
+ * and reading `.summary` off `undefined` throws a `TypeError`. It throws *inside the memo that
+ * assembles this model*, and Solid 2 answers a throw in a computation by halting the graph, so the
+ * cost is not one blank card: it is the whole dashboard's skeletons never resolving, which is the
+ * same failure `readPagedSection` above exists to have already had once. Checked, it is a panel with
+ * a sentence in it, and the other four readings still land.
+ */
+function clusterSummaryOf(body: unknown): Reading<ClusterSummary> {
+  const section = (body as { cluster?: { summary?: unknown } } | null)?.cluster?.summary;
+  if (section === undefined) {
+    return unknown("KUI could not read the cluster summary: the server sent something other than a cluster.");
+  }
+  return readSection<ClusterSummary>(section, "the cluster summary");
 }
 
 /**

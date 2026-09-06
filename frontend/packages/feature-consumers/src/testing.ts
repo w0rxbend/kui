@@ -20,6 +20,8 @@
 import { render } from "@solidjs/web";
 import type { JSX } from "@solidjs/web/jsx-runtime";
 import axe from "axe-core";
+import type { KuiApiClient } from "@kui/api";
+import type { KuiContextValue } from "@kui/kernel";
 
 export interface Mounted {
   readonly container: HTMLElement;
@@ -53,4 +55,47 @@ export async function findViolations(container: HTMLElement): Promise<axe.Result
 
 export function describeViolations(violations: axe.Result[]): string {
   return violations.map((v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.html).join(", ")})`).join("\n");
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The feature context                                                                             */
+/* ---------------------------------------------------------------------------------------------- */
+
+/**
+ * What `useKui()` answers inside a test.
+ *
+ * `useKui`'s own error message points here: the shell provides the context around every route, so a
+ * test that mounts a *route* rather than a component has to provide one. Mounting the route is the
+ * point — `GroupsScreen` is where the page number, the server's total and the mapping meet, and a
+ * test that drives `GroupList` alone cannot see any of that wiring.
+ *
+ * The api is supplied by the caller and everything else is the smallest honest answer: `permits`
+ * says yes because permissions are not what these cases are about, and `paths` builds the one
+ * address this screen links to. There is no `report` behaviour because the shell's connectivity
+ * tracker is not mounted.
+ */
+export function testContext(api: KuiApiClient): KuiContextValue {
+  return {
+    api,
+    cluster: () => undefined,
+    permits: () => true,
+    paths: {
+      home: () => "/ui",
+      settings: () => "/ui/settings",
+      clusters: () => "/ui/clusters",
+      manageClusters: () => "/ui/clusters/manage",
+      dashboard: (cluster, tab) => `/ui/clusters/${cluster}/dashboard/${tab ?? "overview"}`,
+      brokers: (cluster) => `/ui/clusters/${cluster}/brokers`,
+      broker: (cluster, brokerId) => `/ui/clusters/${cluster}/brokers/${brokerId}`,
+      topics: (cluster) => `/ui/clusters/${cluster}/topics`,
+      topic: (cluster, name) => `/ui/clusters/${cluster}/topics/${encodeURIComponent(name)}`,
+      topicMessages: (cluster, name) =>
+        `/ui/clusters/${cluster}/topics/${encodeURIComponent(name)}/messages`,
+      trackMessages: (cluster) => `/ui/clusters/${cluster}/messages/track`,
+      consumerGroups: (cluster) => `/ui/clusters/${cluster}/consumer-groups`,
+      consumerGroup: (cluster, groupId) =>
+        `/ui/clusters/${cluster}/consumer-groups/${encodeURIComponent(groupId)}`,
+    },
+    report: () => {},
+  };
 }

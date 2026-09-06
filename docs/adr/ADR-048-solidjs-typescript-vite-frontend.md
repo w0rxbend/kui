@@ -118,17 +118,18 @@ and are the subject of a lint rule (SOL-006).
 largest cost of leaving Scala.js, and the only acceptable answer is a mechanism that fails the
 **build**, not the browser.
 
+<!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -->
 **The source document.** The committed OpenAPI documents are the asset: `docs/api/openapi.json`
-(46 paths, 135 schemas, OpenAPI 3.1.0) is emitted by
+(50 paths and 144 schemas, OpenAPI 3.1.0) is emitted by
 `kui.gateway.api.openapi.OpenApiDocument` from the gateway's Tapir endpoints, and each service
 emits its own beside it. They are regenerated and diff-checked by the build already
 (`openApi` / `openApiCheck`), so they cannot drift from the server.
 
 **They cannot be used directly, and finding out why is the reason this section exists.** The
-committed aggregate describes the *service-facing* contract. `X-Kui-Principal` is declared a
-**required header on 42 of its 46 paths**, and `If-Match` on two more. But ADR-020 makes that
-header a signed statement the **gateway** mints, and ADR-040 makes the gateway **strip every
-inbound `X-Kui-*` header from browsers at the edge**. Generating a browser client from that
+committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 45 of
+its 60 operations, across 35 of its 50 paths, and `If-Match` on 2 operations more. But ADR-020
+makes that header a signed statement the **gateway** mints, and ADR-040 makes the gateway **strip
+every inbound `X-Kui-*` header from browsers at the edge**. Generating a browser client from that
 document produces types that oblige every call site to supply an internal trust header the
 browser must never send — the type system would be enforcing the exact inverse of the security
 boundary. (Observed: `tsc` demanded `header: { "X-Kui-Principal": string }` on a consumer-group
@@ -139,12 +140,18 @@ So:
 - The gateway's existing generator gains a second output, **`docs/api/openapi.browser.json`** —
   the *edge view*: the aggregate with every `X-Kui-*` header parameter removed, produced by the
   same projection that `EdgeHeaders.strip` applies at runtime, in the same module, from the
-  same list. `X-Csrf-Token` (required on 19 paths) and `If-Match` **stay**, because the browser
-  genuinely does send those and the types should force it to.
+  same list. `X-Csrf-Token` on 19 operations and `If-Match` on 2 operations **stay**, because the
+  browser genuinely does send those and the types should force it to.
 - It is committed and `--check`ed exactly like the existing documents, so a contract change that
   is not regenerated fails CI.
 - One document, one derivation, no hand-maintained copy: the browser view cannot drift from the
   service view because it is computed from it.
+<!-- /checked -->
+
+Every figure in the block above is counted out of `docs/api/openapi.json` by
+`./scripts/feature-matrix-check.sh` rather than restated from memory. It had been restated: the
+header count read "42 of its 46 paths" — an operation count set against a path total — and stayed
+that way while the document grew.
 
 **What generates, and when.** `openapi-typescript@7.13.0` turns
 `docs/api/openapi.browser.json` into `frontend/packages/api/src/schema.d.ts` — types only, no
@@ -395,14 +402,22 @@ All of the following was observed in this session, in a spike at
    setter applies nested mutation and array push; `createEffect(compute, apply)` runs `apply`
    for each committed value.
 5. **The contract guarantee.** `openapi-typescript` generated 4 255 lines of types from the real
-   `docs/api/openapi.json` (46 paths, 135 schemas) in 99 ms; a client compiled clean against it;
-   renaming one field in the document and regenerating produced `TS2339` and `tsc exit=2`.
-6. **The internal-header problem.** `X-Kui-Principal` is `required: true` on 42 of 46 paths in
-   the aggregate and on every per-service document; `tsc` demanded it at a browser call site.
-   ADR-040 §1 says the gateway strips every inbound `x-kui-*`. Hence §3's browser projection.
-7. **`required` fidelity.** 116 of 135 schemas declare `required`; `GroupSummaryDto` requires 8
-   of its 12 properties and leaves `totalLag` optional, matching its documented "null when it
-   could not be computed". The generator reproduces optionality faithfully.
+   `docs/api/openapi.json` — 46 paths and 135 schemas **on 2026-09-05**, the day the spike ran —
+   in 99 ms; a client compiled clean against it; renaming one field in the document and
+   regenerating produced `TS2339` and `tsc exit=2`.
+6. **The internal-header problem.** `X-Kui-Principal` was `required: true` on 42 of that day's
+   operations, in the aggregate and on every per-service document; `tsc` demanded it at a browser
+   call site. ADR-040 §1 says the gateway strips every inbound `x-kui-*`. Hence §3's browser
+   projection.
+7. **`required` fidelity.** 116 of that day's 135 schemas declared `required`; `GroupSummaryDto`
+   requires 8 of its 12 properties and leaves `totalLag` optional, matching its documented "null
+   when it could not be computed". The generator reproduces optionality faithfully.
+
+   Items 5 to 7 are measurements of the document as it stood when the spike ran, and they are
+   written that way on purpose: an evidence bullet records what was observed on a day, and a
+   figure that is silently kept current stops being evidence of anything. The document's **present**
+   size and header counts are in §3, where `./scripts/feature-matrix-check.sh` compares them with
+   `docs/api/openapi.json` on every run.
 8. **Code splitting and its enforcement surface.** `vite build` put a `lazy()` feature in its own
    250-byte chunk; `dist/.vite/manifest.json` listed it under the entry's `dynamicImports` with
    `isDynamicEntry: true` and not under `imports`. The router's `serverForms` and Solid's

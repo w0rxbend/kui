@@ -193,6 +193,7 @@ object BrokerDetailUseCase {
               leaders = topology.leadersOn(broker.id),
               replicas = load.map(_.replicas),
               skewPercent = load.flatMap(_.skewPercent),
+              leaderSkewPercent = topology.leaderSkewOn(broker.id),
               totalBytes = load.flatMap(_.totalBytes),
               usableBytes = load.flatMap(_.usableBytes),
               usedByKafkaBytes = load.flatMap(_.usedByKafkaBytes),

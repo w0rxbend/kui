@@ -24,6 +24,14 @@
 > a record of what was believed at the time, and what this document is now good for is precisely
 > that: the reasoning behind M8, M9 and M10, and the "known gaps that are deliberate" and "not
 > doing" sections, which `docs/plan/ROADMAP.md` inherits rather than repeats.
+>
+> One figure in the body is worth naming here so that nobody reads it as current. "Forty-two of the
+> fifty-six operations in `docs/api/openapi.browser.json`" named a document that had exactly 56
+> operations over 46 paths at `25176c0`, the commit that wrote this file. It has 59 over 49 at
+> `4135850`, and how many of them have a production call site has not been recounted. The
+> **current** size of that document is checked on every run of `./scripts/feature-matrix-check.sh`,
+> against the figures published in ADR-048 §3 and `frontend/packages/api/README.md`. This document
+> is not checked, because it is a record and not a claim.
 
 **Written:** 2026-09-06. This document describes the frontend as it stands after the Scala.js and
 Laminar implementation was deleted and replaced by a pnpm/TypeScript/SolidJS 2 workspace

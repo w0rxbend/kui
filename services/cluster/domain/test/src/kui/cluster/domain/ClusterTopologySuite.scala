@@ -126,6 +126,7 @@ final class ClusterTopologySuite extends KuiSuite {
     assertEquals(built.topics, None)
     assertEquals(built.partitionsOn(BrokerId.unsafe(1)), None)
     assertEquals(built.leadersOn(BrokerId.unsafe(1)), None)
+    assertEquals(built.leaderSkewOn(BrokerId.unsafe(1)), None)
   }
 
   test("aFoldedCensusFillsTheClusterWideCountsAndEveryBrokerRow") {
@@ -142,6 +143,32 @@ final class ClusterTopologySuite extends KuiSuite {
     assertEquals(built.leadersOn(BrokerId.unsafe(1)), Some(1))
     // Broker 3 holds nothing and the sweep was complete, so it is a measured zero rather than an absence.
     assertEquals(built.leadersOn(BrokerId.unsafe(3)), Some(0))
+  }
+
+  test("leaderSkewIsMeasuredAgainstEveryBrokerAndNotOnlyTheOnesThatLead") {
+    // Two partitions, one led by each of brokers 1 and 2, on a cluster of three. An even spread would be
+    // 0.67 leaderships each, so the two that lead are half again over their share and the third is a whole
+    // share under it. Counting only the brokers that appear in the census would make the leaders look
+    // perfectly balanced and would hide the idle broker, which is the one an operator is looking for.
+    val census = PartitionCensus.of(
+      List(placement(leader = 1, replicas = List(1, 2)), placement(leader = 2, replicas = List(1, 2)))
+    )
+    val built = topology(ref, census = Some(census))
+
+    assertEquals(built.leaderSkewOn(BrokerId.unsafe(1)), Some(50.0d))
+    assertEquals(built.leaderSkewOn(BrokerId.unsafe(2)), Some(50.0d))
+    assertEquals(built.leaderSkewOn(BrokerId.unsafe(3)), Some(-100.0d))
+  }
+
+  test("leaderSkewIsNoneOnAClusterWithNoOnlinePartitionToLead") {
+    // The same rule the replica skew keeps: "perfectly balanced" and "nothing to balance" are different
+    // statements, and only one of them is a number.
+    val offline =
+      PartitionPlacement(leader = None, replicas = Set(BrokerId.unsafe(1)), inSync = Set.empty)
+    val built = topology(ref, census = Some(PartitionCensus.of(List(offline))))
+
+    assertEquals(built.partitions.map(_.online), Some(0))
+    assertEquals(built.leaderSkewOn(BrokerId.unsafe(1)), None)
   }
 
   test("belowMinimumVersionDrivesTheBanner") {

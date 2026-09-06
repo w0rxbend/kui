@@ -79,6 +79,17 @@ import type {
   NavDestination,
 } from "./chrome/types.js";
 import { brokerStorageOf, createClusterStore } from "./data/clusterStore.js";
+import {
+  SEARCH_DEBOUNCE_MS,
+  SEARCH_MAX_LENGTH,
+  fetchSearch,
+  searchGroups,
+  searchStatus,
+  unavailableServices,
+  type SearchAnswer,
+  type SearchLinks,
+  type SearchState,
+} from "./data/search.js";
 import { featureRegistry } from "./features/registry.js";
 import { FeatureGate } from "./features/FeatureGate.jsx";
 import { createHealth, type CallScope } from "./health.js";
@@ -89,6 +100,7 @@ import {
   degradedLabels,
   type FeatureStatus,
 } from "./nav/navigation.js";
+import { topicGroupHref, topicTree } from "./nav/topicTree.js";
 import { ForbiddenPage, GatewayUnreachablePage, NotFoundPage } from "./pages/errorPages.jsx";
 import { SignIn } from "./pages/SignIn.jsx";
 import { SettingsPage, asPreference } from "./pages/SettingsPage.jsx";
@@ -218,6 +230,76 @@ export function App() {
       searchInput?.select();
     }),
   );
+
+  /**
+   * What is in the search box, and what the last search answered.
+   *
+   * Two signals rather than one, because the text and the answer are out of step for most of the
+   * time the box is in use: a debounce is precisely the interval during which the field shows what
+   * was typed and the overlay shows the previous answer, and collapsing them would either delay the
+   * characters appearing or throw the results away on every keystroke.
+   */
+  const [searchText, setSearchText] = createSignal("");
+  const [searchState, setSearchState] = createSignal<SearchState>({ kind: "idle" });
+
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Which search is current.
+   *
+   * `GET /api/v1/search` is a fold over three services, so two searches in flight can finish in
+   * either order — and the loser landing last would put the results for `ord` under a box that says
+   * `orders`. Every answer carries the number of the search that asked for it and is dropped when
+   * that number has moved on, which is the same rule the overview's fetch effect applies to a
+   * cluster switch and for the same reason: a wrong answer that looks right is the worst kind.
+   */
+  let searchEpisode = 0;
+
+  const runSearch = (query: string): void => {
+    const episode = (searchEpisode += 1);
+    setSearchState({ kind: "searching" });
+    void fetchSearch(api, query).then((answer) => {
+      if (episode !== searchEpisode) return;
+      /* The search endpoint is the gateway's own, so a failure here is evidence about the gateway
+         rather than about one upstream — the same reasoning the capability probe applies. A service
+         that could not be asked is *not* a failure and does not reach this branch: it arrives
+         inside a successful answer, in `partial`. */
+      report("shell", answer.ok ? undefined : answer.error);
+      setSearchState(
+        answer.ok
+          ? { kind: "ready", answer: answer.value }
+          : { kind: "failed", reason: userMessage(answer.error) },
+      );
+    });
+  };
+
+  const onSearchInput = (next: string): void => {
+    setSearchText(next);
+    if (searchTimer !== undefined) clearTimeout(searchTimer);
+
+    const query = next.trim();
+    if (query.length === 0) {
+      // Emptying the box is not a search for nothing; it is the end of searching. The episode is
+      // stepped so that an answer already in flight cannot reopen the overlay behind the caret.
+      searchEpisode += 1;
+      setSearchState({ kind: "idle" });
+      return;
+    }
+
+    /* `searching` immediately, and the request after the debounce. Waiting to say anything until
+       the request goes out leaves the overlay showing the *previous* query's results for a fifth of
+       a second under new text, which reads as a search that answered wrongly. */
+    setSearchState({ kind: "searching" });
+    searchTimer = setTimeout(() => runSearch(query), SEARCH_DEBOUNCE_MS);
+  };
+
+  onCleanup(() => {
+    if (searchTimer !== undefined) clearTimeout(searchTimer);
+  });
+
+  const searchAnswer = createMemo<SearchAnswer | undefined>(() => {
+    const state = searchState();
+    return state.kind === "ready" ? state.answer : undefined;
+  });
 
   /**
    * The cluster overview's data.
@@ -431,7 +513,7 @@ export function App() {
             // No cluster, no topic list to send anybody to. The dashboard's own empty state is
             // where that case is explained; a button that navigates nowhere is not.
             const chosen = clusterForFrame();
-            if (chosen !== undefined) navigate(paths.topics(chosen));
+            if (chosen !== undefined) navigate(paths.topics(chosen), AlreadyPrefixed);
           }}
         />
       );
@@ -475,6 +557,34 @@ export function App() {
    * that runs long after this line, so declaring it after the router is not a hazard.
    */
   const paths = shellPaths(Router);
+
+  /**
+   * Where a search result goes, one function per kind of hit.
+   *
+   * All three through the router's typed proxy, like every other address the shell builds. The
+   * subject row is the one that needs `landingFor` rather than `paths`: `KuiPaths` carries no
+   * registry address — it gains no member this wave — and the registry has no per-subject address
+   * anyway, so a subject opens its cluster's registry, which is a page that exists and shows it.
+   */
+  const searchLinks: SearchLinks = {
+    topic: (cluster, name) => paths.topic(cluster, name),
+    group: (cluster, groupId) => paths.consumerGroup(cluster, groupId),
+    subjects: (cluster) => landingFor(Router, "schemas", cluster) ?? paths.dashboard(cluster),
+  };
+
+  /* The two things the field draws from an answer, folded once each rather than at the call site.
+     Declared *after* `searchLinks` and not beside the state above, because `createMemo` computes
+     eagerly in Solid 2 and a memo written above that binding would read it inside its temporal dead
+     zone — the `REACTIVITY_HALTED` blank page this file's header describes at length. */
+  const searchResults = createMemo(() => {
+    const answer = searchAnswer();
+    return answer === undefined ? undefined : searchGroups(answer, searchLinks);
+  });
+
+  const searchUnavailable = createMemo(() => {
+    const answer = searchAnswer();
+    return answer === undefined ? undefined : unavailableServices(answer);
+  });
 
   /** The clusters the capability registry knows, folded to one row each. */
   const clusters = createMemo<readonly ClusterSummary[]>(() =>
@@ -579,8 +689,36 @@ export function App() {
       cluster.select(id);
       setRouteCluster(undefined);
       notify(change.title, { tone: "info", message: change.message });
-      if (change.rewriteAddress) navigate(paths.dashboard(id));
+      if (change.rewriteAddress) navigate(paths.dashboard(id), AlreadyPrefixed);
     };
+
+    /**
+     * The rows nested under Topics: `SCREENS-V4.md` §2.2's tree.
+     *
+     * The fold is `nav/topicTree.ts`'s and the cap is `nav/prefixes.ts`'s; nothing is re-folded
+     * here and no name is grouped in a component. What this supplies is the two things only the
+     * frame knows — which cluster it is, and how to spell an address — and it reads the names
+     * through the same store the badges and the meter read, so expanding the tree costs one request
+     * and not one per row.
+     *
+     * `undefined` rather than an empty array while the names are still in flight, and again for a
+     * cluster with no topics at all: `NavItem` draws a disclosure for a branch and nothing for a
+     * leaf, and a chevron that opens onto nothing is a control that appears broken. The distinction
+     * is `NavDestination.children`'s own, stated there.
+     */
+    const topicChildren = createMemo<readonly NavDestination[] | undefined>(() => {
+      const chosen = clusterForFrame();
+      if (chosen === undefined) return undefined;
+      const names = readingValue(facts.topicNames);
+      if (names === undefined || names.length === 0) return undefined;
+      return topicTree({
+        names,
+        topicHref: (name) => paths.topic(chosen, name),
+        /* The list, asked for the topics this row stands for. `topicGroupHref` owns the three cases
+           — a prefix, `internal`, and the `other` residue that is not describable as a search. */
+        groupHref: (group) => topicGroupHref(paths.topics(chosen), group),
+      });
+    });
 
     const groups = createMemo(() =>
       navigationGroups({
@@ -593,6 +731,11 @@ export function App() {
            unknown count is no badge rather than a `0`, and the tone follows the meaning — so all
            that is supplied here is the lookup. */
         countFor: countLookup(readingValue(facts.counts)),
+        /* Only Topics nests. Brokers and Consumers have no tree in the design and no fold behind
+           one, and a lookup that answered for every feature would be a promise this shell cannot
+           keep. */
+        childrenFor: (registration) =>
+          registration.id === "topics" ? topicChildren() : undefined,
       }),
     );
 
@@ -678,14 +821,26 @@ export function App() {
                 uiPrefix,
                 Router,
               )}
-              /* What the field *searches* is still the features' to supply, so it stays idle.
-               What it no longer does is advertise a shortcut nobody implements: the `⌘K` hint in
-               its corner is bound below, and `inputRef` is how the binding reaches the element. A
-               hint for a key that does nothing teaches the reader that shortcuts do not work. */
+              /* The field, wired to the gateway's cross-entity search. Everything about *what* it
+               shows is decided in `data/search.ts` and handed over as plain data, so the four
+               states the overlay can be in — nothing asked for, asking, an answer, a failure — are
+               each reachable in a story with no server. `inputRef` is how the `⌘K` bound above
+               reaches the element; a hint for a key that does nothing teaches the reader that
+               shortcuts do not work. */
               search={{
-                value: "",
-                onInput: () => undefined,
-                status: "idle",
+                value: searchText(),
+                onInput: onSearchInput,
+                status: searchStatus(searchState()),
+                maxLength: SEARCH_MAX_LENGTH,
+                results: searchResults(),
+                /* The services the fold could not ask, in words. Reported rather than dropped: the
+                   distributed stack routes no schema service, so a search that returned two lists
+                   out of three would tell an operator their subject does not exist. */
+                unavailable: searchUnavailable(),
+                onRetry: () => {
+                  const query = searchText().trim();
+                  if (query.length > 0) runSearch(query);
+                },
                 inputRef: (el) => {
                   searchInput = el;
                 },
@@ -768,6 +923,22 @@ export function App() {
 }
 
 /**
+ * Navigating to an address {@link shellPaths} built.
+ *
+ * `useNavigate`'s default is to treat a leading-`/` string as base-*relative* and prefix the
+ * router's base onto it, which is right for a hand-written `"/settings"` and wrong for everything
+ * this shell has: every address it holds comes from the router's typed proxy, which has already
+ * applied the base. So the default turned `/ui/clusters/x/topics` into `/ui/ui/clusters/x/topics`,
+ * which matches no route and drew the 404 page.
+ *
+ * Both of the shell's navigations had it — `+ Create topic` and the environment rail — and neither
+ * was ever exercised by a test, so the two wirings that wave 2 recorded as "done" produced a 404
+ * every time anybody used them. `resolve: false` says the string is already the final path, which
+ * is exactly what a `KuiPaths` address is.
+ */
+const AlreadyPrefixed = { resolve: false } as const;
+
+/**
  * The rail's shortcut glyphs.
  *
  * Only destinations the shell itself owns, because a shortcut whose service is not configured must
@@ -811,6 +982,7 @@ export function topCrumbs(
     clusters: "Brokers",
     topics: "Topics",
     consumers: "Consumers",
+    schemas: "Schema Registry",
     settings: "Settings",
   };
   // "overview" adds nothing: the cluster crumb already links there, and a trail that repeats itself
@@ -970,7 +1142,19 @@ export function countLookup(
   return (feature) => counts?.[feature.id];
 }
 
-/** Which navigation entry to mark as current, from the address the browser is on. */
+/**
+ * Which navigation entry to mark as current, from the address the browser is on.
+ *
+ * The fall-through is `clusters`, and that is right for `/clusters` and for a broker's page and
+ * wrong for the two addresses that were reaching it by accident. A cluster's **dashboard** —
+ * `/clusters/<id>` and `/clusters/<id>/dashboard/<tab>`, which is the address the product opens on
+ * — marked *Brokers* as the current entry and put "Brokers" in the top band's trail, over a page
+ * headed "Cluster overview". Three signals, two of them wrong, on the first screen anybody sees.
+ * The registry's own screen had the same defect one row down.
+ *
+ * `manage` is excluded from the dashboard test for the reason `clusterInUrl` excludes it: it is a
+ * page of the cluster list, not the id of a cluster.
+ */
 export function currentFeatureId(pathname: string, uiPrefix: string): string | undefined {
   const relative = pathname.startsWith(uiPrefix) ? pathname.slice(uiPrefix.length) : pathname;
   const segments = relative.split("/").filter((segment) => segment.length > 0);
@@ -979,6 +1163,11 @@ export function currentFeatureId(pathname: string, uiPrefix: string): string | u
   if (segments[0] !== "clusters") return undefined;
   if (segments.includes("topics")) return "topics";
   if (segments.includes("consumer-groups")) return "consumers";
+  if (segments.includes("schemas")) return "schemas";
+  // `/clusters/<id>`, with or without `/dashboard/<tab>` after it. Both are the same page.
+  if (segments[1] !== undefined && segments[1] !== "manage" && !segments.includes("brokers")) {
+    return "overview";
+  }
   return "clusters";
 }
 

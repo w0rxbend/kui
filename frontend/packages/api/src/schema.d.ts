@@ -532,7 +532,7 @@ export interface paths {
         };
         /**
          * The subjects registered on this cluster's Schema Registry
-         * @description Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned.
+         * @description Answers KUI-UNSUPPORTED for a cluster with no registry configured, which is a deployment choice rather than a failure: the capability document reports that cluster as not_configured and the browser hides the feature for it. A row's format, versionCount and compatibility are absent when the per-subject call that fills them did not answer; the row itself is still returned. pageSize=0 answers the total with no rows and asks the registry nothing beyond the subject list.
          */
         readonly get: operations["schema.subjects"];
         readonly put?: never;
@@ -1003,6 +1003,26 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/search": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Topics, consumer groups and subjects matching one query, across every cluster
+         * @description Answers 200 whenever the query is well formed, however many of the three services could be asked. A service this deployment does not route, or one that did not answer, contributes its id to `partial` and no results; the other two still answer. A `q` outside 1 to 200 characters is a 400 KUI-VALIDATION naming the field, because a search box with no term is a request the browser should not have made rather than a cluster with nothing in it.
+         */
+        readonly get: operations["gateway.search"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1455,6 +1475,16 @@ export interface components {
             readonly topics?: readonly components["schemas"]["TopicSubscriptionDto"][];
             /** Format: int64 */
             readonly totalLag?: number;
+        };
+        /**
+         * GroupHitDto
+         * @description A consumer group the query matched
+         */
+        readonly GroupHitDto: {
+            /** @description a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ */
+            readonly cluster: string;
+            /** @description a consumer group id */
+            readonly groupId: string;
         };
         /**
          * GroupsResponse
@@ -2128,6 +2158,23 @@ export interface components {
             readonly password: string;
             readonly username: string;
         };
+        /**
+         * SearchAnswerDto
+         * @description Everything one query found, with the services that could not be asked named
+         */
+        readonly SearchAnswerDto: {
+            readonly partial?: readonly string[];
+            readonly results: components["schemas"]["SearchResultsDto"];
+        };
+        /**
+         * SearchResultsDto
+         * @description What the query found, grouped by kind
+         */
+        readonly SearchResultsDto: {
+            readonly groups?: readonly components["schemas"]["GroupHitDto"][];
+            readonly subjects?: readonly components["schemas"]["SubjectHitDto"][];
+            readonly topics?: readonly components["schemas"]["TopicHitDto"][];
+        };
         /** Sensitive */
         readonly Sensitive: {
             /** @description A credential. Internal channel only; never on /api/v1 */
@@ -2170,6 +2217,16 @@ export interface components {
         };
         /** StoreSource */
         readonly StoreSource: components["schemas"]["FromPath"] | components["schemas"]["Inline"];
+        /**
+         * SubjectHitDto
+         * @description A subject the query matched
+         */
+        readonly SubjectHitDto: {
+            /** @description a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ */
+            readonly cluster: string;
+            /** @description a schema registry subject */
+            readonly subject: string;
+        };
         /**
          * SubjectSummaryDto
          * @description A subject list row: the name, and the facts a row shows when they could be read
@@ -2242,6 +2299,16 @@ export interface components {
             readonly partitionsTruncated: boolean;
             /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
             readonly topic: unknown;
+        };
+        /**
+         * TopicHitDto
+         * @description A topic the query matched
+         */
+        readonly TopicHitDto: {
+            /** @description a lowercase slug: ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ */
+            readonly cluster: string;
+            /** @description a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..' */
+            readonly name: string;
         };
         /**
          * TopicNamesResponse
@@ -3385,7 +3452,7 @@ export interface operations {
                 readonly direction?: string;
                 /** @description Which page, numbered from one */
                 readonly page?: number;
-                /** @description How many rows a page holds. A value above the maximum is clamped, not refused */
+                /** @description How many rows a page holds, up to 100. A value above that is clamped, not refused. 0 asks for the total with no rows, which is the only way to read the subject count without paying for a page of enrichment */
                 readonly pageSize?: number;
                 /** @description Case-insensitive substring match over the subject name. Not a regular expression */
                 readonly q?: string;
@@ -4370,6 +4437,38 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["AppInfo"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "gateway.search": {
+        readonly parameters: {
+            readonly query: {
+                /** @description How many hits of each kind to return */
+                readonly limit?: number;
+                /** @description What to look for: a case-insensitive substring of a topic, group or subject name */
+                readonly q: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SearchAnswerDto"];
                 };
             };
             readonly default: {

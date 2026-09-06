@@ -28,7 +28,7 @@
  */
 
 import type { NavDestination } from "../chrome/types.js";
-import { INTERNAL_GROUP, prefixes } from "./prefixes.js";
+import { INTERNAL_GROUP, OTHER_GROUP, prefixes } from "./prefixes.js";
 
 export interface TopicTreeInput {
   /**
@@ -103,4 +103,32 @@ export function topicTree(input: TopicTreeInput): readonly NavDestination[] {
   }));
 
   return [...favourites, ...groups];
+}
+
+/**
+ * Where a prefix row goes: the topic list, asked for the topics that row stands for.
+ *
+ * ## Why the address is assembled here and the route is not
+ *
+ * The *route* comes from the caller — `KuiPaths.topics(cluster)`, built through the router's typed
+ * proxy, so a renamed segment is a compile error rather than a drawer full of links that quietly
+ * 404. What this adds is the query, which is not a route: `q` and `showInternal` are the topic
+ * list endpoint's own parameters, declared in `TopicQueryCodecs` and documented in the generated
+ * schema, and the list screen reads them off its own address.
+ *
+ * ## The three kinds of row, which are not three kinds of filter
+ *
+ * - A **prefix group** is `q=<segment>`. The row's label is written `orders.*` because that is what
+ *   a person reads; the `.*` is presentation and is stripped, because `q` is a name search and not
+ *   a glob — asking the server for `orders.*` literally would match nothing at all.
+ * - **`internal`** is not a prefix. It is every topic whose name begins with an underscore, so the
+ *   filter is the list's own `showInternal` switch rather than a search for a name.
+ * - **`other`** is the residue the group cap left over ({@link prefixes}), which is by construction
+ *   not describable as a search. It goes to the unfiltered list: a row that leads somewhere honest
+ *   and wider than itself is better than a row that leads to a query matching nothing.
+ */
+export function topicGroupHref(listHref: string, group: string): string {
+  if (group === INTERNAL_GROUP) return `${listHref}?showInternal=true`;
+  if (group === OTHER_GROUP) return listHref;
+  return `${listHref}?q=${encodeURIComponent(group.replace(/\.\*$/, ""))}`;
 }

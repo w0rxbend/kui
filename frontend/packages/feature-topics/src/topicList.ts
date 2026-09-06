@@ -209,16 +209,93 @@ export function pageOf<T>(rows: readonly T[], page: number, size: number): reado
 }
 
 /**
- * The page's voice line.
+ * The page's voice line: `3 of 128 topics match · 1,536 partitions` (`SCREENS-V4.md` §4.6).
  *
- * Figures first, joke second — and the joke is dropped entirely when anything is wrong, because an
- * operator whose topics are out of sync does not want to be told about it wittily.
+ * ## Three figures, three documents, and every one of them can be absent
+ *
+ * The design's line mixes scopes on purpose: the match count tracks the filter and the two totals
+ * do not. `matched` is the server's count for the current search, `clusterTopics` and
+ * `clusterPartitions` come from the statistics document, and each clause is **dropped** rather than
+ * filled when its figure is missing. `0 partitions` on a cluster whose sweep was incomplete would
+ * be the never-zero rule broken in the most readable place on the screen; `3 of 0 topics match` is
+ * worse still, because it is arithmetic nobody can do.
+ *
+ * The design's line ends `· 2 of them are drama queens`, and that clause is not written here. It is
+ * a count of out-of-sync topics dressed as a quip, and the only figure this screen holds for it is
+ * over the rows it happens to have — a cluster-wide claim made from one page, which is the sentence
+ * this whole list was rebuilt to stop writing. The health chips say it per topic, accurately.
  */
-export function topicsVoice(shown: number, total: number, partitions: number, outOfSync: number): string {
-  const match = shown === total ? `${total.toLocaleString()} topics` : `${shown.toLocaleString()} of ${total.toLocaleString()} topics match`;
-  const base = `${match} · ${partitions.toLocaleString()} partitions`;
-  if (outOfSync > 0) {
-    return `${base} · ${outOfSync.toLocaleString()} out of sync`;
-  }
-  return `${base}`;
+export function topicsVoice(
+  matched: number | undefined,
+  clusterTopics: number | undefined,
+  clusterPartitions: number | undefined,
+): string {
+  const topics = (count: number): string => `${count.toLocaleString()} ${count === 1 ? "topic" : "topics"}`;
+
+  const head =
+    matched === undefined
+      ? clusterTopics === undefined
+        ? undefined
+        : topics(clusterTopics)
+      : clusterTopics === undefined || clusterTopics === matched
+        ? topics(matched)
+        : `${matched.toLocaleString()} of ${clusterTopics.toLocaleString()} topics match`;
+
+  if (head === undefined) return "";
+  if (clusterPartitions === undefined) return head;
+  return `${head} · ${clusterPartitions.toLocaleString()} partitions`;
+}
+
+/**
+ * The rows on screen, as a CSV an operator can open.
+ *
+ * ## Why absent is an empty cell and not a zero
+ *
+ * The same rule the screen follows, applied where it is easiest to break: a spreadsheet sums a
+ * column without asking, so a `0` written here for a topic whose size could not be read becomes a
+ * cluster total that is quietly short — and unlike the screen, the file carries no dash and no
+ * sentence to say so. An empty cell is what every spreadsheet treats as "no value", and it is the
+ * only rendering of "not known" that survives the export.
+ *
+ * ## Quoting
+ *
+ * Every field is quoted and every embedded quote is doubled, which is RFC 4180 and is not
+ * decoration: Kafka permits `.`, `_` and `-` in a topic name but a cleanup policy is
+ * `compact,delete`, and an unquoted comma there silently shifts every column after it by one.
+ * CRLF line endings for the same reason — it is what the format says, and what a spreadsheet on
+ * Windows expects.
+ */
+export function topicsCsv(topics: readonly TopicRow[]): string {
+  const cell = (value: string | number | undefined): string =>
+    value === undefined ? '""' : `"${String(value).replaceAll('"', '""')}"`;
+
+  const header = [
+    "topic",
+    "internal",
+    "partitions",
+    "replication factor",
+    "health",
+    "records",
+    "size bytes",
+    "messages per second",
+    "cleanup policy",
+  ]
+    .map(cell)
+    .join(",");
+
+  const rows = topics.map((topic) =>
+    [
+      cell(topic.name),
+      cell(topic.internal ? "yes" : "no"),
+      cell(topic.partitions),
+      cell(topic.replicationFactor),
+      cell(topic.health),
+      cell(topic.records),
+      cell(topic.bytes),
+      cell(topic.messagesPerSecond),
+      cell(topic.cleanupPolicy),
+    ].join(","),
+  );
+
+  return [header, ...rows].join("\r\n");
 }

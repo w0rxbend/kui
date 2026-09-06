@@ -10,6 +10,7 @@ import {
   PARTIAL_DISKS,
   SPARSE_SUMMARY,
   UNHEALTHY,
+  ZERO_BYTE_DISKS,
 } from "./fixtures.js";
 import { dashboardHost } from "./harness.jsx";
 import type { OverviewData } from "./load.js";
@@ -117,6 +118,25 @@ export const StorageWithoutDiskSizes: Story = story(NO_DISK_SIZES, `${DASHBOARD}
  * disk it lives on runs past the end of the track, and the bar clamps rather than saying so.
  */
 export const StorageWithAnUnmeasuredDisk: Story = story(PARTIAL_DISKS, `${DASHBOARD}/storage`);
+
+/**
+ * The Storage tab on disks that answered, and answered zero.
+ *
+ * The state between `StorageWithoutDiskSizes` and `StorageTab` that belongs to neither: both byte
+ * figures are present, so nothing is skipped, and there is still no denominator. Every row's detail
+ * line must be the sentence and not `0 B of 0 B` — the same sentence the broker-health bars carry on
+ * the Overview tab, because both come out of one arithmetic. It is a real answer: a directory read
+ * while a volume was being remounted reports exactly this.
+ */
+export const StorageWithZeroByteDisks: Story = story(ZERO_BYTE_DISKS, `${DASHBOARD}/storage`);
+
+/**
+ * The Overview tab on the same disks, which is the other half of that agreement.
+ *
+ * Three broker bars with no fill and the reason under each. If this story and the one above ever
+ * disagree about what a zero-byte disk is, one of them is lying to an operator comparing brokers.
+ */
+export const ZeroByteDisks: Story = story(ZERO_BYTE_DISKS);
 
 /**
  * The Storage tab while the answers are still in flight.

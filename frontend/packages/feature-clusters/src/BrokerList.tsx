@@ -26,9 +26,9 @@
 
 import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { Button, Card, EmptyState, PageHeader, StatTile, formatBytes, formatCount } from "@kui/kernel";
+import { Button, Card, EmptyState, PageHeader, StatTile, formatBytes, formatCount, type TileFigure } from "@kui/kernel";
 import { BrokerCard, type BrokerConfig } from "./BrokerCard.js";
-import { clusterVoice, partitionSkew, voiceOf, type Broker } from "./model.js";
+import { clusterVoice, partitionSkew, summariseDisk, voiceOf, type Broker, type ClusterDisk } from "./model.js";
 
 export interface BrokerListProps {
   readonly clusterName: string;
@@ -42,11 +42,22 @@ export interface BrokerListProps {
   readonly hrefFor: (brokerId: number) => string;
   readonly onOpen?: ((brokerId: number) => void) | undefined;
   /**
+   * A card was opened or closed.
+   *
+   * This is what makes the settings a *lazy* fetch rather than a hidden one: the screen asks the
+   * gateway for a broker's two hundred settings when somebody opens that broker's card, and a page
+   * nobody expands costs nothing beyond the list. The card keeps its own open/closed state, so a
+   * caller that does not care may leave this out.
+   */
+  readonly onToggle?: ((brokerId: number, expanded: boolean) => void) | undefined;
+  /**
    * The per-broker extras the expanded card shows. Functions rather than a map on the broker,
    * because they arrive from three different calls at three different times and the card has to be
    * able to draw before any of them lands.
    */
   readonly configsFor?: ((brokerId: number) => readonly BrokerConfig[] | undefined) | undefined;
+  /** How many settings the card is *not* showing, so it can say so rather than look complete. */
+  readonly configsMoreFor?: ((brokerId: number) => number | undefined) | undefined;
   readonly configsErrorFor?: ((brokerId: number) => string | undefined) | undefined;
   readonly versionFor?: ((brokerId: number) => string | undefined) | undefined;
   readonly uptimeFor?: ((brokerId: number) => string | undefined) | undefined;
@@ -72,28 +83,15 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
   });
 
   /**
-   * What the brokers hold, and — where anything says so — what they could hold.
+   * What the brokers' disks hold, what they could hold, and what Kafka's share of that is.
    *
-   * These are two separate questions and the wire answers only the first. Kafka's admin protocol
-   * reports how much a broker's log directories *hold*; how large the disk beneath them is belongs
-   * to the host and is not exposed. So `total` is almost always absent, and the figure is still
-   * worth printing: "the cluster holds 2.3 MB" is useful on its own.
-   *
-   * This required both to be present at first, so the tile read "log directories could not be
-   * read" on a cluster that had just reported them perfectly. Requiring a denominator that the
-   * protocol does not carry turned a known figure into a reported failure.
+   * Three sums with three fates, because they arrive from two endpoints that fail separately —
+   * `summariseDisk` states the rule. The tile below prefers the capacity pair, because a percentage
+   * is what an operator came here for, and falls back to what Kafka holds rather than refusing:
+   * this once required a denominator, and the tile read "log directories could not be read" on a
+   * cluster that had just reported its usage perfectly.
    */
-  const disk = createMemo(() => {
-    const measured = props.brokers.filter((broker) => broker.diskUsedBytes !== null);
-    if (measured.length === 0) return undefined;
-    const withTotal = measured.filter((broker) => (broker.diskTotalBytes ?? 0) > 0);
-    return {
-      used: measured.reduce((sum, broker) => sum + (broker.diskUsedBytes ?? 0), 0),
-      total: withTotal.length === 0 ? undefined : withTotal.reduce((sum, broker) => sum + (broker.diskTotalBytes ?? 0), 0),
-      measured: measured.length,
-      brokers: props.brokers.length,
-    };
-  });
+  const disk = createMemo(() => summariseDisk(props.brokers));
 
   return (
     <section class="kui-brk-page" data-testid="brokers">
@@ -164,12 +162,8 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
             label="DISK USED"
             icon="disk"
             tone="warning"
-            figure={
-              disk() === undefined
-                ? { kind: "unknown" }
-                : { kind: "value", text: formatBytes(disk()?.used ?? 0) }
-            }
-            chip={diskChip(disk(), props.brokers.length)}
+            figure={diskFigure(disk())}
+            chip={diskChip(disk())}
           />
           <StatTile
             label="PARTITION SKEW"
@@ -206,7 +200,9 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
                   broker={broker}
                   showRack={rackAware()}
                   href={props.hrefFor(broker.id)}
+                  onToggle={(expanded) => props.onToggle?.(broker.id, expanded)}
                   configs={props.configsFor?.(broker.id)}
+                  configsMore={props.configsMoreFor?.(broker.id)}
                   configsError={props.configsErrorFor?.(broker.id)}
                   version={props.versionFor?.(broker.id)}
                   uptime={props.uptimeFor?.(broker.id)}
@@ -238,28 +234,45 @@ function skewCaption(skew: number | undefined): string {
 }
 
 /**
- * What to say beneath the disk figure.
+ * The disk figure itself, which is one of three different numbers.
  *
- * Four cases, and the one that matters is the third: a cluster that reported its usage but has no
- * capacity to report it against. That is the ordinary case — Kafka does not expose the size of the
- * disk under a log directory — and it must not read as a failure.
+ * The capacity pair first — it is the one a percentage can be read off — then what Kafka holds, and
+ * only then the refusal. The order matters: falling straight to `unknown` because no capacity was
+ * reported throws away a figure the server sent, and Kafka not exposing the size of the disk under
+ * a log directory is the ordinary case rather than a failure.
  */
-function diskChip(
-  disk: { readonly used: number; readonly total: number | undefined; readonly measured: number; readonly brokers: number } | undefined,
-  brokerCount: number,
-): { readonly text: string; readonly tone?: "neutral" | "positive" | "attention" } | undefined {
-  if (disk === undefined) {
-    return brokerCount === 0
-      ? { text: "no broker answered", tone: "attention" }
-      : { text: "log directories could not be read", tone: "attention" };
+function diskFigure(disk: ClusterDisk): TileFigure {
+  if (disk.usedBytes !== null) return { kind: "value", text: formatBytes(disk.usedBytes) };
+  if (disk.heldBytes !== null) return { kind: "value", text: formatBytes(disk.heldBytes) };
+  return { kind: "unknown" };
+}
+
+/**
+ * What to say beneath it.
+ *
+ * The case that matters is the third: a cluster that reported what it holds and has no capacity to
+ * report it against. That is the ordinary answer from a broker whose log directories KUI cannot
+ * read, and it must not be drawn as a failure — nor may the figure above be read as a percentage of
+ * anything.
+ */
+type Chip = { readonly text: string; readonly tone?: "neutral" | "positive" | "attention" };
+
+function diskChip(disk: ClusterDisk): Chip | undefined {
+  if (disk.usedBytes !== null) {
+    const total = `of ${formatBytes(disk.capacityBytes ?? 0)}`;
+    return disk.measured < disk.brokers
+      ? {
+          text: `${total}, over the ${disk.measured} of ${disk.brokers} brokers that reported a disk`,
+          tone: "attention",
+        }
+      : { text: total };
   }
-  if (disk.measured < disk.brokers) {
-    return { text: `${disk.measured} of ${disk.brokers} brokers reported`, tone: "attention" };
+  if (disk.heldBytes !== null) {
+    return { text: "what Kafka holds; no disk capacity was reported" };
   }
-  if (disk.total === undefined) {
-    return { text: "Kafka does not report disk capacity" };
-  }
-  return { text: `of ${formatBytes(disk.total)}` };
+  return disk.brokers === 0
+    ? { text: "no broker answered", tone: "attention" }
+    : { text: "log directories could not be read", tone: "attention" };
 }
 
 export { skewCaption };

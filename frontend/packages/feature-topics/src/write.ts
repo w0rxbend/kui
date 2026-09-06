@@ -24,8 +24,7 @@
  * screens want a shape that says what it means ("records" rather than "records?: number | undefined
  * that is null when at least one partition could not be counted").
  */
-import type { KuiApiClient } from "@kui/api";
-import type { ApiResult } from "@kui/api";
+import { userMessage, type ApiResult, type KuiApiClient } from "@kui/api";
 
 /** What a create asks for. `undefined` means "the broker's own default", which is not the same as 1. */
 export interface NewTopic {
@@ -389,4 +388,90 @@ export async function increasePartitions(
   });
   if (!answer.ok) return answer;
   return { ok: true, value: toPartitionPlan(answer.value) };
+}
+
+/**
+ * What a bulk action did, topic by topic.
+ *
+ * ## Why it is not one `ApiResult`
+ *
+ * The bulk bar acts on a set, and a set can fail in the middle. "It failed" over five topics of
+ * which three were deleted is the least useful sentence this product could show — the operator's
+ * next question is which two are left, and a screen holding one error envelope cannot answer it. So
+ * the outcome names both halves, and the toast raised from it says both.
+ *
+ * The failures carry the server's own sentence rather than a code. A refusal here is almost always
+ * a permission or an in-flight controller operation, and both are things an operator reads and
+ * acts on.
+ */
+export interface BulkOutcome {
+  readonly done: readonly string[];
+  readonly failed: readonly { readonly topic: string; readonly reason: string }[];
+}
+
+/**
+ * Runs one plan→confirm pair per topic, in order.
+ *
+ * **Sequential on purpose.** Each of these is two calls that reach Kafka's controller, and a
+ * selection of thirty fired at once is thirty concurrent controller operations from a browser —
+ * which is how a bulk action becomes an outage. The set an operator can select is bounded by the
+ * page, so the worst case is a page's worth of pairs and the screen keeps its bar up while they
+ * run.
+ *
+ * **A topic whose plan refuses is not attempted.** The token *is* the agreement (see this file's
+ * header); a mutation without one is a different operation from the one the operator confirmed.
+ */
+async function eachTopic(
+  names: readonly string[],
+  plan: (topic: string) => Promise<ApiResult<{ readonly token: string | null }>>,
+  confirm: (topic: string, token: string) => Promise<ApiResult<unknown>>,
+): Promise<BulkOutcome> {
+  const done: string[] = [];
+  const failed: { topic: string; reason: string }[] = [];
+
+  for (const topic of names) {
+    const planned = await plan(topic);
+    if (!planned.ok) {
+      failed.push({ topic, reason: userMessage(planned.error) });
+      continue;
+    }
+    const token = planned.value.token;
+    if (token === null) {
+      // The server planned the action and withheld the token. That is a refusal with a reason the
+      // envelope does not carry, and guessing at a token would be the one thing ADR-045 forbids.
+      failed.push({ topic, reason: "The cluster did not issue a confirmation token for this topic." });
+      continue;
+    }
+    const applied = await confirm(topic, token);
+    if (applied.ok) done.push(topic);
+    else failed.push({ topic, reason: userMessage(applied.error) });
+  }
+
+  return { done, failed };
+}
+
+/** Deletes each of the named topics, plan and token included. See {@link eachTopic}. */
+export async function deleteTopics(
+  api: KuiApiClient,
+  clusterId: string,
+  names: readonly string[],
+): Promise<BulkOutcome> {
+  return eachTopic(
+    names,
+    (topic) => planDeletion(api, clusterId, topic),
+    (topic, token) => deleteTopic(api, clusterId, topic, token),
+  );
+}
+
+/** Empties each of the named topics. The topics themselves survive; only their records go. */
+export async function purgeTopics(
+  api: KuiApiClient,
+  clusterId: string,
+  names: readonly string[],
+): Promise<BulkOutcome> {
+  return eachTopic(
+    names,
+    (topic) => planPurge(api, clusterId, topic),
+    (topic, token) => confirmPurge(api, clusterId, topic, token),
+  );
 }

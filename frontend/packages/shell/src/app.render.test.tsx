@@ -31,10 +31,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "@solidjs/web";
 import { flush } from "solid-js";
 
-import { Actions, Resources } from "@kui/api";
+import { Actions, CapabilityStatuses, Resources, SseEventNames } from "@kui/api";
 
 import { App } from "./App.jsx";
+import { SEARCH_DEBOUNCE_MS } from "./data/search.js";
 import { featureRegistry } from "./features/registry.js";
+
+/**
+ * The permissions a deployment with authentication disabled really hands out.
+ *
+ * One grant per feature's view action, over every cluster and every name — which is what
+ * `/auth/me` answers when no identity provider is configured, and what the third `describe` in this
+ * file asserts the registrations line up with. Without them every cluster-scoped row in the drawer
+ * comes out **forbidden**, and a forbidden row carries neither a badge nor a nested tree: a stub
+ * that omitted the grants would leave this suite asserting against a drawer nobody ever sees.
+ */
+const WILDCARD_GRANTS = featureRegistry.map((registration) => ({
+  clusters: ["*"],
+  resource: registration.viewAction.resource,
+  value: ".*",
+  actions: [registration.viewAction.action],
+}));
+
+/** The `/auth/me` body both stubs answer with. */
+const SESSION = {
+  authType: "disabled",
+  csrfToken: "test-token",
+  principal: { kind: "anonymous", name: "anonymous" },
+  permissions: WILDCARD_GRANTS,
+};
 
 /**
  * An `EventSource` that connects to nothing.
@@ -46,18 +71,80 @@ import { featureRegistry } from "./features/registry.js";
  */
 class SilentEventSource {
   static readonly opened: string[] = [];
+  /** Every source built since the last reset, so a case can push a frame down one. */
+  static readonly live: SilentEventSource[] = [];
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   onopen: ((event: Event) => void) | null = null;
   readonly readyState = 0;
 
+  private readonly listeners = new Map<string, ((event: Event) => void)[]>();
+
   constructor(readonly url: string) {
     SilentEventSource.opened.push(url);
+    SilentEventSource.live.push(this);
   }
 
-  addEventListener(): void {}
+  addEventListener(name: string, handler: (event: Event) => void): void {
+    const held = this.listeners.get(name) ?? [];
+    held.push(handler);
+    this.listeners.set(name, held);
+  }
+
   removeEventListener(): void {}
   close(): void {}
+
+  /**
+   * Delivers one frame, the way the browser's own `EventSource` would.
+   *
+   * A `{ data }` object rather than a real `MessageEvent`: the stream reader takes the payload off
+   * `event.data` and looks at nothing else, and jsdom's `MessageEvent` constructor is not what is
+   * under test here.
+   */
+  emit(name: string, data: unknown): void {
+    for (const handler of this.listeners.get(name) ?? []) {
+      handler({ data: JSON.stringify(data) } as unknown as Event);
+    }
+  }
+}
+
+/** One capability entry, as the gateway sends it. */
+function entry(service: string, cluster: string, name: string) {
+  return {
+    key: { service, cluster },
+    state: { status: CapabilityStatuses.Available },
+    updatedAt: "2026-09-06T09:00:00.000Z",
+    name,
+  };
+}
+
+/**
+ * The services a cluster's features are gated on, all reporting healthy.
+ *
+ * Pushed down the stream because that is the only way a feature reaches `ready`: with no frame at
+ * all the shell renders every capability as degraded-with-STARTING, which is the honest state for a
+ * picture that has not arrived and is *not* the state most of this product's rules apply to. A
+ * degraded row carries the capability badge instead of its count and draws no tree, so a suite that
+ * never delivered a frame would be asserting against a drawer no operator sees for longer than a
+ * second.
+ */
+function healthy(...clusters: readonly string[]) {
+  return {
+    generatedAt: "2026-09-06T09:00:00.000Z",
+    entries: clusters.flatMap((cluster) =>
+      ["cluster", "topic", "message", "consumer", "schema"].map((service) =>
+        entry(service, cluster, cluster),
+      ),
+    ),
+  };
+}
+
+/** Delivers a capability frame down the stream the shell opened. */
+function announce(frame: unknown): void {
+  const stream = SilentEventSource.live.at(-1);
+  if (stream === undefined) throw new Error("the capability stream was never opened");
+  stream.emit(SseEventNames.Capabilities, frame);
+  flush();
 }
 
 /** The two start-up answers, and a 404 for anything else the shell decides to ask for. */
@@ -68,14 +155,10 @@ function stubGateway(): void {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.includes("/auth/me")) {
-        return new Response(
-          JSON.stringify({
-            authType: "disabled",
-            csrfToken: "test-token",
-            principal: { kind: "anonymous", name: "anonymous" },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
+        return new Response(JSON.stringify(SESSION), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       if (url.includes("/auth/settings")) {
         return new Response(JSON.stringify({ authType: "disabled", providers: [] }), {
@@ -106,6 +189,7 @@ function mountApp() {
 }
 
 afterEach(() => {
+  SilentEventSource.live.length = 0;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   /* The address and the stored selection are both global, and the shell writes to both: a case that
@@ -217,6 +301,22 @@ describe("the frame, given a cluster in the address", () => {
       topics: ok({ items: [], page: { totalItems: 128 } }),
       incompleteTopics: 0,
     },
+    /* The names-only index the drawer's tree is folded from. Eight names over three prefixes and
+       two internal topics, which is enough for every rule the fold has: a genuine prefix written
+       `orders.*`, a single topic that must *not* be written `heartbeats.*`, and the padlocked
+       `internal` row that collects both underscored names whatever their own prefixes are. */
+    "/api/v1/clusters/prod-kyiv-01/topics/names": {
+      names: ok([
+        "orders.payments.v2",
+        "orders.payments.v1",
+        "orders.shipments",
+        "analytics.clickstream",
+        "analytics.sessions",
+        "heartbeats",
+        "__consumer_offsets",
+        "__transaction_state",
+      ]),
+    },
   };
 
   function stubCluster(): void {
@@ -228,14 +328,10 @@ describe("the frame, given a cluster in the address", () => {
           typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         const path = new URL(href, "http://kui.test").pathname;
         if (path.includes("/auth/me")) {
-          return new Response(
-            JSON.stringify({
-              authType: "disabled",
-              csrfToken: "test-token",
-              principal: { kind: "anonymous", name: "anonymous" },
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          );
+          return new Response(JSON.stringify(SESSION), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
         }
         const body = CLUSTER[path];
         if (body !== undefined) {
@@ -289,6 +385,268 @@ describe("the frame, given a cluster in the address", () => {
     const meter = drawer?.querySelector("[data-testid='storage-meter']");
     expect(meter?.textContent).toContain("63%");
     expect(meter?.textContent).toContain("250 B of 400 B");
+
+    app.dispose();
+  });
+
+  /**
+   * The badge seam, asserted where the product joins the two halves and not where a test joins
+   * them.
+   *
+   * `shell.test.tsx` has three cases about badges and all three call `countLookup` and
+   * `navigationGroups` themselves, so they check the *fold* and observe nothing about `App`'s use
+   * of it. Replacing `countFor: countLookup(readingValue(facts.counts))` with `countFor: () =>
+   * undefined` — cutting the store off from the drawer entirely — left all of them green. This case
+   * mounts the real application over a gateway that answers `page.totalItems: 128` and looks at the
+   * drawer, so the only way it passes is for the store's number to have reached the row.
+   */
+  it("carries the store's own count into the drawer's badge", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster();
+    const app = mountApp();
+    await settled();
+
+    announce(healthy("prod-kyiv-01"));
+
+    const topics = app.host.querySelector("[data-testid='nav-topics']");
+    expect(topics?.textContent).toContain("128");
+    /* And in words, because the visible badge is a fragment: the row's accessible name is what a
+       screen-reader user is given, and it is assembled from the badge's description. */
+    expect(topics?.getAttribute("aria-label")).toContain("128");
+
+    app.dispose();
+  });
+
+  /**
+   * The tree, drawn from names the product fetched.
+   *
+   * `nav/topicTree.ts` was written, tested and exported a wave ago and called by nothing but the
+   * barrel that exported it, so the drawer never nested. Expanding the row here is the assertion
+   * that it is called: the disclosure only exists for a branch, and a branch only exists when
+   * `childrenFor` answered — which needs the names endpoint, the fold and the frame's wiring all
+   * three.
+   */
+  it("nests the topic tree under Topics, from the names the cluster reported", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster();
+    const app = mountApp();
+    await settled();
+
+    announce(healthy("prod-kyiv-01"));
+
+    const disclosure = app.host.querySelector<HTMLButtonElement>(
+      "[data-testid='nav-topics-disclosure']",
+    );
+    expect(disclosure).not.toBeNull();
+
+    disclosure!.click();
+    flush();
+
+    const subtree = app.host.querySelector("[data-testid='nav-topics-subtree']");
+    /* The three rules the fold owns, seen through the drawer: a genuine prefix is written with its
+       star, a lone topic keeps its bare name, and every underscored topic is one padlocked row. */
+    expect(subtree?.textContent).toContain("orders.*");
+    expect(subtree?.textContent).toContain("heartbeats");
+    expect(subtree?.textContent).not.toContain("heartbeats.*");
+    expect(subtree?.textContent).toContain("internal");
+    expect(subtree?.textContent).not.toContain("__consumer_offsets");
+
+    /* The counts are the cluster's and not the page's, and the addresses are the list's own query
+       rather than a hand-written path. */
+    const orders = subtree?.querySelector("[data-testid='nav-prefix:orders.*']");
+    expect(orders?.getAttribute("href")).toBe("/ui/clusters/prod-kyiv-01/topics?q=orders");
+    expect(orders?.textContent).toContain("3");
+    const internal = subtree?.querySelector("[data-testid='nav-prefix:internal']");
+    expect(internal?.getAttribute("href")).toBe(
+      "/ui/clusters/prod-kyiv-01/topics?showInternal=true",
+    );
+
+    app.dispose();
+  });
+
+  /**
+   * `+ Create topic` on the dashboard.
+   *
+   * The handler is three lines in `App.tsx` and replacing it with a no-op was, until this case,
+   * invisible to all 281 shell tests: nothing mounted the route that renders the button. The
+   * assertion is the address, because the address is what the wiring produces — the create flow
+   * lives inside the topics screen and this button is the route to it.
+   */
+  it("takes the dashboard's Create topic button to the cluster's topic list", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster();
+    const app = mountApp();
+    await settled();
+
+    const create = [...app.host.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+      button.textContent?.includes("Create topic"),
+    );
+    expect(create).toBeDefined();
+
+    create!.click();
+    await settled();
+
+    expect(window.location.pathname).toBe("/ui/clusters/prod-kyiv-01/topics");
+
+    app.dispose();
+  });
+});
+
+/**
+ * Changing environment from the rail.
+ *
+ * `EnvRailProps.onSelect` is optional, so an unwired rail is not even a type error — and
+ * `shell.test.tsx`'s three cases about switching call `environmentSwitch` directly, which is the
+ * *decision* and not the four side effects that carry it out. So this case does the thing an
+ * operator does: it puts two clusters in front of the rail and clicks the other one.
+ *
+ * The capability snapshot is what puts them there. `clusters()` is folded out of the capability
+ * registry and out of nothing else, so a frame has to arrive before the rail has anything to draw —
+ * which is also the first time this suite has driven the stream rather than stubbing it silent.
+ */
+describe("the environment rail", () => {
+  it("switches the frame to the cluster the operator clicked", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubGateway();
+    const app = mountApp();
+    await settle();
+    await settle();
+
+    announce(healthy("prod-kyiv-01", "staging-eu-01"));
+
+    const tile = app.host.querySelector<HTMLButtonElement>(
+      "[data-testid='env-tile-staging-eu-01']",
+    );
+    expect(tile).not.toBeNull();
+
+    tile!.click();
+    await settle();
+    await settle();
+
+    /* The address is rewritten because the address named a cluster: leaving it alone would put a
+       URL saying `prod-kyiv-01` in front of a frame describing `staging-eu-01`, and the address is
+       the half of that pair people copy. */
+    expect(window.location.pathname).toBe("/ui/clusters/staging-eu-01/dashboard/overview");
+    /* And the switch is announced, once, by the one toast region in the product. */
+    expect(app.host.ownerDocument.body.textContent).toContain("Switched to staging-eu-01");
+
+    app.dispose();
+  });
+});
+
+/**
+ * The top bar's search field, wired to the gateway's fold.
+ *
+ * The field has existed since wave 1 and searched nothing: its `onInput` was `() => undefined` and
+ * its status was the literal `"idle"`, so every state below the box was reachable only in a story.
+ * This is the seam — a person types, a request goes out, and the overlay draws what came back —
+ * and it is asserted through the mounted application because that is the only place the wiring is.
+ */
+describe("the search field", () => {
+  const FOUND = {
+    results: {
+      topics: [{ cluster: "prod-kyiv-01", name: "orders.payments.v2" }],
+      groups: [{ cluster: "prod-kyiv-01", groupId: "payments-processor" }],
+    },
+    /* The distributed stack routes no schema service, so this is the ordinary answer rather than a
+       failure — and the field has to say so instead of showing two lists out of three. */
+    partial: ["schema"],
+  };
+
+  /** Records every search the shell asks for, and answers the rest as the frame's stub does. */
+  function stubSearch(): string[] {
+    const searched: string[] = [];
+    vi.stubGlobal("EventSource", SilentEventSource);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const href =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url = new URL(href, "http://kui.test");
+        if (url.pathname.includes("/auth/me")) {
+          return new Response(JSON.stringify(SESSION), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.pathname === "/api/v1/search") {
+          searched.push(url.searchParams.get("q") ?? "");
+          return new Response(JSON.stringify(FOUND), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ authType: "disabled", providers: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    return searched;
+  }
+
+  /** Types into the box the way a person does: one event per character. */
+  function type(app: { readonly host: HTMLElement }, text: string): void {
+    const input = app.host.querySelector<HTMLInputElement>("[data-testid='search-input']");
+    if (input === null) throw new Error("the search box is not on the page");
+    input.focus();
+    for (let length = 1; length <= text.length; length += 1) {
+      input.value = text.slice(0, length);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    flush();
+  }
+
+  /** Waits out the debounce and lets the answer land. */
+  async function answered(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 80));
+    for (let turn = 0; turn < 4; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+    }
+  }
+
+  it("asks the gateway once for a typed word and draws what came back", async () => {
+    const searched = stubSearch();
+    const app = mountApp();
+    await settle();
+
+    type(app, "orders");
+    /* One request for six keystrokes. The fold is one call per service per cluster, so a keystroke
+       that escaped the debounce is three upstream calls and not one. */
+    expect(searched).toEqual([]);
+
+    await answered();
+    expect(searched).toEqual(["orders"]);
+
+    const results = app.host.querySelector("[data-testid='search']");
+    expect(results?.textContent).toContain("orders.payments.v2");
+    expect(results?.textContent).toContain("payments-processor");
+    /* And the third list, which nobody was asked for, named rather than silently absent. */
+    expect(results?.textContent).toContain("Schema Registry");
+
+    app.dispose();
+  });
+
+  it("stops searching when the box is emptied rather than searching for nothing", async () => {
+    const searched = stubSearch();
+    const app = mountApp();
+    await settle();
+
+    type(app, "orders");
+    await answered();
+    expect(searched).toEqual(["orders"]);
+
+    const input = app.host.querySelector<HTMLInputElement>("[data-testid='search-input']")!;
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    flush();
+    await answered();
+
+    expect(searched).toEqual(["orders"]);
+    expect(app.host.querySelector("[data-testid='search']")?.textContent).not.toContain(
+      "orders.payments.v2",
+    );
 
     app.dispose();
   });

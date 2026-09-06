@@ -10,7 +10,9 @@
                 "outOfSyncReplicas": 0,
                 "offlinePartitions": 0,
                 "messageCount": 16,
-                "sizeBytes": null
+                "sizeBytes": null,
+                "produceRate": null,
+                "cleanupPolicy": "delete"
             },
             "partitions": [
                 {
@@ -107,7 +109,7 @@
             "cleanupPolicy": "delete",
             "segmentCount": null
         },
-        "fetchedAt": "2026-09-05T15:45:28.742Z"
+        "fetchedAt": "2026-09-06T15:58:47.377Z"
     },
     "consumerGroups": {
         "status": "ok",
@@ -122,6 +124,8 @@
                     "topics": 1,
                     "partitions": 6,
                     "coordinatorId": 1,
+                    "coordinatorHost": "kafka",
+                    "coordinatorPort": 9092,
                     "totalLag": 9,
                     "pace": 0.0,
                     "excludedPartitions": 0,
@@ -132,7 +136,7 @@
                 "dormant": true
             }
         ],
-        "fetchedAt": "2026-09-05T15:45:28.750Z"
+        "fetchedAt": "2026-09-06T15:58:47.377Z"
     },
     "connectors": {
         "status": "not_configured"
@@ -143,5 +147,5 @@
     "schemas": {
         "status": "not_configured"
     },
-    "generatedAt": "2026-09-05T15:45:28.750Z"
+    "generatedAt": "2026-09-06T15:58:47.377Z"
 }

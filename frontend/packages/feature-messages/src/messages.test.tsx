@@ -12,6 +12,7 @@ import { flush } from "solid-js";
 import type { KafkaRecord } from "@kui/kernel";
 import { mount } from "./testing.js";
 import { DEFAULT_BROWSE, type BrowseQuery } from "./browse.js";
+import { NO_PREDICATES } from "./predicates.js";
 import {
   createBrowseSession,
   decodeBrowseEvent,
@@ -362,6 +363,8 @@ describe("the messages screen", () => {
         <MessagesTab
           topic="orders.payments.v2"
           partitionCount={12}
+          predicates={NO_PREDICATES}
+          onPredicatesChange={() => undefined}
           query={query}
           onQueryChange={() => undefined}
           session={session}
@@ -478,6 +481,8 @@ describe("the messages screen", () => {
       <MessagesTab
         topic="t"
         partitionCount={1}
+        predicates={NO_PREDICATES}
+        onPredicatesChange={() => undefined}
         query={DEFAULT_BROWSE}
         onQueryChange={() => undefined}
         session={createBrowseSession({ streamUrl: "/s", transport: fake.transport })}
@@ -495,6 +500,8 @@ describe("the messages screen", () => {
       <MessagesTab
         topic="t"
         partitionCount={1}
+        predicates={NO_PREDICATES}
+        onPredicatesChange={() => undefined}
         query={DEFAULT_BROWSE}
         onQueryChange={() => undefined}
         session={createBrowseSession({ streamUrl: "/s", transport: fake.transport })}
@@ -513,6 +520,8 @@ describe("the messages screen", () => {
       <MessagesTab
         topic="t"
         partitionCount={2}
+        predicates={NO_PREDICATES}
+        onPredicatesChange={() => undefined}
         query={DEFAULT_BROWSE}
         onQueryChange={() => undefined}
         session={createBrowseSession({ streamUrl: "/s", transport: fake.transport })}
@@ -540,6 +549,8 @@ describe("the messages screen", () => {
         <MessagesTab
           topic="t"
           partitionCount={12}
+          predicates={NO_PREDICATES}
+          onPredicatesChange={() => undefined}
           query={DEFAULT_BROWSE}
           onQueryChange={changes}
           session={session}

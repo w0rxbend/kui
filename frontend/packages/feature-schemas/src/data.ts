@@ -11,7 +11,7 @@
  * So `inheritedFromGlobal` is carried through rather than flattened into a level string, and the
  * screens say "BACKWARD, inherited" and "BACKWARD, set on this subject" as different sentences.
  */
-import type { ApiResult, KuiApiClient } from "@kui/api";
+import type { ApiResult, components, KuiApiClient } from "@kui/api";
 import { apiFailure, type Fetched } from "@kui/kernel";
 
 /**
@@ -57,7 +57,7 @@ export interface PageInfo {
 }
 
 export interface SubjectListResult {
-  readonly subjects: readonly string[];
+  readonly subjects: readonly SubjectRow[];
   readonly page: PageInfo;
 }
 
@@ -72,25 +72,24 @@ export interface SubjectQuery {
  * A row is an object, not a bare name.
  *
  * The subjects endpoint used to answer with `items: string[]`. It now answers with a summary row
- * per subject — the name plus the facts a row shows when the registry could be asked for them.
- * `SubjectListResult.subjects` stays a list of names because that is all the list screen draws
- * today; the extra fields are declared here so the shape is written down where the mapping is, and
- * so whoever draws them next does not have to re-derive it from the generated types.
+ * per subject, and for a day the screen rendered `[object Object]` in a link because this mapping
+ * read the row where it used to read the name. Nothing caught it: `tsc` could not, because the
+ * answer was cast; the recorded fixture still held bare strings; and the only thing that saw it was
+ * a browser test looking for the subject's name on the page.
+ *
+ * So the row is carried whole, with every field the wire has, and the screen draws them. A field
+ * this browser drops is a field no test can be wrong about, which is how the last one was missed.
+ *
+ * The three facts after the name are each independently absent — the endpoint documents that the
+ * per-subject call filling them may not answer while the row is still returned — so each is
+ * `undefined` rather than defaulted. `versionCount` is never `0` and the level is never
+ * `BACKWARD`: those are a claim and a guess respectively, and both read as facts on screen.
  */
-interface SubjectRow {
+export interface SubjectRow {
   readonly subject: string;
-  readonly format?: string;
-  readonly versionCount?: number;
-  readonly compatibility?: { readonly level: string; readonly inheritedFromGlobal: boolean };
-}
-
-interface SubjectsPayload {
-  readonly items?: readonly SubjectRow[];
-  readonly page?: {
-    readonly page?: number;
-    readonly pageSize?: number;
-    readonly totalItems?: number;
-  } | null;
+  readonly format: string | undefined;
+  readonly versionCount: number | undefined;
+  readonly compatibility: Compatibility | undefined;
 }
 
 export async function fetchSubjects(
@@ -115,18 +114,41 @@ export async function fetchSubjects(
    * Not a section: this endpoint answers with the page directly, because a subject list has nothing
    * to be partial about — either the registry answered or it did not, and "did not" is a transport
    * failure that `apiFailure` has already turned into a value.
+   *
+   * And not a cast. `answer.value` is `PageDto_A` straight from the generated types, so a field the
+   * gateway renames or re-shapes fails `tsc` here, at the one place in this package that touches the
+   * wire. The double cast that used to sit on this line is why the widening that turned `items` from
+   * strings into rows was invisible until somebody looked at the screen — and it is why the grep for
+   * it in this packet's acceptance list is part of the gate rather than a tidying note.
    */
-  const payload = answer.value as unknown as SubjectsPayload;
+  const payload = answer.value;
+  const items = payload.items ?? [];
   return {
     kind: "ready",
     value: {
-      subjects: (payload.items ?? []).map((row) => row.subject),
+      subjects: items.map(rowOf),
       page: {
-        page: payload.page?.page ?? 1,
-        pageSize: payload.page?.pageSize ?? (payload.items?.length ?? 0),
-        totalItems: typeof payload.page?.totalItems === "number" ? payload.page.totalItems : undefined,
+        page: payload.page.page,
+        pageSize: payload.page.pageSize,
+        totalItems: typeof payload.page.totalItems === "number" ? payload.page.totalItems : undefined,
       },
     },
+  };
+}
+
+/** One wire row as the screen's row. Every absence stays an absence. */
+function rowOf(row: components["schemas"]["SubjectSummaryDto"]): SubjectRow {
+  return {
+    subject: row.subject,
+    format: row.format,
+    versionCount: typeof row.versionCount === "number" ? row.versionCount : undefined,
+    compatibility:
+      row.compatibility === undefined
+        ? undefined
+        : {
+            level: levelOf(row.compatibility.level),
+            inherited: row.compatibility.inheritedFromGlobal === true,
+          },
   };
 }
 

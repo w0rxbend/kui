@@ -17,6 +17,13 @@
  * answer is not to smuggle PACE back into a table the design does not draw it in; it is on the group
  * detail page, where there is room to print it with the word "per second" beside it.
  *
+ * ## The count over the table is the cluster's, and the rows are one page of it
+ *
+ * The voice line reads `totalItems` from the server and the table draws whatever page came back.
+ * They are allowed to disagree, and on any cluster with more groups than fit a page they must:
+ * screenshot `04` says `14 groups` over six rows. Before this, `healthOf` counted the array, so the
+ * sentence was a restatement of the table — true, useless, and wrong about the cluster.
+ *
  * ## The row is a link, and it is also a row
  *
  * Every row carries a real `<a href>` in its first cell, because copy-link, bookmark and
@@ -44,6 +51,7 @@ import {
   MISSING,
   NARROW_QUERY,
   PageHeader,
+  Pagination,
   StatusPill,
   ThresholdValue,
   createMediaQuery,
@@ -65,6 +73,21 @@ export interface GroupListProps {
   readonly rows: readonly GroupSummary[];
   /** How many coordinators did not answer. Drives the voice line and the incomplete chips. */
   readonly coordinatorsMissing?: number | undefined;
+  /**
+   * How many groups the **cluster** has, as the server counted them.
+   *
+   * `null` or absent when the server did not say, which the voice line then states in words. It is
+   * never replaced by `rows.length`: this table draws one page, and the sentence above it is about
+   * the cluster. Screenshot `04` prints `14 groups` over six rows for exactly this reason.
+   */
+  readonly totalItems?: number | null | undefined;
+  /** One-based, and the server's, not this array's index. */
+  readonly page?: number | undefined;
+  /** How many rows a page holds, as asked of the API. Not `rows.length`, which is what came back. */
+  readonly pageSize?: number | undefined;
+  /** Asks the server for another page. The control is drawn only when this is supplied. */
+  readonly onPage?: ((page: number) => void) | undefined;
+  readonly onPageSize?: ((size: number) => void) | undefined;
   readonly loading?: boolean | undefined;
   /**
    * Why the table has no rows, when it has none. `null` means "there is genuinely nothing yet".
@@ -87,7 +110,9 @@ export interface GroupListProps {
 
 export function GroupList(props: GroupListProps): JSX.Element {
   const narrow = createMediaQuery(NARROW_QUERY);
-  const health = createMemo(() => healthOf(props.rows, props.coordinatorsMissing ?? 0));
+  const health = createMemo(() =>
+    healthOf(props.rows, props.coordinatorsMissing ?? 0, props.totalItems ?? null),
+  );
 
   /**
    * The voice line, chosen from the health of the rows on screen and never assembled from a
@@ -148,6 +173,17 @@ export function GroupList(props: GroupListProps): JSX.Element {
   });
 
   const failed = (): boolean => props.failure?.kind === "unavailable" || props.failure?.kind === "forbidden";
+
+  /**
+   * Whether there may be another page, for a server that carried no total.
+   *
+   * One weak signal, and it is the only one available: a page that came back full may have a
+   * successor. It enables `next` and nothing more — `Pagination` still draws no numbered buttons
+   * and no `last` step without a total, because both would be arithmetic over a figure nobody gave.
+   * Disabling `next` instead would strand the operator on page 1 of a list the server can page.
+   */
+  const mayHaveMore = (): boolean =>
+    props.pageSize !== undefined && props.rows.length >= props.pageSize;
 
   return (
     <section class="kui-cg-page" data-testid="consumer-groups">
@@ -217,6 +253,34 @@ export function GroupList(props: GroupListProps): JSX.Element {
             )
           }
         />
+
+        {/*
+          The paging control, drawn only when a caller can actually answer it.
+
+          `SCREENS-V4.md` §4.12 records that the capture draws none — `14 groups` over six rows and
+          no way to the other eight. This packet's brief asks for one, and the two go together: the
+          sentence is only allowed to name a figure larger than the table once the table can be
+          moved through. A story or a test that hands this a fixed array supplies no `onPage` and
+          gets no control, rather than one that does nothing.
+        */}
+        <Show when={props.onPage}>
+          {(onPage) => (
+            <Pagination
+              page={props.page ?? 1}
+              pageSize={props.pageSize ?? props.rows.length}
+              // The server's figure, straight through. `undefined` is `Pagination`'s own word for
+              // "no total was given", and it then hides the numbered buttons rather than guessing
+              // a last page — which is the same refusal the voice line makes in words.
+              total={props.totalItems ?? undefined}
+              shown={props.rows.length}
+              hasNext={mayHaveMore()}
+              onPage={onPage()}
+              onPageSize={props.onPageSize}
+              label="Consumer group pages"
+              testId="consumer-groups-pagination"
+            />
+          )}
+        </Show>
       </Show>
     </section>
   );

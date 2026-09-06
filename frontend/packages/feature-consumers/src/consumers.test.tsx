@@ -11,9 +11,13 @@
  * dispose at the end.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { flush } from "solid-js";
-import { describeViolations, findViolations, mount } from "./testing.js";
+import { KuiProvider } from "@kui/kernel";
+import type { KuiApiClient } from "@kui/api";
+import { describeViolations, findViolations, mount, testContext } from "./testing.js";
+import { GroupsScreen } from "./ConsumersRoute.jsx";
+import { coordinatorAddress } from "./data.js";
 import {
   LAG_WARN_ABOVE,
   UNREADABLE_STATE_CHIP,
@@ -60,21 +64,40 @@ describe("lag levels", () => {
 });
 
 describe("the voice", () => {
+  const total = (count: number) => ({ kind: "total" as const, total: count });
+
   it("keeps the aside only while everything is healthy", () => {
-    expect(groupsVoice({ kind: "healthy", total: 14, rebalancing: 1 })).toBe(
+    expect(groupsVoice({ kind: "healthy", count: total(14), rebalancing: 1 })).toBe(
       "14 groups. One is rebalancing again. We don't judge.",
     );
-    expect(groupsVoice({ kind: "lagging", total: 14, behind: 2 })).not.toContain("judge");
+    expect(groupsVoice({ kind: "lagging", count: total(14), behind: 2 })).not.toContain("judge");
     expect(groupsVoice({ kind: "unavailable" })).toBe("Consumer group data is unavailable.");
   });
 
   it("describes a lagging page as lagging even while something is also rebalancing", () => {
     // Ordering is the rule: the operator has to act on the lag, not on the rebalance.
-    expect(healthOf(SAMPLE_GROUPS, 0).kind).toBe("lagging");
+    expect(healthOf(SAMPLE_GROUPS, 0, 6).kind).toBe("lagging");
   });
 
   it("reports missing coordinators ahead of everything else, because the rows are then incomplete", () => {
-    expect(healthOf(SAMPLE_GROUPS, 2).kind).toBe("incomplete");
+    expect(healthOf(SAMPLE_GROUPS, 2, 6).kind).toBe("incomplete");
+  });
+
+  it("counts the cluster's groups and not the rows in hand", () => {
+    // Six rows on the page, ninety on the cluster. The sentence is about the cluster: this is
+    // screenshot `04`'s own case, where `14 groups` sits over six drawn rows.
+    const health = healthOf(SAMPLE_GROUPS, 0, 90);
+    expect(health.kind !== "unavailable" && health.count).toEqual({ kind: "total", total: 90 });
+    expect(groupsVoice(health)).toContain("90 groups");
+  });
+
+  it("says the total is unstated rather than printing the page's own length as one", () => {
+    // A server that carried no `totalItems` leaves the screen knowing only what it can see. It
+    // says so: publishing `6` as the cluster's figure would be a measurement nobody made.
+    const health = healthOf(SAMPLE_GROUPS, 0, null);
+    const line = groupsVoice(health);
+    expect(line).toContain("on this page");
+    expect(line).toContain("unstated total");
   });
 });
 
@@ -176,12 +199,223 @@ describe("the group list", () => {
     }
   });
 
+  it("prints the server's total beside the heading, not the number of rows on screen", async () => {
+    /*
+     * The seam this case exists for. Six rows are drawn; the cluster has ninety. `GroupList` is
+     * where the server's figure meets the sentence, and before this the sentence was computed from
+     * `rows.length` — so it was always true of the table and always wrong about the cluster the
+     * moment there was a second page.
+     */
+    const { container, dispose } = mount(() => (
+      <GroupList
+        rows={SAMPLE_GROUPS}
+        totalItems={90}
+        page={1}
+        pageSize={6}
+        onPage={noop}
+        hrefFor={(id) => `/g/${id}`}
+      />
+    ));
+    await flush();
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(6);
+    const voice = container.querySelector('[data-testid="consumer-groups-head"]')?.textContent ?? "";
+    expect(voice).toContain("90 groups");
+    expect(voice).not.toContain("6 groups");
+    dispose();
+  });
+
+  it("offers a way to the next page, and says which rows of how many are on screen", async () => {
+    const asked: number[] = [];
+    const { container, dispose } = mount(() => (
+      <GroupList
+        rows={SAMPLE_GROUPS}
+        totalItems={90}
+        page={2}
+        pageSize={6}
+        onPage={(next) => asked.push(next)}
+        hrefFor={(id) => `/g/${id}`}
+      />
+    ));
+    await flush();
+    const control = container.querySelector('[data-testid="consumer-groups-pagination"]');
+    expect(control?.textContent).toContain("of 90");
+    control?.querySelector<HTMLButtonElement>('[aria-label="Next page"]')?.click();
+    await flush();
+    expect(asked).toEqual([3]);
+    dispose();
+  });
+
+  it("draws no paging control for a caller that cannot answer one", async () => {
+    // A story or a detail panel hands this a fixed array. A paginator there would be a control that
+    // does nothing, which teaches people that the controls on this screen do nothing.
+    const { container, dispose } = mount(() => <GroupList rows={SAMPLE_GROUPS} hrefFor={(id) => `/g/${id}`} />);
+    await flush();
+    expect(container.querySelector('[data-testid="consumer-groups-pagination"]')).toBeNull();
+    dispose();
+  });
+
+  it("renders no address at all for a group whose coordinator the wire did not carry", async () => {
+    // Not `broker 1`. A broker id is a number dressed as an address: it is nowhere an operator can
+    // point `kafka-topics.sh`, and on screen it is indistinguishable from a coordinator that
+    // answered. The cell draws the dash and its reason instead.
+    const { container, dispose } = mount(() => <GroupList rows={DEGRADED_GROUPS} hrefFor={(id) => `/g/${id}`} />);
+    await flush();
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("broker 1");
+    expect(text).not.toMatch(/broker \d/);
+    expect(text).toContain("coordinator unavailable");
+    dispose();
+  });
+
   it("has no axe violations", async () => {
     const { container, dispose } = mount(() => <GroupList rows={SAMPLE_GROUPS} hrefFor={(id) => `/g/${id}`} onOpen={noop} />);
     await flush();
     const violations = await findViolations(container);
     expect(describeViolations(violations)).toBe("");
     dispose();
+  });
+});
+
+/**
+ * The list screen, mounted the way the shell mounts it.
+ *
+ * These are the cases the component tests above cannot reach. `GroupList` can be handed a total and
+ * a page by hand; what nobody was watching is whether the *route* reads them off the server's
+ * answer and puts the page number into the request. Wave 2 shipped eight rules whose tests composed
+ * the rule inside the test file; this file mounts `GroupsScreen`, gives it a client, and looks at
+ * what the client was asked for.
+ */
+describe("the consumer groups screen", () => {
+  /** One page of an eighty-group cluster, in the shape the gateway sends. */
+  function listing(page: number, pageSize: number, totalItems: number | null): unknown {
+    const items = Array.from({ length: Math.min(pageSize, 3) }, (_, index) => ({
+      groupId: `group-${(page - 1) * pageSize + index}`,
+      state: "STABLE",
+      members: 1,
+      topics: 1,
+      coordinatorId: 1,
+      coordinatorHost: "kafka",
+      coordinatorPort: 9092,
+      totalLag: 0,
+      excludedPartitions: 0,
+      incomplete: null,
+    }));
+    return {
+      groups: {
+        status: "ok",
+        data: {
+          items,
+          page: { page, pageSize, ...(totalItems === null ? {} : { totalItems }) },
+        },
+      },
+      incompleteCoordinators: 0,
+    };
+  }
+
+  /** Records every list request and answers it; the lag poll gets a quiet, incremental answer. */
+  function stubbed(totalItems: number | null = 80): {
+    readonly api: KuiApiClient;
+    readonly pages: { page?: number; pageSize?: number }[];
+  } {
+    const pages: { page?: number; pageSize?: number }[] = [];
+    const get = vi.fn(
+      async (path: string, init?: { params?: { query?: { page?: number; pageSize?: number } } }) => {
+        if (path.endsWith("/lag")) {
+          const quiet = { changed: [], gone: [], token: "t", nextPollMs: 30_000, full: false };
+          return { ok: true, value: quiet };
+        }
+        const query = init?.params?.query ?? {};
+        pages.push(query);
+        return { ok: true, value: listing(query.page ?? 1, query.pageSize ?? 16, totalItems) };
+      },
+    );
+    return {
+      api: { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient,
+      pages,
+    };
+  }
+
+  function open(api: KuiApiClient, cluster: string) {
+    return mount(() => (
+      <KuiProvider value={testContext(api)}>
+        <GroupsScreen clusterId={cluster} />
+      </KuiProvider>
+    ));
+  }
+
+  /**
+   * Waits for the screen to stop moving.
+   *
+   * A single `flush()` is not enough here, and the reason is worth writing down: the answer travels
+   * through the query cache, so it crosses two promises and two of Solid's scheduling turns before
+   * it reaches the table. A fixed number of flushes chosen by trial is the shape that starts
+   * passing for the wrong reason later, so this drives it until the DOM stops changing.
+   */
+  async function settle(container: HTMLElement): Promise<void> {
+    let previous = "";
+    for (let turn = 0; turn < 20; turn += 1) {
+      await flush();
+      const now = container.innerHTML;
+      if (now === previous && turn > 1) return;
+      previous = now;
+    }
+  }
+
+  it("prints the count the server gave, over the rows the server sent", async () => {
+    const { api } = stubbed(80);
+    const { container, dispose } = open(api, "count-cluster");
+    await settle(container);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(3);
+    expect(container.querySelector('[data-testid="consumer-groups-head"]')?.textContent).toContain(
+      "80 groups",
+    );
+    dispose();
+  });
+
+  it("asks the server for page 2 when the operator asks for page 2", async () => {
+    const { api, pages } = stubbed(80);
+    const { container, dispose } = open(api, "paging-cluster");
+    await settle(container);
+    expect(pages[0]?.page).toBe(1);
+
+    container
+      .querySelector('[data-testid="consumer-groups-pagination"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="Next page"]')
+      ?.click();
+    await settle(container);
+    // A second request, for page 2. Not the first page's rows re-sliced in the browser: this list
+    // is one page of the cluster and the browser holds no other page to slice.
+    expect(pages.map((one) => one.page)).toEqual([1, 2]);
+    expect(container.textContent).toContain("group-16");
+    dispose();
+  });
+
+  it("says the total is unstated when the server sent none, not the row count", async () => {
+    const { api } = stubbed(null);
+    const { container, dispose } = open(api, "silent-cluster");
+    await settle(container);
+    const voice = container.querySelector('[data-testid="consumer-groups-head"]')?.textContent ?? "";
+    expect(voice).toContain("on this page");
+    expect(voice).not.toBe("3 groups. Nothing is rebalancing. Rare, and welcome.");
+    dispose();
+  });
+
+  it("prints the coordinator's address, which is what the wire now carries", async () => {
+    const { api } = stubbed(80);
+    const { container, dispose } = open(api, "coordinator-cluster");
+    await settle(container);
+    expect(container.textContent).toContain("kafka:9092");
+    dispose();
+  });
+});
+
+describe("the coordinator's address", () => {
+  it("is host and port together, or nothing", () => {
+    expect(coordinatorAddress("kafka", 9092)).toBe("kafka:9092");
+    // Half an address reads as a value truncated in transit, which is worse than none.
+    expect(coordinatorAddress("kafka", null)).toBeNull();
+    expect(coordinatorAddress(null, 9092)).toBeNull();
+    expect(coordinatorAddress("", 9092)).toBeNull();
   });
 });
 

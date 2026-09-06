@@ -170,10 +170,32 @@ export interface GroupSummary {
  * cannot: each branch writes its whole sentence.
  */
 export type GroupsHealth =
-  | { readonly kind: "healthy"; readonly total: number; readonly rebalancing: number }
-  | { readonly kind: "lagging"; readonly total: number; readonly behind: number }
-  | { readonly kind: "incomplete"; readonly total: number; readonly coordinatorsMissing: number }
+  | { readonly kind: "healthy"; readonly count: GroupCount; readonly rebalancing: number }
+  | { readonly kind: "lagging"; readonly count: GroupCount; readonly behind: number }
+  | { readonly kind: "incomplete"; readonly count: GroupCount; readonly coordinatorsMissing: number }
   | { readonly kind: "unavailable" };
+
+/**
+ * How many groups there are — and whether that is the cluster's figure or only this page's.
+ *
+ * The two are drawn differently because they answer different questions, and the screen used to
+ * conflate them: the voice line counted `rows.length`, so an operator reading "16 groups" over the
+ * first page of ninety was told a number that was true of the table and false of the cluster. The
+ * server carries `page.totalItems`; when it does not, this says which figure is being printed
+ * rather than passing the page's own length off as the total.
+ */
+export type GroupCount =
+  | { readonly kind: "total"; readonly total: number }
+  | { readonly kind: "page-only"; readonly shown: number };
+
+/** The count, as the sentence opens with it. Never a bare number whose scope is left to guessing. */
+function countClause(count: GroupCount): string {
+  if (count.kind === "total") {
+    return `${formatCount(count.total)} ${plural(count.total, "group", "groups")}`;
+  }
+  const groups = `${formatCount(count.shown)} ${plural(count.shown, "group", "groups")}`;
+  return `${groups} on this page, of an unstated total`;
+}
 
 /**
  * The line under "Consumer groups".
@@ -187,41 +209,55 @@ export function groupsVoice(health: GroupsHealth): string {
     case "unavailable":
       return "Consumer group data is unavailable.";
     case "incomplete":
-      return `${formatCount(health.total)} ${plural(health.total, "group", "groups")}. ${formatCount(
+      return `${countClause(health.count)}. ${formatCount(
         health.coordinatorsMissing,
       )} ${plural(health.coordinatorsMissing, "coordinator", "coordinators")} did not answer, so some rows are incomplete.`;
     case "lagging":
-      return `${formatCount(health.total)} ${plural(health.total, "group", "groups")}. ${formatCount(
+      return `${countClause(health.count)}. ${formatCount(
         health.behind,
       )} ${health.behind === 1 ? "is" : "are"} more than ${formatCount(LAG_WARN_ABOVE)} records behind.`;
     case "healthy":
       if (health.rebalancing === 0) {
-        return `${formatCount(health.total)} ${plural(health.total, "group", "groups")}. Nothing is rebalancing. Rare, and welcome.`;
+        return `${countClause(health.count)}. Nothing is rebalancing. Rare, and welcome.`;
       }
       if (health.rebalancing === 1) {
-        return `${formatCount(health.total)} ${plural(health.total, "group", "groups")}. One is rebalancing again. We don't judge.`;
+        return `${countClause(health.count)}. One is rebalancing again. We don't judge.`;
       }
-      return `${formatCount(health.total)} ${plural(health.total, "group", "groups")}. ${formatCount(
+      return `${countClause(health.count)}. ${formatCount(
         health.rebalancing,
       )} are rebalancing. We don't judge.`;
   }
 }
 
 /**
- * Reads the health of a page of rows off the rows themselves.
+ * Reads the health of a page of rows off the rows themselves — and the count off the server.
  *
  * Order matters and is the whole rule: a page that is both rebalancing and badly behind is
  * described as behind, because that is the one an operator has to do something about. The cheerful
  * branch is reachable only when nothing else is true.
+ *
+ * The two arguments are deliberately different in kind. *Which* branch is chosen is a fact about
+ * the rows on screen — those are the ones the operator can see and act on. *How many groups there
+ * are* is a fact about the cluster, and only the server knows it, so it arrives separately as
+ * `totalItems`. Deriving the count from `rows` is the defect this signature exists to make
+ * impossible to write by accident.
  */
-export function healthOf(rows: readonly GroupSummary[], coordinatorsMissing: number): GroupsHealth {
-  if (coordinatorsMissing > 0) return { kind: "incomplete", total: rows.length, coordinatorsMissing };
+export function healthOf(
+  rows: readonly GroupSummary[],
+  coordinatorsMissing: number,
+  totalItems: number | null,
+): GroupsHealth {
+  const count: GroupCount =
+    totalItems === null
+      ? { kind: "page-only", shown: rows.length }
+      : { kind: "total", total: totalItems };
+  if (coordinatorsMissing > 0) return { kind: "incomplete", count, coordinatorsMissing };
   const behind = rows.filter((row) => row.totalLag !== null && row.totalLag > LAG_WARN_ABOVE).length;
-  if (behind > 0) return { kind: "lagging", total: rows.length, behind };
+  if (behind > 0) return { kind: "lagging", count, behind };
   const rebalancing = rows.filter(
     (row) => row.state === "PREPARING_REBALANCE" || row.state === "COMPLETING_REBALANCE",
   ).length;
-  return { kind: "healthy", total: rows.length, rebalancing };
+  return { kind: "healthy", count, rebalancing };
 }
 
 export function plural(count: number, one: string, many: string): string {
