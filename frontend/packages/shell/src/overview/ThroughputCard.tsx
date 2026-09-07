@@ -47,7 +47,7 @@ import {
   type Series,
 } from "@kui/kernel";
 
-import { NotMeasured } from "./NotMeasured.jsx";
+import { MetricAbsence, forbiddenSentence, notConfiguredSentence } from "./NotMeasured.jsx";
 import {
   THROUGHPUT_RANGES,
   throughputChart,
@@ -56,19 +56,25 @@ import {
   type ThroughputSeries,
 } from "./throughput.js";
 
+/** What this card calls the thing it is not measuring, in both absence sentences. */
+export const THROUGHPUT_NOUN = "this cluster's throughput";
+
 /**
  * What a cluster with no metrics source is told.
  *
  * `not_configured` is a deployment choice, not a fault: the operator configured no exporter and KUI
  * is saying so rather than drawing an axis over nothing. The sentence names what would have to
  * exist, which is the difference between "this is broken" and "this is not switched on".
+ *
+ * Built from the shared sentence rather than written out, because five cards on this tab reach this
+ * state and an operator looking at five spellings of it reads five problems. Kept as an export so
+ * that a case can assert the words rather than a fragment it typed itself — which is what the
+ * render tests now do, and what nothing did for the wave this constant existed unused.
  */
-export const NOT_CONFIGURED_SENTENCE =
-  "KUI is not measuring this cluster's throughput. No metrics source is configured for it, so " +
-  "there is no history to draw — a deployment choice rather than a fault.";
+export const NOT_CONFIGURED_SENTENCE = notConfiguredSentence(THROUGHPUT_NOUN);
 
 /** The one this card shows when the principal may not read the cluster's metrics. */
-export const FORBIDDEN_SENTENCE = "You do not have permission to read this cluster's throughput.";
+export const FORBIDDEN_SENTENCE = forbiddenSentence(THROUGHPUT_NOUN);
 
 /**
  * The window is real and every step in it is blank.
@@ -181,7 +187,16 @@ function ThroughputBody(props: {
   readonly chart: ThroughputChart | undefined;
 }): JSX.Element {
   return (
-    <Show when={props.chart} fallback={<ThroughputAbsence state={props.state} />}>
+    <Show
+      when={props.chart}
+      fallback={
+        /* The waiting box, the not-configured sentence and the permission note, in the one place
+           every metrics card on this screen draws them. `failed` is absent from that component on
+           purpose: `Card` is already drawing that state's own body, with the code and the Retry
+           button, and a second sentence underneath would say the same thing twice. */
+        <MetricAbsence state={props.state} noun={THROUGHPUT_NOUN} testId="throughput-not-measured" />
+      }
+    >
       {(chart) => (
         <div class="kui-throughput">
           <BarChart
@@ -219,50 +234,6 @@ function ThroughputBody(props: {
           </div>
         </div>
       )}
-    </Show>
-  );
-}
-
-/**
- * What the card draws when there is no series.
- *
- * `failed` is absent from this switch on purpose: `Card` is already drawing that state's own body,
- * with the code and the Retry button, and a second sentence underneath it would say the same thing
- * twice. The three that reach here are the three the card has to distinguish — waiting, refused,
- * and not measured at all — and each is a different next action.
- */
-function ThroughputAbsence(props: { readonly state: Fetched<ThroughputSeries> }): JSX.Element {
-  return (
-    <Show when={props.state.kind === "loading"} fallback={<ThroughputRefusal state={props.state} />}>
-      {/* The same waiting box the rest of the dashboard draws, for the same reason: a figure that
-          has not arrived must not look like one that is missing. */}
-      <div
-        class="kui-overview__waiting"
-        role="status"
-        aria-busy="true"
-        aria-label="Reading this cluster's throughput"
-      />
-    </Show>
-  );
-}
-
-function ThroughputRefusal(props: { readonly state: Fetched<ThroughputSeries> }): JSX.Element {
-  return (
-    <Show when={props.state.kind === "not-configured"} fallback={<ForbiddenNote state={props.state} />}>
-      {/* No axis. An axis is a claim that the quantity is measured and merely absent right now, and
-          this cluster has nothing measuring it — which is why this is `NotMeasured` and not the
-          empty plot the no-samples case draws. */}
-      <NotMeasured why={NOT_CONFIGURED_SENTENCE} testId="throughput-not-measured" />
-    </Show>
-  );
-}
-
-function ForbiddenNote(props: { readonly state: Fetched<ThroughputSeries> }): JSX.Element {
-  return (
-    <Show when={props.state.kind === "forbidden"}>
-      <p class="kui-overview__blank" role="note">
-        {FORBIDDEN_SENTENCE}
-      </p>
     </Show>
   );
 }

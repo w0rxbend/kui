@@ -100,7 +100,7 @@ import {
   degradedLabels,
   type FeatureStatus,
 } from "./nav/navigation.js";
-import { topicGroupHref, topicTree } from "./nav/topicTree.js";
+import { topicGroupHref, topicSubtree } from "./nav/topicTree.js";
 import { ForbiddenPage, GatewayUnreachablePage, NotFoundPage } from "./pages/errorPages.jsx";
 import { SignIn } from "./pages/SignIn.jsx";
 import { SettingsPage, asPreference } from "./pages/SettingsPage.jsx";
@@ -703,17 +703,17 @@ export function App() {
      *
      * `undefined` in all three of the cases below, and the three are genuinely different states
      * that happen to draw the same row: no cluster is chosen, the names have not arrived, and the
-     * cluster has no topics. `NavItem` draws a disclosure only for a row whose children array is
-     * non-empty, so an empty array would draw the same leaf — the length check is here to keep the
-     * memo from folding an empty list into an empty tree, not to defend the renderer, which defends
-     * itself.
+     * cluster has no topics. The first two are decided here because only the frame knows them; the
+     * third is `topicSubtree`'s, beside the fold, where a case can call it — it used to be a
+     * `names.length === 0` clause on this line defended by a comment naming `NavItem` as the real
+     * guard, and `NavItem`'s predicate was deletable with all 223 cases green at the same time.
      */
     const topicChildren = createMemo<readonly NavDestination[] | undefined>(() => {
       const chosen = clusterForFrame();
       if (chosen === undefined) return undefined;
       const names = readingValue(facts.topicNames);
-      if (names === undefined || names.length === 0) return undefined;
-      return topicTree({
+      if (names === undefined) return undefined;
+      return topicSubtree({
         names,
         /* The list, asked for the topics this row stands for. `topicGroupHref` owns the three cases
            — a prefix, `internal`, and the `other` residue that is not describable as a search. */

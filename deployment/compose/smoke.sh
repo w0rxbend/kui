@@ -179,6 +179,37 @@ gateway_contracts() {
 # sides of every set below. Naming one costs a line; forgetting one now fails the stack.
 readonly UNROUTED_CONTRACTS=""
 
+# The set arithmetic, pulled out so the self-test below and the real check are the same code.
+#
+# `comm -23` needs both sides sorted and needs the empty line that `printf '%s\n' ""` produces
+# stripped, or an empty `UNROUTED_CONTRACTS` subtracts a blank from the contract list and takes the
+# first entry with it.
+routable_contracts() {
+  local contracts="$1" declared="$2" unrouted
+  unrouted="$(printf '%s\n' "$declared" | grep -v '^$' | LC_ALL=C sort -u || true)"
+  comm -23 <(printf '%s\n' "$contracts") <(printf '%s\n' "$unrouted")
+}
+
+# THE SELF-TEST, AND WHY A SUBTRACTION NEEDS ONE.
+#
+# `UNROUTED_CONTRACTS` is empty and has always been empty, so `routable_contracts` has only ever
+# been asked to subtract nothing from something -- and a subtraction that is only ever given the
+# identity has not been tested. Every failure mode of it is invisible from here: returning
+# `$contracts` unchanged, dropping the first line, or ignoring its second argument entirely would
+# all produce today's exactly-correct output. The one run where it would matter is the one where
+# somebody has just written a reason into that variable, which is the run nobody would re-check.
+#
+# So it is given the situation it exists for, on made-up input, before the real one. Three
+# contracts, one of them deliberately unrouted, and the answer has to be the other two in order.
+probe="$(routable_contracts "$(printf 'alpha\nbeta\ngamma')" "beta")"
+[[ "$probe" == "$(printf 'alpha\ngamma')" ]] || fail "the unrouted-contract subtraction is broken:
+  subtracting [beta] from [alpha beta gamma] gave [$(echo "$probe" | tr '\n' ' ')] and not
+  [alpha gamma]. Every check below that uses it is now reporting the wrong set."
+# And the identity, which is the case every real run takes: subtracting nothing changes nothing.
+probe="$(routable_contracts "$(printf 'alpha\nbeta')" "")"
+[[ "$probe" == "$(printf 'alpha\nbeta')" ]] || fail "the unrouted-contract subtraction dropped an
+  entry when nothing was unrouted: [alpha beta] became [$(echo "$probe" | tr '\n' ' ')]."
+
 # 2. Every service the gateway is routing, read from the gateway itself.
 routed_services() {
   curl -sf "$base/api/v1/capabilities" | jq -r '[.entries[].key.service] | unique | .[]'
@@ -265,7 +296,7 @@ contracts="$(gateway_contracts)"
 [[ -n "$contracts" ]] || fail "no service contract could be read out of ServiceContracts.byService"
 declared="$(service_containers)"
 unrouted="$(printf '%s\n' "$UNROUTED_CONTRACTS" | grep -v '^$' | LC_ALL=C sort -u || true)"
-expected="$(comm -23 <(printf '%s\n' "$contracts") <(printf '%s\n' "$unrouted"))"
+expected="$(routable_contracts "$contracts" "$UNROUTED_CONTRACTS")"
 if [[ "$expected" != "$declared" ]]; then
   fail "the gateway holds contracts for [$(echo "$contracts" | tr '\n' ' ')] \
 and this stack runs [$(echo "$declared" | tr '\n' ' ')].
@@ -323,6 +354,59 @@ await "proxied cluster list" "ok" \
   "curl -sf $base/api/v1/clusters | jq -r .clusters.status"
 
 # ==================================================================================================
+# SOMETHING TO MEASURE, BECAUSE AN IDLE BROKER PUBLISHES ALMOST NOTHING.
+#
+# This is not a workaround and it is not a way of making a number look better. Kafka creates most of
+# its MBeans lazily, on the first event of the kind they count, and until wave 5 this stack asserted
+# only the three broker-wide `BrokerTopicMetrics` meters -- which exist from boot because
+# `BrokerTopicStats.allTopicsStats` is constructed eagerly. Checked here against this stack, idle:
+# those three are served and read `0.0`, and NOTHING ELSE THE DASHBOARD NEEDS IS THERE AT ALL. No
+# `RequestMetrics{request=Produce}` bean, because nothing has produced; no
+# `RequestMetrics{request=FetchConsumer}`, because nothing has consumed; no per-topic byte rate,
+# because the broker had no topics.
+#
+# So the widened exporter ruleset could not be asserted against this stack without traffic, and the
+# assertion is the whole point of the ruleset. Producing a few hundred records and reading them back
+# creates every one of those beans, and it also turns the throughput assertion below from "a bucket
+# carrying a measured zero" into "a bucket carrying a number somebody caused" -- which is closer to
+# what M7's criterion means by a real number, and cost one topic.
+#
+# Through the broker's own CLI rather than through KUI's produce API. The point is to put bytes
+# through Kafka, and routing them through the message service would make this step fail for reasons
+# that have nothing to do with measurement -- a plan token, a principal, a serde -- on a stack whose
+# subject is fault isolation.
+# ==================================================================================================
+log "producing a little traffic, so that there is something to measure"
+
+readonly TRAFFIC_TOPIC="smoke-traffic"
+readonly TRAFFIC_RECORDS=500
+
+kafka_cli() {
+  local tool="$1"
+  shift
+  "${compose[@]}" exec -T kafka "/opt/kafka/bin/$tool" "$@"
+}
+
+kafka_cli kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists \
+  --topic "$TRAFFIC_TOPIC" --partitions 1 --replication-factor 1 >/dev/null 2>&1 ||
+  fail "could not create the topic $TRAFFIC_TOPIC on the broker this stack runs"
+
+# Padded to a couple of hundred bytes each, so the byte counters move by something a person reading
+# the exposition can recognise as this step rather than as noise.
+seq 1 "$TRAFFIC_RECORDS" |
+  awk '{ printf "%s %s\n", $1, "smoke-traffic-payload-padding-so-the-counters-move" }' |
+  "${compose[@]}" exec -T kafka /opt/kafka/bin/kafka-console-producer.sh \
+    --bootstrap-server localhost:9092 --topic "$TRAFFIC_TOPIC" >/dev/null 2>&1 ||
+  fail "could not produce to $TRAFFIC_TOPIC"
+
+# And read them back, which is the only way to make the broker publish a `FetchConsumer` percentile:
+# a produce alone leaves that bean uncreated and the latency card with one series instead of two.
+kafka_cli kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic "$TRAFFIC_TOPIC" \
+  --from-beginning --max-messages "$TRAFFIC_RECORDS" --timeout-ms 30000 >/dev/null 2>&1 ||
+  fail "could not read back the $TRAFFIC_RECORDS records just produced to $TRAFFIC_TOPIC"
+printf '  %s records produced to %s and read back\n' "$TRAFFIC_RECORDS" "$TRAFFIC_TOPIC"
+
+# ==================================================================================================
 # THE MEASUREMENT, WHICH IS THE HALF M7 SPENT TWO WAVES UNABLE TO PROVE.
 #
 # The throughput endpoint answers one of `ok | stale | unavailable | not_configured`, and with no
@@ -336,20 +420,129 @@ await "proxied cluster list" "ok" \
 # `measured` has an exporter named under `kui.metrics.sources` and must come back `ok` with a real
 # number in it, and `unmeasured` -- the same broker, no entry -- must come back `not_configured`.
 # ==================================================================================================
+
+# ==================================================================================================
+# THE METRIC NAMES ARE THE CONTRACT, AND UNTIL WAVE 5 TWO OF THEM WERE CHECKED.
+#
+# `../metrics/kafka-jmx-exporter.yml` calls its name list "a CONTRACT with services/metrics's
+# Prometheus reader" and it is one: the reader looks a family up by name, and a family that has been
+# renamed is byte-for-byte indistinguishable, to that reader, from a family the broker does not
+# publish. It answers honestly that it cannot measure the thing, which is the correct rendering of
+# the wrong situation.
+#
+# Nothing could see that. This step used to count the two byte-rate families and stop, and the two
+# stacks' healthchecks grep one of those two. So `MessagesInPerSec` could be renamed here, or any of
+# the `_total` rules, and every gate in this repository stayed green while `recordsPerSecond` was
+# null on every bucket for ever -- which the bucket assertion below cannot see either, because it
+# tests `bytesInPerSecond != null` and that is a different family.
+#
+# So: every name, by literal string, written out here rather than derived from the ruleset. A
+# derivation would rename itself alongside the rule and assert nothing, which is the shape of gate
+# this wave exists to stop shipping. Two lists that have to be edited together is the cost, and it
+# is the point: this is the only place in the repository where a real exporter, a real broker and a
+# real KUI process are in the same room, so it is the only place the contract can actually be read.
+#
+# It is asked from inside a container because `kafka-metrics` publishes no port to the host -- the
+# exposition is for KUI, not for a person. And it is asked before any assertion about KUI's adapter,
+# because the two failures need separating: if this passes and the next one does not, the sidecar is
+# fine and KUI is the problem; if this fails, no assertion about KUI's adapter means anything.
+# ==================================================================================================
+# LINE SHAPES AND NOT FAMILY NAMES, because half the contract is in the labels.
+#
+# `PrometheusExposition` matches each family against an EXACT set of dimensions -- the broker-wide
+# rates against no label at all, the p99 against `{request}`, the purgatory against
+# `{delayedoperation}`, the per-topic rate against `{topic}`. So a rule that kept its name and lost
+# its label, or kept its name and gained one, serves a line this script would have found and the
+# reader will not. The trailing space in the unlabelled patterns is what says "no labels": in the
+# exposition format the name is followed by `{` when there are labels and by a space when there are
+# none.
+#
+# This was not a hypothetical. The first version of the widened ruleset spelled the request kind
+# into the metric name -- `..._totaltimems_produce_99thpercentile` -- which is a perfectly good
+# Prometheus name, is what the existing throughput rules do with `name=`, and is invisible to a
+# reader testing `dimensionsOf(sample) == Set("request")`. It served, this script found the family,
+# and the latency card would have said it could not measure a number that was on the wire.
+readonly EXPORTER_LINES=(
+  # Throughput, broker-wide. The Traffic tab's chart is drawn from the three rates; the three
+  # counters are there for an adapter that would rather difference a monotonic total than trust a
+  # moving average. No dimension on any of them: that is how the reader tells the broker's own
+  # figure from a per-topic slice of it.
+  '^kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate '
+  '^kafka_server_brokertopicmetrics_bytesoutpersec_oneminuterate '
+  '^kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate '
+  '^kafka_server_brokertopicmetrics_bytesinpersec_total '
+  '^kafka_server_brokertopicmetrics_bytesoutpersec_total '
+  '^kafka_server_brokertopicmetrics_messagesinpersec_total '
+  # The p99 latency card, produce and fetch as two series on one chart. The label value keeps the
+  # broker's capitalisation -- `lowercaseOutputLabelNames` lower-cases label names only -- and the
+  # reader lower-cases before comparing, so `Produce` here and `produce` there is correct.
+  '^kafka_network_requestmetrics_totaltimems_99thpercentile\{request="Produce"\} '
+  '^kafka_network_requestmetrics_totaltimems_99thpercentile\{request="FetchConsumer"\} '
+  # The ring gauges: two ratios in 0..1, undimensioned.
+  '^kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate '
+  '^kafka_network_socketserver_networkprocessoravgidlepercent '
+  # And the queue length that is not a ratio, one line per delayed operation.
+  '^kafka_server_delayedoperationpurgatory_purgatorysize\{delayedoperation="Produce"\} '
+  '^kafka_server_delayedoperationpurgatory_purgatorysize\{delayedoperation="Fetch"\} '
+)
+
 log "the broker beside this stack is measurable, and KUI measures it"
 
-# First the exporter on its own, because the two failures need separating. If this passes and the
-# next one does not, the sidecar is fine and KUI's adapter is the problem; if this fails, no
-# assertion about KUI's adapter means anything. It is asked from inside a container because
-# `kafka-metrics` publishes no port to the host -- the exposition is for KUI, not for a person.
-rates="$("${compose[@]}" exec -T kui-gateway \
-  curl -fsS http://kafka-metrics:5556/metrics 2>/dev/null |
-  grep -cE '^kafka_server_brokertopicmetrics_bytes(in|out)persec_oneminuterate ' || true)"
-[[ "$rates" == "2" ]] || fail "the JMX exporter served $rates of the two byte-rate families.
-  Expected kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate and ..._bytesoutpersec_... .
-  Those names are a contract with the Prometheus reader in services/metrics; they are produced by
-  ../metrics/kafka-jmx-exporter.yml and nothing else in this repository writes them."
-printf '  the exporter serves both byte-rate families\n'
+exposition="$("${compose[@]}" exec -T kui-gateway \
+  curl -fsS http://kafka-metrics:5556/metrics 2>/dev/null || true)"
+# The same guard the image preflight has, for the same reason: everything below is a loop over this
+# body, and a loop over an empty body runs zero times and reports that every family was found.
+[[ -n "$exposition" ]] || fail "the JMX exporter at kafka-metrics:5556 answered nothing at all.
+  Every assertion below reads that body, so an empty one would pass all of them."
+
+# Every pattern is anchored at `^`, which is doing real work rather than being tidy: without it
+# `..._bytesinpersec_oneminuterate` would be reported as present by a line for
+# `..._replicationbytesinpersec_oneminuterate`, which is a different and much smaller number, and
+# is the same trap `PrometheusExposition.isAttribute` guards against on the reading side.
+missing=""
+for line in "${EXPORTER_LINES[@]}"; do
+  grep -qE "$line" <<<"$exposition" || missing="$missing
+    $line"
+done
+[[ -z "$missing" ]] || fail "the JMX exporter served nothing matching:$missing
+  Every shape in EXPORTER_LINES in this script is produced by ../metrics/kafka-jmx-exporter.yml and
+  by nothing else in this repository, and is read by name and by label in services/metrics. One
+  missing here is a card that will say it cannot measure something, on a broker that publishes it.
+  Either a rule in that file was renamed or re-dimensioned without changing this list, or the broker
+  stopped publishing the bean behind it -- \`docker compose -f $here/docker-compose.yml exec -T
+  kui-gateway curl -s http://kafka-metrics:5556/metrics\` shows what it did serve."
+printf '  the exporter serves all %s line shapes the reader reads\n' "${#EXPORTER_LINES[@]}"
+
+# And the line that is not a family of its own. Top producers is drawn from the SAME family as the
+# broker-wide byte rate, dimensioned by a `topic` label -- Kafka's own convention, and what
+# `PrometheusExposition`'s aggregates-and-slices rule was written against. The list above cannot see
+# it: the unlabelled aggregate satisfies that pattern on its own, so the per-topic rule could be
+# deleted whole and every one of the thirteen shapes above would still be found.
+#
+# It is asserted here and not at start-up because the traffic step above is what makes it exist:
+# Kafka creates a per-topic `BrokerTopicMetrics` bean on that topic's first byte and not before, so
+# on an idle broker the correct answer really is that this family has no labelled line at all.
+per_topic='^kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate\{topic='
+[[ "$(grep -cE "$per_topic" <<<"$exposition")" -gt 0 ]] ||
+  fail "the exporter served no per-topic byte rate.
+  Expected at least one kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate{topic=\"...\"}
+  line, which is the only figure a broker publishes that the Top producers card can be drawn from.
+  It comes from the third rule in ../metrics/kafka-jmx-exporter.yml; the aggregate line above it
+  satisfies the family check on its own, so nothing else in this repository would notice its loss."
+printf '  the exporter serves the per-topic byte rate the producers card needs\n'
+
+# And that the records really arrived, which is what makes every line above a measurement of
+# something rather than a measurement of nothing. The monotonic counter and not the one-minute rate:
+# the rate is a Yammer EWMA that ticks every five seconds, so a scrape taken immediately after a
+# produce can honestly read `0.0` and asserting on it would be a flake. `_total` is exact from the
+# first byte, and the traffic step above is the only thing on this stack that can move it.
+bytes_in="$(grep -E '^kafka_server_brokertopicmetrics_bytesinpersec_total ' <<<"$exposition" |
+  awk '{ print $2 }')"
+[[ -n "$bytes_in" ]] && awk -v v="$bytes_in" 'BEGIN { exit !(v > 0) }' ||
+  fail "the broker reports $bytes_in bytes in since it started, after $TRAFFIC_RECORDS records were
+  produced to $TRAFFIC_TOPIC and read back. Either the produce above did not reach this broker, or
+  the exporter is attached to a different JVM than the one KUI's cluster service is writing to."
+printf '  the broker has taken %s bytes in since it started\n' "$bytes_in"
 
 # Then KUI. `await` and not a single call: the scrape loop runs at `kui.metrics.scrapeInterval`, so
 # a stack that came up two seconds ago has correctly sampled nothing yet, and the honest answer at

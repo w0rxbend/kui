@@ -65,6 +65,21 @@ export function focusableWithin(root: HTMLElement): HTMLElement[] {
   });
 }
 
+/**
+ * Every surface currently trapping the page, in the order they opened.
+ *
+ * `Escape` belongs to the **last** one, and nothing else can decide that. Both traps listen on
+ * `document` — they have to, see the note beside `addEventListener` below — and `stopPropagation`
+ * does not stop a *sibling* listener on the same node, only listeners further up the tree. So the
+ * comment that used to sit on that line, claiming a dialog opened from inside a drawer closes only
+ * itself, was making a promise the mechanism could not keep: measured, one `Escape` closed both.
+ *
+ * `stopImmediatePropagation` is not the fix either, because it would hand the key to whichever
+ * surface registered *first*, which is the outer one. The order has to be read the other way round,
+ * so it is kept explicitly.
+ */
+const trapping: HTMLElement[] = [];
+
 export interface ModalBehaviourOptions {
   /** Called for `Escape`, for a click on the veil, and for the close button. */
   readonly onClose: () => void;
@@ -119,8 +134,12 @@ export function modalBehaviour(options: ModalBehaviourOptions) {
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
+        // Only the innermost surface answers. See `trapping`.
+        if (trapping[trapping.length - 1] !== element) return;
         event.preventDefault();
-        // `stopPropagation` so a dialog opened from inside a drawer closes only itself.
+        // Still worth stopping: the event bubbles through the surface's own subtree before it
+        // reaches `document`, and a handler on anything in between must not see a key this
+        // surface has just consumed.
         event.stopPropagation();
         options.onClose();
         return;
@@ -159,8 +178,15 @@ export function modalBehaviour(options: ModalBehaviourOptions) {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
+    trapping.push(element);
+
     return () => {
       document.removeEventListener("keydown", onKeyDown);
+      // Spliced by identity rather than popped: a page can close an outer surface while an inner
+      // one is still up — a route change tearing down a drawer takes its dialog with it, and the
+      // two cleanups do not run in a guaranteed order.
+      const at = trapping.lastIndexOf(element);
+      if (at !== -1) trapping.splice(at, 1);
       document.body.style.overflow = previousOverflow;
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };

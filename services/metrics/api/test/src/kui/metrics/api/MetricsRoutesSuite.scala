@@ -7,6 +7,7 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.kernel.Resource
+import cats.syntax.all.*
 import io.circe.parser.parse
 import io.circe.Json
 import munit.CatsEffectSuite
@@ -21,13 +22,14 @@ import kui.contracts.KuiEndpoint
 import kui.http.principal.PrincipalVerification
 import kui.kernel.error.InfrastructureError
 import kui.kernel.{ClusterId, Secret, ServiceId, UserName}
-import kui.metrics.application.{ClusterSources, SourceProfile, ThroughputUseCase}
-import kui.metrics.domain.{MetricsSourcePort, ThroughputRange, ThroughputSample, ThroughputSeries}
+import kui.metrics.application.{ClusterSources, MetricsUseCases, SourceProfile}
+import kui.metrics.contract.MetricsEndpoints
+import kui.metrics.domain.*
 import kui.observability.Telemetry
 import kui.security.*
 import kui.testkit.fakes.FakeStructuredLogger
 
-/** That the one endpoint this service has answers the way the whole service was designed around.
+/** That the five endpoints this service has answer the way the whole service was designed around.
   *
   * The claim is a single sentence and it is the reason `services/metrics` exists at all: a cluster KUI cannot
   * measure gets **200** with a section saying so, never a 404 and never a 500, because the dashboard card
@@ -38,10 +40,10 @@ import kui.testkit.fakes.FakeStructuredLogger
   *
   * Everything below the route is real: the range codec the contract publishes, the use case that decides
   * between "no such cluster" and "nothing to measure", and the mapping onto the wire. Only the metrics source
-  * is stubbed, because there is no collector in this build to stub anything else with. It runs through
-  * Tapir's stub interpreter, which is the real interceptor chain and the real principal check without a
-  * socket; a bound port would add seconds per case and prove only that Netty works, which `libs/http` proves
-  * once for every service.
+  * is stubbed, because what is under test here is the route rather than the collector — `MetricsWiringSuite`
+  * drives the real one against a real socket. It runs through Tapir's stub interpreter, which is the real
+  * interceptor chain and the real principal check without a socket; a bound port would add seconds per case
+  * and prove only that Netty works, which `libs/http` proves once for every service.
   */
 final class MetricsRoutesSuite extends CatsEffectSuite {
 
@@ -71,11 +73,15 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
     * single stub with a flag would make each case read as a setting rather than as a situation.
     */
   private final class DeadSource extends MetricsSourcePort[IO] {
-    def throughput(range: ThroughputRange, endingAt: Instant) =
-      IO.pure(Left(exporterDown))
+    def throughput(range: ThroughputRange, endingAt: Instant) = IO.pure(Left(exporterDown))
+    def latency(range: ThroughputRange, endingAt: Instant) = IO.pure(Left(exporterDown))
+    def requestHandlers(asOf: Instant) = IO.pure(Left(exporterDown))
+    def producers(count: Int, asOf: Instant) = IO.pure(Left(exporterDown))
+    def recordSize(asOf: Instant) = IO.pure(Left(exporterDown))
   }
 
   private final class LiveSource extends MetricsSourcePort[IO] {
+
     def throughput(range: ThroughputRange, endingAt: Instant) =
       IO.pure(
         Right(
@@ -86,6 +92,37 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
           )
         )
       )
+
+    def latency(range: ThroughputRange, endingAt: Instant) =
+      IO.pure(
+        Right(
+          LatencySeries.over(
+            range,
+            endingAt,
+            List(LatencySample(endingAt.minusSeconds(60L), Some(9.0d), Some(502.0d)))
+          )
+        )
+      )
+
+    def requestHandlers(asOf: Instant) =
+      IO.pure(
+        Right(
+          RequestHandlerReading(Some(0.8912d), Some(0.7104d), List(PurgatoryQueue("Fetch", 481L)))
+        )
+      )
+
+    /** Ten topics, so that a `?top=` the route ignored would be visible as a list of the wrong length. */
+    def producers(count: Int, asOf: Instant) =
+      IO.pure(
+        Right(
+          TopProducers.of(
+            List.tabulate(10)(index => TopicProducer(s"topic-$index", (index + 1).toDouble * 100.0d)),
+            count
+          )
+        )
+      )
+
+    def recordSize(asOf: Instant) = IO.pure(Right(RecordSizeReading.from(Some(1024.0d), Some(8.0d))))
   }
 
   /** The deployment this suite describes: one cluster with no source, one with a source that answers, one
@@ -125,7 +162,7 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
         interceptors <- MetricsApi.interceptors[IO](Telemetry.noop[IO], rejections, logger)
       } yield {
         val routes = MetricsRoutes[IO](
-          ThroughputUseCase.make[IO](sources),
+          MetricsUseCases.make[IO](sources),
           MetricsApi.Securing[IO](codec, rejections, logger)
         )
 
@@ -172,8 +209,10 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
   private def body(response: Response[String]): Json =
     parse(response.body).fold(failure => fail(s"not JSON: ${failure.message} in ${response.body}"), identity)
 
-  private def throughputPath(cluster: ClusterId): String =
-    s"/internal/v1/clusters/${cluster.value}/metrics/throughput"
+  private def metricsPath(cluster: ClusterId, endpoint: String): String =
+    s"/internal/v1/clusters/${cluster.value}/metrics/$endpoint"
+
+  private def throughputPath(cluster: ClusterId): String = metricsPath(cluster, "throughput")
 
   // -----------------------------------------------------------------------------------------------
 
@@ -327,5 +366,184 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
           )
       )
       .map(response => assertEquals(response.code.code, 401, response.body))
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // The four endpoints the milestone added
+  // -----------------------------------------------------------------------------------------------
+
+  test("everyCardAnswersTwoHundredWithANotConfiguredSectionForAnUnmeasuredCluster") {
+    // The claim the whole service exists to demonstrate, asserted on every card rather than on the one it
+    // was first written for. A dashboard with four honest cards and one red panel is a dashboard whose
+    // operator learns to ignore red panels.
+    val cards = List(
+      "latency" -> "latency",
+      "request-handlers" -> "requestHandlers",
+      "producers" -> "producers",
+      "record-size" -> "recordSize"
+    )
+
+    server
+      .use(backend =>
+        cards.traverse((path, field) =>
+          get(backend, metricsPath(prod, path)).map { response =>
+            val section = body(response).hcursor.downField(field)
+            assertEquals(response.code.code, 200, s"$path: ${response.body}")
+            assertEquals(section.get[String]("status"), Right("not_configured"), s"$path: ${response.body}")
+            assertEquals(section.get[Option[Json]]("data"), Right(None), s"$path: ${response.body}")
+          }
+        )
+      )
+      .map(_ => ())
+  }
+
+  test("aMeasuredClusterAnswersLatencyAsTwoSeriesOnTheRequestedWindow") {
+    server.use(get(_, s"${metricsPath(measured, "latency")}?window=7d")).map { response =>
+      val section = body(response).hcursor.downField("latency")
+      val data = section.downField("data")
+
+      assertEquals(response.code.code, 200, response.body)
+      assertEquals(section.get[String]("status"), Right("ok"))
+      assertEquals(data.get[String]("window"), Right("7d"))
+      assertEquals(data.get[Long]("stepSeconds"), Right(ThroughputRange.Last7Days.step.toSeconds))
+      assertEquals(
+        data.downField("buckets").as[List[Json]].map(_.size),
+        Right(ThroughputRange.Last7Days.bucketCount)
+      )
+      val buckets = data.downField("buckets").as[List[Json]].getOrElse(fail(response.body))
+      // The two lines the legend draws, and a gap where nothing was sampled — never a zero, which would
+      // claim the broker answered instantly.
+      assertEquals(buckets.flatMap(_.hcursor.get[Option[Double]]("produceP99Millis").toOption.flatten), List(9.0))
+      assertEquals(buckets.flatMap(_.hcursor.get[Option[Double]]("fetchP99Millis").toOption.flatten), List(502.0))
+      assert(buckets.exists(_.hcursor.get[Option[Double]]("produceP99Millis") == Right(None)), response.body)
+    }
+  }
+
+  test("anUnrecognisedLatencyWindowIsFourHundredWithTheFieldNamed") {
+    // The same refusal as `?range=`, under the parameter name this card's control uses. Defaulting would
+    // draw seven days of data under a label the caller chose.
+    server.use(get(_, s"${metricsPath(prod, "latency")}?window=90d")).map { response =>
+      val json = body(response).hcursor
+
+      assertEquals(response.code.code, 400, response.body)
+      assertEquals(json.get[String]("code"), Right("KUI-VALIDATION"))
+      assertEquals(json.downField("details").downN(0).get[String]("field"), Right("window"))
+    }
+  }
+
+  test("theIdleRatiosArriveAsRatiosAndPurgatoryArrivesAsACount") {
+    // ADR-052's first refusal, asserted where a browser reads it: two fractions of one, and a count of
+    // parked requests with no denominator anywhere on the document to turn it into a percentage.
+    server.use(get(_, metricsPath(measured, "request-handlers"))).map { response =>
+      val data = body(response).hcursor.downField("requestHandlers").downField("data")
+
+      assertEquals(response.code.code, 200, response.body)
+      assertEquals(data.get[Option[Double]]("requestHandlerIdleRatio"), Right(Some(0.8912)))
+      assertEquals(data.get[Option[Double]]("networkProcessorIdleRatio"), Right(Some(0.7104)))
+      assertEquals(data.downField("purgatory").downN(0).get[String]("operation"), Right("Fetch"))
+      assertEquals(data.downField("purgatory").downN(0).get[Long]("delayedRequests"), Right(481L))
+      assert(!response.body.contains("Percent"), response.body)
+      assert(!response.body.contains("%"), response.body)
+    }
+  }
+
+  test("topProducersAreTopicsAndTheTopParameterReachesThePort") {
+    // ADR-052's second refusal on the wire — `measuredBy` is `topic` and no field is called `clientId` —
+    // and the query parameter travelling all the way, which is what stops a five-row card answering a
+    // request for three.
+    server.use(get(_, s"${metricsPath(measured, "producers")}?top=3")).map { response =>
+      val data = body(response).hcursor.downField("producers").downField("data")
+
+      assertEquals(response.code.code, 200, response.body)
+      assertEquals(data.get[String]("measuredBy"), Right("topic"))
+      assertEquals(data.downField("topics").as[List[Json]].map(_.size), Right(3))
+      assertEquals(data.downField("topics").downN(0).get[String]("topic"), Right("topic-9"))
+      assert(!response.body.contains("clientId"), response.body)
+    }
+  }
+
+  test("aCallerWhoNamesNoTopGetsTheContractsDefaultAndNotTheWholeList") {
+    // The default is part of the contract a browser codes against: the card draws five rows, and the
+    // endpoint's own document says five. Nothing asserted it until this case, so `?top=` could have been
+    // defaulted to any number at all and every existing case — each of which names a `top` — would have
+    // stayed green while the card grew rows nobody asked for.
+    server.use(get(_, metricsPath(measured, "producers"))).map { response =>
+      val topics = body(response).hcursor
+        .downField("producers")
+        .downField("data")
+        .downField("topics")
+        .as[List[Json]]
+        .getOrElse(fail(response.body))
+
+      assertEquals(response.code.code, 200, response.body)
+      assertEquals(topics.size, MetricsEndpoints.DefaultTop)
+      assertEquals(MetricsEndpoints.DefaultTop, 5)
+    }
+  }
+
+  test("aTopOutsideItsBoundsIsFourHundredRatherThanClamped") {
+    // Clamping would answer fifty of the two hundred asked for and look like a cluster with fewer busy
+    // topics than it has, which is `SearchEndpoints`' argument and holds here.
+    server.use(get(_, s"${metricsPath(measured, "producers")}?top=200")).map { response =>
+      assertEquals(response.code.code, 400, response.body)
+      assertEquals(body(response).hcursor.get[String]("code"), Right("KUI-VALIDATION"))
+    }
+  }
+
+  test("aTopThatIsNotANumberIsFourHundredAndNotTheDefault") {
+    server.use(get(_, s"${metricsPath(measured, "producers")}?top=lots")).map { response =>
+      assertEquals(response.code.code, 400, response.body)
+    }
+  }
+
+  test("theRecordSizeCardIsAMeanWithItsTwoRatesAndNoPercentile") {
+    // ADR-052's third refusal, asserted where a browser reads it. There is no `p50`, no `p99`, no `max`
+    // and no bucket array on this document, so a twelve-bucket histogram cannot be drawn from it at all.
+    server.use(get(_, metricsPath(measured, "record-size"))).map { response =>
+      val data = body(response).hcursor.downField("recordSize").downField("data")
+
+      assertEquals(response.code.code, 200, response.body)
+      assertEquals(data.get[Option[Double]]("meanBytes"), Right(Some(128.0)))
+      assertEquals(data.get[Option[Double]]("bytesInPerSecond"), Right(Some(1024.0)))
+      assertEquals(data.get[Option[Double]]("recordsPerSecond"), Right(Some(8.0)))
+      assert(!response.body.contains("p50"), response.body)
+      assert(!response.body.contains("p99"), response.body)
+      assert(!response.body.contains("histogram"), response.body)
+    }
+  }
+
+  test("aSourceThatRefusesOneFamilyIsUnavailableOnThatCardAndOkOnTheOthers") {
+    // One dead family costs one card. The `broken` cluster's source refuses everything, so what this
+    // asserts is that each card carries its own reason rather than one 500 taking the page.
+    val cards = List("latency" -> "latency", "producers" -> "producers", "record-size" -> "recordSize")
+
+    server
+      .use(backend =>
+        cards.traverse((path, field) =>
+          get(backend, metricsPath(broken, path)).map { response =>
+            val section = body(response).hcursor.downField(field)
+            assertEquals(response.code.code, 200, s"$path: ${response.body}")
+            assertEquals(section.get[String]("status"), Right("unavailable"), s"$path: ${response.body}")
+            assertEquals(section.get[String]("message"), Right(exporterDown.message), s"$path: $response")
+          }
+        )
+      )
+      .map(_ => ())
+  }
+
+  test("everyPublishedEndpointIsRoutedAndNoneOfThemIsAFourOhFour") {
+    // The list `MetricsEndpoints.all` publishes is the list the gateway proxies. An endpoint declared and
+    // not bound is a public path that 404s on a deployment whose capability document says it works.
+    val paths = MetricsEndpoints.all
+      .map(_.showPathTemplate().takeWhile(_ != '?').replace("{clusterId}", measured.value))
+
+    assertEquals(paths.size, 5)
+    server
+      .use(backend =>
+        paths.traverse(path =>
+          get(backend, path).map(response => assertEquals(response.code.code, 200, s"$path: ${response.body}"))
+        )
+      )
+      .map(_ => ())
   }
 }

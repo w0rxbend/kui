@@ -847,4 +847,382 @@ describe("the schemas route, over a stub gateway", () => {
       dispose();
     }
   });
+
+  /* ---------------------------------------------------------------------------------------------
+   * Rules this package shipped with no gate, closed by mutation.
+   *
+   * Each case below was written after deleting the rule it names from the source and watching all
+   * 147 existing cases stay green. The mutation is named in the comment, because a case whose rule
+   * is already gated somewhere else is a case nobody will maintain — and because the next reader
+   * should be able to re-run the measurement rather than trust it.
+   * ------------------------------------------------------------------------------------------ */
+
+  /** Opens the dialog and fills it with whatever document the case wants to submit. */
+  async function fillWith(
+    container: HTMLElement,
+    subject: string,
+    definition: string,
+  ): Promise<void> {
+    const opener = [...container.querySelectorAll("button")].find((one) =>
+      one.textContent?.includes("Register schema"),
+    );
+    opener?.click();
+    await flush();
+
+    const dialog = document.querySelector('[data-testid="register-schema-dialog"]');
+    expect(dialog).not.toBeNull();
+    const name = dialog?.querySelector<HTMLInputElement>("input");
+    name!.value = subject;
+    name!.dispatchEvent(new Event("input", { bubbles: true }));
+    const editor = dialog?.querySelector<HTMLTextAreaElement>("textarea");
+    editor!.value = definition;
+    editor!.dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+  }
+
+  it("refuses a schema document that is not valid JSON before it reaches the registry", async () => {
+    /*
+     * **The rule this packet owns**, and it was ungated at the seam that matters.
+     *
+     * `proposedSchemaProblem` itself has four cases in `recorded.test.ts`. What nothing asserted is
+     * that `RegisterSchemaDialog` is *wired* to it: replacing its `problem` memo with one that
+     * answers `undefined`, or dropping the `problem() === undefined` clause from `canRegister`,
+     * leaves all 147 cases in this package green — and with either applied the Register button
+     * submits `{ not json` to the registry, the `role="alert"` paragraph never appears, and
+     * `blockedReason`'s fallback is dead code.
+     *
+     * So the assertion is on the product's own dialog, over the route, and it is about three
+     * things at once: the parser's position is on screen, the control says why it will not press,
+     * and **no POST leaves the browser**. The last one is the half a component-level case cannot
+     * make.
+     */
+    const { container, dispose, stub } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: { ...registry, [REGISTER_PATH]: { subject: "ping-value", version: 1, id: 41 } },
+    });
+    try {
+      await fillWith(container, "ping-value", "{ not json");
+
+      const dialog = document.querySelector('[data-testid="register-schema-dialog"]');
+      // The parser's own message, which names the position. "Invalid JSON" names nothing.
+      const alert = dialog?.querySelector('[role="alert"]');
+      expect(alert).not.toBeNull();
+      expect(alert?.textContent).toContain("This is not valid JSON");
+      expect(alert?.textContent).toContain("AVRO");
+
+      const button = [...(dialog?.querySelectorAll("button") ?? [])].find(
+        (one) => one.textContent?.trim() === "Register",
+      );
+      expect(button?.getAttribute("aria-disabled")).toBe("true");
+      // Reachable, not merely present: `Button` marks a refused control `aria-disabled` rather than
+      // `disabled` precisely so its reason can still be read.
+      button?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      await flush();
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+        "This is not valid JSON",
+      );
+
+      pressRegister();
+      await settle();
+
+      // The registry was never asked, so there is nothing for it to have accepted or refused.
+      expect(stub.calls.filter((call) => call.method === "POST")).toEqual([]);
+      expect(toasts()).toEqual([]);
+      expect(document.querySelector('[data-testid="register-schema-dialog"]')).not.toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it("lets a Protobuf definition through, because a .proto file is not JSON", async () => {
+    /*
+     * The other half of the same wire, and the reason the check is `proposedSchemaProblem` rather
+     * than `JSON.parse`: a dialog that refused every correct Protobuf schema would be worse than
+     * one that refused none. Asserted through the dialog for the same reason as above — the
+     * function's own case cannot see whether the dialog consults it, and this one cannot pass if
+     * the dialog starts refusing what the function allows.
+     */
+    const { container, dispose, stub } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: { ...registry, [REGISTER_PATH]: { subject: "ping-value", version: 1, id: 41 } },
+    });
+    try {
+      await fillWith(container, "ping-value", 'syntax = "proto3"; message Ping { string id = 1; }');
+      const dialog = document.querySelector('[data-testid="register-schema-dialog"]');
+      const type = [...(dialog?.querySelectorAll<HTMLElement>('[role="combobox"]') ?? [])].find(
+        (one) => one.textContent?.includes("AVRO"),
+      );
+      type?.click();
+      await flush();
+      [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+        .find((one) => one.textContent === "PROTOBUF")
+        ?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      await flush();
+
+      expect(dialog?.querySelector('[role="alert"]')).toBeNull();
+      pressRegister();
+      await settle();
+      const write = stub.calls.find((call) => call.method === "POST");
+      expect((write?.init?.["body"] as { schemaType?: string })?.schemaType).toBe("PROTOBUF");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says a registration the registry accepted without naming a version, and never says version 0", async () => {
+    /*
+     * The milestone's bare-zero rule on the one wire wave 4 added, and it was ungated at *both*
+     * layers: `registerSchema` could read `Number(answer.value.version ?? 0)` and `notifyRegistered`
+     * could push `version ${registered.version ?? 0}`, each with 147 cases green, and either puts
+     * "The registry accepted it as version 0" in the success toast.
+     *
+     * The branch is real rather than hypothetical, which is why `RegisteredVersionDto` makes the
+     * field optional: the registry's own registration answer is `{"id": N}` and the version is a
+     * second call that can fail after the write has already succeeded.
+     */
+    const { container, dispose } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: { ...registry, [REGISTER_PATH]: { id: 41 } },
+    });
+    try {
+      await fillRegistration(container, "ping-value");
+      pressRegister();
+      await settle();
+
+      const raised = toasts();
+      expect(raised.map((toast) => toast.title)).toEqual(["Registered a schema under ping-value"]);
+      // What the registry did say, labelled.
+      expect(raised[0]?.message).toContain("schema id 41");
+      // And not a word about a version, because the registry named none. `version 0` is the
+      // failure this asserts against; so is `version undefined`.
+      expect(raised[0]?.message).not.toMatch(/version/i);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says the registry named neither figure, rather than printing two zeroes", async () => {
+    // The same rule one step further: an acceptance that carried no id either. The sentence is the
+    // whole answer, and it is a sentence rather than `version 0, schema id 0`.
+    const { container, dispose } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: { ...registry, [REGISTER_PATH]: {} },
+    });
+    try {
+      await fillRegistration(container, "ping-value");
+      pressRegister();
+      await settle();
+
+      expect(toasts()[0]?.message).toBe(
+        "The registry accepted it and did not say which version or id it became.",
+      );
+      expect(toasts()[0]?.message).not.toContain("0");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("keeps a typed schema when the veil is clicked", async () => {
+    /*
+     * `closeOnScrimClick={false}` was deletable with every case green. A stray click beside a
+     * dialog holding forty lines somebody pasted is not a decision to discard them, and the two
+     * deliberate ways out — Cancel and Escape — are both still there.
+     */
+    const { container, dispose } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: { ...registry, [REGISTER_PATH]: { subject: "ping-value", version: 1, id: 41 } },
+    });
+    try {
+      await fillRegistration(container, "ping-value");
+      const scrim = document.querySelector(".kui-modal-scrim");
+      expect(scrim).not.toBeNull();
+      // Dispatched natively: `scrimClickHandler` compares `event.target` with the veil itself.
+      scrim?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+
+      const dialog = document.querySelector('[data-testid="register-schema-dialog"]');
+      expect(dialog).not.toBeNull();
+      expect(dialog?.querySelector("textarea")?.value).toBe(AVRO);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("does not carry a refusal into the next opening of the dialog", async () => {
+    /*
+     * `register.reset()` in the dialog's `onClose` was deletable. The existing case about a fresh
+     * form goes through a *successful* registration, which resets the mutation on its own path —
+     * so the branch that matters, closing after the registry has refused, was asserted by nothing,
+     * and the next opening would draw the previous attempt's refusal above a box nobody has typed
+     * in yet.
+     */
+    const refusal: ApiError = {
+      kind: "envelope",
+      code: "KUI-VALIDATION",
+      message: "The registry rejected this schema.",
+      details: [],
+      correlationId: "c-2",
+      retryable: false,
+    };
+    const { container, dispose } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: { ...registry, [REGISTER_PATH]: refuses(refusal) },
+    });
+    try {
+      await fillRegistration(container, "orders.avro-value");
+      pressRegister();
+      await settle();
+      expect(
+        document.querySelector('[data-testid="register-schema-dialog"] .kui-banner'),
+      ).not.toBeNull();
+
+      const dialog = document.querySelector('[data-testid="register-schema-dialog"]');
+      [...(dialog?.querySelectorAll("button") ?? [])]
+        .find((one) => one.textContent?.trim() === "Cancel")
+        ?.click();
+      await flush();
+
+      const reopen = [...container.querySelectorAll("button")].find((one) =>
+        one.textContent?.includes("Register schema"),
+      );
+      reopen?.click();
+      await flush();
+
+      const reopened = document.querySelector('[data-testid="register-schema-dialog"]');
+      expect(reopened).not.toBeNull();
+      expect(reopened?.querySelector(".kui-banner")).toBeNull();
+      expect(reopened?.textContent).not.toContain("The registry rejected this schema.");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says whether the subject typed is a new version or a new subject", async () => {
+    /*
+     * The Subject field's three-branch `help` was collapsible to its first string with every case
+     * green, which also made `knownSubjects` dead. It is the one thing the page's own list can
+     * honestly say about a name: the same three fields submitted under a familiar subject are a
+     * *new version*, judged by that subject's compatibility level, and under an unfamiliar one they
+     * may be a new subject — "may", because the page holds fifty rows of a registry that can have
+     * four thousand.
+     */
+    const { container, dispose } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: registry,
+    });
+    try {
+      await fillWith(container, "", "");
+      const dialog = document.querySelector('[data-testid="register-schema-dialog"]');
+      expect(dialog?.textContent).toContain("The registry's own name for this schema");
+
+      const name = dialog?.querySelector<HTMLInputElement>("input");
+      const type = (text: string): void => {
+        name!.value = text;
+        name!.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+
+      type("orders.avro-value");
+      await flush();
+      expect(dialog?.textContent).toContain("already in the registry");
+      expect(dialog?.textContent).toContain("registers a new version");
+      expect(dialog?.textContent).not.toContain("No subject with this name is on screen");
+
+      type("nothing.like.this-value");
+      await flush();
+      expect(dialog?.textContent).toContain("No subject with this name is on screen");
+      expect(dialog?.textContent).not.toContain("already in the registry");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("offers no next page over a registry that did not count its subjects", async () => {
+    /*
+     * `hasNext` was replaceable with `true`, green. It only decides anything when the registry
+     * answered no total — exactly the case it exists for — and with it always true the control
+     * offers page 2 of a registry whose two subjects are all of them, which lands the operator on
+     * an empty page and a search they did not change.
+     */
+    const uncounted = {
+      items: page.items,
+      page: { page: 1, pageSize: 50, totalItems: null },
+    };
+    const { container, dispose } = await open({
+      at: "/clusters/quickstart/schemas",
+      answers: { ...registry, [SUBJECTS_PATH]: uncounted },
+    });
+    try {
+      // No total, so no page count and no numbered buttons: the only thing that can say whether
+      // there is more is whether this page came back full.
+      expect(container.querySelector(".kui-schemas__count")?.textContent).toBe("2 shown");
+      const next = [...container.querySelectorAll("button")].find(
+        (one) => one.getAttribute("aria-label") === "Next page",
+      );
+      expect(next).not.toBeUndefined();
+      expect((next as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says a refusal with no reason is a refusal, and not an acceptance", async () => {
+    /*
+     * `CompatibilityCheck`'s header argues this at length and nothing asserted it: the branch that
+     * draws "The registry refused it and gave no reason" could be replaced by the branch that
+     * draws "The registry raised nothing against it", green, and a refusal would then read on
+     * screen as an approval with a red pill beside it.
+     *
+     * The state is the quickstart's own. Apicurio's Confluent-compatible API words its explanation
+     * under a key KUI's registry client does not read, so a genuine refusal arrives as
+     * `{"compatible": false, "messages": []}` — which `recorded.test.ts` maps correctly and no case
+     * had ever drawn.
+     */
+    const VERSIONS = "GET /api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions";
+    const ONE_VERSION =
+      "GET /api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}";
+    const SUBJECT_COMPAT =
+      "GET /api/v1/clusters/{clusterId}/schemas/subjects/{subject}/compatibility";
+    const CHECK =
+      "POST /api/v1/clusters/{clusterId}/schemas/subjects/{subject}/versions/{version}/compatibility";
+
+    const { container, dispose } = await open({
+      at: "/clusters/quickstart/schemas/orders.avro-value",
+      answers: {
+        ...registry,
+        [VERSIONS]: { versions: [1] },
+        [ONE_VERSION]: {
+          subject: "orders.avro-value",
+          version: 1,
+          id: 1042,
+          schemaType: "AVRO",
+          definition: AVRO,
+          references: [],
+        },
+        // Not NONE: under NONE the control is refused, which is a different rule with its own case.
+        [SUBJECT_COMPAT]: { level: "BACKWARD", inheritedFromGlobal: false },
+        [CHECK]: { compatible: false, messages: [] },
+      },
+    });
+    try {
+      const editor = container.querySelector<HTMLTextAreaElement>(".kui-schema-check__editor");
+      expect(editor).not.toBeNull();
+      editor!.value = AVRO;
+      editor!.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+
+      [...container.querySelectorAll("button")]
+        .find((one) => one.textContent?.trim() === "Check compatibility")
+        ?.click();
+      await settle();
+
+      const answer = container.querySelector('[data-testid="compatibility-verdict"]');
+      expect(answer).not.toBeNull();
+      expect(answer?.textContent).toContain("Would be refused");
+      expect(answer?.textContent).toContain("gave no reason");
+      // The sentence for an *acceptance*, which must never appear beside a refusal.
+      expect(answer?.textContent).not.toContain("raised nothing against it");
+    } finally {
+      dispose();
+    }
+  });
 });

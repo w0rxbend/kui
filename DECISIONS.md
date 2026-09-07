@@ -56,6 +56,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 | [ADR-049](docs/adr/ADR-049-cross-entity-search.md) | Cross-entity search is a fold at the gateway over the three services' own list endpoints, and `partial` is a list of service ids | Accepted | 2026-09-06 |
 | [ADR-050](docs/adr/ADR-050-metrics-source.md) | The metrics adapter reads a Prometheus exposition; `MetricsSourceKind.Jmx` stays declared and unimplemented because `SafeUrl` cannot express a JMX service URL | Accepted | 2026-09-06 |
 | [ADR-051](docs/adr/ADR-051-schema-registration.md) | Registering a schema is an endpoint of `kui-schema`, and a registry's rejection is carried to the browser as the registry's own sentence | Accepted | 2026-09-06 |
+| [ADR-052](docs/adr/ADR-052-metrics-endpoints.md) | Four more metrics reads beside throughput, and the three figures a Kafka broker will not give us: purgatory is a queue length and not a percentage, top producers is by topic and not by `client.id`, and there is no record-size distribution | Accepted | 2026-09-07 |
 
 ADR-039 … ADR-043 were written at and after the architecture review (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded

@@ -21,9 +21,9 @@ import kui.http.principal.PrincipalVerification
 import kui.http.upstream.{UpstreamClient, UpstreamConfig}
 import kui.kernel.{ClusterId, PositiveInt}
 import kui.metrics.api.{MetricsApi, MetricsCapabilities}
-import kui.metrics.application.{SourceAccess, SourceProfile, ThroughputUseCase}
+import kui.metrics.application.{MetricsUseCases, SourceAccess, SourceProfile}
 import kui.metrics.domain.MetricsSourcePort
-import kui.metrics.infrastructure.{ConfiguredClusterSources, PrometheusThroughputScrape, ThroughputBuffer}
+import kui.metrics.infrastructure.{ConfiguredClusterSources, MetricsBuffer, PrometheusBrokerScrape}
 import kui.observability.Telemetry
 import kui.security.PrincipalCodec
 
@@ -101,6 +101,30 @@ object MetricsWiring {
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
   ): Resource[F, MetricsServer[F]] =
+    // The address rule is read here rather than taken as a parameter of this method, so that the all-in-one
+    // and the stand-alone process cannot apply two different ones — widening `make` would move a seam
+    // `apps/allinone` codes against. A JMX exporter at `http://kafka-metrics:5556/metrics` inside a Compose
+    // network is the ordinary arrangement, and `KUI_ALLOW_PRIVATE_UPSTREAMS` is what admits it.
+    Resource
+      .eval(Async[F].delay(UrlPolicy.fromEnv(sys.env)))
+      .flatMap(policy => makeWith[F](clusters, metrics, policy, telemetry, principals, logger))
+
+  /** The same wiring with the address rule handed in.
+    *
+    * `make` is this with `UrlPolicy.fromEnv(sys.env)`, and the split exists so that both halves of the rule
+    * can be exercised on one machine: a suite can build the wiring against a loopback exporter under
+    * `UrlPolicy.Dev` and watch it measure, and build the same wiring under `UrlPolicy.Strict` and watch every
+    * scrape be refused by name. Nothing outside this module calls it — `apps/allinone` and `Main` both call
+    * `make`, so the seam they code against has not moved.
+    */
+  private[app] def makeWith[F[_]: {Async, Parallel}](
+      clusters: List[ClusterConfig],
+      metrics: MetricsConfig,
+      policy: UrlPolicy,
+      telemetry: Telemetry[F],
+      principals: PrincipalCodec[F],
+      logger: StructuredLogger[F]
+  ): Resource[F, MetricsServer[F]] =
     for {
       meter <- Resource.eval(telemetry.meter(Instrumentation))
       rejections <- Resource.eval(PrincipalVerification.rejectionCounter[F](meter))
@@ -109,15 +133,10 @@ object MetricsWiring {
       profiles = ConfiguredClusterSources.profilesOf(clusters, metrics)
       _ <- Resource.eval(startupLog[F](profiles, logger))
 
-      // The address rule is read here rather than taken as a parameter, so that the all-in-one and the
-      // stand-alone process cannot apply two different ones — and because widening `make` would move a
-      // seam `apps/allinone` codes against. A JMX exporter at `http://kafka-metrics:5556/metrics` inside a
-      // Compose network is the ordinary arrangement, and `KUI_ALLOW_PRIVATE_UPSTREAMS` is what admits it.
-      policy <- Resource.eval(Async[F].delay(UrlPolicy.fromEnv(sys.env)))
-      ports <- collectors[F](clusters, metrics, policy, telemetry, meter, logger)
+      buffers <- collectors[F](clusters, metrics, policy, telemetry, meter, logger)
 
-      sources = new ConfiguredClusterSources[F](profiles, ports)
-      throughput = ThroughputUseCase.make[F](sources)
+      sources = new ConfiguredClusterSources[F](profiles, buffers.toMap[ClusterId, MetricsSourcePort[F]])
+      useCases = MetricsUseCases.make[F](sources)
       capabilities = MetricsCapabilities.make[F](sources)
 
       // Readiness is deliberately empty. "Can this service answer" is true as soon as it is wired: every
@@ -126,7 +145,7 @@ object MetricsWiring {
       // an *optional* dependency was slow, which is the schema service's argument and holds here too.
       readiness = List.empty[ReadinessCheck[F]]
     } yield MetricsServer(
-      routes = MetricsApi.routes[F](throughput, readiness, capabilities, principals, rejections, logger),
+      routes = MetricsApi.routes[F](useCases, readiness, capabilities, principals, rejections, logger),
       interceptors = interceptors,
       readiness = readiness,
       capabilities = MetricsApi.capabilityDocument[F](capabilities, logger)
@@ -138,18 +157,24 @@ object MetricsWiring {
     * circuit breaker per exporter, one retention window per cluster and one scrape fibre per cluster. All of
     * it ends when the process does, which is why a scrape in flight at shutdown is cancelled rather than left
     * holding a socket.
+    *
+    * It hands back the buffers rather than the ports it widens them into, because the four numbers this
+    * method decides — the bucket step, the retention, the sample ceiling and which clusters get a collector
+    * at all — are only observable through `record`. A suite that could only see `MetricsSourcePort` would
+    * have to wait for a real scrape to land before it could ask about any of them, and would then be
+    * asserting a clock rather than a configuration.
     */
-  private def collectors[F[_]: Async](
+  private[app] def collectors[F[_]: Async](
       clusters: List[ClusterConfig],
       metrics: MetricsConfig,
       policy: UrlPolicy,
       telemetry: Telemetry[F],
       meter: Meter[F],
       logger: StructuredLogger[F]
-  ): Resource[F, Map[ClusterId, MetricsSourcePort[F]]] = {
+  ): Resource[F, Map[ClusterId, MetricsBuffer[F]]] = {
     val readable = ConfiguredClusterSources.scrapable(clusters, metrics)
 
-    if readable.isEmpty then Resource.pure[F, Map[ClusterId, MetricsSourcePort[F]]](Map.empty)
+    if readable.isEmpty then Resource.pure[F, Map[ClusterId, MetricsBuffer[F]]](Map.empty)
     else
       for {
         transport <- HttpClientFs2Backend.resource[F]()
@@ -183,7 +208,7 @@ object MetricsWiring {
       telemetry: Telemetry[F],
       cacheMetrics: CacheMetrics[F],
       logger: StructuredLogger[F]
-  ): Resource[F, MetricsSourcePort[F]] =
+  ): Resource[F, MetricsBuffer[F]] =
     for {
       upstream <- UpstreamClient.resource[F](
         upstreamConfig(cluster, settings, policy),
@@ -193,33 +218,36 @@ object MetricsWiring {
         logger
       )
       buffer <- Resource.eval(
-        ThroughputBuffer.create[F](
+        MetricsBuffer.create[F](
           cluster = cluster,
+          // The bucket width the samples are filed under is the cadence they arrive at: two scrapes inside
+          // one step are one reading, so a clock that drifts by a second does not produce two points a
+          // second apart.
           step = metrics.scrapeInterval,
-          // Passed through as the operator wrote it. A retention shorter than one scrape interval — a
-          // pair the loader accepts, because the two keys are bounded independently — is widened by
-          // `ThroughputBuffer.create`, which is where the window's own invariant lives and where a case
-          // can hold it.
+          // Passed through exactly as the operator wrote it, and not widened. `retention < scrapeInterval`
+          // is refused at load by `KuiConfigSource.checkMetricsRules`, so the pair that would need widening
+          // cannot reach this line; widening it here would make a configuration the loader refuses behave
+          // as though it had been accepted.
           retention = metrics.retention,
           maxSamples = metrics.maxSamplesPerSeries,
           startedAt = startedAt,
           metrics = cacheMetrics
         )
       )
-      scrape = new PrometheusThroughputScrape[F](upstream.backend, settings.url)
-      _ <- ThroughputScrapeLoop.resource[F](cluster, scrape, buffer, metrics.scrapeInterval, logger)
+      scrape = new PrometheusBrokerScrape[F](upstream.backend, settings.url)
+      _ <- BrokerScrapeLoop.resource[F](cluster, scrape, buffer, metrics.scrapeInterval, logger)
     } yield buffer
 
   /** The resilience an exporter is called behind. One address, one call at a time, no retry — see the two
     * constants above for why each of those is the number it is.
     */
-  private def upstreamConfig(
+  private[app] def upstreamConfig(
       cluster: ClusterId,
       settings: MetricsSourceSettings,
       policy: UrlPolicy
   ): UpstreamConfig =
     UpstreamConfig(
-      name = s"${PrometheusThroughputScrape.UpstreamName}-${cluster.value}",
+      name = s"${PrometheusBrokerScrape.UpstreamName}-${cluster.value}",
       urls = NonEmptyList.one(settings.url),
       // The whole-call budget the operator configured. It is bounded below the scrape interval by the
       // loader, so a scrape cannot outlive the interval and overlap the next one.

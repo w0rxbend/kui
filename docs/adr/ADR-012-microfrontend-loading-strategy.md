@@ -61,9 +61,19 @@ registry entry carries two things: a small static `List[RoutePattern]` describin
 the feature owns, which the shell links against normally, and the `js.dynamicImport` thunk
 that produces the feature and its render functions, which is called only once the route
 matches. The static half is data (path shapes), not code, so it costs a few bytes in
-`main.js` and does not pull the feature's classes in with it; the bundle-shape check in task
-BUILD-006 still fails the build if a real class reference leaks. Implemented by tasks UI-007
+`main.js` and does not pull the feature's classes in with it. Implemented by tasks UI-007
 and UI-009, documented in `docs/frontend/features.md`.
+
+**Corrected 2026-09-07.** The sentence that stood here said the bundle-shape check in task
+BUILD-006 *"still fails the build if a real class reference leaks"*, and it had not been true since
+ADR-048. BUILD-006 is `build-tests`'s `BundleShape.scala`, which parses **Scala.js linker output**
+that ADR-048 deleted, and no `checkBundleShape` task remains for it to run under; the pair is dead
+code and `TECH_DEBT.md` says so. What enforces this promise today is
+`frontend/scripts/bundle-shape.mjs`, which reads the Vite manifest `pnpm build` writes and fails if
+a feature chunk is reachable from the shell's entry without an `import()`; CI runs it as
+`pnpm bundle-shape` in the frontend job. `ARCHITECTURE.md` §3's A7 paragraph carries the same
+correction, because the same false sentence was in two documents and repairing one of them is how
+it survived four waves.
 
 ## Evidence
 

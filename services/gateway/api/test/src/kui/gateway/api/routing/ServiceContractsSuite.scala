@@ -68,16 +68,31 @@ final class ServiceContractsSuite extends FunSuite {
       ServiceContracts.of(message),
       MessageMutationEndpoints.all ++ FilterEndpoints.all ++ TrackEndpoints.all
     )
-    // Both of the schema service's lists. The second one holds the two compatibility writes *and* the
-    // compatibility check, which is not a mutation at all -- it is grouped by request shape, not by
-    // effect -- so leaving it out would drop the one endpoint a registration flow needs most.
+    // Both of the schema service's lists. The second one holds the three writes -- the two compatibility
+    // settings and the registration -- *and* the compatibility check, which is not a mutation at all: it
+    // is grouped by request shape, not by effect, so leaving it out would drop the one endpoint a
+    // registration flow needs most.
     assertEquals(
       ServiceContracts.of(schema),
       SchemaEndpoints.all ++ SchemaMutationEndpoints.all
     )
-    // The metrics service's one list. It publishes a single read and no mutation, so unlike every
-    // service above it there is no second object to forget.
+    // The metrics service's one list. It publishes reads and no mutation, so unlike every service above
+    // it there is no second object to forget. The count is deliberately not asserted: M7 adds four reads
+    // to that list and this entry does not move.
     assertEquals(ServiceContracts.of(metrics), MetricsEndpoints.all)
+  }
+
+  test("theSchemaServicesTwoListsAreTheSizeTheMapSaysTheyAre") {
+    // `ServiceContracts` explains its schema entry with two counts, and both of them were wrong for a
+    // whole wave: the second list gained the registration in wave 4 and the sentence beside it still said
+    // "two compatibility writes". A number in a comment that nothing reads is a number that drifts, so the
+    // two the map states are read here.
+    assertEquals(SchemaEndpoints.all.size, 5, SchemaEndpoints.all.flatMap(_.info.name).toString)
+    assertEquals(
+      SchemaMutationEndpoints.all.size,
+      4,
+      SchemaMutationEndpoints.all.flatMap(_.info.name).toString
+    )
   }
 
   test("a service the gateway has no contract for is not an error") {

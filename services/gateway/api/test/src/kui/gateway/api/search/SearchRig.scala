@@ -63,12 +63,35 @@ object SearchRig {
     case Down
   }
 
-  /** One recorded upstream call: which operation, on which cluster, with which query.
+  /** One recorded upstream call: which operation, on which cluster, and what it asked *for*.
     *
     * A record and not a formatted string, so a case can assert on the count and on the query separately and
     * a failure prints something a reader can act on.
+    *
+    * `pageSize` and `states` are here because the fold's cost bound is a property of the *request* and not
+    * of the answer. Every source's page size is cut to the caller's `limit` again by
+    * `SearchResultsDto.take` before the answer leaves the gateway, so a source that asked its service for a
+    * hundred rows produces a response byte-identical to one that asked for ten — and the extra ninety are
+    * paid for upstream, where the schema service enriches every row it returns. The same is true of the
+    * group state filter: a search that asked only for `Stable` groups and a search that asked for every
+    * state look identical whenever no dead group happened to match. Neither rule can be asserted from a
+    * response body, so both are recorded here.
+    *
+    * @param pageSize
+    *   what the source asked its service to return, where that service pages. `topic.names` is unpaged by
+    *   design — it answers a cluster's whole name index in one call, which is the endpoint's whole purpose —
+    *   so it records `None` rather than a number it never sent.
+    * @param states
+    *   the group states a consumer-group list was narrowed to. `Some(Set.empty)` is "every state", which is
+    *   what a search must ask for; `None` is an operation that has no such parameter.
     */
-  final case class Call(operation: String, cluster: Option[ClusterId], q: Option[String])
+  final case class Call(
+      operation: String,
+      cluster: Option[ClusterId],
+      q: Option[String],
+      pageSize: Option[Int] = None,
+      states: Option[Set[GroupState]] = None
+  )
 
   object Call {
     given CanEqual[Call, Call] = CanEqual.derived
@@ -124,10 +147,10 @@ object SearchRig {
         case "topic.names" => Call(operation, Some(input.asInstanceOf[ClusterId]), None)
         case "consumer.list" =>
           val (cluster, params) = input.asInstanceOf[(ClusterId, GroupListParams)]
-          Call(operation, Some(cluster), params.q)
+          Call(operation, Some(cluster), params.q, Some(params.pageSize), Some(params.states))
         case "schema.subjects" =>
           val (cluster, params) = input.asInstanceOf[(ClusterId, SubjectListParams)]
-          Call(operation, Some(cluster), params.q)
+          Call(operation, Some(cluster), params.q, Some(params.pageSize))
         case other => Call(other, None, None)
       }
 

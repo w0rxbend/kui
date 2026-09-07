@@ -8,7 +8,7 @@ import sttp.model.StatusCode
 
 import kui.config.SafeUrl
 import kui.kernel.Subject
-import kui.kernel.error.ErrorCode
+import kui.kernel.error.{ErrorCode, InfrastructureError}
 import kui.schema.domain.*
 import kui.testkit.KuiIOSuite
 
@@ -321,5 +321,188 @@ final class RegistryHttpSuite extends KuiIOSuite {
       case Left(error) => assertEquals(error.code, ErrorCode.UpstreamUnavailable)
       case Right(found) => fail(s"expected a failure, got $found")
     }
+  }
+
+  test("a 409 on a read is not reported as a validation failure") {
+    // Wave 4 added `StatusCode.Conflict` to the branch that produces `KUI-VALIDATION`, and `errorFrom` is
+    // shared by every call this file makes — so a 409 answering `GET /subjects` became a 400 telling the
+    // operator their request was invalid, with `details[0].field` null and no form anywhere on the screen.
+    // A read sends no body: there is nothing it could have got wrong. A registry mid-election, mid-migration
+    // or behind a confused proxy is an upstream problem and says so, which is what a caller can act on.
+    val readIsUpstream = registry { case "/subjects" =>
+      (StatusCode.Conflict, """{"error_code":40901,"message":"leader election in progress"}""")
+    }.subjects.map {
+      case Left(error) =>
+        assertEquals(error.code, ErrorCode.UpstreamUnavailable)
+        assertEquals(error.details, Nil, "a read has no field a refusal could belong beside")
+      case Right(found) => fail(s"expected a failure, got $found")
+    }
+
+    val configReadIsUpstream = registry { case "/config" =>
+      (StatusCode.Conflict, """{"message":"leader election in progress"}""")
+    }.globalCompatibility.map {
+      case Left(error) => assertEquals(error.code, ErrorCode.UpstreamUnavailable)
+      case Right(found) => fail(s"expected a failure, got $found")
+    }
+
+    // The other half, and it is the half that must not move: the registration's own 409 is the refusal an
+    // operator acts on, and it stays `KUI-VALIDATION` beside the field they typed into.
+    val writeStaysValidation = registry { case "/subjects/orders-value/versions" =>
+      (StatusCode.Conflict, """{"error_code":409,"message":"incompatible with an earlier schema"}""")
+    }.register(orders, ProposedSchema(SchemaFormat.Avro, "{}", Nil)).map {
+      case Left(error) =>
+        assertEquals(error.code, ErrorCode.Validation)
+        assertEquals(error.details.map(_.field), List(Some("definition")))
+      case Right(registered) => fail(s"expected a refusal, got $registered")
+    }
+
+    readIsUpstream *> configReadIsUpstream *> writeStaysValidation
+  }
+
+  test("a refusal with no field of its own still carries the registry's sentence, keyed to nothing") {
+    // `PUT /config` with a level the registry does not know. There is no form input to mark — the whole
+    // request is the level — so `details[0].field` is null, which is the shape ADR-034 gives a refusal
+    // about the request rather than about one of its fields. The case that covered this asserted only
+    // `error.message`, so the `details` array could be emptied with every case in this service green, and
+    // a browser reading `details[0]` for the registry's own words would have found nothing there.
+    registry { case "/config" =>
+      (StatusCode.UnprocessableEntity, """{"error_code":42203,"message":"Invalid compatibility level"}""")
+    }.setGlobalCompatibility(CompatibilityLevel.Full)
+      .map {
+        case Left(error) =>
+          assertEquals(error.code, ErrorCode.Validation)
+          assertEquals(error.details.map(_.field), List(None))
+          assertEquals(error.details.flatMap(_.restrictions), List("Invalid compatibility level"))
+        case Right(_) => fail("expected a failure")
+      }
+  }
+
+  test("a refusal quotes the registry's message and nothing else it sent") {
+    // ADR-034 forbids echoing an upstream body: it routinely carries another system's internals. The
+    // registry's `message` field is written for a human and is the exception; every other field it sent
+    // — a stack trace, an internal host name, a `details` object — is read and thrown away.
+    val body =
+      """{"error_code":409,"message":"incompatible with an earlier schema",
+        |"stack":"at io.confluent.kafka.Internal(Secret.java:41)",
+        |"upstream":"http://user:hunter2@registry-internal:8081"}""".stripMargin
+
+    registry { case "/subjects/orders-value/versions" => (StatusCode.Conflict, body) }
+      .register(orders, ProposedSchema(SchemaFormat.Avro, "{}", Nil))
+      .map {
+        case Left(error) =>
+          assert(clue(error.message).contains("incompatible with an earlier schema"))
+          assert(!error.message.contains("hunter2"), "an upstream body must never be echoed (ADR-034)")
+          assert(!error.message.contains("Secret.java"), "an upstream body must never be echoed (ADR-034)")
+          assertEquals(error.details.flatMap(_.restrictions).size, 1)
+        case Right(registered) => fail(s"expected a refusal, got $registered")
+      }
+  }
+
+  test("a connection failure is described by its class and message, never by its toString") {
+    // `describe` keeps the exception's *simple* class name and its message and throws the rest away, and
+    // it can be reduced to `failure.toString` with every other case in this file green. A `toString`
+    // carries the exception's package and, worse, its whole cause chain — which for a transport failure
+    // is where the connection's own text ends up. The class is the half an operator can act on.
+    val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF { _ =>
+        IO.raiseError(
+          new RuntimeException(
+            "Connection refused",
+            new java.net.ConnectException("no route to registry-internal:8081")
+          )
+        )
+      }
+
+    new RegistryHttp[IO](backend, base, RegistryCredentials.anonymous[IO]).subjects.map {
+      case Left(InfrastructureError.Unreachable(upstream, cause)) =>
+        assertEquals(upstream, RegistryHttp.UpstreamName)
+        assert(
+          clue(cause).startsWith("ConnectException: ") || clue(cause).startsWith("RuntimeException: "),
+          "the failure's simple class name is what names the kind of failure"
+        )
+        assert(
+          !cause.contains("java.net.") && !cause.contains("java.lang."),
+          "a toString drags the exception's package and its cause chain into the log line"
+        )
+      case other => fail(s"expected an unreachable upstream, got $other")
+    }
+  }
+
+  test("a 403 is an authentication failure, exactly as a 401 is") {
+    // Both, because a registry behind an authorising proxy answers 403 where the registry itself answers
+    // 401, and "your credentials were refused" is the same sentence and the same screen for either.
+    registry { case "/subjects" => (StatusCode.Forbidden, "nope") }.subjects.map {
+      case Left(error) => assertEquals(error.code, ErrorCode.UpstreamAuth)
+      case Right(found) => fail(s"expected a failure, got $found")
+    }
+  }
+
+  test("the compatibility check asks the registry for its reasons") {
+    // Without `verbose=true` the registry answers a bare `{"is_compatible": false}`, and the screen tells
+    // an operator "no" with no reason — the least useful possible answer to "why will this not register".
+    // The query string is the only place that request differs, so only the asked-for URI can show it.
+    var asked: String = ""
+    val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF { request =>
+        asked = request.uri.toString
+        IO.pure(ResponseStub.adjust("""{"is_compatible":true}""", StatusCode.Ok))
+      }
+
+    new RegistryHttp[IO](backend, base, RegistryCredentials.anonymous[IO])
+      .checkCompatibility(orders, VersionSelector.Latest, ProposedSchema(SchemaFormat.Avro, "{}", Nil))
+      .map(_ => assert(clue(asked).contains("verbose=true")))
+  }
+
+  test("the subject a schema names is the registry's own, not the one that was asked for") {
+    // Confluent's compatibility layers answer `GET /subjects/{s}/versions/{v}` with the subject the schema
+    // is actually stored under, and an ingress or an alias can make those two differ. Printing the
+    // requested name over the stored one is a panel claiming a schema belongs to a subject it does not.
+    registry { case "/subjects/orders-value/versions/1" =>
+      (StatusCode.Ok, """{"subject":"orders-value-v2","version":1,"id":9,"schema":"\"string\""}""")
+    }.schema(orders, VersionSelector.Numbered(SchemaVersion.unsafe(1)))
+      .map(_.map(_.map(_.subject.value)))
+      .assertEquals(Right(Some("orders-value-v2")))
+  }
+
+  test("a reference pinned to a version that is not a version is dropped, never carried as itself") {
+    // Registry versions start at 1 and `-1` is its spelling of "latest", so neither is a number a
+    // reference can pin. Carrying one through would put a dependency on screen that nobody can look up;
+    // dropping it leaves a schema whose references are the ones that exist.
+    val body =
+      """{"subject":"orders-value","version":2,"id":11,"schema":"{}",
+        |"references":[{"name":"Address","subject":"address-value","version":1},
+        |{"name":"Latest","subject":"legacy-value","version":-1},
+        |{"name":"Zero","subject":"legacy-value","version":0}]}""".stripMargin
+
+    registry { case "/subjects/orders-value/versions/2" => (StatusCode.Ok, body) }
+      .schema(orders, VersionSelector.Numbered(SchemaVersion.unsafe(2)))
+      .map {
+        case Right(Some(schema)) =>
+          assertEquals(schema.references.map(_.name), List("Address"))
+          assertEquals(schema.references.map(_.version.value), List(1))
+        case other => fail(s"expected a schema, got $other")
+      }
+  }
+
+  test("KUI sends the vendor content type and accepts plain JSON as well") {
+    // Two differences between the registries that speak this API, and both are handled rather than
+    // assumed away: several implementations only ever *send* `application/json`, so a strict `Accept`
+    // gets a 406 from them, while the vendor type is what the documented API says to send.
+    var accept: String = ""
+    var contentType: String = ""
+    val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF { request =>
+        accept = request.header("Accept").getOrElse("")
+        contentType = request.header("Content-Type").getOrElse("")
+        IO.pure(ResponseStub.adjust("""{"id":41}""", StatusCode.Ok))
+      }
+
+    new RegistryHttp[IO](backend, base, RegistryCredentials.anonymous[IO])
+      .register(orders, ProposedSchema(SchemaFormat.Avro, "{}", Nil))
+      .map { _ =>
+        assert(clue(accept).contains("application/vnd.schemaregistry.v1+json"))
+        assert(clue(accept).contains("application/json"), "a registry that only sends JSON answers 406")
+        assert(clue(contentType).startsWith("application/vnd.schemaregistry.v1+json"))
+      }
   }
 }

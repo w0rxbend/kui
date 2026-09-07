@@ -37,9 +37,12 @@ object SchemaRoutes {
       compatibility: CompatibilityReadUseCase[F],
       secured: SchemaApi.Securing[F]
   ): List[ServerEndpoint[Any, F]] =
-    // The order is the contract's own, and it is load bearing: `/schemas/compatibility` and
-    // `/schemas/subjects/...` both sit under `/schemas`, and a router that tried the subject routes first
-    // would answer the global compatibility request with a lookup of a subject named "compatibility".
+    // The order is the contract's own. It used to be described here as load bearing — a router trying the
+    // subject routes first answering `/schemas/compatibility` with a lookup of a subject named
+    // "compatibility" — and wave 5 measured that and it is not so: `/schemas/compatibility` is one segment
+    // under `/schemas` and every subject route is two or more, so Tapir cannot confuse them and swapping
+    // these lines changes nothing any case can see. The order is kept because it mirrors the contract's,
+    // which is worth something on its own, and it is no longer claimed to be a rule.
     List(
       globalCompatibility(compatibility, secured),
       subjectList(subjects, secured),

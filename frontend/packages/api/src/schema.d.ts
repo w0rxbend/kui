@@ -459,6 +459,86 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/metrics/latency": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The cluster's p99 request latency over the requested window
+         * @description Two series, produce and consumer fetch, on the same axis as throughput. A step KUI did not sample carries null, which breaks the line rather than drawing an instant answer. An unavailable section here means the exporter answered and publishes no RequestMetrics family at all, so the whitelist is what has to change.
+         */
+        readonly get: operations["metrics.latency"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/metrics/producers": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The topics receiving the most traffic
+         * @description Ranked by the broker's one-minute bytes-in rate per topic. `measuredBy` is `topic`: a Kafka broker publishes no per-client.id byte rate unless quotas are configured (ADR-052), so this is not a list of clients. An empty list means the exporter served the family and no per-topic line, which is either a cluster where nothing is producing or a ruleset with no per-topic rule; an unavailable section is an exporter that does not publish the family at all.
+         */
+        readonly get: operations["metrics.producers"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/metrics/record-size": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The mean size of a record on this cluster
+         * @description bytes in over records in, with both rates beside it so a caller can say what the figure is. There is no percentile and no histogram here because Kafka publishes none (ADR-052); a card that needs a distribution keeps its 'not measured' sentence.
+         */
+        readonly get: operations["metrics.recordSize"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/metrics/request-handlers": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * How idle the broker's request handlers are, and how deep its purgatories are
+         * @description Idle figures are ratios in 0..1 exactly as the broker publishes them, so the caller chooses the rounding. Purgatory is a count of parked requests per delayed operation and never a percentage: Kafka publishes a queue length and no ceiling to divide it by (ADR-052).
+         */
+        readonly get: operations["metrics.requestHandlers"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/metrics/throughput": {
         readonly parameters: {
             readonly query?: never;
@@ -1607,6 +1687,14 @@ export interface components {
             readonly totalLag?: number;
         };
         /**
+         * LatencyResponse
+         * @description The cluster's p99 request latency, or the reason there is none to show
+         */
+        readonly LatencyResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly latency: unknown;
+        };
+        /**
          * LogDirsResponse
          * @description Log directories, with a per-directory error where there is one
          */
@@ -2022,6 +2110,14 @@ export interface components {
             readonly replicaId: number;
         };
         /**
+         * RecordSizeResponse
+         * @description The mean record size, or the reason there is none to show
+         */
+        readonly RecordSizeResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly recordSize: unknown;
+        };
+        /**
          * RefreshAcceptedDto
          * @description A refresh was accepted; the snapshot is not new yet
          */
@@ -2061,6 +2157,14 @@ export interface components {
             readonly definition: string;
             readonly references?: readonly components["schemas"]["SchemaReferenceDto"][];
             readonly schemaType: string;
+        };
+        /**
+         * RequestHandlersResponse
+         * @description How busy the broker's handlers are, or the reason there is nothing to show
+         */
+        readonly RequestHandlersResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly requestHandlers: unknown;
         };
         /**
          * ResendRequestDto
@@ -2391,6 +2495,14 @@ export interface components {
             readonly partitions?: readonly components["schemas"]["PartitionDto"][];
             /** @description a Kafka topic name: 1-249 characters from [a-zA-Z0-9._-], not '.' or '..' */
             readonly topic: string;
+        };
+        /**
+         * TopProducersResponse
+         * @description Who is producing the traffic, or the reason KUI cannot say
+         */
+        readonly TopProducersResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly producers: unknown;
         };
         /**
          * TrackHitDto
@@ -3328,6 +3440,132 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["TrackResultDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.latency": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How far back to reach: 24h, 7d, 30d */
+                readonly window?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["LatencyResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.producers": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How many topics to return, 1 to 50 */
+                readonly top?: number;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TopProducersResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.recordSize": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RecordSizeResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "metrics.requestHandlers": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RequestHandlersResponse"];
                 };
             };
             readonly default: {

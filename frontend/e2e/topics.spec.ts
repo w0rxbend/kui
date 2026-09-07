@@ -171,7 +171,7 @@ test.describe("the topic list", () => {
     await expect(page.locator("body")).not.toContainText("orders.v1");
   });
 
-  test("a ?q= in the address arrives at a filtered list", async ({ page }) => {
+  test("a ?q= in the address filters the list", async ({ page }) => {
     /*
      * The drawer's topic-prefix rows link here (`…/topics?q=<prefix>`), and this screen used to
      * seed its query from a default and read the address only for `?tab=` — so the link was honest
@@ -236,7 +236,10 @@ test.describe("the topics list's statistics region", () => {
     expect(await figureOf()).toBe(before);
   });
 
-  test("the partition total is the cluster's and not the page's", async ({ page, api }) => {
+  test("the statistics tile's partition total is read and compared, not merely non-empty", async ({
+    page,
+    api,
+  }) => {
     /*
      * The case said "a page of eight topics cannot sum to the cluster's 86" and then asserted only
      * that the tile did not read "not measured" — so a tile that summed the page would have passed

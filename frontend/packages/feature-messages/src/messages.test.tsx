@@ -121,6 +121,39 @@ describe("a browse session", () => {
     });
   });
 
+  test("a pause on a busy tail is bounded, and releasing one stays bounded", () => {
+    /*
+     * Found by mutation, and it is the same bound as the case above with the pause left on.
+     *
+     * `MAX_ROWS` was asserted on one of the three places it is applied. Deleting it from the held
+     * queue, or from the merge that releases the queue, left every case in this package green —
+     * and a pause is exactly where an unbounded list is reached first: the cap on the visible rows
+     * exists because a busy topic delivers faster than a person reads, and a paused screen is one
+     * where nothing is being dropped at all while the records keep arriving. The tab dies holding
+     * a queue nobody has looked at.
+     */
+    withSession((session, fake) => {
+      session.start({ ...DEFAULT_BROWSE, live: true });
+      // Ten rows already on screen before the pause, so the release below is a *merge* of two
+      // non-empty lists. Without them the held queue's own cap would be doing all the work and
+      // the bound on the merge could be deleted with this case still green.
+      for (let i = 0; i < 10; i += 1) fake.emit(record(`before-${String(i)}`));
+      session.setPaused(true);
+      for (let i = 0; i < MAX_ROWS + 25; i += 1) fake.emit(record(String(i)));
+      void flush();
+      expect(session.held()).toBe(MAX_ROWS);
+      // The delivered count is not capped and must not be: it counts what the stream sent, which
+      // is how a reader tells a paused screen from a stalled one.
+      expect(session.progress().delivered).toBe(MAX_ROWS + 35);
+
+      session.setPaused(false);
+      void flush();
+      expect(session.rows()).toHaveLength(MAX_ROWS);
+      // The newest end is the end kept, on release as on the live path.
+      expect(session.rows()[0]?.offset).toBe(String(MAX_ROWS + 24));
+    });
+  });
+
   test("a pause holds records back and releasing shows every one of them, in order", () => {
     withSession((session, fake) => {
       session.start({ ...DEFAULT_BROWSE, live: true });
@@ -240,6 +273,115 @@ describe("a browse session", () => {
       session.loadMore();
       expect(fake.urls).toHaveLength(0);
     });
+  });
+
+  test("load more after a browse that ended with no cursor does nothing", () => {
+    /*
+     * The case the one above cannot make. There, no browse had ever run, so `lastQuery` was
+     * undefined and the guard on *it* was doing all the work — the cursor check could be deleted
+     * with that case still green. Here a browse has run and finished, and the server chose to send
+     * no continuation: the short-circuit that is left is the cursor's.
+     *
+     * Without it `loadMore` re-runs the last query with `cursor: undefined`, which is the same
+     * request again, and appends its answer to the rows already on screen. In the comment's own
+     * words, a button that scrolled the user back to where they began — except that the rows
+     * arrive twice, so the same record is on screen in two places.
+     */
+    withSession((session, fake) => {
+      session.start(DEFAULT_BROWSE);
+      fake.emit(record("1"));
+      // No marker: the server omits one whenever asking again would be pointless.
+      fake.close();
+      void flush();
+      expect(fake.urls).toHaveLength(1);
+      expect(session.rows()).toHaveLength(1);
+
+      session.loadMore();
+      void flush();
+
+      // No second request, so no second copy of the page. The request is the assertion rather than
+      // the row count: this fake keeps one set of handlers, so a record emitted after the mutated
+      // call would land on the stale stream too and prove nothing about which one appended it.
+      expect(fake.urls).toHaveLength(1);
+      expect(session.rows().map((r) => r.offset)).toEqual(["1"]);
+    });
+  });
+
+  test("a browse that is stopped does not offer the previous browse's continuation", () => {
+    /*
+     * The cursor a page is read with is spent the moment the next browse starts, and this is the
+     * state that proves it — the one state where `running` is not covering for it.
+     *
+     * Read a page and the server sends a continuation. Change the range and press Read: the new
+     * browse is running, so nothing offers Load more whatever the cursor holds. Then press Stop.
+     * `stop()` clears `running` and touches no cursor, so a cursor left over from the *first*
+     * range is now sitting behind an enabled Load more — and pressing it appends the next page of
+     * a range that is no longer on screen onto the rows of one that is.
+     */
+    withSession((session, fake) => {
+      session.start(DEFAULT_BROWSE);
+      fake.close("cursor-1");
+      void flush();
+      expect(session.canLoadMore()).toBe(true);
+
+      session.start({ ...DEFAULT_BROWSE, seek: { kind: "beginning" } });
+      void flush();
+      session.stop();
+      void flush();
+
+      expect(session.canLoadMore()).toBe(false);
+      session.loadMore();
+      void flush();
+      // Two requests: the two browses. A third would be the first range's second page.
+      expect(fake.urls).toHaveLength(2);
+    });
+  });
+
+  test("does not offer load-more while a browse is still running", () => {
+    /*
+     * A stream that ends *after* a newer one has started still hands over the continuation the
+     * server sent with it — deliberately, because `finish` runs for whichever handle reported the
+     * close and an early close must not be lost. What it must not do is light up Load more beside
+     * a browse that is still delivering: pressing it stops the running stream and restarts it at a
+     * continuation belonging to the range before it, so the rows on screen and the rows arriving
+     * are two different questions.
+     *
+     * The transport here keeps its handlers per call, which the shared fake does not — it holds
+     * only the latest, so this sequence is not expressible with it.
+     */
+    interface Stream {
+      handlers: Parameters<BrowseTransport["open"]>[1];
+      marker: string | undefined;
+    }
+    const streams: Stream[] = [];
+    const transport: BrowseTransport = {
+      open: (_url, handlers) => {
+        const stream: Stream = { handlers, marker: undefined };
+        streams.push(stream);
+        return { close: () => undefined, endMarker: () => stream.marker };
+      },
+    };
+
+    const { dispose } = mount(() => {
+      const session = createBrowseSession({ streamUrl: "/s", transport });
+      session.start(DEFAULT_BROWSE);
+      void flush();
+      session.start({ ...DEFAULT_BROWSE, seek: { kind: "beginning" } });
+      void flush();
+      expect(session.running()).toBe(true);
+
+      const first = streams[0];
+      if (first === undefined) throw new Error("the first browse never opened a stream");
+      first.marker = "cursor-1";
+      first.handlers.onConnection({ phase: "closed", reason: "done" });
+      void flush();
+
+      // The second browse is still open, so this is not the state Load more is for.
+      expect(session.running()).toBe(true);
+      expect(session.canLoadMore()).toBe(false);
+      return null;
+    });
+    dispose();
   });
 
   test("a new browse replaces the rows; it does not mix two ranges", () => {

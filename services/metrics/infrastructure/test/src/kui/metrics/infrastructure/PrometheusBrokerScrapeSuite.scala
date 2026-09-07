@@ -18,7 +18,7 @@ import kui.testkit.KuiIOSuite
   * exporter is the slowest way to produce one and cannot be made to produce most of them at all — an
   * ingress's HTML error page, a 401, a body from the wrong exporter entirely.
   */
-final class PrometheusThroughputScrapeSuite extends KuiIOSuite {
+final class PrometheusBrokerScrapeSuite extends KuiIOSuite {
 
   private val at = Instant.parse("2026-09-06T12:00:00Z")
   private val url: SafeUrl = SafeUrl.unsafe("http://kafka-metrics:5556/metrics")
@@ -29,11 +29,11 @@ final class PrometheusThroughputScrapeSuite extends KuiIOSuite {
       |kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate 1420.75
       |""".stripMargin
 
-  private def answering(status: StatusCode, body: String): PrometheusThroughputScrape[IO] = {
+  private def answering(status: StatusCode, body: String): PrometheusBrokerScrape[IO] = {
     val backend: Backend[IO] = BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
       .thenRespondF(_ => IO.pure(ResponseStub.adjust(body, status): Response[StubBody]))
 
-    new PrometheusThroughputScrape[IO](backend, url)
+    new PrometheusBrokerScrape[IO](backend, url)
   }
 
   test("a body the exporter served becomes a sample with both rates") {
@@ -59,7 +59,7 @@ final class PrometheusThroughputScrapeSuite extends KuiIOSuite {
         IO.pure(ResponseStub.adjust(served, StatusCode.Ok): Response[StubBody])
       }
 
-    new PrometheusThroughputScrape[IO](backend, url).sample(at).map(_ => assertEquals(asked, "/"))
+    new PrometheusBrokerScrape[IO](backend, url).sample(at).map(_ => assertEquals(asked, "/"))
   }
 
   test("a body that cannot be parsed is a Left and no sample") {

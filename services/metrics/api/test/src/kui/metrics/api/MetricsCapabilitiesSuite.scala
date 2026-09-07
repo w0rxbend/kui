@@ -6,6 +6,7 @@ import munit.CatsEffectSuite
 import kui.contracts.capability.CapabilityState
 import kui.kernel.ClusterId
 import kui.metrics.application.{ClusterSources, SourceProfile}
+import kui.metrics.contract.MetricsEndpoints
 import kui.metrics.domain.MetricsSourcePort
 
 /** What the gateway is told about each cluster this service can and cannot measure.
@@ -57,7 +58,12 @@ final class MetricsCapabilitiesSuite extends CatsEffectSuite {
       .map { report =>
         assertEquals(report(prod).status, CapabilityState.Available.status)
         assert(report(prod).configured)
-        assertEquals(report(prod).features, List(MetricsCapabilities.ThroughputFeature))
+        // Every endpoint this service publishes, named exactly as the OpenAPI document names it. A
+        // feature list shorter than the contract is a card the browser never asks for on a cluster that
+        // can answer it, which looks exactly like a service that is down.
+        assertEquals(report(prod).features, MetricsEndpoints.all.flatMap(_.info.name))
+        assertEquals(report(prod).features.size, 5)
+        assert(report(prod).features.contains(MetricsCapabilities.ThroughputFeature))
         // Nothing to explain: a row carrying a reason it does not need is a row an operator reads
         // looking for a problem that is not there.
         assertEquals(report(prod).reason, None)

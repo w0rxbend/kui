@@ -85,6 +85,31 @@ export function topicTree(input: TopicTreeInput): readonly NavDestination[] {
 }
 
 /**
+ * The tree as the drawer's `childrenFor` seam wants it: the rows, or `undefined` when there are
+ * none.
+ *
+ * `NavigationInput.childrenFor` distinguishes the two and says why at length — `undefined` is "this
+ * row is a leaf", an empty array is "a branch that currently holds nothing" — and `destinationFor`
+ * keeps them apart by omitting the `children` key entirely for the first. A cluster with no topics
+ * is a leaf: the row's own badge already says how many topics there are, and a disclosure over an
+ * empty list is a control that appears broken.
+ *
+ * A function beside the fold rather than a `length` check at the call site, because that is where a
+ * case can reach it. The rule lived inside `App.tsx`'s memo for two waves behind a comment that
+ * named `NavItem` as the real defence, while `NavItem`'s own predicate was at the same time
+ * deletable with the whole suite green — two comments each pointing at the other and no assertion
+ * anywhere. Both ends carry one now: this function's, and `chrome.test.tsx`'s empty-children case.
+ *
+ * The emptiness tested is the fold's output and not the input, which is the wider rule: a name list
+ * holding nothing but empty strings is dropped by {@link prefixes} and would otherwise arrive here
+ * as a branch with no rows in it.
+ */
+export function topicSubtree(input: TopicTreeInput): readonly NavDestination[] | undefined {
+  const rows = topicTree(input);
+  return rows.length === 0 ? undefined : rows;
+}
+
+/**
  * Where a prefix row goes: the topic list, asked for the topics that row stands for.
  *
  * ## Why the address is assembled here and the route is not

@@ -21,12 +21,20 @@ import kui.security.Principal
   * `ServiceContracts.byService`, so publishing the write here gives the gateway its public route with no
   * gateway change.
   *
-  * ==The three refusals, in the order they are decided==
+  * ==The four refusals, in the order they are decided==
   *
   *   1. an unknown cluster is a 404, because the caller followed a link to something that is not there;
   *   1. a **read-only** cluster is `KUI-READ-ONLY`, decided before the registry is contacted, so an
   *      operator's proxy never logs a write KUI was always going to refuse (ADR-047 §2);
+  *   1. an empty or oversized document is `KUI-VALIDATION`, decided here rather than by the registry;
   *   1. a cluster with no registry is `KUI-UNSUPPORTED` naming the configuration key.
+  *
+  * The order is the list's and not the code's convenience, and it was the other way round until wave 5: the
+  * document was validated first, so an oversized schema aimed at a cluster KUI has never heard of answered
+  * `400` rather than `404`, and one aimed at a read-only cluster answered `400` rather than `405`. Neither
+  * broke a rule — nothing leaves the process on either path, so ADR-047 §2 held — but "the schema you pasted
+  * is too big" is the wrong first sentence for a link that points at nothing, and it is the sentence an
+  * operator would have acted on. `SchemaRegistrationSuite` names both combinations.
   *
   * The permission half — `SCHEMA:CREATE` over the subject — is declared on the endpoint and enforced by
   * `SecuredRoutes`' guard and by the gateway, which is the same path both compatibility writes take. It is
@@ -75,27 +83,29 @@ object RegisterSchemaUseCase {
           subject: Subject,
           proposed: ProposedSchema
       ): F[Either[KuiError, RegisteredVersion]] =
-        validate(proposed) match {
-          case Some(error) => error.asLeft[RegisteredVersion].pure[F]
+        registries.profile(cluster).flatMap {
           case None =>
-            registries.profile(cluster).flatMap {
+            RegistryAccess.unknownCluster(cluster).asLeft[RegisteredVersion].pure[F]
+
+          // Before the registry is contacted, and before the port is even resolved: a read-only
+          // deployment that opened a connection to say no would still have said no in the registry's
+          // access log, which is the thing an operator then has to explain.
+          case Some(profile) if profile.readOnly =>
+            val refusal = ApplicationError.Refused(
+              ErrorCode.ReadOnly,
+              s"cluster ${profile.displayName} is configured read-only, so " +
+                s"$Operation is not accepted"
+            )
+            logger
+              .info(context(cluster, subject, principal))("refused: the cluster is read-only")
+              .as(refusal.asLeft[RegisteredVersion])
+
+          // The document is checked once the cluster is known to be one this deployment writes to, so
+          // that the answer to a bad link is "no such cluster" rather than a complaint about the body.
+          case Some(_) =>
+            validate(proposed) match {
+              case Some(error) => error.asLeft[RegisteredVersion].pure[F]
               case None =>
-                RegistryAccess.unknownCluster(cluster).asLeft[RegisteredVersion].pure[F]
-
-              // Before the registry is contacted, and before the port is even resolved: a read-only
-              // deployment that opened a connection to say no would still have said no in the registry's
-              // access log, which is the thing an operator then has to explain.
-              case Some(profile) if profile.readOnly =>
-                val refusal = ApplicationError.Refused(
-                  ErrorCode.ReadOnly,
-                  s"cluster ${profile.displayName} is configured read-only, so " +
-                    s"$Operation is not accepted"
-                )
-                logger
-                  .info(context(cluster, subject, principal))("refused: the cluster is read-only")
-                  .as(refusal.asLeft[RegisteredVersion])
-
-              case Some(_) =>
                 registries.registry(cluster).flatMap {
                   case None =>
                     RegistryAccess.notConfigured(cluster).asLeft[RegisteredVersion].pure[F]

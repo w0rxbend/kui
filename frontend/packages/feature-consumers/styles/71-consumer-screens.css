@@ -232,3 +232,45 @@
   gap: var(--kui-space-3);
   margin-block-start: var(--kui-space-4);
 }
+
+/* --- Forgetting one topic's committed offsets ------------------------------------------------ */
+
+.kui-cg-forget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+}
+
+.kui-cg-forget__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+/*
+ * A row per topic, with the button pinned to the right-hand end. `auto` on the topic column and
+ * `1fr` on the figure rather than the other way round: a topic name is the thing being identified
+ * and must not be the column that truncates, and there is never more than a short phrase beside it.
+ */
+.kui-cg-forget__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-3) var(--kui-space-4);
+  background: var(--kui-color-surface-elevated);
+  border: var(--kui-card-border);
+  border-radius: var(--kui-radius-lg);
+}
+
+.kui-cg-forget__topic {
+  overflow-wrap: anywhere;
+}
+
+.kui-cg-forget__held {
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+}

@@ -76,6 +76,273 @@
         }
       }
     },
+    "/internal/v1/clusters/{clusterId}/metrics/latency" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The cluster's p99 request latency over the requested window",
+        "description" : "Two series, produce and consumer fetch, on the same axis as throughput. A step KUI did not sample carries null, which breaks the line rather than drawing an instant answer. An unavailable section here means the exporter answered and publishes no RequestMetrics family at all, so the whitelist is what has to change.",
+        "operationId" : "metrics.latency",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "window",
+            "in" : "query",
+            "description" : "How far back to reach: 24h, 7d, 30d",
+            "required" : false,
+            "schema" : {
+              "default" : "24h",
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LatencyResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/metrics/request-handlers" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "How idle the broker's request handlers are, and how deep its purgatories are",
+        "description" : "Idle figures are ratios in 0..1 exactly as the broker publishes them, so the caller chooses the rounding. Purgatory is a count of parked requests per delayed operation and never a percentage: Kafka publishes a queue length and no ceiling to divide it by (ADR-052).",
+        "operationId" : "metrics.requestHandlers",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RequestHandlersResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/metrics/producers" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The topics receiving the most traffic",
+        "description" : "Ranked by the broker's one-minute bytes-in rate per topic. `measuredBy` is `topic`: a Kafka broker publishes no per-client.id byte rate unless quotas are configured (ADR-052), so this is not a list of clients. An empty list means the exporter served the family and no per-topic line, which is either a cluster where nothing is producing or a ruleset with no per-topic rule; an unavailable section is an exporter that does not publish the family at all.",
+        "operationId" : "metrics.producers",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "top",
+            "in" : "query",
+            "description" : "How many topics to return, 1 to 50",
+            "required" : false,
+            "schema" : {
+              "default" : 5,
+              "type" : "integer",
+              "format" : "int32",
+              "minimum" : 1,
+              "maximum" : 50
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TopProducersResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: query parameter top",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/metrics/record-size" : {
+      "get" : {
+        "tags" : [
+          "metrics"
+        ],
+        "summary" : "The mean size of a record on this cluster",
+        "description" : "bytes in over records in, with both rates beside it so a caller can say what the figure is. There is no percentile and no histogram here because Kafka publishes none (ADR-052); a card that needs a distribution keeps its 'not measured' sentence.",
+        "operationId" : "metrics.recordSize",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RecordSizeResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live" : {
       "get" : {
         "description" : "Whether the process should be restarted. Never depends on an upstream.",
@@ -263,6 +530,19 @@
           }
         }
       },
+      "LatencyResponse" : {
+        "title" : "LatencyResponse",
+        "description" : "The cluster's p99 request latency, or the reason there is none to show",
+        "type" : "object",
+        "required" : [
+          "latency"
+        ],
+        "properties" : {
+          "latency" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "LivenessReport" : {
         "title" : "LivenessReport",
         "description" : "Whether the process should be restarted",
@@ -312,6 +592,32 @@
           }
         }
       },
+      "RecordSizeResponse" : {
+        "title" : "RecordSizeResponse",
+        "description" : "The mean record size, or the reason there is none to show",
+        "type" : "object",
+        "required" : [
+          "recordSize"
+        ],
+        "properties" : {
+          "recordSize" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "RequestHandlersResponse" : {
+        "title" : "RequestHandlersResponse",
+        "description" : "How busy the broker's handlers are, or the reason there is nothing to show",
+        "type" : "object",
+        "required" : [
+          "requestHandlers"
+        ],
+        "properties" : {
+          "requestHandlers" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
       "ServiceCapabilities" : {
         "title" : "ServiceCapabilities",
         "type" : "object",
@@ -338,6 +644,19 @@
         ],
         "properties" : {
           "throughput" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "TopProducersResponse" : {
+        "title" : "TopProducersResponse",
+        "description" : "Who is producing the traffic, or the reason KUI cannot say",
+        "type" : "object",
+        "required" : [
+          "producers"
+        ],
+        "properties" : {
+          "producers" : {
             "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
           }
         }

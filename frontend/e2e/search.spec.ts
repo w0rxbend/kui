@@ -61,6 +61,30 @@ test.describe("cross-entity search", () => {
     await expect(first).toHaveAttribute("href", /^\/ui\/clusters\//);
   });
 
+  /**
+   * The click, and the reason it needs a browser to prove.
+   *
+   * A pointer press on a result focuses the link, which blurs the input; the `click` only exists
+   * once the button comes back up. Closing the overlay on the blur therefore takes the row out
+   * from under the cursor between the two halves of one press, and every result in the panel
+   * becomes unclickable while looking perfectly normal — no error, no console line, nothing on the
+   * screen to point at. `SearchField.RESULT_CLICK_GRACE_MS` is what stops it, and only a real
+   * browser sequences the press the way a person does.
+   *
+   * The case above asserts the row's address; this one asserts that the address is reachable by
+   * clicking, which is a different question and the one an operator asks.
+   */
+  test("a click on a search result lands before the panel closes", async ({ page }) => {
+    await search(page, "orders");
+    const first = page.getByRole("option").first();
+    await expect(first).toBeVisible();
+    const href = await first.getAttribute("href");
+    expect(href).toBeTruthy();
+
+    await first.click();
+    await expect(page).toHaveURL(new RegExp(`${href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  });
+
   test("says which service could not be asked instead of returning fewer results silently", async ({
     page,
     api,
@@ -96,7 +120,7 @@ test.describe("cross-entity search", () => {
     await expect(overlay).not.toContainText(/not answering/i);
   });
 
-  test("bounds the query at the box, at the length the endpoint accepts", async ({ api }) => {
+  test("bounds the query at the box, at the length the endpoint accepts", async ({ page, api }) => {
     /*
      * The wire half of the same rule. A 201-character `q` is a `KUI-VALIDATION` 400 naming the
      * field, and the overlay's only failure rendering says the search is not answering — a sentence
@@ -104,6 +128,16 @@ test.describe("cross-entity search", () => {
      * own maximum as a `maxlength` and the case is unreachable from the screen; this asserts that
      * the maximum the box enforces is the one the server actually has.
      */
+    /* The box's half, which this case claimed to assert and did not: `SEARCH_MAX_LENGTH` reaches
+       the field through one line of `App.tsx`, and raising it left every unit case green. */
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    const input = page.getByRole("combobox", { name: /Search topics, groups, anything/i });
+    await expect(input).toHaveAttribute("maxlength", "200");
+
+    /* And the server's, from both sides of the boundary, so the two numbers are pinned to each
+       other rather than each to itself. */
+    const accepted = await api.raw.get(`/api/v1/search?q=${"a".repeat(200)}`);
+    expect(accepted.status()).toBe(200);
     const response = await api.raw.get(`/api/v1/search?q=${"a".repeat(201)}`);
     expect(response.status()).toBe(400);
     const body = (await response.json()) as {

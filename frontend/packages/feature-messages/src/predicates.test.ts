@@ -162,6 +162,26 @@ describe("the preset store", () => {
     expect(presets[0]?.name).toBe(`p${String(MAX_PRESETS + 2)}`);
   });
 
+  test("the store keeps the bound too, and not only the builder", () => {
+    /*
+     * Found by mutation rather than by reading: `writePresets` caps what it stores at
+     * {@link MAX_PRESETS} and deleting that cap left all 156 cases in this package green. The
+     * bound above is `withPreset`'s, and every call site in the product goes through it — so this
+     * is a second defence that nothing could see, on the one function that decides how long the
+     * chip row is the next time this browser opens the screen.
+     *
+     * Written as a direct call for that reason: it is exactly the caller `withPreset` is not.
+     */
+    const many = Array.from({ length: MAX_PRESETS + 4 }, (_, index) => ({
+      name: `p${String(index)}`,
+      predicates: KEY_STARTS,
+    }));
+    writePresets("c", many);
+    expect(readPresets("c")).toHaveLength(MAX_PRESETS);
+    // The head of the list, so the cap keeps the newest rather than trimming from the wrong end.
+    expect(readPresets("c")[0]?.name).toBe("p0");
+  });
+
   test("what is written comes back", () => {
     writePresets("c", [
       { name: "Big tickets", predicates: KEY_STARTS, expression: "record.offset > 0" },

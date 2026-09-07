@@ -320,7 +320,12 @@ describe("the frame, given a cluster in the address", () => {
     },
   };
 
-  function stubCluster(): void {
+  /**
+   * @param overrides answers replacing the six above, keyed by path — for the cases that need a
+   * cluster which reports something other than the healthy fixture.
+   */
+  function stubCluster(overrides: Readonly<Record<string, unknown>> = {}): void {
+    const answers: Readonly<Record<string, unknown>> = { ...CLUSTER, ...overrides };
     vi.stubGlobal("EventSource", SilentEventSource);
     vi.stubGlobal(
       "fetch",
@@ -334,7 +339,7 @@ describe("the frame, given a cluster in the address", () => {
             headers: { "content-type": "application/json" },
           });
         }
-        const body = CLUSTER[path];
+        const body = answers[path];
         if (body !== undefined) {
           return new Response(JSON.stringify(body), {
             status: 200,
@@ -461,6 +466,39 @@ describe("the frame, given a cluster in the address", () => {
     expect(internal?.getAttribute("href")).toBe(
       "/ui/clusters/prod-kyiv-01/topics?showInternal=true",
     );
+
+    app.dispose();
+  });
+
+  /**
+   * The same wiring over a cluster that has no topics at all.
+   *
+   * Three genuinely different states draw this row as a leaf — no cluster chosen, the names not yet
+   * arrived, and a cluster with nothing in it — and the third is the one an operator meets on a
+   * cluster they have just registered. The row keeps its link and its badge; what it must not grow
+   * is a chevron, because a disclosure opening onto an empty list is a control that appears broken.
+   *
+   * This is the whole chain, and it is deliberately not the only case on the rule. The DOM cannot
+   * tell `children: []` from an absent `children` — `NavItem` draws both as a leaf, which is the
+   * point — so the memo's own answer is pinned where the product decides it, in
+   * `nav/topicTree.ts`'s `topicSubtree`, and the renderer's predicate is pinned in
+   * `chrome.test.tsx`. This case is what proves the two meet over a real gateway answer.
+   */
+  it("a memo over an empty topic list yields no subtree", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster({ "/api/v1/clusters/prod-kyiv-01/topics/names": { names: ok([]) } });
+    const app = mountApp();
+    await settled();
+
+    announce(healthy("prod-kyiv-01"));
+
+    const topics = app.host.querySelector("[data-testid='nav-topics']");
+    expect(topics).not.toBeNull();
+    /* The badge is still the cluster's own figure, which is what says "no topics" here — the row
+       says it better than a disclosure over nothing would. */
+    expect(topics?.textContent).toContain("128");
+    expect(app.host.querySelector("[data-testid='nav-topics-disclosure']")).toBeNull();
+    expect(app.host.querySelector("[data-testid='nav-topics-subtree']")).toBeNull();
 
     app.dispose();
   });
@@ -832,6 +870,74 @@ describe("the search field", () => {
     /* And the third list, which nobody was asked for, named rather than silently absent. */
     expect(results?.textContent).toContain("Schema Registry");
 
+    app.dispose();
+  });
+
+  /**
+   * How long the box waits, which is a rule and not a taste.
+   *
+   * The case above asserts that nothing has gone out *synchronously*, and that is true of any
+   * deferral at all: `SEARCH_DEBOUNCE_MS` can be set to `0` and every case in this package stays
+   * green, because `answered()` waits `SEARCH_DEBOUNCE_MS + 80` and rescales with it and no case
+   * ever put real time between two keystrokes. What that costs is one gateway fold per character,
+   * and the fold is one call per service per cluster — so a six-letter word becomes eighteen
+   * upstream calls instead of three.
+   *
+   * The clock is faked so the waits are facts rather than races, and only the timer functions are:
+   * Solid 2 batches to a microtask, and a faked `queueMicrotask` would stop the renderer. The
+   * intervals are absolute milliseconds and deliberately not derived from the constant, which is
+   * the mistake that let the rule go ungated in the first place.
+   */
+  it("holds the request through a whole typed word, not through one keystroke", async () => {
+    const searched = stubSearch();
+    const app = mountApp();
+    await settle();
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const input = app.host.querySelector<HTMLInputElement>("[data-testid='search-input']")!;
+      input.focus();
+      // 100 ms apart, which is a fast typist rather than an impossible one.
+      for (const typed of ["o", "or", "ord"]) {
+        input.value = typed;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        flush();
+        vi.advanceTimersByTime(100);
+        for (let turn = 0; turn < 4; turn += 1) {
+          await Promise.resolve();
+          flush();
+        }
+        expect(searched).toEqual([]);
+      }
+
+      // Three hundred milliseconds of typing and nothing asked. Then the pause, and one request.
+      vi.advanceTimersByTime(400);
+      for (let turn = 0; turn < 4; turn += 1) {
+        await Promise.resolve();
+        flush();
+      }
+      expect(searched).toEqual(["ord"]);
+    } finally {
+      vi.useRealTimers();
+      app.dispose();
+    }
+  });
+
+  /**
+   * The bound the box carries, which reaches it only through `App`.
+   *
+   * `SEARCH_MAX_LENGTH` is passed as the field's `maxLength` at one line of `App.tsx` and nothing
+   * asserted the figure: raised to 20000 the whole package stays green. What that costs is a `q`
+   * the endpoint refuses with a `KUI-VALIDATION` 400, and the only failure this overlay can draw
+   * says "search is not answering" — a sentence that sends an operator to look at a gateway that
+   * is working perfectly. The number is written out here rather than imported, because importing
+   * it is what let it drift.
+   */
+  it("bounds the box at the two hundred characters the endpoint accepts", () => {
+    stubSearch();
+    const app = mountApp();
+    const input = app.host.querySelector<HTMLInputElement>("[data-testid='search-input']")!;
+    expect(input.getAttribute("maxlength")).toBe("200");
     app.dispose();
   });
 

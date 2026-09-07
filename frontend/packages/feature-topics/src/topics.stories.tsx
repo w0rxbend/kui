@@ -359,7 +359,14 @@ const OVERVIEW_PARTITIONS = Array.from({ length: 6 }, (_, partition) => ({
   sizeBytes: 48_200_000 + partition,
 }));
 
-/** The tab the strip opens by default, which drew nothing at all before this wave. */
+/**
+ * The tab the strip opens by default, which drew nothing at all before this wave.
+ *
+ * Six partition rows under a topic that has twelve, so it also draws the short-table notice —
+ * *"This table shows 6 of 12 partitions."* That is not decoration here: the notice fires on the
+ * difference between the topic's own partition count and the rows that arrived, and this story is
+ * the only place a reader sees the wording at a shortfall the gateway's cap does not explain.
+ */
 export const TopicOverview: OverviewStory = {
   render: (args) => <TopicOverviewTab {...args} />,
   args: {
@@ -389,6 +396,10 @@ export const TopicOverview: OverviewStory = {
  * — and no answer from the consumer service. Three sentences, no zeroes: a topic with no bytes on
  * disk, a topic nobody produces to and a topic nothing reads are all real states and none of them
  * is what these tiles are showing.
+ *
+ * Three partition rows under a topic of six, so this one also draws *"This table shows 3 of 6
+ * partitions."* — the shortfall said out loud beside figures that are already absent, which is the
+ * combination a reader is most likely to mistake for a broken screen.
  */
 export const TopicOverviewNotMeasured: OverviewStory = {
   render: (args) => <TopicOverviewTab {...args} />,

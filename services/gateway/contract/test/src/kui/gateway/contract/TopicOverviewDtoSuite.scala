@@ -13,11 +13,19 @@ import kui.contracts.topic.{PartitionDto, ReplicaDto, TopicDetailDto, TopicRowDt
 import kui.gateway.contract.dto.TopicOverviewDto
 import kui.kernel.{BrokerId, PartitionId, TopicName}
 
-/** That the topic page's document is exactly what is committed, and that the browser decodes it.
+/** That the topic page's document is exactly what is committed, and that the gateway's own encoder produces
+  * it.
   *
-  * Cross-compiled deliberately. M1's second integration defect was a browser and a server disagreeing about
-  * an aggregation's shape, and the browser's half was never run against the server's document. These
-  * assertions run on the JVM and under Node, over one committed file.
+  * These assertions run **on the JVM only**. `./mill resolve services.gateway.contract._` names one module,
+  * `.jvm`, and has since this suite was written — the gateway's contract is not cross-compiled, unlike every
+  * service contract the browser decodes directly. The header used to claim otherwise, and a claim that a
+  * document is checked on two platforms when it is checked on one is worse than no claim, because it is the
+  * reason nobody goes looking for the missing half.
+  *
+  * What the committed file is still worth is the other half of M1's second integration defect: a browser and
+  * a server disagreeing about an aggregation's shape, where the server's document had never been written
+  * down. It is written down here, byte for byte, and the browser's `schema.d.ts` is generated from the same
+  * endpoints — which is a weaker join than a shared test and is stated as one.
   */
 final class TopicOverviewDtoSuite extends FunSuite {
 

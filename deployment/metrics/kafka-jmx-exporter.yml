@@ -1,6 +1,6 @@
 # What the JMX exporter beside a KUI demonstration broker publishes, and nothing else.
 #
-# KUI's metrics service reads broker throughput from a Prometheus text-exposition endpoint
+# KUI's metrics service reads broker measurements from a Prometheus text-exposition endpoint
 # (ADR-050). It cannot read JMX directly and it is not going to be able to:
 # `MetricsSourceSettings.url` is a `SafeUrl`, which ARCHITECTURE.md §14 restricts to `http` and
 # `https`, so
@@ -13,17 +13,24 @@
 # the first symptom of the drift is one stack's throughput card filling and the other's staying
 # empty for a reason nobody can see.
 #
-# WHY SO FEW RULES. The stock Kafka JMX ruleset published with the exporter turns roughly four
-# thousand MBean attributes into an exposition body of about a megabyte, per scrape. KUI reads three
-# families. Every rule below is one KUI actually parses, and the exporter drops the rest -- which is
-# also what makes the body small enough to read by eye when somebody is working out why a chart is
-# empty.
+# WHY SO FEW RULES, AND THE NUMBER IS MEASURED RATHER THAN REMEMBERED. Pointed at the quickstart
+# broker on 2026-09-06 with no `rules:` at all -- just `hostPort` and the two `lowercase*` flags --
+# this exporter served **12,993 lines, 11,189 of them samples, over 1.28 MB**, per scrape. With the
+# rules below, and nine topics on that broker, it serves twenty-one. Every rule here is one KUI
+# actually parses and the exporter drops the rest, which is also what makes the body small enough to
+# read by eye when somebody is working out why a chart is empty.
 #
 # THE NAMES BELOW ARE A CONTRACT with `services/metrics`'s Prometheus reader. If a rule here is
-# renamed, that reader stops finding the family and the throughput card goes back to saying it
-# cannot measure anything -- honestly, and for the wrong reason. The names are the conventional
-# lower-cased rendering of the MBean's own identity, so they read the same as they do in every other
-# Kafka deployment:
+# renamed, that reader stops finding the family and the card that needed it goes back to saying it
+# cannot measure anything -- honestly, and for the wrong reason. Nothing in the reader can notice,
+# because a family that is absent and a family that was renamed produce the identical body. So the
+# names are asserted, one by one and by literal string, in `../compose/smoke.sh`: see the block
+# there headed THE METRIC NAMES ARE THE CONTRACT. Renaming a rule here without renaming it there
+# fails the compose job, which is the only place in this repository where a real exporter, a real
+# broker and a real KUI are in the same room.
+#
+# The names are the conventional lower-cased rendering of the MBean's own identity, so they read
+# the same as they do in every other Kafka deployment:
 #
 #   kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate     bytes/second, gauge
 #   kafka_server_brokertopicmetrics_bytesoutpersec_oneminuterate    bytes/second, gauge
@@ -32,11 +39,64 @@
 #   kafka_server_brokertopicmetrics_bytesoutpersec_total      bytes since start, counter
 #   kafka_server_brokertopicmetrics_messagesinpersec_total    records since start, counter
 #
-# Both shapes are published on purpose. The rate is what the broker itself already computes and is
-# the cheapest correct answer for a chart; the total is monotonic, so an adapter that would rather
-# difference two samples than trust a one-minute moving average can do that without a second
-# exporter. Neither is a KUI invention: they are the `OneMinuteRate` and `Count` attributes of the
-# same Yammer meter.
+#   kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate{topic="..."}
+#                                                             bytes/second per topic, gauge
+#
+#   kafka_network_requestmetrics_totaltimems_99thpercentile{request="Produce"}
+#   kafka_network_requestmetrics_totaltimems_99thpercentile{request="FetchConsumer"}
+#                                                             milliseconds, gauge
+#
+#   kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate
+#                                                             ratio in 0..1, gauge
+#   kafka_network_socketserver_networkprocessoravgidlepercent  ratio in 0..1, gauge
+#
+#   kafka_server_delayedoperationpurgatory_purgatorysize{delayedoperation="Produce"}
+#   kafka_server_delayedoperationpurgatory_purgatorysize{delayedoperation="Fetch"}
+#                                                             operations queued, gauge
+#
+# TWO SPELLING RULES, WRITTEN DOWN BECAUSE THE NEXT RULE ADDED HERE HAS TO FOLLOW THEM.
+#
+# 1. A named MBean attribute is part of the metric name; the attribute called `Value` is not. The
+#    same Yammer meter publishes `OneMinuteRate`, `MeanRate` and `Count`, so a name that omitted the
+#    attribute would be ambiguous about which number it carried. A JMX gauge publishes exactly one
+#    attribute and it is always called `Value`, so appending it says nothing.
+# 2. AN MBEAN KEY THAT NARROWS THE READING STAYS A LABEL AND IS NEVER FOLDED INTO THE NAME. That is
+#    `topic=`, `request=` and `delayedOperation=`, and it is not a matter of taste: the reader
+#    selects on the label. `PrometheusExposition.dimensionsOf` computes the set of labels a line
+#    carries and each family is matched against an exact set -- the broker-wide rates against the
+#    empty set, the p99 against `{request}`, the purgatory against `{delayedoperation}`, the
+#    per-topic rate against `{topic}`. A rule that spelled the dimension into the metric name
+#    instead, `..._produce_99thpercentile`, would serve a line the reader's exact-set test never
+#    matches, and the latency card would say it cannot measure a figure that is on the wire in front
+#    of it. This was written the wrong way round first and caught by running the exporter.
+#
+#    Label VALUES keep the broker's own capitalisation -- `lowercaseOutputLabelNames` lower-cases
+#    label *names* only, so `request="Produce"` is what goes out. The reader lower-cases before
+#    comparing, which is why that is safe and why it is worth knowing before changing either side.
+#
+# WHAT THE PER-TOPIC RULE DOES TO THE BROKER-WIDE ONE, WHICH IS NOTHING, ON PURPOSE. The per-topic
+# rule publishes the *same family name* as the broker-wide rule above it, distinguished only by
+# carrying a `topic` label -- which is what Kafka's own convention does, and what
+# `PrometheusExposition`'s aggregates-and-slices section was written against: the aggregate is the
+# line with no dimension at all, and the slices are the lines dimensioned by `topic` and nothing
+# else. Publishing these under an invented second family name would have been a name no other Kafka
+# deployment has, and would have made the throughput reader's "no dimension" test meaningless.
+#
+# THREE OF THESE ARE PUBLISHED AND NOT READ, AND SAYING SO IS CHEAPER THAN DISCOVERING IT. The
+# `_total` counters are not parsed by `PrometheusExposition`, which reads the `oneminuterate` line
+# for every rate it needs; `smoke.sh` reads `bytesinpersec_total` to prove its seeded traffic
+# reached the broker, and nothing in KUI reads the other two. They are kept for the reason given
+# above -- a monotonic total is what an adapter differences when it does not want to trust a moving
+# average -- but that adapter does not exist yet, so a reader who greps for a consumer of
+# `bytesoutpersec_total` will not find one and should not conclude that something is broken.
+#
+# WHAT IS DELIBERATELY NOT HERE, AND IT IS THE EVIDENCE FOR THREE CARDS THAT CANNOT BE DRAWN. The
+# capture referred to above is the whole of what this broker publishes, and it does not contain:
+# any per-`client.id` byte rate (Kafka publishes one only where client quotas are configured, and
+# none are here); any record-size distribution (`BrokerTopicMetrics` carries bytes and messages,
+# and no histogram of either); and any purgatory *ratio* -- `PurgatorySize` read 37 on that broker,
+# which is a count of queued operations and not a percentage of anything. ADR-052 is where that is
+# decided; this file is where it was measured.
 
 # The broker's remote JMX server. This is the address the exporter dials, on the Compose network,
 # and it is why the broker sets `-Djava.rmi.server.hostname=kafka`: an RMI registry hands back a
@@ -51,9 +111,13 @@ lowercaseOutputName: true
 lowercaseOutputLabelNames: true
 
 rules:
+  # ===============================================================================================
+  # THROUGHPUT. What the Traffic tab's chart is drawn from.
+  # ===============================================================================================
+
   # The broker-wide meters. `type=BrokerTopicMetrics, name=X` with no `topic=` key is the aggregate
   # across every topic, which is what a cluster throughput chart is about; the per-topic beans carry
-  # a third key and are therefore not matched here.
+  # a third key and are matched by the rule below rather than by this one.
   - pattern: "kafka.server<type=BrokerTopicMetrics, name=(BytesInPerSec|BytesOutPerSec|MessagesInPerSec)><>OneMinuteRate"
     name: kafka_server_brokertopicmetrics_$1_oneminuterate
     type: GAUGE
@@ -63,3 +127,100 @@ rules:
     name: kafka_server_brokertopicmetrics_$1_total
     type: COUNTER
     help: "The monotonic total behind $1 since this broker started."
+
+  # ===============================================================================================
+  # TOP PRODUCERS, and it is by topic because a broker publishes nothing else.
+  #
+  # SCREENS-V4 §4 draws this card by `client.id`. A broker publishes no per-`client.id` byte rate
+  # unless client quotas are configured, and none are configured on either of the brokers this file
+  # is mounted beside -- checked against the stock capture, which has no such family in it. What it
+  # does publish is this: the same `BytesInPerSec` meter, dimensioned by topic. It is a real number
+  # and it is not the number the design named, so ADR-052 decides what the card is called and
+  # `services/metrics` names the field for what it holds. This file's job is only to publish it.
+  #
+  # `.+` and not `[a-zA-Z0-9._-]+`: Kafka's own topic-name rule is that character class, but a
+  # pattern here that disagreed with Kafka's would silently drop whichever topic fell outside it,
+  # and a card missing one row is a harder defect to see than a card missing all of them.
+  # ===============================================================================================
+  #
+  # The `help` line has to be true of the UNLABELLED line as well, and that is not a stylistic
+  # point. Two rules writing one family name produce one `# HELP` in the body -- checked against a
+  # real exporter, which kept exactly one of the two -- so a help text written only about the
+  # per-topic line would end up documenting the broker-wide one.
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=BytesInPerSec, topic=(.+)><>OneMinuteRate"
+    name: kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate
+    labels:
+      topic: "$1"
+    type: GAUGE
+    help: >-
+      One-minute moving average of bytes in, per second: unlabelled is the whole
+      broker, a `topic` label is that topic's share.
+
+  # ===============================================================================================
+  # REQUEST LATENCY. The p99 line, produce and fetch as two series.
+  #
+  # `TotalTimeMs` and not `LocalTimeMs`: the design asks how long a client waited, and total time is
+  # queue plus local plus remote plus response. The other three are how you find out *why* it was
+  # slow, which is a different screen.
+  #
+  # `FetchConsumer` and not `Fetch`. The broker publishes both, and they are not the same bean:
+  # `Fetch` includes the replica fetches other brokers make, which on a busy cluster dominate the
+  # number and have nothing to do with anybody's consumer. On the single-node quickstart broker the
+  # two read 501.7 and 502.0, which is close enough to hide the difference and is exactly why the
+  # choice is written down here rather than left to whoever reads the chart.
+  # ===============================================================================================
+  - pattern: "kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(Produce|FetchConsumer)><>99thPercentile"
+    name: kafka_network_requestmetrics_totaltimems_99thpercentile
+    labels:
+      request: "$1"
+    type: GAUGE
+    help: "The 99th percentile of end-to-end broker time for one request kind, in milliseconds."
+
+  # ===============================================================================================
+  # THE RING GAUGES. Two ratios, and one queue length that is not a ratio.
+  #
+  # Both idle figures are already in 0..1 as the broker publishes them. They are published as such
+  # and are not multiplied by a hundred here: a percentage is a rendering, the card decides it, and
+  # a number that has been pre-formatted by a deployment file cannot be un-formatted by a reader.
+  # ===============================================================================================
+
+  # Anchored on the exact bean name. The broker publishes three request-handler pools --
+  # `RequestHandlerAvgIdlePercent`, `BrokerRequestHandlerAvgIdlePercent` and
+  # `ControllerRequestHandlerAvgIdlePercent` -- and a pattern loose enough to take all three would
+  # publish three lines under one name, which is a family whose value depends on which one the
+  # reader happens to find first.
+  - pattern: "kafka.server<type=KafkaRequestHandlerPool, name=RequestHandlerAvgIdlePercent><>OneMinuteRate"
+    name: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate
+    type: GAUGE
+    help: "The fraction of the last minute the request-handler threads spent idle, in 0..1."
+
+  # `type=SocketServer` and not `type=Processor`. The latter is published once per network thread,
+  # dimensioned by `networkprocessor=`, and the card asks one question about the broker rather than
+  # six about its threads. This bean is the broker's own average of those.
+  - pattern: "kafka.network<type=SocketServer, name=NetworkProcessorAvgIdlePercent><>Value"
+    name: kafka_network_socketserver_networkprocessoravgidlepercent
+    type: GAUGE
+    help: "The fraction of time the broker's network processor threads are idle, in 0..1."
+
+  # PURGATORY IS A LENGTH, AND SCREENS-V4 §3.4 DRAWS IT AS "38% PURGATORY".
+  #
+  # There is no percentage here to read. `PurgatorySize` is the number of delayed operations
+  # currently parked waiting for a timeout or a condition, against no ceiling at all: on the
+  # quickstart broker the `Fetch` purgatory read 37 and then, an hour later on the same broker with
+  # the same consumers, 552. Two readings of an unbounded count. Dividing either by an invented
+  # ceiling would be a fabricated percentage labelled with the design's word, and that decision
+  # belongs in ADR-052 rather than in this file; what this file can do is publish the count, with
+  # its unit in the `help` line, so the decision is taken against a number somebody has seen.
+  #
+  # `Produce` and `Fetch` only. The broker publishes seven of these beans -- `AlterAcls`,
+  # `DeleteRecords`, `RemoteFetch`, `RemoteListOffsets` and `ShareFetch` beside these two -- and in
+  # the stock capture the other five read 0.0 while `Fetch` read 37, because they are queues for
+  # operations an ordinary client never issues. `Produce` is kept although it too read 0.0 there:
+  # it is 0.0 because nothing was producing at that instant, which is a measurement, and it is the
+  # half of the pair a write-heavy cluster is diagnosed by.
+  - pattern: "kafka.server<type=DelayedOperationPurgatory, name=PurgatorySize, delayedOperation=(Produce|Fetch)><>Value"
+    name: kafka_server_delayedoperationpurgatory_purgatorysize
+    labels:
+      delayedoperation: "$1"
+    type: GAUGE
+    help: "Delayed operations parked in one purgatory. A count of operations, not a ratio."

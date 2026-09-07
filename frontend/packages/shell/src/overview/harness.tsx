@@ -21,12 +21,17 @@
  * are therefore the real `shellPaths` over the same router.
  *
  * The client used to be an empty object with a comment saying it was never called, because the
- * screen took a finished model and fetched nothing. It fetches one thing now: the throughput series,
- * whose request depends on `?range=` and therefore on the address this harness exists to set. So the
- * stub answers **by path** and refuses anything it was not given — an unstubbed call is an
- * `unreachable` failure naming itself, which shows up in an assertion rather than as an empty card.
- * The default answers the throughput endpoint `not_configured`, which is the honest answer for a
- * fixture cluster with no exporter and is what every case that is not about throughput should see.
+ * screen took a finished model and fetched nothing. It fetches five things now — the throughput
+ * series, the latency series, the request-handler readings, the top producers and the mean record
+ * size — and the first two depend on `?range=` and therefore on the address this harness exists to
+ * set. So the stub answers **by path** and refuses anything it was not given: an unstubbed call is
+ * an `unreachable` failure naming itself, which shows up in an assertion rather than as an empty
+ * card.
+ *
+ * The default answers all five `not_configured`, which is the honest answer for a fixture cluster
+ * with no exporter and is what every case that is not about metrics should see. It is deliberately
+ * not "refuse everything": a case about the storage card would otherwise draw four red failure
+ * panels beside it and its own axe sweep would be asserting somebody else's broken card.
  */
 
 import { createRouter, memoryHistory, useLocation, type RouteSectionProps } from "@solidjs/router";
@@ -37,12 +42,22 @@ import { KuiProvider, type KuiContextValue } from "@kui/kernel";
 
 import { shellPaths } from "../routing/paths.js";
 import { shellRoutes, type RouteViews } from "../routing/routes.jsx";
-import { THROUGHPUT_NOT_CONFIGURED } from "./fixtures.js";
+import {
+  HANDLERS_NOT_CONFIGURED,
+  LATENCY_NOT_CONFIGURED,
+  PRODUCERS_NOT_CONFIGURED,
+  RECORD_SIZE_NOT_CONFIGURED,
+  THROUGHPUT_NOT_CONFIGURED,
+} from "./fixtures.js";
 
 const nothing = () => null;
 
-/** The throughput endpoint, as the client names it. One string, so a stub cannot misspell it. */
+/** The five metrics endpoints, as the client names them. One string each, so a stub cannot misspell one. */
 export const THROUGHPUT_PATH = "/api/v1/clusters/{clusterId}/metrics/throughput";
+export const LATENCY_PATH = "/api/v1/clusters/{clusterId}/metrics/latency";
+export const HANDLERS_PATH = "/api/v1/clusters/{clusterId}/metrics/request-handlers";
+export const PRODUCERS_PATH = "/api/v1/clusters/{clusterId}/metrics/producers";
+export const RECORD_SIZE_PATH = "/api/v1/clusters/{clusterId}/metrics/record-size";
 
 export interface StubApi {
   readonly api: KuiApiClient;
@@ -82,6 +97,18 @@ export function stubApi(answers: Readonly<Record<string, unknown>>): StubApi {
   } as unknown as KuiApiClient;
   return { api, calls };
 }
+
+/**
+ * A deployment that has configured no exporter, which is the ordinary case rather than the failure
+ * case. Exported so a story or a case can extend it with the one endpoint it is about.
+ */
+export const UNCONFIGURED_METRICS: Readonly<Record<string, unknown>> = {
+  [THROUGHPUT_PATH]: THROUGHPUT_NOT_CONFIGURED,
+  [LATENCY_PATH]: LATENCY_NOT_CONFIGURED,
+  [HANDLERS_PATH]: HANDLERS_NOT_CONFIGURED,
+  [PRODUCERS_PATH]: PRODUCERS_NOT_CONFIGURED,
+  [RECORD_SIZE_PATH]: RECORD_SIZE_NOT_CONFIGURED,
+};
 
 export interface DashboardHostOptions {
   /**
@@ -139,7 +166,7 @@ export function dashboardHost(
   });
 
   const context: KuiContextValue = {
-    api: options.api ?? stubApi({ [THROUGHPUT_PATH]: THROUGHPUT_NOT_CONFIGURED }).api,
+    api: options.api ?? stubApi(UNCONFIGURED_METRICS).api,
     cluster: () => options.selected,
     permits: () => true,
     paths: shellPaths(Router),

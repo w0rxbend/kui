@@ -51,6 +51,17 @@ export interface GroupDetailProps {
   readonly onDelete?: (() => void) | undefined;
   /** Why deletion is not offered, when it is not. */
   readonly deleteRefusal?: string | undefined;
+  /**
+   * Opens the confirmation for forgetting this group's committed offsets on one topic.
+   *
+   * Named by topic and not by partition, because that is the shape of the endpoint behind it:
+   * `DELETE …/consumer-groups/{group}/offsets?topic=` removes the group's positions on one topic
+   * and nothing else. Absent when this user may not reset this group's offsets — the endpoint is
+   * authorized by `ConsumerGroupResetOffsets`, the same action the wizard needs.
+   */
+  readonly onForgetOffsets?: ((topic: string) => void) | undefined;
+  /** Why forgetting is not offered, when it is not. */
+  readonly forgetRefusal?: string | undefined;
 }
 
 export function GroupDetail(props: GroupDetailProps): JSX.Element {
@@ -144,8 +155,77 @@ export function GroupDetail(props: GroupDetailProps): JSX.Element {
       </Card>
 
       <ResetWizard {...props.reset} topics={topics()} />
+
+      {/*
+        Forgetting one topic's offsets — a separate action from the wizard above it and from the
+        delete in the header, and it is per topic rather than a column of the assignments table.
+        The endpoint names a topic; that table's rows are partitions, so a per-row control would
+        offer a gesture the server cannot perform, and a single button would have to guess which of
+        the group's topics the operator meant.
+
+        Absent, rather than empty, for a group holding no offsets at all: there is nothing to
+        forget, and a heading over an empty list reads as a control that failed to load.
+      */}
+      <Show when={topics().length > 0}>
+        <section class="kui-cg-forget" data-testid="group-forget-offsets">
+          <h2 class="kui-cg-section__title">Forget this group's offsets on one topic</h2>
+          <p class="kui-cg-reset__note">
+            The group itself stays, every other topic it holds offsets on is untouched, and no
+            records are deleted. A consumer that comes back for this topic starts wherever its own
+            auto.offset.reset says, which for the default is the end of the log.
+          </p>
+          <ul class="kui-cg-forget__list">
+            <For each={topics()}>
+              {(held) => (
+                <li class="kui-cg-forget__row">
+                  <span class="kui-cg-mono kui-cg-forget__topic">{held.topic}</span>
+                  {/* The figure the receipt will be compared against, said before the click. */}
+                  <span class="kui-cg-forget__held">{describeHeld(held.partitions.length)}</span>
+                  <Show
+                    when={props.onForgetOffsets}
+                    fallback={
+                      <Button
+                        variant="secondary"
+                        icon="trash"
+                        disabled
+                        disabledReason={
+                          props.forgetRefusal ??
+                          "You do not have permission to change this group's committed offsets."
+                        }
+                      >
+                        Forget offsets
+                      </Button>
+                    }
+                  >
+                    {(forget) => (
+                      <Button
+                        variant="secondary"
+                        icon="trash"
+                        onClick={() => forget()(held.topic)}
+                      >
+                        Forget offsets
+                      </Button>
+                    )}
+                  </Show>
+                </li>
+              )}
+            </For>
+          </ul>
+        </section>
+      </Show>
     </section>
   );
+}
+
+/**
+ * How many partitions this group holds a committed position on for one topic.
+ *
+ * Spelled out rather than left as a bare number beside a topic name: "3" next to
+ * `orders.v1` could as easily be a version, a replica count or a lag, and this figure is the one
+ * the receipt after the click is read against.
+ */
+function describeHeld(count: number): string {
+  return count === 1 ? "1 partition held" : `${formatCount(count)} partitions held`;
 }
 
 /**

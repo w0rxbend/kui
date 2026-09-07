@@ -19,6 +19,18 @@ final class FakeSource(failure: Option[KuiError] = None) extends MetricsSourcePo
 
   def throughput(range: ThroughputRange, endingAt: Instant): IO[Either[KuiError, ThroughputSeries]] =
     IO.pure(failure.toLeft(ThroughputSeries.absent(range, endingAt)))
+
+  def latency(range: ThroughputRange, endingAt: Instant): IO[Either[KuiError, LatencySeries]] =
+    IO.pure(failure.toLeft(LatencySeries.absent(range, endingAt)))
+
+  def requestHandlers(asOf: Instant): IO[Either[KuiError, RequestHandlerReading]] =
+    IO.pure(failure.toLeft(RequestHandlerReading(Some(0.64d), Some(0.71d), List(PurgatoryQueue("Fetch", 961)))))
+
+  def producers(count: Int, asOf: Instant): IO[Either[KuiError, TopProducers]] =
+    IO.pure(failure.toLeft(TopProducers.of(List(TopicProducer("orders.v1", 98000.0d)), count)))
+
+  def recordSize(asOf: Instant): IO[Either[KuiError, RecordSizeReading]] =
+    IO.pure(failure.toLeft(RecordSizeReading.from(Some(1024.0d), Some(8.0d))))
 }
 
 /** Which clusters this fixture knows, and which of them have a collector behind them. */
@@ -39,7 +51,7 @@ final class FakeSources(profiles: List[SourceProfile], ports: Map[ClusterId, Met
   * keeps a written sentence, the other offers a retry. Collapsing them is the failure this service is shaped
   * to avoid, so it is asserted here rather than left to the route.
   */
-final class ThroughputUseCaseSuite extends CatsEffectSuite {
+final class MetricsUseCasesSuite extends CatsEffectSuite {
 
   private val local = ClusterId.unsafe("local")
   private val other = ClusterId.unsafe("other")
@@ -50,8 +62,8 @@ final class ThroughputUseCaseSuite extends CatsEffectSuite {
   private def useCase(
       profiles: List[SourceProfile],
       ports: Map[ClusterId, MetricsSourcePort[IO]] = Map.empty
-  ): ThroughputUseCase[IO] =
-    ThroughputUseCase.make[IO](new FakeSources(profiles, ports))
+  ): MetricsUseCases[IO] =
+    MetricsUseCases.make[IO](new FakeSources(profiles, ports))
 
   test("a cluster KUI has never heard of is a 404 and not an empty chart") {
     useCase(List(profile(local, hasSource = false)))
@@ -124,5 +136,71 @@ final class ThroughputUseCaseSuite extends CatsEffectSuite {
         case Right(MetricsReading.Unreadable(failure, _)) => assertEquals(failure.code, down.code)
         case other => fail(s"expected Unreadable, got $other")
       }
+  }
+
+  test("every endpoint answers NotMeasured for a cluster with no source, not just throughput") {
+    // The three-way rule is written once, in `ask`, and this is what says every method goes through it.
+    // A fifth endpoint bound directly to the port would answer an `unavailable` section for a deployment
+    // that simply configured nothing, which is the red panel this service exists to avoid.
+    val cases = useCase(List(profile(local, hasSource = false)))
+
+    for {
+      throughput <- cases.throughput(local, ThroughputRange.Last24Hours)
+      latency <- cases.latency(local, ThroughputRange.Last24Hours)
+      handlers <- cases.requestHandlers(local)
+      producers <- cases.producers(local, 5)
+      recordSize <- cases.recordSize(local)
+    } yield List(throughput, latency, handlers, producers, recordSize).foreach {
+      case Right(MetricsReading.NotMeasured(explanation)) =>
+        assert(explanation.contains("kui.metrics.sources"), explanation)
+      case other => fail(s"expected NotMeasured from every endpoint, got $other")
+    }
+  }
+
+  test("every endpoint is a 404 for a cluster KUI has never heard of") {
+    val cases = useCase(List(profile(local, hasSource = false)))
+
+    for {
+      latency <- cases.latency(other, ThroughputRange.Last24Hours)
+      handlers <- cases.requestHandlers(other)
+      producers <- cases.producers(other, 5)
+      recordSize <- cases.recordSize(other)
+    } yield List(latency, handlers, producers, recordSize).foreach {
+      case Left(error) => assertEquals(error.code, ErrorCode.ClusterNotFound)
+      case Right(reading) => fail(s"expected a not-found error, got $reading")
+    }
+  }
+
+  test("a source that refuses one family is Unreadable on that endpoint and not a 500") {
+    // The refusal that is not a deployment choice: the exporter answered and publishes no such family, so
+    // the card names a whitelist rather than waiting for an axis to fill.
+    val absent = InfrastructureError.Remote(ErrorCode.UpstreamUnavailable, "no RequestMetrics family", Nil)
+
+    useCase(List(profile(local, hasSource = true)), Map(local -> new FakeSource(Some(absent))))
+      .latency(local, ThroughputRange.Last24Hours)
+      .map {
+        case Right(MetricsReading.Unreadable(failure, _)) => assertEquals(failure.code, absent.code)
+        case other => fail(s"expected Unreadable, got $other")
+      }
+  }
+
+  test("the top count asked for reaches the port rather than being decided here") {
+    // `?top=` is the caller's, and a use case that clamped or ignored it would answer a five-row card for
+    // a request for one and nothing on the screen would say so.
+    val counting = new MetricsSourcePort[IO] {
+      def throughput(range: ThroughputRange, endingAt: Instant) =
+        IO.pure(Right(ThroughputSeries.absent(range, endingAt)))
+      def latency(range: ThroughputRange, endingAt: Instant) =
+        IO.pure(Right(LatencySeries.absent(range, endingAt)))
+      def requestHandlers(asOf: Instant) = IO.pure(Right(RequestHandlerReading.Empty))
+      def producers(count: Int, asOf: Instant) =
+        IO.pure(Right(TopProducers(List.tabulate(count)(index => TopicProducer(s"topic-$index", 1.0d)))))
+      def recordSize(asOf: Instant) = IO.pure(Right(RecordSizeReading.Empty))
+    }
+
+    useCase(List(profile(local, hasSource = true)), Map(local -> counting)).producers(local, 3).map {
+      case Right(MetricsReading.Measured(producers, _)) => assertEquals(producers.topics.size, 3)
+      case other => fail(s"expected Measured, got $other")
+    }
   }
 }

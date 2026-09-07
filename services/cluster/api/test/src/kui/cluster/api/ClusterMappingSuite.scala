@@ -9,7 +9,14 @@ import org.scalacheck.Prop.forAll
 
 import kui.cluster.application.{BrokerListRow, SnapshotFreshness}
 import kui.cluster.contract.dto.ClusterProfileDto
-import kui.cluster.domain.{ControllerMode, ControllerUptime, LogDirError, QuorumInfo, ReplicaState}
+import kui.cluster.domain.{
+  ControllerMode,
+  ControllerUptime,
+  LogDirError,
+  ProfileOrigin,
+  QuorumInfo,
+  ReplicaState
+}
 import kui.contracts.cluster.ClusterSummaryDto
 import kui.kernel.{BrokerId, Secret}
 import kui.kernel.cluster.*
@@ -78,6 +85,39 @@ final class ClusterMappingSuite extends ScalaCheckSuite {
     // cluster service holds, field for field.
     val decoded = dto.asJson.as[ClusterProfileDto].fold(failure => fail(failure.message), identity)
     assertEquals(ClusterProfileDto.connectionOf(decoded), profile.connection)
+  }
+
+  test("aStaticallyConfiguredClusterCarriesNoStoreVersionRatherThanAZeroOne") {
+    // `version` is an optimistic-concurrency token: a write sends it back and the store refuses if the
+    // record has moved. A statically configured cluster was never written, so there is no version for a
+    // write to replace, and sending one would ask the store to *create* a cluster that is already on the
+    // screen. The mapping's own comment says exactly this and nothing asserted it.
+    val static = ClusterMapping.row(profile, None, SnapshotFreshness.Loading, ClusterFixtures.At)
+
+    assertEquals(static.version, None)
+    assertEquals(static.origin, "static")
+  }
+
+  test("aStoredClusterCarriesTheVersionAWriteHasToSendBack") {
+    val stored = ClusterMapping.row(
+      ClusterFixtures.profile(origin = ProfileOrigin.Stored),
+      None,
+      SnapshotFreshness.Loading,
+      ClusterFixtures.At
+    )
+
+    assertEquals(stored.version, Some(7L))
+  }
+
+  test("aLogDirectorysReplicasArriveBiggestFirst") {
+    // The list the browser truncates. Sorting is done here so that every client gets the same order, and
+    // truncating an unsorted list drops exactly the large partitions the operator opened the page to find.
+    val dir = ClusterMapping.logDir(BrokerId.unsafe(1), ClusterFixtures.logDirOfSizes)
+
+    assertEquals(dir.replicas.map(_.sizeBytes), List(9_000L, 4_000L, 4_000L, 1_000L))
+    // Ties break by topic then partition, so two replicas of the same size still have one order.
+    assertEquals(dir.replicas.map(replica => (replica.topic, replica.partition)).take(3),
+      List(("orders", 1), ("audit", 0), ("orders", 0)))
   }
 
   test("aSummaryReportsWhatKafkaSaidAndNothingItDidNot") {

@@ -29,7 +29,7 @@ Three build failures, and a browser never enters into it. Measured, not asserted
 
 <!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -->
 `docs/api/openapi.json` describes the contract KUI's *services* speak, and that contract requires
-`X-Kui-Principal` on 46 of its 61 operations, across 35 of its 50 paths. Those are two figures and
+`X-Kui-Principal` on 50 of its 65 operations, across 39 of its 54 paths. Those are two figures and
 not one: a path with a `GET` and a `DELETE` carries the header on both operations and is still one
 path. This paragraph used to pair the *operation* count with the *path* total as though they were
 the same denominator, which is why it is now checked rather than maintained. The gateway mints that

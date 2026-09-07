@@ -9,7 +9,7 @@ import org.typelevel.log4cats.StructuredLogger
 
 import kui.kernel.ClusterId
 import kui.kernel.error.KuiError
-import kui.metrics.infrastructure.{ThroughputBuffer, ThroughputScrape}
+import kui.metrics.infrastructure.{BrokerScrape, MetricsBuffer}
 
 /** One fibre per configured cluster, reading its exporter on a cadence and filing what came back.
   *
@@ -40,15 +40,15 @@ import kui.metrics.infrastructure.{ThroughputBuffer, ThroughputScrape}
   * never answers delays this fibre and nothing else — start-up included, because the loop runs in the
   * background from the moment it is allocated.
   */
-object ThroughputScrapeLoop {
+object BrokerScrapeLoop {
 
   /** Starts the fibre and hands back its lifetime. It is cancelled when the composition root's `Resource`
     * closes, which is what stops a scrape in flight from outliving the process it belongs to.
     */
   def resource[F[_]: Temporal](
       cluster: ClusterId,
-      scrape: ThroughputScrape[F],
-      buffer: ThroughputBuffer[F],
+      scrape: BrokerScrape[F],
+      buffer: MetricsBuffer[F],
       interval: FiniteDuration,
       logger: StructuredLogger[F]
   ): Resource[F, Unit] =
@@ -66,8 +66,8 @@ object ThroughputScrapeLoop {
     */
   def pass[F[_]: Temporal](
       cluster: ClusterId,
-      scrape: ThroughputScrape[F],
-      buffer: ThroughputBuffer[F],
+      scrape: BrokerScrape[F],
+      buffer: MetricsBuffer[F],
       logger: StructuredLogger[F]
   ): F[Unit] =
     Temporal[F].realTimeInstant

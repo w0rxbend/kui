@@ -42,11 +42,18 @@ export const THROUGHPUT_RANGES = ["24h", "7d", "30d"] as const;
 export type ThroughputRange = (typeof THROUGHPUT_RANGES)[number];
 
 /**
- * The range a request with no `?range=` gets, and the one the card opens on.
+ * The range the card opens on, and the one an unrecognised `?range=` resolves to.
  *
- * The same value `ThroughputRange.Default` holds on the server. If the two ever disagree the card
- * asks for one window and labels it with another, so the agreement is asserted rather than assumed:
- * see `throughput.test.ts`.
+ * It is deliberately *not* a mirror of the server's `ThroughputRange.Default`, and nothing here
+ * depends on the two agreeing: `fetchThroughput` always sends the resolved range in `?range=`, so
+ * the server's own default is never reached by this card and a disagreement could not make it "ask
+ * for one window and label it with another" — the sentence that used to sit here, which described a
+ * failure this code cannot have.
+ *
+ * What the constant does carry is the agreement between the *address* and the *selector*: the tab is
+ * reached at `/dashboard/traffic` with no query at all, and the segment the strip marks and the
+ * window the request asks for both come from here. That is what `throughput.test.ts` asserts, in
+ * "resolves an absent or unrecognised window to the default rather than refusing".
  */
 export const DEFAULT_THROUGHPUT_RANGE: ThroughputRange = "24h";
 
@@ -106,6 +113,21 @@ export interface CoverageRun {
   readonly length: number;
 }
 
+/**
+ * The two rates and the current reading, with no axis attached.
+ *
+ * What a stat card needs, and all of it: `ThroughputChart` extends this with the labels, ticks,
+ * coverage and caption that only the chart draws.
+ */
+export interface RateSeries {
+  /** Bytes in per second, per bucket. `null` is a gap. */
+  readonly produce: readonly (number | null)[];
+  /** Bytes out per second, per bucket. `null` is a gap. */
+  readonly consume: readonly (number | null)[];
+  /** The newest bucket that carried a rate. `undefined` when none did. */
+  readonly latest: { readonly produce: number | null; readonly consume: number | null } | undefined;
+}
+
 /** Everything the card draws, decided here so the component is arrangement. */
 export interface ThroughputChart {
   /** One label per bucket. Its length is the axis, and it is the server's count, never a target. */
@@ -138,8 +160,12 @@ function rate(value: number | null | undefined): number | null {
  * header says why there is no control for one — so a label in any other zone would be a claim the
  * rest of the product does not make. Each range gets the coarsest label that still separates two
  * adjacent buckets: minutes over a day, the weekday over a week, the date over a month.
+ *
+ * Exported because the latency card draws the *same three windows* over the same steps, and two
+ * axis-labelling rules on one screen is two chances for the throughput chart and the latency chart
+ * to disagree about what "Tue 14:00" means.
  */
-function labelFor(instant: string | undefined, range: ThroughputRange): string {
+export function bucketLabel(instant: string | undefined, range: ThroughputRange): string {
   if (instant === undefined) return "";
   const at = new Date(instant);
   if (Number.isNaN(at.getTime())) return "";
@@ -194,8 +220,12 @@ export function coverageRuns(
   return runs;
 }
 
-/** How long one step is, in words, from the width the server sent. `undefined` when it sent none. */
-function stepWords(stepSeconds: number | undefined): string | undefined {
+/**
+ * How long one step is, in words, from the width the server sent. `undefined` when it sent none.
+ *
+ * Exported for the latency caption, which counts its gaps in the same words over the same steps.
+ */
+export function stepWords(stepSeconds: number | undefined): string | undefined {
   if (stepSeconds === undefined || !Number.isFinite(stepSeconds) || stepSeconds <= 0) return undefined;
   if (stepSeconds % 3600 === 0) {
     const hours = stepSeconds / 3600;
@@ -243,24 +273,29 @@ function captionFor(
 }
 
 /**
- * The wire's series as the picture, and the one line in this file that matters.
+ * The two rates, and the newest bucket that carried either — the part of the fold that has nothing
+ * to do with an axis.
  *
- * `rate()` is what keeps a gap a gap. Replacing either of its two calls with `?? 0` turns every
- * unsampled step into a measured quiet one, and the chart, the coverage strip and the hidden data
- * table all stop being able to tell the difference — which is the mutation this card is gated on.
+ * Separate from {@link throughputChart} because two callers need exactly this and nothing else: the
+ * PRODUCTION and CONSUME stat cards print one figure and a `Sparkline`, and neither draws a
+ * category, a tick or a caption. Built through the whole chart they cost 288 `toLocaleTimeString`
+ * calls apiece to throw the labels away — measured as the difference between a Traffic tab that
+ * renders inside a five-second test budget and one that does not.
+ *
+ * `rate()` is what keeps a gap a gap, and it is the one line in this file that matters. Replacing
+ * either of its two calls with `?? 0` turns every unsampled step into a measured quiet one, and the
+ * chart, the coverage strip, the hidden data table and both sparklines stop being able to tell the
+ * difference.
  */
-export function throughputChart(series: ThroughputSeries, range: ThroughputRange): ThroughputChart {
+export function rateSeries(series: ThroughputSeries): RateSeries {
   const buckets = series.buckets ?? [];
-  const categories = buckets.map((bucket) => labelFor(bucket.startingAt ?? bucket.at, range));
   const produce = buckets.map((bucket) => rate(bucket.bytesInPerSecond));
   const consume = buckets.map((bucket) => rate(bucket.bytesOutPerSecond));
-  const coverage = coverageRuns(produce, consume);
-  const absentBuckets = coverage.reduce((sum, run) => (run.measured ? sum : sum + run.length), 0);
 
-  /* The newest bucket that measured anything, which is what the legend chips print. Newest rather
-     than an average over the window: §3.1 puts the *current* value in the chip, and an average
-     across a day is a number nobody can act on. */
-  let latest: ThroughputChart["latest"] = undefined;
+  /* The newest bucket that measured anything, which is what the legend chips and the stat cards
+     print. Newest rather than an average over the window: §3.1 puts the *current* value in the
+     chip, and an average across a day is a number nobody can act on. */
+  let latest: RateSeries["latest"] = undefined;
   for (let index = buckets.length - 1; index >= 0; index -= 1) {
     const producedAt = produce[index] ?? null;
     const consumedAt = consume[index] ?? null;
@@ -269,6 +304,23 @@ export function throughputChart(series: ThroughputSeries, range: ThroughputRange
       break;
     }
   }
+
+  return { produce, consume, latest };
+}
+
+/**
+ * The wire's series as the picture.
+ *
+ * The rates come from {@link rateSeries}, so the never-a-zero rule has one implementation and the
+ * chart and the stat cards above it cannot disagree about what was measured. What this adds is the
+ * axis: the labels, the ticks, the coverage runs and the sentence.
+ */
+export function throughputChart(series: ThroughputSeries, range: ThroughputRange): ThroughputChart {
+  const buckets = series.buckets ?? [];
+  const categories = buckets.map((bucket) => bucketLabel(bucket.startingAt ?? bucket.at, range));
+  const { produce, consume, latest } = rateSeries(series);
+  const coverage = coverageRuns(produce, consume);
+  const absentBuckets = coverage.reduce((sum, run) => (run.measured ? sum : sum + run.length), 0);
 
   return {
     categories,

@@ -100,6 +100,25 @@ export function ResendDialog(props: ResendDialogProps): JSX.Element {
     },
   );
 
+  /**
+   * The partition count as a *value* the sentence below is drawn from, or nothing.
+   *
+   * Wrapped in an object rather than handed over bare so that the narrowing is structural: `Show`
+   * renders the child only when this answers, and the child is given the number, so the sentence
+   * cannot be composed at all without one. Read straight off `props.partitionCount` inside a
+   * `<Show when={props.partitionCount !== undefined}>`, the compiler still saw `number |
+   * undefined` there, and the `?? 0` that satisfied it was a pre-written "has 0 partitions" —
+   * unreachable only for as long as the sibling condition and the fallback stayed in step. That
+   * sentence is the exact falsehood this dialog's own header, this file's tests and an end-to-end
+   * assertion all exist to prevent, so it is not left one edit away from being said.
+   *
+   * Bare `when={props.partitionCount}` would not do it either: a count of `0` is falsy, so a
+   * server that did say zero would be redrawn as a server that said nothing.
+   */
+  const measured = createMemo<{ readonly count: number } | undefined>(() =>
+    props.partitionCount === undefined ? undefined : { count: props.partitionCount },
+  );
+
   const problem = createMemo(() => resendDraftProblem(draft()));
   const busy = () => props.state.kind === "running";
   const total = createMemo(() => draftSize(draft()));
@@ -271,7 +290,7 @@ export function ResendDialog(props: ResendDialogProps): JSX.Element {
                     shipped instead was worse than silence: a hard-coded zero, stated as a fact,
                     with the control that adds a range disabled to match it. */}
                 <Show
-                  when={props.partitionCount !== undefined}
+                  when={measured()}
                   fallback={
                     <p class="kui-resend__unknown">
                       KUI has not been told how many partitions {props.topic} has, so it cannot say
@@ -283,9 +302,11 @@ export function ResendDialog(props: ResendDialogProps): JSX.Element {
                   {/* `__known`, not `__unknown`. The two sentences are opposite statements and they
                       were sharing a class, so the styling that says "this is a gap" was applied to
                       the one that states a measured figure. */}
-                  <p class="kui-resend__known">
-                    {props.topic} {describePartitions(props.partitionCount ?? 0)}.
-                  </p>
+                  {(known) => (
+                    <p class="kui-resend__known">
+                      {props.topic} {describePartitions(known().count)}.
+                    </p>
+                  )}
                 </Show>
               </section>
 

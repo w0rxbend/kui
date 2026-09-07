@@ -28,6 +28,15 @@
  */
 import { test, expect, CLUSTER, type KuiApi } from "./fixtures";
 
+/**
+ * A seeded group that holds committed offsets, so the per-topic controls on its page have rows.
+ *
+ * `analytics-indexer` is the quickstart's live one — a container that keeps consuming
+ * `analytics.pageviews` — so it is the group whose detail page is populated on a stack that has
+ * only just come up, where the two stopped groups are equally valid and less certain to be settled.
+ */
+const GROUP_WITH_OFFSETS = "analytics-indexer";
+
 /** The server's own count of the cluster's groups, read straight from the gateway. */
 async function totalGroups(api: KuiApi): Promise<number> {
   const answer = (await api.get(`/api/v1/clusters/${CLUSTER}/consumer-groups`)) as {
@@ -128,5 +137,49 @@ test.describe("consumer groups", () => {
     // the list before wave 2, and a URL assertion would have passed while it did.
     await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /reset offsets/i })).toBeVisible();
+  });
+
+  test("offers forgetting the offsets on each topic the group holds them on", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * `CG-005`, and the half only a browser settles: the control is on the shipped screen, and the
+     * topics it names are the coordinator's rather than a fixture's. The row that shipped for two
+     * waves said the control was there; the port to `feature-consumers` did not carry it across
+     * and nothing looked.
+     *
+     * It is **not pressed here.** Forgetting a seeded group's offsets removes the group — a group
+     * is nothing but its committed offsets — and the quickstart's three groups are shared state
+     * that this file's own count assertions and three other specs read. KUI cannot create a
+     * consumer group either: `…/offsets/plan` answers `KUI-GROUP-NOT-FOUND` for a group that does
+     * not exist, checked against the running stack, so there is no scratch group to do it to. The
+     * destructive half — the request, the receipt and the two sentences its figure chooses
+     * between — is driven at the route in `src/groupRoute.test.tsx`.
+     */
+    const detail = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/consumer-groups/${encodeURIComponent(GROUP_WITH_OFFSETS)}`,
+    )) as { topics?: { topic: string; partitions?: unknown[] }[] };
+    const held = detail.topics ?? [];
+    expect(held.length).toBeGreaterThan(0);
+
+    await page.goto(
+      `/ui/clusters/${CLUSTER}/consumer-groups/${encodeURIComponent(GROUP_WITH_OFFSETS)}`,
+    );
+
+    const section = page.getByTestId("group-forget-offsets");
+    await expect(section).toBeVisible({ timeout: 20_000 });
+    // One row per topic the coordinator says this group holds a position on, and the count beside
+    // each is that topic's partitions — the figure the receipt after a click is read against.
+    await expect(section.locator("li")).toHaveCount(held.length);
+    for (const topic of held) {
+      const partitions = topic.partitions?.length ?? 0;
+      expect(partitions).toBeGreaterThan(0);
+      const row = section.locator("li", { hasText: topic.topic });
+      await expect(row).toContainText(
+        partitions === 1 ? "1 partition held" : `${partitions} partitions held`,
+      );
+      await expect(row.getByRole("button", { name: /forget offsets/i })).toBeEnabled();
+    }
   });
 });

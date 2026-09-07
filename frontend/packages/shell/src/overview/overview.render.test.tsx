@@ -22,21 +22,50 @@ import { Overview, UNMEASURED_DISK } from "./Overview.jsx";
 import { toOverviewModel } from "./load.js";
 import {
   CONSUMERS_UNAVAILABLE,
+  HANDLER_ONE_ABSENT,
+  HANDLER_READINGS,
   HEALTHY,
+  LATENCY_ALL_ABSENT,
+  LATENCY_WITH_A_GAP,
   LOADING,
   NO_DISK_SIZES,
   PARTIAL_DISKS,
+  PRODUCERS_BY_CLIENT,
+  PRODUCERS_BY_TOPIC,
+  RECORD_SIZE_ABSENT,
+  RECORD_SIZE_MEAN,
   SPARSE_SUMMARY,
   THROUGHPUT_ALL_ABSENT,
   THROUGHPUT_FORBIDDEN,
+  THROUGHPUT_MEASURED_ZERO,
   THROUGHPUT_NOT_CONFIGURED,
+  THROUGHPUT_STALE,
   THROUGHPUT_UNAVAILABLE,
   THROUGHPUT_WITH_A_GAP,
   UNHEALTHY,
   ZERO_BYTE_DISKS,
+  handlersOk,
+  latencyOk,
+  producersOk,
+  recordSizeOk,
   throughputOk,
 } from "./fixtures.js";
-import { AddressProbe, THROUGHPUT_PATH, dashboardHost, stubApi } from "./harness.jsx";
+import {
+  AddressProbe,
+  HANDLERS_PATH,
+  LATENCY_PATH,
+  PRODUCERS_PATH,
+  RECORD_SIZE_PATH,
+  THROUGHPUT_PATH,
+  UNCONFIGURED_METRICS,
+  dashboardHost,
+  stubApi,
+} from "./harness.jsx";
+import { FORBIDDEN_SENTENCE, NOT_CONFIGURED_SENTENCE, NO_SAMPLES_SENTENCE } from "./ThroughputCard.jsx";
+import { NO_DISTRIBUTION } from "./TrafficCards.jsx";
+import { notConfiguredSentence } from "./NotMeasured.jsx";
+import { HANDLERS_NOUN, PRODUCERS_NOUN } from "./TrafficCards.jsx";
+import { LATENCY_NOUN } from "./LatencyCard.jsx";
 import { findViolations, mount, type Mounted } from "../chrome/testing.js";
 import type { OverviewData } from "./load.js";
 
@@ -88,8 +117,21 @@ const settle = async (rounds = 6): Promise<void> => {
  * one server, which is right in the product — so two cases naming the same cluster would otherwise
  * share an answer and the second would assert against the first one's stub.
  */
-const showTraffic = async (body: unknown, at: string = `${DASHBOARD}/traffic`) => {
-  const stub = stubApi({ [THROUGHPUT_PATH]: body });
+const showTraffic = async (body: unknown, at: string = `${DASHBOARD}/traffic`) =>
+  showMetrics({ [THROUGHPUT_PATH]: body }, at);
+
+/**
+ * The same, with any of the five metrics endpoints answered.
+ *
+ * Whatever is not named answers `not_configured`, which is the honest state for a fixture cluster
+ * with no exporter — and is what stops a case about one card from being surrounded by four red
+ * failure panels it did not mean to assert against.
+ */
+const showMetrics = async (
+  answers: Readonly<Record<string, unknown>>,
+  at: string = `${DASHBOARD}/traffic`,
+) => {
+  const stub = stubApi({ ...UNCONFIGURED_METRICS, ...answers });
   const mounted = keep(
     mount(
       dashboardHost(
@@ -108,6 +150,15 @@ const showTraffic = async (body: unknown, at: string = `${DASHBOARD}/traffic`) =
   return { ...mounted, stub };
 };
 
+/**
+ * Only the throughput requests, in order.
+ *
+ * The Traffic tab asks five endpoints, so a case about the range selector has to say which requests
+ * it is counting or it is asserting how many other cards this tab happens to have.
+ */
+const throughputCalls = (calls: readonly string[]): readonly string[] =>
+  calls.filter((call) => call.startsWith(THROUGHPUT_PATH));
+
 /** The card's hidden data table, which is the honest reading of the bars beside it. */
 const throughputTable = (container: HTMLElement): HTMLTableElement | null =>
   container.querySelector('[data-testid="panel-throughput"] table');
@@ -117,6 +168,16 @@ const bucketCells = (container: HTMLElement, index: number): readonly string[] =
   const row = throughputTable(container)?.querySelectorAll("tbody tr")[index];
   return [...(row?.querySelectorAll("td") ?? [])].map((cell) => cell.textContent ?? "");
 };
+
+/**
+ * The voice line under the page title, and only that.
+ *
+ * Read from the header's own element rather than from the container's text, because two of the
+ * sentences this tab can print also appear inside the throughput card — so a case reading the whole
+ * page would pass on the card's copy while the header said the opposite above it.
+ */
+const voiceOf = (container: HTMLElement): string =>
+  container.querySelector('[data-testid="overview-header"] .kui-page-head__voice')?.textContent ?? "";
 
 /** Which segment the strip has marked, read the way a screen reader reads it. */
 const currentTab = (container: HTMLElement): string | null =>
@@ -232,37 +293,69 @@ describe("the healthy dashboard", () => {
   });
 });
 
-describe("the panels this backend cannot fill", () => {
-  it("says what is not measured, rather than drawing an empty chart", () => {
-    const { container } = show(HEALTHY);
+describe("a deployment that has configured no exporter", () => {
+  it("says so on every metrics card, in one voice, and draws no axis on any of them", async () => {
+    // Five cards reach this state and they must reach it in one sentence: an operator looking at a
+    // screen where five panels say the same thing in five different ways reads five problems. The
+    // sentence is imported rather than retyped, which is the drift this packet removed — a case
+    // that typed its own fragment passes while the screen says something else.
+    const { container } = await showMetrics({});
 
-    const latency = container.querySelector('[data-testid="panel-latency"]');
-    expect(latency?.textContent).toContain("does not record request latency");
-    expect(latency?.querySelector(".kui-chart, .kui-line-chart, [role=\"img\"]")).toBeNull();
+    const nouns: Readonly<Record<string, string>> = {
+      "panel-latency": LATENCY_NOUN,
+      "panel-top-producers": PRODUCERS_NOUN,
+      "panel-request-handlers": HANDLERS_NOUN,
+    };
+    for (const panel of ["panel-throughput", "panel-latency", "panel-top-producers", "panel-request-handlers"]) {
+      const card = container.querySelector(`[data-testid="${panel}"]`);
+      const noun = nouns[panel];
+      expect(card?.textContent).toContain(
+        noun === undefined ? "No metrics source is configured for it" : notConfiguredSentence(noun),
+      );
+      // An axis or a ring is a claim that the quantity is measured and merely absent right now,
+      // and this cluster has nothing measuring it. Either sends somebody to find an exporter that
+      // was never configured.
+      expect(card?.querySelector("table")).toBeNull();
+      expect(card?.querySelector('[role="img"]')).toBeNull();
+      // And not a failure: no retry, because no retry could ever succeed.
+      expect(card?.querySelector("button")).toBeNull();
+    }
+    // The card's own sentence, whole and imported rather than a fragment retyped here. Read from
+    // the `NotMeasured` note itself, because the card's text also carries its title and its range
+    // selector's three segments.
+    expect(
+      container.querySelector('[data-testid="throughput-not-measured"] .kui-not-measured__why')
+        ?.textContent,
+    ).toBe(NOT_CONFIGURED_SENTENCE);
   });
 
-  it("says the same of the record-size distribution on the storage tab", () => {
-    const { container } = show(HEALTHY, `${DASHBOARD}/storage`);
+  it("says the same of the record-size card on the storage tab", async () => {
+    const { container } = await showMetrics({}, `${DASHBOARD}/storage`);
     const sizes = container.querySelector('[data-testid="panel-message-sizes"]');
-    expect(sizes?.textContent).toContain("does not record message sizes");
-    // The design's twelve buckets and five axis labels are exactly what must not be drawn: an axis
-    // is a claim that the quantity is measured and merely absent right now.
-    expect(sizes?.querySelector(".kui-chart, .kui-histogram, [role=\"img\"]")).toBeNull();
-    expect(sizes?.textContent).not.toContain("—");
+    expect(sizes?.textContent).toContain(notConfiguredSentence("this cluster's record sizes"));
+    // The design's twelve buckets and five axis labels are exactly what must not be drawn.
+    expect(sizes?.querySelector('.kui-chart, .kui-histogram, .kui-plot, [role="img"]')).toBeNull();
+    // And no figure at all, dash or otherwise. The *sentence* contains an em dash — "— a deployment
+    // choice rather than a fault" — so what must be absent is a figure that reads as one, which is
+    // the rendering that says the mean is momentarily unreadable.
+    expect(sizes?.querySelector('[data-testid="record-size-mean"]')).toBeNull();
   });
 
-  it("offers no retry, because no retry could ever succeed", () => {
-    const { container } = show(HEALTHY);
-    const throughput = container.querySelector('[data-testid="panel-throughput"]');
-    expect(throughput?.textContent?.toLowerCase()).not.toContain("retry");
-    expect(throughput?.querySelector("button")).toBeNull();
-  });
-
-  it("does not print a dash where there is no measurement, which would read as a failed read", () => {
-    const { container } = show(HEALTHY);
-    const production = container.querySelector('[data-testid="stat-production"]');
-    expect(production?.textContent).toContain("does not sample");
-    expect(production?.textContent).not.toContain("—");
+  it("does not print a dash where there is no measurement, which would read as a failed read", async () => {
+    // A `StatCard` reading `— MB/s` says the rate is momentarily unreadable. The truth is that this
+    // deployment configured nothing to read it, and that is a sentence rather than punctuation.
+    const { container } = await showMetrics({});
+    for (const stat of ["stat-production", "stat-consume"]) {
+      const card = container.querySelector(`[data-testid="${stat}"]`);
+      expect(card?.textContent).toContain("No metrics source is configured for it");
+      /* No figure slot at all, which is stronger than "no dash in the text": the shared sentence
+         itself ends "— a deployment choice rather than a fault", so a case that forbade the
+         character would be forbidding the punctuation of the sentence it is asserting. What must
+         not exist is a `StatCard` figure — `.kui-stat__unknown` is the em dash this rule is about. */
+      expect(card?.querySelector(".kui-stat__figure")).toBeNull();
+      expect(card?.querySelector(".kui-stat__unknown")).toBeNull();
+      expect(card?.querySelector(".kui-sparkline")).toBeNull();
+    }
   });
 });
 
@@ -582,21 +675,59 @@ describe("the Traffic tab", () => {
     expect(traffic.container.querySelector('[data-testid="panel-storage"]')).toBeNull();
   });
 
-  it("keeps the three cards wave 5 will fill saying so, beside a chart that is real", async () => {
-    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+  it("draws each card from its own read, so one dead family costs one card and not the tab", async () => {
+    // ADR-039's whole shape, on one screen. The throughput and the producers are answered and the
+    // other three are not, and the difference has to be visible per card rather than per page —
+    // which is what `Section` is for and why these are five queries and not one.
+    const { container } = await showMetrics({
+      [THROUGHPUT_PATH]: throughputOk(THROUGHPUT_WITH_A_GAP),
+      [PRODUCERS_PATH]: producersOk(PRODUCERS_BY_TOPIC),
+    });
 
+    expect(throughputTable(container)).not.toBeNull();
     expect(container.querySelector('[data-testid="panel-top-producers"]')?.textContent).toContain(
-      "does not record which clients are producing",
+      "orders.payments",
     );
     expect(container.querySelector('[data-testid="panel-request-handlers"]')?.textContent).toContain(
-      "does not record request-handler idle time",
+      notConfiguredSentence(HANDLERS_NOUN),
     );
-    // None of the three may borrow a figure from something the browser happens to hold: a producer
-    // rate computed from a message browse is not a broker metric.
-    for (const panel of ["panel-top-producers", "panel-message-sizes", "panel-request-handlers"]) {
-      const card = container.querySelector(`[data-testid="${panel}"]`);
-      expect(card?.querySelector('[role="img"]')).toBeNull();
-    }
+    expect(container.querySelector('[data-testid="panel-latency"]')?.textContent).toContain(
+      notConfiguredSentence(LATENCY_NOUN),
+    );
+  });
+
+  it("names the row by what the server measured, not by what the design drew", async () => {
+    // §4 draws `Top producers · client.id`. A broker publishes no per-`client.id` byte rate unless
+    // quotas are configured; it publishes a per-*topic* one. So the heading follows the answer —
+    // a tile labelled `client.id` over a topic name is the defect wave 5's rule 7 exists to stop.
+    const topics = await showMetrics({ [PRODUCERS_PATH]: producersOk(PRODUCERS_BY_TOPIC) });
+    const byTopic = topics.container.querySelector('[data-testid="panel-top-producers"]');
+    expect(byTopic?.textContent).toContain("Top producers · topic");
+    expect(byTopic?.textContent).not.toContain("client.id");
+
+    const clients = await showMetrics({ [PRODUCERS_PATH]: producersOk(PRODUCERS_BY_CLIENT) });
+    expect(clients.container.querySelector('[data-testid="panel-top-producers"]')?.textContent).toContain(
+      "Top producers · client.id",
+    );
+  });
+
+  it("gives each producer a monogram, which is what the design leads the row with", async () => {
+    const { container } = await showMetrics({ [PRODUCERS_PATH]: producersOk(PRODUCERS_BY_TOPIC) });
+    const tiles = container.querySelectorAll('[data-testid="panel-top-producers"] .kui-monogram');
+    expect(tiles).toHaveLength(5);
+    // `orders.payments` reads left to right: the first letter of each of the first two segments.
+    expect(tiles[0]?.textContent).toBe("OP");
+    // Decoration, because the identifier it abbreviates is written beside it.
+    expect(tiles[0]?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps a producer whose rate did not arrive, and says so in words", async () => {
+    // Dropping the row would shorten a top-five to a top-four without saying so; drawing a zero
+    // would rank it last on a measurement nobody made.
+    const { container } = await showMetrics({ [PRODUCERS_PATH]: producersOk(PRODUCERS_BY_TOPIC) });
+    const card = container.querySelector('[data-testid="panel-top-producers"]');
+    expect(card?.textContent).toContain("audit.trail");
+    expect(card?.textContent).toContain("not measured");
   });
 
   it("names the tab in the strip and marks it current at its own address", async () => {
@@ -606,14 +737,32 @@ describe("the Traffic tab", () => {
 
   it("promises only what it measures in the voice line", async () => {
     const measured = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
-    expect(measured.container.textContent).toContain("KUI measures the first of those");
+    expect(voiceOf(measured.container)).toContain("KUI measures the first of those");
 
     const unconfigured = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
     // The design's sentence names three things and this cluster measures none of them. Printed
-    // unqualified over three cards that say so, it is the cheerful-line-over-a-broken-cluster
-    // failure in a different hat: a reader who believes the header goes looking for the chart.
-    expect(unconfigured.container.textContent).toContain("no metrics source");
-    expect(unconfigured.container.textContent).not.toContain("KUI measures the first of those");
+    // unqualified over cards that say so, it is the cheerful-line-over-a-broken-cluster failure in
+    // a different hat: a reader who believes the header goes looking for the chart.
+    expect(voiceOf(unconfigured.container)).toContain("no metrics source");
+    expect(voiceOf(unconfigured.container)).not.toContain("KUI measures the first of those");
+  });
+
+  it("does not claim to be measuring when a reachable exporter has sampled nothing", async () => {
+    /*
+     * The rule this packet owns, and it is the one `trafficLede` was written for and nothing
+     * asserted. `hasMeasuredBucket` is the whole difference between the two sentences, and
+     * collapsing the branch to the cheerful one left 162 cases green — so a cluster whose exporter
+     * is up and has sampled nothing got "KUI measures the first of those" printed over 288 blank
+     * steps, which is precisely what the function's own eight-line comment says it exists to
+     * prevent. The fixture and the story for this state both existed; neither was ever read.
+     *
+     * Asserted on the *voice line* rather than on the page's text, because "Nothing has been
+     * sampled in this window yet" is also the plot's empty message — a case that read the whole
+     * container would pass on the chart's sentence while the header lied above it.
+     */
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_ALL_ABSENT));
+    expect(voiceOf(container)).toContain("Nothing has been sampled in this window yet");
+    expect(voiceOf(container)).not.toContain("KUI measures the first of those");
   });
 });
 
@@ -661,8 +810,11 @@ describe("a null bucket is a gap and never a zero", () => {
     const { container } = await showTraffic(throughputOk(THROUGHPUT_ALL_ABSENT));
 
     expect(throughputTable(container)?.querySelectorAll("tbody tr")).toHaveLength(288);
+    // The card's own sentence, imported rather than retyped: a case that types its own fragment
+    // keeps passing while the screen says something else, which is what these three exports were
+    // added for and what nothing had ever used them for.
     expect(container.querySelector('[data-testid="panel-throughput"]')?.textContent).toContain(
-      "Nothing has been sampled in this window yet",
+      NO_SAMPLES_SENTENCE,
     );
     // No legend figure either: there is no current rate, and an em dash in a chip reads as a
     // rendering fault where the sentence in the plot has already said what is missing.
@@ -683,6 +835,243 @@ describe("a null bucket is a gap and never a zero", () => {
   });
 });
 
+describe("the p99 latency card", () => {
+  it("draws a null bucket as a gap and never as a zero", async () => {
+    /*
+     * The throughput card's rule, on the second chart drawn from a broker metric. The fixture holds
+     * a measured `0` nowhere and twenty unsampled steps at 100..119, and a fold that turned a null
+     * into a zero would draw a broker that stopped answering as one answering instantly — the most
+     * flattering possible rendering of "we were not looking".
+     *
+     * Read from the plot's own hidden data table, which is the honest reading of a line that simply
+     * has no ink in the hole.
+     */
+    const { container } = await showMetrics({ [LATENCY_PATH]: latencyOk(LATENCY_WITH_A_GAP) });
+    const rows = container.querySelectorAll('[data-testid="panel-latency"] table tbody tr');
+    expect(rows).toHaveLength(288);
+
+    const cells = (index: number): readonly string[] =>
+      [...(rows[index]?.querySelectorAll("td") ?? [])].map((cell) => cell.textContent ?? "");
+    expect(cells(100)).toEqual(["—", "—"]);
+    expect(cells(119)).toEqual(["—", "—"]);
+    expect(cells(100)).not.toContain("0.00 ms");
+    // And a bucket either side still carries its reading, so this is not a case that passes over a
+    // chart that lost every value.
+    expect(cells(99).join()).toContain("ms");
+    expect(cells(120).join()).toContain("ms");
+  });
+
+  it("counts the gaps in words, and not in the words a rate would use", async () => {
+    const { container } = await showMetrics({ [LATENCY_PATH]: latencyOk(LATENCY_WITH_A_GAP) });
+    const caption = container.querySelector('[data-testid="panel-latency"] .kui-panel__caption');
+    expect(caption?.textContent).toContain("20 of the 288 5-minute steps");
+    // "as a rate of zero" belongs to the throughput card. A blank latency step drawn as zero claims
+    // the broker answered instantly.
+    expect(caption?.textContent).toContain("rather than as zero latency");
+  });
+
+  it("prints the newest measured reading in each legend chip", async () => {
+    // §3.1 puts the current value in the chip, which is what lets this plot have no y-axis labels.
+    const { container } = await showMetrics({ [LATENCY_PATH]: latencyOk(LATENCY_WITH_A_GAP) });
+    const chips = [
+      ...container.querySelectorAll('[data-testid="panel-latency"] .kui-chart-legend__item'),
+    ].map((item) => item.textContent?.trim());
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toMatch(/^produce.*ms$/);
+    expect(chips[1]).toMatch(/^fetch.*ms$/);
+  });
+
+  it("draws the whole axis for a window nothing was sampled in, and no figure in the chips", async () => {
+    const { container } = await showMetrics({ [LATENCY_PATH]: latencyOk(LATENCY_ALL_ABSENT) });
+    expect(container.querySelectorAll('[data-testid="panel-latency"] table tbody tr')).toHaveLength(288);
+    expect(
+      container.querySelectorAll('[data-testid="panel-latency"] .kui-chart-legend__value'),
+    ).toHaveLength(0);
+  });
+});
+
+describe("the request-handler tiles", () => {
+  it("draws a ratio as a ring and a queue length as a count, in the same card", async () => {
+    /*
+     * §3.4 draws "71% NETWORK IDLE", "64% IO IDLE" and "38% PURGATORY" as three rings.
+     * `DelayedOperationPurgatory` publishes a queue *length* with no ceiling, so the third is not a
+     * percentage of anything and is not drawn as one — and the card says why in words, because a
+     * tile that is not a ring in a row of rings otherwise reads as a ring that failed to draw.
+     */
+    const { container } = await showMetrics({ [HANDLERS_PATH]: handlersOk(HANDLER_READINGS) });
+    const card = container.querySelector('[data-testid="panel-request-handlers"]');
+
+    expect(card?.querySelector('[data-testid="handler-network-idle"] .kui-gauge')).not.toBeNull();
+    expect(
+      card?.querySelector('[data-testid="handler-io-idle"] [role="img"]')?.getAttribute("aria-label"),
+    ).toBe("IO IDLE: 64%");
+    // The ratio arrived as `0.64`, so a fold that forgot to multiply would print `1%`.
+    expect(card?.textContent).toContain("64%");
+
+    const purgatory = card?.querySelector('[data-testid="handler-purgatory"]');
+    expect(purgatory?.querySelector(".kui-gauge")).toBeNull();
+    expect(purgatory?.textContent).toContain("38");
+    expect(purgatory?.textContent).toContain("operations");
+    expect(purgatory?.textContent).not.toContain("38%");
+    expect(card?.textContent).toContain("queue length");
+  });
+
+  it("draws the plain track and an em dash for a reading with no value", async () => {
+    // §3.4's absent rule, and `RingGauge`'s: never a full ring and never an empty one that reads as
+    // a measured zero. The arc is a separate element from the track, so counting paths is the
+    // honest test for "did this gauge claim a measurement".
+    const { container } = await showMetrics({ [HANDLERS_PATH]: handlersOk(HANDLER_ONE_ABSENT) });
+    const absent = container.querySelector('[data-testid="handler-io-idle"]');
+
+    expect(absent?.querySelector(".kui-gauge__track")).not.toBeNull();
+    expect(absent?.querySelector(".kui-gauge__arc")).toBeNull();
+    expect(absent?.querySelector(".kui-gauge__figure")?.textContent).toBe("—");
+    // The dash never reaches a screen reader: it is announced as "dash" or as nothing at all.
+    expect(absent?.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe(
+      "IO IDLE: not measured",
+    );
+    // Beside a gauge that did measure something, so this is not a card that drew nothing.
+    expect(container.querySelector('[data-testid="handler-network-idle"] .kui-gauge__arc')).not.toBeNull();
+  });
+});
+
+describe("the record-size card, on a cluster that is measured", () => {
+  it("draws the mean and refuses the distribution the design asked for", async () => {
+    /*
+     * The card ADR-052 calls unmeasurable, drawn on a deployment where the other four cards are
+     * answering — which is the only way a refusal can be told apart from an endpoint nobody wrote.
+     * §3.5 draws twelve buckets and `p50 · 1.1 KB` / `p99 · 18 KB` / `max · 0.9 MB`; a broker
+     * publishes a mean and nothing else, so the mean is printed and the distribution is named as
+     * absent rather than assembled from it.
+     */
+    const { container } = await showMetrics({
+      [THROUGHPUT_PATH]: throughputOk(THROUGHPUT_WITH_A_GAP),
+      [RECORD_SIZE_PATH]: recordSizeOk(RECORD_SIZE_MEAN),
+    });
+    const card = container.querySelector('[data-testid="panel-message-sizes"]');
+
+    expect(card?.querySelector('[data-testid="record-size-mean"]')?.textContent).toContain("1.2 kB");
+    expect(card?.textContent).toContain(NO_DISTRIBUTION);
+    /* No histogram, no axis, and none of the three percentile chips the design draws. Selected by
+       the chart family's own classes rather than by `svg`, because `Card` draws its title icon as
+       one and a case that counted every `svg` would be asserting that the card has no icon. */
+    expect(card?.querySelector(".kui-histogram, .kui-plot, .kui-chart")).toBeNull();
+    expect(card?.textContent).not.toContain("p50");
+    expect(card?.textContent).not.toContain("p99");
+    // And the throughput card beside it really is measured, so the refusal is a refusal and not the
+    // absence of the code.
+    expect(throughputTable(container)).not.toBeNull();
+  });
+
+  it("says a mean that did not arrive in words rather than with a dash", async () => {
+    const { container } = await showMetrics({ [RECORD_SIZE_PATH]: recordSizeOk(RECORD_SIZE_ABSENT) });
+    const figure = container.querySelector('[data-testid="record-size-mean"]');
+    expect(figure?.textContent).toContain("not measured");
+    expect(figure?.textContent).not.toContain("—");
+  });
+
+  it("is drawn on the storage tab too, because it is the same card", async () => {
+    const { container } = await showMetrics(
+      { [RECORD_SIZE_PATH]: recordSizeOk(RECORD_SIZE_MEAN) },
+      `${DASHBOARD}/storage`,
+    );
+    expect(container.querySelector('[data-testid="record-size-mean"]')?.textContent).toContain("1.2 kB");
+  });
+});
+
+describe("the two rate cards, from the series already on the screen", () => {
+  it("prints the current rate and a sparkline of the window", async () => {
+    // §3.2's `Produce rate 86.4 MB/s` and `Consume rate 71.2 MB/s`, each with the jagged sparkline
+    // the same table gives it. `bytesInPerSecond` **is** the produce rate — the same broker metric
+    // the chart below is drawn from — rather than a number derived from something else.
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+
+    for (const stat of ["stat-production", "stat-consume"]) {
+      const card = container.querySelector(`[data-testid="${stat}"]`);
+      expect(card?.querySelector(".kui-stat__figure")?.textContent).toMatch(/\/s$/);
+      // The mark is decoration on a card that has already printed the figure, so it says nothing
+      // to a screen reader — §3.3, in one attribute.
+      const spark = card?.querySelector(".kui-sparkline");
+      expect(spark).not.toBeNull();
+      expect(spark?.getAttribute("aria-hidden")).toBe("true");
+    }
+    // The two cards are not the same number: one is bytes in and the other bytes out.
+    const produce = container.querySelector('[data-testid="stat-production"] .kui-stat__figure')?.textContent;
+    const consume = container.querySelector('[data-testid="stat-consume"] .kui-stat__figure')?.textContent;
+    expect(produce).not.toBe(consume);
+
+    /* And neither is the *mark*. The figure and the sparkline come from one `pick`, so a swap of
+       both shows up in the line above — but a sparkline handed the other card's series while the
+       figure stayed right would leave that assertion green, and a reader would compare two cards
+       whose shapes were the same picture of one quantity. */
+    const line = (stat: string): string | null =>
+      container
+        .querySelector(`[data-testid="${stat}"] .kui-sparkline__line`)
+        ?.getAttribute("points") ?? null;
+    expect(line("stat-production")).not.toBeNull();
+    expect(line("stat-production")).not.toBe(line("stat-consume"));
+  });
+
+  it("says nothing has been sampled rather than printing a rate of zero", async () => {
+    // A reachable exporter that has sampled nothing has no *current* rate. A card reading `0 B/s`
+    // would be a measured claim about a cluster nobody measured.
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_ALL_ABSENT));
+    const card = container.querySelector('[data-testid="stat-production"]');
+    expect(card?.textContent).toContain("Nothing has been sampled in this window yet");
+    expect(card?.textContent).not.toContain("0 B/s");
+    expect(card?.querySelector(".kui-sparkline")).toBeNull();
+  });
+
+  it("prints a measured zero as a rate, because a quiet cluster is a reading", async () => {
+    /*
+     * The one case that separates "nobody is writing to this cluster" from "nobody measured it",
+     * and it is a case the obvious code gets wrong: written `<Show when={rate()}>`, a rate of
+     * exactly `0` is falsy and the card falls through to the sentence — reporting an idle cluster
+     * as an unmeasured one, which is this screen's central mistake made backwards. Found by writing
+     * it that way first.
+     */
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_MEASURED_ZERO));
+    const card = container.querySelector('[data-testid="stat-production"]');
+    expect(card?.querySelector(".kui-stat__figure")?.textContent).toBe("0 B/s");
+    expect(card?.textContent).not.toContain("Nothing has been sampled");
+    expect(card?.querySelector(".kui-sparkline")).not.toBeNull();
+  });
+
+  it("leaves the two cards with no series without a sparkline at all", async () => {
+    // §3.2's absent rule: a card with no series has no sparkline, and does not draw a flat line at
+    // zero. KUI keeps no history of the topic count or of the in-sync share, so neither card gets
+    // one — and a flat mark beside `128 total` would assert a trend nobody measured.
+    const { container } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
+    expect(container.querySelector('[data-testid="stat-topics"] .kui-sparkline')).toBeNull();
+    expect(container.querySelector('[data-testid="stat-in-sync"] .kui-sparkline')).toBeNull();
+  });
+});
+
+describe("an answer KUI knows is out of date", () => {
+  it("says so in the caption, beside the data it is still drawing", async () => {
+    /*
+     * The second rule this packet owns. Nothing anywhere rendered the throughput card in `stale`
+     * — no fixture, no story, no render case — so `captionOf`'s stale branch could be replaced by
+     * `return chart?.caption` with 162 cases green, and last-known-good data then drew as though it
+     * were current: no badge (deliberately, because `Fetched.stale` carries no `asOf` and the badge
+     * would mean inventing a timestamp) and, after the mutation, no sentence either. That is the
+     * same defect class the brokers screen was repaired for in the same wave.
+     *
+     * The data is still drawn, which is the other half of the rule: a blank panel at the moment
+     * something is wrong is worse than an old figure that says it is old.
+     */
+    const { container } = await showTraffic(THROUGHPUT_STALE);
+    const caption = container.querySelector('[data-testid="panel-throughput"] .kui-panel__caption');
+
+    expect(caption?.textContent).toContain("This is the last answer KUI received:");
+    expect(caption?.textContent).toContain("The exporter has not answered since 11:58.");
+    // And the gap count is still there: the stale reason is added to what the card had to say, not
+    // instead of it.
+    expect(caption?.textContent).toContain("20 of the 288 5-minute steps");
+    expect(throughputTable(container)?.querySelectorAll("tbody tr")).toHaveLength(288);
+  });
+});
+
 describe("a cluster with no metrics source", () => {
   it("draws the sentence and no axis", async () => {
     const { container } = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
@@ -699,7 +1088,11 @@ describe("a cluster with no metrics source", () => {
     expect(card?.querySelector("button")).toBeNull();
   });
 
-  it("still offers the range control, because the card is the same card", async () => {
+  /* Fifteen seconds rather than the default five. This case mounts the whole Traffic tab, which is
+     five metrics reads and five cards, and the default budget is one this file's own a11y case
+     already had to raise for a smaller tree — a red here under a loaded machine is a stopwatch and
+     not a defect. */
+  it("still offers the range control, because the card is the same card", { timeout: 15_000 }, async () => {
     // `Card` keeps `headerEnd` in every state on purpose. A selector that vanished with the data
     // would remove the only way out of a window with nothing in it.
     const { container } = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
@@ -717,7 +1110,7 @@ describe("a cluster with no metrics source", () => {
     const { container } = await showTraffic(THROUGHPUT_FORBIDDEN);
     const card = container.querySelector('[data-testid="panel-throughput"]');
 
-    expect(card?.textContent).toContain("You do not have permission");
+    expect(card?.textContent).toContain(FORBIDDEN_SENTENCE);
     // Not a failure and not a retry: retrying will never help, and offering one teaches an operator
     // that the button does nothing.
     expect(card?.querySelector("button")).toBeNull();
@@ -757,7 +1150,7 @@ describe("the range selector", () => {
       `${DASHBOARD}/traffic?range=30d`,
     );
 
-    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=30d`]);
+    expect(throughputCalls(stub.calls)).toEqual([`${THROUGHPUT_PATH}?range=30d`]);
     expect(container.querySelector('[role="radiogroup"] input[value="30d"]')).toHaveProperty(
       "checked",
       true,
@@ -766,12 +1159,15 @@ describe("the range selector", () => {
 
   it("reaches the request and not only the label", async () => {
     const { container, stub } = await showTraffic(throughputOk(THROUGHPUT_WITH_A_GAP));
-    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=24h`]);
+    expect(throughputCalls(stub.calls)).toEqual([`${THROUGHPUT_PATH}?range=24h`]);
 
     choose7d(container);
     await settle();
 
-    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=24h`, `${THROUGHPUT_PATH}?range=7d`]);
+    expect(throughputCalls(stub.calls)).toEqual([
+      `${THROUGHPUT_PATH}?range=24h`,
+      `${THROUGHPUT_PATH}?range=7d`,
+    ]);
   });
 
   it("resolves a window nobody has to the default rather than refusing the page", async () => {
@@ -782,7 +1178,7 @@ describe("the range selector", () => {
       throughputOk(THROUGHPUT_WITH_A_GAP),
       `${DASHBOARD}/traffic?range=90d`,
     );
-    expect(stub.calls).toEqual([`${THROUGHPUT_PATH}?range=24h`]);
+    expect(throughputCalls(stub.calls)).toEqual([`${THROUGHPUT_PATH}?range=24h`]);
     expect(container.querySelector('[role="radiogroup"] input[value="24h"]')).toHaveProperty(
       "checked",
       true,
@@ -797,7 +1193,12 @@ describe("the range selector", () => {
     expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
   });
 
-  it("has no accessibility violations when there is nothing to measure", async () => {
+  /* The same thirty seconds its neighbour above takes, and for a related reason. This tab is five
+     metrics cards now rather than one chart and three sentences, and axe walks the whole subtree —
+     the not-configured rendering is cheap to *draw* and is still five cards, two stat notes and a
+     tab strip to audit. Measured here at 15.8s on a machine running eleven other suites; the five
+     the default allows is a stopwatch rather than a finding. */
+  it("has no accessibility violations when there is nothing to measure", { timeout: 30_000 }, async () => {
     const { container } = await showTraffic(THROUGHPUT_NOT_CONFIGURED);
     expect((await findViolations(container)).map((v) => v.id)).toEqual([]);
   });

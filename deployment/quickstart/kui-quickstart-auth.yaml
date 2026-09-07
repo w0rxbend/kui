@@ -21,6 +21,34 @@
 # THIS IS A DEMONSTRATION CONFIGURATION AND ITS PASSWORDS ARE PUBLIC. There is no TLS, the session
 # cookie is served without `Secure` so that plain HTTP on localhost works, and the two password
 # hashes below are in a public repository. All three are wrong anywhere a network can reach.
+#
+# ------------------------------------------------------------------------------------------------
+# WHAT CHECKS THIS FILE, AND WHAT DOES NOT. Read this before assuming a green build covers it.
+#
+# CHECKED. `ShippedConfigurationSuite` in `libs/config` loads this file through the real loader on
+# every `./mill libs.config.test`, so a key spelled wrongly, an `rbac` role naming a cluster that is
+# not here, a TOPIC permission with no `value`, or a `callTimeout` that is not shorter than
+# `kui.metrics.scrapeInterval` all fail a unit test rather than a demonstration. That row was added
+# in wave 5; before it, nothing in this repository read this file at all.
+#
+# NOT CHECKED, AND IT IS DELIBERATE RATHER THAN AN OVERSIGHT. No CI job runs
+# `./docker-compose.auth.yml`, so nothing automated ever signs in as either account, and nothing
+# proves that `admin` sees the create-topic button while `viewer` does not. That is the claim this
+# file exists to make, and it is made by hand:
+#
+#     deployment/quickstart/quickstart.sh --with-auth
+#
+# The reason for leaving it there is cost against coverage, and it is worth stating so that nobody
+# adds the job without knowing what they are buying. The `e2e` job already drives a browser against
+# the quickstart, and a second one would be a second full stack -- a broker, a registry, a seed run
+# and a browser -- for one assertion whose subject, the authorization fold, is covered by
+# `services/identity`'s own suites and by `frontend/packages/shell`'s permission-gated rendering.
+# What a job here would add over those is the wiring of THIS file to THAT screen, which is one
+# `--config` flag in `docker-compose.auth.yml` and the two hashes below.
+#
+# So: what breaks silently if this file is edited badly is the sign-in itself -- a wrong hash, or a
+# `groups:` entry that no `rbac` role names. Change either and run the line above before pushing.
+# ------------------------------------------------------------------------------------------------
 
 kui:
   server:

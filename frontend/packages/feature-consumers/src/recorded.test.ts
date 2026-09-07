@@ -8,7 +8,7 @@ import quietDocument from "./recorded/lag-quiet.json" with { type: "json" };
 import expiredDocument from "./recorded/lag-expired.json" with { type: "json" };
 import { fetchGroup, fetchGroups, stateOf } from "./data.js";
 import { subscriptions } from "./detail.js";
-import { applyLagDelta, fetchLagDelta, pollLag } from "./lag.js";
+import { DEFAULT_POLL_MS, MIN_POLL_MS, applyLagDelta, fetchLagDelta, pollLag } from "./lag.js";
 import type { GroupSummary } from "./model.js";
 
 /**
@@ -390,6 +390,45 @@ describe("the recorded lag delta", () => {
     expect(merged.rows).toEqual(rows);
   });
 
+  it("floors an advised poll interval of zero rather than adopting it", async () => {
+    /*
+     * `nextPollMs` is a number the *server* chooses and the browser obeys, and the docblock over
+     * `MIN_POLL_MS` argues at length that a `0` — from a bug, a truncated body, or a future server
+     * that means something else by the field — must not turn this screen into a request loop that
+     * describes groups as fast as the browser can ask. Nothing asserted it: every recorded document
+     * advises 30 s, so `Math.max(advised, MIN_POLL_MS)` and a bare `advised` are the same function
+     * on all four of them.
+     *
+     * Zero is the interesting value rather than a negative one because it is what an integer field
+     * defaults to when it is not filled in.
+     */
+    const advisingZero = JSON.parse(JSON.stringify(deltaDocument)) as Record<string, unknown>;
+    advisingZero["nextPollMs"] = 0;
+    expect(deltaDocument.nextPollMs).toBe(30_000);
+
+    const answer = await fetchLagDelta(client(advisingZero), "quickstart", "cXVpY2tzdGFydDo2");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.nextPollMs).toBe(MIN_POLL_MS);
+  });
+
+  it("reads an empty token as no token, rather than quoting one back", async () => {
+    /*
+     * An empty string is not a snapshot the server can recognise. Adopted as a real token it is
+     * sent back on the next poll, where the server does not match it and answers in full — which
+     * works, by accident of it not matching, and costs a whole group list every thirty seconds
+     * with nothing on screen to show that the incremental protocol has stopped.
+     *
+     * `null` is the honest reading, and it takes the browser down the "ask for everything" path
+     * deliberately rather than by luck.
+     */
+    const empty = JSON.parse(JSON.stringify(deltaDocument)) as Record<string, unknown>;
+    empty["token"] = "";
+
+    const answer = await fetchLagDelta(client(empty), "quickstart", "cXVpY2tzdGFydDo2");
+    if (answer.kind !== "ready") throw new Error(`expected ready, got ${answer.kind}`);
+    expect(answer.value.token).toBeNull();
+  });
+
   it("falls back to a full list when the token was not honoured", async () => {
     /*
      * `lag-expired.json` is a real answer to a token cut from a snapshot the server had discarded.
@@ -560,6 +599,92 @@ describe("pollLag", () => {
       const onThePage = rows.map((row) => row.groupId);
       expect(onThePage.length).toBeGreaterThan(0);
       for (const scope of scopes) expect(scope).toEqual(onThePage);
+
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits the floor out before asking again when the server advises zero", async () => {
+    /*
+     * The floor, where the product spends it: the delay the next timer is armed with.
+     *
+     * The mapping's assertion above proves `fetchLagDelta` returns 2 s for an advised 0. This
+     * proves the poll loop then waits it — which is the failure the docblock describes, a screen
+     * asking the coordinator to describe every group as fast as the browser can send.
+     *
+     * The scripted answer advises 1 ms rather than 0 so that a run against a dropped floor is a
+     * few hundred polls and not a timer storm the runner has to abort.
+     */
+    const advisingOne = JSON.parse(JSON.stringify(deltaDocument)) as Record<string, unknown>;
+    advisingOne["nextPollMs"] = 1;
+
+    vi.useFakeTimers();
+    try {
+      const { api, since } = scripted([advisingOne, quietDocument]);
+      let rows = await baseline();
+      const stop = pollLag(api, "quickstart", () => rows, (next) => {
+        rows = next as GroupSummary[];
+      });
+
+      // The seeding call, which is what reads the advised interval.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(since).toHaveLength(1);
+
+      // Well past the millisecond the server asked for and short of the floor: still one request.
+      await vi.advanceTimersByTimeAsync(MIN_POLL_MS - 1);
+      expect(since).toHaveLength(1);
+
+      // And it does poll, at the floor. A floor that never fires would be a screen that stopped
+      // refreshing, which this case would otherwise be happy with.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(since).toHaveLength(2);
+
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends no token at all after an answer whose token was the empty string", async () => {
+    /*
+     * The other half of the empty-token rule, at the request. `since` is omitted rather than sent
+     * empty because an absent `since` is the documented way to ask for everything, and an empty
+     * one is an unrecognised token that the server also answers in full — by accident of it not
+     * matching anything, which is not a property to build a protocol on.
+     *
+     * Asserted on the keys of the query object rather than on its values: `since: ""` and no
+     * `since` at all read identically once a recorder has defaulted the missing one.
+     */
+    const emptyToken = JSON.parse(JSON.stringify(fullDocument)) as Record<string, unknown>;
+    emptyToken["token"] = "";
+
+    const queries: Record<string, unknown>[] = [];
+    const get = vi.fn(
+      async (path: string, init?: { params?: { query?: Record<string, unknown> } }) => {
+        if (path.endsWith("/lag")) {
+          queries.push({ ...(init?.params?.query ?? {}) });
+          return { ok: true, value: queries.length === 1 ? emptyToken : quietDocument };
+        }
+        return { ok: true, value: groupsDocument };
+      },
+    );
+    const api = { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient;
+
+    vi.useFakeTimers();
+    try {
+      let rows = await baseline();
+      const stop = pollLag(api, "quickstart", () => rows, (next) => {
+        rows = next as GroupSummary[];
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(DEFAULT_POLL_MS);
+      expect(queries).toHaveLength(2);
+      // The seeding call never carries one, and neither does the poll after an empty answer.
+      expect(Object.keys(queries[0] ?? {})).not.toContain("since");
+      expect(Object.keys(queries[1] ?? {})).not.toContain("since");
 
       stop();
     } finally {

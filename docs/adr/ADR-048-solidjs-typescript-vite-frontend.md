@@ -120,14 +120,14 @@ largest cost of leaving Scala.js, and the only acceptable answer is a mechanism 
 
 <!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -->
 **The source document.** The committed OpenAPI documents are the asset: `docs/api/openapi.json`
-(50 paths and 146 schemas, OpenAPI 3.1.0) is emitted by
+(54 paths and 150 schemas, OpenAPI 3.1.0) is emitted by
 `kui.gateway.api.openapi.OpenApiDocument` from the gateway's Tapir endpoints, and each service
 emits its own beside it. They are regenerated and diff-checked by the build already
 (`openApi` / `openApiCheck`), so they cannot drift from the server.
 
 **They cannot be used directly, and finding out why is the reason this section exists.** The
-committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 46 of
-its 61 operations, across 35 of its 50 paths, and `If-Match` on 2 operations more. But ADR-020
+committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 50 of
+its 65 operations, across 39 of its 54 paths, and `If-Match` on 2 operations more. But ADR-020
 makes that header a signed statement the **gateway** mints, and ADR-040 makes the gateway **strip
 every inbound `X-Kui-*` header from browsers at the edge**. Generating a browser client from that
 document produces types that oblige every call site to supply an internal trust header the

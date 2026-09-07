@@ -4,7 +4,7 @@ import cats.effect.kernel.Async
 import cats.syntax.all.*
 import io.circe.{parser, Decoder, HCursor, Json}
 import sttp.client4.*
-import sttp.model.{MediaType, StatusCode, Uri}
+import sttp.model.{MediaType, Method, StatusCode, Uri}
 
 import kui.config.SafeUrl
 import kui.http.upstream.UpstreamFailure
@@ -284,7 +284,7 @@ final class RegistryHttp[F[_]: Async](
             else if response.code == StatusCode.NotFound then Right(None)
             else if response.code == StatusCode.Unauthorized || response.code == StatusCode.Forbidden then
               Left(InfrastructureError.AuthFailed(UpstreamName))
-            else Left(errorFrom(response.code, response.body, rejectedField))
+            else Left(errorFrom(response.code, response.body, rejectedField, request.method))
           }
           .recover {
             // The resilient backend carries its typed error inside this one exception rather than losing
@@ -394,11 +394,35 @@ final class RegistryHttp[F[_]: Async](
 
   /** A non-404 failure status, with the registry's own error code and message when it sent one.
     *
-    * `422` with `error_code` 42203 is the one worth naming: it is what a registry answers when the
-    * compatibility level in a `PUT /config` is not one it knows, and turning it into a `KUI-VALIDATION`
-    * failure puts the message beside the field rather than in a red banner about an upstream.
+    * ==Which statuses become `KUI-VALIDATION`, and on which calls==
+    *
+    * `400` and `422` say the registry read what KUI sent and would not have it. `422` with `error_code` 42203
+    * is the one worth naming: it is what a registry answers when the compatibility level in a `PUT /config`
+    * is not one it knows, and turning it into a `KUI-VALIDATION` failure puts the message beside the field
+    * rather than in a red banner about an upstream.
+    *
+    * `409` is the registration's own refusal — "incompatible with an earlier schema for this subject" — and
+    * it belongs in the same branch for the same reason. It is folded in **only for a call that sent a body**,
+    * which here means every method except `GET`. A `409` answering `GET /subjects`, `GET …/versions`,
+    * `GET …/versions/{v}` or `GET /config` cannot be about anything the caller typed, because those calls
+    * carry nothing; reporting one as a `400 KUI-VALIDATION` would put a form error on a screen that has no
+    * form and hide a registry mid-election, mid-migration or behind a confused proxy. Those arrive as
+    * `KUI-UPSTREAM-UNAVAILABLE`, which is what a caller can act on.
+    *
+    * ==What `details` carries==
+    *
+    * One [[kui.kernel.error.FieldError]] when the registry sent a `message`, and an empty array when it sent
+    * nothing usable. Its `field` is `rejectedField` — `definition` on a registration, and `null` on the two
+    * `PUT /config` calls, because a level that the registry rejected is the whole request rather than one
+    * input of a form. A `null` field is the shape ADR-034 gives "this refusal is about the request", and a
+    * browser reading `details[0]` has to keep working when it is absent.
     */
-  private def errorFrom(status: StatusCode, body: String, rejectedField: Option[String]): KuiError = {
+  private def errorFrom(
+      status: StatusCode,
+      body: String,
+      rejectedField: Option[String],
+      method: Method
+  ): KuiError = {
     val detail = parser
       .parse(body)
       .toOption
@@ -407,7 +431,7 @@ final class RegistryHttp[F[_]: Async](
       .filter(_.nonEmpty)
 
     if status == StatusCode.UnprocessableEntity || status == StatusCode.BadRequest ||
-      status == StatusCode.Conflict
+      (status == StatusCode.Conflict && method != Method.GET)
     then
       ApplicationError.Invalid(
         detail.fold(s"the schema registry refused the request (HTTP ${status.code})")(message =>

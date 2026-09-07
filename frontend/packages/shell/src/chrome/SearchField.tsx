@@ -105,6 +105,19 @@ export type SearchFieldProps = {
   readonly inputRef?: ((el: HTMLInputElement) => void) | undefined;
 };
 
+/**
+ * How long the overlay stays open after the field loses focus, in milliseconds.
+ *
+ * A pointer press on a result focuses the link, which blurs the input, which closes the panel — and
+ * the `click` only arrives after the button comes back up. Closing on the blur itself therefore
+ * removes the row from under the cursor before it can be clicked, and every result in the overlay
+ * becomes unclickable while looking perfectly normal. The grace period is what lets the click land.
+ *
+ * Named rather than typed into the handler so the case that pins the rule can say what it is
+ * waiting for, and so the number is deletable only by deleting the rule.
+ */
+export const RESULT_CLICK_GRACE_MS = 120;
+
 /** `⌘K` on Apple platforms, `Ctrl K` everywhere else. */
 export function shortcutHint(platform: "apple" | "other"): string {
   return platform === "apple" ? "⌘K" : "Ctrl K";
@@ -161,10 +174,10 @@ export function SearchField(props: SearchFieldProps) {
           aria-autocomplete="list"
           onInput={(event) => props.onInput(event.currentTarget.value)}
           onFocus={() => setFocused(true)}
-          /* The blur is deferred by a frame so that a click landing on a result row is processed
-             before the overlay is removed; closing on the mousedown would make every result
-             unclickable, which is the classic version of this bug. */
-          onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+          /* Deferred, and by {@link RESULT_CLICK_GRACE_MS} rather than by a frame: the click on a
+             result has to be processed before the overlay is removed from under it. Closing on the
+             blur is the classic version of this bug. */
+          onBlur={() => window.setTimeout(() => setFocused(false), RESULT_CLICK_GRACE_MS)}
           onKeyDown={(event) => {
             if (event.key === "Escape") setFocused(false);
           }}

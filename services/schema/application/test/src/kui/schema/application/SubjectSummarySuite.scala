@@ -1,5 +1,7 @@
 package kui.schema.application
 
+import scala.concurrent.duration.DurationInt
+
 import cats.effect.IO
 
 import kui.kernel.{PageRequest, PageSize, PositiveInt, SortOrder}
@@ -206,6 +208,53 @@ final class SubjectSummarySuite extends KuiIOSuite {
       // Four versions numbered 1, 2, 3, 7 — a registry where three were deleted. The count is the length
       // of the list and not the largest number in it, which is the difference a soft delete makes.
       assertEquals(rowsOf(result).map(_.versionCount), List(Some(4)))
+  }
+
+  test("a registry-wide level that could not be read leaves the inheriting rows with none") {
+    // Not the registry's documented default. `BACKWARD` is what a registry applies when nobody has set a
+    // level, and printing it for a registry that would not answer is a guess presented as a fact on the
+    // screen an operator uses to decide whether a breaking change is allowed. `globalLevel` here is
+    // deliberately something other than the default, so a case that accepted either could not pass.
+    for {
+      registry <- SchemaRig.registry(
+        subjects = Map(orders -> List(1, 2), payments -> List(1)),
+        globalLevel = CompatibilityLevel.FullTransitive,
+        subjectLevels = Map(payments -> CompatibilityLevel.None),
+        globalFails = true
+      )
+      useCase <- listing(registry)
+      result <- useCase.list(SchemaRig.WithRegistry, SubjectQuery.Default)
+    } yield {
+      val rows = rowsOf(result)
+
+      // The page still arrives: one unreadable registry-wide call costs the inheriting rows their level
+      // and costs the page nothing, which is the same rule a failed row decoration follows.
+      assertEquals(rows.map(_.subject.value), List(orders, payments))
+      assertEquals(rows.head.compatibility, None)
+      assertEquals(rows.head.versionCount, Some(2))
+      // A subject with a level of its own still has one: nothing was inherited, so nothing was lost.
+      assertEquals(rows.last.compatibility, Some(SubjectCompatibility.own(CompatibilityLevel.None)))
+    }
+  }
+
+  test("a page enriches at most eight rows at once, whatever the page holds") {
+    // The bulkhead in front of a Schema Registry is deliberately narrow — it is a single-writer JVM — and
+    // `SubjectListUseCase.MaxConcurrentRows` is half of it so that one list page can never fill it. The
+    // rows are identical whether they were fetched eight at a time or twenty-five at once, so the peak
+    // number in flight is the only thing that can see this. Eight is written out rather than read from the
+    // constant, because a case that reads the constant passes at any value of it.
+    for {
+      registry <- SchemaRig.registry(subjects = fortySubjects, enrichmentDelay = 20.millis)
+      useCase <- listing(registry)
+      result <- useCase.list(SchemaRig.WithRegistry, query(1, 25))
+      peak <- registry.peakInFlight.get
+    } yield {
+      assertEquals(result.map(_.items.size), Right(25))
+      assert(clue(peak) <= 8, "more rows were in flight at once than the registry bulkhead allows for")
+      // And the fan-out is real: a use case that enriched one row at a time would be twenty-five rounds
+      // of latency for one screen, which is the other half of why the number is eight and not one.
+      assert(clue(peak) > 1, "the page's rows were fetched one at a time")
+    }
   }
 
   test("a registry that does not answer the list fails the page rather than returning bare rows") {

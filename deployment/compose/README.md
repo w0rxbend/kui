@@ -187,11 +187,18 @@ the machine, so a build step somebody skipped is reported by name instead of as 
 against a registry KUI publishes nothing to — a check that now refuses to pass on an empty list,
 which it used to do, because a `for` over nothing runs no iterations and reports no failure.
 
-And it asserts the measurement. The exporter is asked for the two byte-rate families KUI parses,
-`measured`'s throughput is awaited until it answers `ok` with at least one bucket carrying a rate
-that is not null, and `unmeasured`'s is asserted to be `not_configured`. The last of those three is
-the one M7's criterion used to consist of on its own, and on its own it is satisfied by a service
-that was never built.
+And it asserts the measurement. Five hundred records are produced to `smoke-traffic` and read back,
+so that there is something to measure; the exporter is then asked for **every line shape the
+Prometheus reader reads** — thirteen of them, name and labels together — `measured`'s throughput is
+awaited until it answers `ok` with at least one bucket carrying a rate that is not null, and
+`unmeasured`'s is asserted to be `not_configured`. The last of those is the one M7's criterion used
+to consist of on its own, and on its own it is satisfied by a service that was never built.
+
+The traffic step is not decoration. Kafka creates most of its MBeans on the first event they count,
+so an idle broker publishes only the three broker-wide `BrokerTopicMetrics` meters, which exist
+from boot and read `0.0`. Checked on this stack before the step was added: no `RequestMetrics` bean
+for either request kind, and no per-topic byte rate at all, because the broker had no topics. Every
+card beyond throughput would have been asserted against a broker that had nothing to say.
 
 CI runs it in the end-to-end job, right after the seven backend images are built, so that a broken
 compose file is caught by the same run that builds the artefacts it describes. That list is derived
@@ -203,6 +210,41 @@ The interface is unaffected throughout. It is a static file server that proxies 
 nothing to lose when a KUI service dies: the page still loads, and what an operator sees is the
 capability document's verdict rendered as a dimmed navigation entry with an explanation, rather than
 an error page. `smoke.sh` asserts that while `kui-cluster` is stopped.
+
+## When the first measured bucket arrives, and what was and was not reproduced
+
+`smoke.sh` waits ninety seconds for `measured`'s throughput to carry a bucket with a rate in it.
+Wave 4 reported that wait failing deterministically — twice, from a torn-down stack — and attributed
+it to a scrape loop that does not survive its first failed pass. **Neither half of that stands up.**
+
+The failure did not reproduce. Three consecutive `smoke.sh` runs from a torn-down stack, on the tree
+that was said to fail, on images built from it: `buckets carrying a measured rate: yes` every time.
+
+And the loop plainly survives a failed pass. `kui-metrics` starts before the exporter does — the
+exporter waits on the broker's health and this process waits for nothing — so its first scrape
+always fails on a cold stack. Timed here: the process starts, logs one WARN three seconds later, and
+the next pass about thirty-four seconds after that succeeds; the first bucket is filled roughly
+forty seconds after start, with sixty seconds of the budget unspent.
+
+Forced to the worst case the ordering can produce — `kui-metrics` alone for three minutes with no
+broker and no exporter at all — the log reads five WARNs, `circuit … is now open`, then `halfopen`
+and `open` again on each failed probe. When the exporter finally appears it goes `halfopen`,
+`closed`, and files a bucket **two seconds** after Compose called the exporter healthy. The whole
+recovery is bounded by one circuit `resetTimeout` (30s) plus one scrape interval, against a 90s
+budget.
+
+So `kui-metrics` now carries `depends_on: kafka-metrics`, and that is **headroom rather than a
+repair**: it removes the failed scrapes and the circuit from a cold start, so the WARNs an operator
+sees on a first `docker compose up` are about something real. It is not the fix for the failure
+above, because nothing here reproduced that failure, and a patch justified by a story is how
+`degraded` came to be asserted where `available` was meant.
+
+What remains unexplained is the original report, and it is left unexplained rather than closed. Two
+differences between that machine and this one are worth trying before anyone reaches for the
+timeout: `smoke.sh` now produces traffic before it measures, which adds ten to twenty seconds of
+wall clock before the bucket wait starts, and the broker's own health can take up to 135s
+(`retries: 24` at `interval: 5s`) on a cold or loaded host, every second of which is a failed
+scrape.
 
 ## The gateway starts even when nothing else does
 
@@ -266,16 +308,22 @@ first minute retrying connections to a collector that is not running.
 | -------------------- | --------------- | ----------------------------------------------------------------- |
 | `kui.yaml`           | `kui-gateway`   | The service addresses, the poll interval, CORS, the shared keys    |
 | `kui-cluster.yaml`   | `kui-cluster`   | Where to listen, telemetry, and the same shared keys               |
+| `kui-service.yaml`   | the other five  | `kui-topic`, `kui-message`, `kui-consumer`, `kui-schema` and `kui-metrics` all mount it: shared keys, cursor key, the two clusters, and `kui.metrics.sources` for one of them |
 | `kui-allinone.yaml`  | `kui-allinone`  | Where to listen and telemetry. No addresses, no keys — see below   |
 | *(none)*             | `kui-frontend`  | Nothing on disk: the nginx block is written at start from `KUI_GATEWAY_URL`, `KUI_BASE_PATH` and `KUI_BUILD_VERSION` (`../frontend/`) |
 | `otel-collector.yaml`| the collector   | Receive on 4317 and 4318, print everything                         |
 
-**The one thing the first two must agree about is `kui.gateway.principalKeys`.** It looks like a
+**The one thing the first three must agree about is `kui.gateway.principalKeys`.** It looks like a
 gateway setting and it is not: it is the shared key set of one deployment. The gateway signs the
 `X-Kui-Principal` header with the newest key whose `notBefore` has passed, and every service accepts
-any key in the set (ADR-020). Both files name the same key id and read the same secret from
-`KUI_PRINCIPAL_KEY`, which Compose passes to both containers. Get this wrong and every call the
+any key in the set (ADR-020). All three name the same key id and read the same secret from
+`KUI_PRINCIPAL_KEY`, which Compose passes to every container. Get this wrong and every call the
 gateway makes comes back `401`.
+
+Every one of them is loaded through the shipped loader by `ShippedConfigurationSuite` in
+`libs/config`, so a file this stack mounts and no suite reads is a state this repository was in for
+three milestones and is not in now. `kui-service.yaml` was the one that was missing, and it is the
+one five containers read.
 
 The all-in-one file has no keys at all and that is correct: nothing is signed when nothing leaves
 the process. Pointing the all-in-one image at `kui.yaml` works too, and earns two warnings about the

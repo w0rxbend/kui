@@ -225,6 +225,46 @@ describe("the query cache", () => {
     kept.stop();
   });
 
+  it("evicts the oldest answer first when only one entry has to go", async () => {
+    // The case above proves *that* unwatched entries are dropped, and it drops both candidates at
+    // once — so reversing the sort left it green and the "oldest answer first" half of the rule was
+    // gated by nothing. This is the same cache one entry over its bound, where exactly one settled
+    // unwatched answer has to go and the two candidates differ only in age.
+    let clock = 0;
+    const server = stubFetch();
+    const cache = createQueryCache<string>({
+      fetch: server.fetch,
+      maxEntries: 3,
+      now: () => clock,
+    });
+
+    const onScreen = watching(cache.watch.bind(cache), "on-screen");
+    await server.answer(0, "visible");
+
+    clock += 1;
+    const older = watching(cache.watch.bind(cache), "older");
+    await server.answer(1, "the older answer");
+    older.stop();
+
+    clock += 1;
+    const newer = watching(cache.watch.bind(cache), "newer");
+    await server.answer(2, "the newer answer");
+    newer.stop();
+
+    clock += 1;
+    const fourth = watching(cache.watch.bind(cache), "fourth");
+    await server.answer(3, "the fourth answer");
+
+    // Least recently answered is the best guess at least likely to be wanted again; dropping the
+    // freshest one instead would make the cache worse the more it is used.
+    expect(cache.size()).toBe(3);
+    expect(cache.peek("older").lastGood).toBeUndefined();
+    expect(cache.peek("newer").lastGood).toBe("the newer answer");
+    expect(cache.peek("on-screen").lastGood).toBe("visible");
+    onScreen.stop();
+    fourth.stop();
+  });
+
   /**
    * What an untracked read of `watch` actually does, which is not what the docstring used to claim.
    *

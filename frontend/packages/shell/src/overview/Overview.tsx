@@ -30,26 +30,32 @@
  * tab-invariant and the body below them belongs to the tab. That is exactly how this file is laid
  * out, so a third tab is a case in one switch rather than a rearrangement.
  *
- * ## The panels that are not real, and the one that stopped being one
+ * ## The panels that were not real, and what is left of that list
  *
- * The current produce rate, latency percentiles, the record-size distribution, top producers and
- * request-handler idle time are drawn in the design and are not collected by this backend: the four
- * endpoints behind them are wave 5's. They render as a sentence saying so. See `NotMeasured.tsx`
- * for why that is a `ready` card and not an `unavailable` one, and `model.ts` for the sentences.
+ * Five of the design's figures had no source in this product a wave ago and rendered as a sentence
+ * saying so. `services/metrics` now answers all five: throughput, p99 latency, the request-handler
+ * readings, the top producers and the mean record size. So this file no longer receives them as
+ * `notCollected` readings on the model — it **asks**, and draws whatever comes back, including the
+ * common answer that a deployment configured no exporter.
  *
- * **Throughput is no longer one of them.** `services/metrics` answers a real series, so the card
- * asks for one — which is the single thing on this screen that this component fetches rather than
- * receives.
+ * Two refusals survive and they are refusals about *what a broker publishes* rather than about what
+ * KUI collects, which is a different claim and is why they are drawn beside real figures rather
+ * than instead of them: there is no purgatory *percentage* (`DelayedOperationPurgatory` publishes a
+ * queue length) and no record-size *distribution* (only a mean). ADR-052 takes both decisions;
+ * `metrics.ts` and `TrafficCards.tsx` carry them.
  *
- * ## Why this file fetches exactly one thing
+ * ## Why this file fetches, and why the fetches are keyed on the tab
  *
- * Everything else arrives as a finished view model, and the header above says why. Throughput is
- * the exception because its request is a function of the *address*: the range lives in `?range=`
- * so a colleague can be sent a link to the window somebody is looking at, and the shell's single
- * overview fetch is keyed on the cluster alone and reads no query parameter. Folding the range into
- * it would mean refetching five endpoints to change one axis. So the query is opened here, beside
- * the reading of the address it depends on, and the card below is handed a finished state exactly
- * like every other panel — which keeps every state of the card reachable from a story and a test.
+ * Everything else arrives as a finished view model, and the header above says why. The metrics
+ * reads are the exception because their requests are a function of the *address*: the window lives
+ * in `?range=` so a colleague can be sent a link to what somebody is looking at, and the shell's
+ * single overview fetch is keyed on the cluster alone and reads no query parameter. Folding the
+ * window into it would mean refetching five endpoints to change one axis.
+ *
+ * The three cards that belong to one tab ask on that tab only — `useQuery` asks nothing for an
+ * `undefined` key, which is what makes a tab strip cheap: opening Storage does not scrape a broker
+ * for a card Storage does not draw. Each card is then handed a finished state exactly like every
+ * other panel, so every state of every one of them is reachable from a story and from a test.
  */
 
 import { For, Show, createMemo } from "solid-js";
@@ -66,28 +72,50 @@ import {
   PageHeader,
   ProgressBar,
   RingGauge,
+  Sparkline,
   StatCard,
   TabStrip,
+  formatBytes,
   formatCount,
   formatPercent,
   useKui,
   useQuery,
   type Fetched,
+  type IconName,
   type MagnitudeEntry,
   type QueryRegistry,
   type StatFigure,
   type Tab,
 } from "@kui/kernel";
 
-import { NotMeasured } from "./NotMeasured.jsx";
+import { MetricAbsence, NotMeasured, notConfiguredSentence } from "./NotMeasured.jsx";
 import { StorageByBroker, topicsCounted } from "./StorageByBroker.jsx";
 import { ThroughputCard } from "./ThroughputCard.jsx";
+import { LatencyCard } from "./LatencyCard.jsx";
+import { RecordSizeCard, RequestHandlersCard, TopProducersCard } from "./TrafficCards.jsx";
+import {
+  TOP_PRODUCERS,
+  fetchLatency,
+  fetchRecordSize,
+  fetchRequestHandlers,
+  fetchTopProducers,
+  latencyKey,
+  producersKey,
+  recordSizeKey,
+  requestHandlersKey,
+  type HandlerDocument,
+  type LatencySeries,
+  type ProducerDocument,
+  type RecordSizeDocument,
+} from "./metrics.js";
 import {
   RANGE_PARAM,
   fetchThroughput,
   hasMeasuredBucket,
+  rateSeries,
   throughputKey,
   throughputRange,
+  type RateSeries,
   type ThroughputRange,
   type ThroughputSeries,
 } from "./throughput.js";
@@ -119,12 +147,16 @@ export interface OverviewModel {
   readonly topicCount: Reading<number>;
   readonly partitionTotal: Reading<number>;
   readonly inSync: Reading<number>;
-  readonly productionRate: Reading<never>;
-  readonly latency: Reading<never>;
-  readonly messageSizes: Reading<never>;
-  /** The Traffic tab's last row, both of which wave 5's endpoints fill (SCREENS-V4.md §4.2). */
-  readonly topProducers: Reading<never>;
-  readonly requestHandlers: Reading<never>;
+  /*
+   * The five figures that used to sit here as `Reading<never>` — the produce rate, the latency
+   * percentiles, the record-size distribution, the top producers and the request handlers — are
+   * gone, and their absence is the shape of this wave's change. Each was a constant sentence on a
+   * model, which meant the *screen* could not distinguish "this build does not measure it" from
+   * "this deployment configured no exporter" from "the exporter stopped answering", because the
+   * model gave it one answer for all three. They are now five queries whose six-case `Fetched`
+   * states say which. Putting one back would be a second answer to a question the query already
+   * answers, and the two would disagree the first time either was edited.
+   */
   readonly lag: Reading<{ total: number; incomplete: number }>;
   readonly lagPill: { text: string; tone: Tone } | undefined;
   readonly brokers: Reading<readonly BrokerBar[]>;
@@ -219,18 +251,74 @@ export function Overview(props: OverviewProps): JSX.Element {
     const id = cluster();
     return id === undefined ? undefined : throughputKey(id, range());
   });
-  const throughput = useQuery<ThroughputSeries>({
-    key,
-    load: async () => {
-      const id = cluster();
-      /* Unreachable: the key is `undefined` without a cluster, and `useQuery` asks nothing for an
-         undefined key. It is a value rather than a throw because a loader that rejects takes the
-         page down, which is what `ApiResult` exists to prevent. */
-      if (id === undefined) return { kind: "failed", message: "No cluster is selected.", code: "NO_CLUSTER" };
-      return fetchThroughput(kui.api, id, range());
-    },
-    ...(props.queries === undefined ? {} : { registry: props.queries }),
+  /**
+   * What a loader answers when it is somehow run without a cluster.
+   *
+   * Unreachable: every key below is `undefined` without a cluster, and `useQuery` asks nothing for
+   * an undefined key. It is a value rather than a throw because a loader that rejects takes the
+   * page down, which is what `ApiResult` exists to prevent.
+   */
+  const noCluster = <A,>(): Fetched<A> => ({
+    kind: "failed",
+    message: "No cluster is selected.",
+    code: "NO_CLUSTER",
   });
+
+  /** One query, keyed and registered the same way. Five of them, so the shape is written once. */
+  const metric = <A,>(
+    keyOf: () => string | undefined,
+    load: (id: string) => Promise<Fetched<A>>,
+  ) =>
+    useQuery<A>({
+      key: keyOf,
+      load: async () => {
+        const id = cluster();
+        return id === undefined ? noCluster<A>() : load(id);
+      },
+      ...(props.queries === undefined ? {} : { registry: props.queries }),
+    });
+
+  const throughput = metric<ThroughputSeries>(key, (id) => fetchThroughput(kui.api, id, range()));
+
+  /**
+   * The p99 latency, over the same window the address names.
+   *
+   * Asked for on every tab that draws row 3 — which is the Overview and Traffic tabs, because §4.3
+   * replaces the whole body on Storage. The key is `undefined` on Storage, so nothing is asked.
+   */
+  const latency = metric<LatencySeries>(
+    createMemo<string | undefined>(() => {
+      const id = cluster();
+      return id === undefined || tab() === "storage" ? undefined : latencyKey(id, range());
+    }),
+    (id) => fetchLatency(kui.api, id, range()),
+  );
+
+  /** The Traffic tab's own last row: two of its three cards are asked for only when it is open. */
+  const handlers = metric<HandlerDocument>(
+    createMemo<string | undefined>(() => {
+      const id = cluster();
+      return id === undefined || tab() !== "traffic" ? undefined : requestHandlersKey(id);
+    }),
+    (id) => fetchRequestHandlers(kui.api, id),
+  );
+
+  const producers = metric<ProducerDocument>(
+    createMemo<string | undefined>(() => {
+      const id = cluster();
+      return id === undefined || tab() !== "traffic" ? undefined : producersKey(id, TOP_PRODUCERS);
+    }),
+    (id) => fetchTopProducers(kui.api, id, TOP_PRODUCERS),
+  );
+
+  /** Drawn on Traffic and on Storage (§4.2, §4.3), so it is asked for on both and on neither else. */
+  const recordSize = metric<RecordSizeDocument>(
+    createMemo<string | undefined>(() => {
+      const id = cluster();
+      return id === undefined || tab() === "overview" ? undefined : recordSizeKey(id);
+    }),
+    (id) => fetchRecordSize(kui.api, id),
+  );
 
   const tabs = (): readonly Tab[] => {
     const id = cluster();
@@ -276,7 +364,7 @@ export function Overview(props: OverviewProps): JSX.Element {
       {/* Tab-invariant, and drawn once above the switch rather than inside each arm. §4.2 proves
           the rule the design only implies: the stat cards are identical on every tab, so a reader
           who switches tabs is not made to re-read them. */}
-      <StatRow model={props.model} />
+      <StatRow model={props.model} throughput={throughput.state()} range={range()} />
 
       {/* `Dynamic` rather than a call, and this is not a style choice. The JSX compiler treats an
           expression container holding a call as dynamic and wraps it in a tracked computation, so
@@ -290,6 +378,10 @@ export function Overview(props: OverviewProps): JSX.Element {
         component={bodyFor(tab())}
         model={props.model}
         throughput={throughput.state()}
+        latency={latency.state()}
+        handlers={handlers.state()}
+        producers={producers.state()}
+        recordSize={recordSize.state()}
         range={range()}
         onRange={(chosen: ThroughputRange) => {
           /* `setSearchParams` and not a `navigate`: this replaces one parameter and leaves the
@@ -386,6 +478,10 @@ function bodyFor(tab: DashboardTab): BodyComponent {
 interface BodyProps {
   readonly model: OverviewModel;
   readonly throughput: Fetched<ThroughputSeries>;
+  readonly latency: Fetched<LatencySeries>;
+  readonly handlers: Fetched<HandlerDocument>;
+  readonly producers: Fetched<ProducerDocument>;
+  readonly recordSize: Fetched<RecordSizeDocument>;
   readonly range: ThroughputRange;
   readonly onRange: (range: ThroughputRange) => void;
   readonly onRetry: () => void;
@@ -393,8 +489,20 @@ interface BodyProps {
 
 type BodyComponent = (props: BodyProps) => JSX.Element;
 
-/** The row of stat cards, which every tab carries unchanged. */
-function StatRow(props: { readonly model: OverviewModel }): JSX.Element {
+/**
+ * The row of stat cards, which every tab carries unchanged.
+ *
+ * The two rate cards read the throughput series rather than a figure on the model, and that is not
+ * a shortcut: `bytesInPerSecond` **is** the produce rate the design's `86.4 MB/s` card names, from
+ * the same broker metric the chart below is drawn from. Computing it from anything else — a message
+ * browse, a partition sweep — would be a card that quietly became a different measurement, which is
+ * what the contract between this packet and the feature packets forbids.
+ */
+function StatRow(props: {
+  readonly model: OverviewModel;
+  readonly throughput: Fetched<ThroughputSeries>;
+  readonly range: ThroughputRange;
+}): JSX.Element {
   return (
     <div class="kui-overview__stats">
       <StatCard
@@ -437,10 +545,28 @@ function StatRow(props: { readonly model: OverviewModel }): JSX.Element {
         }
         testId="stat-in-sync"
       />
-      {/* The design's "PRODUCTION 86.4 MB/s". Nothing samples broker byte rates, so this card
-          carries the sentence rather than a figure — a card reading `— MB/s` would say the rate
-          is momentarily unreadable, which is a different and untrue claim. */}
-      <ProductionCard reading={props.model.productionRate} />
+      {/* The design's "PRODUCTION 86.4 MB/s" and "CONSUME 71.2 MB/s" (§3.2), each with the jagged
+          sparkline the same table gives it. Two of §3.2's four sparkline cards; the other two —
+          Topics and Partitions in sync — draw none, because KUI keeps no history of either figure
+          and §3.2's own absent rule is that a card with no series has no sparkline rather than a
+          flat line at zero. */}
+      <RateCard
+        label="PRODUCTION"
+        testId="stat-production"
+        icon="chart-bars"
+        noun="this cluster's produce rate"
+        instead="Per-topic message counts are on each topic's page."
+        state={props.throughput}
+        pick={(rates) => ({ current: rates.latest?.produce ?? null, points: rates.produce })}
+      />
+      <RateCard
+        label="CONSUME"
+        testId="stat-consume"
+        icon="stream"
+        noun="this cluster's consume rate"
+        state={props.throughput}
+        pick={(rates) => ({ current: rates.latest?.consume ?? null, points: rates.consume })}
+      />
       <StatCard
         label="CONSUMER LAG"
         icon="lag"
@@ -458,7 +584,7 @@ function OverviewBody(props: BodyProps): JSX.Element {
   return (
     <>
       <ChartsRow {...props} />
-      <PanelsRow model={props.model} />
+      <PanelsRow model={props.model} latency={props.latency} range={props.range} />
 
       <div class="kui-overview__charts">
         <StorageCard reading={props.model.storage} />
@@ -474,38 +600,21 @@ function OverviewBody(props: BodyProps): JSX.Element {
  * repeated here: *the tab selects the last row only*. Written out twice, the two tabs would be two
  * places for the broker-health card to drift, and the rule the design proves would be a comment.
  *
- * Every card in the last row keeps its `NotMeasured` sentence. `…/metrics/producers`,
- * `…/metrics/record-size` and `…/metrics/request-handlers` are wave 5's, and none of them may be
- * filled from something this browser happens to hold: a producer rate computed from a message
- * browse is not a broker metric, and a card that quietly became a different measurement would be
- * the most expensive kind of wrong on a screen whose whole promise is that it says what it knows.
+ * None of the three may be filled from something this browser happens to hold: a producer rate
+ * computed from a message browse is not a broker metric, and a card that quietly became a different
+ * measurement would be the most expensive kind of wrong on a screen whose whole promise is that it
+ * says what it knows. Each is handed the state of its own read and nothing else.
  */
 function TrafficBody(props: BodyProps): JSX.Element {
   return (
     <>
       <ChartsRow {...props} />
-      <PanelsRow model={props.model} />
+      <PanelsRow model={props.model} latency={props.latency} range={props.range} />
 
       <div class="kui-overview__panels">
-        <Card title="Top producers · client.id" icon="person" testId="panel-top-producers">
-          <NotMeasured
-            why={props.model.topProducers.kind === "notCollected" ? props.model.topProducers.why : ""}
-          />
-        </Card>
-
-        <Card title="Message size distribution" icon="chart-bars" testId="panel-message-sizes">
-          <NotMeasured
-            why={props.model.messageSizes.kind === "notCollected" ? props.model.messageSizes.why : ""}
-          />
-        </Card>
-
-        <Card title="Request handlers" icon="stream" testId="panel-request-handlers">
-          <NotMeasured
-            why={
-              props.model.requestHandlers.kind === "notCollected" ? props.model.requestHandlers.why : ""
-            }
-          />
-        </Card>
+        <TopProducersCard state={props.producers} />
+        <RecordSizeCard state={props.recordSize} />
+        <RequestHandlersCard state={props.handlers} />
       </div>
     </>
   );
@@ -530,7 +639,11 @@ function ChartsRow(props: BodyProps): JSX.Element {
 }
 
 /** Row 3, on both tabs that have one: partition health, top consumer lag, latency. */
-function PanelsRow(props: { readonly model: OverviewModel }): JSX.Element {
+function PanelsRow(props: {
+  readonly model: OverviewModel;
+  readonly latency: Fetched<LatencySeries>;
+  readonly range: ThroughputRange;
+}): JSX.Element {
   return (
     <div class="kui-overview__panels">
       <Card title="Partition health" icon="topology" testId="panel-partitions">
@@ -541,9 +654,7 @@ function PanelsRow(props: { readonly model: OverviewModel }): JSX.Element {
         <TopLag reading={props.model.topLag} />
       </Card>
 
-      <Card title="Latency · p99" icon="chart-line" testId="panel-latency">
-        <NotMeasured why={props.model.latency.kind === "notCollected" ? props.model.latency.why : ""} />
-      </Card>
+      <LatencyCard state={props.latency} range={props.range} />
     </div>
   );
 }
@@ -560,11 +671,7 @@ function StorageBody(props: BodyProps): JSX.Element {
   return (
     <div class="kui-overview__charts">
       <StorageCard reading={props.model.storage} />
-      <Card title="Message size distribution" icon="chart-bars" testId="panel-message-sizes">
-        <NotMeasured
-          why={props.model.messageSizes.kind === "notCollected" ? props.model.messageSizes.why : ""}
-        />
-      </Card>
+      <RecordSizeCard state={props.recordSize} />
     </div>
   );
 }
@@ -624,30 +731,146 @@ function pillForPartitions(reading: Reading<number>): { text: string; tone: Tone
 }
 
 /**
- * The design's "PRODUCTION 86.4 MB/s" card, with a sentence where the figure would be.
+ * The design's "PRODUCTION 86.4 MB/s" and "CONSUME 71.2 MB/s" cards (§3.2), from the throughput
+ * series that is already on the screen.
+ *
+ * ## Why one component draws both, and why it has two bodies
+ *
+ * The two cards differ in one accessor and nothing else, and a second copy would be a second place
+ * for the never-a-zero rule to be got wrong. Each has two renderings and the choice between them is
+ * the whole point:
+ *
+ *  - a **measured** rate — including a measured zero, which is a fact about a quiet cluster — draws
+ *    a `StatCard` with the figure and a `Sparkline` of the window;
+ *  - anything else draws the card's head and a **sentence**, because a `StatCard` reading `— MB/s`
+ *    says the rate is momentarily unreadable, and "no exporter is configured", "you may not read
+ *    this", "the exporter stopped answering" and "nothing has been sampled yet" are four different
+ *    claims that a dash makes indistinguishable.
+ *
+ * The measured-zero case is why the switch below is written `rate() !== undefined` rather than as a
+ * truthiness test: a produce rate of exactly `0 B/s` is the reading a quiet cluster gives, and
+ * `<Show when={0}>` would have sent it to the sentence — reporting an idle cluster as an unmeasured
+ * one, which is this screen's central mistake made backwards.
+ *
+ * `loading` reaches the sentence half too, and draws the waiting box `MetricAbsence` owns rather
+ * than a figure: a figure that has not arrived must not look like one that is missing, and the box
+ * is the shape the rest of this dashboard reserves for exactly that.
+ */
+function RateCard(props: {
+  readonly label: string;
+  readonly testId: string;
+  readonly icon: IconName;
+  /** What is not measured, in the possessive, for the two shared absence sentences. */
+  readonly noun: string;
+  readonly instead?: string | undefined;
+  readonly state: Fetched<ThroughputSeries>;
+  /** Which of the two rates this card is. The only thing that differs between the two callers. */
+  readonly pick: (rates: RateSeries) => {
+    readonly current: number | null;
+    readonly points: readonly (number | null)[];
+  };
+}): JSX.Element {
+  /* `rateSeries` and not `throughputChart`: this card draws one figure and a mark, and the chart's
+     other half is 288 `toLocaleTimeString` calls for labels no stat card prints. And a `createMemo`
+     rather than a bare accessor, for the reason the throughput key above is one — `Sparkline` reads
+     its `points` prop several times per render, and recomputed on each read the summary cost more
+     than the chart it summarises. */
+  const rates = createMemo<RateSeries | undefined>(() => {
+    const state = props.state;
+    return state.kind === "ready" || state.kind === "stale" ? rateSeries(state.value) : undefined;
+  });
+
+  const reading = createMemo(() => {
+    const built = rates();
+    return built === undefined ? undefined : props.pick(built);
+  });
+
+  /** The current rate, or `undefined` when there is not one. `0` is a rate. */
+  const rate = createMemo<number | undefined>(() => {
+    const value = reading()?.current;
+    return value === null || value === undefined ? undefined : value;
+  });
+
+  return (
+    <Show when={rate() !== undefined} fallback={<RateNote {...props} />}>
+      <StatCard
+        label={props.label}
+        icon={props.icon}
+        tone="accent"
+        figure={{ kind: "value", text: `${formatBytes(rate() as number)}/s` }}
+        /* §3.3: the mark is read only for its shape, and the figure beside it carries the
+           magnitude. A `null` step breaks the line rather than being drawn through, which is the
+           same gap rule the chart below the card keeps. */
+        visual={<Sparkline points={reading()?.points ?? []} />}
+        testId={props.testId}
+      />
+    </Show>
+  );
+}
+
+/**
+ * The same card with a sentence where the figure would be.
  *
  * It borrows `.kui-stat`'s own head — the icon tile and the label — rather than being a bare note,
- * so that the row of four reads as a row of four. Dropping the label as well as the figure made
- * this card visibly a different kind of object from its three neighbours, which draws the eye to
- * the one card that has nothing to say.
- *
- * What it does *not* borrow is the figure. A `StatCard` with a `—` in it would say the rate is
- * momentarily unreadable; the truth is that KUI never reads it, and that is a sentence, not a dash.
+ * so that the row reads as a row of equals. Dropping the label as well as the figure made this card
+ * visibly a different kind of object from its neighbours, which draws the eye to the one card that
+ * has nothing to say.
  */
-function ProductionCard(props: { readonly reading: Reading<never> }): JSX.Element {
+function RateNote(props: {
+  readonly label: string;
+  readonly testId: string;
+  readonly icon: IconName;
+  readonly noun: string;
+  readonly instead?: string | undefined;
+  readonly state: Fetched<ThroughputSeries>;
+}): JSX.Element {
   return (
-    <div class="kui-stat kui-stat--note" data-testid="stat-production">
+    <div class="kui-stat kui-stat--note" data-testid={props.testId}>
       <span class="kui-stat__head">
-        <IconTile icon="chart-bars" tone="neutral" />
-        <span class="kui-stat__label">PRODUCTION</span>
+        <IconTile icon={props.icon} tone="neutral" />
+        <span class="kui-stat__label">{props.label}</span>
       </span>
-      <NotMeasured
-        why={props.reading.kind === "notCollected" ? props.reading.why : ""}
-        instead="Per-topic message counts are on each topic's page."
-        testId="stat-production-note"
-      />
+      <Show
+        when={rateAbsence(props.state, props.noun)}
+        fallback={<MetricAbsence state={props.state} noun={props.noun} />}
+      >
+        {(why) => (
+          <NotMeasured
+            why={why()}
+            instead={props.instead}
+            testId={`${props.testId}-note`}
+          />
+        )}
+      </Show>
     </div>
   );
+}
+
+/**
+ * Which sentence a rate card with no figure prints, or `undefined` when the state draws itself.
+ *
+ * `loading` and `forbidden` fall through to `MetricAbsence`, which owns the waiting box and the
+ * permission note for every metrics card on this screen. The two written out here are the two that
+ * are specific to a *rate*: a deployment with no exporter, and a window a reachable exporter has
+ * sampled nothing in. The second is the one that has to exist — without it a cluster whose exporter
+ * is up and idle prints a cheerful figure of nothing at all.
+ */
+function rateAbsence(state: Fetched<ThroughputSeries>, noun: string): string | undefined {
+  switch (state.kind) {
+    case "not-configured":
+      return notConfiguredSentence(noun);
+    case "failed":
+      return `${state.message} (${state.code})`;
+    case "ready":
+    case "stale":
+      return (
+        "Nothing has been sampled in this window yet, so there is no current rate to print — " +
+        "a blank window rather than a rate of zero."
+      );
+    case "loading":
+    case "forbidden":
+      return undefined;
+  }
 }
 
 function BrokerHealth(props: { readonly reading: Reading<readonly BrokerBar[]> }): JSX.Element {

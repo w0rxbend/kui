@@ -30,6 +30,7 @@ import { KuiProvider, clearToasts, toasts, type KuiContextValue, type KuiPaths }
 import type { KuiApiClient } from "@kui/api";
 
 import { mount } from "./testing.js";
+import { presetsKey } from "./presets.js";
 import Messages from "./MessagesRoute.jsx";
 
 const CLUSTER = "quickstart";
@@ -716,6 +717,50 @@ describe("the toasts a write raises", () => {
     dispose();
   });
 
+  test("a copy whose source was partly eaten by retention reports both figures and they differ",
+    async () => {
+    /*
+     * The case the rule exists for, and the one this suite did not have.
+     *
+     * `MessagesRoute` composes the toast as `written of read`, and its comment says why: the
+     * request said how many records to try for, the answer says how many arrived, and on a range
+     * retention has already eaten those are different numbers. Every other copy case in this
+     * package — here and in `dialogs.test.tsx`'s route-free ones — uses a fixture where `read` and
+     * `written` are equal, so the two figures are interchangeable and the template could report
+     * either one. With `read: 12, written: 3` they are not: reporting `read` twice tells the
+     * operator twelve records reached the destination when three did, which is the copy stating
+     * the intention it was given rather than the outcome the server measured.
+     */
+    const { api } = fakeApi({
+      topicAnswer: topicWith(12, "orders.eaten"),
+      copied: { toTopic: "orders.replay", read: 12, written: 3 },
+    });
+    const { container, dispose } = routeAt("", api, "orders.eaten");
+    await settle();
+
+    press(container, "Copy records out");
+    await settle();
+    const dialog = overlay();
+    await fillCopy(dialog, "orders.replay");
+    pressIn(dialog, /^Copy records$/);
+    await settle();
+
+    const raised = toasts().find((toast) => toast.title === "Records copied");
+    expect(raised).toBeDefined();
+    // Written first, read second, and the two are not the same number.
+    expect(raised?.message).toContain("3 of 12");
+    // The two ways the pair collapses into a single figure. `12 of 12` is `read` in the written
+    // slot — the mutation this case is written against — and `3 of 3` is the request's own figure
+    // standing in for what the log still held.
+    expect(raised?.message).not.toContain("12 of 12");
+    expect(raised?.message).not.toContain("3 of 3");
+    // Still a success and not a warning: three records did move, and the operator has a
+    // destination to go and look at. The shortfall is in the figures, which is where they are.
+    expect(raised?.tone).toBe("success");
+
+    dispose();
+  });
+
   test("a copy that moved nothing raises a warning toast, never a success one", async () => {
     /*
      * The state this whole screen is shaped around: a range whose offsets retention has already
@@ -747,5 +792,87 @@ describe("the toasts a write raises", () => {
     expect(raised?.message).toContain("0 of 0");
 
     dispose();
+  });
+});
+
+describe("saving what is on the filter bar", () => {
+  beforeEach(() => {
+    clearToasts();
+    // A preset store is per browser and per cluster, and it survives between cases in one process.
+    // Left in place, the second run of this file would find the first run's chip already there.
+    try {
+      window.localStorage.removeItem(presetsKey(CLUSTER));
+    } catch {
+      /* A store that refuses is one of the states `presets.ts` is written to survive. */
+    }
+  });
+
+  test("naming a preset confirms it was saved, and says where it was saved", async () => {
+    /*
+     * The sixth `notify` in these two packages and the only one nothing asserted.
+     *
+     * A preset is written into this browser's `localStorage` and nowhere else: it does not reach
+     * the cluster, it is not visible to a colleague, and it is gone with the browser profile. The
+     * chip appearing on the bar says a preset exists; it does not say *that* — and the sentence
+     * this raises is the only place the product tells anybody, which is why it is asserted here
+     * rather than left as a toast that could be deleted with 150 cases still green.
+     */
+    const asked: string[] = [];
+    const original = window.prompt;
+    // jsdom implements `prompt` as a stub that returns `null` and logs "not implemented", so a
+    // case that did not replace it would exercise the cancel path and never reach the notify.
+    window.prompt = (message?: string) => {
+      asked.push(message ?? "");
+      return "Big tickets";
+    };
+
+    try {
+      const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.presets") });
+      // A predicate on the address, because the control is offered only when there is something to
+      // save: a "save as preset" over the empty arrangement would be a chip named after nothing.
+      const { container, dispose } = routeAt("?key=ord_", api, "orders.presets");
+      await settle();
+
+      press(container, "Save as preset");
+      await settle();
+
+      expect(asked).toEqual(["Name this filter"]);
+      expect(toastTitles()).toContain("Filter saved");
+      const raised = toasts().find((toast) => toast.title === "Filter saved");
+      expect(raised?.message).toContain("Big tickets");
+      // The half a chip cannot say. A preset that is only in this browser and reads as though it
+      // were saved on the cluster is a colleague being sent a link that shows them nothing.
+      expect(raised?.message).toContain("this browser only");
+      expect(raised?.tone).toBe("info");
+
+      // And it is on the bar afterwards, so the toast is a confirmation of something that happened
+      // rather than a sentence raised beside a write that did not.
+      expect(container.textContent).toContain("Big tickets");
+
+      dispose();
+    } finally {
+      window.prompt = original;
+    }
+  });
+
+  test("cancelling the prompt saves nothing and says nothing", async () => {
+    const original = window.prompt;
+    // What an operator who changes their mind gets. An empty answer means "cancel", and a toast
+    // reading "Filter saved" over a preset nobody named is worse than silence.
+    window.prompt = () => null;
+
+    try {
+      const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.unsaved") });
+      const { container, dispose } = routeAt("?key=ord_", api, "orders.unsaved");
+      await settle();
+
+      press(container, "Save as preset");
+      await settle();
+
+      expect(toastTitles()).toEqual([]);
+      dispose();
+    } finally {
+      window.prompt = original;
+    }
   });
 });

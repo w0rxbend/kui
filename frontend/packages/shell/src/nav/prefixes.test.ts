@@ -55,6 +55,18 @@ describe("the topic tree's prefix groups", () => {
     expect(rows.reduce((sum, row) => sum + row.count, 0)).toBe(4000);
   });
 
+  it("caps at the eight rows the drawer has room for, not at whatever the constant says", () => {
+    /* The case above is written `MAX_PREFIX_GROUPS + 1`, so it holds for any cap at all: the
+     * constant can be 800 and the whole package stays green, over a drawer eight hundred rows deep.
+     * Eight is a product decision — `SCREENS-V4.md` §2.2 draws eight, and the tree sits between the
+     * Topics row and the Consumers row with the storage meter still visible at the foot of a laptop
+     * screen — so the figure is asserted rather than rescaled. */
+    const names = Array.from({ length: 4000 }, (_, index) => `topic-${index}`);
+    const rows = prefixes(names);
+    expect(rows.length).toBe(9);
+    expect(rows.filter((row) => row.prefix !== "other").length).toBe(8);
+  });
+
   it("keeps the largest groups, and orders ties the same way every time", () => {
     /* A refetch that returns the names in another order must not reshuffle the rows under the
      * reader's cursor — the same argument `navigation.ts` makes about entries that move. */

@@ -67,6 +67,8 @@ function plan(noOp = false): unknown {
 interface Stub {
   readonly api: KuiApiClient;
   readonly calls: string[];
+  /** The `topic` query each `DELETE …/offsets` carried, in order. */
+  readonly forgotten: string[];
 }
 
 /**
@@ -78,10 +80,15 @@ interface Stub {
  */
 function stub(options: {
   readonly detail?: unknown;
+  readonly plan?: unknown;
   readonly applyFails?: string;
   readonly deleteFails?: string;
+  /** What `DELETE …/offsets` answers with. Absent means it removed every partition it was asked. */
+  readonly forgetAnswer?: { readonly topic: string; readonly partitions: readonly number[] };
+  readonly forgetFails?: string;
 }): Stub {
   const calls: string[] = [];
+  const forgotten: string[] = [];
   const refuse = (message: string) => ({
     ok: false,
     error: {
@@ -104,7 +111,7 @@ function stub(options: {
   const post = async (path: string) => {
     calls.push(`POST ${path}`);
     if (path === "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets/plan") {
-      return { ok: true, value: plan() };
+      return { ok: true, value: options.plan ?? plan() };
     }
     if (path === "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets") {
       return options.applyFails === undefined
@@ -113,18 +120,35 @@ function stub(options: {
     }
     return { ok: false, error: { kind: "unreachable", cause: "nothing answers that here" } };
   };
-  const remove = async (path: string) => {
+  const remove = async (
+    path: string,
+    init?: { readonly params?: { readonly query?: { readonly topic?: string } } },
+  ) => {
     calls.push(`DELETE ${path}`);
     if (path === "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}") {
       return options.deleteFails === undefined
         ? { ok: true, value: {} }
         : refuse(options.deleteFails);
     }
+    if (path === "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}/offsets") {
+      /* The topic is a *query* parameter, not a path segment, because the resource is "this
+         group's offsets" narrowed by topic. Recorded rather than ignored: a request that reached
+         the endpoint without it would forget nothing and answer 400, and a stub that dropped it
+         would let this suite pass over that. */
+      const topic = init?.params?.query?.topic ?? "";
+      forgotten.push(topic);
+      if (options.forgetFails !== undefined) return refuse(options.forgetFails);
+      return {
+        ok: true,
+        value: options.forgetAnswer ?? { topic, partitions: [0, 1, 2] },
+      };
+    }
     return { ok: false, error: { kind: "unreachable", cause: "nothing answers that here" } };
   };
 
   return {
     calls,
+    forgotten,
     api: {
       get,
       post,
@@ -262,6 +286,55 @@ describe("the group page's toasts", () => {
     dispose();
   });
 
+  it("shows a partition the group never committed on as a dash, never as offset zero", async () => {
+    /*
+     * `write.ts`'s most argued-for line, asserted where the product applies it rather than where a
+     * test arranges it. `toPlannedPartition` is not exported, so the only honest seam is the
+     * server's own payload going in and the plan table coming out — and the payload here is the
+     * one shape the recorded plan cannot be: a partition whose `current` field is **absent**,
+     * which is how the server says this group has never committed a position there.
+     *
+     * `current: payload.current ?? 0` satisfies every type on that path and draws a `0` in the
+     * From column, which tells an operator the group has consumed the first record when it has
+     * consumed nothing — and then the reset they are about to approve reads as a rewind of one
+     * record instead of a first commit.
+     */
+    const { api } = stub({
+      plan: {
+        topic: "analytics.pageviews",
+        token: "plan-token-1",
+        expiresAt: "2099-01-01T00:00:00Z",
+        noOp: false,
+        partitions: [
+          { partition: 0, current: 40, proposed: 0, delta: -40 },
+          // No `current` and no `delta`: nothing has ever been committed here.
+          { partition: 1, proposed: 0 },
+        ],
+        warnings: [],
+      },
+    });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(container, /^Reset offsets$/);
+    await settle();
+    press(container, /^Preview the plan$/);
+    await settle();
+
+    const rows = [...container.querySelectorAll('[data-testid="group-reset-plan"] tbody tr')];
+    expect(rows).toHaveLength(2);
+    const cells = (row: Element | undefined): readonly string[] =>
+      [...(row?.querySelectorAll("td") ?? [])].map((cell) => (cell.textContent ?? "").trim());
+
+    // The partition that has a position keeps its number, so this is not a table of dashes.
+    expect(cells(rows[0])[1]).toBe("40");
+    // And the one that has none draws the em dash the column's own comment promises.
+    expect(cells(rows[1])[1]).toBe("—");
+    expect(cells(rows[1])[1]).not.toBe("0");
+
+    dispose();
+  });
+
   it("raises a toast when the group is deleted, and leaves through the router so it survives", async () => {
     /*
      * `GroupRoute` navigates away on success. The list it arrives at has no trace of what happened —
@@ -290,6 +363,162 @@ describe("the group page's toasts", () => {
     // The list, through the router — and with the mount point exactly once. A `KuiPaths` address
     // already carries the base, so a navigation that resolved it again would land on `/ui/ui/…`.
     expect(url()).toBe(`${BASE}/clusters/${CLUSTER}/consumer-groups`);
+
+    dispose();
+  });
+
+  it("forgets one topic's offsets and reports how many partitions the server removed", async () => {
+    /*
+     * `CG-005`'s exit, in one case: the control is on the page per topic, and the receipt is
+     * asserted at the route.
+     *
+     * Three things are checked and none of them can be met by the others. The request carries the
+     * topic as a **query** parameter, which is where the endpoint puts it — a request without it
+     * forgets nothing and comes back 400. The toast quotes the *server's* partition count and not
+     * the figure the page was drawing, because the two are the same only until somebody else has
+     * reset the group between the page load and the click. And the group is still here afterwards:
+     * this removes committed positions, not the group, and a screen that navigated away would be
+     * telling the operator it had done the other thing.
+     */
+    const { api, calls, forgotten } = stub({
+      forgetAnswer: { topic: "analytics.pageviews", partitions: [0, 1, 2, 3, 4] },
+    });
+    const { container, dispose, url } = openGroup(api);
+    await settle();
+
+    press(container, /^Forget offsets$/);
+    await settle();
+
+    /* The consequence, before the click, in this group's own figures. The recorded group holds
+       twelve partitions of `analytics.pageviews`, and the number is what makes this a consequence
+       rather than an adjective — the dialog's own contract, and the sentence beside it is the one
+       that decides whether an operator should press the button at all. */
+    const asking = confirmation().textContent ?? "";
+    expect(asking).toContain("12 partitions of analytics.pageviews");
+    expect(asking).toContain("No records are deleted.");
+    expect(asking).toContain("auto.offset.reset");
+
+    press(confirmation(), /^Forget offsets$/);
+    await settle();
+
+    expect(forgotten).toEqual(["analytics.pageviews"]);
+
+    expect(titles()).toContain("Committed offsets forgotten");
+    const raised = toasts().find((toast) => toast.title === "Committed offsets forgotten");
+    expect(raised?.tone).toBe("success");
+    // The server's five, not the twelve the recorded group holds — so the sentence cannot be
+    // composed from anything the browser already knew.
+    expect(raised?.message).toContain("5 partitions");
+    expect(raised?.message).toContain("analytics.pageviews");
+    // The sentence that decides whether this was safe, and the one an operator forgets.
+    expect(raised?.message).toContain("No records were deleted.");
+
+    expect(url()).toBe(`${BASE}/clusters/${CLUSTER}/consumer-groups/${GROUP}`);
+
+    /* And the page behind the dialog was re-read. The assignments table is drawn from offsets that
+       have just changed, so without this it keeps showing committed positions Kafka no longer
+       holds — figures that were true a second ago, which is the most convincing kind of wrong. */
+    const reads = calls.filter(
+      (call) => call === "GET /api/v1/clusters/{clusterId}/consumer-groups/{groupId}",
+    );
+    expect(reads).toHaveLength(2);
+
+    dispose();
+  });
+
+  it("says one partition rather than 1 partitions when the server removed exactly one", async () => {
+    // The singular, which the plural template gets wrong on every single-partition topic — most of
+    // what a scratch cluster holds. Its twin on the way in (`1 partition held`) has a case in
+    // `consumers.test.tsx`; this is the receipt's.
+    const { api } = stub({ forgetAnswer: { topic: "analytics.pageviews", partitions: [3] } });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(container, /^Forget offsets$/);
+    await settle();
+    press(confirmation(), /^Forget offsets$/);
+    await settle();
+
+    const raised = toasts().find((toast) => toast.title === "Committed offsets forgotten");
+    expect(raised?.message).toContain("1 partition of analytics.pageviews");
+    expect(raised?.message).not.toContain("1 partitions");
+
+    dispose();
+  });
+
+  it("does not show the last refusal over a confirmation that has just been reopened", async () => {
+    /*
+     * A refusal belongs to the attempt that earned it. The mutation's state outlives the dialog —
+     * the dialog is a `Show`, the mutation is not — so without a reset on the way in, reopening
+     * this confirmation puts "cluster is read-only" over a fresh question about a topic the
+     * operator has just chosen, which reads as a refusal of the thing they have not asked yet.
+     */
+    const { api } = stub({ forgetFails: "cluster 'quickstart' is read-only" });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(container, /^Forget offsets$/);
+    await settle();
+    press(confirmation(), /^Forget offsets$/);
+    await settle();
+    expect(confirmation().textContent).toContain("read-only");
+
+    // Closed, and asked again.
+    press(confirmation(), /^Cancel$/);
+    await settle();
+    press(container, /^Forget offsets$/);
+    await settle();
+
+    expect(confirmation().textContent).not.toContain("read-only");
+
+    dispose();
+  });
+
+  it("says nothing was forgotten, in a warning, when the group held no offsets there", async () => {
+    /*
+     * The shape this whole product keeps meeting: a 200 whose entire meaning is in a figure.
+     *
+     * `DELETE …/offsets` answers 200 with an **empty** partition list when the group held no
+     * committed position on that topic — the endpoint's own description says the body exists so
+     * that "the group had none" and "they were deleted" stay distinguishable, which a bare status
+     * code cannot do. A green tick over the empty case sends an operator away believing a position
+     * they can still see elsewhere was removed.
+     */
+    const { api } = stub({ forgetAnswer: { topic: "analytics.pageviews", partitions: [] } });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(container, /^Forget offsets$/);
+    await settle();
+    press(confirmation(), /^Forget offsets$/);
+    await settle();
+
+    expect(titles()).toContain("Nothing was forgotten");
+    const raised = toasts().find((toast) => toast.title === "Nothing was forgotten");
+    // The tone is the assertion. The wording is what a reader skims; the colour is what they see
+    // from across the room.
+    expect(raised?.tone).toBe("warning");
+    expect(raised?.message).toContain("held no committed offset");
+    expect(titles()).not.toContain("Committed offsets forgotten");
+    // And above all not a zero dressed as a result: `0 partitions` reads as an action that ran.
+    expect(raised?.message).not.toContain("0 partitions");
+
+    dispose();
+  });
+
+  it("raises no toast when the cluster refuses to forget the offsets", async () => {
+    const { api } = stub({ forgetFails: "cluster 'quickstart' is read-only" });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(container, /^Forget offsets$/);
+    await settle();
+    press(confirmation(), /^Forget offsets$/);
+    await settle();
+
+    expect(titles()).toEqual([]);
+    // The confirmation stays open carrying the server's own words, where the operator is looking.
+    expect(confirmation().textContent).toContain("read-only");
 
     dispose();
   });

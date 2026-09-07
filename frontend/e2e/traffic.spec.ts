@@ -34,14 +34,90 @@ interface WireThroughput {
   };
 }
 
+/** One step of the latency series. Both percentiles are nullable and null means unsampled. */
+interface WireLatencyBucket {
+  readonly startingAt?: string;
+  readonly produceP99Millis?: number | null;
+  readonly produceP99?: number | null;
+  readonly fetchP99Millis?: number | null;
+  readonly fetchP99?: number | null;
+}
+
+/**
+ * `latency` is optional because a gateway that does not route this path answers an ADR-034 error
+ * envelope rather than a section — which is exactly what it does until W5-01's endpoints land, and
+ * what it would do again if the route were ever removed. Read as `undefined`, that falls into each
+ * case's failure branch and asserts the card says so, instead of throwing inside the spec and
+ * reporting a `TypeError` where a red card is the finding.
+ */
+interface WireLatency {
+  readonly latency?: {
+    readonly status: string;
+    readonly data?: { readonly buckets?: readonly WireLatencyBucket[] };
+  };
+}
+
+interface WireHandlers {
+  readonly requestHandlers?: {
+    readonly status: string;
+    readonly data?: {
+      readonly readings?: readonly {
+        readonly id?: string;
+        readonly label?: string;
+        readonly ratio?: number | null;
+        readonly count?: number | null;
+        readonly unit?: string;
+      }[];
+    };
+  };
+  readonly "request-handlers"?: WireHandlers["requestHandlers"];
+}
+
+interface WireProducers {
+  readonly producers?: {
+    readonly status: string;
+    readonly data?: {
+      readonly entries?: readonly {
+        readonly clientId?: string;
+        readonly topic?: string;
+        readonly bytesPerSecond?: number | null;
+      }[];
+    };
+  };
+}
+
+interface WireRecordSize {
+  readonly recordSize?: { readonly status: string; readonly data?: { readonly meanBytes?: number | null } };
+  readonly "record-size"?: WireRecordSize["recordSize"];
+}
+
 /** How many buckets each window holds, from `ThroughputRange.bucketCount`. */
 const BUCKETS = { "24h": 288, "7d": 168, "30d": 120 } as const;
 
 const throughput = async (api: KuiApi, range: string): Promise<WireThroughput> =>
   (await api.get(`/api/v1/clusters/${CLUSTER}/metrics/throughput?range=${range}`)) as WireThroughput;
 
+const latency = async (api: KuiApi, window: string): Promise<WireLatency> =>
+  (await api.get(`/api/v1/clusters/${CLUSTER}/metrics/latency?window=${window}`)) as WireLatency;
+
 const measured = (bucket: WireBucket): boolean =>
   typeof bucket.bytesInPerSecond === "number" || typeof bucket.bytesOutPerSecond === "number";
+
+const latencyMeasured = (bucket: WireLatencyBucket): boolean =>
+  typeof (bucket.produceP99Millis ?? bucket.produceP99) === "number" ||
+  typeof (bucket.fetchP99Millis ?? bucket.fetchP99) === "number";
+
+/**
+ * The sentence a card draws for a cluster with no metrics source, exactly as `NotMeasured.tsx`
+ * builds it.
+ *
+ * Retyped here rather than imported, and that is a real cost: this suite runs under Playwright's
+ * own tsconfig and does not resolve `@kui/shell`. What stops it drifting is that the fragment
+ * asserted is the *middle clause*, which the builder writes once for all five cards — so a change
+ * to any card's noun leaves this passing and a change to the shared sentence reddens every case
+ * that uses it at once.
+ */
+const NOT_CONFIGURED = "No metrics source is configured for it";
 
 test.describe("the Traffic tab", () => {
   test("is reachable from the tab strip and marked when it is open", async ({ page }) => {
@@ -60,7 +136,7 @@ test.describe("the Traffic tab", () => {
   });
 
   test("carries the same stat cards as Overview, and its own last row", async ({ page }) => {
-    const cards = ["BROKERS ONLINE", "TOPICS", "PARTITIONS IN SYNC", "PRODUCTION", "CONSUMER LAG"];
+    const cards = ["BROKERS ONLINE", "TOPICS", "PARTITIONS IN SYNC", "PRODUCTION", "CONSUME", "CONSUMER LAG"];
 
     await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
     for (const label of cards) await expect(page.getByText(label, { exact: true })).toBeVisible();
@@ -71,9 +147,14 @@ test.describe("the Traffic tab", () => {
     await expect(page.getByRole("heading", { name: "Cluster overview" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Broker health" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Partition health" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Latency · p99" })).toBeVisible();
 
-    // And the last row is this tab's own.
-    for (const title of ["Top producers · client.id", "Message size distribution", "Request handlers"]) {
+    /* And the last row is this tab's own. The producers heading is asserted by its stem, because
+       what follows the interpunct is the word the *server* used — `topic` on a broker with no
+       client quotas configured, `client.id` on one with them — and a suite that pinned either
+       would be asserting the deployment rather than the rule. */
+    await expect(page.getByRole("heading", { name: /^Top producers/ })).toBeVisible();
+    for (const title of ["Message size distribution", "Request handlers"]) {
       await expect(page.getByRole("heading", { name: title })).toBeVisible();
     }
     // `Storage by broker` belongs to the other two tabs.
@@ -144,7 +225,7 @@ test.describe("the Traffic tab", () => {
        * time axis is a claim that the quantity is measured and merely absent right now, and it sends
        * somebody to find an exporter that was never configured.
        */
-      await expect(card).toContainText("No metrics source is configured for it");
+      await expect(card).toContainText(NOT_CONFIGURED);
       await expect(card.locator("table")).toHaveCount(0);
       await expect(card.locator('[role="img"]')).toHaveCount(0);
       await expect(card).not.toContainText("0 B/s");
@@ -155,14 +236,198 @@ test.describe("the Traffic tab", () => {
       await expect(card).toContainText(/did not answer|unavailable|KUI-/i);
     }
 
-    /* Whatever the status, the three cards wave 5 fills keep saying what they cannot measure. None
-       of them may borrow a figure from something the browser happens to hold. */
-    await expect(page.locator('[data-testid="panel-top-producers"]')).toContainText(
-      "does not record which clients are producing",
+    /* Whatever the status, the record-size card refuses the distribution the design drew. That
+       refusal is a fact about what a broker publishes rather than about this deployment, so it
+       holds on a stack where everything else is measured — which is the only way it can be told
+       apart from an endpoint nobody wrote. */
+    await expect(page.locator('[data-testid="panel-message-sizes"]')).toContainText(
+      "publishes no record-size distribution",
     );
-    await expect(page.locator('[data-testid="panel-request-handlers"]')).toContainText(
-      "does not record request-handler idle time",
-    );
+    /* By the chart family's own classes rather than by `svg`: `Card` draws its title icon as one,
+       so a count of every `svg` would be asserting that the card has no icon. */
+    await expect(page.locator('[data-testid="panel-message-sizes"] .kui-histogram')).toHaveCount(0);
+    await expect(page.locator('[data-testid="panel-message-sizes"] .kui-plot')).toHaveCount(0);
+  });
+
+  test("draws the latency the endpoint answered, and never a zero for a gap", async ({ page, api }) => {
+    const wire = await latency(api, "24h");
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/traffic`);
+
+    const card = page.locator('[data-testid="panel-latency"]');
+    await expect(page.getByRole("heading", { name: "Latency · p99" })).toBeVisible();
+
+    if (wire.latency?.status === "ok" || wire.latency?.status === "stale") {
+      const buckets = wire.latency.data?.buckets ?? [];
+
+      /* The axis is the window and not the sample count, exactly as it is for throughput: a range's
+         bucket count is constant whatever was sampled, so a quiet hour draws the same axis. */
+      expect(buckets.length).toBe(BUCKETS["24h"]);
+      await expect(card.locator("table tbody tr")).toHaveCount(buckets.length);
+
+      const gap = buckets.findIndex((bucket) => !latencyMeasured(bucket));
+      if (gap >= 0) {
+        /* The rule this card exists for. A step nothing sampled prints the em dash; drawn as a
+           zero it would say the broker answered instantly, which is the most flattering possible
+           rendering of "we were not looking". */
+        const cells = card.locator("table tbody tr").nth(gap).locator("td");
+        await expect(cells.first()).toHaveText("—");
+        await expect(cells.first()).not.toHaveText(/^0/);
+
+        const absent = buckets.filter((bucket) => !latencyMeasured(bucket)).length;
+        await expect(card).toContainText(`${absent} of the ${buckets.length}`);
+        // And in this card's own words, not the throughput card's.
+        await expect(card).toContainText("rather than as zero latency");
+      }
+
+      if (buckets.some(latencyMeasured)) {
+        const row = buckets.findIndex(latencyMeasured);
+        await expect(card.locator("table tbody tr").nth(row).locator("td").first()).toContainText(/ms|s$/);
+        /* And the legend carries the current reading, which is where §3.1 puts it — the reason the
+           plot is allowed no y-axis labels at all. By list item rather than by text, because
+           "produce" is also a column heading in the hidden data table and the two would collide. */
+        await expect(card.getByRole("listitem").filter({ hasText: "produce" })).toContainText(/ms|s$/);
+      }
+    } else if (wire.latency?.status === "not_configured") {
+      /* The refusal, and the same reason it is not enough on its own that the throughput case
+         gives: what is asserted is not that a sentence appears but that no axis, no table and no
+         figure appear beside it. */
+      await expect(card).toContainText(NOT_CONFIGURED);
+      await expect(card.locator("table")).toHaveCount(0);
+      await expect(card.locator('[role="img"]')).toHaveCount(0);
+    } else {
+      await expect(card).toContainText(/did not answer|unavailable|KUI-/i);
+    }
+  });
+
+  test("draws a ratio as a ring and a queue length as a count", async ({ page, api }) => {
+    const wire = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/metrics/request-handlers`,
+    )) as WireHandlers;
+    const section = wire.requestHandlers ?? wire["request-handlers"];
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/traffic`);
+
+    const card = page.locator('[data-testid="panel-request-handlers"]');
+    await expect(page.getByRole("heading", { name: "Request handlers" })).toBeVisible();
+
+    if (section?.status === "ok" || section?.status === "stale") {
+      const readings = section.data?.readings ?? [];
+      for (const reading of readings) {
+        const tile = card.locator(`[data-testid="handler-${reading.id ?? ""}"]`);
+        await expect(tile).toBeVisible();
+        if (typeof reading.ratio === "number") {
+          /* A ratio in 0..1 arrives from the endpoint and the card multiplies it. A gauge printing
+             `0%` for a broker that is 71% idle is what a missing multiply looks like. */
+          await expect(tile.locator(".kui-gauge")).toHaveCount(1);
+          await expect(tile).toContainText(`${Math.round(reading.ratio * 100)}%`);
+        } else if (typeof reading.count === "number") {
+          /* §3.4 draws "38% PURGATORY" and this is not a percentage of anything: there is no
+             ceiling to divide a queue length by, and dividing it by an invented one is a fabricated
+             figure. So no ring, no per cent sign, and the card says why in words. */
+          await expect(tile.locator(".kui-gauge")).toHaveCount(0);
+          await expect(tile).toContainText(String(reading.count));
+          await expect(tile).not.toContainText("%");
+          await expect(card).toContainText("queue length");
+        } else {
+          // Served the name and not the value: the plain track and an em dash, never a full ring.
+          await expect(tile.locator(".kui-gauge__arc")).toHaveCount(0);
+          await expect(tile).toContainText("—");
+        }
+      }
+    } else if (section?.status === "not_configured") {
+      await expect(card).toContainText(NOT_CONFIGURED);
+      await expect(card.locator(".kui-gauge")).toHaveCount(0);
+    } else {
+      await expect(card).toContainText(/did not answer|unavailable|KUI-/i);
+    }
+  });
+
+  test("titles the producers card with the word the server used", async ({ page, api }) => {
+    const wire = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/metrics/producers?top=5`,
+    )) as WireProducers;
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/traffic`);
+
+    const card = page.locator('[data-testid="panel-top-producers"]');
+
+    if (wire.producers?.status === "ok" || wire.producers?.status === "stale") {
+      const entries = wire.producers.data?.entries ?? [];
+      const first = entries.find((entry) => entry.clientId !== undefined || entry.topic !== undefined);
+      if (first !== undefined) {
+        /*
+         * §4 draws `Top producers · client.id` and a broker publishes no per-`client.id` byte rate
+         * unless quotas are configured — it publishes a per-*topic* one. The heading has to say
+         * whichever the server actually sent, because a tile labelled `client.id` over a topic name
+         * is the drift wave 5's rule 7 exists to stop. Asserted against the wire, so the same case
+         * passes on a deployment with quotas and on one without.
+         */
+        const subject = first.clientId !== undefined ? "client.id" : "topic";
+        await expect(page.getByRole("heading", { name: `Top producers · ${subject}` })).toBeVisible();
+        await expect(card).toContainText(first.clientId ?? first.topic ?? "");
+      }
+      for (const entry of entries) {
+        const name = entry.clientId ?? entry.topic;
+        if (name === undefined) continue;
+        // A named producer whose rate did not arrive keeps its place and says so in words: dropping
+        // it shortens a top-five without saying so, and a zero ranks it last on nothing.
+        if (entry.bytesPerSecond === null) await expect(card).toContainText("not measured");
+      }
+    } else if (wire.producers?.status === "not_configured") {
+      await expect(card).toContainText(NOT_CONFIGURED);
+      await expect(card.locator(".kui-progress")).toHaveCount(0);
+    } else {
+      await expect(card).toContainText(/did not answer|unavailable|KUI-/i);
+    }
+  });
+
+  test("prints a mean record size and refuses the distribution the design drew", async ({ page, api }) => {
+    const wire = (await api.get(`/api/v1/clusters/${CLUSTER}/metrics/record-size`)) as WireRecordSize;
+    const section = wire.recordSize ?? wire["record-size"];
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/traffic`);
+
+    const card = page.locator('[data-testid="panel-message-sizes"]');
+    await expect(page.getByRole("heading", { name: "Message size distribution" })).toBeVisible();
+
+    if (section?.status === "ok" || section?.status === "stale") {
+      /*
+       * The card ADR-052 calls unmeasurable, asserted on the deployment where the throughput card
+       * is drawing real bytes — which is the only way this refusal can be told apart from an
+       * endpoint nobody wrote. §3.5 draws twelve buckets and three percentile chips; Kafka
+       * publishes a mean and nothing else, so the mean is printed and the rest is named as absent
+       * rather than spread across twelve columns.
+       */
+      await expect(card.locator('[data-testid="record-size-mean"]')).toBeVisible();
+      if (typeof section.data?.meanBytes !== "number") {
+        await expect(card.locator('[data-testid="record-size-mean"]')).toContainText("not measured");
+      }
+      await expect(card).toContainText("publishes no record-size distribution");
+      await expect(card).not.toContainText("p50");
+      await expect(card.locator(".kui-histogram, .kui-plot")).toHaveCount(0);
+    } else if (section?.status === "not_configured") {
+      await expect(card).toContainText(NOT_CONFIGURED);
+    } else {
+      await expect(card).toContainText(/did not answer|unavailable|KUI-/i);
+    }
+  });
+
+  test("fills the produce and consume stat cards from the series, or says why not", async ({ page, api }) => {
+    const wire = await throughput(api, "24h");
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/traffic`);
+
+    const production = page.locator('[data-testid="stat-production"]');
+    const consume = page.locator('[data-testid="stat-consume"]');
+    const anyMeasured = (wire.throughput.data?.buckets ?? []).some(measured);
+
+    if ((wire.throughput.status === "ok" || wire.throughput.status === "stale") && anyMeasured) {
+      /* §3.2's `Produce rate 86.4 MB/s`, from `bytesInPerSecond` — the same broker metric the chart
+         below is drawn from, not a rate derived from anything this browser happens to hold. */
+      await expect(production).toContainText("/s");
+      await expect(consume).toContainText("/s");
+    } else {
+      /* Words, never `— MB/s`: a dash says the rate is momentarily unreadable, and the truth is
+         either that nothing is configured to read it or that nothing has been sampled yet. */
+      await expect(production).not.toContainText("—");
+      await expect(production).toContainText(/No metrics source|Nothing has been sampled|permission/);
+    }
   });
 
   test("puts the chosen window in the address, so a colleague can be sent one", async ({ page }) => {
@@ -222,8 +487,14 @@ test.describe("the Traffic tab", () => {
 
     const card = page.locator('[data-testid="panel-throughput"]');
     if (wire.throughput.status === "not_configured") {
-      await expect(card).toContainText("No metrics source is configured for it");
+      await expect(card).toContainText(NOT_CONFIGURED);
       await expect(card.locator("table")).toHaveCount(0);
+      /* And the same on every other card on the tab, in the same sentence. One unconfigured cluster
+         beside one measured cluster on one deployment is what M7's criterion asks for, and it is
+         the pair that a refusal-only assertion could never establish. */
+      for (const panel of ["panel-latency", "panel-top-producers", "panel-request-handlers"]) {
+        await expect(page.locator(`[data-testid="${panel}"]`)).toContainText(NOT_CONFIGURED);
+      }
     } else {
       await expect(card.locator("table tbody tr")).toHaveCount(BUCKETS["24h"]);
     }

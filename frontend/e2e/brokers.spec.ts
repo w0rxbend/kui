@@ -37,7 +37,9 @@ interface ClusterDocument {
 }
 
 interface BrokersDocument {
-  readonly brokers?: Section<readonly { readonly leaderSkewPercent?: number | null }[]>;
+  readonly brokers?: Section<
+    readonly { readonly leaderSkewPercent?: number | null; readonly leaderCount?: number | null }[]
+  >;
 }
 
 interface LogDirsDocument {
@@ -229,6 +231,58 @@ test.describe("the brokers screen", () => {
       await expect(said).toContainText(
         new RegExp(`Leads ${Math.abs(Math.round(skew))}% (more|fewer) partitions`),
       );
+    }
+  });
+
+  test("TOTAL LEADERS is the cluster's own count, or a sentence saying it was not read", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * Closed by mutation, in the unit suite and here: deleting the `leaderPartitions === null` guard
+     * from `totalLeaders` left all 147 cases in `feature-clusters` green, and the tile then adds an
+     * unreadable broker in as `0` and prints a total that is quietly short.
+     *
+     * Both branches are legitimate answers — Kafka does not report a per-broker leader count on
+     * every cluster, and a single-broker cluster is the usual place it is `null` — so the gateway
+     * decides which one this deployment gives, and the assertion is that the screen drew the
+     * rendering that answer calls for.
+     */
+    const document = (await api.get(`/api/v1/clusters/${CLUSTER}/brokers`)) as BrokersDocument;
+    const brokers = dataOf(document.brokers) ?? [];
+    expect(brokers.length, "the quickstart should report at least one broker").toBeGreaterThan(0);
+    const counts = brokers.map((broker) => broker.leaderCount ?? null);
+    const anyUnread = counts.some((count) => count === null);
+
+    await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
+    const tile = page.locator(".kui-brk-tiles .kui-tile").filter({ hasText: "TOTAL LEADERS" });
+    await expect(tile).toBeVisible();
+
+    if (anyUnread) {
+      // No figure at all rather than a sum with a zero in it, and a chip saying which silence this
+      // is: these brokers answered `describeCluster`, so "no broker answered" would send an
+      // operator looking for an outage that is not happening.
+      await expect(tile.locator(".kui-tile__value")).toHaveCount(0);
+      await expect(tile.locator(".kui-tile__absent")).toBeVisible();
+      await expect(tile).toContainText("this cluster does not report leader counts");
+    } else {
+      const total = counts.reduce((sum: number, count) => sum + (count ?? 0), 0);
+      await expect(tile.locator(".kui-tile__value")).toContainText(total.toLocaleString("en-US"));
+      await expect(tile).not.toContainText("does not report leader counts");
+    }
+
+    // And the same rule one level down, on the card: a figure where the wire carried one, an em
+    // dash with a reason where it did not — never a zero standing in for either.
+    const card = page.locator(".kui-brkcard").first();
+    const leaders = card.locator(".kui-brkcard__figure").filter({ hasText: "LEADERS" }).first();
+    if (counts[0] === null) {
+      await expect(leaders).toContainText("—");
+      await expect(leaders.locator("[title]")).toHaveAttribute(
+        "title",
+        "The leader count could not be read",
+      );
+    } else {
+      await expect(leaders).toContainText(Number(counts[0]).toLocaleString("en-US"));
     }
   });
 

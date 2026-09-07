@@ -6,6 +6,7 @@ import cats.syntax.all.*
 import kui.contracts.capability.{CapabilityState, ClusterCapability}
 import kui.kernel.ClusterId
 import kui.metrics.application.{ClusterSources, SourceAccess, SourceProfile}
+import kui.metrics.contract.MetricsEndpoints
 
 /** What the metrics service can currently do, per cluster, as the gateway reads it.
   *
@@ -64,7 +65,7 @@ object MetricsCapabilities {
     if profile.isMeasurable then
       ClusterCapability(
         configured = true,
-        features = List(ThroughputFeature),
+        features = Features,
         status = CapabilityState.Available.status,
         name = Some(profile.displayName),
         reason = None
@@ -78,8 +79,17 @@ object MetricsCapabilities {
         reason = Some(SourceAccess.explain(profile))
       )
 
-  /** The one thing this service measures. It is the endpoint's own name, so that a browser reading the
-    * feature list and a browser reading the OpenAPI document are reading one string.
+  /** Everything this service measures, each named by its own endpoint, so that a browser reading the feature
+    * list and a browser reading the OpenAPI document are reading one string.
+    *
+    * Derived from the published contract rather than written out, because a list written out is a list that
+    * goes stale: a sixth endpoint added to `MetricsEndpoints.all` and forgotten here would be a card the
+    * browser never asks for, on a cluster that can answer it. `flatMap` over the names rather than `map`,
+    * because `info.name` is an `Option` and `MetricsContractSuite` is what holds every endpoint to having
+    * one.
     */
+  val Features: List[String] = MetricsEndpoints.all.flatMap(_.info.name)
+
+  /** The feature the throughput card asks about, named once for the callers that only care about that one. */
   val ThroughputFeature: String = "metrics.throughput"
 }

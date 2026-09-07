@@ -92,7 +92,12 @@ export {
   prefixes,
   type PrefixGroup,
 } from "./nav/prefixes.js";
-export { topicGroupHref, topicTree, type TopicTreeInput } from "./nav/topicTree.js";
+/* `TopicTreeInput` is not on this line, and that is the correction rather than an omission. It was
+   published for two waves and named by nothing outside its own declaration and the two signatures
+   that take it — `App.tsx` calls the fold with an object literal, and so does its test — so the
+   export was a promise to a consumer that never arrived. It stays exported from its own module,
+   which is what the signatures' declaration emit needs, and off the shell's public surface. */
+export { topicGroupHref, topicSubtree, topicTree } from "./nav/topicTree.js";
 export {
   brokerStorageOf,
   createClusterStore,

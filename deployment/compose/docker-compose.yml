@@ -335,6 +335,30 @@ services:
     image: kui-metrics:${KUI_VERSION:-0.1.0-SNAPSHOT}
     container_name: kui-metrics
     command: ["--config", "/etc/kui/kui-service.yaml"]
+    # ORDERED AFTER THE EXPORTER, AND THIS IS HEADROOM RATHER THAN A REPAIR. Say which it is,
+    # because the last thing written about this line was a repair for a cause that turned out to be
+    # false, and it is the only `depends_on` in this file that is about a measurement.
+    #
+    # Without it, `kui-metrics` starts before `kafka-metrics` -- the exporter waits for the broker's
+    # health and this process waits for nothing -- and every scrape it makes in that window fails.
+    # Measured on this stack, cold, wave 5: the process starts, its first scrape fails 3s later, and
+    # the second one, ~34s after that, succeeds; the first bucket is filled about forty seconds
+    # after start. Forced to the worst case -- `kui-metrics` alone for three minutes with no broker
+    # and no exporter at all -- it logs five WARNs, `circuit ... is now open`, then `halfopen` and
+    # `open` again on each failed probe, and when the exporter finally appears it goes `halfopen`,
+    # `closed`, and files a bucket **2 seconds** after Compose called the exporter healthy. The loop
+    # retries and the breaker recovers, exactly as it is written to.
+    #
+    # So the cost this line removes is bounded and it is not a failure: one `resetTimeout` (30s)
+    # plus one scrape interval, against `smoke.sh`'s 90s budget. What it buys is that a cold start
+    # makes no failed scrape at all, so the WARNs an operator sees on a first `docker compose up`
+    # are about something real. `required: false`, like every other entry in this file, because a
+    # metrics service that refused to start without its exporter would be the opposite of what this
+    # stack demonstrates.
+    depends_on:
+      kafka-metrics:
+        condition: service_healthy
+        required: false
     environment:
       KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
       # Carried although this service signs nothing: it mounts the file the other three mount, and

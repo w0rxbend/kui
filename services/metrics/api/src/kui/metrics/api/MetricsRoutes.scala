@@ -4,9 +4,9 @@ import cats.effect.kernel.Async
 import cats.syntax.all.*
 import sttp.tapir.server.ServerEndpoint
 
-import kui.metrics.application.ThroughputUseCase
+import kui.metrics.application.MetricsUseCases
 import kui.metrics.contract.MetricsEndpoints
-import kui.metrics.contract.dto.ThroughputResponse
+import kui.metrics.contract.dto.*
 
 /** The read endpoints, bound to use cases.
   *
@@ -24,24 +24,82 @@ import kui.metrics.contract.dto.ThroughputResponse
   *
   * ==Nothing here decides anything==
   *
-  * The cluster/source decision is [[ThroughputUseCase]]'s, and the reading-to-section decision is
+  * The cluster/source decision is [[MetricsUseCases]]'s, and the reading-to-section decision is
   * [[MetricsMapping]]'s. This module renames fields.
   */
 object MetricsRoutes {
 
   def apply[F[_]: Async](
-      throughput: ThroughputUseCase[F],
+      metrics: MetricsUseCases[F],
       secured: MetricsApi.Securing[F]
   ): List[ServerEndpoint[Any, F]] =
-    List(throughputRoute(throughput, secured))
+    List(
+      throughputRoute(metrics, secured),
+      latencyRoute(metrics, secured),
+      requestHandlersRoute(metrics, secured),
+      producersRoute(metrics, secured),
+      recordSizeRoute(metrics, secured)
+    )
 
   private def throughputRoute[F[_]: Async](
-      throughput: ThroughputUseCase[F],
+      metrics: MetricsUseCases[F],
       secured: MetricsApi.Securing[F]
   ): ServerEndpoint[Any, F] =
     secured(MetricsEndpoints.throughput) { _ => (cluster, range) =>
-      throughput
+      metrics
         .throughput(cluster, MetricsMapping.range(range))
-        .map(_.map(reading => ThroughputResponse(MetricsMapping.sectionOf(reading))))
+        .map(_.map(reading => ThroughputResponse(MetricsMapping.sectionOf(reading)(MetricsMapping.series))))
+    }
+
+  private def latencyRoute[F[_]: Async](
+      metrics: MetricsUseCases[F],
+      secured: MetricsApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured(MetricsEndpoints.latency) { _ => (cluster, window) =>
+      metrics
+        .latency(cluster, MetricsMapping.range(window))
+        .map(
+          _.map(reading => LatencyResponse(MetricsMapping.sectionOf(reading)(MetricsMapping.latencySeries)))
+        )
+    }
+
+  private def requestHandlersRoute[F[_]: Async](
+      metrics: MetricsUseCases[F],
+      secured: MetricsApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured(MetricsEndpoints.requestHandlers) { _ => cluster =>
+      metrics
+        .requestHandlers(cluster)
+        .map(
+          _.map(reading =>
+            RequestHandlersResponse(MetricsMapping.sectionOf(reading)(MetricsMapping.requestHandlers))
+          )
+        )
+    }
+
+  private def producersRoute[F[_]: Async](
+      metrics: MetricsUseCases[F],
+      secured: MetricsApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured(MetricsEndpoints.producers) { _ => (cluster, top) =>
+      metrics
+        .producers(cluster, top)
+        .map(
+          _.map(reading =>
+            TopProducersResponse(MetricsMapping.sectionOf(reading)(MetricsMapping.topProducers))
+          )
+        )
+    }
+
+  private def recordSizeRoute[F[_]: Async](
+      metrics: MetricsUseCases[F],
+      secured: MetricsApi.Securing[F]
+  ): ServerEndpoint[Any, F] =
+    secured(MetricsEndpoints.recordSize) { _ => cluster =>
+      metrics
+        .recordSize(cluster)
+        .map(
+          _.map(reading => RecordSizeResponse(MetricsMapping.sectionOf(reading)(MetricsMapping.recordSize)))
+        )
     }
 }

@@ -154,6 +154,16 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
    * number is no longer current. Without it, a stream that flaps twice inside one poll interval
    * leaves the first episode's pending callback alive alongside the second, and from then on two
    * independent chains poll and re-open the stream on their own timers.
+   *
+   * This is the *only* thing a pending callback reads, and that is deliberate. The guard used to be
+   * `!polling || current !== episode`, which is the same test written twice: `polling` is cleared
+   * in exactly two places and both of them raise the episode in the same breath, so a callback that
+   * failed one half always failed the other. Measured, on the tree this replaced: deleting the
+   * episode bump from `stop()` and deleting `polling = false` from `stop()` each left the whole
+   * suite green, one masked by the other. Two guards that mask each other are one guard nobody has
+   * checked. `polling` now answers only the question it is named for — whether a fallback chain is
+   * already running and a second must not be started — and each line can be deleted on its own and
+   * watched to fail.
    */
   let episode = 0;
 
@@ -215,7 +225,10 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
   function applyConnection(current: SseConnection): void {
     switch (current.phase) {
       case "open":
-        // The stream is working again, so the poller stands down.
+        // The stream is working again, so the poller stands down — and the episode ends with it.
+        // A tick already scheduled would otherwise wake up an interval later, call `connect()`,
+        // and `connect()` releases the handle it is replacing: the stream that had just recovered
+        // is torn down by the chain that recovering onto it was supposed to end.
         polling = false;
         episode += 1;
         setConnection(current);
@@ -245,10 +258,10 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
   }
 
   function tick(current: number): void {
-    if (!polling || current !== episode) return;
+    if (current !== episode) return;
 
     void options.poll().then((outcome) => {
-      if (!polling || current !== episode) return;
+      if (current !== episode) return;
       if (outcome.ok) {
         const frame = decodeCapabilityFrame(JSON.stringify(outcome.value));
         if (frame.ok && frame.value.kind === "snapshot") applySnapshot(frame.value.entries);
@@ -261,7 +274,7 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
 
     options.schedule(pollIntervalMs, () => {
       // Each tick is also another go at the stream: recovering onto it is what stops the polling.
-      if (!polling || current !== episode) return;
+      if (current !== episode) return;
       connect();
       tick(current);
     });
@@ -373,10 +386,13 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
 
     stop(): void {
       stopped = true;
-      polling = false;
-      // Invalidates any callback already scheduled, so the store really does go quiet rather than
+      // Not the same fact as the line below, and both are load-bearing. Ending the episode is what
+      // silences the callbacks already scheduled, so the store really does go quiet rather than
       // keep polling and re-opening the stream against a gateway the user may no longer be
-      // authenticated to.
+      // authenticated to. Clearing `polling` is what lets a later `start()` fall back *again*:
+      // `beginPollingFallback` refuses to start a chain while one is running, so a flag left true
+      // here would mean a restarted store never polls after its stream drops.
+      polling = false;
       episode += 1;
       releaseHandle();
       setConnection({ phase: "closed", reason: "closed by the client" });

@@ -32,7 +32,6 @@ import {
   type Reading,
   combineReadings,
   mapReading,
-  notCollected,
   readingValue,
   unknown,
   value,
@@ -571,61 +570,24 @@ export function topLag(groups: Reading<readonly ConsumerGroup[]>, limit = 4): Re
   );
 }
 
-/* --- The things KUI does not measure ------------------------------------------------------------- */
-
-/**
- * The figures the design draws that this backend still does not collect.
+/* --- The figures that used to have no source ------------------------------------------------------
  *
- * They are not failures and they are not empty states. `services/metrics` answers one question —
- * throughput — and the four endpoints behind these are wave 5's; until they exist the gateway's
- * OpenAPI documents publish nothing that could answer any of them. The dashboard says so in a
- * sentence and draws no axes, because an empty chart with a labelled time axis is a claim that the
- * data is merely missing right now, and somebody will go looking for the broken exporter.
+ * Five constant `notCollected` readings lived here — the produce rate, the latency percentiles, the
+ * record-size distribution, the top producers and the request-handler idle time — each a sentence
+ * saying the product did not measure it. All five now have an endpoint in `services/metrics`, so
+ * the sentences moved to where the *answer* is: `metrics.ts` asks, and the five cards draw whichever
+ * of six states came back.
  *
- * Throughput is deliberately not in this list any more: it has an endpoint, so the card asks for it
- * and renders whatever comes back — including `not_configured`, which is a different sentence with
- * a different cause. See `throughput.ts` and `ThroughputCard.tsx`.
+ * They are not replaced by new constants here, and that is the point rather than an omission. A
+ * constant on the model gives the screen one answer for three different situations — this build
+ * does not measure it, this deployment configured no exporter, the exporter stopped answering — and
+ * the whole argument of `reading.ts` is that those must not be the same thing to show somebody.
+ *
+ * What survives as a standing refusal is narrower and belongs beside the card that draws it: there
+ * is no purgatory *percentage* and no record-size *distribution*, because a broker publishes a queue
+ * length and a mean. `TrafficCards.tsx` carries both, ADR-052 decides both, and both are drawn next
+ * to real figures rather than instead of them.
  */
-
-export const productionRate = (): Reading<never> =>
-  notCollected("KUI does not sample the current produce rate.");
-
-export const latencyPercentiles = (): Reading<never> =>
-  notCollected(
-    "KUI does not record request latency. Produce and fetch percentiles come from broker JMX, which nothing here scrapes.",
-  );
-
-/**
- * The Traffic tab's last row (SCREENS-V4.md §4.2), two thirds of which have no source.
- *
- * `…/metrics/producers?top=` and `…/metrics/request-handlers` are named in M7 and are wave 5's, so
- * these two cards keep their sentence beside a Throughput card that is now real. That mixture is
- * the point of the tab: it is what stops the strip being four segments of the same nothing, and it
- * is also why neither of these may be filled from something the browser happens to hold — a
- * producer rate computed from a message browse is not a broker metric.
- */
-export const topProducers = (): Reading<never> =>
-  notCollected(
-    "KUI does not record which clients are producing. Per-client byte rates come from broker JMX, which this build does not yet scrape.",
-  );
-
-export const requestHandlers = (): Reading<never> =>
-  notCollected(
-    "KUI does not record request-handler idle time. It is a broker JMX gauge, which this build does not yet scrape.",
-  );
-
-/**
- * The Storage tab's second card (SCREENS-V4.md §4.3), and the fourth figure with no source.
- *
- * A record-size distribution is a histogram over every record a broker has seen, which only the
- * brokers themselves count. KUI can read how much space a partition takes and cannot read what it
- * is made of, and those are different questions — so this is a sentence rather than a `Histogram`
- * drawn over the twelve buckets the design labels, which would put an axis under nothing.
- */
-export const messageSizes = (): Reading<never> =>
-  notCollected(
-    "KUI does not record message sizes. The distribution comes from broker JMX, which nothing here scrapes.",
-  );
 
 /* --- The page's own sentence ---------------------------------------------------------------------- */
 

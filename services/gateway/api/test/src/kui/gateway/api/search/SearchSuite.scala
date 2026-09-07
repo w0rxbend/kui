@@ -8,9 +8,13 @@ import munit.CatsEffectSuite
 import kui.contracts.ErrorEnvelope
 import kui.gateway.api.search.SearchRig.{Behaviour, Call, Data}
 import kui.gateway.api.{GatewayTestServer, SearchRoutes}
+import kui.gateway.application.client.CallContext
 import kui.gateway.application.search.{SearchSource, SearchUseCase}
-import kui.gateway.contract.dto.SearchAnswerDto
-import kui.kernel.{ClusterId, ServiceId}
+import kui.gateway.contract.dto.{SearchAnswerDto, SearchResultsDto}
+import kui.gateway.contract.SearchQuery
+import kui.kernel.group.GroupState
+import kui.kernel.{ClusterId, CorrelationId, ServiceId}
+import kui.security.Principal
 
 /** Cross-entity search, asserted where a browser meets it: over a real server, at `/api/v1/search`.
   *
@@ -20,6 +24,15 @@ import kui.kernel.{ClusterId, ServiceId}
   * Tapir before any handler runs — and would be asserting an arrangement of its own rather than the product.
   */
 final class SearchSuite extends CatsEffectSuite {
+
+  /** The call context a route would have built: anonymous, one correlation id, one cluster.
+    *
+    * Only the two cases that drive a `SearchSource` directly need it — everything else goes through the
+    * route, which builds its own from the request.
+    */
+  private val context: CallContext =
+    CallContext(Principal.Anonymous, CorrelationId.unsafe("00000000-0000-4000-8000-000000000001"),
+      Some(SearchRig.Cluster))
 
   private val allThree: Set[ServiceId] =
     Set(SearchRig.TopicService, SearchRig.ConsumerService, SearchRig.SchemaService)
@@ -166,6 +179,23 @@ final class SearchSuite extends CatsEffectSuite {
     }
   }
 
+  test("aServiceThatFailedOnEveryClusterIsNamedInPartialOnce") {
+    // `partialOf` is `distinct` and sorted, and its scaladoc says why: two identical requests must produce
+    // identical bytes, and a browser rendering the list would otherwise print "Schema Registry, Schema
+    // Registry" on a two-cluster deployment. Every other case here runs on one cluster, so nothing could
+    // ever see a repeat — dropping `.distinct` left the whole gateway suite green when it was tried.
+    serve(
+      clusters = List(ClusterId.unsafe("prod-eu"), ClusterId.unsafe("prod-us")),
+      topics = List("orders.v1"),
+      down = Set(SearchRig.SchemaService)
+    ) { (server, _) =>
+      server.get("/api/v1/search?q=orders").map { response =>
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(answerOf(response.body).partial.map(_.value), List("schema"))
+      }
+    }
+  }
+
   test("theFoldIssuesOneRequestPerServicePerClusterAndNotOnePerResult") {
     // Ten matching topics on two clusters is one cluster list plus six calls, not twenty-six. This is the
     // bound the whole design rests on: the field fires on every keystroke.
@@ -185,6 +215,85 @@ final class SearchSuite extends CatsEffectSuite {
         assertEquals(asked.count(_.operation == "consumer.list"), 2, asked.toString)
         assertEquals(asked.count(_.operation == "schema.subjects"), 2, asked.toString)
         assertEquals(asked.size, 7, asked.toString)
+      }
+    }
+  }
+
+  test("aSearchAsksEachSourceForTheCallersLimitAndNoMore") {
+    // The fan-out's *cost* bound, which no response body can show: `SearchResultsDto.take` cuts every kind
+    // to `limit` on the way out, so a source that asked its service for a hundred rows and one that asked
+    // for ten produce the same document. The difference is paid upstream — the schema service enriches
+    // each subject it returns with per-subject registry calls, so asking for the contract's maximum would
+    // be five hundred of them — and it is visible only in what was asked.
+    serve(
+      groups = (1 to 40).toList.map(n => s"orders-consumer-$n"),
+      subjects = (1 to 40).toList.map(n => s"orders-$n-value")
+    ) { (server, calls) =>
+      for {
+        response <- server.get("/api/v1/search?q=orders&limit=3")
+        asked <- calls
+      } yield {
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(
+          asked.filter(_.pageSize.isDefined).map(call => call.operation -> call.pageSize).sortBy(_._1),
+          List("consumer.list" -> Some(3), "schema.subjects" -> Some(3))
+        )
+      }
+    }
+  }
+
+  test("aTopicSearchReturnsNoMoreHitsThanTheCallerAskedFor") {
+    // The topic half's share of the same bound, and it is asserted on the source rather than on the
+    // response because `topics/names` is unpaged by design: the cap is the gateway's own `.take`, and the
+    // fold's out-going cut hides its absence completely. Forty matches cut to three here is forty
+    // `TopicHitDto`s not built, per cluster, on every keystroke.
+    Ref.of[IO, List[Call]](Nil).flatMap { calls =>
+      val data = Data(topics = (1 to 40).toList.map(n => s"orders.v$n"))
+      val source = TopicSearchSource[IO](SearchRig.client(SearchRig.TopicService, data, calls))
+
+      source
+        .find(SearchRig.Cluster, SearchQuery("orders", 3), context)
+        .map(_.fold(error => fail(error.message), results => assertEquals(results.topics.size, 3)))
+    }
+  }
+
+  test("aGroupSearchAsksForEveryState") {
+    // No state filter, and the reason is the case the field is most often opened for: somebody is looking
+    // for a group precisely *because* it is dead. A default that asked only for `Stable` would answer
+    // "nothing matches" for a group that is sitting right there, and would do it silently — the answer is
+    // a well-formed empty list either way.
+    serve(groups = List("orders-consumer")) { (server, calls) =>
+      for {
+        _ <- server.get("/api/v1/search?q=orders")
+        asked <- calls
+      } yield assertEquals(
+        asked.filter(_.operation == "consumer.list").map(_.states),
+        List(Some(Set.empty[GroupState]))
+      )
+    }
+  }
+
+  test("aDeploymentWithNoClustersNamesNoServiceInPartialBecauseAllThreeWereAskable") {
+    // ADR-049 §2 defines `partial` as the services the gateway *could not ask*, in four enumerated ways,
+    // and a deployment with no clusters is none of them: the topic, consumer and schema services are all
+    // routed and all perfectly askable, there is simply nothing to ask them about. Naming them would put a
+    // sentence in front of a user — "Topics, Consumer groups, Schema Registry could not be asked" — that is
+    // not true, which is the one thing this endpoint's whole design is against.
+    //
+    // What it costs is stated rather than hidden: the browser cannot tell this answer from a search that
+    // matched nothing, and it renders "Nothing matches". That is a browser-side fact and the browser
+    // already holds it — it draws the cluster selector from the same list — so the remedy is a sentence on
+    // the shell's empty state and not a fifth cause in this field. `SearchAnswerDto.partial` says so too.
+    serve(clusters = Nil, topics = List("orders.v1")) { (server, calls) =>
+      for {
+        response <- server.get("/api/v1/search?q=orders")
+        asked <- calls
+      } yield {
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(answerOf(response.body).partial, Nil)
+        assertEquals(answerOf(response.body).results, SearchResultsDto.Empty)
+        // And nothing was asked past the cluster list, which is the other half of the same fact.
+        assertEquals(asked.map(_.operation), List("cluster.list"))
       }
     }
   }

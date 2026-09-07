@@ -12,6 +12,14 @@
 # and sign in as `admin` / `quickstart-admin`, or as `viewer` / `quickstart-viewer` to see a role
 # with fewer permissions render fewer controls. ./kui-quickstart-auth.yaml has the accounts and the
 # roles, with the reasoning beside each.
+#
+# NO CI JOB RUNS THIS OVERLAY, and that is a decision rather than an omission. The reasoning and
+# what it costs are written out at the top of ./kui-quickstart-auth.yaml, under "WHAT CHECKS THIS
+# FILE, AND WHAT DOES NOT". Read that before adding a job here: half of what such a job would
+# assert is asserted more cheaply somewhere else, and the half that is not is the sign-in itself.
+# What did change in wave 5 is that the configuration this overlay mounts is now loaded by
+# `ShippedConfigurationSuite`, so a key spelled wrongly in it fails a unit test rather than a
+# demonstration in front of somebody.
 
 services:
   kui:

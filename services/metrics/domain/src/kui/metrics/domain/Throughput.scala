@@ -127,8 +127,8 @@ object ThroughputSeries {
 
   /** Folds raw samples into the range's buckets, ending at `endingAt`.
     *
-    * This is the domain rule of the whole service, and it is stated here rather than in whichever adapter M7
-    * writes so that a JMX source and a Prometheus source cannot disagree about what a gap is.
+    * This is the domain rule of the whole service, and it is stated here rather than in the adapter so that a
+    * JMX source and a Prometheus source could never disagree about what a gap is.
     *
     * Three things it guarantees, each of which has a wrong answer that reaches a screen:
     *
@@ -144,26 +144,15 @@ object ThroughputSeries {
     * whole of 12:00–12:05.
     */
   def over(range: ThroughputRange, endingAt: Instant, samples: List[ThroughputSample]): ThroughputSeries = {
-    val stepSeconds = range.step.toSeconds
-    val to = floorTo(endingAt, stepSeconds).plusSeconds(stepSeconds)
-    val from = to.minusSeconds(range.window.toSeconds)
-
-    val byBucket: Map[Instant, List[ThroughputSample]] =
-      samples
-        .filter(sample => !sample.at.isBefore(from) && sample.at.isBefore(to))
-        .groupBy(sample => floorTo(sample.at, stepSeconds))
-
-    val buckets = boundaries(from, to, stepSeconds).map { start =>
+    val (from, to, buckets) = Bucketing.over(range, endingAt, samples, _.at) { (start, inBucket) =>
       // Each rate is folded over the samples that carried *it*, not over the samples in the bucket. An
       // exporter that started publishing `MessagesInPerSec` halfway through an hour must not make the
       // bytes it published all hour read as absent, and must not make the first half read as measured.
-      val inBucket = byBucket.getOrElse(start, Nil)
-
       ThroughputBucket(
         startingAt = start,
-        bytesInPerSecond = mean(inBucket.flatMap(_.bytesInPerSecond)),
-        bytesOutPerSecond = mean(inBucket.flatMap(_.bytesOutPerSecond)),
-        recordsPerSecond = mean(inBucket.flatMap(_.recordsPerSecond))
+        bytesInPerSecond = Bucketing.mean(inBucket.flatMap(_.bytesInPerSecond)),
+        bytesOutPerSecond = Bucketing.mean(inBucket.flatMap(_.bytesOutPerSecond)),
+        recordsPerSecond = Bucketing.mean(inBucket.flatMap(_.recordsPerSecond))
       )
     }
 
@@ -178,20 +167,4 @@ object ThroughputSeries {
     */
   def absent(range: ThroughputRange, endingAt: Instant): ThroughputSeries =
     over(range, endingAt, Nil)
-
-  private def boundaries(from: Instant, to: Instant, stepSeconds: Long): List[Instant] =
-    Iterator
-      .iterate(from)(_.plusSeconds(stepSeconds))
-      .takeWhile(_.isBefore(to))
-      .toList
-
-  /** The start of the step `at` falls in, measured from the epoch rather than from the request. */
-  private def floorTo(at: Instant, stepSeconds: Long): Instant =
-    Instant.ofEpochSecond(Math.floorDiv(at.getEpochSecond, stepSeconds) * stepSeconds)
-
-  /** `None` for a rate nothing in the bucket measured — which is the one arithmetic mistake this file exists
-    * to prevent, since `0.0 / 0` is `NaN` and a `NaN` serialises to `null` by a route nobody chose.
-    */
-  private def mean(values: List[Double]): Option[Double] =
-    Option.when(values.nonEmpty)(values.sum / values.size)
 }

@@ -24,6 +24,10 @@ final class ShippedConfigurationSuite extends KuiSuite {
   private val signingKey: Map[String, String] =
     Map("KUI_PRINCIPAL_KEY" -> "a-signing-key-long-enough-to-be-accepted")
 
+  /** The cursor and plan-token key the five service containers share (ADR-026, ADR-045). */
+  private val cursorKey: Map[String, String] =
+    Map("KUI_CURSOR_KEY" -> "a-cursor-key-long-enough-to-be-accepted")
+
   /** Every file, with the environment it expects and the URL policy the deployment it describes runs under.
     *
     * The environment entries are the `env:` references each file makes. Supplying them rather than leaving
@@ -33,8 +37,27 @@ final class ShippedConfigurationSuite extends KuiSuite {
   private val shipped: List[(String, UrlPolicy, Map[String, String])] = List(
     ("deployment/compose/kui.yaml", UrlPolicy.Dev, signingKey),
     ("deployment/compose/kui-cluster.yaml", UrlPolicy.Dev, signingKey),
+    // THE FILE FOUR OF THE SIX SERVICE CONTAINERS MOUNT, and it was not on this list for three
+    // milestones. `docker-compose.yml` gives `kui-topic`, `kui-message`, `kui-consumer`,
+    // `kui-schema` and `kui-metrics` the same `--config /etc/kui/kui-service.yaml`, so a mistake
+    // here stops five processes rather than one -- and nothing in this repository read it. Wave 4
+    // measured the cost: setting `callTimeout: "60s"` beside the default 30s `scrapeInterval` in
+    // this file left `./mill libs.config.test` at 395/395 and `docker compose config -q` at exit
+    // 0, because YAML is well-formed whatever it says, while the process refuses to boot with
+    // "kui-metrics cannot start; the configuration has problems: ... callTimeout (60 seconds) must
+    // be shorter than kui.metrics.scrapeInterval". `smoke.sh` would then fail four minutes later
+    // on a stack that never came up, with a message about a capability document.
+    ("deployment/compose/kui-service.yaml", UrlPolicy.Dev, signingKey ++ cursorKey),
     ("deployment/compose/kui-allinone.yaml", UrlPolicy.Dev, Map.empty),
     ("deployment/quickstart/kui-quickstart.yaml", UrlPolicy.Dev, Map.empty),
+    // The quickstart's `--with-auth` configuration. No CI job runs `docker-compose.auth.yml`, so
+    // before this row nothing in the repository read this file at all -- not a job, not a suite,
+    // not a `docker compose config`. It carries its own `kui.auth`, its own `kui.rbac` and its own
+    // copy of the `kui.metrics.sources` block, and a typo in any of the three was a demonstration
+    // that failed in front of whoever was being shown it. The file itself now says so, beside the
+    // section that says what still is not covered here: this row proves it loads and asserts
+    // nothing about whether the two accounts can sign in.
+    ("deployment/quickstart/kui-quickstart-auth.yaml", UrlPolicy.Dev, Map.empty),
     (
       "deployment/secured/kui-secured.yaml",
       UrlPolicy.Dev,

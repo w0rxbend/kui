@@ -140,6 +140,41 @@ test.describe("the typed predicates", () => {
   });
 });
 
+test.describe("presets", () => {
+  test("naming a preset says where it was saved, which no chip can", async ({ page }) => {
+    /*
+     * A preset is a name this browser has given to a set of predicates. It does not reach the
+     * cluster: `POST …/messages/filters` compiles an expression and answers with `sha256(source)`,
+     * there is no `GET`, and nothing on the server holds a name for one. So the chip that appears
+     * says a preset exists and cannot say that it exists here only — the sentence this raises is
+     * the one place the product tells anybody, and until this wave nothing asserted it in either
+     * suite.
+     *
+     * `page.on("dialog")` because `savePreset` asks with `window.prompt`, and Playwright dismisses
+     * an unhandled dialog — which is the cancel path, and saves nothing.
+     */
+    page.on("dialog", (dialog) => void dialog.accept("Big tickets"));
+
+    await page.goto(`/ui/clusters/${CLUSTER}/topics/${TOPIC}/messages?key=ord_`);
+
+    // Offered only when there is something to save, so the predicate above is what puts it there.
+    const save = page.getByRole("button", { name: /save as preset/i });
+    await expect(save).toBeVisible({ timeout: 20_000 });
+    await save.click();
+
+    const toast = page.locator(".kui-notice").first();
+    await expect(toast).toBeVisible({ timeout: 20_000 });
+    await expect(toast).toContainText("Filter saved");
+    await expect(toast).toContainText("Big tickets");
+    // The half a chip cannot say, and the reason the toast exists at all.
+    await expect(toast).toContainText("this browser only");
+
+    // And the chip is on the bar, so the sentence is a confirmation of something that happened.
+    // `exact`, because the chip's own remove control is named `Forget the preset Big tickets`.
+    await expect(page.getByRole("button", { name: "Big tickets", exact: true })).toBeVisible();
+  });
+});
+
 test.describe("writing", () => {
   test("a produce that succeeds raises a toast naming where the record landed", async ({
     page,

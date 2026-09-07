@@ -142,7 +142,11 @@ object SearchResultsDto {
   *   that timed out is an outage somebody can go and look at. A boolean would collapse those two into one
   *   grey sentence.
   *
-  * An empty list is the ordinary answer and means every service answered.
+  * An empty list is the ordinary answer and means every service answered — including on a deployment with no
+  * clusters at all, where all three services are routed and askable and there is nothing to ask them about.
+  * That case is deliberately not named here: `partial` says "we could not ask", and saying it about a service
+  * that was never in any difficulty is the one thing this field cannot afford to do. `SearchUseCase` carries
+  * the argument and what it costs.
   */
 final case class SearchAnswerDto(results: SearchResultsDto, partial: List[ServiceId])
 

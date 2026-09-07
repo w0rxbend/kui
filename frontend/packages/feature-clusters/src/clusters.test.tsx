@@ -932,6 +932,51 @@ describe("the brokers screen", () => {
       dispose();
     }
   });
+
+  it("draws a sensitive setting as hidden on the card's chip row, and never as an em dash", async () => {
+    /*
+     * Closed by mutation: `chipsFor`'s `entry.sensitive ? "hidden"` is deletable with 147 cases
+     * green. The one existing case about a withheld value goes through the *detail page's* table,
+     * so the card's chip row — the copy of the same rule an operator meets first — was asserted by
+     * nothing, and `ConfigChip` draws an absent value as an em dash.
+     *
+     * The three states are not each other: Kafka refuses to disclose this value, an unset setting
+     * has none, and a setting KUI failed to read is a fourth thing the card says separately. An em
+     * dash here reads as the second.
+     */
+    const withheld = {
+      configs: ok([
+        // `isSensitive`, not `sensitive` — the broker configuration endpoint's own spelling, and
+        // the wire carries no value beside it.
+        { name: "ssl.keystore.password", value: null, source: "static-broker", isSensitive: true },
+        { name: "compression.type", value: "producer", source: "default" },
+      ]),
+    };
+    const { api } = gateway({
+      ...everything(0),
+      "/api/v1/clusters/{clusterId}/brokers/{brokerId}/configs": withheld,
+    });
+    const { container, dispose } = open(api, "sensitive-chip");
+    await settle(container);
+    try {
+      expand(container);
+      await settle(container);
+
+      const chip = [...container.querySelectorAll(".kui-config-chip")].find((one) =>
+        one.textContent?.includes("ssl.keystore.password"),
+      );
+      expect(chip).not.toBeUndefined();
+      expect(chip?.textContent).toContain("hidden");
+      expect(chip?.textContent).not.toContain("—");
+      // The setting beside it still shows its value, so this is not "the chips stopped rendering".
+      const ordinary = [...container.querySelectorAll(".kui-config-chip")].find((one) =>
+        one.textContent?.includes("compression.type"),
+      );
+      expect(ordinary?.textContent).toContain("producer");
+    } finally {
+      dispose();
+    }
+  });
 });
 
 /**
@@ -1007,5 +1052,160 @@ describe("removing a cluster", () => {
     expect(removed).toHaveLength(1);
     expect(toasts().map((toast) => toast.title)).toContain("Cluster removed");
     dispose();
+  });
+});
+
+
+/**
+ * Rules this feature shipped with no gate, closed by mutation.
+ *
+ * Every case below was written after deleting the rule it names from the source and watching all
+ * 147 existing cases stay green. The mutation is named in each comment so that the next reader can
+ * re-run the measurement rather than take it on trust.
+ */
+describe("figures that must not become zero", () => {
+  /** The `BrokersRefetching` story's own props: rows already on screen, and a request in flight. */
+  function refetching(brokers: readonly Broker[]) {
+    return mount(() => (
+      <BrokerList
+        clusterName="prod-kyiv-01"
+        brokers={brokers}
+        loading
+        underReplicatedPartitions={0}
+        observedAgo="2s ago"
+        clustersHref="/clusters"
+        hrefFor={(id) => `/b/${id}`}
+      />
+    ));
+  }
+
+  function withBrokers(brokers: readonly Broker[]) {
+    return mount(() => (
+      <BrokerList
+        clusterName="prod-kyiv-01"
+        brokers={brokers}
+        underReplicatedPartitions={0}
+        observedAgo="2s ago"
+        clustersHref="/clusters"
+        hrefFor={(id) => `/b/${id}`}
+      />
+    ));
+  }
+
+  it("keeps the figures on screen while a refetch is out", async () => {
+    /*
+     * Closed by mutation: dropping `&& props.brokers.length === 0` from `BrokerList`'s `waiting`
+     * memo leaves 147 cases green. The screen-level case that carries this name cannot fail on it
+     * — it drives `BrokersScreen`, where `useQuery` holds its value and never re-enters `loading`
+     * once an answer has landed, so the mutated branch is never taken there.
+     *
+     * This one is over the props the `BrokersRefetching` story constructs, which is the state the
+     * packet that wrote the memo said "could not be reached" while shipping a story that reaches
+     * it. Blanking figures an operator is reading, in order to say they are being fetched again, is
+     * the reference product's five-second full-page loader and the thing this file's header
+     * refuses.
+     */
+    const { container, dispose } = refetching(SAMPLE_BROKERS);
+    await flush();
+    try {
+      // The rows are still there.
+      expect(container.querySelectorAll(".kui-brkcard")).toHaveLength(3);
+      expect(container.querySelector('[data-testid="brokers-pending"]')).toBeNull();
+
+      // And so are the four figures, none of them pending and none of them blanked.
+      const tiles = [...container.querySelectorAll(".kui-tile")];
+      expect(tiles).toHaveLength(4);
+      for (const tile of tiles) {
+        expect(tile.getAttribute("aria-busy")).not.toBe("true");
+      }
+      const leaders = tiles.find((tile) => tile.textContent?.includes("TOTAL LEADERS"));
+      expect(leaders?.querySelector(".kui-tile__value")?.textContent).toContain("1,536");
+
+      // The voice line still describes the cluster it is drawing, rather than announcing a read.
+      const head = container.querySelector('[data-testid="brokers-head"]');
+      expect(head?.textContent).toContain("3 brokers online");
+      expect(head?.textContent).not.toContain("Reading this cluster's brokers");
+
+      // The freshness line dates the picture that is on screen, and the picture is on screen.
+      expect(container.querySelector('[data-testid="brokers-freshness"]')).not.toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it("does not sum a broker whose leaderships could not be read as zero", async () => {
+    /*
+     * Closed by mutation: deleting the `some(leaderPartitions === null)` guard from `totalLeaders`
+     * leaves 147 cases green, and the tile then adds an unreadable broker in as `0` and prints a
+     * total that is quietly short — a number an operator compares against a rebalance plan.
+     *
+     * `DEGRADED_BROKERS` is the shape that produces it: broker 3 is unreachable and reports no
+     * leader count, so the honest answer for the cluster is that the total is not known.
+     */
+    const { container, dispose } = withBrokers(DEGRADED_BROKERS);
+    await flush();
+    try {
+      const tile = [...container.querySelectorAll(".kui-tile")].find((one) =>
+        one.textContent?.includes("TOTAL LEADERS"),
+      );
+      expect(tile).not.toBeUndefined();
+      // No figure at all, rather than 512 + 0 + 0 + 512 dressed up as the cluster's leaderships.
+      expect(tile?.querySelector(".kui-tile__value")).toBeNull();
+      expect(tile?.querySelector(".kui-tile__absent")).not.toBeNull();
+      expect(tile?.textContent).not.toContain("1,024");
+      // And the chip says which silence this is: these brokers answered `describeCluster`, so
+      // "no broker answered" would send somebody looking for an outage that is not happening.
+      expect(tile?.textContent).toContain("this cluster does not report leader counts");
+
+      // The same rule one level down, on the card: an em dash with a reason, never a zero.
+      const unreadable = container.querySelector('[data-testid="broker-3"]');
+      const leaders = [...(unreadable?.querySelectorAll(".kui-brkcard__figure") ?? [])].find((one) =>
+        one.textContent?.includes("LEADERS"),
+      );
+      expect(leaders?.textContent).toContain("—");
+      expect(leaders?.querySelector("[title]")?.getAttribute("title")).toBe(
+        "The leader count could not be read",
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it("says how many brokers reported a disk when not all of them did", async () => {
+    /*
+     * Closed by mutation: collapsing `diskChip`'s partial-coverage branch to `{ text: total }`
+     * leaves 147 cases green, and DISK USED then reads as the cluster's disk when it is two
+     * brokers' out of four — a figure an operator sizes a cluster from.
+     */
+    const { container, dispose } = withBrokers(DEGRADED_BROKERS);
+    await flush();
+    try {
+      const tile = [...container.querySelectorAll(".kui-tile")].find((one) =>
+        one.textContent?.includes("DISK USED"),
+      );
+      expect(tile?.textContent).toContain("over the 2 of 4 brokers that reported a disk");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("sums a capacity only where both halves of it were reported", () => {
+    /*
+     * `summariseDisk`'s own docstring states this rule — "a broker is counted in the capacity sums
+     * only when *both* halves are known, because half a broker's capacity produces a
+     * plausible-looking percentage that is simply wrong" — and dropping the `diskTotalBytes` half
+     * of the filter leaves 147 cases green. The existing sum case pairs a fully measured broker
+     * with a fully unmeasured one, which the narrower filter gets right by accident.
+     */
+    const half: Broker = { ...SAMPLE_BROKERS[0]!, diskUsedBytes: 610_000_000_000, diskTotalBytes: null };
+    const summary = summariseDisk([half]);
+    expect(summary.measured).toBe(0);
+    expect(summary.usedBytes).toBeNull();
+    expect(summary.capacityBytes).toBeNull();
+    // What Kafka holds is a different sum with a different fate, and it still answers.
+    expect(summary.heldBytes).toBe(128_000_000_000);
+
+    // A capacity of zero is the same absence: it is a denominator nothing can be divided by.
+    expect(summariseDisk([{ ...half, diskTotalBytes: 0 }]).measured).toBe(0);
   });
 });

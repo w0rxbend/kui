@@ -55,15 +55,18 @@ object ServiceContracts {
         "message"
       ) -> (MessageMutationEndpoints.all ++ FilterEndpoints.all ++ TrackEndpoints.all),
       // Both lists, for the same reason as the topic and consumer services: the schema service
-      // publishes its five reads from one object and its three bodied endpoints from another. The
-      // second list holds the two compatibility writes *and* the compatibility check, which is not a
-      // mutation at all — it is grouped by request shape, not by effect — so leaving that list out
-      // would silently drop the one endpoint a registration flow needs most.
+      // publishes its five reads from one object and its four bodied endpoints from another. The
+      // second list holds the three writes — the two compatibility settings and the registration —
+      // *and* the compatibility check, which is not a mutation at all: it is grouped by request shape,
+      // not by effect, so leaving that list out would silently drop the one endpoint a registration
+      // flow needs most. The two counts are asserted in `ServiceContractsSuite` rather than left as
+      // prose, because this sentence has been wrong once already.
       ServiceId.unsafe("schema") -> (SchemaEndpoints.all ++ SchemaMutationEndpoints.all),
-      // One list, because the metrics service has one endpoint and no mutation: nothing it publishes
+      // One list, because the metrics service publishes reads and no mutation: nothing it publishes
       // changes a cluster, and there is nothing for a read-only deployment to refuse. It is the eighth
       // service and the shortest entry in this map, which is the point of it — a service is added here
-      // in one line, and three later milestones each add one.
+      // in one line, and its endpoints arrive without one. M7 adds four reads to that list and this
+      // entry does not move.
       ServiceId.unsafe("metrics") -> MetricsEndpoints.all
     )
 

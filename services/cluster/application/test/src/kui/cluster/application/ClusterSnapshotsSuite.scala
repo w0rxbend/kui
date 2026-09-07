@@ -5,6 +5,7 @@ import scala.concurrent.duration.*
 import cats.effect.IO
 import cats.effect.testkit.TestControl
 
+import kui.cache.Snapshot
 import kui.cluster.application.fakes.FakeClusterAdmin
 import kui.cluster.domain.*
 import kui.kernel.{BrokerId, TopicName}
@@ -24,6 +25,9 @@ final class ClusterSnapshotsSuite extends munit.CatsEffectSuite {
 
   private val unreachable: KuiError =
     InfrastructureError.Unreachable("the cluster", "connection refused")
+
+  private val missingCell: Throwable =
+    new AssertionError("the rig settled without giving this cluster a cell")
 
   private def refreshOne(
       admin: FakeClusterAdmin[IO],
@@ -286,6 +290,45 @@ final class ClusterSnapshotsSuite extends munit.CatsEffectSuite {
         // calls, two different failures.
         assertEquals(topology.topics, Some(3))
     }
+  }
+
+  test("aSweepThatHasStoppedAnsweringContributesNothingToATopologyStampedNow") {
+    // The cell deliberately keeps the last good sweep so that the *sweep* can be reported as stale. What
+    // must not happen is that a topology stamped with this instant carries it: that dates a count from a
+    // cluster which has since stopped answering as though it had just been taken. Nothing asserted it —
+    // replacing the `Option.unless(swept.status.isOffline)` guard with `swept.value` left 2633 green.
+    val measured = TopologyFixtures.sweep(
+      List(TopologyFixtures.placement(leader = 1), TopologyFixtures.placement(leader = 2)),
+      topics = 2
+    )
+
+    ClusterRig
+      .resource(List(prod), setup = admin => admin.set(_.copy(sweep = Right(measured))))
+      .use { rig =>
+        for {
+          _ <- ClusterRig.settled(rig)
+          before <- rig.snapshots
+            .topologyOf(prod.id)
+            .flatMap(cell => cell.fold(IO.raiseError[Snapshot[ClusterTopology]](missingCell))(_.get))
+          // The sweep stops answering. Its cell still holds the two partitions it found a moment ago.
+          _ <- rig.admin.set(_.copy(sweep = Left(unreachable)))
+          sweep <- rig.snapshots
+            .partitionsOf(prod.id)
+            .flatMap(cell => cell.fold(IO.raiseError[Snapshot[TopicSweep]](missingCell))(_.refresh))
+          after <- rig.snapshots
+            .topologyOf(prod.id)
+            .flatMap(cell => cell.fold(IO.raiseError[Snapshot[ClusterTopology]](missingCell))(_.refresh))
+        } yield {
+          // The positive half: while the sweep was answering, the counts were published.
+          assertEquals(before.value.flatMap(_.partitions).map(_.online), Some(2))
+          // The cell kept its value, and reports itself offline. That is what "stale" is made of.
+          assert(sweep.status.isOffline, s"the sweep cell should be offline: ${sweep.status}")
+          assertEquals(sweep.value.map(_.topics), Some(2))
+          // And the topology taken after it declines the figures rather than repeating them.
+          assertEquals(after.value.flatMap(_.partitions), None)
+          assertEquals(after.value.flatMap(_.topics), None)
+        }
+      }
   }
 
   test("aControllerWindowThatIsNotYetFullRefusesAndStillStatesItsLength") {

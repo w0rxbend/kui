@@ -248,6 +248,32 @@ function fakeResponse(status: number, body = ""): StreamResponse & {
   };
 }
 
+/**
+ * A transport whose request never resolves until the test says so, and whose failure is the one
+ * `fetch` actually produces on the teardown path: the browser rejects the in-flight promise with an
+ * `AbortError` the moment the `AbortSignal` fires. `fakeTransport` below cannot reach that branch
+ * at all — its send promise is already settled — which is why the rule guarding it went unnoticed.
+ */
+function abortingTransport(): StreamTransport & { failSend: () => void; isAborted: boolean } {
+  let fail: ((cause: unknown) => void) | undefined;
+  const pending = new Promise<StreamResponse>((_resolve, reject) => {
+    fail = reject;
+  });
+  return {
+    isAborted: false,
+    send: () => pending,
+    abort(): void {
+      this.isAborted = true;
+    },
+    aborted(): boolean {
+      return this.isAborted;
+    },
+    failSend(): void {
+      fail?.(new Error("AbortError: The user aborted a request."));
+    },
+  };
+}
+
 function fakeTransport(response: Promise<StreamResponse>): StreamTransport & { isAborted: boolean } {
   return {
     isAborted: false,
@@ -341,6 +367,34 @@ describe("a stream over fetch", () => {
       // Whatever the body does afterwards is not news.
       response.fail();
       flush();
+      expect(errors).toEqual([]);
+      expect(handle.connection()).toEqual({ phase: "closed", reason: "closed by the client" });
+      dispose();
+    });
+  });
+
+  it("a client-initiated close is not reported as a transport failure", async () => {
+    const transport = abortingTransport();
+    const { errors, subscriber } = recorder();
+
+    await createRoot(async (dispose) => {
+      const handle = openFetchStreamWith(transport, subscriber);
+      await Promise.resolve();
+      flush();
+
+      // The user navigates away, or the browse is stopped. `close()` aborts the request, and the
+      // abort is what makes the request the browser had in flight reject.
+      handle.close();
+      flush();
+      transport.failSend();
+      await Promise.resolve();
+      await Promise.resolve();
+      flush();
+
+      // The rejection is the *consequence* of the close, not a failure to report: without the
+      // `aborted()` check every ordinary close raises a transport error at the subscriber, and a
+      // message browser the operator closed on purpose would offer to retry a connection that was
+      // never broken.
       expect(errors).toEqual([]);
       expect(handle.connection()).toEqual({ phase: "closed", reason: "closed by the client" });
       dispose();

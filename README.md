@@ -84,15 +84,21 @@ reason the architecture is shaped the way it is, and it is tested rather than as
   `kui.auth.type` defaults to `disabled`. Until you configure it, anyone who can reach the port can
   do anything KUI can do, including deleting topics. Run it on a network you control.
 - **No Kafka Connect, no ksqlDB, no ACL or quota management.**
-- **One broker metric, and not a metrics system.** KUI reads a Prometheus exposition — a
-  JMX-exporter endpoint the deployment declares under `kui.metrics.sources.<cluster>` — and keeps a
-  bounded series of bytes in and out per second, which the dashboard's Traffic tab draws. That is
-  the whole of it. Request latency, request-handler idle, top producers and record size are four
-  endpoints that do not exist yet, and their cards say they cannot be measured rather than showing a
-  number. A cluster with no configured source answers `not_configured` and its cards say *that*,
-  which is the design rather than a failure. There is still no JMX client: `MetricsSourceKind.Jmx`
-  is declared, refuses with a sentence naming the build, and cannot be configured at all while a
-  metrics source's address is an `http`/`https` URL (ADR-050).
+- **Broker metrics from one Prometheus exposition, and not a metrics system.** KUI scrapes a
+  JMX-exporter endpoint the deployment declares under `kui.metrics.sources.<cluster>` and keeps a
+  bounded series from it. Five reads come off that one scrape — bytes in and out per second, p99
+  request latency, request-handler and network-processor idle, the busiest producers, and record
+  size — and the dashboard's Traffic tab draws them. **Three of them are deliberately not the card
+  the design drew, and each divergence is an ADR rather than a derived number wearing the design's
+  label** (ADR-052): purgatory is a queue *length* and Kafka publishes no percentage, so it is drawn
+  as a count; the busiest producers are ranked by *topic*, because a broker publishes no
+  per-`client.id` byte rate unless quotas are configured, and the card's title says the word the
+  server answered with; and there is no record-size distribution anywhere in Kafka's JMX surface, so
+  the card prints the mean and says the twelve-bucket histogram cannot be measured. A cluster with
+  no configured source answers `not_configured` and its cards say *that*, which is the design rather
+  than a failure. There is still no JMX client: `MetricsSourceKind.Jmx` is declared, refuses with a
+  sentence naming the build, and cannot be configured at all while a metrics source's address is an
+  `http`/`https` URL (ADR-050).
 - **No alerts and no event feed.** No alert definition, threshold, severity or acknowledgement
   exists, and the notification panel is fed an empty list.
 - The masking engine exists and is tested but is not yet reachable from a screen; it is marked

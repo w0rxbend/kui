@@ -3,7 +3,7 @@ package kui.consumer.application
 import java.time.Instant
 
 import cats.effect.IO
-import cats.effect.kernel.Ref
+import cats.effect.kernel.{Deferred, Ref}
 
 import kui.consumer.domain.*
 import kui.consumer.domain.fixtures.GroupFixtures
@@ -343,6 +343,37 @@ final class MutationSuite extends KuiIOSuite {
       assertEquals(result.left.map(_.code), Left(ErrorCode.GroupNotEmpty))
       assertEquals(records.size, 1)
       assertEquals(records.head.outcome, MutationOutcome.Refused)
+    }
+  }
+
+  test("a cancelled mutation is recorded as unknown, and never as a success or a failure") {
+    // `MutationOutcome.Unknown`'s own scaladoc is the rule: Kafka gives no guarantee that a cancelled
+    // write was *not* applied, so a record claiming either would be a lie, and `Unknown` is what tells an
+    // operator to go and look. Nothing asserted it — turning this branch into `Succeeded` left
+    // `./mill libs.__.test + services.*` at 2633/2633, and the operator would then read that an offset
+    // reset they aborted had gone through.
+    for {
+      rigged <- rig(emptyGroup)
+      (_, audit, guard, invalidations) = rigged
+      started <- Deferred[IO, Unit]
+      running <- guard
+        .guard(Caller, ConsumerRig.Cluster, MutationKind.ResetOffsets, group.value, Map.empty, Map.empty)(
+          started.complete(()) >> IO.never[Either[KuiError, Unit]]
+        )
+        .start
+      _ <- started.get
+      _ <- running.cancel
+      records <- audit.written.get
+      invalidated <- invalidations.get
+    } yield {
+      assertEquals(records.map(_.outcome), List(MutationOutcome.Unknown))
+      assertEquals(
+        records.head.detail.get("reason"),
+        Some("the operation was cancelled after the request was sent")
+      )
+      // And the snapshot is not dropped: invalidation is the success path's, and doing it here would
+      // claim the same thing the outcome refuses to claim.
+      assertEquals(invalidated, Nil)
     }
   }
 

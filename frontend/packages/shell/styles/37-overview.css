@@ -276,3 +276,142 @@
     transparent 2px 4px
   );
 }
+
+/* --- The Traffic tab's last row ------------------------------------------------------------------
+ *
+ * Three cards, and in each of them the design named a figure a broker does not publish. What is
+ * drawn instead is decided in ADR-052 and in `TrafficCards.tsx`; the rules below only have to make
+ * the two shapes of a request-handler reading — a ring and a count — read as members of one row
+ * rather than as a ring and a rendering fault. */
+
+.kui-handlers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* §3.4 draws each sub-tile on its own `--kui-color-surface-hover` ground. `flex: 1 1 0` with a floor
+ * so three tiles share the card and two tiles do not each take half a card's width and look like a
+ * different component. */
+.kui-handlers__tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 6.5rem;
+  padding: var(--kui-space-4) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  background: var(--kui-color-surface-hover);
+}
+
+/* A queue length, which is not a share of anything and therefore not a ring. It borrows the ring's
+ * vertical rhythm — figure above, uppercase caption below — so the row still reads as one row, and
+ * the card's caption says in words why one tile is not a ring. */
+.kui-handlers__count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  text-align: center;
+}
+
+.kui-handlers__count-value {
+  font-size: var(--kui-font-size-xl);
+  font-weight: var(--kui-font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--kui-color-text);
+}
+
+.kui-handlers__count-unit,
+.kui-handlers__count-caption {
+  font-size: var(--kui-font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kui-color-text-muted);
+}
+
+/* --- Top producers -------------------------------------------------------------------------------
+ *
+ * §4's row is a monogram tile, the identifier, and a bar with the rate on it. The tile and the name
+ * sit on one line above the bar for the reason the broker-health row does the same: `ProgressBar`
+ * puts its `label` on `aria-label` and nowhere else, so a row that relied on it would name every
+ * producer to a screen reader and none to anybody looking at the screen. */
+
+.kui-producers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-producers__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+}
+
+.kui-producers__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kui-space-3);
+  min-width: 0;
+}
+
+/* Truncated rather than wrapped: an identifier is one token and a wrapped one doubles the row's
+ * height for every producer whose name is long. The full string is in the bar's accessible name. */
+.kui-producers__name {
+  overflow: hidden;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- The record-size card ------------------------------------------------------------------------
+ *
+ * One figure and one sentence. There is no histogram here and there is not going to be one: Kafka
+ * publishes a mean and no distribution, so the twelve buckets §3.5 draws would be a picture of an
+ * assumption. The figure is given the weight a stat card's is, because it is the only measurement
+ * on the card and the sentence beside it is the reason there is only one. */
+
+.kui-record-size {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+.kui-record-size__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.kui-record-size__value {
+  font-size: var(--kui-font-size-2xl);
+  font-weight: var(--kui-font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--kui-color-text);
+}
+
+/* Words, not an em dash. A dash beside "MEAN RECORD" reads as a figure that failed to arrive, and
+ * the truth is that the exporter served no mean — the product's rule that an unmeasurable figure
+ * says so in words, applied to the one card on this tab that still had a number-shaped hole. */
+.kui-record-size__absent {
+  font-size: var(--kui-font-size-md);
+  color: var(--kui-color-text-muted);
+}
+
+.kui-record-size__label {
+  font-size: var(--kui-font-size-xs);
+  letter-spacing: 0.06em;
+  color: var(--kui-color-text-muted);
+}

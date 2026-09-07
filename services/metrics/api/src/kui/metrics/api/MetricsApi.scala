@@ -18,7 +18,7 @@ import kui.http.ErrorInterceptor
 import kui.http.health.{HealthEndpoints, ReadinessCheck}
 import kui.http.principal.{PrincipalInterceptor, SecuredRoutes}
 import kui.kernel.ServiceId
-import kui.metrics.application.ThroughputUseCase
+import kui.metrics.application.MetricsUseCases
 import kui.metrics.contract.MetricsEndpoints
 import kui.observability.{KuiInterceptors, Telemetry}
 import kui.security.PrincipalCodec
@@ -58,7 +58,7 @@ object MetricsApi {
     * through the router.
     */
   def routes[F[_]: {Async, Parallel}](
-      throughput: ThroughputUseCase[F],
+      metrics: MetricsUseCases[F],
       readiness: List[ReadinessCheck[F]],
       capabilities: MetricsCapabilities[F],
       principals: PrincipalCodec[F],
@@ -68,7 +68,7 @@ object MetricsApi {
     val secured = Securing[F](principals, rejections, logger)
 
     HealthEndpoints.make[F](readiness, capabilityDocument[F](capabilities, logger)) ++
-      MetricsRoutes[F](throughput, secured)
+      MetricsRoutes[F](metrics, secured)
   }
 
   /** The cross-cutting chain, outermost first, in the order `libs/http`'s server wants it: principal, then

@@ -45,6 +45,9 @@ function clickOn(element: HTMLElement): void {
 afterEach(() => {
   clearToasts();
   vi.useRealTimers();
+  // A case that mounts a modal surface and asserts on the lock has to hand the page back unlocked,
+  // or the next case inherits a `<body>` nothing in it opened.
+  document.body.style.overflow = "";
 });
 
 /* ------------------------------------------------------------------------------------------- */
@@ -631,6 +634,78 @@ describe("Drawer", () => {
     expect(editorAfter).toBe(editor);
     expect(editorAfter.value).toBe('{"id":42}');
     expect(document.querySelector('[data-testid="serde-count"]')!.textContent).toBe("3 serdes");
+    dispose();
+  });
+
+  it("a nested overlay closing does not unlock the page beneath it", async () => {
+    const [dialogOpen, setDialogOpen] = createSignal(true, { ownedWrite: true });
+
+    // A drawer with a confirmation over it — produce a record, then confirm the topic it goes to.
+    // Both surfaces lock the page, and the inner one is closed first, which is the sequence no
+    // test drove and the one the restore was written for.
+    const { dispose } = mount(() => (
+      <Drawer open onClose={() => {}} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+        <Dialog open={dialogOpen()} onClose={() => setDialogOpen(false)} title="Are you sure?">
+          <p>This writes to a production topic.</p>
+        </Dialog>
+      </Drawer>
+    ));
+    await Promise.resolve();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    setDialogOpen(false);
+    flush();
+    await Promise.resolve();
+
+    // Restored to what it was when the dialog opened, not to "". The drawer is still on screen
+    // over the page, and unlocking here leaves it floating over a document that scrolls underneath
+    // it — the whole page moving behind a surface the user has not finished with.
+    expect(document.querySelector(".kui-modal")).toBeNull();
+    expect(document.querySelector(".kui-sheet")).not.toBeNull();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    dispose();
+    await Promise.resolve();
+    // And the last one out really does give the page back.
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("a nested dialog answers Escape and the drawer under it does not", async () => {
+    const user = userEvent.setup();
+    const [dialogOpen, setDialogOpen] = createSignal(true, { ownedWrite: true });
+    let drawerClosed = 0;
+    let dialogClosed = 0;
+
+    const { dispose } = mount(() => (
+      <Drawer open onClose={() => (drawerClosed += 1)} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+        <Dialog
+          open={dialogOpen()}
+          onClose={() => {
+            dialogClosed += 1;
+            setDialogOpen(false);
+          }}
+          title="Are you sure?"
+        >
+          <p>This writes to a production topic.</p>
+        </Dialog>
+      </Drawer>
+    ));
+    await Promise.resolve();
+
+    await user.keyboard("{Escape}");
+    flush();
+
+    // Both traps listen on `document`, so `stopPropagation` cannot keep one key away from the
+    // other — measured before this case existed: one Escape closed both, and the operator lost the
+    // record they had typed along with the confirmation they were answering.
+    expect([dialogClosed, drawerClosed]).toEqual([1, 0]);
+
+    // And the drawer takes it back once it is the only thing trapping the page.
+    await user.keyboard("{Escape}");
+    flush();
+    expect(drawerClosed).toBe(1);
     dispose();
   });
 

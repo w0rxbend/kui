@@ -30,16 +30,56 @@ const TOPICS = [
 const after = <T,>(ms: number, value: T): Promise<T> => new Promise((resolve) => setTimeout(() => resolve(value), ms));
 const at = (): string => "09:19";
 
-/** The whole page: header, facts, members, assignments and the wizard at its foot. */
+/** The whole page: header, facts, members, assignments, the wizard and the forget rows. */
 export const TheDetailPage: Story = {
   render: () => (
     <GroupDetail
       group={SAMPLE_GROUP_DETAIL}
       listHref="#/consumer-groups"
       onDelete={() => {}}
+      onForgetOffsets={() => {}}
       reset={{
         plan: () => after(400, { ok: true, plan: SAMPLE_PLAN }),
         apply: () => after(400, { ok: true, receipt: SAMPLE_PLAN }),
+        formatTime: at,
+      }}
+    />
+  ),
+};
+
+/**
+ * Forgetting refused: the rows stay, disabled, with the reason on each button.
+ *
+ * Present rather than absent, for the reason the delete action gives — a control that disappears
+ * teaches an operator the product cannot do this at all, where the truth is that this account
+ * may not.
+ */
+export const ForgettingRefused: Story = {
+  render: () => (
+    <GroupDetail
+      group={SAMPLE_GROUP_DETAIL}
+      listHref="#/consumer-groups"
+      forgetRefusal="You do not have permission to change this group's committed offsets."
+      reset={{
+        plan: () => after(0, { ok: false, problem: "The cluster is read-only." }),
+        apply: () => after(0, { ok: false, problem: "The cluster is read-only." }),
+        permitted: false,
+        refusal: "You do not have permission to reset this group's offsets.",
+      }}
+    />
+  ),
+};
+
+/** A group with no committed offsets anywhere: no forget rows, because there is nothing to forget. */
+export const NothingToForget: Story = {
+  render: () => (
+    <GroupDetail
+      group={{ ...SAMPLE_GROUP_DETAIL, offsets: [], totalLag: null }}
+      listHref="#/consumer-groups"
+      onForgetOffsets={() => {}}
+      reset={{
+        plan: () => after(0, { ok: true, plan: SAMPLE_PLAN }),
+        apply: () => after(0, { ok: true, receipt: SAMPLE_PLAN }),
         formatTime: at,
       }}
     />

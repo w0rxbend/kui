@@ -20,18 +20,13 @@ import {
   controllerNote,
   inSyncPercent,
   lagPill,
-  latencyPercentiles,
-  messageSizes,
   overviewLede,
   partitionHealth,
   partitionTotal,
-  productionRate,
   replicationPill,
-  requestHandlers,
   storageBreakdown,
   storageLede,
   topLag,
-  topProducers,
   totalLag,
 } from "./model.js";
 import {
@@ -234,31 +229,26 @@ describe("broker health", () => {
   });
 });
 
-describe("the figures this backend does not collect", () => {
-  it("marks them not-collected, which is not the same as unavailable", () => {
-    for (const reading of [productionRate(), latencyPercentiles(), topProducers(), requestHandlers()]) {
-      expect(reading.kind).toBe("notCollected");
-      // The distinction that matters: nothing here should read as a transient failure inviting a
-      // retry, because no retry can ever succeed.
-      expect(reading.kind).not.toBe("unknown");
+describe("the figures this model no longer decides", () => {
+  it("carries none of the five metrics figures, because each of them is now a query", () => {
+    // The model used to carry a constant `notCollected` reading for each of these and the cards
+    // drew it. Deleting them is the shape of this wave's change; the other half is that the cards
+    // ask. A constant here gives the screen one answer for three different situations — this build
+    // does not measure it, this deployment configured no exporter, the exporter stopped answering —
+    // and the whole argument of `reading.ts` is that those must not look the same. If one ever
+    // comes back onto the model it will be a second answer to a question the query already
+    // answers, and the two will disagree the first time either is edited.
+    const keys = Object.keys(toOverviewModel(loadingData()));
+    for (const gone of [
+      "throughput",
+      "productionRate",
+      "latency",
+      "topProducers",
+      "requestHandlers",
+      "messageSizes",
+    ]) {
+      expect(keys).not.toContain(gone);
     }
-  });
-
-  it("explains what is missing in terms of the thing that would have to exist", () => {
-    const latency = latencyPercentiles();
-    expect(latency.kind === "notCollected" && latency.why).toContain("JMX");
-    const producers = topProducers();
-    const handlers = requestHandlers();
-    expect(producers.kind === "notCollected" && producers.why).toContain("JMX");
-    expect(handlers.kind === "notCollected" && handlers.why).toContain("JMX");
-  });
-
-  it("no longer counts throughput among them, because there is an endpoint for it now", () => {
-    // The model used to carry a `notCollected` throughput reading and the card drew it. Deleting
-    // that reading is half of this wave's change; the other half is that the card asks. If a
-    // `throughput` ever comes back onto the model, it will be a second answer to a question the
-    // query already answers, and the two will disagree the first time one of them is edited.
-    expect(Object.keys(toOverviewModel(loadingData()))).not.toContain("throughput");
   });
 });
 
@@ -290,12 +280,8 @@ describe("the assembled model", () => {
     expect(model.brokerCount.kind).toBe("pending");
     expect(model.partitions.kind).toBe("pending");
     expect(model.brokerPill).toBeUndefined();
-    // Except the four that are never coming from this build, which are known to be absent from the
-    // start and should not spend the page's life pretending to load.
-    expect(model.latency.kind).toBe("notCollected");
-    expect(model.productionRate.kind).toBe("notCollected");
-    expect(model.topProducers.kind).toBe("notCollected");
-    expect(model.requestHandlers.kind).toBe("notCollected");
+    expect(model.storage.kind).toBe("pending");
+    expect(model.topLag.kind).toBe("pending");
   });
 });
 
@@ -568,14 +554,6 @@ describe("the in-sync share the gauge draws", () => {
   it("is unknown, not 100, when the counts were not reported", () => {
     const share = inSyncPercent(value({ ...healthy, underReplicatedPartitionCount: undefined }));
     expect(share.kind).toBe("unknown");
-  });
-});
-
-describe("the fourth figure with no source", () => {
-  it("says the distribution is not recorded rather than drawing empty buckets", () => {
-    const reading = messageSizes();
-    expect(reading.kind).toBe("notCollected");
-    expect(reading.kind === "notCollected" && reading.why).toContain("does not record message sizes");
   });
 });
 

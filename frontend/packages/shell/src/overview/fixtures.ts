@@ -242,6 +242,31 @@ export const THROUGHPUT_WITH_A_GAP: unknown = {
   }),
 };
 
+/**
+ * A window whose newest measured step is a measured **zero**.
+ *
+ * The state a quiet cluster is in, and the one that makes the rate cards' switch a rule rather than
+ * a convenience: `0 B/s` is a fact about a cluster nobody is writing to, and a card that treated it
+ * as "no reading" would report an idle cluster as an unmeasured one — this screen's central mistake
+ * made backwards. Short on purpose: 288 buckets are not needed to say one thing.
+ */
+export const THROUGHPUT_MEASURED_ZERO: unknown = {
+  range: "24h",
+  stepSeconds: STEP_SECONDS,
+  buckets: [
+    {
+      startingAt: new Date(SERIES_END - 2 * STEP_SECONDS * 1000).toISOString(),
+      bytesInPerSecond: 4_000,
+      bytesOutPerSecond: 9_000,
+    },
+    {
+      startingAt: new Date(SERIES_END - STEP_SECONDS * 1000).toISOString(),
+      bytesInPerSecond: 0,
+      bytesOutPerSecond: 0,
+    },
+  ],
+};
+
 /** A source KUI can reach and has never managed to sample: the full axis, and nothing on it. */
 export const THROUGHPUT_ALL_ABSENT: unknown = {
   range: "24h",
@@ -289,3 +314,140 @@ export const THROUGHPUT_UNAVAILABLE: unknown = throughputBody({
  * five. A status this build refuses to draw is a blank card on the day a service starts sending it.
  */
 export const THROUGHPUT_FORBIDDEN: unknown = throughputBody({ status: "forbidden" });
+
+/**
+ * The exporter has stopped answering and the buffer still holds the last window.
+ *
+ * The state nothing on this screen rendered before this wave — no fixture, no story, no render case
+ * — which is how `ThroughputCard.captionOf`'s stale branch came to be deletable with 162 cases
+ * green. Last-known-good data drawn as though it were current, with no badge (deliberately: the
+ * badge needs an `asOf` this state does not carry) and no sentence either, is the same defect class
+ * the brokers screen was repaired for in wave 4.
+ */
+export const THROUGHPUT_STALE: unknown = throughputBody({
+  status: "stale",
+  data: THROUGHPUT_WITH_A_GAP,
+  fetchedAt: "2026-09-05T11:58:00Z",
+  reason: "KUI-UPSTREAM-UNAVAILABLE",
+  message: "The exporter has not answered since 11:58.",
+});
+
+/* --- Latency: the states the p99 card has to be right about ------------------------------------ */
+
+/**
+ * A day of p99 latency with the same hole the throughput fixture has, in the same place.
+ *
+ * Deliberately the same buckets: an operator's first move on seeing a latency spike is to look at
+ * the throughput chart above it for the same hour, and two fixtures with holes in different places
+ * would make every story on this tab quietly incomparable. Bucket 0 is a **measured** 0.4 ms rather
+ * than a zero, because a broker answering inside its own clock resolution is a fact and not an
+ * absence.
+ */
+export const LATENCY_WITH_A_GAP: unknown = {
+  range: "24h",
+  stepSeconds: STEP_SECONDS,
+  buckets: Array.from({ length: BUCKETS_24H }, (_unused, index) => {
+    const startingAt = new Date(SERIES_END - (BUCKETS_24H - index) * STEP_SECONDS * 1000).toISOString();
+    if (index >= 100 && index < 120) {
+      return { startingAt, produceP99Millis: null, fetchP99Millis: null };
+    }
+    const wave = 1 + Math.sin(index / 12);
+    return {
+      startingAt,
+      produceP99Millis: Math.round((6 + wave * 4) * 10) / 10,
+      fetchP99Millis: Math.round((11 + wave * 7) * 10) / 10,
+    };
+  }),
+};
+
+/** A reachable exporter that has never served a percentile: the whole axis, and nothing on it. */
+export const LATENCY_ALL_ABSENT: unknown = {
+  range: "24h",
+  stepSeconds: STEP_SECONDS,
+  buckets: Array.from({ length: BUCKETS_24H }, (_unused, index) => ({
+    startingAt: new Date(SERIES_END - (BUCKETS_24H - index) * STEP_SECONDS * 1000).toISOString(),
+    produceP99Millis: null,
+    fetchP99Millis: null,
+  })),
+};
+
+export const latencyBody = (section: unknown): unknown => ({ latency: section });
+export const latencyOk = (series: unknown): unknown =>
+  latencyBody({ status: "ok", data: series, fetchedAt: "2026-09-05T12:00:00Z" });
+export const LATENCY_NOT_CONFIGURED: unknown = latencyBody({ status: "not_configured" });
+
+/* --- Request handlers -------------------------------------------------------------------------- */
+
+/**
+ * The design's three sub-tiles (§3.4), as a broker can actually answer them.
+ *
+ * Two ratios and a **count**, which is the whole point of the fixture. §3.4 draws "38% PURGATORY";
+ * `DelayedOperationPurgatory` publishes a queue length with no ceiling, so the third reading arrives
+ * as `count` with its own unit and the card must not draw it as a ring. The two ratios are `0..1`
+ * and not pre-formatted percentages, so a fold that forgot to multiply would draw 0.71% idle.
+ */
+export const HANDLER_READINGS: unknown = {
+  readings: [
+    { id: "network-idle", label: "NETWORK IDLE", ratio: 0.71 },
+    { id: "io-idle", label: "IO IDLE", ratio: 0.64 },
+    { id: "purgatory", label: "PURGATORY", count: 38, unit: "operations" },
+  ],
+};
+
+/** A ratio the exporter served the name of and not the value. Draws the track and an em dash. */
+export const HANDLER_ONE_ABSENT: unknown = {
+  readings: [
+    { id: "network-idle", label: "NETWORK IDLE", ratio: 0.71 },
+    { id: "io-idle", label: "IO IDLE", ratio: null },
+  ],
+};
+
+export const handlersBody = (section: unknown): unknown => ({ requestHandlers: section });
+export const handlersOk = (document: unknown): unknown =>
+  handlersBody({ status: "ok", data: document, fetchedAt: "2026-09-05T12:00:00Z" });
+export const HANDLERS_NOT_CONFIGURED: unknown = handlersBody({ status: "not_configured" });
+
+/* --- Top producers ------------------------------------------------------------------------------ */
+
+/**
+ * What an exporter without client quotas can answer: a per-**topic** byte rate.
+ *
+ * §4 draws "Top producers · client.id" and a broker publishes no per-`client.id` rate unless quotas
+ * are configured. This is the fixture for the card's title following the data rather than the
+ * design, which is wave 5's rule 7 on the screen.
+ */
+export const PRODUCERS_BY_TOPIC: unknown = {
+  entries: [
+    { topic: "orders.payments", bytesPerSecond: 5_400_000 },
+    { topic: "analytics.clicks", bytesPerSecond: 3_100_000 },
+    { topic: "inventory.stock", bytesPerSecond: 820_000 },
+    { topic: "orders.refunds", bytesPerSecond: 240_000 },
+    { topic: "audit.trail", bytesPerSecond: null },
+  ],
+};
+
+/** The other half of the same rule: a deployment that *does* configure quotas answers client ids. */
+export const PRODUCERS_BY_CLIENT: unknown = {
+  entries: [
+    { clientId: "checkout-svc", bytesPerSecond: 4_800_000 },
+    { clientId: "payments", bytesPerSecond: 2_200_000 },
+  ],
+};
+
+export const producersBody = (section: unknown): unknown => ({ producers: section });
+export const producersOk = (document: unknown): unknown =>
+  producersBody({ status: "ok", data: document, fetchedAt: "2026-09-05T12:00:00Z" });
+export const PRODUCERS_NOT_CONFIGURED: unknown = producersBody({ status: "not_configured" });
+
+/* --- Record size --------------------------------------------------------------------------------- */
+
+/** The one figure a broker publishes about record size: a mean, as bytes in over messages in. */
+export const RECORD_SIZE_MEAN: unknown = { meanBytes: 1_180, window: "Averaged over the last hour." };
+
+/** A source that answered without a mean. Words rather than a dash — see `RecordSizeCard`. */
+export const RECORD_SIZE_ABSENT: unknown = { meanBytes: null };
+
+export const recordSizeBody = (section: unknown): unknown => ({ recordSize: section });
+export const recordSizeOk = (document: unknown): unknown =>
+  recordSizeBody({ status: "ok", data: document, fetchedAt: "2026-09-05T12:00:00Z" });
+export const RECORD_SIZE_NOT_CONFIGURED: unknown = recordSizeBody({ status: "not_configured" });

@@ -1,5 +1,7 @@
 package kui.schema.application
 
+import scala.concurrent.duration.{Duration, FiniteDuration}
+
 import cats.effect.IO
 import cats.effect.kernel.Ref
 import cats.syntax.all.*
@@ -29,10 +31,14 @@ final class FakeRegistry(
     val vanished: Set[String] = Set.empty,
     val failure: Option[KuiError] = None,
     val rejects: Set[String] = Set.empty,
+    val globalFails: Boolean = false,
+    val enrichmentDelay: FiniteDuration = Duration.Zero,
     val writes: Ref[IO, List[(String, CompatibilityLevel)]],
     val enrichments: Ref[IO, List[String]],
     val globalReads: Ref[IO, Int],
-    val registrations: Ref[IO, List[(String, ProposedSchema)]]
+    val registrations: Ref[IO, List[(String, ProposedSchema)]],
+    val inFlight: Ref[IO, Int],
+    val peakInFlight: Ref[IO, Int]
 ) extends SchemaRegistryPort[IO] {
 
   private def answer[A](value: A): IO[Either[KuiError, A]] =
@@ -51,7 +57,7 @@ final class FakeRegistry(
     * case is one row failing while the page around it succeeds.
     */
   def summary(subject: Subject): IO[Either[KuiError, Option[SubjectSummary]]] =
-    enrichments.update(_ :+ subject.value) *> {
+    enrichments.update(_ :+ subject.value) *> held {
       if unenrichable.contains(subject.value) then IO.pure(Left(SchemaRig.unreachable))
       else
         answer(
@@ -74,6 +80,18 @@ final class FakeRegistry(
   def schema(subject: Subject, version: VersionSelector): IO[Either[KuiError, Option[RegisteredSchema]]] =
     answer(schemas.get(subject.value -> version.path))
 
+  /** Runs one enrichment while the number in flight is recorded.
+    *
+    * `peakInFlight` is the only way to see `SubjectListUseCase.MaxConcurrentRows`: the rows a page carries
+    * are identical whether they were fetched eight at a time or all at once, and the bulkhead in front of a
+    * single-writer registry is the whole reason the limit exists.
+    */
+  private def held[A](work: IO[A]): IO[A] =
+    inFlight
+      .updateAndGet(_ + 1)
+      .flatTap(now => peakInFlight.update(_.max(now)))
+      .bracket(_ => IO.sleep(enrichmentDelay) *> work)(_ => inFlight.update(_ - 1))
+
   /** Counted, for the same reason the per-subject calls are.
     *
     * The registry-wide compatibility level is one call the list page makes on top of its rows, and whether it
@@ -83,7 +101,11 @@ final class FakeRegistry(
     * and turning the short-circuit off left it green.
     */
   def globalCompatibility: IO[Either[KuiError, CompatibilityLevel]] =
-    globalReads.update(_ + 1) *> answer(globalLevel)
+    globalReads.update(_ + 1) *> {
+      // A registry that answers about subjects and not about `/config` is the state the page's
+      // registry-wide read has to survive: it costs the inheriting rows their level and nothing else.
+      if globalFails then IO.pure(Left(SchemaRig.unreachable)) else answer(globalLevel)
+    }
 
   def subjectCompatibility(subject: Subject): IO[Either[KuiError, Option[CompatibilityLevel]]] =
     answer(subjectLevels.get(subject.value))
@@ -195,13 +217,17 @@ object SchemaRig {
       unenrichable: Set[String] = Set.empty,
       vanished: Set[String] = Set.empty,
       failure: Option[KuiError] = None,
-      rejects: Set[String] = Set.empty
+      rejects: Set[String] = Set.empty,
+      globalFails: Boolean = false,
+      enrichmentDelay: FiniteDuration = Duration.Zero
   ): IO[FakeRegistry] =
     for {
       writes <- Ref.of[IO, List[(String, CompatibilityLevel)]](Nil)
       enrichments <- Ref.of[IO, List[String]](Nil)
       globalReads <- Ref.of[IO, Int](0)
       registrations <- Ref.of[IO, List[(String, ProposedSchema)]](Nil)
+      inFlight <- Ref.of[IO, Int](0)
+      peakInFlight <- Ref.of[IO, Int](0)
     } yield new FakeRegistry(
       subjects,
       schemas,
@@ -212,9 +238,13 @@ object SchemaRig {
       vanished,
       failure,
       rejects,
+      globalFails,
+      enrichmentDelay,
       writes,
       enrichments,
       globalReads,
-      registrations
+      registrations,
+      inFlight,
+      peakInFlight
     )
 }

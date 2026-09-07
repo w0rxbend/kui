@@ -91,6 +91,17 @@ final class EndpointDecisionSuite extends FunSuite {
     assertEquals(EndpointAuthorization.pathValue(readTopic, "topicName", List("topics")), None)
   }
 
+  test("a short request that would still index into something yields no name rather than the wrong one") {
+    // The alignment is from the end, so a request one segment short slides every parameter left by one.
+    // `readTopic` declares six slots and this request carries five; aligning them anyway would read the
+    // topic name out of the slot the *cluster* id is in and authorize a call about `local` against a
+    // pattern for a topic. `None` is the only safe answer, and the caller treats it as a refusal.
+    val short = List("v1", "clusters", "local", "topics", "orders")
+
+    assertEquals(EndpointAuthorization.pathValue(readTopic, "topicName", short), None)
+    assertEquals(EndpointAuthorization.pathValue(readTopic, "clusterId", short), None)
+  }
+
   // -- the decision -------------------------------------------------------------------------------
 
   test("an endpoint with no declaration cannot be authorized, and says so rather than allowing") {

@@ -195,6 +195,38 @@ final class KafkaTopicScrapeSuite extends KuiIOSuite {
     }
   }
 
+  test("aTopicKuiMaySeeAndMayNotDescribeCostsItsSettingsTabAndNotTheWholePage") {
+    // The one place in this adapter where a typed failure is deliberately turned back into a value. A 403
+    // here would take the topic page down and the partitions the user *is* entitled to see would vanish
+    // with the tab they are not; the port's own scaladoc requires the conversion. Removing it left
+    // `./mill libs.__.test + services.*` at 2633/2633.
+    val client = cluster(List("orders"), _ => Right("compact"), batchFails = true)
+
+    for {
+      (admin, _) <- adminOver(client)
+      view <- admin.config(cluster, TopicName.unsafe("orders"))
+    } yield view match {
+      case Right(kui.topic.domain.TopicConfigView.NotPermitted(detail)) =>
+        assert(detail.nonEmpty, "a refusal the operator is shown must say something")
+      case other =>
+        fail(s"a refused describeConfigs must be a NotPermitted view rather than an error: $other")
+    }
+  }
+
+  test("aTopicWhoseSettingsCanBeReadStillAnswersWithThem") {
+    // The positive half, so the case above is not satisfied by an adapter that always answers NotPermitted.
+    val client = cluster(List("orders"), _ => Right("compact"))
+
+    for {
+      (admin, _) <- adminOver(client)
+      view <- admin.config(cluster, TopicName.unsafe("orders"))
+    } yield view match {
+      case Right(kui.topic.domain.TopicConfigView.Entries(entries)) =>
+        assertEquals(entries.map(_.name), List("cleanup.policy"))
+      case other => fail(s"a readable configuration must be settings: $other")
+    }
+  }
+
   test("tenThousandTopicsCostFiftyConfigCallsAndNotTenThousand") {
     // The number the adapter's own scaladoc publishes. It was arithmetic nobody had run: a `grouped` that
     // lost its argument, or a fold that asked per row, returns exactly the same policies.

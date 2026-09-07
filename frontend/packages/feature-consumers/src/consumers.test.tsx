@@ -26,7 +26,7 @@ import {
   lagLevel,
   stateChip,
 } from "./model.js";
-import { EMPTY_RESET_FORM, partitionLag, recordsMoved, resetRequestOf, subscriptions, targetOption } from "./detail.js";
+import { EMPTY_RESET_FORM, partitionLag, recordsMoved, resetRequestOf, subscriptions, targetOption, type ResetTarget } from "./detail.js";
 import { GroupList } from "./GroupList.jsx";
 import { GroupDetail } from "./GroupDetail.jsx";
 import { ResetWizard, scopeSentence } from "./ResetWizard.jsx";
@@ -179,6 +179,34 @@ describe("the group list", () => {
     empty.dispose();
   });
 
+  it("says a filter matched nothing in the voice, and does not call the cluster empty", async () => {
+    /*
+     * Both halves of the filtered voice were added together and only the counted-zero half was
+     * asserted. Guard the filtered branch off and the fall-through reaches the *other* sentence —
+     * `No consumer groups on this cluster.` — over a page whose zero rows are the filter's doing.
+     * An operator searching for a name they mistyped is then told the cluster has no consumer
+     * groups at all, which is a statement about the cluster made from a statement about the box
+     * they are typing in, and it is the one thing this screen's voice is written not to do.
+     *
+     * `totalItems={0}` because that is what the server answers a search that matched nothing, and
+     * it is the value that makes the fall-through say the wrong sentence rather than a vaguer one.
+     */
+    const { container, dispose } = mount(() => (
+      <GroupList
+        rows={[]}
+        totalItems={0}
+        hrefFor={() => "#"}
+        failure={{ kind: "filtered", term: "payments", onClear: noop }}
+      />
+    ));
+    await flush();
+
+    const voice = container.querySelector('[data-testid="consumer-groups-head"]')?.textContent ?? "";
+    expect(voice).toContain("No consumer group on this cluster is named like payments.");
+    expect(voice).not.toContain("No consumer groups on this cluster.");
+    dispose();
+  });
+
   it("keeps a frame, a code and a retry when the request failed", async () => {
     const { container, dispose } = mount(() => (
       <GroupList
@@ -279,6 +307,41 @@ describe("the group list", () => {
     await flush();
     expect(container.querySelector('[data-testid="consumer-groups-pagination"]')).toBeNull();
     dispose();
+  });
+
+  it("enables Next on a full page with no total, and disables it on a short one", async () => {
+    /*
+     * `mayHaveMore` is the only signal there is when the server carried no total, and it was
+     * asserted nowhere: mutated to `() => true` the whole package stayed green, and `Pagination`
+     * ignores it entirely once a total is known — so every existing paging case ran past it.
+     *
+     * A page that came back full may have a successor; a short page is the end of the list. The
+     * two mounts differ only in how many rows they hold, so the assertion cannot pass on anything
+     * except the length comparison the rule is.
+     */
+    const full = mount(() => (
+      <GroupList rows={SAMPLE_GROUPS} page={1} pageSize={6} onPage={noop} hrefFor={(id) => `/g/${id}`} />
+    ));
+    await flush();
+    const forward = (root: HTMLElement): HTMLButtonElement | null =>
+      root.querySelector<HTMLButtonElement>('[data-testid="consumer-groups-pagination"] [aria-label="Next page"]');
+    expect(forward(full.container)?.disabled).toBe(false);
+    full.dispose();
+
+    // Three rows of a page that holds six: there is nowhere forward to go, and offering it would
+    // send the operator to an empty page and leave them there.
+    const short = mount(() => (
+      <GroupList
+        rows={SAMPLE_GROUPS.slice(0, 3)}
+        page={1}
+        pageSize={6}
+        onPage={noop}
+        hrefFor={(id) => `/g/${id}`}
+      />
+    ));
+    await flush();
+    expect(forward(short.container)?.disabled).toBe(true);
+    short.dispose();
   });
 
   it("renders no address at all for a group whose coordinator the wire did not carry", async () => {
@@ -618,6 +681,105 @@ describe("the group detail page", () => {
     dispose();
   });
 
+  it("offers forgetting the offsets once per topic the group holds them on", async () => {
+    /*
+     * `CG-005`'s control. The endpoint behind it names a *topic* — `DELETE …/offsets?topic=` —
+     * so the row is per topic, and the figure beside each one is the number of partitions this
+     * group holds a committed position on there. That figure is what the receipt afterwards is
+     * read against, which is why it is said before the click as well as after it.
+     */
+    const asked: string[] = [];
+    const { container, dispose } = mount(() => (
+      <GroupDetail
+        group={SAMPLE_GROUP_DETAIL}
+        listHref="/groups"
+        onForgetOffsets={(topic) => asked.push(topic)}
+        reset={{ plan: async () => ({ ok: false, problem: "no" }), apply: async () => ({ ok: false, problem: "no" }) }}
+      />
+    ));
+    await flush();
+
+    const section = container.querySelector<HTMLElement>('[data-testid="group-forget-offsets"]');
+    expect(section).not.toBeNull();
+    const rows = [...(section?.querySelectorAll("li") ?? [])];
+    // The two topics this group holds offsets on, in the order `subscriptions` sorts them.
+    expect(rows.map((row) => row.querySelector(".kui-cg-forget__topic")?.textContent)).toEqual([
+      "clickstream",
+      "sessions",
+    ]);
+    // Four partitions of `clickstream` and one of `sessions`, spelled out rather than left as a
+    // bare number beside a topic name where it reads as a version or a replica count.
+    expect(rows[0]?.textContent).toContain("4 partitions held");
+    expect(rows[1]?.textContent).toContain("1 partition held");
+
+    rows[1]?.querySelector("button")?.click();
+    await flush();
+    // The topic on the row that was pressed, not the first one and not the whole group.
+    expect(asked).toEqual(["sessions"]);
+    dispose();
+  });
+
+  it("draws no forget control at all for a group that holds no offsets", async () => {
+    // There is nothing to forget, and a heading over an empty list reads as a control that failed
+    // to load rather than as an action that does not apply.
+    const { container, dispose } = mount(() => (
+      <GroupDetail
+        group={{ ...SAMPLE_GROUP_DETAIL, offsets: [] }}
+        listHref="/groups"
+        onForgetOffsets={noop}
+        reset={{ plan: async () => ({ ok: false, problem: "no" }), apply: async () => ({ ok: false, problem: "no" }) }}
+      />
+    ));
+    await flush();
+    expect(container.querySelector('[data-testid="group-forget-offsets"]')).toBeNull();
+    dispose();
+  });
+
+  it("shows the forget control disabled, with the reason, for somebody who may not use it", async () => {
+    // Disabled and present rather than absent: a control that vanishes teaches an operator the
+    // product cannot do this at all, where the truth is that this account may not.
+    const { container, dispose } = mount(() => (
+      <GroupDetail
+        group={SAMPLE_GROUP_DETAIL}
+        listHref="/groups"
+        forgetRefusal="You do not have permission to change this group's committed offsets."
+        reset={{ plan: async () => ({ ok: false, problem: "no" }), apply: async () => ({ ok: false, problem: "no" }) }}
+      />
+    ));
+    await flush();
+
+    const button = container.querySelector<HTMLButtonElement>(
+      '[data-testid="group-forget-offsets"] button',
+    );
+    // `aria-disabled` and not `disabled`, for the reason the delete action gives: a `disabled`
+    // element cannot be focused, so the reason below can never be read from a keyboard.
+    expect(button?.getAttribute("aria-disabled")).toBe("true");
+    button?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await flush();
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain(
+      "You do not have permission to change this group's committed offsets.",
+    );
+    dispose();
+  });
+
+  it("has no axe violations with the forget rows on the page", async () => {
+    // The new section is a list of rows each carrying a destructive control, which is exactly the
+    // shape that produces `list`, `button-name` and `aria-*` findings if it is assembled loosely.
+    const { container, dispose } = mount(() => (
+      <GroupDetail
+        group={SAMPLE_GROUP_DETAIL}
+        listHref="/groups"
+        onDelete={noop}
+        onForgetOffsets={noop}
+        reset={{ plan: async () => ({ ok: false, problem: "no" }), apply: async () => ({ ok: false, problem: "no" }) }}
+      />
+    ));
+    await flush();
+    const violations = await findViolations(container);
+    expect(describeViolations(violations)).toBe("");
+    dispose();
+  });
+
   it("computes a partition's lag only when both offsets are there", () => {
     expect(partitionLag({ topic: "t", partition: 0, committed: 10, endOffset: 25, memberId: null })).toBe(15);
     expect(partitionLag({ topic: "t", partition: 0, committed: null, endOffset: 25, memberId: null })).toBeNull();
@@ -662,6 +824,26 @@ describe("the reset form's refusals", () => {
     expect(targetOption("EARLIEST").parameter).toBeNull();
     expect(targetOption("TIMESTAMP").parameter).toBe("timestamp");
     expect(targetOption("TIMESTAMP").hint).toContain("moves to its end");
+  });
+
+  it("refuses loudly for a target no option describes, rather than handing back nothing", () => {
+    /*
+     * `RESET_TARGETS` is data and `targetOption` reads it, so the union and the array agree by
+     * convention and not by the type system. Dropping a member from the array leaves every call
+     * here type-correct and answers `undefined` — and the caller reads `.parameter` off it, so a
+     * dropped `TIMESTAMP` would put the wizard in front of an operator with the timestamp field
+     * missing and the form still willing to send a `TIMESTAMP` request.
+     *
+     * The cast is the point of the case: it is the shape the array being edited would produce, and
+     * it is the only way to reach a branch the compiler otherwise proves unreachable.
+     */
+    expect(() => targetOption("SOMETHING_ELSE" as ResetTarget)).toThrow(/SOMETHING_ELSE/);
+
+    // And through the form builder, which is where the product reads it: a request is refused
+    // rather than composed without the parameter its target needs.
+    expect(() =>
+      resetRequestOf({ ...EMPTY_RESET_FORM, topic: "t", target: "SOMETHING_ELSE" as ResetTarget }, partitions),
+    ).toThrow();
   });
 
   it("counts the records a plan moves, ignoring direction", () => {

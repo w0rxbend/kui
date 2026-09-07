@@ -7,11 +7,14 @@ import munit.FunSuite
 import kui.gateway.contract.dto.{GroupHitDto, SearchAnswerDto, SearchResultsDto, TopicHitDto}
 import kui.kernel.{ClusterId, GroupId, ServiceId, TopicName}
 
-/** That the search answer is exactly the document committed beside it, on both platforms.
+/** That the search answer is exactly the document committed beside it.
   *
-  * Cross-compiled for the reason every gateway aggregation's suite is: this document is assembled by the
-  * gateway and decoded by the browser, and the browser's half of an aggregation is the half that has twice
-  * gone unrun until a screen rendered the wrong thing.
+  * On the JVM only, and the same correction as `TopicOverviewDtoSuite`'s: `./mill resolve
+  * services.gateway.contract._` names one module, `.jvm`. Wave 4 rewrote this header to say the suite is
+  * cross-compiled and it never was. The document is assembled by the gateway and decoded by the browser, and
+  * the browser's half of an aggregation is the half that has twice gone unrun until a screen rendered the
+  * wrong thing — so the join here is the committed file plus the generated `schema.d.ts`, not one test
+  * running twice.
   *
   * The case that earns its place is the empty `subjects` beside a `partial` naming `schema`. That pair is
   * the endpoint's entire argument — "we could not ask" is not "nothing matched" — and it is the one thing a

@@ -1,14 +1,15 @@
 package kui.schema.application
 
 import cats.effect.IO
-import cats.effect.kernel.Ref
+import cats.effect.kernel.{Deferred, Ref}
 
 import kui.kernel.Subject
 import kui.kernel.error.ErrorCode
 import kui.schema.domain.*
 import kui.security.Principal
-import kui.security.audit.{MutationKind, MutationOutcome}
+import kui.security.audit.{AuditSink, MutationKind, MutationOutcome, MutationRecord}
 import kui.testkit.KuiIOSuite
+import kui.testkit.fakes.FakeStructuredLogger
 
 /** The three-way answer every read in this service gives, and the fact the whole service is shaped around.
   *
@@ -108,6 +109,30 @@ final class CompatibilityReadSuite extends KuiIOSuite {
   }
 }
 
+/** A registry that accepts the write and then never answers, so a fibre can be cancelled mid-call.
+  *
+  * The `before` read succeeds, because the rule under test is about what the record says once the PUT has
+  * left KUI: everything before that point is already covered by the refusal cases.
+  */
+final private class Hanging(inFlight: Deferred[IO, Unit]) extends SchemaRegistryPort[IO] {
+
+  def setGlobalCompatibility(level: CompatibilityLevel): IO[Either[kui.kernel.error.KuiError, Unit]] =
+    inFlight.complete(()) *> IO.never
+
+  def globalCompatibility: IO[Either[kui.kernel.error.KuiError, CompatibilityLevel]] =
+    IO.pure(Right(CompatibilityLevel.Full))
+
+  def subjects = IO.pure(Right(Nil))
+  def summary(subject: Subject) = IO.pure(Right(None))
+  def versions(subject: Subject) = IO.pure(Right(None))
+  def schema(subject: Subject, version: VersionSelector) = IO.pure(Right(None))
+  def subjectCompatibility(subject: Subject) = IO.pure(Right(None))
+  def register(subject: Subject, proposed: ProposedSchema) = IO.never
+  def setSubjectCompatibility(subject: Subject, level: CompatibilityLevel) = IO.never
+  def checkCompatibility(subject: Subject, version: VersionSelector, proposed: ProposedSchema) =
+    IO.pure(Right(None))
+}
+
 /** The one mutation: refused on a read-only cluster, audited either way. */
 final class SetCompatibilitySuite extends KuiIOSuite {
 
@@ -185,6 +210,80 @@ final class SetCompatibilitySuite extends KuiIOSuite {
       assertEquals(records.map(_.outcome), List(MutationOutcome.Failed))
     }
   }
+
+  test("a previous level that could not be read is recorded as unknown, never as a blank") {
+    // `before.orElse(Some(UnknownBefore))` can be reduced to `before` with every other case in this
+    // service green, and the record then carries no `before` at all. The file's own header says why that
+    // matters: a blank `before` and an unknown `before` mean different things to an incident review, and
+    // only one of them is true when the read failed.
+    for {
+      // The whole registry refuses, so the `before` read fails and the write fails after it.
+      registry <- SchemaRig.registry(failure = Some(SchemaRig.unreachable))
+      pair <- rig(registry)
+      (useCase, audit) = pair
+      result <- useCase.setGlobal(who, SchemaRig.WithRegistry, CompatibilityLevel.None)
+      records <- audit.records.get
+    } yield {
+      assertEquals(result, Left(SchemaRig.unreachable))
+      assertEquals(records.map(_.outcome), List(MutationOutcome.Failed))
+      assertEquals(records.map(_.before), List(Some(SetCompatibilityUseCase.UnknownBefore)))
+      assert(
+        clue(SetCompatibilityUseCase.UnknownBefore).contains("unknown"),
+        "the marker has to read as an absence of knowledge rather than as a level"
+      )
+    }
+  }
+
+  test("a cancelled write is audited as Unknown, because it may still have been applied") {
+    // The outcome that tells an operator to go and look. `MutationOutcome.Unknown` can be changed to
+    // `Succeeded` in the `guaranteeCase` block with every other case in this service green — and a record
+    // claiming a cancelled PUT succeeded is the one an incident review would trust and should not. The
+    // registry hangs *after* accepting the request, which is the only state this rule is about: the PUT
+    // is on the wire and nobody knows whether it landed.
+    for {
+      inFlight <- Deferred[IO, Unit]
+      records <- Ref.of[IO, List[MutationRecord]](Nil)
+      logger <- SchemaRig.logger
+      audit = new RecordingAudit(records)
+      registries = new FakeRegistries(SchemaRig.profiles, Map(SchemaRig.WithRegistry -> Hanging(inFlight)))
+      useCase = SetCompatibilityUseCase.make[IO](registries, audit, logger)
+      fibre <- useCase.setGlobal(who, SchemaRig.WithRegistry, CompatibilityLevel.None).start
+      _ <- inFlight.get
+      _ <- fibre.cancel
+      written <- records.get
+    } yield {
+      assertEquals(written.map(_.outcome), List(MutationOutcome.Unknown))
+      assert(
+        clue(written.flatMap(_.detail.get("reason"))).exists(_.contains("cancelled")),
+        "the record has to say the operation was cut off after the request was sent"
+      )
+    }
+  }
+
+  test("an audit sink that cannot write never fails the mutation it was recording") {
+    // Every other guard in KUI makes the same trade and states it: an operator's registry matters more
+    // than KUI's bookkeeping. Delete the `handleErrorWith` around `audit.record` and the write starts
+    // failing on a broken sink, with every other case in this service green.
+    val broken = new AuditSink[IO] {
+      def record(entry: MutationRecord): IO[Unit] =
+        IO.raiseError(new RuntimeException("the audit log is full"))
+    }
+
+    for {
+      registry <- SchemaRig.registry()
+      logger <- FakeStructuredLogger[IO]
+      useCase = SetCompatibilityUseCase.make[IO](SchemaRig.registries(registry), broken, logger)
+      result <- useCase.setGlobal(who, SchemaRig.WithRegistry, CompatibilityLevel.Full)
+      writes <- registry.writes.get
+      entries <- logger.entriesWith("operation")
+    } yield {
+      assertEquals(result, Right(CompatibilityLevel.Full))
+      assertEquals(writes, List("global" -> CompatibilityLevel.Full))
+      // And it is not silent: the record that could not be written is the thing somebody has to know is
+      // missing, so the failure is logged at error with the same context the record would have carried.
+      assertEquals(entries.map(_.level), List("error"))
+    }
+  }
 }
 
 /** The check: a read that carries a body, answered on a read-only cluster. */
@@ -210,14 +309,35 @@ final class CompatibilityCheckSuite extends KuiIOSuite {
     } yield assertEquals(result.left.map(_.code), Left(ErrorCode.Validation))
   }
 
-  test("a schema past the size bound is refused rather than forwarded") {
-    val huge = "x" * (CompatibilityCheckUseCase.MaxDefinitionBytes + 1)
+  test("a document larger than the bound is refused, and the case does not read the bound to build it") {
+    // `"x" * (MaxDefinitionBytes + 1)` was the input here until wave 5, which is the constant asserted
+    // against itself: multiply `MaxDefinitionBytes` by 1024 and this case still passes, while a 1 GiB
+    // document is buffered in this process and posted to a single-writer registry. The literal below is
+    // the mebibyte the constant's own scaladoc argues for.
+    assertEquals(CompatibilityCheckUseCase.MaxDefinitionBytes, SchemaRegistrationSuite.OneMebibyte)
+
+    val huge = "x" * (SchemaRegistrationSuite.OneMebibyte + 1)
 
     for {
       registry <- SchemaRig.registry(subjects = Map("orders-value" -> List(1)))
       useCase = CompatibilityCheckUseCase.make[IO](SchemaRig.registries(registry))
       result <- useCase.check(SchemaRig.WithRegistry, orders, VersionSelector.Latest, proposal(huge))
-    } yield assertEquals(result.left.map(_.code), Left(ErrorCode.Validation))
+    } yield {
+      assertEquals(result.left.map(_.code), Left(ErrorCode.Validation))
+      assert(clue(result.swap.toOption.map(_.message)).exists(_.contains("the limit is")))
+    }
+  }
+
+  test("a document of exactly the bound is checked, so the refusal is not a refusal of everything") {
+    val atTheLimit = "x" * SchemaRegistrationSuite.OneMebibyte
+
+    for {
+      registry <- SchemaRig.registry(subjects = Map("orders-value" -> List(1)))
+      useCase = CompatibilityCheckUseCase.make[IO](SchemaRig.registries(registry))
+      result <- useCase.check(SchemaRig.WithRegistry, orders, VersionSelector.Latest, proposal(atTheLimit))
+      // The fake answers `compatible` when the text contains that word, so a document of x's is a
+      // verdict of `false` — a verdict, which is what proves the call was made rather than refused.
+    } yield assertEquals(result.map(_.compatible), Right(false))
   }
 
   test("an unknown subject is a schema-not-found rather than a fabricated 'compatible'") {

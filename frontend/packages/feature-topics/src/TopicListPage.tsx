@@ -188,9 +188,13 @@ export function queryFromAddress(search: string): TopicListQuery {
   const params = new URLSearchParams(search);
   return {
     ...DEFAULT_TOPIC_QUERY,
+    // Trimmed, because a prefix copied out of a terminal or wrapped by a mail client arrives with
+    // spaces around it — and a Kafka topic name cannot contain one, so ` orders. ` is a search that
+    // matches nothing and gets reported as "No topic matches that text".
     search: (params.get("q") ?? "").trim(),
     // Only `true`. A `?showInternal=1` this screen decided to honour would be a parameter spelling
-    // the wire does not have, invented in the browser.
+    // the wire does not have, invented in the browser — and `?showInternal=false`, read as
+    // "present, therefore on", would turn the chip on for an address that says to leave it off.
     facet: params.get("showInternal") === "true" ? "internal" : DEFAULT_TOPIC_QUERY.facet,
   };
 }

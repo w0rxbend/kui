@@ -1,8 +1,11 @@
 package kui.gateway.app
 
+import java.net.{InetAddress, ServerSocket, SocketTimeoutException}
+
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.IO
+import cats.effect.kernel.Resource
 
 import kui.config.{GatewayConfig, ServerConfig, UpstreamServiceConfig}
 import kui.gateway.contract.dto.TopicOverviewDto
@@ -41,6 +44,30 @@ final class GatewayWiringSuite extends KuiIOSuite {
     )
   }
 
+  /** A socket that listens and never answers, so that "nobody connected" is an observation.
+    *
+    * A backlog is what makes it work: the operating system completes the handshake for a queued connection
+    * whether or not this test ever calls `accept`, so a probe issued during wiring is recorded even though
+    * nothing was reading at the time.
+    */
+  private def listener: Resource[IO, ServerSocket] =
+    Resource.make(IO(new ServerSocket(0, 8, InetAddress.getLoopbackAddress)))(socket => IO(socket.close()))
+
+  /** The same two-service configuration, aimed at a port something really is listening on. */
+  private def pointedAt(server: ServerSocket): GatewayServiceConfig = {
+    val there = UpstreamServiceConfig(
+      url = kui.config.SafeUrl.unsafe(s"http://127.0.0.1:${server.getLocalPort}"),
+      timeout = 1.second,
+      maxConcurrent = PositiveInt.unsafe(1)
+    )
+
+    unreachableUpstreams.copy(gateway =
+      unreachableUpstreams.gateway.copy(services =
+        Map(ServiceId.unsafe("cluster") -> there, ServiceId.unsafe("topic") -> there)
+      )
+    )
+  }
+
   private def wire(config: GatewayServiceConfig) =
     FakeStructuredLogger[IO].flatMap { logger =>
       GatewayWiring.make[IO](config, Telemetry.noop[IO], logger).use(IO.pure)
@@ -54,11 +81,31 @@ final class GatewayWiringSuite extends KuiIOSuite {
   }
 
   test("theGatewayStartsWhenEveryUpstreamIsUnreachable") {
-    // No upstream is contacted while wiring, so this returns as fast as the empty case. That is the
-    // assertion: a timeout here would mean the composition root had started probing, which is what turns a
-    // slow upstream into a gateway that never finishes booting.
-    wire(unreachableUpstreams).timeout(5.seconds).map { gateway =>
-      assert(gateway.routes.nonEmpty)
+    // The claim is that no upstream is *contacted* while wiring, and it is asserted by watching a socket
+    // rather than a clock.
+    //
+    // This case used to be `wire(...).timeout(5.seconds)`, and that measured the wrong thing in both
+    // directions. It could not fail for the defect it was written for — the upstreams are at 127.0.0.1:1,
+    // which refuses a connection instantly, so a composition root that probed every one of them would still
+    // have returned in milliseconds. And it failed on one of three full-suite runs during wave 4's
+    // verification and passed in isolation, because five seconds of wall clock is not a bound on anything
+    // when sixteen forked suites are loading the sttp, tapir and otel class graphs at once: the same
+    // module's six cases take 1.5 s in isolation and its siblings take 40 to 90 s each under load.
+    //
+    // So: a real listening socket that accepts nothing, and afterwards an `accept` that must time out. A
+    // connection opened during wiring would already be sitting in the backlog and would be accepted at once,
+    // which makes this fail for the defect and for nothing else. MUnit's own 30-second timeout is what
+    // catches a composition root that hangs.
+    listener.use { server =>
+      wire(pointedAt(server)).map { gateway =>
+        assert(gateway.routes.nonEmpty)
+        server.setSoTimeout(250)
+        val connected =
+          try { server.accept().close(); true }
+          catch { case _: SocketTimeoutException => false }
+
+        assert(!connected, "the composition root opened a connection to an upstream while wiring")
+      }
     }
   }
 

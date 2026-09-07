@@ -44,7 +44,8 @@ object ClusterFixtures {
       id: ClusterId = Prod,
       name: String = "Production EU",
       version: Long = 7L,
-      readOnly: Boolean = false
+      readOnly: Boolean = false,
+      origin: ProfileOrigin = ProfileOrigin.Static
   ): ClusterProfile =
     ClusterProfile
       .from(
@@ -80,9 +81,48 @@ object ClusterFixtures {
         readOnly = readOnly,
         colour = None,
         version = ProfileVersion.unsafe(version),
-        origin = ProfileOrigin.Static
+        origin = origin
       )
       .getOrElse(throw new IllegalStateException("the fixture profile is not valid"))
+
+  /** Four replicas of three different sizes, deliberately out of order and with one size repeated, so that
+    * both halves of the biggest-first rule — the ordering and its tie-break — are visible.
+    */
+  def logDirOfSizes: LogDir =
+    LogDir
+      .from(
+        LogDirPath.unsafe("/var/lib/kafka/data"),
+        None,
+        Some(549755813888L),
+        Some(366503875925L),
+        List(
+          ReplicaInfo(
+            TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(0)),
+            4_000L,
+            0L,
+            isFuture = false
+          ),
+          ReplicaInfo(
+            TopicPartition(TopicName.unsafe("payments"), PartitionId.unsafe(0)),
+            1_000L,
+            0L,
+            isFuture = false
+          ),
+          ReplicaInfo(
+            TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(1)),
+            9_000L,
+            0L,
+            isFuture = false
+          ),
+          ReplicaInfo(
+            TopicPartition(TopicName.unsafe("audit"), PartitionId.unsafe(0)),
+            4_000L,
+            0L,
+            isFuture = false
+          )
+        )
+      )
+      .getOrElse(throw new IllegalStateException("the fixture log directory is not valid"))
 
   def broker(id: Int, host: String = "broker-1.example.com", rack: Option[String] = Some("eu-west-1a")): Broker =
     Broker(

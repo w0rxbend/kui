@@ -32,10 +32,12 @@ import type { OverviewData } from "./load.js";
  * Storage tab does at that address, rather than about what a prop said it should do.
  *
  * The Traffic tab has stories of its own in `Traffic.stories.tsx`, because the states worth drawing
- * there are states of a *request* rather than of the model these stories vary. The Throughput card
- * appears on the Overview tab too, and in these stories it draws the not-configured sentence: the
- * harness's default gateway answers `not_configured`, which is the honest answer for a fixture
- * cluster that has no exporter behind it.
+ * there are states of a *request* rather than of the model these stories vary. Three of that tab's
+ * five metrics cards appear on the Overview tab too — the throughput chart, the p99 latency line
+ * and the two rate stat cards — and in these stories every one of them draws the not-configured
+ * sentence: the harness's default gateway answers `not_configured` on all five, which is the honest
+ * answer for a fixture cluster that has no exporter behind it. That is what these stories are for.
+ * The *measured* renderings of the same cards live next door, where the gateway answers.
  */
 const meta = {
   title: "Screens/Overview",

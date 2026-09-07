@@ -59,15 +59,24 @@ object ThroughputRangeDto {
     * out of one day of samples, and nothing on the screen would say so. The refusal travels as the kernel's
     * own validation error so that `libs/http` renders it as a `KUI-VALIDATION` envelope naming the parameter,
     * exactly as a malformed cluster id is rendered.
+    *
+    * @param field
+    *   the query parameter's own name, because two endpoints spell this vocabulary differently — `?range=` on
+    *   throughput and `?window=` on latency — and a refusal that named the wrong one would send a caller to
+    *   look at a parameter they did not send.
     */
-  given TapirCodec[String, ThroughputRangeDto, TextPlain] = TapirCodec.string.mapDecode(raw =>
-    fromWire(raw) match {
-      case Some(range) => DecodeResult.Value(range)
-      case None =>
-        val expected = s"one of ${Wires.mkString(", ")}"
-        DecodeResult.Error(raw, KernelDecodeFailure(ValidationError.Format("range", expected, raw)))
-    }
-  )(_.wire)
+  def codecFor(field: String): TapirCodec[String, ThroughputRangeDto, TextPlain] =
+    TapirCodec.string.mapDecode(raw =>
+      fromWire(raw) match {
+        case Some(range) => DecodeResult.Value(range)
+        case None =>
+          val expected = s"one of ${Wires.mkString(", ")}"
+          DecodeResult.Error(raw, KernelDecodeFailure(ValidationError.Format(field, expected, raw)))
+      }
+    )(_.wire)
+
+  /** The default spelling, for the endpoint that named the parameter `range`. */
+  given TapirCodec[String, ThroughputRangeDto, TextPlain] = codecFor("range")
 
   given CanEqual[ThroughputRangeDto, ThroughputRangeDto] = CanEqual.derived
 }
@@ -163,9 +172,10 @@ object ThroughputSeriesDto {
   * are things a card can draw. A 404 for the first would be indistinguishable from a typo in the URL, and a
   * 500 for the second tells a browser only that something went wrong somewhere.
   *
-  * One field and not a bare `Section`, for the same reason `BrokersResponse` has one: the response grows a
-  * second section when M7 adds latency beside throughput, and an object that started as a bare section could
-  * not grow one without breaking every client.
+  * One field and not a bare `Section`, for the same reason `BrokersResponse` has one: an object that started
+  * as a bare section could never grow a second field without breaking every client that had shipped against
+  * it. Latency did not end up here — it is its own endpoint, so that one dead exporter family costs one card
+  * — but the property is worth keeping for whatever throughput acquires next.
   */
 final case class ThroughputResponse(throughput: Section[ThroughputSeriesDto])
 

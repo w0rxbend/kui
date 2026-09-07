@@ -47,6 +47,22 @@ trait SearchSource[F[_]] {
   * whole field away over a deployment choice — and on the distributed stack, which routes no schema service
   * at all, it would take it away permanently.
   *
+  * ==A deployment with no clusters names nobody in `partial`, and that is a decision==
+  *
+  * With no clusters configured the cluster list is read, the fan-out has nothing to fan over, and the answer
+  * is three empty lists beside an empty `partial`. ADR-049 §2 defines `partial` as the services the gateway
+  * **could not ask**, in four enumerated ways, and this is none of them: the topic, consumer and schema
+  * services are all routed and all perfectly askable, there is simply nothing to ask them about. Naming them
+  * would put a sentence in front of a user — "Topics, Consumer groups, Schema Registry could not be asked" —
+  * that is not true, and a field whose entries are sometimes true and sometimes protective is a field nobody
+  * can act on.
+  *
+  * What it costs is real and is stated rather than hidden: this answer is indistinguishable, in the document,
+  * from a search that matched nothing, so the browser renders "Nothing matches" on a deployment that has no
+  * clusters at all. The remedy is not a fifth cause here. The browser already knows how many clusters exist —
+  * it draws its cluster selector from that same list — so the sentence belongs on the shell's empty state,
+  * where it can say what is actually wrong and offer the page that fixes it.
+  *
   * ==The fan-out is bounded by clusters times services==
   *
   * One request per service per cluster and no more. Each of the three list endpoints already matches on its

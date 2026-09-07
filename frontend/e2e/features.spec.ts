@@ -5,7 +5,7 @@
  * the feature: "nothing matched" and "nothing was read" are the same table without the count beside
  * it, and they are opposite conclusions.
  */
-import { test, expect, CLUSTER } from "./fixtures";
+import { test, expect, CLUSTER, type KuiApi } from "./fixtures";
 
 interface SubjectsDocument {
   readonly items?: readonly {
@@ -169,6 +169,253 @@ test.describe("the schema registry", () => {
     await page.goto(`/ui/clusters/${CLUSTER}/schemas/orders.avro-value`);
     await expect(page.getByText(/schema id/i).first()).toBeVisible();
     await expect(page.getByText(/^version$/i).first()).toBeVisible();
+  });
+});
+
+/**
+ * `SR-005`, driven.
+ *
+ * The row has stood at REVIEW because only the *display* of a compatibility level had ever been
+ * pressed in a browser: the two writes and the check had recorded-response tests and seven stories
+ * and no browser evidence at all. These four cases are that evidence, against the quickstart's own
+ * Apicurio registry.
+ *
+ * The global level is changed and changed **back**, in a `finally`, because the first case in this
+ * file asserts that the quickstart runs at `NONE` — a suite that leaves the registry somewhere else
+ * would fail a sibling case for a reason that has nothing to do with it.
+ */
+interface LevelDocument {
+  readonly level?: string | null;
+  readonly inheritedFromGlobal?: boolean;
+}
+
+interface VerdictDocument {
+  readonly compatible?: boolean;
+  readonly messages?: readonly string[];
+}
+
+/** A subject name nothing else will collide with. The registry has no delete, so the name is the isolation. */
+function scratchSubject(what: string): string {
+  return `kui-e2e-${what}-${Date.now()}-value`;
+}
+
+const BASE_SCHEMA =
+  '{"type":"record","name":"KuiE2eCompat","fields":[{"name":"id","type":"string"}]}';
+/** A field with no default: readers of the old schema cannot read this, so BACKWARD refuses it. */
+const BREAKING_SCHEMA =
+  '{"type":"record","name":"KuiE2eCompat","fields":[{"name":"id","type":"string"},' +
+  '{"name":"channel","type":"string"}]}';
+/** The same field with a default, which is the change BACKWARD exists to allow. */
+const SAFE_SCHEMA =
+  '{"type":"record","name":"KuiE2eCompat","fields":[{"name":"id","type":"string"},' +
+  '{"name":"channel","type":"string","default":""}]}';
+
+/** Registers a subject over HTTP, so a failure to arrange cannot be read as the failure under test. */
+async function seedSubject(api: KuiApi, subject: string): Promise<void> {
+  await api.post(
+    `/api/v1/clusters/${CLUSTER}/schemas/subjects/${encodeURIComponent(subject)}/versions`,
+    { schemaType: "AVRO", definition: BASE_SCHEMA },
+  );
+}
+
+test.describe("compatibility, written from the screen", () => {
+  test("changes the registry's global level, and says what NONE means when NONE is set", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * Both writes in one case, because the *restore* is the second write and running it as a
+     * separate test would leave the registry changed if this one failed.
+     *
+     * The two toasts are deliberately different events: every level but `NONE` narrows what the
+     * registry will accept, and `NONE` turns the checking off — a green "done" for that would be
+     * the product agreeing with a decision it should be reporting.
+     */
+    const before = ((await api.get(
+      `/api/v1/clusters/${CLUSTER}/schemas/compatibility`,
+    )) as LevelDocument).level;
+    expect(typeof before, "the gateway should report a global compatibility level").toBe("string");
+
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas`);
+    const globalRow = page.locator(".kui-schemas__global");
+    await expect(globalRow).toBeVisible();
+
+    try {
+      // The Select opens on `BACKWARD`, so Save alone writes it.
+      await globalRow.getByRole("button", { name: "Change" }).click();
+      await globalRow.getByRole("button", { name: "Save" }).click();
+
+      await expect(page.locator(".kui-notice-stack")).toContainText(
+        "Compatibility for every inheriting subject set to BACKWARD",
+      );
+      // Asked of the registry rather than read back off the screen that claimed it.
+      const written = ((await api.get(
+        `/api/v1/clusters/${CLUSTER}/schemas/compatibility`,
+      )) as LevelDocument).level;
+      expect(written).toBe("BACKWARD");
+      // And the screen re-read it: the pill is the registry's answer, not the value that was typed.
+      await expect(globalRow).toContainText("BACKWARD");
+      await expect(globalRow).not.toContainText("accept a schema that breaks existing readers");
+    } finally {
+      await globalRow.getByRole("button", { name: "Change" }).click();
+      await globalRow.getByRole("combobox", { name: "Compatibility level" }).click();
+      await page.getByRole("option", { name: String(before), exact: true }).click();
+      await globalRow.getByRole("button", { name: "Save" }).click();
+      await expect(page.locator(".kui-notice-stack")).toContainText(
+        `Compatibility for every inheriting subject set to ${String(before)}`,
+      );
+    }
+
+    const restored = ((await api.get(
+      `/api/v1/clusters/${CLUSTER}/schemas/compatibility`,
+    )) as LevelDocument).level;
+    expect(restored).toBe(before);
+
+    if (restored === "NONE") {
+      // The warning, not a cheerful success: from here the registry accepts a schema that breaks
+      // every existing reader, and the toast is the only place that is said as it happens.
+      await expect(page.locator(".kui-notice-stack")).toContainText(/breaks every existing reader/i);
+      await expect(globalRow).toContainText("accept a schema that breaks existing readers");
+    }
+  });
+
+  test("sets one subject's level, and the screen says it is the subject's own", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * The second write, and the distinction the feature turns on. The quickstart's registry reports
+     * every subject at the global `NONE`, so a subject that reads `BACKWARD, set on this subject`
+     * afterwards is the write having landed — and the sentence beside the pill is what tells an
+     * operator that changing the *global* level will no longer move this one.
+     */
+    const subject = scratchSubject("compat-subject");
+    await seedSubject(api, subject);
+
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas/${encodeURIComponent(subject)}`);
+    const pane = page.locator(".kui-subject");
+    await expect(pane).toBeVisible();
+
+    await pane.getByRole("combobox", { name: "Compatibility level" }).click();
+    await page.getByRole("option", { name: "BACKWARD", exact: true }).click();
+
+    await expect(page.locator(".kui-notice-stack")).toContainText(
+      `Compatibility for ${subject} set to BACKWARD`,
+    );
+
+    const level = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/schemas/subjects/${encodeURIComponent(subject)}/compatibility`,
+    )) as LevelDocument;
+    expect(level.level).toBe("BACKWARD");
+    expect(level.inheritedFromGlobal).toBe(false);
+
+    await expect(pane.locator(".kui-subject__compat")).toContainText("BACKWARD");
+    await expect(pane).toContainText("set on this subject");
+    await expect(pane).not.toContainText("inherited from the registry's global level");
+  });
+
+  test("asks the registry whether a schema would be accepted, and draws the answer it gave", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * The check, driven, on the deployment where its hardest rendering is the ordinary one.
+     *
+     * Apicurio's Confluent-compatible API words its explanation under a key KUI's registry client
+     * does not read, so **both** verdicts arrive with `messages: []` — measured here, not assumed:
+     * a refusal is `{"compatible": false, "messages": []}` and an acceptance is
+     * `{"compatible": true, "messages": []}`. The same empty list therefore has to render as two
+     * opposite sentences, decided by the verdict and by nothing else, and "refused, and the
+     * registry gave no reason" must never look like "the registry raised nothing against it".
+     */
+    const subject = scratchSubject("compat-check");
+    await seedSubject(api, subject);
+
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas/${encodeURIComponent(subject)}`);
+    const pane = page.locator(".kui-subject");
+    await expect(pane).toBeVisible();
+
+    // A level of NONE would make the registry answer "compatible" for anything, which is why the
+    // control refuses to run there — so the check needs a level that decides something first.
+    await pane.getByRole("combobox", { name: "Compatibility level" }).click();
+    await page.getByRole("option", { name: "BACKWARD", exact: true }).click();
+    await expect(pane.locator(".kui-subject__compat")).toContainText("BACKWARD");
+
+    const panel = page.locator(".kui-schema-check");
+    await expect(panel).toBeVisible();
+    // The panel says on itself that it writes nothing; that promise is the reason anybody presses it.
+    await expect(panel).toContainText(/Nothing is registered and nothing is changed/i);
+
+    const editor = panel.locator("textarea");
+    const button = panel.getByRole("button", { name: "Check compatibility" });
+
+    /** What the registry itself says, so the expectation is not a guess about this registry. */
+    const asked = async (definition: string): Promise<VerdictDocument> =>
+      (await api.post(
+        `/api/v1/clusters/${CLUSTER}/schemas/subjects/${encodeURIComponent(subject)}` +
+          `/versions/latest/compatibility`,
+        { schemaType: "AVRO", definition },
+      )) as VerdictDocument;
+
+    const refused = await asked(BREAKING_SCHEMA);
+    expect(
+      refused.compatible,
+      "a required field with no default should be refused under BACKWARD",
+    ).toBe(false);
+
+    await editor.fill(BREAKING_SCHEMA);
+    await button.click();
+    const verdict = page.locator('[data-testid="compatibility-verdict"]');
+    await expect(verdict).toBeVisible();
+    await expect(verdict).toContainText("Would be refused");
+    if ((refused.messages ?? []).length === 0) {
+      await expect(verdict).toContainText(/gave no reason/i);
+      await expect(verdict).not.toContainText(/raised nothing against it/i);
+    } else {
+      await expect(verdict).toContainText(String((refused.messages ?? [])[0]));
+    }
+
+    const accepted = await asked(SAFE_SCHEMA);
+    expect(accepted.compatible, "the same field with a default should be accepted").toBe(true);
+
+    await editor.fill(SAFE_SCHEMA);
+    await button.click();
+    await expect(verdict).toContainText("Would be accepted");
+    await expect(verdict).toContainText(/raised nothing against it/i);
+    await expect(verdict).not.toContainText(/gave no reason/i);
+
+    // Nothing was registered: the panel's promise, asked of the registry rather than believed.
+    const versions = (await api.get(
+      `/api/v1/clusters/${CLUSTER}/schemas/subjects/${encodeURIComponent(subject)}/versions`,
+    )) as { readonly versions?: readonly number[] };
+    expect(versions.versions ?? []).toEqual([1]);
+  });
+
+  test("refuses the check under NONE, and says why rather than hiding the control", async ({
+    page,
+    api,
+  }) => {
+    /*
+     * The refusal beside the capability. Under `NONE` the registry answers "compatible" for every
+     * schema, including one that breaks every reader — the recorded documents show the two verdicts
+     * are byte for byte identical — so a green pill there would be evidence for a change that is
+     * about to break production. The control is disabled rather than removed, because a missing
+     * control teaches an operator the product cannot do the thing.
+     */
+    const subject = scratchSubject("compat-none");
+    await seedSubject(api, subject);
+
+    await page.goto(`/ui/clusters/${CLUSTER}/schemas/${encodeURIComponent(subject)}`);
+    const pane = page.locator(".kui-subject");
+    await expect(pane).toBeVisible();
+    await expect(pane.locator(".kui-subject__compat")).toContainText("NONE");
+
+    const panel = page.locator(".kui-schema-check");
+    await expect(panel).toContainText(/compatibility level is NONE/i);
+    const button = panel.getByRole("button", { name: "Check compatibility" });
+    await expect(button).toHaveAttribute("aria-disabled", "true");
+    await button.focus();
+    await expect(page.locator('[role="tooltip"]')).toContainText(/not an answer worth having/i);
   });
 });
 

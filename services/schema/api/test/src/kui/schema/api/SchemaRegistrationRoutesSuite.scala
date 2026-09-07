@@ -26,6 +26,7 @@ import kui.schema.application.*
 import kui.schema.contract.SchemaMutationEndpoints
 import kui.schema.contract.dto.*
 import kui.schema.contract.dto.RegisterSchemaRequest.given
+import kui.schema.contract.dto.CompatibilityCheckRequest.given
 import kui.schema.domain.*
 import kui.security.*
 import kui.security.rbac.*
@@ -78,11 +79,14 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
   private final class RecordingRegistry(
       rejection: Option[KuiError],
       version: Option[SchemaVersion],
-      val stored: Ref[IO, List[(String, String, String)]]
+      val stored: Ref[IO, List[(String, String, String)]],
+      val proposals: Ref[IO, List[ProposedSchema]],
+      val checked: Ref[IO, List[ProposedSchema]]
   ) extends SchemaRegistryPort[IO] {
 
     def register(subject: Subject, proposed: ProposedSchema): IO[Either[KuiError, RegisteredVersion]] =
       stored.update(_ :+ ((subject.value, proposed.format.label, proposed.definition))) *>
+        proposals.update(_ :+ proposed) *>
         IO.pure(rejection.toLeft(RegisteredVersion(subject, SchemaId.unsafe(41), version)))
 
     def subjects = IO.pure(Right(List(orders)))
@@ -95,7 +99,8 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
     def setSubjectCompatibility(subject: Subject, level: CompatibilityLevel) = IO.pure(Right(()))
 
     def checkCompatibility(subject: Subject, version: VersionSelector, proposed: ProposedSchema) =
-      IO.pure(Right(None))
+      checked.update(_ :+ proposed) *>
+        IO.pure(Right(Some(CompatibilityVerdict(true, List("the registry said so")))))
   }
 
   /** The four bodied routes, with no socket, over one writable cluster and one read-only one.
@@ -115,9 +120,11 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
         meter <- MeterProvider.noop[IO].get("kui.schema")
         rejections <- PrincipalVerification.rejectionCounter[IO](meter)
         stored <- Ref.of[IO, List[(String, String, String)]](Nil)
+        proposals <- Ref.of[IO, List[ProposedSchema]](Nil)
+        checked <- Ref.of[IO, List[ProposedSchema]](Nil)
         interceptors <- SchemaApi.interceptors[IO](Telemetry.noop[IO], rejections, logger)
       } yield {
-        val port = new RecordingRegistry(rejection, version, stored)
+        val port = new RecordingRegistry(rejection, version, stored, proposals, checked)
 
         val registries = new ClusterRegistries[IO] {
           private val profiles = List(
@@ -204,6 +211,29 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
         .response(asStringAlways)
         .send(backend)
     )
+
+  private def compatibilityPath(on: ClusterId): String =
+    s"/internal/v1/clusters/${on.value}/schemas/subjects/${orders.value}/versions/latest/compatibility"
+
+  /** The compatibility check is bodied too, so it carries the same ADR-020 Amendment 1 token. */
+  private def checkPost(
+      backend: Backend[IO],
+      path: String,
+      proposal: CompatibilityCheckRequest
+  ): IO[Response[String]] = {
+    val bytes = Printer.noSpaces.print(proposal.asJson).getBytes(StandardCharsets.UTF_8)
+
+    token(path, bytes, Set.empty).flatMap(signed =>
+      basicRequest
+        .post(Uri.unsafeParse(s"http://schema$path"))
+        .header(KuiEndpoint.PrincipalHeader, signed.value)
+        .header(HttpHeaders.Csrf, Csrf)
+        .contentType("application/json")
+        .body(new String(bytes, StandardCharsets.UTF_8))
+        .response(asStringAlways)
+        .send(backend)
+    )
+  }
 
   private def body(response: Response[String]): Json =
     parse(response.body).fold(failure => fail(s"not JSON: ${failure.message} in ${response.body}"), identity)
@@ -391,6 +421,99 @@ final class SchemaRegistrationRoutesSuite extends KuiIOSuite {
       .getOrElse(fail("the registration endpoint carries no authorization declaration"))
 
     assertEquals(declared.requirements.flatMap(_.actions.toList), List(Action.SchemaCreate))
+  }
+
+  test("a registration carrying references passes them to the port") {
+    // `SchemaMapping.toRegister` can be written `references = Nil` with every case in this service green,
+    // and a Protobuf or Avro schema with imports is then registered without them — the registry either
+    // refuses it with a message about an unresolvable type or stores a schema no consumer can resolve.
+    // `references` is a published field of `RegisterSchemaRequest`, so this is a documented input that
+    // reached nothing. The packet that shipped this endpoint closed the identical hole for `schemaType`.
+    val withReferences = request.copy(references =
+      List(
+        SchemaReferenceDto("com.acme.Address", Subject.unsafe("address-value"), 3),
+        SchemaReferenceDto("com.acme.Money", Subject.unsafe("money-value"), 1)
+      )
+    )
+
+    server().use { (backend, registry, _) =>
+      for {
+        response <- post(backend, versionsPath(cluster), withReferences)
+        proposals <- registry.proposals.get
+      } yield {
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(
+          proposals.flatMap(_.references).map(reference =>
+            (reference.name, reference.subject.value, reference.version.value)
+          ),
+          List(("com.acme.Address", "address-value", 3), ("com.acme.Money", "money-value", 1))
+        )
+      }
+    }
+  }
+
+  test("a reference pinned to a number that is not a version never reaches the registry as one") {
+    // Registry versions start at 1, so `0` and `-1` are not versions a reference can name — `-1` is the
+    // registry's own spelling of "latest", which is a different request. `SchemaMapping.toRegister` drops
+    // them through `SchemaVersion.from(...).toOption`, and what this case pins is that no *number* is
+    // invented for them: a reference forwarded as version 0 is a dependency nobody can look up.
+    //
+    // Dropping is the behaviour this build has and not obviously the right one — a registration that
+    // silently loses a dependency is a registration the operator did not ask for — but inventing a
+    // version is the one answer that is certainly wrong, and it is what this asserts.
+    val mixed = request.copy(references =
+      List(
+        SchemaReferenceDto("com.acme.Address", Subject.unsafe("address-value"), 3),
+        SchemaReferenceDto("com.acme.Latest", Subject.unsafe("legacy-value"), -1),
+        SchemaReferenceDto("com.acme.Zero", Subject.unsafe("legacy-value"), 0)
+      )
+    )
+
+    server().use { (backend, registry, _) =>
+      for {
+        response <- post(backend, versionsPath(cluster), mixed)
+        proposals <- registry.proposals.get
+      } yield {
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(proposals.flatMap(_.references).map(_.name), List("com.acme.Address"))
+        assert(
+          proposals.flatMap(_.references).forall(_.version.value >= 1),
+          "a reference reached the registry pinned to a version the registry cannot have"
+        )
+      }
+    }
+  }
+
+  test("a compatibility check carries its references too, or it checks something else") {
+    // The same expression, in `SchemaMapping.proposed`, and the same mutation leaves everything green.
+    // Checking a schema without the schemas it refers to checks a document the registry would never
+    // store, and the verdict it produces is about that other document.
+    val proposal = CompatibilityCheckRequest(
+      schemaType = "PROTOBUF",
+      definition = """syntax = "proto3"; import "address.proto";""",
+      references = List(SchemaReferenceDto("address.proto", Subject.unsafe("address-value"), 2))
+    )
+
+    server().use { (backend, registry, _) =>
+      for {
+        response <- checkPost(backend, compatibilityPath(cluster), proposal)
+        checked <- registry.checked.get
+      } yield {
+        val json = body(response).hcursor
+
+        assertEquals(response.code.code, 200, response.body)
+        assertEquals(checked.map(_.format.label), List("PROTOBUF"))
+        assertEquals(
+          checked.flatMap(_.references).map(r => (r.name, r.subject.value, r.version.value)),
+          List(("address.proto", "address-value", 2))
+        )
+        // And the verdict's own explanations reach the caller. `SchemaMapping.verdict` can answer `Nil`
+        // for `messages` with everything green, and the screen then tells an operator "no" and nothing
+        // else — the least useful possible answer to "why will this schema not register".
+        assertEquals(json.get[Boolean]("compatible"), Right(true))
+        assertEquals(json.get[List[String]]("messages"), Right(List("the registry said so")))
+      }
+    }
   }
 
   test("a read-only cluster is refused before the permission is even the question") {

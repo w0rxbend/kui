@@ -19,6 +19,8 @@ import kui.testkit.fakes.FakeStructuredLogger
   */
 final class SchemaRegistrationSuite extends KuiIOSuite {
 
+  import SchemaRegistrationSuite.OneMebibyte
+
   private val orders = Subject.unsafe("orders-value")
   private val who: Principal = Principal.Anonymous
 
@@ -140,7 +142,17 @@ final class SchemaRegistrationSuite extends KuiIOSuite {
     }
   }
 
-  test("a schema past the size bound is refused, and the bound is the compatibility check's own") {
+  test("a schema document larger than the bound is refused by a case that does not compute its input") {
+    // The input is a literal, and that is the whole point of this case. Until wave 5 it read
+    // `"x" * (RegisterSchemaUseCase.MaxDefinitionBytes + 1)`, which is the bound measured against itself:
+    // `MaxDefinitionBytes` could be multiplied by 1024 and every case in this service stayed green, and a
+    // 1 GiB schema document would then be buffered here and forwarded to a single-writer registry JVM.
+    // One mebibyte is written out below so that raising the constant reddens this case instead.
+    assertEquals(
+      RegisterSchemaUseCase.MaxDefinitionBytes,
+      OneMebibyte,
+      "the bound this endpoint forwards operator text under is a mebibyte, written out and not derived"
+    )
     // One bound for the two endpoints that forward operator text to a registry. A document KUI will check
     // and then refuse to register is a difference an operator finds by hitting it.
     assertEquals(RegisterSchemaUseCase.MaxDefinitionBytes, CompatibilityCheckUseCase.MaxDefinitionBytes)
@@ -148,12 +160,69 @@ final class SchemaRegistrationSuite extends KuiIOSuite {
     for {
       registry <- SchemaRig.registry()
       run <- useCase(registry)
-      oversized = avro.copy(definition = "x" * (RegisterSchemaUseCase.MaxDefinitionBytes + 1))
+      oversized = avro.copy(definition = "x" * (OneMebibyte + 1))
       result <- run.register(who, SchemaRig.WithRegistry, orders, oversized)
       registrations <- registry.registrations.get
     } yield {
       assertEquals(result.left.map(_.code), Left(ErrorCode.Validation))
+      assert(clue(result.swap.toOption.map(_.message)).exists(_.contains("the limit is")))
+      // Refused here, so nothing that size is ever buffered into a request to the registry.
+      assertEquals(registrations, Nil, "an oversized document still reached the registry")
+    }
+  }
+
+  test("a schema document of exactly the bound is registered, so the refusal refuses something") {
+    // The other half of the bound. A case that only asserts a refusal is satisfied by a use case that
+    // refuses every document, which is house rule 6 in one sentence.
+    for {
+      registry <- SchemaRig.registry()
+      run <- useCase(registry)
+      atTheLimit = avro.copy(definition = "x" * OneMebibyte)
+      result <- run.register(who, SchemaRig.WithRegistry, orders, atTheLimit)
+      registrations <- registry.registrations.get
+    } yield {
+      assertEquals(result.map(_.id.value), Right(SchemaRig.RegisteredId))
+      assertEquals(registrations.map(_._2.definition.length), List(OneMebibyte))
+    }
+  }
+
+  test("an oversized document at a cluster KUI has never heard of is a 404 and not a complaint about it") {
+    // The order the file's header states, which the code did not follow until wave 5: validation ran
+    // first, so the answer to a link pointing at nothing was "the schema is 1048577 characters". That is
+    // the sentence an operator would have acted on, and the cluster is the thing that is actually wrong.
+    for {
+      registry <- SchemaRig.registry()
+      run <- useCase(registry)
+      oversized = avro.copy(definition = "x" * (OneMebibyte + 1))
+      unknown <- run.register(who, SchemaRig.Unknown, orders, oversized)
+      empty <- run.register(who, SchemaRig.Unknown, orders, avro.copy(definition = "   "))
+    } yield {
+      assertEquals(unknown.left.map(_.code), Left(ErrorCode.ClusterNotFound))
+      assertEquals(empty.left.map(_.code), Left(ErrorCode.ClusterNotFound))
+    }
+  }
+
+  test("an oversized document at a read-only cluster is refused as read-only, not as a bad document") {
+    // Same ordering rule one step further in. ADR-047 §2's refusal is about the deployment's link to the
+    // cluster and it is the answer that tells an operator why the button will never work here; "your
+    // schema is too big" invites them to paste a smaller one and try again.
+    for {
+      registry <- SchemaRig.registry()
+      run <- useCase(registry)
+      oversized = avro.copy(definition = "x" * (OneMebibyte + 1))
+      result <- run.register(who, SchemaRig.ReadOnly, orders, oversized)
+      registrations <- registry.registrations.get
+    } yield {
+      assertEquals(result.left.map(_.code), Left(ErrorCode.ReadOnly))
       assertEquals(registrations, Nil)
     }
   }
+}
+
+object SchemaRegistrationSuite {
+
+  /** 1024 * 1024, written out, because the point of the case that reads it is not to read the constant it
+    * is checking. See `CompatibilityCheckUseCase.MaxDefinitionBytes` for why the bound exists.
+    */
+  val OneMebibyte: Int = 1048576
 }

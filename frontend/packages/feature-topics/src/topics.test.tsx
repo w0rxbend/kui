@@ -17,6 +17,7 @@ import {
   TopicListPage,
   formatBytes,
   matchCount,
+  queryFromAddress,
   rememberView,
   storedView,
   type TopicListPageProps,
@@ -25,6 +26,7 @@ import {
 import { TopicCards } from "./TopicCards.jsx";
 import { TopicConsumers } from "./TopicConsumers.jsx";
 import { TopicPage, healthChip } from "./TopicPage.jsx";
+import { TopicStatisticsRegion } from "./TopicStatisticsRegion.jsx";
 import {
   forgetQueries,
   restoreMeasuredRows,
@@ -133,6 +135,26 @@ describe("the topic list", () => {
     expect(container.textContent).toContain("narrows the 3 topics on this page");
     // And it really narrowed: only the row whose policy includes `compact` survives.
     expect(container.textContent).not.toContain("__consumer_offsets");
+    dispose();
+  });
+
+  test("the facet chips are drawn in the order the design puts them in", async () => {
+    /*
+     * `SCREENS-V4.md` §4.6 writes the bar out as
+     * `✓ All | 🔒 Internal | ⚠ Out of sync | ⇄ Compacted`, and the order is the reading: the two
+     * the cluster can apply come first, then the two that narrow the page. Reversing `FACETS` left
+     * every case in this package green, so the design's own sequence was carried by nothing but
+     * the order somebody typed it in.
+     */
+    const list = listing();
+    const { container, dispose } = mount(() => list.node);
+    await flush();
+    const chips = [
+      ...(container
+        .querySelector('[data-testid="topic-facets"]')
+        ?.querySelectorAll("button") ?? []),
+    ].map((chip) => chip.textContent?.trim());
+    expect(chips).toEqual(["All", "Internal", "Out of sync", "Compacted"]);
     dispose();
   });
 
@@ -318,6 +340,23 @@ describe("the topic list", () => {
     dispose();
   });
 
+  test("the address describes which list, and never where the reader is in it", () => {
+    /*
+     * The page, the page size and the order are this reader's own controls over a list rather than
+     * a description of which list, and nothing in the product links to them. Reading them would be
+     * two sources of truth for one number — the very next keystroke resets the page to 1 — and
+     * `queryFromAddress` growing a `page:` line left every case in this package green.
+     *
+     * Asserted against the defaults rather than against literals, so that changing the default page
+     * size is one edit and not two.
+     */
+    const asked = queryFromAddress("?q=orders.&page=7&pageSize=8&sort=size:desc");
+    expect(asked.search).toBe("orders.");
+    expect(asked.page).toBe(DEFAULT_TOPIC_QUERY.page);
+    expect(asked.pageSize).toBe(DEFAULT_TOPIC_QUERY.pageSize);
+    expect(asked.sort).toBe(DEFAULT_TOPIC_QUERY.sort);
+  });
+
   test("counts and sizes read as people write them", () => {
     expect(matchCount(3, 3)).toBe("3 topics");
     expect(matchCount(1, 1)).toBe("1 topic");
@@ -464,6 +503,39 @@ describe("the view toggle", () => {
     expect(container.textContent).not.toContain("0 B");
     dispose();
   });
+
+  test("the magnitude bar is this page's scale, and absent where nothing was read", async () => {
+    /*
+     * Two rules that share one `Show`, and neither could be made to fail.
+     *
+     * A bar needs a denominator and the only one the cards hold is the largest topic among the rows
+     * the server sent, so the caller supplies it. Dividing by a constant instead — a cluster-wide
+     * maximum this component invented — left every case green and draws a picture of a number
+     * nobody measured. And a topic whose size could not be read must draw **no bar**: an empty
+     * track and a topic of zero bytes are indistinguishable, and one of them is a measurement.
+     *
+     * `rows` holds exactly the pair that separates them: `orders.payments.v2` at 128 GB, and
+     * `shipments.v1`, the topic KUI could not describe.
+     */
+    const { container, dispose } = mount(() => (
+      <TopicCards topics={rows} onOpen={() => undefined} formatBytes={formatBytes} />
+    ));
+    await flush();
+
+    const cards = [...container.querySelectorAll(".kui-topic-card")];
+    const barIn = (index: number): HTMLElement | null =>
+      cards[index]?.querySelector<HTMLElement>(".kui-magnitude__fill") ?? null;
+
+    // The largest row on the page is the denominator, so it fills the track exactly.
+    expect(barIn(0)?.style.width).toBe("100%");
+    /* And the row beside it is scaled against that same 128 GB rather than against a constant:
+       4,096 bytes of 128 GB rounds to nothing, which is the honest picture. */
+    expect(barIn(1)?.style.width).toBe("0%");
+    // The topic with no size draws no track at all.
+    expect(cards).toHaveLength(3);
+    expect(barIn(2)).toBeNull();
+    dispose();
+  });
 });
 
 /**
@@ -531,6 +603,25 @@ describe("the topics screen, wired", () => {
     incompleteTopics: 0,
   };
 
+  test("a first paint is a placeholder and never the sentence for a refusal", async () => {
+    /*
+     * Two absences that look alike and mean opposite things: "we have not asked yet" and "we asked
+     * and there is no answer". Collapsing the pending branch left this package green, and the
+     * result is a page that says *"not measured"* under all three totals for as long as the first
+     * request takes — a cluster reported as unmeasurable while it is being measured, which is the
+     * one wrong reading a screen built on this distinction must not produce.
+     *
+     * The region is rendered directly because the rule is the component's own: the route decides
+     * *whether* it is loading, and this decides what loading looks like.
+     */
+    const { container, dispose } = mount(() => <TopicStatisticsRegion loading />);
+    await flush();
+
+    expect(container.querySelectorAll(".kui-skeleton").length).toBeGreaterThan(0);
+    expect(container.textContent).not.toContain("not measured");
+    dispose();
+  });
+
   test("the statistics region shows the cluster total and not the page's", async () => {
     /*
      * `SCREENS-V4.md` §4.6 calls this the load-bearing fact of the screen: the capture shows 128
@@ -563,6 +654,57 @@ describe("the topics screen, wired", () => {
        — the windowed table draws no rows in a DOM with no layout engine, which is what
        `viewportHeight` exists for and is not what this case is about. */
     expect(container.querySelector(".kui-topic-list__count")?.textContent).toBe("3 topics");
+    dispose();
+  });
+
+  test("the statistics document is fetched once and not per keystroke", async () => {
+    /*
+     * The other half of the load-bearing fact. The tile must not *move* when the search box does,
+     * and the case above proves the figure; this proves the request. Keying the statistics query by
+     * the query — which is the natural thing to write, and which left all 134 cases green — issues
+     * a request per control change for a document that cannot change because of one, and on a slow
+     * registry the totals then flicker to `not measured` while somebody types.
+     *
+     * Counted on the wire rather than on the tile, because a cache that answered from memory would
+     * hide the extra request and the operator's cluster would still be answering it.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/one-statistics-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}/topics/statistics": {
+          statistics: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              topicCount: 128,
+              partitionCount: 1536,
+              sizeBytes: 842_000_000_000,
+              incompleteTopics: 0,
+            },
+          },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const countOf = (path: string): number =>
+      host.stub.calls.filter((call) => call === path).length;
+    expect(countOf("/api/v1/clusters/{clusterId}/topics/statistics")).toBe(1);
+    const listedBefore = countOf("/api/v1/clusters/{clusterId}/topics");
+
+    // The chip is the control that needs no debounce; any control that moves the query would do.
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Internal")
+      ?.click();
+    await settle();
+
+    // The list moved, so the query genuinely changed…
+    expect(countOf("/api/v1/clusters/{clusterId}/topics")).toBeGreaterThan(listedBefore);
+    // …and the cluster was not asked a second time for figures the change cannot alter.
+    expect(countOf("/api/v1/clusters/{clusterId}/topics/statistics")).toBe(1);
     dispose();
   });
 
@@ -701,6 +843,61 @@ describe("the topics screen, wired", () => {
     expect(container.textContent).not.toContain("broker 1");
     // The row with no coordinator says nothing rather than half an address.
     expect(container.textContent).toContain("no coordinator address");
+    dispose();
+  });
+
+  test("reopening a tab re-reads it, because lag moves while somebody is looking", async () => {
+    /*
+     * `TAB_QUERIES` is a registry of its own at `staleAfterMs: 0`, and the reason is written above
+     * it: consumer lag and partition offsets move while the page is open, so a figure carried over
+     * from four minutes ago is wrong in the direction that matters — it says a group has caught up
+     * when it has not. Raising the entry to the general cache's thirty seconds left every case in
+     * this package green, which made the whole registry deletable.
+     *
+     * The tabs are read out of the address, so this is one mounted route and three navigations, not
+     * three mounts: a case that remounted would prove nothing about a cache that outlives a mount.
+     */
+    const at = "/clusters/reopened-cluster/topics/orders.v1";
+    const host = topicsHost({
+      at: `${at}?tab=consumers`,
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              row: {
+                name: "orders.v1",
+                internal: false,
+                partitionCount: 6,
+                replicationFactor: 1,
+                outOfSyncReplicas: 0,
+                offlinePartitions: 0,
+              },
+              partitions: [],
+            },
+          },
+        },
+        "/api/v1/clusters/{clusterId}/topics/{topic}/consumer-groups": { rows: [] },
+      },
+    });
+    const { dispose } = mount(host.view);
+    await settle();
+
+    const opens = (): number =>
+      host.stub.calls.filter(
+        (call) => call === "/api/v1/clusters/{clusterId}/topics/{topic}/consumer-groups",
+      ).length;
+    expect(opens()).toBe(1);
+
+    // Away, and the closed tab's key is `undefined`, so nothing is bound and nothing is asked.
+    host.goTo(`${at}?tab=settings`);
+    await settle();
+    // And back, well inside the thirty seconds the general cache would have called this fresh.
+    host.goTo(`${at}?tab=consumers`);
+    await settle();
+
+    expect(opens()).toBe(2);
     dispose();
   });
 
@@ -1088,6 +1285,229 @@ describe("the topics screen, wired", () => {
     dispose();
   });
 
+  test("the create dialog will not submit a name the broker would refuse", async () => {
+    /*
+     * `write.test.ts` asserts the *validator*; nothing asserted that the dialog is wired to it.
+     * Loosening `canCreate` to `!busy()` left every case in this package green, and the result is a
+     * POST of an empty name — a request whose 400 arrives as an error envelope the operator has to
+     * read to learn something the form already knew.
+     *
+     * Three states in one case, because the rule is the transition: closed on an empty form, closed
+     * on a name Kafka reserves, and open on a name it will take. Any one of the three alone passes
+     * against a button that is always disabled or always enabled.
+     */
+    const host = topicsHost({
+      at: "/clusters/create-guard-cluster/topics",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Create topic")
+      ?.click();
+    await settle();
+
+    const dialog = document.querySelector('[role="dialog"]');
+    const confirm = (): HTMLButtonElement | undefined =>
+      [...(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+        (button) => button.textContent?.trim() === "Create topic",
+      );
+    const type = async (value: string): Promise<void> => {
+      const field = dialog?.querySelector<HTMLInputElement>('input[type="text"]');
+      if (field !== null && field !== undefined) {
+        field.value = value;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await settle();
+    };
+
+    // Nothing typed: closed.
+    expect(confirm()?.getAttribute("aria-disabled")).toBe("true");
+    // A name Kafka reserves: still closed, and the form says which rule it broke.
+    await type(".");
+    expect(confirm()?.getAttribute("aria-disabled")).toBe("true");
+    // A name it will take: open.
+    await type("orders.new.v1");
+    expect(confirm()?.getAttribute("aria-disabled")).not.toBe("true");
+
+    // And nothing was posted along the way — the guard is before the request, not after it.
+    expect(host.stub.requests.filter((request) => request.body !== undefined)).toHaveLength(0);
+    dispose();
+  });
+  test("an undescribed topic gets no partition badge, because 0 is a claim", async () => {
+    /*
+     * `count: overview()?.topic.partitions ?? 0` is the natural thing to write and left this whole
+     * package green. It draws `0` beside "Partitions" for a topic KUI could not describe — a claim
+     * no Kafka topic satisfies, made about the one topic whose shape nobody actually knows. Absent
+     * is the honest rendering, and this is the case that distinguishes them.
+     *
+     * The overview path is unstubbed, so the section refuses: the frame still draws, which is the
+     * other half of the rule.
+     */
+    const host = topicsHost({
+      at: "/clusters/undescribed-cluster/topics/orders.v1",
+      answers: {},
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const strip = container.querySelector(".kui-page-tabs");
+    expect(strip?.textContent).toContain("Partitions");
+    // No badge at all — not a badge reading zero.
+    expect(strip?.querySelectorAll(".kui-page-tabs__count")).toHaveLength(0);
+    dispose();
+  });
+  test("each control on the topic page is gated on its own action", async () => {
+    /*
+     * Four controls, four actions, and `writeBlockedReason` takes whichever one it is handed —
+     * swapping `TopicMessagesDelete` for `TopicDelete` on the purge left this package green,
+     * because every case that had ever exercised permissions answered one `false` for everything.
+     * With one answer for all four, a control wired to the wrong action is disabled at exactly the
+     * moments the right one would be, and no assertion can tell the two apart.
+     *
+     * So the principal here holds exactly one of them: they may empty this topic and may not delete
+     * it. That is a real role — an operator trusted to reclaim disk and not to destroy a stream —
+     * and it is the only arrangement in which the wiring is observable.
+     */
+    const overview = {
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+        topic: {
+          status: "ok",
+          fetchedAt: "2026-09-06T00:00:00Z",
+          data: {
+            row: {
+              name: "orders.v1",
+              internal: false,
+              partitionCount: 6,
+              replicationFactor: 1,
+              outOfSyncReplicas: 0,
+              offlinePartitions: 0,
+            },
+            partitions: [],
+          },
+        },
+      },
+    };
+
+    /**
+     * Whether each control is offered, for one principal.
+     *
+     * `aria-disabled` rather than the `disabled` attribute, which is `Button`'s own deliberate
+     * choice: a disabled element is skipped by Tab and fires no pointer events, so its explanation
+     * would be unreachable by keyboard and unreachable by hover. The control is present either
+     * way — §3.7's rule is that a forbidden action is explained, never hidden.
+     */
+    const offered = async (
+      cluster: string,
+      held: string,
+    ): Promise<Record<string, boolean | undefined>> => {
+      const host = topicsHost({
+        at: `/clusters/${cluster}/topics/orders.v1`,
+        permits: (action) => action.action === held,
+        answers: overview,
+      });
+      const { container, dispose } = mount(host.view);
+      await settle();
+      const state = Object.fromEntries(
+        ["Empty topic", "Delete topic"].map((label) => [
+          label,
+          [...container.querySelectorAll<HTMLButtonElement>("button")]
+            .find((one) => one.textContent?.includes(label))
+            ?.getAttribute("aria-disabled") !== "true",
+        ]),
+      );
+      dispose();
+      forgetQueries();
+      return state;
+    };
+
+    // May empty, may not delete.
+    expect(await offered("purger-cluster", "MESSAGES_DELETE")).toEqual({
+      "Empty topic": true,
+      "Delete topic": false,
+    });
+    /* And the mirror image, which is what makes the pair a gate: with only one arrangement, wiring
+       both controls to the same action passes both assertions. */
+    expect(await offered("deleter-cluster", "DELETE")).toEqual({
+      "Empty topic": false,
+      "Delete topic": true,
+    });
+  });
+  test("a plan the server withheld a token for cannot be confirmed", async () => {
+    /*
+     * ADR-045's refusal shape: a read-only cluster answers the *plan* — so the operator can see
+     * exactly what would happen — and withholds the token. There is nothing to send, and inventing
+     * one would produce a validation envelope that reads like a bug in KUI rather than a policy.
+     *
+     * `if (token === null) return;` was the whole of that rule and nothing could fail it: made to
+     * confirm with an invented token, every case in this package stayed green. The dialog says why
+     * in words, and no request leaves.
+     */
+    const host = topicsHost({
+      at: "/clusters/read-only-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              row: {
+                name: "orders.v1",
+                internal: false,
+                partitionCount: 6,
+                replicationFactor: 1,
+                outOfSyncReplicas: 0,
+                offlinePartitions: 0,
+              },
+              partitions: [],
+            },
+          },
+        },
+        // A plan, in full, and no token beside it.
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge/plan": {
+          topic: "orders.v1",
+          partitions: [{ partition: 0, lowWatermark: 0, highWatermark: 8 }],
+          warnings: [],
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Empty topic"))
+      ?.click();
+    await settle();
+
+    const confirmation = document.querySelector(
+      '[data-testid="planned-action-confirm"], [role="dialog"]',
+    );
+    // The preview is shown, and the reason it cannot be applied is in it.
+    expect(confirmation?.textContent).toContain("read-only");
+
+    const field = confirmation?.querySelector<HTMLInputElement>('input[type="text"]');
+    if (field !== null && field !== undefined) {
+      field.value = "orders.v1";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+
+    [...(confirmation?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => button.textContent?.trim() === "Empty topic")
+      ?.click();
+    await settle();
+
+    // Nothing was sent, so nothing was emptied — and no toast claims otherwise.
+    expect(
+      host.stub.calls.filter(
+        (call) => call === "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge",
+      ),
+    ).toHaveLength(0);
+    expect(toasts()).toHaveLength(0);
+    dispose();
+  });
+
   test("a ?q= in the address filters the list", async () => {
     /*
      * The drawer's topic-prefix rows link at `…/topics?q=<prefix>`, and this screen used to seed
@@ -1134,6 +1554,248 @@ describe("the topics screen, wired", () => {
         button.getAttribute("aria-selected") === "true",
     );
     expect(lit?.textContent).toContain("Internal");
+    dispose();
+  });
+
+  test("a second address change on a mounted route reaches the server", async () => {
+    /*
+     * The rule: **the address keeps being read, not read once.**
+     *
+     * The drawer's topic-prefix rows are ordinary links, so clicking a second one while this screen
+     * is already on does not remount the route — it changes the search string underneath a live
+     * component. Every other address case in this file mounts fresh at its address, and the seed
+     * (`queryFromAddress(listLocation.search)`) answers those on its own; the effect that follows
+     * later changes was live code that nothing exercised, and deleting it left this whole package
+     * green.
+     *
+     * Asserted on the *requests*, in order, because that is where the following happens: a screen
+     * that repainted its search box and kept asking for `orders.` would look identical.
+     */
+    const host = topicsHost({
+      at: "/clusters/second-address-cluster/topics?q=orders.",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const listCalls = (): readonly StubRequest[] =>
+      host.stub.requests.filter(
+        (request) => request.path === "/api/v1/clusters/{clusterId}/topics",
+      );
+    const first = listCalls();
+    expect(first.at(-1)?.params.query?.["q"]).toBe("orders.");
+
+    // The second prefix row, followed while this screen is the one on screen.
+    host.goTo("/clusters/second-address-cluster/topics?q=analytics.");
+    await settle();
+
+    const after = listCalls();
+    expect(after.length).toBeGreaterThan(first.length);
+    expect(after.at(-1)?.params.query?.["q"]).toBe("analytics.");
+    // And the box agrees with what was asked for, so the screen and the server describe one list.
+    expect(container.querySelector<HTMLInputElement>(".kui-textfield__input")?.value).toBe(
+      "analytics.",
+    );
+    dispose();
+  });
+
+  test("a ?showInternal=1 is not honoured", async () => {
+    /*
+     * `showInternal` is the one facet the wire has, and it has exactly one spelling. A screen that
+     * accepted `1`, `yes` or `false` as truthy would be honouring a parameter the server has never
+     * published — invented in the browser, and impossible to keep in step with anything.
+     *
+     * `?showInternal=false` is the sharper half: read as "present, therefore on", it would turn the
+     * Internal chip on for an address that says in words to leave it off.
+     */
+    for (const spelling of ["1", "false"]) {
+      const host = topicsHost({
+        at: `/clusters/spelling-${spelling}-cluster/topics?showInternal=${spelling}`,
+        answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+      });
+      const { container, dispose } = mount(host.view);
+      await settle();
+
+      const asked = host.stub.requests.find(
+        (request) => request.path === "/api/v1/clusters/{clusterId}/topics",
+      );
+      expect(asked?.params.query?.["showInternal"]).toBe(false);
+      const lit = [...container.querySelectorAll("button")].find(
+        (button) => button.getAttribute("aria-pressed") === "true",
+      );
+      expect(lit?.textContent).toContain("All");
+      dispose();
+      forgetQueries();
+    }
+  });
+
+  test("a ?q= with surrounding space is trimmed before it is sent", async () => {
+    /*
+     * A prefix copied out of a terminal, or a link wrapped by a mail client, arrives with spaces
+     * around it. Kafka topic names cannot contain a space, so ` orders. ` is a search that matches
+     * nothing — and the screen would report that as "No topic matches that text", which is the
+     * wrong answer given confidently.
+     */
+    const host = topicsHost({
+      at: "/clusters/spaced-cluster/topics?q=%20orders.%20",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const asked = host.stub.requests.find(
+      (request) => request.path === "/api/v1/clusters/{clusterId}/topics",
+    );
+    expect(asked?.params.query?.["q"]).toBe("orders.");
+    // And the box shows what was sent, rather than the padded text nobody asked the server for.
+    expect(container.querySelector<HTMLInputElement>(".kui-textfield__input")?.value).toBe(
+      "orders.",
+    );
+    dispose();
+  });
+
+  test("the statistics region names why a figure is unavailable", async () => {
+    /*
+     * Two different absences, and the tiles must not read the same for both. A document that
+     * arrived with `partitionCount: null` is a cluster that could not add something up; a
+     * statistics *request* that failed is KUI not having read the document at all — and the second
+     * one owes the operator the sentence that says the list underneath is still trustworthy.
+     *
+     * The statistics path is deliberately unstubbed, which the harness answers as `unreachable`,
+     * so the route's `failed` branch is the one under test. Asserted on the tile's own title, which
+     * is where `StatTile` puts a `not-measured` figure's reason.
+     */
+    const host = topicsHost({
+      at: "/clusters/no-statistics-cluster/topics",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const why = container
+      .querySelector('[data-testid="topic-stat-partitions"] .kui-tile__absent')
+      ?.getAttribute("title");
+    expect(why).toContain("could not read this cluster's topic totals");
+    // The half the operator acts on: the rows below are the cluster's, so the page is still usable.
+    expect(why).toContain("The list below is still this cluster's.");
+    // And it is words rather than a zero, on every tile the document would have filled.
+    expect(container.querySelector('[data-testid="topic-stat-topics"]')?.textContent).toContain(
+      "not measured",
+    );
+    dispose();
+  });
+
+  test("a created topic is waited for until the list can see it", async () => {
+    /*
+     * `createTopics` returns when the **controller has accepted** the create, not when every broker
+     * can list it. A screen that re-read the list once therefore shows the list without the topic
+     * the operator just made, and the first thing they do is make it again.
+     *
+     * The stub answers the listing without the new topic on the first read and with it afterwards,
+     * which is the race as it actually happens. Replacing the settle loop with a no-op left every
+     * case in this package green, so the poll — a whole commit's worth of behaviour — was carried
+     * by nothing.
+     */
+    withMeasuredRows();
+    const created = {
+      name: "orders.new.v1",
+      internal: false,
+      partitionCount: 3,
+      replicationFactor: 1,
+      outOfSyncReplicas: 0,
+      offlinePartitions: 0,
+    };
+    let listReads = 0;
+    const host = topicsHost({
+      at: "/clusters/created-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": (request: StubRequest) => {
+          // The POST goes to the same templated path; only the reads are counted and answered.
+          if (request.body !== undefined) return { name: created.name, partitions: 3 };
+          listReads += 1;
+          if (listReads <= 1) return threeRows;
+          return {
+            topics: {
+              status: "ok",
+              fetchedAt: "2026-09-06T00:00:00Z",
+              data: {
+                items: [...threeRows.topics.data.items, created],
+                page: { page: 1, pageSize: 32, totalItems: 4 },
+              },
+            },
+            incompleteTopics: 0,
+          };
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+    expect(container.textContent).not.toContain("orders.new.v1");
+
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Create topic")
+      ?.click();
+    await settle();
+
+    const field = document.querySelector<HTMLInputElement>('[role="dialog"] input[type="text"]');
+    expect(field).not.toBeNull();
+    if (field !== null) {
+      field.value = created.name;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await settle();
+
+    [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .find((button) => button.textContent?.trim() === "Create topic")
+      ?.click();
+    await settle();
+
+    /* One poll interval, plus room for the fetch it starts. The loop's own comment sets 500ms as
+       "long enough for the fetch the reload just started to have landed". */
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await settle();
+
+    expect(listReads).toBeGreaterThan(1);
+    expect(container.textContent).toContain("orders.new.v1");
+    dispose();
+  }, 10_000);
+
+  test("the bulk bar's dismiss clears the ticks and not just the bar", async () => {
+    /*
+     * Dismissing the bar is the operator saying "never mind", and the ticks are the selection: a
+     * dismiss that only hid the bar would leave rows ticked with no control over them, and the next
+     * bulk action would run against a set nobody could see. `onDismiss` returning nothing left this
+     * package green, which is why the ticks themselves are counted here and not the bar's absence.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/dismissed-cluster/topics",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]')?.click();
+    await settle();
+    expect(
+      [...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')].filter(
+        (box) => box.checked,
+      ),
+    ).toHaveLength(1);
+
+    const bar = container.querySelector('[data-testid="topic-bulk-bar"]');
+    const dismiss = [...(bar?.querySelectorAll("button") ?? [])].find(
+      (button) => button.textContent?.trim() === "Clear selection",
+    );
+    expect(dismiss).toBeDefined();
+    dismiss?.click();
+    await settle();
+
+    expect(
+      [...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')].filter(
+        (box) => box.checked,
+      ),
+    ).toHaveLength(0);
     dispose();
   });
 });
@@ -1257,8 +1919,18 @@ describe("the export, and the sentence above the list", () => {
     const text = await (handed as Blob).text();
     expect(text).toContain('"orders.v1"');
     expect(text).toContain('"delete"');
-    // The header row, so a file with rows and no columns is not mistaken for a working export.
-    expect(text.split("\r\n")[0]).toContain('"cleanup policy"');
+    /* The whole header row, in order, so a file with rows and no columns is not mistaken for a
+       working export — and so a column quietly dropped from `topicsCsv` is a red case rather than a
+       spreadsheet whose figures have all shifted one place left. */
+    expect(text.split("\r\n")[0]).toBe(
+      '"topic","internal","partitions","replication factor","health","records","size bytes",' +
+        '"messages per second","cleanup policy"',
+    );
+    /* And the anchor the download was made with is gone again. It is attached because a detached
+       one is ignored in some browsers, which makes leaving it a real possibility rather than a
+       tidiness point: one stray link per export accumulates in a tab somebody keeps open all day.
+       Dropping `anchor.remove()` left every other case in this package green. */
+    expect(document.querySelectorAll("a[download]")).toHaveLength(0);
 
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: original });
     dispose();
@@ -1342,6 +2014,162 @@ describe("a destructive success says so", () => {
     expect(toasts().map((toast) => toast.title)).toContain("orders.v1 deleted");
     // The sentence an operator is least likely to have thought of, carried into the confirmation.
     expect(toasts()[0]?.message).toContain("recreate");
+    dispose();
+  });
+
+
+
+
+
+  test("a purge that partly refused raises a warning toast", async () => {
+    /*
+     * The tone is the whole content of this rendering, and it was a constant nothing could fail:
+     * hard-coding `tone: "success"` here left all 127 cases in this package green, because the only
+     * asserted purge toast was the one where nothing refused.
+     *
+     * A purge is per partition and the broker answers per partition, so "four emptied, two refused"
+     * is an ordinary outcome rather than an error envelope — there is no failure for the dialog to
+     * show, and the toast is the only place the operator is told the difference. A green toast over
+     * it is the reassuring rendering of the state that needs attention.
+     */
+    const plan = {
+      topic: "orders.v1",
+      partitions: [
+        { partition: 0, lowWatermark: 0, highWatermark: 8 },
+        { partition: 1, lowWatermark: 0, highWatermark: 8 },
+      ],
+      warnings: [],
+      token: "tok-purge",
+      expiresAt: "2026-09-06T00:05:00Z",
+    };
+    const host = topicsHost({
+      at: "/clusters/half-purged-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              row: {
+                name: "orders.v1",
+                internal: false,
+                partitionCount: 6,
+                replicationFactor: 1,
+                outOfSyncReplicas: 0,
+                offlinePartitions: 0,
+              },
+              partitions: [],
+            },
+          },
+        },
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge/plan": plan,
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge": {
+          result: {
+            purged: [{ partition: 0 }, { partition: 1 }, { partition: 2 }, { partition: 3 }],
+            failed: [
+              { partition: 4, reason: "leader unavailable" },
+              { partition: 5, reason: "leader unavailable" },
+            ],
+          },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Empty topic"))
+      ?.click();
+    await settle();
+
+    const confirmation = document.querySelector(
+      '[data-testid="planned-action-confirm"], [role="dialog"]',
+    );
+    const field = confirmation?.querySelector<HTMLInputElement>('input[type="text"]');
+    expect(field).toBeDefined();
+    if (field !== null && field !== undefined) {
+      field.value = "orders.v1";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+
+    [...(confirmation?.querySelectorAll("button") ?? [])]
+      .find((button) => button.textContent?.trim() === "Empty topic")
+      ?.click();
+    await settle();
+
+    const raised = toasts().at(-1);
+    expect(raised?.title).toBe("orders.v1 emptied");
+    // Both halves, from the server's own answer rather than from the plan.
+    expect(raised?.message).toContain("4 emptied");
+    expect(raised?.message).toContain("2 refused");
+    // The rendering this case exists for.
+    expect(raised?.tone).toBe("warning");
+    dispose();
+  });
+
+  test("a purge that refused nothing raises a success toast", async () => {
+    // The other half of the same expression: with both branches asserted the tone cannot be a
+    // constant of either value, which is the only shape of assertion that closes a ternary.
+    const plan = {
+      topic: "orders.v1",
+      partitions: [{ partition: 0, lowWatermark: 0, highWatermark: 8 }],
+      warnings: [],
+      token: "tok-purge",
+      expiresAt: "2026-09-06T00:05:00Z",
+    };
+    const host = topicsHost({
+      at: "/clusters/wholly-purged-cluster/topics/orders.v1",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+          topic: {
+            status: "ok",
+            fetchedAt: "2026-09-06T00:00:00Z",
+            data: {
+              row: {
+                name: "orders.v1",
+                internal: false,
+                partitionCount: 6,
+                replicationFactor: 1,
+                outOfSyncReplicas: 0,
+                offlinePartitions: 0,
+              },
+              partitions: [],
+            },
+          },
+        },
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge/plan": plan,
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/messages/purge": {
+          result: { purged: [{ partition: 0 }], failed: [] },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Empty topic"))
+      ?.click();
+    await settle();
+
+    const confirmation = document.querySelector(
+      '[data-testid="planned-action-confirm"], [role="dialog"]',
+    );
+    const field = confirmation?.querySelector<HTMLInputElement>('input[type="text"]');
+    if (field !== null && field !== undefined) {
+      field.value = "orders.v1";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+
+    [...(confirmation?.querySelectorAll("button") ?? [])]
+      .find((button) => button.textContent?.trim() === "Empty topic")
+      ?.click();
+    await settle();
+
+    const raised = toasts().at(-1);
+    expect(raised?.message).toContain("1 partition emptied");
+    expect(raised?.tone).toBe("success");
     dispose();
   });
 

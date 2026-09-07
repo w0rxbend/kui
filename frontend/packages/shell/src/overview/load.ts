@@ -33,18 +33,13 @@ import {
   controllerNote,
   inSyncPercent,
   lagPill,
-  latencyPercentiles,
-  messageSizes,
   overviewLede,
   partitionHealth,
   partitionTotal,
-  productionRate,
   replicationPill,
-  requestHandlers,
   storageBreakdown,
   storageLede,
   topLag,
-  topProducers,
   totalLag,
 } from "./model.js";
 import type { OverviewModel } from "./Overview.jsx";
@@ -280,10 +275,6 @@ export function toOverviewModel(data: OverviewData): OverviewModel {
     brokerPill: replicationPill(data.summary),
     topicCount: data.topicCount,
     partitionTotal: partitionTotal(data.summary),
-    productionRate: productionRate(),
-    latency: latencyPercentiles(),
-    topProducers: topProducers(),
-    requestHandlers: requestHandlers(),
     lag,
     lagPill: lagPill(lag),
     brokers: brokerHealth(data.brokers, data.logDirs),
@@ -292,6 +283,5 @@ export function toOverviewModel(data: OverviewData): OverviewModel {
     inSync: inSyncPercent(data.summary),
     topLag: topLag(data.groups),
     storage,
-    messageSizes: messageSizes(),
   };
 }

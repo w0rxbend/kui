@@ -4,7 +4,9 @@
 #
 # It holds one family of each kind this parser has to survive: the three broker-wide rates it reads, the
 # per-topic slices of the same MBeans it must not double-count, the replication family whose name contains
-# one of the names it reads, four of the several hundred families it knows nothing about, and a NaN.
+# one of the names it reads, the request percentiles, the two idle ratios beside the two decoy pools whose
+# names contain one of them, the purgatory queues, four of the several hundred families it knows nothing
+# about, a NaN and a +Inf.
 #
 # The slices are written BEFORE the aggregate they belong to, deliberately. Nothing in the exposition
 # format orders a family's lines, and a parser that took the first line matching a name would read
@@ -41,6 +43,27 @@ kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate 
 # HELP kafka_controller_kafkacontroller_activecontrollercount Attribute exposed for management
 # TYPE kafka_controller_kafkacontroller_activecontrollercount untyped
 kafka_controller_kafkacontroller_activecontrollercount 1.0
+# HELP kafka_network_requestmetrics_totaltimems_99thpercentile Attribute exposed for management
+# TYPE kafka_network_requestmetrics_totaltimems_99thpercentile untyped
+kafka_network_requestmetrics_totaltimems_99thpercentile{request="Produce",} 9.0
+kafka_network_requestmetrics_totaltimems_99thpercentile{request="FetchConsumer",} 502.0
+# A third request kind the screens do not draw. It parses and is ignored, which is the whole rule.
+kafka_network_requestmetrics_totaltimems_99thpercentile{request="FetchFollower",} 0.0
+# Two pools whose attribute names CONTAIN the one KUI reads. A substring match reads whichever comes
+# first, and on a real broker the broker pool is published first -- see the captured fixture beside this
+# file, where it also reads above 1.0.
+# HELP kafka_server_kafkarequesthandlerpool_brokerrequesthandleravgidlepercent_oneminuterate Attribute exposed for management
+kafka_server_kafkarequesthandlerpool_brokerrequesthandleravgidlepercent_oneminuterate 1.0006
+kafka_server_kafkarequesthandlerpool_controllerrequesthandleravgidlepercent_oneminuterate 0.9995
+# HELP kafka_network_socketserver_networkprocessoravgidlepercent Attribute exposed for management
+# TYPE kafka_network_socketserver_networkprocessoravgidlepercent gauge
+kafka_network_socketserver_networkprocessoravgidlepercent 0.7104
+# A queue length per delayed operation, and there is no percentage anywhere near it.
+# HELP kafka_server_delayedoperationpurgatory_purgatorysize Attribute exposed for management
+kafka_server_delayedoperationpurgatory_purgatorysize{delayedoperation="Produce",} 0.0
+kafka_server_delayedoperationpurgatory_purgatorysize{delayedoperation="Fetch",} 481.0
 # A JMX attribute that has never been populated since the broker started reads as NaN, which is not a
-# measurement and must not become one.
+# measurement and must not become one. Neither is an infinity: an exporter that could not read a counter
+# serves +Inf, and charting it puts `Infinity` on a card.
 kafka_network_requestmetrics_totaltimems{request="Produce",quantile="0.99",} NaN
+kafka_server_brokertopicmetrics_bytesrejectedpersec_oneminuterate +Inf

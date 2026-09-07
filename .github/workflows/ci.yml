@@ -317,16 +317,46 @@ jobs:
       # `[a-z-]` and not `[a-z]`. The character class used to have no hyphen in it, so
       # `image: kui-schema-registry:` matched nothing at all and would have been dropped from the
       # build list in silence — the exact failure a derived list exists to prevent, reintroduced
-      # inside the derivation. Every image the stack names today is one word, which is why nobody
-      # noticed; the first hyphenated one would have been an image CI could not build and could not
-      # report.
+      # inside the derivation.
+      #
+      # THAT FIX WAS UNOBSERVABLE UNTIL THE FIXTURE BELOW EXISTED, and saying so is the whole reason
+      # this step is longer than the one line it used to be. Every image this stack names today is
+      # one word, so the derived list is byte-identical with the hyphen and without it: taking the
+      # hyphen back out changes nothing any run of this workflow could see, and the first hyphenated
+      # image somebody adds is an image CI cannot build and cannot report. A repair whose absence
+      # produces no red is a repair that will be undone by the next person who tidies this line.
+      #
+      # So the derivation is a function, and it is given a made-up compose file containing exactly
+      # the situation it was widened for — one hyphenated KUI image, one `kui-frontend` that must be
+      # filtered out, and one third-party image that must not match at all — before it is given the
+      # real one. Reverting the character class fails the fixture and the job stops here, which is
+      # what "fixed" was supposed to mean the first time.
       #
       # The braces matter: `./mill a b` passes `b` as an argument to `a` rather than running both,
       # which is the same trap that once made the test job run no tests.
       - name: Build the container images the distributed stack runs
         run: |
-          images=$(grep -oE 'image: kui-[a-z-]+:' deployment/compose/docker-compose.yml |
-                   sed 's/image: kui-//; s/:$//' | grep -v '^frontend$' | sort -u)
+          derive() {
+            grep -oE 'image: kui-[a-z-]+:' "$1" |
+              sed 's/image: kui-//; s/:$//' | grep -v '^frontend$' | sort -u
+          }
+
+          fixture="$(mktemp)"
+          cat > "$fixture" <<'FIXTURE'
+            image: kui-schema-registry:0.1.0-SNAPSHOT
+            image: kui-frontend:0.1.0-SNAPSHOT
+            image: apache/kafka:4.3.1
+          FIXTURE
+          probe="$(derive "$fixture")"
+          rm -f "$fixture"
+          [ "$probe" = "schema-registry" ] || {
+            echo "the image derivation is broken: a compose file naming kui-schema-registry," \
+                 "kui-frontend and apache/kafka derived [$probe] and not [schema-registry]." \
+                 "Check the character class and the frontend filter in derive() above."
+            exit 1
+          }
+
+          images=$(derive deployment/compose/docker-compose.yml)
           [ -n "$images" ] || { echo "no kui-* image is named in docker-compose.yml"; exit 1; }
           echo "building: $images"
           targets=$(for image in $images; do printf 'deployment.docker.%s,' "$image"; done)

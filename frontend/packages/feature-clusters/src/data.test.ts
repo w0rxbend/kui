@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KuiApiClient } from "@kui/api";
-import { fetchBrokers, fetchClusters, healthOf } from "./data.js";
+import { fetchBrokers, fetchClusterDisks, fetchClusters, healthOf } from "./data.js";
 
 /**
  * The cluster feature's data layer.
@@ -200,5 +200,44 @@ describe("healthOf", () => {
 
   it("says unknown when there was no scrape, rather than guessing", () => {
     expect(healthOf(undefined)).toBe("unknown");
+  });
+});
+
+describe("fetchClusterDisks", () => {
+  it("skips a directory that reported only half a capacity, rather than reading the gap as zero", async () => {
+    /*
+     * Closed by mutation: dropping either `continue` from `disksOf` leaves all 147 cases in this
+     * package green, and `dir.totalBytes - dir.usableBytes` over a pair of `null`s is `0` — so a
+     * directory that failed contributes a silent nothing, and a directory that reported a size and
+     * no free space contributes a disk that is exactly 100% full. The second one is the damaging
+     * shape: it draws a red bar on the card for a broker whose disk was never measured, which is
+     * the reading an operator acts on first.
+     *
+     * Kafka answers `describeLogDirs` per directory, so this is the ordinary partial answer and not
+     * a broken server.
+     */
+    const answer = await fetchClusterDisks(
+      client({
+        logDirs: {
+          status: "ok",
+          fetchedAt: "2026-09-05T12:00:00Z",
+          data: [
+            { brokerId: 1, path: "/data/a", error: null, totalBytes: 1_000, usableBytes: 400 },
+            // Answered with an error: neither half is known.
+            { brokerId: 1, path: "/data/b", error: "KafkaStorageException", totalBytes: null, usableBytes: null },
+            // A size with no free space beside it. Half a capacity is not a capacity.
+            { brokerId: 2, path: "/data/c", error: null, totalBytes: 2_000, usableBytes: null },
+          ],
+        },
+      }),
+      "prod",
+    );
+
+    expect(answer.kind).toBe("ready");
+    const disks = answer.kind === "ready" ? answer.value : [];
+    // Broker 2 contributes nothing at all: no entry, so its card keeps its `null`s and says so.
+    expect(disks.map((disk) => disk.brokerId)).toEqual([1]);
+    // And broker 1 is the sum of the one directory that answered both halves, not of both.
+    expect(disks[0]).toEqual({ brokerId: 1, usedBytes: 600, capacityBytes: 1_000 });
   });
 });

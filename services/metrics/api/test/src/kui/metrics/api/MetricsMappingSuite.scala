@@ -8,8 +8,8 @@ import kui.contracts.Section
 import kui.contracts.capability.ReasonCode
 import kui.kernel.error.InfrastructureError
 import kui.metrics.application.MetricsReading
-import kui.metrics.contract.dto.ThroughputRangeDto
-import kui.metrics.domain.{ThroughputRange, ThroughputSeries}
+import kui.metrics.contract.dto.{ThroughputRangeDto, TopProducersDto}
+import kui.metrics.domain.*
 
 /** The translation between the two vocabularies, and the section a card is drawn from.
   *
@@ -42,7 +42,7 @@ final class MetricsMappingSuite extends FunSuite {
   }
 
   test("a cluster with nothing to measure becomes not_configured, never an empty chart") {
-    val section = MetricsMapping.sectionOf(MetricsReading.NotMeasured("no source"))
+    val section = MetricsMapping.sectionOf(MetricsReading.NotMeasured("no source"))(MetricsMapping.series)
 
     assertEquals(section.status, "not_configured")
     // Not `Ok` with an empty series: an empty axis is a chart claiming it looked and found nothing.
@@ -51,7 +51,7 @@ final class MetricsMappingSuite extends FunSuite {
 
   test("a source that refused becomes unavailable with the upstream's own reason") {
     val down = InfrastructureError.Unreachable("metrics-exporter", "connection refused")
-    val section = MetricsMapping.sectionOf(MetricsReading.Unreadable(down, at))
+    val section = MetricsMapping.sectionOf(MetricsReading.Unreadable(down, at))(MetricsMapping.series)
 
     assertEquals(section.status, "unavailable")
     section match {
@@ -64,7 +64,7 @@ final class MetricsMappingSuite extends FunSuite {
 
   test("a measured series keeps its axis and its gaps") {
     val series = ThroughputSeries.absent(ThroughputRange.Last24Hours, at)
-    val section = MetricsMapping.sectionOf(MetricsReading.Measured(series, at))
+    val section = MetricsMapping.sectionOf(MetricsReading.Measured(series, at))(MetricsMapping.series)
 
     section match {
       case Section.Ok(dto, fetchedAt) =>
@@ -77,5 +77,73 @@ final class MetricsMappingSuite extends FunSuite {
         assert(dto.buckets.forall(_.bytesInPerSecond.isEmpty))
       case other => fail(s"expected Ok, got $other")
     }
+  }
+
+  test("a latency series keeps the same axis and spells its window with the same three words") {
+    // One range vocabulary across both charts. A `24h` that meant a different window on the latency card
+    // would be two axes a reader compares without being able to see that they differ.
+    val series = LatencySeries.absent(ThroughputRange.Last7Days, at)
+    val section = MetricsMapping.sectionOf(MetricsReading.Measured(series, at))(MetricsMapping.latencySeries)
+
+    section match {
+      case Section.Ok(dto, _) =>
+        assertEquals(dto.window, ThroughputRangeDto.Last7Days)
+        assertEquals(dto.window.wire, ThroughputRange.Last7Days.wire)
+        assertEquals(dto.stepSeconds, ThroughputRange.Last7Days.step.toSeconds)
+        assertEquals(dto.buckets.size, ThroughputRange.Last7Days.bucketCount)
+        assert(dto.buckets.forall(_.produceP99Millis.isEmpty))
+      case other => fail(s"expected Ok, got $other")
+    }
+  }
+
+  test("an idle ratio crosses the wire as a ratio and is not pre-formatted") {
+    // The mapping is the last place a `0.8912` could become a `"89%"`, and a ring gauge cannot draw an arc
+    // from a string. The DTO has no percent field at all, so this is asserted on the value that does exist.
+    val dto = MetricsMapping.requestHandlers(RequestHandlerReading(Some(0.8912), Some(0.7104), Nil))
+
+    assertEquals(dto.requestHandlerIdleRatio, Some(0.8912))
+    assertEquals(dto.networkProcessorIdleRatio, Some(0.7104))
+  }
+
+  test("a purgatory queue crosses as a count, keeping the broker's own name for the operation") {
+    val dto = MetricsMapping.requestHandlers(
+      RequestHandlerReading(None, None, List(PurgatoryQueue("Fetch", 481L), PurgatoryQueue("Produce", 0L)))
+    )
+
+    assertEquals(dto.purgatory.map(_.operation), List("Fetch", "Produce"))
+    assertEquals(dto.purgatory.map(_.delayedRequests), List(481L, 0L))
+  }
+
+  test("top producers are labelled as topics on the wire, not as clients") {
+    // ADR-052's second refusal, at the only place a list of topics could acquire the design's word. The
+    // browser reads `measuredBy` to choose the card's title, so a wrong value here is a mislabelled card.
+    val dto = MetricsMapping.topProducers(TopProducers(List(TopicProducer("orders.v1", 900.0))))
+
+    assertEquals(dto.measuredBy, TopProducersDto.ByTopic)
+    assertEquals(dto.topics.map(_.topic), List("orders.v1"))
+  }
+
+  test("a record size crosses as a mean with the two rates it came from and no percentile") {
+    val dto = MetricsMapping.recordSize(RecordSizeReading.from(Some(1024.0), Some(8.0)))
+
+    assertEquals(dto.meanBytes, Some(128.0))
+    assertEquals(dto.bytesInPerSecond, Some(1024.0))
+    assertEquals(dto.recordsPerSecond, Some(8.0))
+    // Three fields and no more. A `p50` here would be a percentile assembled from a mean, which is the
+    // drawing of an assumption ADR-052 refuses.
+    assertEquals(dto.productArity, 3)
+  }
+
+  test("every reading uses one section mapping, so a refusal reads the same on all five cards") {
+    val down = InfrastructureError.Unreachable("metrics-exporter", "connection refused")
+    val sections = List(
+      MetricsMapping.sectionOf(MetricsReading.Unreadable(down, at))(MetricsMapping.series).status,
+      MetricsMapping.sectionOf(MetricsReading.Unreadable(down, at))(MetricsMapping.latencySeries).status,
+      MetricsMapping.sectionOf(MetricsReading.Unreadable(down, at))(MetricsMapping.requestHandlers).status,
+      MetricsMapping.sectionOf(MetricsReading.Unreadable(down, at))(MetricsMapping.topProducers).status,
+      MetricsMapping.sectionOf(MetricsReading.Unreadable(down, at))(MetricsMapping.recordSize).status
+    )
+
+    assertEquals(sections.distinct, List("unavailable"))
   }
 }

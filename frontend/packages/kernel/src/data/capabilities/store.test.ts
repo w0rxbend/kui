@@ -14,6 +14,7 @@ function fakeStream() {
   );
   let subscriber: SseSubscriber<CapabilityFrame> | undefined;
   let closes = 0;
+  let opens = 0;
 
   const handle: SseHandle = {
     connection,
@@ -29,8 +30,12 @@ function fakeStream() {
     get closes(): number {
       return closes;
     },
+    get opens(): number {
+      return opens;
+    },
     open(next: SseSubscriber<CapabilityFrame>): SseHandle {
       subscriber = next;
+      opens += 1;
       setConnection({ phase: "connecting" });
       return handle;
     },
@@ -356,13 +361,48 @@ describe("the capability store", () => {
     });
   });
 
-  it("goes quiet when it is stopped", async () => {
+  it("a stream that flaps twice inside one poll interval leaves one poll chain", async () => {
+    await createRoot(async (dispose) => {
+      const world = harness();
+      world.capabilities.start();
+      world.stream.connect();
+
+      // The first flap starts the fallback: one poll now, and one tick scheduled an interval out.
+      world.stream.drop();
+      await world.settle();
+      expect(world.polls).toBe(1);
+
+      // Back, and gone again, both well inside that same interval. The first episode's callback is
+      // still pending and now belongs to a chain nobody is following.
+      world.stream.connect();
+      await world.settle();
+      world.stream.drop();
+      await world.settle();
+      expect(world.polls).toBe(2);
+
+      // One interval, one poll. The abandoned callback and the live one would otherwise both run,
+      // and each schedules its own successor: from here two chains poll and re-open the stream on
+      // their own timers for the life of the tab, and the rate doubles at every flap.
+      world.advance(30_000);
+      await world.settle();
+      expect(world.polls).toBe(3);
+
+      world.advance(30_000);
+      await world.settle();
+      expect(world.polls).toBe(4);
+      dispose();
+    });
+  });
+
+  it("a store that has been stopped does not re-open its stream", async () => {
     await createRoot(async (dispose) => {
       const world = harness();
       world.capabilities.start();
       world.stream.connect();
       world.stream.drop();
       await world.settle();
+      const openedBeforeStop = world.stream.opens;
+      expect(world.polls).toBe(1);
 
       world.capabilities.stop();
       world.advance(30_000);
@@ -370,9 +410,22 @@ describe("the capability store", () => {
       world.advance(30_000);
       await world.settle();
 
-      // A stopped store must not keep polling and re-opening a stream against a gateway the user
-      // may no longer be authenticated to.
+      // Every pending tick is a `connect()` as well as a poll, so a stopped store that let one
+      // through would be holding a fresh stream open against a gateway the user may no longer be
+      // authenticated to — with nothing left on screen able to close it.
+      expect(world.stream.opens).toBe(openedBeforeStop);
       expect(world.polls).toBe(1);
+
+      // And it starts again. Stopping clears the polling flag as well as ending the episode, and
+      // that is the half this half of the case is for: `beginPollingFallback` refuses to start a
+      // chain while one is running, so a flag left true by `stop()` leaves the restarted store
+      // with a stream it cannot hold and no fallback behind it. The stream is deliberately never
+      // let through to `open` here — recovering onto it clears the flag by another route, which
+      // is what made this hole invisible.
+      world.capabilities.start();
+      world.stream.drop();
+      await world.settle();
+      expect(world.polls).toBe(2);
       dispose();
     });
   });

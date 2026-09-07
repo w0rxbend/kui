@@ -6,12 +6,12 @@ import kui.contracts.Section
 import kui.contracts.capability.ReasonCode
 import kui.metrics.application.MetricsReading
 import kui.metrics.contract.dto.*
-import kui.metrics.domain.{ThroughputBucket, ThroughputRange, ThroughputSeries}
+import kui.metrics.domain.*
 
 /** The two vocabularies this service holds, and the total translation between them.
   *
   * `services/metrics/contract` may not see `services/metrics/domain` (rule A2) and the domain may not see the
-  * wire (rule A1), so the range exists twice — once as the browser spells it, once with the window and step
+  * wire (rule A1), so every type exists twice — once as the browser spells it, once with the arithmetic
   * behind it. This file is the only place the two meet, which is what makes them pinnable by a test rather
   * than kept equal by everybody remembering.
   */
@@ -52,20 +52,68 @@ object MetricsMapping {
       buckets = series.buckets.map(bucket)
     )
 
+  def latencyBucket(bucket: LatencyBucket): LatencyBucketDto =
+    LatencyBucketDto(
+      startingAt = bucket.startingAt,
+      produceP99Millis = bucket.produceP99Millis,
+      fetchP99Millis = bucket.fetchP99Millis
+    )
+
+  def latencySeries(series: LatencySeries): LatencySeriesDto =
+    LatencySeriesDto(
+      window = rangeDto(series.range),
+      from = series.from,
+      to = series.to,
+      stepSeconds = series.range.step.toSeconds,
+      buckets = series.buckets.map(latencyBucket)
+    )
+
+  def purgatoryQueue(queue: PurgatoryQueue): PurgatoryQueueDto =
+    PurgatoryQueueDto(operation = queue.operation, delayedRequests = queue.delayedRequests)
+
+  /** The ratios travel as ratios. A `Some(0.64)` here becoming `"64%"` on the wire would be this service
+    * choosing a rounding and a locale for every client that will ever read it.
+    */
+  def requestHandlers(reading: RequestHandlerReading): RequestHandlersDto =
+    RequestHandlersDto(
+      requestHandlerIdleRatio = reading.requestHandlerIdleRatio,
+      networkProcessorIdleRatio = reading.networkProcessorIdleRatio,
+      purgatory = reading.purgatory.map(purgatoryQueue)
+    )
+
+  def topProducers(producers: TopProducers): TopProducersDto =
+    TopProducersDto(
+      // Stated rather than assumed: the card's title is drawn from this field, and a list of topics
+      // labelled "top producers by client id" is exactly the mislabelling ADR-052 forbids.
+      measuredBy = TopProducersDto.ByTopic,
+      topics = producers.topics.map(topic => TopicProducerDto(topic.topic, topic.bytesInPerSecond))
+    )
+
+  def recordSize(reading: RecordSizeReading): RecordSizeDto =
+    RecordSizeDto(
+      meanBytes = reading.meanBytes,
+      bytesInPerSecond = reading.bytesInPerSecond,
+      recordsPerSecond = reading.recordsPerSecond
+    )
+
   /** A reading as the section a card renders.
     *
     * The three cases are the three renderings, and keeping the mapping here — rather than letting each route
     * decide — is what stops "no source configured" reaching one screen as an empty chart and another as an
-    * error. `NotMeasured` deliberately loses its sentence into the section's `not_configured` status, which
-    * carries no message: the sentence a card shows is the product's own copy (`SCREENS-V4.md` §6), not a
-    * string a service wrote, and the *reason* is still available per cluster on the capability document.
+    * error. It is written once for all five endpoints so that a sixth cannot spell them differently.
+    *
+    * `NotMeasured` deliberately loses its sentence into the section's `not_configured` status, which carries
+    * no message: the sentence a card shows is the product's own copy (`SCREENS-V4.md` §6), not a string a
+    * service wrote, and the *reason* is still available per cluster on the capability document. `Unreadable`
+    * keeps its message, because that one is not a deployment choice — it names an exporter that is down or a
+    * whitelist that is missing a family, and no card copy could know which.
     */
-  def sectionOf(reading: MetricsReading[ThroughputSeries]): Section[ThroughputSeriesDto] = reading match {
-    case MetricsReading.Measured(value, at) => Section.Ok(series(value), at)
+  def sectionOf[A, B](reading: MetricsReading[A])(toDto: A => B): Section[B] = reading match {
+    case MetricsReading.Measured(value, at) => Section.Ok(toDto(value), at)
     case MetricsReading.NotMeasured(_) => Section.NotConfigured
     case MetricsReading.Unreadable(failure, at) => unavailable(failure.message, ReasonCode.of(failure), at)
   }
 
-  private def unavailable(message: String, reason: ReasonCode, at: Instant): Section[ThroughputSeriesDto] =
+  private def unavailable[B](message: String, reason: ReasonCode, at: Instant): Section[B] =
     Section.Unavailable(reason, message, Some(at))
 }

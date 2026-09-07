@@ -9,7 +9,7 @@
 
 import { createSignal, flush } from "solid-js";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AccountMenu } from "./AccountMenu.jsx";
 import { AppearancePopover, type AppearancePreferences } from "./AppearancePopover.jsx";
@@ -18,7 +18,7 @@ import { BrandBlock } from "./BrandBlock.jsx";
 import { Breadcrumb } from "./Breadcrumb.jsx";
 import { ClusterSelector } from "./ClusterSelector.jsx";
 import { ClusterStatusCard } from "./ClusterStatusCard.jsx";
-import { EnvRail } from "./EnvRail.jsx";
+import { EnvRail, tileLetter } from "./EnvRail.jsx";
 import { NavDrawer } from "./NavDrawer.jsx";
 import { NavItem } from "./NavItem.jsx";
 import { NotificationPanel, type Notice } from "./Notifications.jsx";
@@ -102,6 +102,40 @@ describe("NavItem", () => {
     ));
     expect(container.querySelector(".kui-nav-item__badge")).toBeNull();
     expect(container.textContent).not.toContain("0");
+    dispose();
+  });
+
+  /**
+   * The branch predicate, which two comments claimed and no case made.
+   *
+   * `NavDestination.children` says absent and empty draw the same thing and that this is the
+   * renderer's decision; `App.tsx`'s memo said the same thing back, naming this component as "the
+   * renderer, which defends itself". Between the two, `children().length > 0` could become
+   * `props.destination.children !== undefined` with every case in the package green — a cluster
+   * with no topics drawing an expandable Topics row over an empty subtree. Nothing in this file
+   * had ever handed a destination an empty array.
+   */
+  it("draws no disclosure for a destination with an empty children array", () => {
+    const { container, dispose } = mount(() => (
+      <NavItem
+        destination={{
+          id: "topics",
+          label: "Topics",
+          icon: "topics",
+          href: "/t",
+          children: [],
+          /* Seeded open as well, so the case fails on both halves of the predicate rather than
+             only on the chevron: a branch that is expanded and holds nothing draws an empty `<ul>`
+             beneath the row, which is the same control appearing broken one line down. */
+          expanded: true,
+        }}
+      />
+    ));
+    // A chevron that opens onto nothing is a control that appears broken.
+    expect(container.querySelector('[data-testid="nav-topics-disclosure"]')).toBeNull();
+    expect(container.querySelector('[data-testid="nav-topics-subtree"]')).toBeNull();
+    // And the row itself is still a link to the list, which is what a leaf Topics row is.
+    expect(container.querySelector('a[data-testid="nav-topics"]')).not.toBeNull();
     dispose();
   });
 });
@@ -507,6 +541,84 @@ describe("SearchField", () => {
       <SearchField value="" onInput={() => {}} maxLength={200} platform="other" />
     ));
     expect(container.querySelector("input")!.getAttribute("maxlength")).toBe("200");
+    dispose();
+  });
+
+  /**
+   * The 120 ms the overlay stays open after the field loses focus.
+   *
+   * A pointer press on a result focuses the link, which blurs the input; the `click` only arrives
+   * when the button comes back up. `onBlur={() => setFocused(false)}` therefore removes the row
+   * from under the cursor before it can be clicked, and every result in the panel becomes
+   * unclickable while looking perfectly normal — a defect with no visible symptom at all. That
+   * mutation left all 223 cases in this package green.
+   *
+   * The clock is faked so the wait is a fact rather than a race, and only the timer functions are
+   * faked: Solid 2 batches to a microtask, and a fake `queueMicrotask` would stop the renderer
+   * rather than the component. The two waits are absolute milliseconds and not the exported
+   * constant, so shrinking the grace period to zero fails here too.
+   */
+  it("keeps the results panel open long enough for a click on a result to land", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { container, dispose } = mount(() => (
+        <SearchField
+          value="orders"
+          onInput={() => {}}
+          status="ready"
+          results={[{ heading: "TOPICS", items: [{ id: "t", label: "orders.v1", href: "/t" }] }]}
+          platform="other"
+        />
+      ));
+      const panel = container.querySelector(".kui-global-search__results")!;
+      const input = container.querySelector("input")!;
+      input.focus();
+      flush();
+      expect(panel.hasAttribute("hidden")).toBe(false);
+
+      /* What a pointer press on a result actually does first: focus moves to the link, and the
+         input is blurred before any click exists. */
+      const result = container.querySelector<HTMLAnchorElement>('[role="option"]')!;
+      result.focus();
+      flush();
+      expect(document.activeElement).toBe(result);
+      expect(panel.hasAttribute("hidden")).toBe(false);
+
+      // Still there a hundred milliseconds later, which is longer than a mouse button is held.
+      vi.advanceTimersByTime(100);
+      flush();
+      expect(panel.hasAttribute("hidden")).toBe(false);
+
+      // And it does close: the grace period is a deferral, not a decision to stay open.
+      vi.advanceTimersByTime(200);
+      flush();
+      expect(panel.hasAttribute("hidden")).toBe(true);
+      dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The overlay needs text, not just focus.
+   *
+   * `open()` is `focused() && props.value.length > 0`, and dropping the second half left all 223
+   * cases in this package green. What it costs is a panel that appears the moment the box is
+   * tabbed through — over an empty query it can only be a boundary with nothing in it, and the ⌘K
+   * shortcut puts it there on every use.
+   */
+  it("draws no overlay over an empty box, however long it is focused", () => {
+    const { container, dispose } = mount(() => (
+      <SearchField value="" onInput={() => {}} status="idle" platform="other" />
+    ));
+    const input = container.querySelector("input")!;
+    input.focus();
+    flush();
+    expect(container.querySelector(".kui-global-search__results")!.hasAttribute("hidden")).toBe(
+      true,
+    );
+    // And the combobox says so, because that is what a screen reader is told about the panel.
+    expect(input.getAttribute("aria-expanded")).toBe("false");
     dispose();
   });
 
@@ -1063,7 +1175,23 @@ describe("EnvRail", () => {
       "prod-kyiv-01 — healthy",
       "prod-eu-02 — degraded",
     ]);
+    /* And the letter itself, which is the other half of the sentence above: the comment has said
+       "both drawn as P" since the rail was built and nothing had ever looked. Dropping
+       `tileLetter`'s `.toUpperCase()` left all 223 cases green over a rail of lowercase tiles. */
+    expect(tiles.map((tile) => tile.querySelector(".kui-rail__letter")?.textContent)).toEqual([
+      "P",
+      "P",
+    ]);
     dispose();
+  });
+
+  it("takes one whole character for the tile, not half of an astral-plane one", () => {
+    /* The second rule the function states and the second nothing asserted: `name[0]` would cut a
+       surrogate pair in two and render a replacement glyph, and environment names come out of
+       configuration files that people write. `?` for a name with nothing in it, because a blank
+       tile reads as a rail that failed to load. */
+    expect(tileLetter("\u{1F6D2}shop")).toBe("\u{1F6D2}");
+    expect(tileLetter("   ")).toBe("?");
   });
 
   it("keeps its width when no cluster has arrived yet", () => {

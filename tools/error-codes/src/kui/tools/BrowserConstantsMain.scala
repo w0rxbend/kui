@@ -19,9 +19,17 @@ object BrowserConstantsMain {
   def main(args: Array[String]): Unit = {
     val checkOnly = args.contains("--check")
     val target = args.find(!_.startsWith("--")).map(Paths.get(_)).getOrElse(defaultTarget)
-    val expected = BrowserConstants.render(ErrorCode.values.toList)
 
-    if checkOnly then check(target, expected) else write(target, expected)
+    // `render` answers `Left` for the one thing a regeneration cannot repair: an RBAC vocabulary whose
+    // connector fallback no longer matches by name, which would emit a list the browser's evaluator reads
+    // as a mapping. Both modes fail on it, because writing that file is worse than not writing it.
+    BrowserConstants.render(ErrorCode.values.toList) match {
+      case Left(problem) =>
+        println(s"$target was not generated: $problem")
+        sys.exit(1)
+      case Right(expected) =>
+        if checkOnly then check(target, expected) else write(target, expected)
+    }
   }
 
   private def write(target: Path, content: String): Unit = {

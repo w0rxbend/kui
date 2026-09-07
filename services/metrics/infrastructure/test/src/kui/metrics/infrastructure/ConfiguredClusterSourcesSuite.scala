@@ -11,7 +11,7 @@ import kui.config.*
 import kui.kernel.ClusterId
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterSecurity}
 import kui.kernel.error.KuiError
-import kui.metrics.domain.{MetricsSourcePort, ThroughputRange, ThroughputSeries}
+import kui.metrics.domain.*
 
 /** What this process was configured to measure, and what it will actually do about it.
   *
@@ -122,4 +122,14 @@ final class FixedSource extends MetricsSourcePort[Id] {
 
   def throughput(range: ThroughputRange, endingAt: Instant): Id[Either[KuiError, ThroughputSeries]] =
     Right(ThroughputSeries.absent(range, endingAt))
+
+  def latency(range: ThroughputRange, endingAt: Instant): Id[Either[KuiError, LatencySeries]] =
+    Right(LatencySeries.absent(range, endingAt))
+
+  def requestHandlers(asOf: Instant): Id[Either[KuiError, RequestHandlerReading]] =
+    Right(RequestHandlerReading.Empty)
+
+  def producers(count: Int, asOf: Instant): Id[Either[KuiError, TopProducers]] = Right(TopProducers.Empty)
+
+  def recordSize(asOf: Instant): Id[Either[KuiError, RecordSizeReading]] = Right(RecordSizeReading.Empty)
 }

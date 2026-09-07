@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { topicGroupHref, topicTree } from "./topicTree.js";
+import { topicGroupHref, topicSubtree, topicTree } from "./topicTree.js";
 
 const NAMES = [
   "orders.payments.v2",
@@ -90,6 +90,38 @@ describe("the drawer's topic tree", () => {
     const rows = tree(singletons, 3);
     expect(rows.length).toBe(4);
     expect(rows.at(-1)?.label).toBe("other");
+  });
+});
+
+/**
+ * The seam the frame hands the fold through.
+ *
+ * `NavigationInput.childrenFor` treats `undefined` and `[]` as different answers — a leaf and a
+ * branch holding nothing — and `destinationFor` omits the `children` key entirely for the first.
+ * The rule that a cluster with no topics is a *leaf* lived inside `App.tsx`'s memo for two waves,
+ * as a `names.length === 0` clause defended by a comment that named `NavItem` as the real guard;
+ * `NavItem`'s guard was deletable with all 223 cases green at the same time, so the rule was
+ * claimed twice and asserted nowhere. It lives here now, where a case can call it.
+ */
+describe("the subtree the drawer's Topics row is given", () => {
+  const subtree = (names: readonly string[]) =>
+    topicSubtree({ names, groupHref: (prefix) => `/ui/clusters/prod/topics?prefix=${prefix}` });
+
+  it("is no subtree at all for a cluster with no topics, rather than an empty one", () => {
+    expect(subtree([])).toBeUndefined();
+  });
+
+  it("is no subtree when every name folds away, not a branch holding nothing", () => {
+    /* The wider rule, and the reason the emptiness tested is the fold's output rather than its
+       input: `prefixes` drops a zero-length name, so a list that is not empty can still produce no
+       rows, and a `names.length` check at the call site would hand the drawer a branch with an
+       empty list under it. */
+    expect(subtree(["", ""])).toBeUndefined();
+  });
+
+  it("is the fold's own rows, in the fold's own order, when there are any", () => {
+    const rows = subtree(NAMES);
+    expect(rows?.map((row) => row.label)).toEqual(tree().map((row) => row.label));
   });
 });
 

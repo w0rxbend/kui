@@ -3,8 +3,8 @@ package kui.tools
 import kui.contracts.HttpHeaders
 import kui.contracts.capability.{CapabilityState, DegradedReason, ReasonCode}
 import kui.contracts.sse.SseEventName
-import kui.security.rbac.{Action, Resource}
 import kui.kernel.error.ErrorCode
+import kui.security.rbac.{Action, Resource}
 
 /** Renders the handful of strings the browser and the server must spell identically, as TypeScript.
   *
@@ -41,7 +41,15 @@ object BrowserConstants {
       "// `kui.contracts.sse.SseEventName` constants and the `kui.security.rbac` vocabulary. Do not\n" +
       "// edit by hand: your change will be overwritten."
 
-  def render(codes: List[ErrorCode]): String = {
+  /** Renders the whole file, or names the one thing that would make the rendering a lie.
+    *
+    * The `Left` is the RBAC vocabulary's invariant below, and it is a returned value rather than a thrown
+    * exception because this is the only thing the generator can get *wrong* as opposed to out of date: a
+    * caller has to decide what to do about it, and `Either` is what makes that decision visible at the call
+    * site instead of arriving as a stack trace from three frames down. `BrowserConstantsMain` prints it and
+    * exits non-zero, so the build still stops -- the failure is unchanged and only the mechanism is.
+    */
+  def render(codes: List[ErrorCode]): Either[String, String] = {
     val sorted = codes.sortBy(_.wire)
 
     val entries = sorted.map { code =>
@@ -49,7 +57,7 @@ object BrowserConstants {
          |  ${identifier(code)}: "${code.wire}",""".stripMargin
     }
 
-    (List(
+    val preamble = List(
       GeneratedWarning,
       "",
       "/**",
@@ -66,7 +74,9 @@ object BrowserConstants {
       "export const CsrfHeaderName = " + quoted(HttpHeaders.Csrf) + " as const;",
       "",
       "export const ErrorCodes = {"
-    ) ++ entries ++ List(
+    )
+
+    val closing = List(
       "} as const;",
       "",
       "/** One of the codes this build knows about. */",
@@ -82,7 +92,11 @@ object BrowserConstants {
       "/** Every known code, for tests and for exhaustiveness checks over the vocabulary. */",
       "export const AllErrorCodes: readonly KnownErrorCode[] = Object.values(ErrorCodes);",
       ""
-    ) ++ capabilitySection ++ streamEvents ++ vocabulary).mkString("\n") + "\n"
+    )
+
+    vocabulary.map { rbac =>
+      (preamble ++ entries ++ closing ++ capabilitySection ++ streamEvents ++ rbac).mkString("\n") + "\n"
+    }
   }
 
   /** The capability vocabulary: the `status` discriminator, the reason codes, and their sentences.
@@ -190,6 +204,37 @@ object BrowserConstants {
     "];"
   )
 
+  /** The connector actions whose parent-connect fallback is spelled differently from the action itself.
+    *
+    * Every connector action falls back to the *same-named* action on the parent connect cluster, so what the
+    * browser needs is the list of actions that have a fallback at all, not a mapping. The rule is a function
+    * of the pairs rather than a fold over `Action.values` so that a case can hand it a pair the enum does not
+    * contain: an invariant nothing can put into the failing state is one nothing can check, and this one used
+    * to be a `throw` inside a private method with no caller but itself.
+    *
+    * @param fallbacks
+    *   `(action wire name, parent connect action wire name)` for every action that has a fallback
+    */
+  def mismatchedFallbacks(fallbacks: List[(String, String)]): List[String] =
+    fallbacks.collect { case (action, parent) if action != parent => s"$action -> $parent" }
+
+  /** The pairs above, as the RBAC vocabulary actually declares them. */
+  def declaredFallbacks: List[(String, String)] =
+    Action.values.toList.flatMap(action => action.onParentConnect.map(parent => (action.wire, parent.wire)))
+
+  private def vocabulary: Either[String, List[String]] = {
+    val mismatched = mismatchedFallbacks(declaredFallbacks)
+
+    if mismatched.nonEmpty then Left(fallbackProblem(mismatched))
+    else Right(rbacLines)
+  }
+
+  /** The sentence a mismatch is reported with, in one place because a suite reads it too. */
+  def fallbackProblem(mismatched: List[String]): String =
+    "a connector action no longer falls back to the same-named connect action: " +
+      mismatched.mkString(", ") +
+      ". The browser's permission evaluator assumes the names match; fix both together."
+
   /** The RBAC vocabulary, as the browser's permission store needs it.
     *
     * ==Why an action carries its resource==
@@ -206,7 +251,7 @@ object BrowserConstants {
     * after the server had renamed it — every write control on the consumer screen would simply go quiet, and
     * a disabled button looks exactly like a permission the user does not hold.
     */
-  private def vocabulary: List[String] = {
+  private def rbacLines: List[String] = {
     val resources = Resource.values.toList.map { resource =>
       s"  ${resource.toString}: ${quoted(resource.wire)},"
     }
@@ -215,21 +260,6 @@ object BrowserConstants {
       s"  ${action.toString}: { resource: ${quoted(action.resource.wire)}, " +
         s"action: ${quoted(action.wire)} },"
     }
-
-    // Every connector action falls back to the *same-named* action on the parent connect cluster, so
-    // what the browser needs is the list of actions that have a fallback at all, not a mapping. The
-    // assertion is here rather than in a comment: if a future action ever maps to a differently-named
-    // parent, this generator fails and the browser's evaluator is corrected with it.
-    val mismatched = Action.values.toList.flatMap { action =>
-      action.onParentConnect.filter(_.wire != action.wire).map(parent => s"${action.wire} -> ${parent.wire}")
-    }
-
-    if mismatched.nonEmpty then
-      throw new IllegalStateException(
-        "a connector action no longer falls back to the same-named connect action: " +
-          mismatched.mkString(", ") +
-          ". The browser's permission evaluator assumes the names match; fix both together."
-      )
 
     val parents = Action.values.toList
       .filter(_.onParentConnect.isDefined)

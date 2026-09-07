@@ -127,9 +127,17 @@ export interface HostOptions {
   /** The address, as the router sees it: `/clusters/quickstart/topics?tab=consumers`. */
   readonly at: string;
   readonly answers: StubbedAnswers;
-  /** What `useKui().permits` answers. Defaults to "everything", so a case about a control's
-   *  presence is not silently a case about permissions. */
-  readonly permits?: boolean | undefined;
+  /**
+   * What `useKui().permits` answers. Defaults to "everything", so a case about a control's presence
+   * is not silently a case about permissions.
+   *
+   * A predicate as well as a flag, because this screen gates four controls on four different
+   * actions and a single `false` cannot tell them apart: with one answer for everything, a control
+   * wired to the wrong action is disabled at exactly the moments the right one would be.
+   *
+   * Typed off the context rather than off `KnownAction`, which the kernel's barrel does not export.
+   */
+  readonly permits?: boolean | KuiContextValue["permits"] | undefined;
 }
 
 /**
@@ -143,8 +151,20 @@ export interface HostOptions {
 export function topicsHost(options: HostOptions): {
   readonly view: () => JSX.Element;
   readonly stub: StubApi;
+  readonly goTo: (address: string) => void;
 } {
   const stub = stubApi(options.answers);
+
+  /*
+   * Held rather than inlined, because a case needs to move the address of a route that is *already
+   * mounted*.
+   *
+   * Every other case in this file mounts at its address, so the screen's seed answers it and the
+   * effect that keeps reading the address is never exercised. Pushing onto this history changes the
+   * search string under a live route — the drawer's second prefix row, exactly — and the router
+   * keeps the same component instance because the matched path did not change.
+   */
+  const history = memoryHistory(options.at);
 
   const Router = createRouter({
     routes: [
@@ -152,13 +172,16 @@ export function topicsHost(options: HostOptions): {
       { path: "/clusters/:clusterId/topics/:topicName", component: () => <Topics /> },
       { path: "*", component: () => <p data-testid="no-route">no route matched</p> },
     ],
-    history: memoryHistory(options.at),
+    history,
   });
 
   const context: KuiContextValue = {
     api: stub.api,
     cluster: () => undefined,
-    permits: () => options.permits ?? true,
+    permits: (action, name) =>
+      typeof options.permits === "function"
+        ? options.permits(action, name)
+        : (options.permits ?? true),
     paths,
     report: () => {},
   };
@@ -170,6 +193,13 @@ export function topicsHost(options: HostOptions): {
         <Router>{(route: RouteSectionProps) => route.children}</Router>
       </KuiProvider>
     ),
+    /**
+     * Navigates the mounted view, the way a link in the drawer does.
+     *
+     * A push and not a replace: `back()` is a real thing an operator does after following two
+     * prefix rows, and a history whose entries are overwritten cannot be walked backwards.
+     */
+    goTo: (address: string) => history.set({ value: address }),
   };
 }
 

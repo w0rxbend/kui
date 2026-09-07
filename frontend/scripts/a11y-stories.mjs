@@ -27,7 +27,15 @@
  *
  * `SB` overrides the Storybook origin (default `http://localhost:6017`).
  *
- * Exits non-zero when anything fails, so it can be a gate.
+ * ## Exit codes, because two very different things used to look the same
+ *
+ *   0 — every story rendered in both themes and axe found nothing.
+ *   1 — axe found violations. They are printed above the summary, one block each.
+ *   2 — **the sweep could not run**: Storybook was unreachable, the filter matched no stories, or a
+ *       story would not take the theme it was asked for. Nothing is being said about accessibility
+ *       in this case, and the message says so in as many words — the previous version printed the
+ *       theme failure with the same `✗ <story id>` prefix a violation uses, and two wave-4 packets
+ *       read a loaded machine as an a11y regression because of it.
  */
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -41,6 +49,24 @@ const filter = process.argv[2] === undefined ? undefined : new RegExp(process.ar
 
 /** The harness's own failure, not a component's. See the header. */
 const DISABLED_RULES = { region: { enabled: false } };
+
+/**
+ * How long to wait for `.storybook/preview.tsx` to stamp `data-theme` on the root, per attempt.
+ *
+ * A widening budget rather than two attempts at a flat ten seconds. Wave 4 measured the flat wait
+ * failing on an arbitrary story — a different one in each of two reports, each passing when run
+ * alone, with **no axe violation printed in any run** — under a load average of 21 on 16 cores,
+ * while the same sweep was clean twice at a normal load. So it is the story's render losing to the
+ * machine rather than anything about the story, and a budget that does not widen under load fails
+ * CI for a reason that has nothing to do with accessibility.
+ *
+ * Three attempts, each a fresh navigation: the second and third also serve the original purpose of
+ * the retry, which is a feature chunk that had not been built yet on the first visit and is warm on
+ * the second. The totals matter more than the individual numbers — a story that has not themed
+ * after seventy seconds of waiting across three loads is not slow, it is broken, and the sweep
+ * should say so rather than wait for ever.
+ */
+const THEME_WAIT_MS = [10_000, 20_000, 40_000];
 
 const index = await fetch(`${base}/index.json`)
   .then((response) => response.json())
@@ -73,26 +99,38 @@ for (const theme of ["dark", "light"]) {
     // below is on the attribute itself.
     const url = `${base}/iframe.html?id=${id}&viewMode=story&globals=theme:${theme}`;
     let themed = false;
-    // Two attempts. A story whose feature chunk has not been built yet can take longer than the
-    // timeout on its first visit, and that is a slow cache rather than a broken story — retrying
-    // the navigation distinguishes the two, where failing immediately just made the run flaky.
-    for (let attempt = 0; attempt < 2 && !themed; attempt++) {
+    let waitedMs = 0;
+    // See `THEME_WAIT_MS`: each attempt is a fresh navigation on a wider budget, so a slow render
+    // under load is told apart from a story that genuinely never applies the theme.
+    for (const budget of THEME_WAIT_MS) {
       await page.goto(url, { waitUntil: "load" });
+      const startedAt = Date.now();
       try {
         await page.waitForFunction(
           (expected) => document.documentElement.getAttribute("data-theme") === expected,
           theme,
-          { timeout: 10_000 },
+          { timeout: budget },
         );
         themed = true;
       } catch {
-        /* Try once more, from a warm cache. */
+        /* Try again, from a warm cache and with more room. */
       }
+      waitedMs += Date.now() - startedAt;
+      if (themed) break;
     }
 
     if (!themed) {
       const applied = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
-      console.error(`\n✗ ${id}: asked for the ${theme} theme and got ${applied ?? "none"}. Not checking a theme twice.`);
+      const seconds = Math.round(waitedMs / 1000);
+      // Deliberately not the `✗ <id>` shape a violation is printed with. This story was never
+      // checked, so the run has found nothing about it either way, and the two must not read alike.
+      console.error(`\nHARNESS FAILURE — nothing was checked here, and this is not a violation.`);
+      console.error(`  ${id}: asked for the ${theme} theme and got ${applied ?? "none"}, after`);
+      console.error(`  ${THEME_WAIT_MS.length} navigations and ${seconds}s of waiting in total.`);
+      console.error(`  A theme that never applied means the sweep would check one theme twice,`);
+      console.error(`  so it stops here rather than report a pass it did not earn.`);
+      console.error(`  Re-run this story on its own before reporting a defect:`);
+      console.error(`      node scripts/a11y-stories.mjs '^${id}$'`);
       await browser.close();
       process.exit(2);
     }

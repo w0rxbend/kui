@@ -13,8 +13,8 @@
 # never the prose being wrong. That is how the counts drifted at `25176c0`, which moved one row and
 # left the paragraph alone.
 #
-# The same shape had already happened twice more, in two other documents, which is why this script
-# checks three things rather than one:
+# The same shape had already happened three times more, in three other documents, which is why this
+# script checks four things rather than one:
 #
 #   rows              the State column of `docs/FEATURE_MATRIX.md` against the totals published in
 #                     that file and in `README.md`
@@ -24,6 +24,10 @@
 #   dependencies      every npm dependency pinned under `frontend/` against the rows of
 #                     `DEPENDENCY_MATRIX.md`, whose own preamble requires a row per dependency and
 #                     which nothing enforced
+#   milestones        the Milestone and Priority columns of the same rows against the milestone
+#                     table two paragraphs above the state totals, which sat outside every marker
+#                     while the totals beside it were checked -- so moving one row's Milestone cell
+#                     left the table wrong and this script green
 #
 # The name is the one the CI step uses (`.github/workflows/ci.yml`, the `generated` job). It was
 # also the name the wave plan that commissioned this script used; that plan has since been deleted,
@@ -41,11 +45,32 @@
 #
 # A marked block that yields no assertion is a failure, not a pass, and a file that was expected to
 # carry a block and does not is a failure too. A gate that can quietly check nothing is the thing
-# this script exists to replace -- and for two waves this script could do it itself. The three
-# sections below therefore each close with their own floor, because the whole-run `assertions == 0`
-# check at the foot of the file cannot see one section going quiet while the other two carry the
-# total. Section 3 is where that mattered: it globbed for its inputs, and a glob that matched
-# nothing took the run from 49 claims to 45 and still printed "all true".
+# this script exists to replace -- and for three waves this script could do it itself. Section 3 is
+# where that first mattered: it globbed for its inputs, and a glob that matched nothing took the run
+# from 49 claims to 45 and still printed "all true".
+#
+# WHY EACH SECTION CARRIES A NUMBER AND NOT A FLOOR
+# -------------------------------------------------
+# The repair for that was a per-section floor -- `counted > 0` -- and it reopened the same hole one
+# line over, because a floor measures a section's liveness and not its coverage. Four deletions were
+# measured against the floored script on 2026-09-07, one at a time, against these same documents.
+# Every one of them exited 0 and printed "all true":
+#
+#   handing `jq` "${manifests[0]}" instead of "${manifests[@]}"   45 claims (dependencies 25 -> 21)
+#   narrowing the dependencies selector to one key                29 claims (dependencies 25 -> 5)
+#   deleting the `X-Csrf-Token` branch of check_document_region   47 claims (merged-document 9 -> 7)
+#   deleting check_rows_region's other-direction loop             49 claims -- *no change at all*
+#
+# The first prints `feature-matrix-check: 45 claims checked, all true.` -- byte for byte the output
+# the unmatched glob produced, which is the failure the floor was added to end. The last is the
+# sharpest: that loop incremented `failures` and never `assertions`, so removing a whole check moved
+# the number that exists to notice removals by nothing.
+#
+# So every section now closes with the count it published last time, not with a floor, and every
+# loop that can fail also counts. A section that checks fewer things than it did is a failure with
+# a number in it, which is the only shape that distinguishes "this claim went away" from "this
+# claim is still true". The cost is that adding or removing a claim means editing the number beside
+# the section -- one line, paid loudly, exactly like the manifest list above.
 #
 # USAGE
 # -----
@@ -103,24 +128,30 @@ failures=0
 assertions=0
 
 # ---------------------------------------------------------------------------------------------
-# Per-section floors.
+# Per-section counts.
 # ---------------------------------------------------------------------------------------------
 #
 # The `assertions == 0` check at the foot of this file is a floor over the whole run, and a floor
-# over the whole run cannot see a section going quiet: sections 1 and 2 read marked blocks that are
-# always present, so the total never reaches zero however much of section 3 disappears. Each
-# section therefore closes with its own count, and a section that asserted nothing is a failure
-# with the section's name on it rather than a shorter list of true things.
+# over the whole run cannot see a section going quiet: sections 1, 2 and 4 read marked blocks that
+# are always present, so the total never reaches zero however much of section 3 disappears. Each
+# section therefore closes with the number of claims it made last time this script was edited, and
+# a section that makes a different number is a failure with the section's name and both figures in
+# it.
+#
+# These four numbers are not a configuration. They are the measurement, written down: change what a
+# marked block claims, run the script, and put the number it prints here. That is the whole cost,
+# and it is what makes a deleted assertion a red run rather than a shorter list of true things.
 
 declare -A section_claims=()
 section_floor=0
 
 close_section() {
-  local name=$1 counted=$(( assertions - section_floor ))
+  local name=$1 expected=$2 counted=$(( assertions - section_floor ))
   section_claims[$name]=$counted
-  (( counted > 0 )) ||
-    fail "section \`$name\` checked nothing;" \
-         "its inputs are missing or the markers it reads have moved."
+  (( counted == expected )) ||
+    fail "section \`$name\` checked $counted claims and published $expected the last time this" \
+         "script was edited; an assertion has been added, deleted or silenced." \
+         "If the change is deliberate, the number beside \`close_section $name\` moves with it."
   section_floor=$assertions
 }
 
@@ -134,6 +165,17 @@ fail() {
 # ---------------------------------------------------------------------------------------------
 # Marked regions.
 # ---------------------------------------------------------------------------------------------
+
+# Prints the lines of every marked region of one kind, unflattened. A table is rows and a paragraph
+# is prose: section 4 reads a table, where a line is the unit and joining them would destroy it.
+region_lines() {
+  local kind=$1 file=$2
+  awk -v kind="$kind" '
+    index($0, "<!-- checked: " kind) > 0 { inside = 1; next }
+    index($0, "<!-- /checked -->")  > 0 { inside = 0; next }
+    inside { print }
+  ' "$file"
+}
 
 # Prints every marked region of one kind in one file, flattened to a single line per region so that
 # a claim that wraps across two lines is still one string to match against.
@@ -222,11 +264,21 @@ check_rows_region() {
   done
 
   # The other direction: a state that exists in the rows and is named nowhere in the paragraph.
-  for name in "${!actual[@]}"; do
-    if [[ ${#claimed[@]} -gt 0 && -z ${claimed[$name]+set} ]]; then
-      fail "$where names no total for \`$name\`; ${actual[$name]} row(s) are in that state."
-    fi
-  done
+  #
+  # This loop used to increment `failures` and never `assertions`, so deleting it whole changed the
+  # printed total by nothing at all and the run stayed green -- a check that could be removed
+  # without moving the number that is supposed to notice removals. It counts now, one claim per
+  # state the rows carry, and only for a block that names states at all: a block claiming none of
+  # them is not silently claiming all of them.
+  if (( ${#claimed[@]} > 0 )); then
+    for name in "${!actual[@]}"; do
+      if [[ -z ${claimed[$name]+set} ]]; then
+        fail "$where names no total for \`$name\`; ${actual[$name]} row(s) are in that state."
+      fi
+      assertions=$(( assertions + 1 ))
+      found=$(( found + 1 ))
+    done
+  fi
 
   if [[ $text =~ \(([0-9]+)\ capability\ rows\) ]]; then
     (( BASH_REMATCH[1] == rows )) ||
@@ -269,7 +321,7 @@ for file in "$matrix" README.md; do
     fail "$file carries no \`<!-- checked: rows -->\` block; its totals are unguarded."
 done
 
-close_section rows
+close_section rows 23
 
 # ---------------------------------------------------------------------------------------------
 # 2. The merged OpenAPI document against the figures published about it.
@@ -352,7 +404,7 @@ for file in "$adr048" "$apireadme"; do
     fail "$file carries no \`<!-- checked: merged-document -->\` block; its figures are unguarded."
 done
 
-close_section merged-document
+close_section merged-document 9
 
 # ---------------------------------------------------------------------------------------------
 # 3. Every pinned npm dependency against DEPENDENCY_MATRIX.md.
@@ -413,7 +465,135 @@ while IFS=$'\t' read -r name version; do
     fail "$deps records \`$name\` as $row; frontend/ pins $version."
 done <<< "$dep_rows"
 
-close_section dependencies
+close_section dependencies 25
+
+# ---------------------------------------------------------------------------------------------
+# 4. The milestone table against the Milestone and Priority columns of the rows it counts.
+# ---------------------------------------------------------------------------------------------
+#
+# `docs/FEATURE_MATRIX.md` publishes two summaries of the same rows: the state totals at the top,
+# which section 1 checks, and a milestone table further down -- eleven rows, three columns and a
+# grand total -- which nothing checked. Both were recomputed by hand in the same pass, one was
+# brought inside a marker and the other was not, and the consequence is exact: moving one row's
+# Milestone cell left the table wrong and this whole script green.
+#
+# The rule is the same as section 1's, in both directions. Every line of the table must equal what
+# the rows say, and every milestone the rows use must have a line -- a new milestone with no line
+# is the drift that a table of eleven fixed rows cannot otherwise see.
+
+declare -A milestone_rows=() milestone_p0=() milestone_p1=()
+milestone_p0_total=0
+milestone_p1_total=0
+while IFS=$'\t' read -r milestone priority; do
+  [[ -z $milestone ]] && continue
+  milestone_rows[$milestone]=$(( ${milestone_rows[$milestone]:-0} + 1 ))
+  milestone_p0[$milestone]=${milestone_p0[$milestone]:-0}
+  milestone_p1[$milestone]=${milestone_p1[$milestone]:-0}
+  if [[ $priority == P0 ]]; then
+    milestone_p0[$milestone]=$(( milestone_p0[$milestone] + 1 ))
+    milestone_p0_total=$(( milestone_p0_total + 1 ))
+  fi
+  if [[ $priority == P1 ]]; then
+    milestone_p1[$milestone]=$(( milestone_p1[$milestone] + 1 ))
+    milestone_p1_total=$(( milestone_p1_total + 1 ))
+  fi
+done < <(awk -F'|' '
+  NF >= 12 && $2 ~ /^ *[A-Z][A-Z]-[0-9]/ {
+    m = $8; sub(/^[ \t]+/, "", m); sub(/[ \t]+$/, "", m)
+    p = $5; sub(/^[ \t]+/, "", p); sub(/[ \t]+$/, "", p)
+    if (m != "") print m "\t" p
+  }' "$matrix")
+
+# Reads one cell: leading and trailing space and the bold markers the total line uses.
+cell() {
+  local value=$1
+  value=${value//\*/}
+  value=${value#"${value%%[![:space:]]*}"}
+  value=${value%"${value##*[![:space:]]}"}
+  printf '%s' "$value"
+}
+
+declare -A milestone_claimed=()
+milestone_lines=0
+total_line_seen=0
+while IFS= read -r line; do
+  [[ $line == \|* ]] || continue
+  IFS='|' read -r _ raw_label raw_rows raw_p0 raw_p1 _ <<< "$line"
+  label=$(cell "${raw_label:-}")
+  [[ $label == "Milestone" || $label == --* || -z $label ]] && continue
+
+  claimed_rows=$(cell "${raw_rows:-}")
+  claimed_p0=$(cell "${raw_p0:-}")
+  claimed_p1=$(cell "${raw_p1:-}")
+
+  if [[ $label == "Total" ]]; then
+    total_line_seen=1
+    # "189 (150 from research + 39 KUI-new)": the total and the split that has to add up to it.
+    [[ $claimed_rows =~ ^([0-9]+) ]] || {
+      fail "$matrix (checked: milestones): the Total line names no row count."
+      continue
+    }
+    (( BASH_REMATCH[1] == rows )) ||
+      fail "$matrix (checked: milestones): the Total line says ${BASH_REMATCH[1]} rows;" \
+           "the table has $rows."
+    assertions=$(( assertions + 1 ))
+
+    if [[ $claimed_rows =~ \(([0-9]+)\ from\ research\ \+\ ([0-9]+)\ KUI-new\) ]]; then
+      (( BASH_REMATCH[1] + BASH_REMATCH[2] == rows )) ||
+        fail "$matrix (checked: milestones): the Total line splits the rows as" \
+             "${BASH_REMATCH[1]} + ${BASH_REMATCH[2]}, which is not $rows."
+      assertions=$(( assertions + 1 ))
+    else
+      fail "$matrix (checked: milestones): the Total line no longer says how the rows split" \
+           "between research and KUI-new; that claim has gone rather than become false."
+    fi
+
+    (( claimed_p0 == milestone_p0_total )) ||
+      fail "$matrix (checked: milestones): the Total line says $claimed_p0 P0 rows;" \
+           "the table has $milestone_p0_total."
+    (( claimed_p1 == milestone_p1_total )) ||
+      fail "$matrix (checked: milestones): the Total line says $claimed_p1 P1 rows;" \
+           "the table has $milestone_p1_total."
+    assertions=$(( assertions + 2 ))
+    continue
+  fi
+
+  # "— (rejected)" names the milestone cell of the rejected rows, which is the em dash alone.
+  key=${label%% *}
+  milestone_claimed[$key]=1
+  milestone_lines=$(( milestone_lines + 1 ))
+
+  (( claimed_rows == ${milestone_rows[$key]:-0} )) ||
+    fail "$matrix (checked: milestones): $label says $claimed_rows rows;" \
+         "${milestone_rows[$key]:-0} rows name that milestone."
+  (( claimed_p0 == ${milestone_p0[$key]:-0} )) ||
+    fail "$matrix (checked: milestones): $label says $claimed_p0 P0 rows;" \
+         "it has ${milestone_p0[$key]:-0}."
+  (( claimed_p1 == ${milestone_p1[$key]:-0} )) ||
+    fail "$matrix (checked: milestones): $label says $claimed_p1 P1 rows;" \
+         "it has ${milestone_p1[$key]:-0}."
+  assertions=$(( assertions + 3 ))
+done < <(region_lines milestones "$matrix")
+
+if (( milestone_lines == 0 )); then
+  fail "$matrix carries no \`<!-- checked: milestones -->\` table; the milestone totals are" \
+       "unguarded, which is the state they were in until 2026-09-07."
+fi
+
+(( total_line_seen == 1 )) ||
+  fail "$matrix (checked: milestones): the table has no Total line, so its grand totals are" \
+       "no longer claimed."
+
+# The other direction, and it counts: a milestone the rows use with no line in the table.
+for key in "${!milestone_rows[@]}"; do
+  if [[ -z ${milestone_claimed[$key]+set} ]]; then
+    fail "$matrix (checked: milestones): the table has no line for milestone \`$key\`;" \
+         "${milestone_rows[$key]} row(s) name it."
+  fi
+  assertions=$(( assertions + 1 ))
+done
+
+close_section milestones 48
 
 # ---------------------------------------------------------------------------------------------
 
@@ -428,8 +608,9 @@ if (( failures > 0 )); then
 fi
 
 printf 'feature-matrix-check: %d claims checked, all true.\n' "$assertions"
-printf '  rows: %d, merged-document: %d, dependencies: %d over %d named manifests.\n' \
-  "${section_claims[rows]}" "${section_claims[merged-document]}" \
+printf '  rows: %d, merged-document: %d, milestones: %d,' \
+  "${section_claims[rows]}" "${section_claims[merged-document]}" "${section_claims[milestones]}"
+printf ' dependencies: %d over %d named manifests.\n' \
   "${section_claims[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \
   "$matrix" "$rows" "$complete" "$in_scope" "$percent"

@@ -10,7 +10,7 @@ import sttp.model.{StatusCode, Uri}
 import kui.config.SafeUrl
 import kui.http.upstream.UpstreamFailure
 import kui.kernel.error.{ErrorCode, InfrastructureError, KuiError}
-import kui.metrics.domain.ThroughputSample
+import kui.metrics.domain.BrokerSample
 
 /** One reading of one source, taken now. The scrape half of the collector, separated from the retention half
   * so that neither has to be faked to test the other.
@@ -19,13 +19,13 @@ import kui.metrics.domain.ThroughputSample
   * in it all arrive as a `Left`, because the caller is a background loop whose one rule is that a failed pass
   * must not take anything down with it.
   */
-trait ThroughputScrape[F[_]] {
+trait BrokerScrape[F[_]] {
 
   /** @param at
     *   the instant KUI is taking the reading. Supplied rather than read here, so that one clock decides the
     *   axis and a test can put a scrape in a bucket without waiting for one.
     */
-  def sample(at: Instant): F[Either[KuiError, ThroughputSample]]
+  def sample(at: Instant): F[Either[KuiError, BrokerSample]]
 }
 
 /** A Prometheus text exposition endpoint — a JMX exporter in httpserver mode, in every deployment KUI ships —
@@ -47,15 +47,14 @@ trait ThroughputScrape[F[_]] {
   * sub-path, and the fix is the same one: build against the root and let `rebase` put the path back exactly
   * once.
   */
-final class PrometheusThroughputScrape[F[_]: Async](backend: Backend[F], url: SafeUrl)
-    extends ThroughputScrape[F] {
+final class PrometheusBrokerScrape[F[_]: Async](backend: Backend[F], url: SafeUrl) extends BrokerScrape[F] {
 
-  import PrometheusThroughputScrape.*
+  import PrometheusBrokerScrape.*
 
   private val root: Uri =
     Uri.parse(url.value).getOrElse(uri"http://metrics-exporter.invalid").withWholePath("")
 
-  def sample(at: Instant): F[Either[KuiError, ThroughputSample]] =
+  def sample(at: Instant): F[Either[KuiError, BrokerSample]] =
     basicRequest
       .get(root)
       .header("Accept", AcceptHeader)
@@ -65,7 +64,7 @@ final class PrometheusThroughputScrape[F[_]: Async](backend: Backend[F], url: Sa
         if !response.code.isSuccess then Left(statusFailure(response.code))
         else
           PrometheusExposition
-            .throughputAt(at, response.body)
+            .brokerSampleAt(at, response.body)
             .left
             .map(why => malformed(why))
       }
@@ -77,7 +76,7 @@ final class PrometheusThroughputScrape[F[_]: Async](backend: Backend[F], url: Sa
       }
 }
 
-object PrometheusThroughputScrape {
+object PrometheusBrokerScrape {
 
   /** The label this source wears in errors and in upstream metrics. A name, never an address: a connection
     * failure's text routinely carries hosts and ports, and ADR-034 keeps them out of a user-visible message.

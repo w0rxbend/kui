@@ -342,6 +342,12 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
    * already on does not remount the route — it changes the search string underneath it. Guarded on
    * the two fields the address carries so that typing in the search box, which moves the query and
    * not the address, is not undone on the next unrelated navigation.
+   *
+   * The claim above went three waves with nothing behind it: every address case mounted fresh, so
+   * the seed answered them and this could be deleted whole with the package green. "A second
+   * address change on a mounted route reaches the server" is the case that fails without it, and it
+   * pushes onto the harness's history rather than mounting again, which is the only arrangement in
+   * which a *second* read is distinguishable from the first.
    */
   createEffect(
     () => listLocation.search,

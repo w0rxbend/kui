@@ -10,19 +10,19 @@ import kui.metrics.api.MetricsApi
   * `IO` appears here and nowhere else in the service (ADR-010). The startup sequence is [[ServiceMain]]'s,
   * shared with every other service process; what is left here is the part that is about metrics.
   *
-  * ==It starts even when nothing is configured, and today that is every deployment==
+  * ==It starts even when nothing is configured, and most deployments are in that state==
   *
-  * No cluster can be measured by this build, because no collector exists in it yet. The process still starts,
-  * still serves its routes, and reports every cluster as `not_configured` — which is the fact the dashboard
-  * needs in order to keep its written "not measured" sentences rather than draw six empty axes. A process
-  * that exited because it had nothing to measure would restart-loop in every deployment there is.
+  * A deployment that names no `kui.metrics.sources` entry still starts this process, still serves its routes,
+  * and reports every cluster as `not_configured` — which is the fact the dashboard needs in order to keep its
+  * written "not measured" sentences rather than draw five empty axes. A process that exited because it had
+  * nothing to measure would restart-loop in every deployment there is.
   *
   * ==Why there is no URL policy parameter here==
   *
-  * Unlike the schema service's `Main`, this one dials nothing, so there is no upstream address to check. The
-  * `kui.metrics.sources` URLs are already `SafeUrl`s — the loader applied the same SSRF rule to them that it
-  * applies to a registry address — and the collector that will use them arrives with the milestone that needs
-  * the policy passed down.
+  * `MetricsWiring.make` reads `KUI_ALLOW_PRIVATE_UPSTREAMS` for itself, so that this process and the
+  * all-in-one cannot apply two different address rules to the same configuration file. Passing one down from
+  * here would be a second opinion about a security control, which is exactly what `UrlPolicy`'s own scaladoc
+  * argues against.
   */
 object Main extends IOApp {
 

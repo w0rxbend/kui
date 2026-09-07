@@ -205,8 +205,12 @@ own so that a sixth has to be argued in the commit that adds it. `libs/config` i
 because the Kafka metadata-store adapter lives there (ADR-042 §5); that exception is deliberate and
 named, which is what makes a second one visible.
 
-A7 (the shell holding no static reference to a feature) is not checkable from module metadata and
-is enforced by the bundle-shape assertion in BUILD-006 instead.
+A7 (the shell holding no static reference to a feature) is not checkable from module metadata. It is
+enforced by `frontend/scripts/bundle-shape.mjs`, which reads the Vite manifest `pnpm build` writes and
+fails if a feature chunk is reachable from the shell's entry without an `import()`; CI runs it as
+`pnpm bundle-shape` in the frontend job. It is **not** enforced by BUILD-006 — that was
+`build-tests`'s `BundleShape.scala`, which parses Scala.js linker output ADR-048 deleted, and no
+`checkBundleShape` task remains for it to run under (`TECH_DEBT.md` records the dead pair).
 
 ## 4. Shared libraries and their public APIs
 

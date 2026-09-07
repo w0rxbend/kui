@@ -3,7 +3,13 @@ package kui.cluster.infrastructure
 import scala.jdk.CollectionConverters.*
 
 import cats.effect.IO
-import org.apache.kafka.clients.admin.{Admin, KuiClusterAdminResults, TopicDescription, TopicListing}
+import org.apache.kafka.clients.admin.{
+  Admin,
+  KuiClusterAdminResults,
+  ListTopicsOptions,
+  TopicDescription,
+  TopicListing
+}
 import org.apache.kafka.common.errors.TopicAuthorizationException
 import org.apache.kafka.common.{KafkaFuture, Node, TopicCollection, TopicPartitionInfo, Uuid}
 
@@ -73,6 +79,40 @@ final class KafkaPartitionSweepSuite extends KuiIOSuite {
       pool <- RecordingAdminPool(Some(admin))
       logger <- FakeStructuredLogger[IO]
     } yield (new KafkaPartitionSweeper[IO](pool, logger), pool)
+
+  test("theListingAsksForInternalTopics, because an under-replicated __consumer_offsets is an outage") {
+    // `__consumer_offsets` holds fifty partitions on most clusters, and a cluster-wide count that quietly
+    // excluded it would disagree with the broker's own `UnderReplicatedPartitions` gauge by exactly the
+    // partitions an operator most needs to see. The adapter's own comment says so; nothing checked it —
+    // `listInternal(true)` becomes `false` and `./mill libs.__.test + services.*` stays at 2633/2633,
+    // because every fixture's listing is built by the fixture rather than filtered by Kafka.
+    // The stub is called from inside a `delay`, so the flag is captured in a plain atomic rather than in a
+    // `Ref`: there is no effect to sequence at the point Kafka's own API hands the options over.
+    val asked = new java.util.concurrent.atomic.AtomicReference[Option[Boolean]](None)
+
+    val admin = StubAdmin {
+      case ("listTopics", (options: ListTopicsOptions) :: _) =>
+        asked.set(Some(options.shouldListInternal))
+        KuiClusterAdminResults.listTopics(
+          Map("orders" -> new TopicListing("orders", Uuid.randomUuid(), false)).asJava
+        )
+      case ("describeTopics", (collection: TopicCollection.TopicNameCollection) :: _) =>
+        KuiClusterAdminResults.describeTopics(
+          collection.topicNames.asScala.toList
+            .map(name => name -> KafkaFuture.completedFuture(description(name, 1)))
+            .toMap
+            .asJava
+        )
+    }
+
+    for {
+      (sweeper, _) <- sweeperOver(admin)
+      swept <- sweeper.sweep(connection)
+    } yield {
+      assertEquals(asked.get, Some(true))
+      assertEquals(swept.map(_.topics), Right(1))
+    }
+  }
 
   test("aSweepThatDescribedEveryTopicFillsTheCensus") {
     val admin = cluster(List("orders", "payments"), name => Right(description(name, 3)))
