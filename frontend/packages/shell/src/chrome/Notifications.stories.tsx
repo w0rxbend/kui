@@ -175,6 +175,95 @@ export const TheBell: Story = {
   },
 };
 
+/**
+ * The bell over an alert feed, which is a different set of states from the one above.
+ *
+ * Left to right: nothing open, nobody has said how many are open, seven open and unread, seven open
+ * and read. The two on the left draw nothing and are **not** the same state — the difference is in
+ * the accessible name, which is where it has to be, because a missing badge cannot say whether it
+ * is missing for want of alerts or for want of an answer. The two on the right draw the same figure
+ * in two fills: reading an alert does not close it, so the count stays and stops being an alarm.
+ */
+export const TheBellOverAlerts: Story = {
+  render: () => (
+    <div style={{ display: "flex", gap: "24px", "align-items": "center" }}>
+      <NotificationBell unreadCount={0} openCount={0} open={false} onToggle={() => undefined} />
+      <NotificationBell unreadCount={0} openCount={null} open={false} onToggle={() => undefined} />
+      <NotificationBell
+        unreadCount={0}
+        openCount={7}
+        unread={true}
+        open={false}
+        onToggle={() => undefined}
+      />
+      <NotificationBell
+        unreadCount={0}
+        openCount={7}
+        unread={false}
+        open={false}
+        onToggle={() => undefined}
+      />
+    </div>
+  ),
+};
+
+/**
+ * A deployment that runs no alerts service.
+ *
+ * ADR-032's `not_configured` is *hidden* — the drawer leaves the Alerts row out entirely — but the
+ * bell is part of the frame and has nowhere to hide, so the panel owes the reader a sentence. It is
+ * deliberately not "Nothing to report. The cluster has been quiet.": that is a claim about the
+ * cluster, and a deployment with no alerts service has established nothing about the cluster.
+ * There is no Try-again beside it, because nothing failed.
+ */
+export const NoAlertsService: Story = {
+  render: () => (
+    <Panel
+      feed={{
+        kind: "not_configured",
+        reason: "This deployment runs no alerts service, so KUI has nothing to notify you about.",
+      }}
+    />
+  ),
+};
+
+/**
+ * A severity this build has no tone for.
+ *
+ * `@kui/kernel` carries the word the alerts service sent and refuses to fold it onto the nearest
+ * one it knows — house rule 7 — so a `blocker` shipped by a later service arrives here labelled
+ * unrecognised. It takes the neutral tile: `danger` would claim a seriousness nothing established
+ * and `info`'s calm blue would deny one, and dropping the row would hide an event nobody can then
+ * act on. Beside it, the same feed's known severities, so the difference is visible rather than
+ * argued.
+ */
+export const UnrecognisedSeverity: Story = {
+  render: () => (
+    <Panel
+      feed={{
+        kind: "ready",
+        notices: [
+          {
+            id: "unknown",
+            severity: "unknown",
+            title: "Quorum controller lost its lease",
+            body: "Sent with a severity this build of KUI does not have a colour for.",
+            at: ago(3),
+          },
+          {
+            id: "known",
+            severity: "danger",
+            category: "storage",
+            title: "Log directory past its critical threshold",
+            body: "broker-3 · /data/a at 94%.",
+            at: ago(9),
+          },
+        ],
+      }}
+    />
+  ),
+};
+
 /** The bell and the panel together, positioned as the top bar does it. Click to open. */
 export const BellAndPanel: Story = {
   parameters: { layout: "fullscreen" },

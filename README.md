@@ -45,8 +45,8 @@ documentation, and — through the committed OpenAPI documents the browser's typ
 **It streams instead of accumulating.** Browsing records, following a query, watching metrics: all
 of it flows from Kafka to the browser without buffering whole topics in memory.
 
-**It can be one process or seven.** The same modules compose into a single JVM for local use, or
-into a gateway and six services in separate containers for production. No code changes between the
+**It can be one process or nine.** The same modules compose into a single JVM for local use, or
+into a gateway and eight services in separate containers for production. No code changes between the
 two: `deployment/compose/docker-compose.yml` runs the second shape, and
 `deployment/compose/smoke.sh` stops one of its containers and shows the other five carrying on.
 
@@ -75,6 +75,7 @@ reason the architecture is shaped the way it is, and it is tested rather than as
 | Consumer groups: groups, members, assignments, lag, offset reset | done, wizard included |
 | Schema registry: subjects, versions, registering a version, compatibility levels and checks, registry-backed Avro and JSON Schema decoding | done |
 | Sign-in and access control: form and OIDC authentication, sessions, CSRF, role-based authorization at the edge | done, and disabled by default |
+| Alerts: four cluster rules, event feed, acknowledgement, Alerts screen, dashboard card and notification bell | done, with an SSE change stream and polling fallback |
 | Quickstart, configuration examples, demonstration environment | done |
 
 **What is not built:**
@@ -88,7 +89,10 @@ reason the architecture is shaped the way it is, and it is tested rather than as
   JMX-exporter endpoint the deployment declares under `kui.metrics.sources.<cluster>` and keeps a
   bounded series from it. Five reads come off that one scrape — bytes in and out per second, p99
   request latency, request-handler and network-processor idle, the busiest producers, and record
-  size — and the dashboard's Traffic tab draws them. **Three of them are deliberately not the card
+  size — and the dashboard's Traffic tab draws them, checked in a browser against a running
+  stack and not inferred from the endpoints answering: two of the five drew nothing for a whole
+  milestone because the server and the browser had guessed different field names for one wire and
+  every gate on both sides was green. **Three of them are deliberately not the card
   the design drew, and each divergence is an ADR rather than a derived number wearing the design's
   label** (ADR-052): purgatory is a queue *length* and Kafka publishes no percentage, so it is drawn
   as a count; the busiest producers are ranked by *topic*, because a broker publishes no
@@ -99,14 +103,12 @@ reason the architecture is shaped the way it is, and it is tested rather than as
   than a failure. There is still no JMX client: `MetricsSourceKind.Jmx` is declared, refuses with a
   sentence naming the build, and cannot be configured at all while a metrics source's address is an
   `http`/`https` URL (ADR-050).
-- **No alerts and no event feed.** No alert definition, threshold, severity or acknowledgement
-  exists, and the notification panel is fed an empty list.
 - The masking engine exists and is tested but is not yet reachable from a screen; it is marked
   `IMPLEMENTING` rather than `COMPLETE` in the feature matrix.
 
-<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -->
-68 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
-delivered end to end — about 38%.
+<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: in-scope-delivered, delivered-percent -->
+70 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
+delivered end to end — about 39%.
 <!-- /checked -->
 
 That figure is recounted from the rows every time it is written down, never adjusted from the

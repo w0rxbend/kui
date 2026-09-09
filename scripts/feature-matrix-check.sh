@@ -14,7 +14,7 @@
 # left the paragraph alone.
 #
 # The same shape had already happened three times more, in three other documents, which is why this
-# script checks four things rather than one:
+# script checks five things rather than one:
 #
 #   rows              the State column of `docs/FEATURE_MATRIX.md` against the totals published in
 #                     that file and in `README.md`
@@ -28,6 +28,12 @@
 #                     table two paragraphs above the state totals, which sat outside every marker
 #                     while the totals beside it were checked -- so moving one row's Milestone cell
 #                     left the table wrong and this script green
+#   adr-index         every `docs/adr/ADR-*.md` against the rows of `DECISIONS.md`, and every row
+#                     against a file. ADR-052 was accepted, referenced by four documents and had no
+#                     row in the index for a whole wave; it was repaired by hand, and a
+#                     `grep -rn 'DECISIONS.md'` over every `.sh`, `.yml`, `.mill` and `.scala` in
+#                     the tree returned nothing, so no script, workflow, build target or suite read
+#                     the index. ADR-053 was written next and would have walked into the same hole.
 #
 # The name is the one the CI step uses (`.github/workflows/ci.yml`, the `generated` job). It was
 # also the name the wave plan that commissioned this script used; that plan has since been deleted,
@@ -37,44 +43,89 @@
 # HOW A DOCUMENT SAYS "CHECK ME"
 # ------------------------------
 # Prose is prose; the script does not guess which sentence is a claim. A document marks the block it
-# wants checked with an HTML comment, invisible when rendered:
+# wants checked with an HTML comment, invisible when rendered, and names in that comment the claims
+# it expects to be checked inside it:
 #
-#   <!-- checked: rows -->
+#   <!-- checked: rows -- claims: capability-rows, delivered-percent -->
 #   ... the paragraph ...
 #   <!-- /checked -->
 #
-# A marked block that yields no assertion is a failure, not a pass, and a file that was expected to
-# carry a block and does not is a failure too. A gate that can quietly check nothing is the thing
-# this script exists to replace -- and for three waves this script could do it itself. Section 3 is
-# where that first mattered: it globbed for its inputs, and a glob that matched nothing took the run
-# from 49 claims to 45 and still printed "all true".
+# A marked block that yields no assertion is a failure, not a pass; a file that was expected to
+# carry a block and does not is a failure too; and a block whose `claims:` list is missing is a
+# failure, because a block that does not say what it expects checked cannot notice a check that
+# stopped happening.
 #
-# WHY EACH SECTION CARRIES A NUMBER AND NOT A FLOOR
-# -------------------------------------------------
-# The repair for that was a per-section floor -- `counted > 0` -- and it reopened the same hole one
-# line over, because a floor measures a section's liveness and not its coverage. Four deletions were
-# measured against the floored script on 2026-09-07, one at a time, against these same documents.
-# Every one of them exited 0 and printed "all true":
+# WHY A COUNT WAS NOT ENOUGH, AND WHAT REPLACED IT
+# ------------------------------------------------
+# This script has now closed the same hole three times, one level up each time.
+#
+# It began by globbing for its inputs, and a glob that matched nothing took the run from 49 claims
+# to 45 and still printed "all true". The repair was a per-section floor -- `counted > 0` -- which
+# reopened the hole one line over, because a floor measures a section's liveness and not its
+# coverage. The repair for *that* was a per-section count, and four deletions were measured against
+# the floored script, one at a time, every one of which exited 0 printing "all true":
 #
 #   handing `jq` "${manifests[0]}" instead of "${manifests[@]}"   45 claims (dependencies 25 -> 21)
 #   narrowing the dependencies selector to one key                29 claims (dependencies 25 -> 5)
 #   deleting the `X-Csrf-Token` branch of check_document_region   47 claims (merged-document 9 -> 7)
 #   deleting check_rows_region's other-direction loop             49 claims -- *no change at all*
 #
-# The first prints `feature-matrix-check: 45 claims checked, all true.` -- byte for byte the output
-# the unmatched glob produced, which is the failure the floor was added to end. The last is the
-# sharpest: that loop incremented `failures` and never `assertions`, so removing a whole check moved
-# the number that exists to notice removals by nothing.
+# The count caught the first three. It could not catch the fourth, and it could not catch four more
+# that were measured against the counted script on 2026-09-07, each of which printed
+# `105 claims checked, all true` and exited 0:
 #
-# So every section now closes with the count it published last time, not with a floor, and every
-# loop that can fail also counts. A section that checks fewer things than it did is a failure with
-# a number in it, which is the only shape that distinguishes "this claim went away" from "this
-# claim is still true". The cost is that adding or removing a claim means editing the number beside
-# the section -- one line, paid loudly, exactly like the manifest list above.
+#   replacing the bare call `reconcile_manifests` with `:`        105 claims -- no change
+#   neutering one comparison and leaving its increment in place   105 claims -- no change
+#   deleting the milestone table's `total_line_seen` guard        105 claims -- no change
+#   flooring close_section, then deleting that comparison whole   103 claims, still "all true"
+#
+# The second of those was run with ADR-048 publishing `X-Csrf-Token on 99 operations` against a
+# document that has it on 20, and the fourth with the same false figure standing. Both exited 0.
+# Every one of the four is red against this file now, and the four reds were measured the same day
+# against the same documents; the numbers above are what the script printed, not what was expected.
+#
+# Every one of those is the same defect: **a count of how many times a variable was incremented
+# cannot see a comparison that stopped comparing.** `reconcile_manifests` contributed no assertion
+# at all, so deleting the call moved nothing; a comparison whose body is deleted but whose
+# `assertions=$(( assertions + 1 ))` is left behind keeps the number and loses the check, after
+# which ADR-048 could publish `X-Csrf-Token on 99 operations` with the run green; and a floored
+# `close_section` makes the number itself advisory.
+#
+# So the number is no longer the gate. Every comparison **records what it compared** -- a section,
+# a scope and a claim *kind* -- and the run reconciles that ledger against two independent fixtures:
+#
+#   1. the `claims:` list in each marked block's own marker, which is the document stating what it
+#      expects checked about itself, in the document whose figures are at stake; and
+#   2. the `registry` table at the top of this script, which pins the claim kinds each section is
+#      made of, independently of any document.
+#
+# A comparison that stops comparing therefore fails in *three* places at once and names itself in
+# all three: its kind is missing from its region's declared list, missing from its section's pinned
+# kinds, and -- for the two prose sections -- the figure it was reading is left unclaimed by the
+# residue check below. Silencing it means editing this script, the marked block's marker and the
+# published sentence, which is three deliberate edits naming the claim in English rather than one
+# deleted line and a number nobody re-derives.
+#
+# The per-section counts are kept beside the registry rather than instead of it. A count still says
+# something the kinds do not -- that a section compared *fewer instances* of a kind it still
+# compares, such as one npm dependency's row going missing -- and it is the cheaper half of the two.
+#
+# THE RESIDUE CHECK: A FIGURE NOBODY CLAIMED
+# ------------------------------------------
+# The two prose sections consume the text they match: each comparison deletes the sentence fragment
+# it read out of a working copy of the block. Whatever digits are left when every comparison has run
+# are figures the block publishes that nothing checks, and those are a failure with the leftover
+# printed. Dates, `ADR-nnn` references and `wave-n` are not figures about the thing being counted
+# and are struck out before the residue is read; everything else has to be claimed by a comparison.
+#
+# That is the gate that does not route through the ledger at all, so it holds even if the registry
+# and a marker are edited to agree with a neutered comparison: publishing
+# `X-Csrf-Token on 99 operations` with the `csrf-operations` comparison gone leaves `99` unclaimed.
 #
 # USAGE
 # -----
 #   ./scripts/feature-matrix-check.sh          # exit 0 when every published count is true
+#   ./scripts/feature-matrix-check.sh --claims # and print the ledger, one compared claim per line
 #
 # Every disagreement is printed with the file that carries it and the figure that would make it
 # true, so the repair is a substitution rather than an investigation.
@@ -83,6 +134,17 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+
+print_claims=0
+for argument in "$@"; do
+  case $argument in
+    --claims) print_claims=1 ;;
+    *)
+      echo "feature-matrix-check: unknown argument $argument (only --claims is understood)." >&2
+      exit 2
+      ;;
+  esac
+done
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "feature-matrix-check: jq is required to read the OpenAPI and package manifests." >&2
@@ -93,6 +155,7 @@ matrix="docs/FEATURE_MATRIX.md"
 adr048="docs/adr/ADR-048-solidjs-typescript-vite-frontend.md"
 apireadme="frontend/packages/api/README.md"
 deps="DEPENDENCY_MATRIX.md"
+decisions="DECISIONS.md"
 
 # The npm manifests section 3 reads, written out one per line. The sentence below used to be false
 # of this very list, and the way it was false is worth keeping: section 3 fed `jq` the glob
@@ -105,6 +168,7 @@ deps="DEPENDENCY_MATRIX.md"
 manifests=(
   frontend/package.json
   frontend/packages/api/package.json
+  frontend/packages/feature-alerts/package.json
   frontend/packages/feature-clusters/package.json
   frontend/packages/feature-consumers/package.json
   frontend/packages/feature-messages/package.json
@@ -116,8 +180,8 @@ manifests=(
 
 # Every input is named rather than globbed: a glob that matches nothing checks nothing and says so
 # to nobody, which is the failure this script was written to end.
-for required in "$matrix" README.md "$adr048" "$apireadme" "$deps" docs/api/openapi.json \
-                "${manifests[@]}"; do
+for required in "$matrix" README.md "$adr048" "$apireadme" "$deps" "$decisions" \
+                docs/api/openapi.json "${manifests[@]}"; do
   if [[ ! -f $required ]]; then
     echo "feature-matrix-check: $required is missing; the check cannot run." >&2
     exit 2
@@ -125,41 +189,105 @@ for required in "$matrix" README.md "$adr048" "$apireadme" "$deps" docs/api/open
 done
 
 failures=0
-assertions=0
 
 # ---------------------------------------------------------------------------------------------
-# Per-section counts.
+# The registry: what each section is made of.
 # ---------------------------------------------------------------------------------------------
 #
-# The `assertions == 0` check at the foot of this file is a floor over the whole run, and a floor
-# over the whole run cannot see a section going quiet: sections 1, 2 and 4 read marked blocks that
-# are always present, so the total never reaches zero however much of section 3 disappears. Each
-# section therefore closes with the number of claims it made last time this script was edited, and
-# a section that makes a different number is a failure with the section's name and both figures in
-# it.
+# One line per section, naming the claim *kinds* that section compares, space separated and sorted.
+# This is the fixture that does not live in a document: a comparison deleted from this file has to
+# be deleted from here too, and deleting it from here is a line that says in English which claim
+# stopped being made. The `claims:` list in each marked block is the second, independent fixture,
+# and the per-section counts below are the third figure -- they see a kind that is still compared
+# but compared fewer times, which neither set of kinds can.
+
+declare -A registry=(
+  [rows]="capability-rows delivered-percent in-scope-delivered out-of-scope-rows state-total"
+  [merged-document]="csrf-operations if-match-operations openapi-version paths-and-schemas\
+ principal-operations principal-paths"
+  [dependencies]="manifest npm-version"
+  [milestones]="milestone-line milestone-p0 milestone-p1 milestone-rows total-line total-p0\
+ total-p1 total-rows total-split"
+  [adr-index]="adr-file adr-row"
+)
+
+# ---------------------------------------------------------------------------------------------
+# The ledger.
+# ---------------------------------------------------------------------------------------------
 #
-# These four numbers are not a configuration. They are the measurement, written down: change what a
-# marked block claims, run the script, and put the number it prints here. That is the whole cost,
-# and it is what makes a deleted assertion a red run rather than a shorter list of true things.
+# Every comparison in this file records one line here before or after it compares. A line is
+# `section<TAB>scope<TAB>kind`: the scope is the marked block, manifest or table row the comparison
+# was made inside, so that a failure can name where a claim went missing rather than only that one
+# did. Nothing else counts assertions; the count printed at the end is the length of this array.
 
-declare -A section_claims=()
-section_floor=0
-
-close_section() {
-  local name=$1 expected=$2 counted=$(( assertions - section_floor ))
-  section_claims[$name]=$counted
-  (( counted == expected )) ||
-    fail "section \`$name\` checked $counted claims and published $expected the last time this" \
-         "script was edited; an assertion has been added, deleted or silenced." \
-         "If the change is deliberate, the number beside \`close_section $name\` moves with it."
-  section_floor=$assertions
-}
+declare -a ledger=()
+current_section=""
+current_scope=""
 
 # Takes the message in as many arguments as it needs to stay inside 100 columns here; they are
 # joined with a space so a wrapped call still prints one sentence.
 fail() {
   printf 'feature-matrix-check: %s\n' "$*" >&2
   failures=$((failures + 1))
+}
+
+scope() {
+  current_section=$1
+  current_scope=$2
+}
+
+record() {
+  ledger+=("$current_section"$'\t'"$current_scope"$'\t'"$1")
+}
+
+# The distinct kinds the ledger holds for one section (or, with a scope, for one block), sorted and
+# space separated so that two of them can be compared as strings.
+kinds_of() {
+  local section=$1 scope_filter=${2-}
+  local line
+  for line in ${ledger+"${ledger[@]}"}; do
+    IFS=$'\t' read -r a b c <<< "$line"
+    [[ $a == "$section" ]] || continue
+    [[ -z $scope_filter || $b == "$scope_filter" ]] || continue
+    printf '%s\n' "$c"
+  done | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+
+count_of() {
+  local section=$1 line total=0
+  for line in ${ledger+"${ledger[@]}"}; do
+    [[ ${line%%$'\t'*} == "$section" ]] && total=$(( total + 1 ))
+  done
+  printf '%s' "$total"
+}
+
+# Fixture 2, applied per section: the kinds observed against the kinds pinned in `registry`. Called
+# once as each section closes and again over the whole ledger at the foot of the file, because a
+# gate with one call site is a gate one deleted line disables -- which is exactly how the floored
+# `close_section` used to make every number advisory.
+reconcile_registry() {
+  local where=$1 only=${2-} section observed expected
+  for section in "${!registry[@]}"; do
+    [[ -n $only && $section != "$only" ]] && continue
+    expected=$(printf '%s\n' ${registry[$section]} | sort -u | tr '\n' ' ' | sed 's/ $//')
+    observed=$(kinds_of "$section")
+    [[ $observed == "$expected" ]] && continue
+    fail "$where: section \`$section\` compared [$observed] and this script's registry pins" \
+         "[$expected]; a comparison has been added or has stopped comparing."
+  done
+}
+
+declare -A section_counts=()
+
+close_section() {
+  local name=$1 expected=$2 counted
+  counted=$(count_of "$name")
+  section_counts[$name]=$counted
+  (( counted == expected )) ||
+    fail "section \`$name\` compared $counted claims and published $expected the last time this" \
+         "script was edited; a comparison has been added, deleted or silenced." \
+         "If the change is deliberate, the number beside \`close_section $name\` moves with it."
+  reconcile_registry "closing \`$name\`" "$name"
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -187,6 +315,88 @@ regions() {
     inside { printf "%s ", $0 }
     END { if (inside) print "" }
   ' "$file"
+}
+
+# Fixture 1: the `claims:` list out of each region's own opening marker, one line per region, in the
+# order `regions`/`region_lines` yield them. A marker with no list prints the empty string, which
+# `reconcile_region` reports rather than passes over.
+region_claims() {
+  local kind=$1 file=$2
+  awk -v kind="$kind" '
+    index($0, "<!-- checked: " kind) > 0 {
+      line = $0
+      if (match(line, /claims:.*/)) {
+        list = substr(line, RSTART + 7)
+        sub(/-->[ \t]*$/, "", list)
+        gsub(/,/, " ", list)
+        gsub(/^[ \t]+|[ \t]+$/, "", list)
+        print list
+      } else print ""
+    }
+  ' "$file"
+}
+
+reconcile_region() {
+  local where=$1 declared=$2 observed expected
+  if [[ -z ${declared// /} ]]; then
+    fail "$where: the block's marker names no \`claims:\` list, so nothing states which" \
+         "comparisons it expects; a comparison that stopped comparing would not be noticed here."
+    return
+  fi
+  expected=$(printf '%s\n' $declared | sort -u | tr '\n' ' ' | sed 's/ $//')
+  observed=$(kinds_of "$current_section" "$current_scope")
+  [[ $observed == "$expected" ]] && return
+  fail "$where: the block declares claims [$expected] and this run compared [$observed]." \
+       "A claim in the marker that was not compared is a check that has gone silent; a claim" \
+       "compared but not declared is a check the document does not know about."
+}
+
+# The residue: digits the block publishes that no comparison consumed. `consume` is how a
+# comparison says which fragment it read.
+consume() {
+  local -n text_ref=$1
+  text_ref=${text_ref/"$2"/}
+}
+
+# One comparison, as one call. It records the claim, strikes the figure it read out of the block
+# so the residue check below cannot see it, and compares -- and those three are one call and not
+# three statements on purpose. The mutation this file exists to stop is a comparison whose body is
+# deleted and whose bookkeeping is left behind: with `record`, `consume` and the comparison written
+# separately, deleting the middle three lines kept the ledger, kept the figure struck out and kept
+# the run green at 216 claims while ADR-048 published `X-Csrf-Token on 99 operations`. Measured
+# here on 2026-09-07, which is why the shape below exists.
+#
+# Arguments: the claim kind, the text to strike out (empty when the caller has already struck it),
+# then one or more groups of three -- what the document said, what the fact is, and the sentence to
+# print when they differ. A call with no group at all is itself a failure: recording and consuming
+# without comparing is the defect, so it is refused in the one place every comparison goes through.
+claim() {
+  local kind=$1 matched=$2
+  shift 2
+  record "$kind"
+  if [[ -n $matched ]]; then consume text "$matched"; fi
+  if (( $# == 0 || $# % 3 != 0 )); then
+    fail "$where: the \`$kind\` claim recorded a claim and struck a figure out of the block" \
+         "without comparing anything. A claim that does not compare is not a claim."
+    return
+  fi
+  while (( $# > 0 )); do
+    [[ $1 == "$2" ]] || fail "$3"
+    shift 3
+  done
+}
+
+report_unclaimed_figures() {
+  local where=$1 rest=$2
+  # A date, an `ADR-nnn` reference and a `wave-n` are not figures about the thing being counted.
+  rest=$(printf '%s' "$rest" | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}//g; s/ADR-[0-9]+//g;
+                                       s/wave-[0-9]+//g')
+  [[ $rest =~ [0-9] ]] || return 0
+  local leftovers
+  leftovers=$(printf '%s' "$rest" | grep -oE '[0-9][0-9.%]*' | sort -u | tr '\n' ' ')
+  fail "$where publishes figures no comparison read: $leftovers." \
+       "A figure inside a checked block that nothing compares is the state this script exists" \
+       "to end; either a comparison reads it or it does not belong inside the markers."
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -231,19 +441,24 @@ fi
 # Rounded to the nearest whole percent, the way the prose states it.
 percent=$(( (complete * 200 + in_scope) / (in_scope * 2) ))
 
-# Checks one marked block of prose about the rows. Every pattern it recognises is a claim; a block
-# that matches none of them is reported rather than passed over.
+# Checks one marked block of prose about the rows. Every figure it recognises is a claim and every
+# figure it does not recognise is a failure, so a state total cannot be added to the paragraph
+# without a comparison being added beside it.
 check_rows_region() {
   local where=$1 text=$2 rest tok n name
-  local found=0
   declare -A claimed=()
 
+  # The state totals, in both directions at once. This used to be two loops, the second of which
+  # -- the one that notices a state present in the rows and named nowhere in the prose --
+  # incremented `failures` and never `assertions`, so deleting it whole changed the printed total
+  # by nothing at all. One pass over the union of what is claimed and what the rows hold cannot be
+  # half-deleted: a state the prose stopped naming still reaches the comparison as "absent".
   rest=$text
   while [[ $rest =~ ([0-9]+)\ \`([A-Z][A-Z\ ,]*[A-Z])\` ]]; do
     tok=${BASH_REMATCH[0]}; n=${BASH_REMATCH[1]}; name=${BASH_REMATCH[2]}
     claimed[$name]=$n
-    found=$(( found + 1 ))
     rest=${rest#*"$tok"}
+    consume text "$tok"
   done
 
   # "and no `BLOCKED` row" is a claim that the count is zero, and has to be read as one or the
@@ -252,76 +467,74 @@ check_rows_region() {
   while [[ $rest =~ no\ \`([A-Z][A-Z\ ,]*[A-Z])\`\ row ]]; do
     tok=${BASH_REMATCH[0]}; name=${BASH_REMATCH[1]}
     claimed[$name]=0
-    found=$(( found + 1 ))
     rest=${rest#*"$tok"}
   done
 
-  for name in "${!claimed[@]}"; do
-    if (( claimed[$name] != ${actual[$name]:-0} )); then
-      fail "$where says ${claimed[$name]} \`$name\` rows; $matrix has ${actual[$name]:-0}."
+  # A block that names no state at all is not silently claiming every state: the union is only
+  # read for a block that makes at least one state claim.
+  local -A union=()
+  local -a union_names=()
+  if (( ${#claimed[@]} > 0 )); then
+    for name in "${!claimed[@]}"; do union[$name]=1; done
+    for name in "${!actual[@]}"; do union[$name]=1; done
+    union_names=("${!union[@]}")            # a state name carries spaces: `SERVICE DONE, NO UI`
+  fi
+  for name in ${union_names+"${union_names[@]}"}; do
+    if [[ -z ${claimed[$name]+set} ]]; then
+      claim state-total "" \
+        "named" "unnamed" \
+        "$where names no total for \`$name\`; ${actual[$name]:-0} row(s) are in that state."
+    else
+      claim state-total "" \
+        "${claimed[$name]}" "${actual[$name]:-0}" \
+        "$where says ${claimed[$name]} \`$name\` rows; $matrix has ${actual[$name]:-0}."
     fi
-    assertions=$(( assertions + 1 ))
   done
 
-  # The other direction: a state that exists in the rows and is named nowhere in the paragraph.
-  #
-  # This loop used to increment `failures` and never `assertions`, so deleting it whole changed the
-  # printed total by nothing at all and the run stayed green -- a check that could be removed
-  # without moving the number that is supposed to notice removals. It counts now, one claim per
-  # state the rows carry, and only for a block that names states at all: a block claiming none of
-  # them is not silently claiming all of them.
-  if (( ${#claimed[@]} > 0 )); then
-    for name in "${!actual[@]}"; do
-      if [[ -z ${claimed[$name]+set} ]]; then
-        fail "$where names no total for \`$name\`; ${actual[$name]} row(s) are in that state."
-      fi
-      assertions=$(( assertions + 1 ))
-      found=$(( found + 1 ))
-    done
-  fi
-
   if [[ $text =~ \(([0-9]+)\ capability\ rows\) ]]; then
-    (( BASH_REMATCH[1] == rows )) ||
-      fail "$where says ${BASH_REMATCH[1]} capability rows; $matrix has $rows."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+    claim capability-rows "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$rows" \
+      "$where says ${BASH_REMATCH[1]} capability rows; $matrix has $rows."
   fi
 
   if [[ $text =~ the\ ([0-9]+)\ deferred\ and\ rejected\ rows ]]; then
-    (( BASH_REMATCH[1] == out_of_scope )) ||
-      fail "$where says ${BASH_REMATCH[1]} deferred and rejected rows; $matrix has $out_of_scope."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+    claim out-of-scope-rows "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$out_of_scope" \
+      "$where says ${BASH_REMATCH[1]} deferred and rejected rows; $matrix has $out_of_scope."
   fi
 
   if [[ $text =~ ([0-9]+)\ of\ ([0-9]+)\ in-scope\ capabilities ]]; then
-    (( BASH_REMATCH[1] == complete )) ||
-      fail "$where says ${BASH_REMATCH[1]} in-scope capabilities are delivered;" \
-           "$matrix has $complete COMPLETE."
-    (( BASH_REMATCH[2] == in_scope )) ||
-      fail "$where says ${BASH_REMATCH[2]} in-scope capabilities; $matrix has $in_scope."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+    claim in-scope-delivered "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$complete" \
+      "$where says ${BASH_REMATCH[1]} delivered; $matrix has $complete COMPLETE." \
+      "${BASH_REMATCH[2]}" "$in_scope" \
+      "$where says ${BASH_REMATCH[2]} in-scope capabilities; $matrix has $in_scope."
   fi
 
-  if [[ $text =~ ([0-9]+)%\ *\** ]]; then
-    (( BASH_REMATCH[1] == percent )) ||
-      fail "$where says $complete of $in_scope is ${BASH_REMATCH[1]}%; it is $percent%."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+  if [[ $text =~ ([0-9]+)% ]]; then
+    claim delivered-percent "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$percent" \
+      "$where says $complete of $in_scope is ${BASH_REMATCH[1]}%; it is $percent%."
   fi
 
-  (( found > 0 )) || fail "$where: a block marked \`checked: rows\` asserts nothing."
+  report_unclaimed_figures "$where" "$text"
 }
 
 for file in "$matrix" README.md; do
   blocks=0
+  mapfile -t declared_lists < <(region_claims rows "$file")
   while IFS= read -r text; do
     [[ -z ${text// /} ]] && continue
     blocks=$(( blocks + 1 ))
+    scope rows "$file#$blocks"
     check_rows_region "$file (checked: rows #$blocks)" "$text"
+    reconcile_region "$file (checked: rows #$blocks)" "${declared_lists[$(( blocks - 1 ))]:-}"
   done < <(regions rows "$file")
   (( blocks > 0 )) ||
     fail "$file carries no \`<!-- checked: rows -->\` block; its totals are unguarded."
 done
 
-close_section rows 23
+close_section rows 15
 
 # ---------------------------------------------------------------------------------------------
 # 2. The merged OpenAPI document against the figures published about it.
@@ -333,6 +546,7 @@ close_section rows 23
 # contract carries the internal principal header.
 
 read -r doc_paths doc_ops doc_schemas principal_ops principal_paths csrf_ops if_match_ops \
+        doc_version \
   < <(jq -r '
   def ops: [.paths | to_entries[] as $p | $p.value | to_entries[] as $o
             | {path: $p.key, op: $o.value}];
@@ -343,68 +557,82 @@ read -r doc_paths doc_ops doc_schemas principal_ops principal_paths csrf_ops if_
     ([ops[] | select(.op | carries("X-Kui-Principal"))] | length),
     ([ops[] | select(.op | carries("X-Kui-Principal")) | .path] | unique | length),
     ([ops[] | select(.op | carries("X-Csrf-Token"))] | length),
-    ([ops[] | select(.op | carries("If-Match"))] | length)
+    ([ops[] | select(.op | carries("If-Match"))] | length),
+    .openapi
   ] | @tsv' docs/api/openapi.json)
 
 check_document_region() {
-  local where=$1 text=$2
-  local found=0
+  local where=$1 text=$2 rest tok
 
   if [[ $text =~ \`X-Kui-Principal\`\ on\ ([0-9]+)\ of\ its\ ([0-9]+)\ operations ]]; then
-    (( BASH_REMATCH[1] == principal_ops )) ||
-      fail "$where says X-Kui-Principal is on ${BASH_REMATCH[1]} operations;" \
-           "the document has $principal_ops."
-    (( BASH_REMATCH[2] == doc_ops )) ||
-      fail "$where says the document has ${BASH_REMATCH[2]} operations; it has $doc_ops."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+    claim principal-operations "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$principal_ops" \
+      "$where: X-Kui-Principal on ${BASH_REMATCH[1]} operations; the document has $principal_ops." \
+      "${BASH_REMATCH[2]}" "$doc_ops" \
+      "$where says the document has ${BASH_REMATCH[2]} operations; it has $doc_ops."
   fi
 
   if [[ $text =~ across\ ([0-9]+)\ of\ its\ ([0-9]+)\ paths ]]; then
-    (( BASH_REMATCH[1] == principal_paths )) ||
-      fail "$where says X-Kui-Principal spans ${BASH_REMATCH[1]} paths;" \
-           "the document has $principal_paths."
-    (( BASH_REMATCH[2] == doc_paths )) ||
-      fail "$where says the document has ${BASH_REMATCH[2]} paths; it has $doc_paths."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+    claim principal-paths "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$principal_paths" \
+      "$where: X-Kui-Principal over ${BASH_REMATCH[1]} paths; the document has $principal_paths." \
+      "${BASH_REMATCH[2]}" "$doc_paths" \
+      "$where says the document has ${BASH_REMATCH[2]} paths; it has $doc_paths."
   fi
 
   if [[ $text =~ \`X-Csrf-Token\`\ on\ ([0-9]+)\ operations ]]; then
-    (( BASH_REMATCH[1] == csrf_ops )) ||
-      fail "$where says X-Csrf-Token is on ${BASH_REMATCH[1]} operations;" \
-           "the document has $csrf_ops."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+    claim csrf-operations "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$csrf_ops" \
+      "$where says X-Csrf-Token is on ${BASH_REMATCH[1]} operations; the document has $csrf_ops."
   fi
 
-  if [[ $text =~ \`If-Match\`\ on\ ([0-9]+)\ operations ]]; then
-    (( BASH_REMATCH[1] == if_match_ops )) ||
-      fail "$where says If-Match is on ${BASH_REMATCH[1]} operations;" \
-           "the document has $if_match_ops."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
-  fi
+  # `If-Match` is claimed twice in ADR-048 -- once beside the principal header and once in the list
+  # of what the browser view keeps -- so this one loops. A claim made twice is compared twice.
+  rest=$text
+  while [[ $rest =~ \`If-Match\`\ on\ ([0-9]+)\ operations ]]; do
+    tok=${BASH_REMATCH[0]}
+    claim if-match-operations "$tok" \
+      "${BASH_REMATCH[1]}" "$if_match_ops" \
+      "$where says If-Match is on ${BASH_REMATCH[1]} operations; the document has $if_match_ops."
+    rest=${rest#*"$tok"}
+  done
 
   if [[ $text =~ ([0-9]+)\ paths\ and\ ([0-9]+)\ schemas ]]; then
-    (( BASH_REMATCH[1] == doc_paths )) ||
-      fail "$where says ${BASH_REMATCH[1]} paths; the document has $doc_paths."
-    (( BASH_REMATCH[2] == doc_schemas )) ||
-      fail "$where says ${BASH_REMATCH[2]} schemas; the document has $doc_schemas."
-    found=$(( found + 1 )); assertions=$(( assertions + 1 ))
+    claim paths-and-schemas "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$doc_paths" \
+      "$where says ${BASH_REMATCH[1]} paths; the document has $doc_paths." \
+      "${BASH_REMATCH[2]}" "$doc_schemas" \
+      "$where says ${BASH_REMATCH[2]} schemas; the document has $doc_schemas."
   fi
 
-  (( found > 0 )) || fail "$where: a block marked \`checked: merged-document\` asserts nothing."
+  # The document's own version. It reached this block as an unclaimed figure once the residue check
+  # existed, which is the residue check doing its job: `OpenAPI 3.1.0` is a statement about the
+  # committed document exactly as the path count is, and it was published and never compared.
+  if [[ $text =~ OpenAPI\ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    claim openapi-version "${BASH_REMATCH[0]}" \
+      "${BASH_REMATCH[1]}" "$doc_version" \
+      "$where says the document is OpenAPI ${BASH_REMATCH[1]}; it declares $doc_version."
+  fi
+
+  report_unclaimed_figures "$where" "$text"
 }
 
 for file in "$adr048" "$apireadme"; do
   blocks=0
+  mapfile -t declared_lists < <(region_claims merged-document "$file")
   while IFS= read -r text; do
     [[ -z ${text// /} ]] && continue
     blocks=$(( blocks + 1 ))
+    scope merged-document "$file#$blocks"
     check_document_region "$file (checked: merged-document #$blocks)" "$text"
+    reconcile_region "$file (checked: merged-document #$blocks)" \
+                     "${declared_lists[$(( blocks - 1 ))]:-}"
   done < <(regions merged-document "$file")
   (( blocks > 0 )) ||
     fail "$file carries no \`<!-- checked: merged-document -->\` block; its figures are unguarded."
 done
 
-close_section merged-document 9
+close_section merged-document 11
 
 # ---------------------------------------------------------------------------------------------
 # 3. Every pinned npm dependency against DEPENDENCY_MATRIX.md.
@@ -420,16 +648,48 @@ close_section merged-document 9
 # makes every directory under `packages/` a member, so the two must be the same set. A package
 # added without a line in `manifests` fails here, and so does the mutation that started this: point
 # a glob at a directory that does not exist and the disagreement is printed rather than absorbed.
+#
+# Each reconciled manifest records a claim of its own. Until 2026-09-07 this function contributed
+# no assertion at all, so replacing the bare call below with `:` printed the same 105 claims and
+# exited 0 -- the disk-versus-named-list reconciliation was deletable with no number moving, and
+# with it gone a package could be dropped from `manifests` and `sort -u` made its dependencies
+# indistinguishable from its siblings'. The claims are what `reconcile_manifest_claims` compares
+# against the named list, so the call cannot go quiet now.
 reconcile_manifests() {
-  local named present
+  local named present manifest
   named=$(printf '%s\n' "${manifests[@]}" | sort)
   present=$(printf '%s\n' frontend/package.json frontend/packages/*/package.json | sort)
+  for manifest in "${manifests[@]}"; do
+    scope dependencies "$manifest"
+    record manifest
+  done
+  scope dependencies "the manifest roster"
   [[ $named == "$present" ]] && return 0
   local only
   only=$(comm -3 <(printf '%s\n' "$named") <(printf '%s\n' "$present") | tr -d '\t' | tr '\n' ' ')
   fail "this script names ${#manifests[@]} npm manifests and frontend/ holds a different set;" \
        "the disagreement is over: $only"
 }
+
+# The other half of the same gate, and a separate call site on purpose: the manifests that were
+# reconciled, against the manifests this script names. Called once beside section 3 and again at
+# the foot of the file.
+reconcile_manifest_claims() {
+  local where=$1 line reconciled expected
+  reconciled=$(
+    for line in ${ledger+"${ledger[@]}"}; do
+      IFS=$'\t' read -r a b c <<< "$line"
+      # An `if` and not an `&&`: `pipefail` is on, and a false `&&` at the end of the loop body
+      # would make this whole pipeline exit 1 and `set -e` end the run with nothing printed.
+      if [[ $a == dependencies && $c == manifest ]]; then printf '%s\n' "$b"; fi
+    done | sort | tr '\n' ' '
+  )
+  expected=$(printf '%s\n' "${manifests[@]}" | sort | tr '\n' ' ')
+  [[ $reconciled == "$expected" ]] && return 0
+  fail "$where: the manifest roster was reconciled for [$reconciled] and this script names" \
+       "[$expected]; the disk-versus-named-list reconciliation did not run over every manifest."
+}
+
 reconcile_manifests
 
 # Under `set -e` an assignment carries the failure out, which the process substitution this used to
@@ -460,12 +720,14 @@ while IFS=$'\t' read -r name version; do
     fail "$deps has no row for the npm dependency \`$name\` (pinned at $version under frontend/)."
     continue
   fi
-  assertions=$(( assertions + 1 ))
+  scope dependencies "npm:$name"
+  record npm-version
   [[ $row == *"$version"* ]] ||
     fail "$deps records \`$name\` as $row; frontend/ pins $version."
 done <<< "$dep_rows"
 
-close_section dependencies 25
+reconcile_manifest_claims "closing \`dependencies\`"
+close_section dependencies 35
 
 # ---------------------------------------------------------------------------------------------
 # 4. The milestone table against the Milestone and Priority columns of the rows it counts.
@@ -513,6 +775,7 @@ cell() {
   printf '%s' "$value"
 }
 
+scope milestones "$matrix#1"
 declare -A milestone_claimed=()
 milestone_lines=0
 total_line_seen=0
@@ -536,13 +799,13 @@ while IFS= read -r line; do
     (( BASH_REMATCH[1] == rows )) ||
       fail "$matrix (checked: milestones): the Total line says ${BASH_REMATCH[1]} rows;" \
            "the table has $rows."
-    assertions=$(( assertions + 1 ))
+    record total-rows
 
     if [[ $claimed_rows =~ \(([0-9]+)\ from\ research\ \+\ ([0-9]+)\ KUI-new\) ]]; then
       (( BASH_REMATCH[1] + BASH_REMATCH[2] == rows )) ||
         fail "$matrix (checked: milestones): the Total line splits the rows as" \
              "${BASH_REMATCH[1]} + ${BASH_REMATCH[2]}, which is not $rows."
-      assertions=$(( assertions + 1 ))
+      record total-split
     else
       fail "$matrix (checked: milestones): the Total line no longer says how the rows split" \
            "between research and KUI-new; that claim has gone rather than become false."
@@ -551,10 +814,11 @@ while IFS= read -r line; do
     (( claimed_p0 == milestone_p0_total )) ||
       fail "$matrix (checked: milestones): the Total line says $claimed_p0 P0 rows;" \
            "the table has $milestone_p0_total."
+    record total-p0
     (( claimed_p1 == milestone_p1_total )) ||
       fail "$matrix (checked: milestones): the Total line says $claimed_p1 P1 rows;" \
            "the table has $milestone_p1_total."
-    assertions=$(( assertions + 2 ))
+    record total-p1
     continue
   fi
 
@@ -566,13 +830,15 @@ while IFS= read -r line; do
   (( claimed_rows == ${milestone_rows[$key]:-0} )) ||
     fail "$matrix (checked: milestones): $label says $claimed_rows rows;" \
          "${milestone_rows[$key]:-0} rows name that milestone."
+  record milestone-rows
   (( claimed_p0 == ${milestone_p0[$key]:-0} )) ||
     fail "$matrix (checked: milestones): $label says $claimed_p0 P0 rows;" \
          "it has ${milestone_p0[$key]:-0}."
+  record milestone-p0
   (( claimed_p1 == ${milestone_p1[$key]:-0} )) ||
     fail "$matrix (checked: milestones): $label says $claimed_p1 P1 rows;" \
          "it has ${milestone_p1[$key]:-0}."
-  assertions=$(( assertions + 3 ))
+  record milestone-p1
 done < <(region_lines milestones "$matrix")
 
 if (( milestone_lines == 0 )); then
@@ -580,9 +846,16 @@ if (( milestone_lines == 0 )); then
        "unguarded, which is the state they were in until 2026-09-07."
 fi
 
-(( total_line_seen == 1 )) ||
+# This guard used to be the only thing that noticed the Total line going missing, and deleting the
+# guard moved no number, so the guard itself was unguarded. It records a claim now: the
+# `total-line` kind is pinned in `registry` and declared in the table's own marker, so deleting
+# these four lines fails the run in two places and names the claim in both.
+if (( total_line_seen == 1 )); then
+  record total-line
+else
   fail "$matrix (checked: milestones): the table has no Total line, so its grand totals are" \
        "no longer claimed."
+fi
 
 # The other direction, and it counts: a milestone the rows use with no line in the table.
 for key in "${!milestone_rows[@]}"; do
@@ -590,31 +863,114 @@ for key in "${!milestone_rows[@]}"; do
     fail "$matrix (checked: milestones): the table has no line for milestone \`$key\`;" \
          "${milestone_rows[$key]} row(s) name it."
   fi
-  assertions=$(( assertions + 1 ))
+  record milestone-line
 done
 
-close_section milestones 48
+reconcile_region "$matrix (checked: milestones #1)" "$(region_claims milestones "$matrix")"
+close_section milestones 49
+
+# ---------------------------------------------------------------------------------------------
+# 5. The ADR index against the ADRs on disk.
+# ---------------------------------------------------------------------------------------------
+#
+# `DECISIONS.md` is the index of every architecture decision this project has taken, and until
+# 2026-09-07 nothing read it. ADR-052 was written, accepted, cited by four other documents and
+# left out of the index for a whole wave; the omission was found by a person reading the file and
+# repaired by hand. `grep -rn 'DECISIONS.md'` over every `.sh`, `.yml`, `.mill` and `.scala` in the
+# tree returned nothing at all, so there was no script, workflow, build target or suite that could
+# have noticed, and ADR-053 was being written into the same hole.
+#
+# Both directions, because each has its own failure: an ADR on disk with no row is the omission
+# that happened, and a row naming a file that does not exist is the one that happens when an ADR is
+# renamed or withdrawn. The link in the row must resolve to the file the id belongs to -- a row
+# whose link points at the wrong document is how an index goes quietly wrong.
+
+adr_files=()
+while IFS= read -r file; do adr_files+=("$file"); done < <(
+  find docs/adr -maxdepth 1 -name 'ADR-*.md' -type f | sort)
+
+if (( ${#adr_files[@]} == 0 )); then
+  fail "docs/adr holds no ADR-*.md files; the index has nothing to be checked against."
+fi
+
+# The rows: id -> the path its link names.
+declare -A adr_row_link=()
+while IFS=$'\t' read -r id link; do
+  [[ -z $id ]] && continue
+  if [[ -n ${adr_row_link[$id]+set} ]]; then
+    fail "$decisions lists \`$id\` more than once; an index with two rows for one decision" \
+         "cannot say which of them is current."
+  fi
+  adr_row_link[$id]=$link
+done < <(awk -F'|' '
+  NF >= 5 && $2 ~ /\[ADR-[0-9]+\]/ {
+    cellone = $2
+    if (match(cellone, /ADR-[0-9]+/)) id = substr(cellone, RSTART, RLENGTH)
+    link = ""
+    if (match(cellone, /\(docs\/adr\/[^)]+\)/)) link = substr(cellone, RSTART + 1, RLENGTH - 2)
+    if (id != "") print id "\t" link
+  }' "$decisions")
+
+for file in ${adr_files+"${adr_files[@]}"}; do
+  id=$(basename "$file" | grep -oE '^ADR-[0-9]+')
+  scope adr-index "$file"
+  record adr-file
+  if [[ -z ${adr_row_link[$id]+set} ]]; then
+    fail "$decisions has no row for \`$id\`, which exists at $file." \
+         "That is the omission ADR-052 shipped with for a whole wave."
+  elif [[ ${adr_row_link[$id]} != "$file" ]]; then
+    fail "$decisions links \`$id\` to ${adr_row_link[$id]:-nothing}; the decision is at $file."
+  fi
+done
+
+for id in "${!adr_row_link[@]}"; do
+  scope adr-index "$id"
+  record adr-row
+  [[ -f ${adr_row_link[$id]} ]] ||
+    fail "$decisions has a row for \`$id\` pointing at ${adr_row_link[$id]:-nothing}," \
+         "which is not a file in this repository."
+done
+
+close_section adr-index 106
 
 # ---------------------------------------------------------------------------------------------
 
+assertions=$(( ${#ledger[@]} ))
+
 if (( assertions == 0 )); then
-  fail "no claim was checked at all; every marked block has gone missing."
+  fail "no claim was compared at all; every marked block has gone missing."
+fi
+
+# The second call site of both whole-run gates. `close_section` runs them section by section as
+# each one finishes, which is where the local message belongs; these two run over the finished
+# ledger. A gate called from one place is a gate one deleted line disables, and the mutation that
+# made that concrete was flooring `close_section` back to `(( counted >= 0 ))` -- after which the
+# named deletion printed 101 claims and "all true".
+reconcile_registry "the finished run"
+reconcile_manifest_claims "the finished run"
+
+if (( print_claims == 1 )); then
+  printf 'feature-matrix-check: %d compared claims.\n' "$assertions"
+  printf '%s\n' "${ledger[@]}" | sort | sed 's/^/  /'
 fi
 
 if (( failures > 0 )); then
-  printf 'feature-matrix-check: %d disagreement(s) over %d checked claims.\n' \
+  printf 'feature-matrix-check: %d disagreement(s) over %d compared claims.\n' \
     "$failures" "$assertions" >&2
   exit 1
 fi
 
 printf 'feature-matrix-check: %d claims checked, all true.\n' "$assertions"
-printf '  rows: %d, merged-document: %d, milestones: %d,' \
-  "${section_claims[rows]}" "${section_claims[merged-document]}" "${section_claims[milestones]}"
+printf '  rows: %d, merged-document: %d, milestones: %d, adr-index: %d,' \
+  "${section_counts[rows]}" "${section_counts[merged-document]}" \
+  "${section_counts[milestones]}" "${section_counts[adr-index]}"
 printf ' dependencies: %d over %d named manifests.\n' \
-  "${section_claims[dependencies]}" "${#manifests[@]}"
+  "${section_counts[dependencies]}" "${#manifests[@]}"
 printf '  %s: %d rows, %d COMPLETE, %d in scope, %d%% delivered.\n' \
   "$matrix" "$rows" "$complete" "$in_scope" "$percent"
 printf '  docs/api/openapi.json: %d paths, %d operations, %d schemas;' \
   "$doc_paths" "$doc_ops" "$doc_schemas"
 printf ' X-Kui-Principal on %d operations over %d paths.\n' \
   "$principal_ops" "$principal_paths"
+printf '  %s: %d rows over %d ADRs in docs/adr.\n' \
+  "$decisions" "${#adr_row_link[@]}" "${#adr_files[@]}"

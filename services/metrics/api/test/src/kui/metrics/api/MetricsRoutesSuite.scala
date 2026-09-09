@@ -20,7 +20,7 @@ import sttp.tapir.server.stub4.TapirStubInterpreter
 
 import kui.contracts.KuiEndpoint
 import kui.http.principal.PrincipalVerification
-import kui.kernel.error.InfrastructureError
+import kui.kernel.error.{InfrastructureError, KuiError}
 import kui.kernel.{ClusterId, Secret, ServiceId, UserName}
 import kui.metrics.application.{ClusterSources, MetricsUseCases, SourceProfile}
 import kui.metrics.contract.MetricsEndpoints
@@ -50,6 +50,13 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
   private val prod = ClusterId.unsafe("prod-eu")
   private val measured = ClusterId.unsafe("measured")
   private val broken = ClusterId.unsafe("broken")
+  private val forgotten = ClusterId.unsafe("forgotten")
+
+  /** The scrape cadence the service under test is configured with, and therefore the age at which a
+    * point-in-time reading stops being current. `LiveSource` answers with the instant it was asked for, so
+    * every case here is fresh unless it uses the `forgotten` cluster.
+    */
+  private val ScrapeInterval: FiniteDuration = 30.seconds
 
   private val exporterDown =
     InfrastructureError.Unreachable("metrics-exporter", "connection refused")
@@ -75,9 +82,12 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
   private final class DeadSource extends MetricsSourcePort[IO] {
     def throughput(range: ThroughputRange, endingAt: Instant) = IO.pure(Left(exporterDown))
     def latency(range: ThroughputRange, endingAt: Instant) = IO.pure(Left(exporterDown))
-    def requestHandlers(asOf: Instant) = IO.pure(Left(exporterDown))
-    def producers(count: Int, asOf: Instant) = IO.pure(Left(exporterDown))
-    def recordSize(asOf: Instant) = IO.pure(Left(exporterDown))
+    def requestHandlers(asOf: Instant): IO[Either[KuiError, Observed[RequestHandlerReading]]] =
+      IO.pure(Left(exporterDown))
+    def producers(count: Int, asOf: Instant): IO[Either[KuiError, Observed[TopProducers]]] =
+      IO.pure(Left(exporterDown))
+    def recordSize(asOf: Instant): IO[Either[KuiError, Observed[RecordSizeReading]]] =
+      IO.pure(Left(exporterDown))
   }
 
   private final class LiveSource extends MetricsSourcePort[IO] {
@@ -107,7 +117,10 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
     def requestHandlers(asOf: Instant) =
       IO.pure(
         Right(
-          RequestHandlerReading(Some(0.8912d), Some(0.7104d), List(PurgatoryQueue("Fetch", 481L)))
+          Observed(
+            RequestHandlerReading(Some(0.8912d), Some(0.7104d), List(PurgatoryQueue("Fetch", 481L))),
+            asOf
+          )
         )
       )
 
@@ -115,24 +128,58 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
     def producers(count: Int, asOf: Instant) =
       IO.pure(
         Right(
-          TopProducers.of(
-            List.tabulate(10)(index => TopicProducer(s"topic-$index", (index + 1).toDouble * 100.0d)),
-            count
+          Observed(
+            TopProducers.of(
+              List.tabulate(10)(index => TopicProducer(s"topic-$index", (index + 1).toDouble * 100.0d)),
+              count
+            ),
+            asOf
           )
         )
       )
 
-    def recordSize(asOf: Instant) = IO.pure(Right(RecordSizeReading.from(Some(1024.0d), Some(8.0d))))
+    def recordSize(asOf: Instant) =
+      IO.pure(Right(Observed(RecordSizeReading.from(Some(1024.0d), Some(8.0d)), asOf)))
+  }
+
+  /** A source whose newest scrape is an hour old: the exporter answered once and then went away.
+    *
+    * It is a third stub rather than a flag on `LiveSource` for the reason the other two are separate — the
+    * situation is what is under test. Everything it holds is true; none of it is current.
+    */
+  private final class AbandonedSource extends MetricsSourcePort[IO] {
+    private def scrapedAnHourBefore(asOf: Instant): Instant = asOf.minusSeconds(3600L)
+
+    def throughput(range: ThroughputRange, endingAt: Instant) =
+      IO.pure(Right(ThroughputSeries.absent(range, endingAt)))
+    def latency(range: ThroughputRange, endingAt: Instant) =
+      IO.pure(Right(LatencySeries.absent(range, endingAt)))
+    def requestHandlers(asOf: Instant) =
+      IO.pure(
+        Right(Observed(RequestHandlerReading(Some(0.5d), Some(0.5d), Nil), scrapedAnHourBefore(asOf)))
+      )
+    def producers(count: Int, asOf: Instant) =
+      IO.pure(
+        Right(
+          Observed(TopProducers.of(List(TopicProducer("orders.v1", 12.0d)), count), scrapedAnHourBefore(asOf))
+        )
+      )
+    def recordSize(asOf: Instant) =
+      IO.pure(
+        Right(Observed(RecordSizeReading.from(Some(64.0d), Some(2.0d)), scrapedAnHourBefore(asOf)))
+      )
   }
 
   /** The deployment this suite describes: one cluster with no source, one with a source that answers, one
-    * with a source that is down, and nothing at all for any other id.
+    * with a source that is down, one whose exporter answered an hour ago and stopped, and nothing at all for
+    * any other id.
     */
   private val sources: ClusterSources[IO] = new ClusterSources[IO] {
     private val profiles = List(
       SourceProfile(prod, "Production EU", hasSource = false),
       SourceProfile(measured, "Measured", hasSource = true),
-      SourceProfile(broken, "Broken", hasSource = true)
+      SourceProfile(broken, "Broken", hasSource = true),
+      SourceProfile(forgotten, "Forgotten", hasSource = true)
     )
 
     def all: IO[List[SourceProfile]] = IO.pure(profiles)
@@ -144,6 +191,7 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
       IO.pure(
         if cluster == measured then Some(new LiveSource)
         else if cluster == broken then Some(new DeadSource)
+        else if cluster == forgotten then Some(new AbandonedSource)
         else None
       )
   }
@@ -162,7 +210,10 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
         interceptors <- MetricsApi.interceptors[IO](Telemetry.noop[IO], rejections, logger)
       } yield {
         val routes = MetricsRoutes[IO](
-          MetricsUseCases.make[IO](sources),
+          // The scrape cadence this suite's service is configured with, and therefore the age at which a
+          // point-in-time reading becomes `stale`. Both stubs answer with the instant they were asked for,
+          // so every case below is a fresh reading unless it says otherwise.
+          MetricsUseCases.make[IO](sources, ScrapeInterval),
           MetricsApi.Securing[IO](codec, rejections, logger)
         )
 
@@ -478,6 +529,33 @@ final class MetricsRoutesSuite extends CatsEffectSuite {
       assertEquals(response.code.code, 200, response.body)
       assertEquals(topics.size, MetricsEndpoints.DefaultTop)
       assertEquals(MetricsEndpoints.DefaultTop, 5)
+    }
+  }
+
+  test("anHourOldGaugeIsAStaleSectionCarryingItsFigureAndTheInstantItWasTaken") {
+    // The fourth section state, on the wire, over the whole path a browser reads. An exporter that stopped
+    // answering leaves a true reading behind it: refusing would throw the number away and offer a Retry,
+    // and answering `ok` would draw an hour-old idle ratio as the broker's current state. `stale` is the
+    // one answer that is neither, and `fetchedAt` is the scrape's own instant rather than the request's.
+    server.use(get(_, metricsPath(forgotten, "request-handlers"))).map { response =>
+      val section = body(response).hcursor.downField("requestHandlers")
+
+      assertEquals(response.code.code, 200, response.body)
+      assertEquals(section.get[String]("status"), Right("stale"))
+      assertEquals(section.downField("data").get[Option[Double]]("requestHandlerIdleRatio"), Right(Some(0.5)))
+      assertEquals(section.get[String]("reason"), Right("UPSTREAM_UNAVAILABLE"))
+      // Older than the reply itself by roughly an hour, which is what makes the badge's age true.
+      val fetchedAt = section.get[Instant]("fetchedAt").getOrElse(fail(response.body))
+      assert(fetchedAt.isBefore(Instant.now().minusSeconds(1800L)), s"$fetchedAt in ${response.body}")
+    }
+  }
+
+  test("aFreshGaugeIsOkAndNotStale") {
+    // The other half, so the rule above cannot be satisfied by answering `stale` to everything. `LiveSource`
+    // answers with the instant it was asked for, which is inside one `ScrapeInterval` by construction.
+    server.use(get(_, metricsPath(measured, "request-handlers"))).map { response =>
+      assertEquals(body(response).hcursor.downField("requestHandlers").get[String]("status"), Right("ok"))
+      assert(ScrapeInterval.toSeconds > 0L)
     }
   }
 

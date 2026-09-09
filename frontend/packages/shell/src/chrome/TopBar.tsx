@@ -52,6 +52,12 @@ import type { Crumb } from "./types.js";
  * A dot with no number is a colour-only signal. The count goes in the accessible name
  * ("Notifications, 3 unread"), and when there is nothing unread there is no dot at all rather than a
  * grey one — a permanently present marker is a marker nobody looks at.
+ *
+ * With an alerts feed behind it the figure is the *open count* and the read marker is the badge's
+ * tone; both arrive as props and neither is computed here. The band holds no store and folds no
+ * feed, which is what keeps the bell and the alerts card reading one number: the store is the
+ * kernel's, the card is in a feature package, and a component that recounted either would be the
+ * second answer to a question that has one.
  */
 export type ThemeMode = "auto" | "light" | "dark";
 
@@ -85,6 +91,14 @@ export type TopBarProps = {
   readonly onOpenAppearance?: (() => void) | undefined;
   /** Unread notifications. Zero means no marker at all. */
   readonly unreadCount?: number | undefined;
+  /**
+   * How many alert events are open, as the alerts service counted them, or `null` when nothing
+   * has said. Absent when the deployment has no alerts feed, which leaves {@link unreadCount} in
+   * charge — see `NotificationBell`, where all three renderings are argued.
+   */
+  readonly alertsOpen?: number | null | undefined;
+  /** Whether this principal has anything unread, as the service counted it. The badge's tone. */
+  readonly alertsUnread?: boolean | undefined;
   /** Whether the notifications panel is showing. Owned by the caller, so that Escape and a click
    * elsewhere can close it from outside this component. */
   readonly notificationsOpen?: boolean | undefined;
@@ -217,6 +231,12 @@ export function TopBar(props: TopBarProps) {
         <div class="kui-topbar__bell-anchor">
           <NotificationBell
             unreadCount={unread()}
+            /* Passed through untouched, `null` included. Collapsing a `null` to a `0` here would
+               make the band claim that nothing is open on behalf of a service that has not
+               answered — the bell is the one control on this screen that is read as a statement
+               about the cluster rather than about the page. */
+            openCount={props.alertsOpen}
+            unread={props.alertsUnread}
             open={props.notificationsOpen === true}
             onToggle={() => props.onToggleNotifications?.()}
           />

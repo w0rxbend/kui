@@ -1,0 +1,8 @@
+{
+  "recordSize" : {
+    "status" : "unavailable",
+    "reason" : "UPSTREAM_UNAVAILABLE",
+    "message" : "the metrics exporter answered and 3 reading(s) of it carry no bytes-in and records-in rate to divide",
+    "since" : "2026-09-06T12:00:00.000Z"
+  }
+}

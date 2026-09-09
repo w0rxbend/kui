@@ -251,7 +251,11 @@ The `+` is the only route to cluster registration anywhere in twenty-three scree
   ▶ ksqlDB           4 objects
 ```
 
-Four facts here that the shipped drawer cannot express:
+Four facts here that the drawer could not express when this document was written. **Three of the
+four ship now** — the second heading, the count beside each heading, and the per-row figure whose
+tone follows its meaning — and the fourth is half shipped, deliberately; item 4 says which half and
+why. The list is kept in its original shape rather than pruned, because what each of these cost is
+the useful part of the record:
 
 1. **Two groups, and the second is `ECOSYSTEM`.** Every registered feature declares
    `group: "Cluster"` today, so the drawer draws one heading.
@@ -260,8 +264,21 @@ Four facts here that the shipped drawer cannot express:
    is `--kui-color-text-subtle`, the row badge is not.
 3. **Every row carries a trailing figure**, and its tone follows meaning rather than magnitude:
    `3/3` green, `128` neutral, `1 rebalancing` amber, `1 failed` red.
-4. **Topics nests.** Two starred favourites by exact name, then prefix groups with counts, then a
-   padlocked `internal`. All in the mono family, on a vertical guide rule.
+4. **Topics nests, and the favourites above the groups are deliberately not built.** The nesting
+   ships: prefix groups with counts, then a padlocked `internal`, all in the mono family on a
+   vertical guide rule — folded in `frontend/packages/shell/src/nav/topicTree.ts` and drawn by
+   `NavItem`. The two starred rows above them do not, and they were **removed rather than
+   deferred**. The fold built them from a `favourites` list that nothing in this product records,
+   so its only callers were that module's own test, a fixture and a story, and the branch had
+   survived two waves as an orphan.
+
+   What bringing it back costs is stated in that module's header, and the fold is the cheap half:
+   `favourites: readonly string[]`, filtered against the names so a deleted topic does not become
+   a row leading to a 404, emitted before the groups and *also* counted inside them. The expensive
+   half is the thing that records the star — a control on a screen, and somewhere for the star to
+   live. Until that exists, drawing the rows would mean drawing a branch that is empty on every
+   cluster in every deployment. Written down here because for two waves this decision existed only
+   in a source comment, which is where a design document's readers do not look.
 
 ### 2.3 The drawer foot is the storage meter
 

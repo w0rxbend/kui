@@ -44,7 +44,9 @@ import {
 import {
   Banner,
   ToastRegion,
+  AlertsProvider,
   AuthDisabled,
+  createAlerts,
   createCapabilities,
   createCurrentCluster,
   createMutation,
@@ -78,6 +80,12 @@ import type {
   NavCounts,
   NavDestination,
 } from "./chrome/types.js";
+import {
+  alertsBadge,
+  alertsStreamUrl,
+  loadAlertFeed,
+  noticesOf,
+} from "./data/alerts.js";
 import { brokerStorageOf, createClusterStore } from "./data/clusterStore.js";
 import {
   SEARCH_DEBOUNCE_MS,
@@ -329,6 +337,66 @@ export function App() {
       };
     },
   );
+
+  /**
+   * The alert feed, opened once for the whole frame.
+   *
+   * Three things read it and they are in three packages that may not see each other: the bell a few
+   * hundred lines below, the drawer's Alerts badge beside it, and the alerts card in
+   * `@kui/feature-alerts`. A feature may not import the shell and the shell must not *statically*
+   * import a feature — `frontend/scripts/bundle-shape.mjs` fails the build on the second — so the
+   * kernel is the one place all three can read from, and this is the one place it is constructed.
+   * A second store would be a second open count, and the count is the whole point.
+   *
+   * `load` and `openStream` are functions rather than values because the cluster changes underneath
+   * them: both read `clusterForFrame()` at the moment they are called, so the effect below can
+   * restart the store without rebuilding it. The stream goes through `deferUntilSession` for the
+   * reason the capability stream does — a cookieless `EventSource` makes the gateway mint a second
+   * session, and the loser's CSRF token is the one this client keeps.
+   */
+  const alerts = createAlerts({
+    openStream: (subscriber) =>
+      deferUntilSession(
+        () =>
+          openEventSource(
+            alertsStreamUrl(bootstrap.apiBase, clusterForFrame() ?? ""),
+            subscriber,
+          ),
+        csrf,
+      ),
+    load: (markRead) => loadAlertFeed(api, clusterForFrame() ?? "", markRead),
+    /* Which cluster the frames on this stream should be about. The store checks it, because a frame
+       naming another cluster moving this bell's count would be a number from somewhere the
+       operator is not looking — and the accessor rather than the value, so a switch is followed. */
+    cluster: () => clusterForFrame(),
+  });
+
+  /*
+   * Started per cluster.
+   *
+   * Not started at all until a cluster is chosen: both addresses name one, and a feed opened
+   * against `/clusters//alerts/events` would ask for a path that matches no route. What the restart
+   * buys is asserted in `app.render.test.tsx`'s "re-opens the alert stream against the cluster the
+   * address moved to" — a stream left pointing at the cluster the operator has left goes on
+   * delivering counts into a bell that is now describing a different one.
+   *
+   * **The cleanup is not what makes the switch safe, and saying so is the point of this sentence.**
+   * `Alerts.start()` already releases the previous handle and steps its own episode, so the old
+   * stream is closed and an in-flight read for the old cluster is discarded whether or not this
+   * returns anything. The cleanup covers the one case `start()` cannot: a frame that stops naming a
+   * cluster at all, where there is no new start to do the releasing. Dropping it therefore leaves
+   * every case here green, which is a fact about what it is for rather than a hole — the teardown
+   * on unmount is `onCleanup` below, and that one is load-bearing.
+   */
+  createEffect(
+    () => clusterForFrame(),
+    (chosen) => {
+      if (chosen === undefined) return undefined;
+      alerts.start();
+      return () => alerts.stop();
+    },
+  );
+  onCleanup(() => alerts.stop());
 
   /**
    * Whether the notifications panel is showing.
@@ -706,7 +774,10 @@ export function App() {
      * cluster has no topics. The first two are decided here because only the frame knows them; the
      * third is `topicSubtree`'s, beside the fold, where a case can call it — it used to be a
      * `names.length === 0` clause on this line defended by a comment naming `NavItem` as the real
-     * guard, and `NavItem`'s predicate was deletable with all 223 cases green at the same time.
+     * guard, and `NavItem`'s predicate was deletable at the same time with every case
+     * `pnpm -C frontend test packages/shell` runs still green — the count is whatever that command
+     * prints today, which is the point: a number frozen into this sentence would stop being true
+     * the next time anybody added a case.
      */
     const topicChildren = createMemo<readonly NavDestination[] | undefined>(() => {
       const chosen = clusterForFrame();
@@ -731,7 +802,7 @@ export function App() {
            every rule about what happens to them — the capability badge wins over a count, an
            unknown count is no badge rather than a `0`, and the tone follows the meaning — so all
            that is supplied here is the lookup. */
-        countFor: countLookup(readingValue(facts.counts)),
+        countFor: countLookup(readingValue(facts.counts), alertsBadge(alerts.openCount())),
         /* Only Topics nests. Brokers and Consumers have no tree in the design and no fold behind
            one, and a lookup that answered for every feature would be a promise this shell cannot
            keep. */
@@ -860,10 +931,33 @@ export function App() {
               }}
               notificationsOpen={noticesOpen()}
               onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
-              /* There is no notification service yet. The panel therefore opens and says there is
-               nothing, which is the honest answer — and is deliberately not the same rendering as a
-               request that failed. */
-              notifications={{ kind: "ready", notices: [] }}
+              /* The bell's two facts, and neither is folded here. The figure is the alerts
+                 service's own **cluster-wide** open count — `null` while nothing has said, which
+                 the bell renders as no badge and an accessible name that admits it, and which
+                 `openCountOf` also answers for a `0` the service's rules have never actually
+                 produced — and the mark
+                 is that service's **per-principal** unread count, a different number counted over
+                 the same store. Both are the server's; the browser recomputes neither, because the
+                 feed is paged and the bell is not. The drawer's Alerts badge and the alerts
+                 screen's card read the same accessors, which is what makes the three unable to
+                 disagree. */
+              alertsOpen={alerts.openCount()}
+              alertsUnread={alerts.unread()}
+              /* The panel is the same feed the bell counts, which is what §4.16 means by putting it
+                 in the frame rather than on a page. It was a hard-coded empty list for three waves
+                 because there was no service behind it; there is one now, and a bell counting one
+                 feed over a panel listing another would be two answers to one question. */
+              notifications={noticesOf(
+                alerts.feed(),
+                landingFor(Router, "alerts", clusterForFrame()),
+              )}
+              onMarkAllRead={() => alerts.markAllRead()}
+              /* Only where trying again could help. `forbidden` and `not_configured` arrive as
+                 sentences with no control beside them: a Try-again under a refusal teaches
+                 operators to press a button that cannot work. */
+              onRetryNotifications={
+                alerts.feed().kind === "failed" ? () => alerts.refresh() : undefined
+              }
             />
           }
         >
@@ -913,13 +1007,15 @@ export function App() {
   };
 
   return (
-    <Router>
-      {(route: RouteSectionProps) => (
-        <KuiProvider value={featureContext}>
-          <Frame route={route} />
-        </KuiProvider>
-      )}
-    </Router>
+    <AlertsProvider value={alerts}>
+      <Router>
+        {(route: RouteSectionProps) => (
+          <KuiProvider value={featureContext}>
+            <Frame route={route} />
+          </KuiProvider>
+        )}
+      </Router>
+    </AlertsProvider>
   );
 }
 
@@ -984,6 +1080,7 @@ export function topCrumbs(
     topics: "Topics",
     consumers: "Consumers",
     schemas: "Schema Registry",
+    alerts: "Alerts",
     settings: "Settings",
   };
   // "overview" adds nothing: the cluster crumb already links there, and a trail that repeats itself
@@ -1139,8 +1236,15 @@ export function environmentSwitch(
  */
 export function countLookup(
   counts: NavCounts | undefined,
+  alerts?: NavCount | undefined,
 ): (feature: FeatureRegistration) => NavCount | undefined {
-  return (feature) => counts?.[feature.id];
+  /* Alerts comes from a different store and is therefore a different argument, not a sixth member
+     of the table. The four in `counts` are the cluster store's — one query cache, four endpoints,
+     one `Reading` — while this one is the kernel's alert feed, held open by a stream for the whole
+     life of the page. Folding it into `NavCounts` would mean the cluster store either fetching a
+     feed it does not own or being handed one, and the drawer's badge would then be a *copy* of the
+     bell's number rather than the same number. */
+  return (feature) => (feature.id === "alerts" ? alerts : counts?.[feature.id]);
 }
 
 /**
@@ -1162,9 +1266,19 @@ export function currentFeatureId(pathname: string, uiPrefix: string): string | u
   if (segments.length === 0) return "overview";
   if (segments[0] === "settings") return "settings";
   if (segments[0] !== "clusters") return undefined;
+  /* The dashboard is decided **before** the sections below, and that ordering is the rule rather
+     than a tidy-up. Every test under it is a `segments.includes`, which cannot tell a section from
+     a tab of the same name — and `alerts` is exactly that: a route of its own at
+     `/clusters/<id>/alerts`, and a tab the design draws at `SCREENS-V4.md` §4.4. An unrecognised
+     tab segment falls back to the overview (`overview/tabs.ts`), so without this line
+     `/dashboard/alerts` drew the overview while the drawer highlighted Alerts and the trail said
+     "Alerts" — three signals, two of them wrong, which is the defect the dashboard and the registry
+     each had until wave 5 and the reason the case below is written. */
+  if (segments[1] !== undefined && segments[2] === "dashboard") return "overview";
   if (segments.includes("topics")) return "topics";
   if (segments.includes("consumer-groups")) return "consumers";
   if (segments.includes("schemas")) return "schemas";
+  if (segments.includes("alerts")) return "alerts";
   // `/clusters/<id>`, with or without `/dashboard/<tab>` after it. Both are the same page.
   if (segments[1] !== undefined && segments[1] !== "manage" && !segments.includes("brokers")) {
     return "overview";

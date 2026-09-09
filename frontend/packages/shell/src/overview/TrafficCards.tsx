@@ -14,8 +14,10 @@
  *    divided by an invented ceiling would have drawn beautifully and meant nothing.
  *  - **Top producers** (§4) is titled `Top producers · client.id` in the design, and a broker
  *    publishes no per-`client.id` byte rate unless quotas are configured. So the **title comes from
- *    the answer**: `producerBoard` reports which field the server filled, and the heading says the
+ *    the answer**: the server sends `measuredBy`, `producerBoard` reads it, and the heading says the
  *    same word. A tile labelled `client.id` over a topic name is exactly the defect the rule names.
+ *    The ranking also leaves out Kafka's own `__` topics, which would otherwise take the top row on
+ *    every idle cluster, and the card says how many were left out rather than showing a short list.
  *  - **Message size distribution** (§3.5) draws twelve buckets and three percentile chips. Kafka
  *    publishes a mean — bytes-in over messages-in — and no distribution at all, so this card prints
  *    the mean and says the distribution is not measured. It draws **no axis**: twelve buckets
@@ -67,9 +69,7 @@ export function RequestHandlersCard(props: { readonly state: Fetched<HandlerDocu
       title="Request handlers"
       icon="stream"
       testId="panel-request-handlers"
-      state={props.state.kind === "failed" ? "unavailable" : "ready"}
-      message={props.state.kind === "failed" ? props.state.message : undefined}
-      code={props.state.kind === "failed" ? props.state.code : undefined}
+      {...failure(props.state)}
       caption={captionOf(props.state, panel()?.caption)}
     >
       <Show
@@ -182,6 +182,15 @@ export function TopProducersCard(props: { readonly state: Fetched<ProducerDocume
     return state.kind === "ready" || state.kind === "stale" ? producerBoard(state.value) : undefined;
   };
 
+  /**
+   * The denominator every bar on this card is drawn against: the **largest** rate on it.
+   *
+   * A magnitude list compares its rows to each other, so the busiest producer fills its track and
+   * everything else is drawn as a fraction of it — which is the comparison the card exists to make.
+   * `Math.min` here would peg every row but the quietest at a full bar and destroy it, and nothing
+   * asserts a bar's width unless a case reads one, which is why `producers-empty` is not the only
+   * rendering case this card has.
+   */
   const ceiling = (): number | undefined => {
     const rates = (board()?.rows ?? [])
       .map((row) => row.bytesPerSecond)
@@ -194,9 +203,7 @@ export function TopProducersCard(props: { readonly state: Fetched<ProducerDocume
       title={producersTitle(board())}
       icon="person"
       testId="panel-top-producers"
-      state={props.state.kind === "failed" ? "unavailable" : "ready"}
-      message={props.state.kind === "failed" ? props.state.message : undefined}
-      code={props.state.kind === "failed" ? props.state.code : undefined}
+      {...failure(props.state)}
       caption={captionOf(props.state, undefined)}
     >
       <Show
@@ -247,7 +254,35 @@ export function TopProducersCard(props: { readonly state: Fetched<ProducerDocume
           </Show>
         )}
       </Show>
+      {/* Said in the card rather than left out of it. The ranking is not the exporter's whole list,
+          and a reader comparing this card against the exporter has to be able to see the difference
+          was made on purpose. The sentence appears only when there is a figure behind it — the
+          count is the server's own, never a length this browser subtracted. */}
+      <Show when={excludedSentence(board())}>
+        {(sentence) => (
+          <p class="kui-producers__excluded" role="note" data-testid="producers-excluded">
+            {sentence()}
+          </p>
+        )}
+      </Show>
     </Card>
+  );
+}
+
+/**
+ * What the card says about the rows it did not rank, or nothing at all.
+ *
+ * `undefined` at zero rather than "0 internal topics were excluded", which is the never-a-zero rule
+ * the whole dashboard keeps: a sentence about an omission that did not happen is noise on a card
+ * with four rows in it.
+ */
+export function excludedSentence(board: ProducerBoard | undefined): string | undefined {
+  const excluded = board?.internalTopicsExcluded ?? 0;
+  if (excluded === 0) return undefined;
+  return (
+    `${excluded} of Kafka's own internal ${excluded === 1 ? "topic is" : "topics are"} not ranked ` +
+    `here: ${excluded === 1 ? "it carries" : "they carry"} the cluster's own bookkeeping rather ` +
+    `than anybody's traffic.`
   );
 }
 
@@ -281,9 +316,7 @@ export function RecordSizeCard(props: { readonly state: Fetched<RecordSizeDocume
       title="Message size distribution"
       icon="chart-bars"
       testId="panel-message-sizes"
-      state={props.state.kind === "failed" ? "unavailable" : "ready"}
-      message={props.state.kind === "failed" ? props.state.message : undefined}
-      code={props.state.kind === "failed" ? props.state.code : undefined}
+      {...failure(props.state)}
       caption={captionOf(props.state, readout()?.window)}
     >
       <Show
@@ -315,6 +348,27 @@ export function RecordSizeCard(props: { readonly state: Fetched<RecordSizeDocume
 }
 
 /* --- Shared ------------------------------------------------------------------------------------- */
+
+/**
+ * The three props a failed read puts on a card, decided once for all three of them.
+ *
+ * They are one decision and not three, because they only work together: `state="unavailable"` with
+ * no `message` draws a card with an empty body, and a `message` with no `code` leaves an operator a
+ * sentence they cannot quote in a support conversation. Written out per card, the three could be —
+ * and were — replaced by a bare `state="ready"` with the whole suite green, after which a gateway
+ * error drew a healthy-looking card with no message, no `KUI-` code and no Retry.
+ *
+ * Returned as an object rather than as three accessors so that a card cannot spread two of them.
+ */
+function failure(state: Fetched<unknown>): {
+  readonly state: "unavailable" | "ready";
+  readonly message: string | undefined;
+  readonly code: string | undefined;
+} {
+  return state.kind === "failed"
+    ? { state: "unavailable", message: state.message, code: state.code }
+    : { state: "ready", message: undefined, code: undefined };
+}
 
 /**
  * A card's caption, with the stale reason in front of whatever else it had to say.

@@ -2,6 +2,8 @@ package kui.metrics.application
 
 import java.time.Instant
 
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
+
 import cats.effect.IO
 import munit.CatsEffectSuite
 
@@ -15,7 +17,15 @@ import kui.metrics.domain.*
   * back, and a stub whose behaviour is written out is the only kind whose answers can be read beside the
   * assertions that depend on them.
   */
-final class FakeSource(failure: Option[KuiError] = None) extends MetricsSourcePort[IO] {
+final class FakeSource(failure: Option[KuiError] = None, scrapedAgo: FiniteDuration = 0.seconds)
+    extends MetricsSourcePort[IO] {
+
+  /** When the newest scrape behind the three point-in-time answers was taken, relative to the moment the
+    * port is asked. Zero is a reading taken this instant; anything past the use case's `staleAfter` is
+    * last-known-good and has to come back as `Stale` rather than as `Measured`.
+    */
+  private def observed[A](asOf: Instant, value: A): Observed[A] =
+    Observed(value, asOf.minusNanos(scrapedAgo.toNanos))
 
   def throughput(range: ThroughputRange, endingAt: Instant): IO[Either[KuiError, ThroughputSeries]] =
     IO.pure(failure.toLeft(ThroughputSeries.absent(range, endingAt)))
@@ -23,14 +33,18 @@ final class FakeSource(failure: Option[KuiError] = None) extends MetricsSourcePo
   def latency(range: ThroughputRange, endingAt: Instant): IO[Either[KuiError, LatencySeries]] =
     IO.pure(failure.toLeft(LatencySeries.absent(range, endingAt)))
 
-  def requestHandlers(asOf: Instant): IO[Either[KuiError, RequestHandlerReading]] =
-    IO.pure(failure.toLeft(RequestHandlerReading(Some(0.64d), Some(0.71d), List(PurgatoryQueue("Fetch", 961)))))
+  def requestHandlers(asOf: Instant): IO[Either[KuiError, Observed[RequestHandlerReading]]] =
+    IO.pure(
+      failure.toLeft(
+        observed(asOf, RequestHandlerReading(Some(0.64d), Some(0.71d), List(PurgatoryQueue("Fetch", 481))))
+      )
+    )
 
-  def producers(count: Int, asOf: Instant): IO[Either[KuiError, TopProducers]] =
-    IO.pure(failure.toLeft(TopProducers.of(List(TopicProducer("orders.v1", 98000.0d)), count)))
+  def producers(count: Int, asOf: Instant): IO[Either[KuiError, Observed[TopProducers]]] =
+    IO.pure(failure.toLeft(observed(asOf, TopProducers.of(List(TopicProducer("orders.v1", 98000.0d)), count))))
 
-  def recordSize(asOf: Instant): IO[Either[KuiError, RecordSizeReading]] =
-    IO.pure(failure.toLeft(RecordSizeReading.from(Some(1024.0d), Some(8.0d))))
+  def recordSize(asOf: Instant): IO[Either[KuiError, Observed[RecordSizeReading]]] =
+    IO.pure(failure.toLeft(observed(asOf, RecordSizeReading.from(Some(1024.0d), Some(8.0d)))))
 }
 
 /** Which clusters this fixture knows, and which of them have a collector behind them. */
@@ -59,11 +73,16 @@ final class MetricsUseCasesSuite extends CatsEffectSuite {
   private def profile(cluster: ClusterId, hasSource: Boolean): SourceProfile =
     SourceProfile(cluster, cluster.value, hasSource)
 
+  /** The scrape cadence this suite's service is configured with, and therefore the age at which a
+    * point-in-time reading stops being current. `kui.metrics.scrapeInterval`'s shipped value.
+    */
+  private val scrapeInterval: FiniteDuration = 30.seconds
+
   private def useCase(
       profiles: List[SourceProfile],
       ports: Map[ClusterId, MetricsSourcePort[IO]] = Map.empty
   ): MetricsUseCases[IO] =
-    MetricsUseCases.make[IO](new FakeSources(profiles, ports))
+    MetricsUseCases.make[IO](new FakeSources(profiles, ports), scrapeInterval)
 
   test("a cluster KUI has never heard of is a 404 and not an empty chart") {
     useCase(List(profile(local, hasSource = false)))
@@ -192,15 +211,60 @@ final class MetricsUseCasesSuite extends CatsEffectSuite {
         IO.pure(Right(ThroughputSeries.absent(range, endingAt)))
       def latency(range: ThroughputRange, endingAt: Instant) =
         IO.pure(Right(LatencySeries.absent(range, endingAt)))
-      def requestHandlers(asOf: Instant) = IO.pure(Right(RequestHandlerReading.Empty))
+      def requestHandlers(asOf: Instant) = IO.pure(Right(Observed(RequestHandlerReading.Empty, asOf)))
       def producers(count: Int, asOf: Instant) =
-        IO.pure(Right(TopProducers(List.tabulate(count)(index => TopicProducer(s"topic-$index", 1.0d)))))
-      def recordSize(asOf: Instant) = IO.pure(Right(RecordSizeReading.Empty))
+        IO.pure(
+          Right(
+            Observed(TopProducers(List.tabulate(count)(index => TopicProducer(s"topic-$index", 1.0d)), 0), asOf)
+          )
+        )
+      def recordSize(asOf: Instant) = IO.pure(Right(Observed(RecordSizeReading.Empty, asOf)))
     }
 
     useCase(List(profile(local, hasSource = true)), Map(local -> counting)).producers(local, 3).map {
       case Right(MetricsReading.Measured(producers, _)) => assertEquals(producers.topics.size, 3)
       case other => fail(s"expected Measured, got $other")
     }
+  }
+
+  test("a reading taken within one scrape interval is current, and carries the scrape's own instant") {
+    // The other half of the stale rule, and the half that stops it from being satisfiable by answering
+    // `stale` to everything. It also pins the instant: a `Measured` stamped with `now` rather than with the
+    // scrape's own time is what let an hour-old gauge claim to be current for a whole milestone.
+    val fresh = new FakeSource(scrapedAgo = scrapeInterval - 1.second)
+
+    useCase(List(profile(local, hasSource = true)), Map(local -> fresh)).requestHandlers(local).map {
+      case Right(MetricsReading.Measured(reading, at)) =>
+        assertEquals(reading.requestHandlerIdleRatio, Some(0.64d))
+        assert(at.isBefore(Instant.now()), s"the reading's instant is the scrape's, not the request's: $at")
+      case other => fail(s"expected Measured, got $other")
+    }
+  }
+
+  test("a reading older than one scrape interval is Stale, with the figure and the instant it was taken") {
+    // An exporter that stopped answering an hour ago. The buffer still holds the last good scrape, so
+    // refusing would throw away a true number and offer a Retry; answering `Measured` would draw an
+    // hour-old idle ratio as the broker's current state. `Stale` is the one answer that is neither.
+    val old = new FakeSource(scrapedAgo = 1.hour)
+
+    useCase(List(profile(local, hasSource = true)), Map(local -> old)).requestHandlers(local).map {
+      case Right(MetricsReading.Stale(reading, at)) =>
+        assertEquals(reading.networkProcessorIdleRatio, Some(0.71d))
+        assert(at.isBefore(Instant.now().minusSeconds(1800L)), s"expected an hour-old instant, got $at")
+      case other => fail(s"expected Stale, got $other")
+    }
+  }
+
+  test("a series is never Stale, because an axis draws its own silence") {
+    // The asymmetry, asserted rather than left to be discovered. A gauge has one number and no way to show
+    // that it is an hour old; a chart has 288 buckets and draws the last hour of them blank.
+    val old = new FakeSource(scrapedAgo = 1.hour)
+
+    useCase(List(profile(local, hasSource = true)), Map(local -> old))
+      .throughput(local, ThroughputRange.Last24Hours)
+      .map {
+        case Right(MetricsReading.Measured(_, _)) => ()
+        case other => fail(s"expected Measured for a range answer, got $other")
+      }
   }
 }

@@ -162,8 +162,26 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
    * episode bump from `stop()` and deleting `polling = false` from `stop()` each left the whole
    * suite green, one masked by the other. Two guards that mask each other are one guard nobody has
    * checked. `polling` now answers only the question it is named for — whether a fallback chain is
-   * already running and a second must not be started — and each line can be deleted on its own and
-   * watched to fail.
+   * already running and a second must not be started.
+   *
+   * **Which of the three `current !== episode` lines is gated, measured rather than asserted.** The
+   * sentence that used to stand here claimed all three could be deleted one at a time and watched
+   * to fail. Two can:
+   *
+   * - the one inside `poll().then(…)` reddens *a poll answered after the episode moved is not
+   *   applied* and *a store that has been stopped does not start a poll chain*, both in
+   *   `store.test.ts`;
+   * - the one in the scheduled callback reddens *a stream that flaps twice inside one poll interval
+   *   leaves one poll chain*.
+   *
+   * The third — `tick`'s first line — cannot be reddened by anything, because every caller has just
+   * made the same test: `beginPollingFallback` raises the episode and passes it in the same
+   * statement, and the scheduled callback tests it one line above. Deleting it leaves the whole
+   * frontend suite green, re-measured for wave 6. It is kept as depth rather than as a gate, and
+   * that is the honest description of it: the day `connect()` grows a path that ends the episode
+   * synchronously between the callback's test and this one, this line is what stops an abandoned
+   * chain restarting. Saying so is the point — a line defended by a sentence claiming a test that
+   * does not exist is worse than an undefended line, because the next reader stops looking.
    */
   let episode = 0;
 
@@ -251,6 +269,13 @@ export function createCapabilities(options: CapabilitiesOptions): Capabilities {
    * per interval per open tab — so it is a fallback and never the normal path.
    */
   function beginPollingFallback(): void {
+    // `stopped` here is depth and not a gate, and it is disclosed rather than left to be found: it
+    // is unreachable through this store's own shutdown, so no case can redden it. `stop()` disposes
+    // the connection watcher before anything else, and a Solid effect that was already queued does
+    // not run after its root is disposed — measured directly, in this workspace, on Solid 2.0.0-rc.6.
+    // So the only caller of this function, `applyConnection`, cannot itself be reached once
+    // `stopped` is true. It is the exact twin of `connect()`'s `if (stopped) return;`, which *is*
+    // reachable, and it stays for the day the teardown order changes.
     if (polling || stopped) return;
     polling = true;
     episode += 1;

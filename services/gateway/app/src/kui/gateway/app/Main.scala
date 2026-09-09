@@ -32,9 +32,9 @@ import kui.observability.{KuiLogger, LogbackSelection, Telemetry}
 object Main extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] =
-    IO.delay(sys.env).flatMap(loadConfig(args, _)).flatMap {
+    IO.delay(sys.env).flatMap(serviceConfig(args, _)).flatMap {
       case Left(errors) => reportConfigProblems(errors)
-      case Right(loaded) => serve(GatewayServiceConfig.from(loaded))
+      case Right(config) => serve(config)
     }
 
   /** The configuration, with the URL policy chosen from the environment.
@@ -56,6 +56,22 @@ object Main extends IOApp {
       env: Map[String, String]
   ): IO[Either[ConfigErrors, KuiConfig]] =
     KuiConfigSource.loadFrom[IO](args, files = Nil, env, UrlPolicy.fromEnv(env))
+
+  /** The configuration this process will actually run on, policy included.
+    *
+    * The policy is derived **once** and travels with the configuration, because it is applied twice: the
+    * loader decides whether an upstream address may be configured at all, and `ResilientBackend` re-applies
+    * it to every request and every redirect. Deriving it a second time further down is what made those two
+    * disagree — a gateway with `KUI_ALLOW_PRIVATE_UPSTREAMS=true` accepted `http://localhost:8081` here and
+    * then refused every call to it as `KUI-UPSTREAM-UNAVAILABLE`, with no connection ever attempted, because
+    * the client fell back to `UpstreamConfig`'s strict default. `run` is one line over this so that the whole
+    * path an operator's environment variable travels is exercisable without setting one for the test process.
+    */
+  private[app] def serviceConfig(
+      args: List[String],
+      env: Map[String, String]
+  ): IO[Either[ConfigErrors, GatewayServiceConfig]] =
+    loadConfig(args, env).map(_.map(GatewayServiceConfig.from(_, UrlPolicy.fromEnv(env))))
 
   /** Runs until the process is asked to stop. `IO.never` is what holds it open: the server is a `Resource`,
     * so the shutdown hook that cancels this fiber is also what closes the listener gracefully.

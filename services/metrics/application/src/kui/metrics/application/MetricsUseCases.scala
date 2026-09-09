@@ -2,6 +2,8 @@ package kui.metrics.application
 
 import java.time.Instant
 
+import scala.concurrent.duration.FiniteDuration
+
 import cats.Monad
 import cats.effect.kernel.Clock
 import cats.syntax.all.*
@@ -12,7 +14,7 @@ import kui.metrics.domain.*
 
 /** What came back when KUI went to measure something.
   *
-  * Three cases and not an `Either`, because the two ways of having no number are not the same fact and the
+  * Four cases and not an `Either`, because the two ways of having no number are not the same fact and the
   * screens draw them differently (ADR-032): a deployment that configured no source is showing the
   * `NotMeasured` sentence *by design*, and an exporter that stopped answering is showing a failure worth
   * retrying. Collapsing them would put a permanently red panel in front of every operator who never asked for
@@ -31,6 +33,19 @@ enum MetricsReading[+A] {
 
   /** There is a source and it did not answer. `at` is when KUI last tried. */
   case Unreadable(failure: KuiError, at: Instant) extends MetricsReading[Nothing]
+
+  /** A real reading that is older than one scrape interval, and the instant it was actually taken.
+    *
+    * The fourth case, and it is the one a gauge needs. `Measured` is a claim about *now*; the buffer holds
+    * samples for `kui.metrics.retention` and hands out the newest it still has, so an exporter that stopped
+    * answering an hour ago leaves an hour-old idle ratio behind it. Drawn as `ok` that is last-known-good
+    * data presented as current, which is the defect the brokers screen was repaired for; drawn as
+    * `Unreadable` it would throw away a true number and offer a Retry for a card that has something to show.
+    * `stale` is the section that says both — here is the reading, here is when it was taken (ADR-052).
+    *
+    * The three range answers never produce it: a series already draws the silence as gaps on its own axis.
+    */
+  case Stale[A](value: A, at: Instant) extends MetricsReading[A]
 }
 
 object MetricsReading {
@@ -83,7 +98,20 @@ trait MetricsUseCases[F[_]] {
 
 object MetricsUseCases {
 
-  def make[F[_]: {Monad, Clock}](sources: ClusterSources[F]): MetricsUseCases[F] =
+  /** @param sources
+    *   which clusters exist and which of them have a collector behind them
+    * @param staleAfter
+    *   how old the newest scrape may be before a point-in-time reading answers `stale` rather than `ok`. It
+    *   is `kui.metrics.scrapeInterval`, because that is the smallest gap an observer can see: a reading a
+    *   whole interval old means the scrape that should have replaced it is late or did not happen. The
+    *   threshold is deliberately tight and the cost of being tight is a caption rather than a wrong number —
+    *   a card that says "this is the last answer KUI received" one interval early has still shown the true
+    *   figure and the true instant, where the reverse mistake shows an hour-old gauge as current.
+    */
+  def make[F[_]: {Monad, Clock}](
+      sources: ClusterSources[F],
+      staleAfter: FiniteDuration
+  ): MetricsUseCases[F] =
     new MetricsUseCases[F] {
 
       def throughput(
@@ -101,16 +129,16 @@ object MetricsUseCases {
       def requestHandlers(
           cluster: ClusterId
       ): F[Either[KuiError, MetricsReading[RequestHandlerReading]]] =
-        ask(cluster)((port, now) => port.requestHandlers(now))
+        current(cluster)((port, now) => port.requestHandlers(now))
 
       def producers(
           cluster: ClusterId,
           count: Int
       ): F[Either[KuiError, MetricsReading[TopProducers]]] =
-        ask(cluster)((port, now) => port.producers(count, now))
+        current(cluster)((port, now) => port.producers(count, now))
 
       def recordSize(cluster: ClusterId): F[Either[KuiError, MetricsReading[RecordSizeReading]]] =
-        ask(cluster)((port, now) => port.recordSize(now))
+        current(cluster)((port, now) => port.recordSize(now))
 
       /** The three-way answer, once.
         *
@@ -122,23 +150,47 @@ object MetricsUseCases {
       private def ask[A](cluster: ClusterId)(
           of: (MetricsSourcePort[F], Instant) => F[Either[KuiError, A]]
       ): F[Either[KuiError, MetricsReading[A]]] =
+        answer(cluster)(of)((value, now) => MetricsReading.Measured(value, now))
+
+      /** The same four-way answer for a reading that is a claim about *now*.
+        *
+        * A series carries its own axis and says "KUI was not looking" by drawing a gap. A gauge cannot: it
+        * has one number and no way to show that the number is an hour old. So the three point-in-time reads
+        * come back stamped with the scrape they were taken from ([[kui.metrics.domain.Observed]]), and a
+        * reading older than `staleAfter` becomes `Stale` — the same figure, its real instant, and a section
+        * the browser draws with the sentence rather than as a current reading.
+        */
+      private def current[A](cluster: ClusterId)(
+          of: (MetricsSourcePort[F], Instant) => F[Either[KuiError, Observed[A]]]
+      ): F[Either[KuiError, MetricsReading[A]]] =
+        answer(cluster)(of) { (observed, now) =>
+          // Strictly after, so a reading exactly one interval old is still current: the boundary belongs to
+          // the scrape that is due at it, and `isAfter` is the comparison a fixed-clock suite can pin.
+          if now.isAfter(observed.at.plusNanos(staleAfter.toNanos)) then
+            MetricsReading.Stale(observed.value, observed.at)
+          else MetricsReading.Measured(observed.value, observed.at)
+        }
+
+      private def answer[A, B](cluster: ClusterId)(
+          of: (MetricsSourcePort[F], Instant) => F[Either[KuiError, A]]
+      )(measured: (A, Instant) => MetricsReading[B]): F[Either[KuiError, MetricsReading[B]]] =
         sources.profile(cluster).flatMap {
-          case None => SourceAccess.unknownCluster(cluster).asLeft[MetricsReading[A]].pure[F]
+          case None => SourceAccess.unknownCluster(cluster).asLeft[MetricsReading[B]].pure[F]
 
           case Some(profile) =>
             sources.source(cluster).flatMap {
               // No collector to ask. Which sentence applies is decided by what the operator configured and
               // by what the adapter could make of it, never by this layer — see `SourceAccess.explain`.
               case None =>
-                (MetricsReading.NotMeasured(SourceAccess.explain(profile)): MetricsReading[A])
+                (MetricsReading.NotMeasured(SourceAccess.explain(profile)): MetricsReading[B])
                   .asRight[KuiError]
                   .pure[F]
 
               case Some(port) =>
                 Clock[F].realTimeInstant.flatMap { now =>
-                  of(port, now).map { answer =>
-                    val reading: MetricsReading[A] = answer match {
-                      case Right(value) => MetricsReading.Measured(value, now)
+                  of(port, now).map { got =>
+                    val reading: MetricsReading[B] = got match {
+                      case Right(value) => measured(value, now)
                       case Left(failure) => MetricsReading.Unreadable(failure, now)
                     }
                     reading.asRight[KuiError]

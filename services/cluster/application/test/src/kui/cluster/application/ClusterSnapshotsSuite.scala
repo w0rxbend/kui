@@ -370,6 +370,46 @@ final class ClusterSnapshotsSuite extends munit.CatsEffectSuite {
     TestControl.executeEmbed(scenario)
   }
 
+  test("aScrapeKuiCouldNotMakeRecordsNothingInTheUptimeWindow") {
+    // `load`'s failure branch says it in words — "a scrape KUI could not make is not a cluster without a
+    // controller, and a `false` here would report KUI's own outage as the cluster's" — and nothing
+    // asserted it. Inserting `uptime.record(now, false)` before the raise left
+    // `./mill services.cluster.__.test` at 509/509 green, after which three hours of KUI being unable to
+    // reach a perfectly healthy cluster draws a controller-uptime ring at about 50 %.
+    //
+    // Six hours of virtual time fills the window, then three hours in which every scrape fails, then one
+    // successful refresh so that a topology can be read at all. The window is one minute per bucket, so
+    // the failing stretch is 180 buckets: a `false` in any of them moves the percentage by tens of points
+    // and cannot be confused with rounding.
+    val scenario = ClusterRig.resource(List(prod)).use { rig =>
+      for {
+        _ <- ClusterRig.settled(rig)
+        _ <- IO.sleep(ClusterRig.UptimeWindow + 1.minute)
+        full <- rig.topology.view(prod.id)
+        _ <- rig.admin.set(_.copy(description = Left(unreachable)))
+        _ <- IO.sleep(ClusterRig.UptimeWindow / 2)
+        _ <- rig.admin.set(_.copy(description = Right(TopologyFixtures.defaultDescription)))
+        recovered <- rig.snapshots
+          .topologyOf(prod.id)
+          .flatMap(cell => cell.fold(IO.raiseError[Snapshot[ClusterTopology]](missingCell))(_.refresh))
+      } yield {
+        // The positive half, so that this case cannot pass by measuring nothing: the window really was
+        // full and really did answer before the outage.
+        val before = full.toOption.flatMap(_.topology).flatMap(_.controllerUptime)
+        assertEquals(before.flatMap(_.percent), Some(100.0d))
+
+        val uptime = recovered.value
+          .flatMap(_.controllerUptime)
+          .getOrElse(fail("a refreshed topology must carry an uptime figure"))
+
+        assertEquals(uptime.coverage, ClusterRig.UptimeWindow, "the window is still full")
+        assertEquals(uptime.percent, Some(100.0d))
+      }
+    }
+
+    TestControl.executeEmbed(scenario)
+  }
+
   test("aRefusedOptionalCallIsAnApplicationErrorAndStillYieldsATopology") {
     for {
       logger <- FakeStructuredLogger[IO]

@@ -113,6 +113,9 @@ final class MergedDocumentShapeSuite extends FunSuite {
       // relayed rather than derived as a proxy route, so `ServiceContracts` never produces it.
       kui.gateway.api.MessageStreamRoutes
         .endpoints[IO]
+        .map(_.showPathTemplate().takeWhile(_ != '?')) ++
+      kui.gateway.api.AlertsStreamRoutes
+        .endpoints[IO]
         .map(_.showPathTemplate().takeWhile(_ != '?'))
     val documented = paths.filter(_.startsWith("/api/v1/clusters"))
 

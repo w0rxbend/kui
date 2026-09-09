@@ -379,28 +379,41 @@ export const LATENCY_NOT_CONFIGURED: unknown = latencyBody({ status: "not_config
 /* --- Request handlers -------------------------------------------------------------------------- */
 
 /**
- * The design's three sub-tiles (§3.4), as a broker can actually answer them.
+ * The design's three sub-tiles (§3.4), as `services/metrics` actually answers them.
  *
- * Two ratios and a **count**, which is the whole point of the fixture. §3.4 draws "38% PURGATORY";
- * `DelayedOperationPurgatory` publishes a queue length with no ceiling, so the third reading arrives
- * as `count` with its own unit and the card must not draw it as a ring. The two ratios are `0..1`
- * and not pre-formatted percentages, so a fold that forgot to multiply would draw 0.71% idle.
+ * Two ratios and a **purgatory list**, which is the whole point of the fixture twice over. §3.4
+ * draws "38% PURGATORY"; `DelayedOperationPurgatory` publishes a queue length with no ceiling, so
+ * the third tile is a count with its own unit and no ring. And the field names are the server's —
+ * `requestHandlerIdleRatio`, `networkProcessorIdleRatio`, `purgatory` — not the `readings[]` this
+ * browser used to decode, which is the mismatch wave 6 repaired. The committed documents in
+ * `services/metrics/contract/test/resources/golden/` are what hold that true; these are the same
+ * shape written for the cases that need a variation of it.
  */
 export const HANDLER_READINGS: unknown = {
-  readings: [
-    { id: "network-idle", label: "NETWORK IDLE", ratio: 0.71 },
-    { id: "io-idle", label: "IO IDLE", ratio: 0.64 },
-    { id: "purgatory", label: "PURGATORY", count: 38, unit: "operations" },
+  requestHandlerIdleRatio: 0.64,
+  networkProcessorIdleRatio: 0.71,
+  purgatory: [
+    { operation: "Fetch", delayedRequests: 481 },
+    { operation: "Produce", delayedRequests: 0 },
   ],
 };
 
 /** A ratio the exporter served the name of and not the value. Draws the track and an em dash. */
 export const HANDLER_ONE_ABSENT: unknown = {
-  readings: [
-    { id: "network-idle", label: "NETWORK IDLE", ratio: 0.71 },
-    { id: "io-idle", label: "IO IDLE", ratio: null },
-  ],
+  requestHandlerIdleRatio: null,
+  networkProcessorIdleRatio: 0.71,
+  purgatory: [],
 };
+
+/**
+ * A document this build reads nothing out of: no ratio named, no queue served.
+ *
+ * It is what an older or a different server would send, and it is the state the card's own sentence
+ * exists for. `services/metrics` cannot produce it — its buffer refuses a scrape carrying none of
+ * the three rather than answering an empty document — so it is written here rather than committed
+ * as a golden.
+ */
+export const HANDLERS_NOTHING_READ: unknown = {};
 
 export const handlersBody = (section: unknown): unknown => ({ requestHandlers: section });
 export const handlersOk = (document: unknown): unknown =>
@@ -410,28 +423,46 @@ export const HANDLERS_NOT_CONFIGURED: unknown = handlersBody({ status: "not_conf
 /* --- Top producers ------------------------------------------------------------------------------ */
 
 /**
- * What an exporter without client quotas can answer: a per-**topic** byte rate.
+ * What an exporter without client quotas answers: a per-**topic** byte rate.
  *
  * §4 draws "Top producers · client.id" and a broker publishes no per-`client.id` rate unless quotas
- * are configured. This is the fixture for the card's title following the data rather than the
- * design, which is wave 5's rule 7 on the screen.
+ * are configured. `measuredBy` is what the card's title is drawn from, and the rows are `topics` of
+ * `{topic, bytesInPerSecond}` — the server's own spelling, not the `entries` of `{clientId,
+ * bytesPerSecond}` this browser used to read. The last row carries a name and no rate, which keeps
+ * its place and says so in words.
  */
 export const PRODUCERS_BY_TOPIC: unknown = {
-  entries: [
-    { topic: "orders.payments", bytesPerSecond: 5_400_000 },
-    { topic: "analytics.clicks", bytesPerSecond: 3_100_000 },
-    { topic: "inventory.stock", bytesPerSecond: 820_000 },
-    { topic: "orders.refunds", bytesPerSecond: 240_000 },
-    { topic: "audit.trail", bytesPerSecond: null },
+  measuredBy: "topic",
+  topics: [
+    { topic: "orders.payments", bytesInPerSecond: 5_400_000 },
+    { topic: "analytics.clicks", bytesInPerSecond: 3_100_000 },
+    { topic: "inventory.stock", bytesInPerSecond: 820_000 },
+    { topic: "orders.refunds", bytesInPerSecond: 240_000 },
+    { topic: "audit.trail", bytesInPerSecond: null },
   ],
+  internalTopicsExcluded: 0,
 };
 
-/** The other half of the same rule: a deployment that *does* configure quotas answers client ids. */
+/** The same rows on a cluster whose exporter also served Kafka's own topics, which are not ranked. */
+export const PRODUCERS_WITH_INTERNAL_EXCLUDED: unknown = {
+  measuredBy: "topic",
+  topics: [{ topic: "orders.payments", bytesInPerSecond: 5_400_000 }],
+  internalTopicsExcluded: 2,
+};
+
+/**
+ * The other half of the same rule: a deployment that *does* configure quotas answers client ids.
+ *
+ * No such deployment exists to test against, and that is the point of `measuredBy` being a field
+ * rather than a constant — the day one does, the heading follows the data with nothing else moving.
+ */
 export const PRODUCERS_BY_CLIENT: unknown = {
-  entries: [
-    { clientId: "checkout-svc", bytesPerSecond: 4_800_000 },
-    { clientId: "payments", bytesPerSecond: 2_200_000 },
+  measuredBy: "client.id",
+  topics: [
+    { topic: "checkout-svc", bytesInPerSecond: 4_800_000 },
+    { topic: "payments", bytesInPerSecond: 2_200_000 },
   ],
+  internalTopicsExcluded: 0,
 };
 
 export const producersBody = (section: unknown): unknown => ({ producers: section });

@@ -52,6 +52,8 @@ Sections:
    ├── kui-ksql-service        Optional    statements, push/pull queries, tables, streams
    ├── kui-metrics-service     Degradable  JMX/Prometheus scrape, inferred metrics, graphs,
    │                                       /metrics exposition
+   ├── kui-alerts-service      Degradable  rules over facts KUI already reads, the event store,
+   │                                       the feed, the open count and the acknowledgement
    └── kui-identity-service    Core*       login (form/OIDC/LDAP), sessions, roles, audit sink
                                            (* only when auth is enabled)
    ▼
@@ -109,6 +111,7 @@ Tier = what the UI does when the service is down.
 | `kui-connect-service` | Kafka Connect Management | connect clusters, connectors, tasks, plugins, validation, actions, offsets | Optional plugin |
 | `kui-ksql-service` | ksqlDB | statement execution, query streaming, tables/streams | Optional plugin |
 | `kui-metrics-service` | Kafka Observability | JMX/Prometheus scrapers, inferred metrics, graph descriptions, PromQL templates, `/metrics` exposition | Degradable |
+| `kui-alerts-service` | Alerting | the rules KUI runs over facts it already reads, the event store and its retention, the feed with its open count and per-principal read marker, and the acknowledgement | Degradable |
 | `kui-identity-service` | Application Identity and Access | authentication adapters, session store, role model and hot reload, permission query, audit sink | **Core when `kui.auth.type != disabled`**; the gateway runs anonymous when auth is disabled |
 
 Two Degradable/Optional services with different failure domains are never merged.
@@ -157,6 +160,7 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 | connect | `ConnectCluster`, `Connector`, `Task`, `Plugin` | `ConnectPort[F]` | sttp client with 409 retry (ADR-037) |
 | ksql | `Statement`, `QueryResult` stream | `KsqlPort[F]` | sttp HTTP/2 `/query-stream` with `/query` fallback |
 | metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `BrokerMetricsScraper[F]`, `MetricsStore[F]`, `TopicSnapshotSource[F]`, `GroupSnapshotSource[F]` | JMX, Prometheus HTTP, contract clients |
+| alerts | `AlertEvent` (opened-at, severity, category, resolution), `ClusterFacts`, `AlertLimits` | `ClusterFactsPort[F]`, `AlertStore[F]`, `AcknowledgementSink[F]` | kui-kafka admin, in-memory event store |
 | identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `IdentityProviderPort[F]`, `OidcProviderPort[F]`, `SessionStore[F]`, `RolePolicySource[F]`, `AuditSink[F]` | UnboundID LDAP, nimbus OIDC, bcrypt users, in-memory/Kafka session and audit sinks |
 
 The gateway has `contract` (its own `/api/v1` endpoint definitions, so
@@ -164,6 +168,24 @@ the frontend derives typed clients from them), `application` (aggregations, capa
 registry, session cache), `api` and `app`. It depends on every service's `contract` module and
 on nothing else from a service. It has no `domain` and no `infrastructure`: it holds no
 business rules (ADR-004) and its only outbound adapters are contract clients.
+
+That dependency is what routing a service *is*, and it is the one thing about a new service the
+gateway cannot do for itself. `ServiceContracts.byService` names an endpoint list; the list is a
+value in the owning service's `contract` module; a module the gateway does not depend on is a
+value it cannot name. `services.gateway.api` therefore depends on `alerts.contract.jvm`, and the
+alerts entry in `ServiceContracts` exposes its feed and acknowledgement through the same derived
+proxy path as the other services.
+
+The alerts **stream** has a second, separate requirement, and it is the same one the message
+service's browse stream has. A stream cannot be a derived proxy route — `ContractRouting` decodes
+and re-encodes, which is the wrong thing to do to a stream — so it needs a hand-written relay in
+the gateway, of which `MessageStreamRoutes` is the worked example. That relay names the upstream
+endpoint value directly, so the endpoint has to live in the service's `contract` module, where
+rule A4 lets the gateway see it: `MessageEndpoints.browseStream` is in
+`services/message/contract/src-jvm/` for exactly this reason, a JVM-only source inside a
+cross-compiled contract. `AlertsStreamEndpoint` likewise lives in
+`services/alerts/contract/src-jvm/`, and `AlertsStreamRoutes` rewrites its prefix, applies the
+gateway's RBAC check before opening the upstream, and relays its event stream.
 
 The layering rules above are checked by `./mill checkArchitecture` on every build, not by
 review (ADR-041). The task reads each module's declared `moduleDeps` and `mvnDeps` and fails on
@@ -813,10 +835,12 @@ operator requirement, documented in `docs/operations/metadata-store.md`.
 
 **Who reads the topic.** The **cluster** and **identity** services connect to the store
 directly, because they own sections and must write them. Every other Kafka-facing service
-(topic, message, consumer, schema, connect, ksql, security, metrics) receives the resolved,
+(topic, message, consumer, schema, connect, ksql, security, metrics, alerts) receives the resolved,
 redacted `ClusterProfile` over the internal contract instead: they need the profile, not the raw
-sections, they must work without store-cluster credentials, and one extra hop is cheaper than
-nine more Kafka connections and nine more holders of the encryption key. The **gateway never
+sections, they must work without store-cluster credentials, and one extra hop is cheaper than one
+more store connection and one more holder of the encryption key **per service in that list** —
+count them there rather than trusting a number written here, which is how the previous figure came
+to be one out. The **gateway never
 touches the store** (ADR-040).
 
 **Failure behavior.** When the store cluster is unreachable, the owning service keeps serving
@@ -883,9 +907,9 @@ object KafkaConfigStore:
 - Services do not open listeners of their own, and their routes are not mounted on the gateway's
   listener either: they are reachable only through the gateway's proxied routes, which is the same
   rule a distributed deployment enforces with a network policy (§14). One consequence is worth
-  recording because the alternative design does not have it — the eleven services' identical
-  `/health/live`, `/health/ready` and `/capabilities` paths never share a router, so no prefixing
-  scheme is needed and none was invented.
+  recording because the alternative design does not have it — the identical `/health/live`,
+  `/health/ready` and `/capabilities` paths of every service in §1's diagram never share a router,
+  so no prefixing scheme is needed and none was invented.
 - Session store, `RbacPolicy` and the capability registry are single in-memory instances. The
   config store and audit sink are the real Kafka adapters pointed at the single dev broker when
   `kui.store.kafka.*` is set, and the file adapter otherwise; all-in-one works either way (§10.1).
@@ -1021,9 +1045,9 @@ kui/
 ├── libs/      kernel/ contracts-core/ kafka/ kafka-auth/ serde/ serde-confluent/ filter/
 │              cache/ observability/ security-core/ http/ config/ testkit/
 ├── services/  gateway/ cluster/ topic/ message/ consumer/ security/ schema/ connect/ ksql/
-│              metrics/ identity/       (each: domain application infrastructure contract api app)
+│              metrics/ alerts/ identity/  (each: domain application infrastructure contract api app)
 ├── frontend/  packages/ api/ kernel/ shell/ feature-clusters/ feature-topics/
-│              feature-messages/ feature-consumers/ feature-schemas/
+│              feature-messages/ feature-consumers/ feature-schemas/ feature-alerts/
 │              (a pnpm/TypeScript/Vite workspace — its own build, its own image)
 ├── apps/allinone/
 ├── deployment/ docker/ compose/ helm/

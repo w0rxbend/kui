@@ -1,0 +1,207 @@
+/* ------------------------------------------------------------------------------------------------
+ * The alerts feed and the alerts screen
+ *
+ * `SCREENS-V4.md` §3.8 draws the same rows in two widths: one third of the row on the dashboard's
+ * Overview tab, full width on the Alerts screen with the age pushed to the far edge. That is one
+ * component and one modifier here, not two sheets — two stylesheets for one card is how the sentence
+ * under an empty feed comes to be styled in one place and not the other.
+ *
+ * The row's mark carries §3.9's correction in CSS as well as in markup: the *tone* is a data
+ * attribute set from the severity and the *glyph* inside it is chosen from the category, so two
+ * warnings can look alike and mean different things. Colour is never the only cue — every row states
+ * both fields in text for a screen reader, and the mark's shape does not change with the tone.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-alerts__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-alerts__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--kui-space-3);
+  padding: var(--kui-space-2) 0;
+  border-bottom: 1px solid var(--kui-color-border);
+}
+
+/* No rule under the last row: the card's own edge is already there, and two lines a few pixels
+   apart read as a rendering fault rather than as a separator. */
+.kui-alerts__row:last-child {
+  border-bottom: none;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The mark: severity as tone, category as glyph
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-alerts__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--kui-radius-md);
+  /* The neutral case is the default, so a tone this build does not set draws a legible mark rather
+     than a transparent square. */
+  color: var(--kui-color-text-muted);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-alerts__mark[data-tone="danger"] {
+  color: var(--kui-color-danger);
+  background: var(--kui-color-danger-container);
+}
+
+.kui-alerts__mark[data-tone="warning"] {
+  color: var(--kui-color-warning);
+  background: var(--kui-color-warning-container);
+}
+
+.kui-alerts__mark[data-tone="accent"] {
+  color: var(--kui-color-accent);
+  background: var(--kui-color-accent-container);
+}
+
+.kui-alerts__mark[data-tone="success"] {
+  color: var(--kui-color-success);
+  background: var(--kui-color-success-container);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The body: a bold title, an indented detail line naming the entity, and the tags
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-alerts__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-1);
+  min-width: 0;
+}
+
+.kui-alerts__title {
+  margin: 0;
+  font-weight: var(--kui-font-weight-medium);
+  color: var(--kui-color-text-strong);
+  /* Wrapping rather than truncating: an alert title names what is wrong, and half of it is worse
+     than a second line. */
+  overflow-wrap: anywhere;
+}
+
+.kui-alerts__detail {
+  margin: 0;
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.kui-alerts__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-1);
+}
+
+/* An empty tag row would still take its line-height and push every row apart by a few pixels more
+   than the rows that have tags, which reads as an alignment fault. */
+.kui-alerts__tags:empty {
+  display: none;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The end of the row: the age, and the acknowledgement
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-alerts__end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--kui-space-1);
+  flex: none;
+}
+
+.kui-alerts__age {
+  font-size: var(--kui-font-size-xs);
+  color: var(--kui-color-text-subtle);
+  /* The age is a fact about one row and is read across from it, so it must not wrap into two lines
+     and drag the row's height with it. */
+  white-space: nowrap;
+}
+
+/* The full-width layout (§3.8): the same rows, with the age at the far edge of a wider card. The
+   grid above already puts it there; what changes is that the middle column has room to be read
+   rather than to be wrapped, so the row is a single line more often than not. */
+.kui-alerts--wide .kui-alerts__row {
+  gap: var(--kui-space-4);
+  padding: var(--kui-space-3) 0;
+}
+
+.kui-alerts--wide .kui-alerts__end {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--kui-space-3);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The screen the feed is the whole body of
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-alerts-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+  padding: var(--kui-page-gutter);
+}
+
+.kui-alerts-screen__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kui-space-3);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * What KUI checked
+ *
+ * One row per rule, and the row is a sentence rather than a table cell on purpose: a rule that could
+ * not read its facts has to say so in words, and a figure column with a gap in it reads as a zero to
+ * anybody scanning. The refusal wraps under the rule's name at narrow widths rather than truncating,
+ * because half a reason is worse than none.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-alerts-rules__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-alerts-rules__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kui-space-2);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-alerts-rules__name {
+  font-family: var(--kui-font-family-mono);
+  color: var(--kui-color-text-strong);
+}
+
+.kui-alerts-rules__figure {
+  color: var(--kui-color-text);
+}
+
+.kui-alerts-rules__unmeasured,
+.kui-alerts-rules__refusal {
+  color: var(--kui-color-text-muted);
+  /* The whole width when it has to wrap: these two are the sentences that keep a figure honest. */
+  flex-basis: 100%;
+}

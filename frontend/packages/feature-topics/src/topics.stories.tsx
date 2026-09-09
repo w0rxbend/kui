@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
+import type { BulkAction } from "@kui/kernel";
 import {
   DEFAULT_TOPIC_QUERY,
   TopicListPage,
@@ -312,17 +313,80 @@ export const StatisticsLoading: StatsStory = {
 // --- Selection, and the bar it raises ------------------------------------------------------------
 
 /**
- * Two topics ticked (`M13`).
+ * The three actions `TopicsRoute` puts on the bar, with a reason attached to whichever of them the
+ * principal may not take.
+ *
+ * Spelled out here rather than imported from the route, because the route's version needs a
+ * cluster, a selection and a server to act on — and what these two stories show is the *bar*: three
+ * labels, three glyphs, and which of them are offered. The ids are the route's own, so a story that
+ * blocks `purge` blocks the control the route calls `purge`.
+ */
+const bulkActions = (blocked: Readonly<Record<string, string>> = {}): readonly BulkAction[] =>
+  (
+    [
+      { id: "export", label: "Export", icon: "download" },
+      { id: "purge", label: "Empty", icon: "minus", destructive: true },
+      { id: "delete", label: "Delete", icon: "trash", destructive: true },
+    ] as const
+  ).map((action) => ({
+    ...action,
+    ...(blocked[action.id] === undefined ? {} : { disabledReason: blocked[action.id] }),
+    onSelect: () => undefined,
+  }));
+
+/**
+ * Two topics ticked, and the bar the design draws under them (`M13`, §3.7).
  *
  * The set is the *page's*, not the table's: the same two ticks are on the cards in the design's own
- * capture, and switching treatment here keeps them. `Delete` is disabled with its reason rather
- * than hidden — if it disappeared for a principal without the grant, `Empty` would move into its
- * place and one gesture would do two different irreversible things to two different people.
+ * capture, and switching treatment here keeps them.
+ *
+ * The bar is passed real actions rather than left out. Without them `TopicListPage` draws no bar at
+ * all — the `Show` around it tests `bulkActions`, not the selection — so a story that ticked two
+ * rows and handed over nothing was a capture of `M13` with the subject of `M13` missing.
  */
 export const Selected: ListStory = {
-  args: { topics: TOPICS, onOpen: () => undefined, onCreate: () => undefined, viewportHeight: 420 },
+  args: {
+    topics: TOPICS,
+    onOpen: () => undefined,
+    onCreate: () => undefined,
+    bulkActions: bulkActions(),
+    viewportHeight: 420,
+  },
   play: async ({ canvasElement }) => {
-    const ticks = [...canvasElement.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
+    const ticks = [
+      ...canvasElement.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]'),
+    ];
+    ticks[0]?.click();
+    ticks[1]?.click();
+  },
+};
+
+/**
+ * The same two ticks, seen by an operator trusted to reclaim disk and not to destroy a stream.
+ *
+ * A real role, and the one the list screen's permission wiring is only observable under: this
+ * principal holds `TOPIC:MESSAGES_DELETE` and neither `TOPIC:DELETE` nor `TOPIC:CREATE`, so
+ * `Create topic` and `Delete` carry their reasons and `Empty` does not.
+ *
+ * Both refusals stay where they are, disabled (§3.7). If `Delete` were hidden instead, `Empty`
+ * would slide into the position `Delete` occupies for everybody else, and the same gesture in the
+ * same place would empty a topic for one operator and destroy it for another.
+ */
+export const SelectedWithoutTheDeleteGrant: ListStory = {
+  args: {
+    topics: TOPICS,
+    onOpen: () => undefined,
+    onCreate: () => undefined,
+    createDisabledReason: "You do not have permission to create a topic on this cluster.",
+    bulkActions: bulkActions({
+      delete: "You do not have permission to delete topics on this cluster.",
+    }),
+    viewportHeight: 420,
+  },
+  play: async ({ canvasElement }) => {
+    const ticks = [
+      ...canvasElement.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]'),
+    ];
     ticks[0]?.click();
     ticks[1]?.click();
   },

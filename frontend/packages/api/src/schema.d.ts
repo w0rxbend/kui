@@ -231,6 +231,66 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/alerts/events": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * What KUI has noticed about this cluster
+         * @description Newest first, resolved events included: the design's card draws five rows of which two are resolved. openCount and unreadCount are counted over the whole store rather than over the page. Each rule carries its own section, so a rule whose facts could not be read says so instead of contributing a zero, and one dead rule costs one row rather than the document.
+         */
+        readonly get: operations["alerts.events"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/alerts/events/{eventId}/acknowledgement": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Mark one alert event acknowledged
+         * @description Part of the alerts.event.acknowledge flow. This call changes nothing. The event stays in the feed with the name of whoever acknowledged it, which is what an incident review reads. An event that is already closed, and an id that names no event, both answer 409 KUI-INVALID-STATE: from the caller's side they are one fact, and neither message says whether the id ever existed.
+         */
+        readonly post: operations["alerts.acknowledge"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/alerts/stream": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One event whenever this cluster's alert feed changes
+         * @description Named events: 'alerts' carries {cluster, openCount, at}; 'heartbeat' keeps proxies from closing an idle connection; 'error' carries the standard envelope. A frame carries the open count and not the events, so one subscriber's unread count never reaches another's socket and a dropped frame costs a fetch rather than a stale screen.
+         */
+        readonly get: operations["alerts.stream"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/brokers": {
         readonly parameters: {
             readonly query?: never;
@@ -1112,6 +1172,15 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AcknowledgementDto
+         * @description The event as it now stands, and the cluster's open count after the acknowledgement
+         */
+        readonly AcknowledgementDto: {
+            readonly event: components["schemas"]["AlertEventDto"];
+            /** Format: int32 */
+            readonly openCount: number;
+        };
+        /**
          * AdminTuningDocument
          * @description Admin client timeouts, chunk sizes and refresh intervals, in whole milliseconds
          */
@@ -1144,6 +1213,42 @@ export interface components {
             readonly parallelism: number;
             /** Format: int64 */
             readonly timeoutMs: number;
+        };
+        /**
+         * AlertEventDto
+         * @description One row of the alerts feed. `severity` chooses the tone and `category` chooses the glyph; both derived values travel so the bell, the card and the panel cannot map them differently. `openedAt` is when KUI noticed, not when the cluster changed
+         */
+        readonly AlertEventDto: {
+            readonly category: string;
+            readonly detail: string;
+            readonly glyph: string;
+            readonly id: string;
+            /** Format: date-time */
+            readonly lastSeenAt: string;
+            /** Format: date-time */
+            readonly openedAt: string;
+            readonly resolution?: components["schemas"]["AlertResolutionDto"];
+            readonly severity: string;
+            readonly title: string;
+            readonly tone: string;
+        };
+        /**
+         * AlertFeedResponse
+         * @description What KUI has noticed about this cluster, or the reason it cannot say
+         */
+        readonly AlertFeedResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly events: unknown;
+        };
+        /**
+         * AlertResolutionDto
+         * @description How an event closed: `cleared` means the condition stopped, `acknowledged` means a person said they know. `by` is set only for an acknowledgement
+         */
+        readonly AlertResolutionDto: {
+            /** Format: date-time */
+            readonly at: string;
+            readonly by?: string;
+            readonly kind: string;
         };
         /**
          * AppInfo
@@ -1357,7 +1462,7 @@ export interface components {
         readonly CompatibilityCheckRequest: {
             readonly definition: string;
             readonly references?: readonly components["schemas"]["SchemaReferenceDto"][];
-            readonly schemaType: string;
+            readonly schemaType?: string;
         };
         /**
          * CompatibilityDto
@@ -2156,7 +2261,7 @@ export interface components {
         readonly RegisterSchemaRequest: {
             readonly definition: string;
             readonly references?: readonly components["schemas"]["SchemaReferenceDto"][];
-            readonly schemaType: string;
+            readonly schemaType?: string;
         };
         /**
          * RequestHandlersResponse
@@ -2982,6 +3087,106 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content?: never;
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "alerts.events": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description How many events to return, 1 to 200 */
+                readonly limit?: number;
+                /** @description When true, this principal's read marker moves to now after unreadCount has been computed, so the caller still learns how many it had not seen. Default false, so a card polling the feed does not clear somebody's bell */
+                readonly markRead?: boolean;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AlertFeedResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "alerts.acknowledge": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The alert event's id, as the feed reported it */
+                readonly eventId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AcknowledgementDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "alerts.stream": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/event-stream": string;
+                };
             };
             readonly default: {
                 headers: {

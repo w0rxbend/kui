@@ -251,8 +251,17 @@ object CompatibilityCheckRequest {
       )
   )
 
+  /** `schemaType` is **optional in the document because it is optional in the decoder**.
+    *
+    * Tapir derives every non-`Option` field as required, so the published document listed `schemaType` in
+    * `required` while the codec above defaults it to `AVRO`. A generated client then refuses to send a body
+    * this server accepts, and the browser is told to fill in a field the server does not need — a
+    * disagreement between the two artefacts generated from this one file, which is the failure ADR-003 exists
+    * to make impossible.
+    */
   given TapirSchema[CompatibilityCheckRequest] = TapirSchema
     .derived[CompatibilityCheckRequest]
+    .modify(_.schemaType)(_.copy(isOptional = true))
     .description("A proposed schema to check against a subject. Nothing is registered")
 
   given CanEqual[CompatibilityCheckRequest, CompatibilityCheckRequest] = CanEqual.derived
@@ -291,8 +300,12 @@ object RegisterSchemaRequest {
       )
   )
 
+  /** Optional for the reason [[CompatibilityCheckRequest]]'s is: the decoder defaults it, so the document
+    * must not demand it.
+    */
   given TapirSchema[RegisterSchemaRequest] = TapirSchema
     .derived[RegisterSchemaRequest]
+    .modify(_.schemaType)(_.copy(isOptional = true))
     .description("The schema to register under this subject, and what it is written in")
 
   given CanEqual[RegisterSchemaRequest, RegisterSchemaRequest] = CanEqual.derived

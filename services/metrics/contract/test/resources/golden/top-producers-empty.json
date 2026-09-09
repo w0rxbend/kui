@@ -1,0 +1,12 @@
+{
+  "producers" : {
+    "status" : "ok",
+    "data" : {
+      "measuredBy" : "topic",
+      "topics" : [
+      ],
+      "internalTopicsExcluded" : 0
+    },
+    "fetchedAt" : "2026-09-06T12:00:00.000Z"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "latency" : {
+    "status" : "ok",
+    "data" : {
+      "window" : "24h",
+      "from" : "2026-09-06T11:45:00Z",
+      "to" : "2026-09-06T12:00:00Z",
+      "stepSeconds" : 300,
+      "buckets" : [
+        {
+          "startingAt" : "2026-09-06T11:45:00Z",
+          "produceP99Millis" : 9.0,
+          "fetchP99Millis" : 502.0
+        },
+        {
+          "startingAt" : "2026-09-06T11:50:00Z",
+          "produceP99Millis" : 7.5,
+          "fetchP99Millis" : null
+        },
+        {
+          "startingAt" : "2026-09-06T11:55:00Z",
+          "produceP99Millis" : null,
+          "fetchP99Millis" : null
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-06T12:00:00.000Z"
+  }
+}

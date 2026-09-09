@@ -25,6 +25,14 @@
  * and when nothing is unread there is no dot at all rather than a grey one. A marker that is always
  * present is a marker nobody looks at.
  *
+ * With an alerts feed behind it the bell says two things at once and they are two fields, not one:
+ * **how many events are open** is the badge's figure, taken from the server's own count and never
+ * folded from the page the browser holds; **whether this principal has read them** is the badge's
+ * tone. An alert that is open stays counted after somebody has looked at it — the card beside the
+ * bell draws `2 open` from the same store and the two must not disagree — so reading turns an
+ * alarm into a tally rather than making it vanish. Both facts are in the accessible name in words,
+ * because one of them is otherwise a colour and the other is otherwise a position.
+ *
  * Inside the panel, read items stay where they are rather than being hidden or moved. Hiding them
  * would mean an operator who read a notification by accident has no way back to it; moving them
  * would reorder the list under the pointer at the moment of the click.
@@ -49,10 +57,20 @@ import { Button, Icon, IconTile, Spinner, relativeAge, type IconName, type TileT
 /**
  * How serious one notification is.
  *
- * Four cases, matching the four the design draws. Severity chooses the tile's **tone** and nothing
- * else; see {@link NoticeCategory} for what chooses the glyph.
+ * Four cases matching the four the design draws, and a fifth that draws none of them.
+ *
+ * `unknown` is for a severity this build has no tone for — a word `services/alerts` began sending
+ * after this bundle was built. It takes the **neutral** tile, which is the only honest answer: the
+ * alarming tones would claim a seriousness nothing established, and `info`'s calm blue dot beside
+ * what might be the loudest event on the cluster is the specific misreading `@kui/kernel`'s alert
+ * vocabulary refuses to make on the shell's behalf — it carries the word verbatim and leaves the
+ * tone to whoever has one. Dropping the row instead would be worse still: an event nobody can see
+ * is an event nobody acts on.
+ *
+ * Severity chooses the tile's **tone** and nothing else; see {@link NoticeCategory} for what
+ * chooses the glyph.
  */
-export type NoticeSeverity = "info" | "success" | "warning" | "danger";
+export type NoticeSeverity = "info" | "success" | "warning" | "danger" | "unknown";
 
 /**
  * What happened, as opposed to how bad it is.
@@ -72,6 +90,10 @@ export type NoticeSeverity = "info" | "success" | "warning" | "danger";
 export type NoticeCategory =
   /** A group moving its partitions around, or a broker rejoining: the arrows of `M06`. */
   | "rebalance"
+  /** A partition with no leader. `services/alerts`' first rule, and its own glyph word. */
+  | "partition"
+  /** A partition with fewer in-sync replicas than replicas. */
+  | "replication"
   /** A log directory filling up. */
   | "storage"
   /** A connector or one of its tasks. */
@@ -112,13 +134,25 @@ export type NoticeFeed =
   | { readonly kind: "ready"; readonly notices: readonly Notice[] }
   /** We have notices, and they are out of date. Shown, with the reason. */
   | { readonly kind: "stale"; readonly notices: readonly Notice[]; readonly reason: string }
-  | { readonly kind: "failed"; readonly reason: string };
+  | { readonly kind: "failed"; readonly reason: string }
+  /**
+   * There is no feed behind this bell at all, because the deployment configures none.
+   *
+   * Its own case and emphatically not `ready` with an empty list. "Nothing to report. The cluster
+   * has been quiet." is a statement *about the cluster*, and a deployment that runs no alerts
+   * service has not established that the cluster is quiet — it has established nothing. This is
+   * ADR-032's `not_configured` rule reaching a control the rule cannot hide: the drawer's Alerts
+   * row is left out entirely, but the bell is part of the frame and predates the feed, so what it
+   * owes the reader is the sentence rather than an absence.
+   */
+  | { readonly kind: "not_configured"; readonly reason: string };
 
 const TONE: Record<NoticeSeverity, TileTone> = {
   info: "primary",
   success: "success",
   warning: "warning",
   danger: "danger",
+  unknown: "neutral",
 };
 
 /**
@@ -133,6 +167,11 @@ const SEVERITY_GLYPH: Record<NoticeSeverity, IconName> = {
   success: "check",
   warning: "warning",
   danger: "error",
+  /* The same mark `info` takes, and that is not a collapse of the two: this is the *fallback*
+     glyph, reached only when the notification also carried no category, and its whole claim is "a
+     notification happened". The seriousness is in the tile's tone, which is neutral here and blue
+     there. A glyph invented for the unknown case would be a picture of something nobody said. */
+  unknown: "info",
 };
 
 /**
@@ -145,6 +184,15 @@ const SEVERITY_GLYPH: Record<NoticeSeverity, IconName> = {
  */
 const CATEGORY_GLYPH: Record<NoticeCategory, IconName> = {
   rebalance: "refresh",
+  /* The mark the topic screens already use for a partition list, for the reason the rest of this
+     table gives: a notification is a pointer at a screen, and an operator who has learned a glyph
+     on the screen it points at should not have to learn a second one here. */
+  partition: "partitions",
+  /* Replicas are a partition drawn across brokers, which is what the topology mark says and what no
+     other glyph in this set says. Not `partitions`, because a partition with no leader and a
+     partition short of replicas are the two rules an operator most needs to tell apart at a
+     glance — and they arrive as two `warning` rows with, without this, one picture. */
+  replication: "topology",
   storage: "disk",
   connector: "connect",
   schema: "schema",
@@ -163,11 +211,82 @@ export type NotificationBellProps = {
   readonly unreadCount: number;
   readonly open: boolean;
   readonly onToggle: () => void;
+  /**
+   * How many alert events are open, **as the alerts service counted them** — or `null` when
+   * nothing has said yet, and absent when this deployment has no alerts feed behind the bell.
+   *
+   * Three values and three renderings, which is the whole reason it is not a `number`:
+   *
+   * - a positive figure is the badge, and it is the server's own count and never a count of the
+   *   rows the browser happens to hold. The feed is paged and the bell is not, so a count folded
+   *   from a page is a different number wearing the same badge.
+   * - `0` is **no badge**. A permanently present marker is a marker nobody looks at, which is the
+   *   rule `countBadge` already keeps for every figure down the drawer's side.
+   * - `null` is also no badge, and for the opposite reason: nobody has said how many are open, and
+   *   a bell that draws nothing while *claiming* nothing is open is the reassuring misreading this
+   *   product refuses everywhere else. The accessible name says which of the two it is, because
+   *   the absence of a badge cannot.
+   *
+   * Absent leaves {@link unreadCount} in charge, which is what every caller that is not the frame
+   * — the stories, the notification cases — passes.
+   */
+  readonly openCount?: number | null | undefined;
+  /**
+   * Whether this principal has anything unread, from the alerts service's own per-principal unread
+   * count — never a comparison the browser made over the page it happens to hold.
+   *
+   * It chooses the badge's *tone* and never whether the badge exists: an alert that is open is
+   * open whether or not somebody has looked at it, and hiding the count once it had been read
+   * would make the bell disagree with the card beside it, which draws `2 open` from the same
+   * store. Reading them turns the badge from an alarm into a tally.
+   *
+   * Not carried by colour alone: the accessible name says "unread" in words.
+   */
+  readonly unread?: boolean | undefined;
 };
 
 export function NotificationBell(props: NotificationBellProps) {
-  const label = () =>
-    props.unreadCount > 0 ? `Notifications, ${props.unreadCount} unread` : "Notifications, none unread";
+  /* `undefined` means the caller supplied no feed at all, which is not the same as a feed that has
+     answered `null`. The nullish coalescing has to keep those apart, so the test is explicit. */
+  const alerts = () => props.openCount !== undefined;
+
+  /**
+   * What the badge says, or `undefined` when there is no badge to draw.
+   *
+   * A **string**, so that the `Show` below cannot be defeated by a falsy zero. No branch here can
+   * produce a `0` — both are guarded by `> 0` — but `<Show when={aNumber()}>` is the exact shape
+   * that made the storage meter draw an em dash over a disk it had read perfectly, one file over,
+   * and a rule that is only safe because of a guard three lines away is a rule waiting to be
+   * edited into a defect. Beyond nine it is `9+`: a three-digit badge is wider than the bell.
+   */
+  const badgeText = (): string | undefined => {
+    const open = props.openCount;
+    const count =
+      open === undefined
+        ? props.unreadCount
+        : open !== null && Number.isFinite(open)
+          ? open
+          : 0;
+    return count > 0 ? (count > 9 ? "9+" : String(count)) : undefined;
+  };
+
+  const label = () => {
+    if (!alerts()) {
+      return props.unreadCount > 0
+        ? `Notifications, ${props.unreadCount} unread`
+        : "Notifications, none unread";
+    }
+    const open = props.openCount;
+    /* The three sentences the three values need. "None open" for a `null` would be a claim about
+       the cluster that nothing measured — the same defect as a `0` badge, moved into the words a
+       screen reader is given. */
+    if (open === null || !Number.isFinite(open)) {
+      return "Notifications, the number of open alerts is not known";
+    }
+    if (open === 0) return "Notifications, no open alerts";
+    const read = props.unread === true ? ", unread" : "";
+    return `Notifications, ${open} open ${open === 1 ? "alert" : "alerts"}${read}`;
+  };
 
   return (
     <button
@@ -180,12 +299,20 @@ export function NotificationBell(props: NotificationBellProps) {
       onClick={() => props.onToggle()}
     >
       <Icon name="bell" size="18px" />
-      <Show when={props.unreadCount > 0}>
-        {/* Decoration: the count is already in the accessible name above. Beyond nine it becomes
-            "9+", because a three-digit badge is wider than the bell it hangs off. */}
-        <span class="kui-bell__badge" aria-hidden="true">
-          {props.unreadCount > 9 ? "9+" : props.unreadCount}
-        </span>
+      <Show when={badgeText()}>
+        {(text) => (
+          /* Decoration: the count and the read state are both already in the accessible name
+             above, so neither reaches a screen-reader user through a colour or a position. */
+          <span
+            class={[
+              "kui-bell__badge",
+              { "kui-bell__badge--read": alerts() && props.unread !== true },
+            ]}
+            aria-hidden="true"
+          >
+            {text()}
+          </span>
+        )}
       </Show>
     </button>
   );
@@ -248,6 +375,17 @@ export function NotificationPanel(props: NotificationPanelProps) {
                 Try again
               </Button>
             </Show>
+          </div>
+        )}
+      </Show>
+
+      {/* No retry beside it, deliberately: nothing here failed, so there is nothing to try again.
+          A refresh control under this sentence would suggest the deployment might be one press
+          away from having an alerts service. */}
+      <Show when={props.feed.kind === "not_configured" ? props.feed : undefined}>
+        {(absent) => (
+          <div class="kui-notices__state">
+            <p>{absent().reason}</p>
           </div>
         )}
       </Show>

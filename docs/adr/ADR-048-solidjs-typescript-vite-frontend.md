@@ -118,16 +118,16 @@ and are the subject of a lint rule (SOL-006).
 largest cost of leaving Scala.js, and the only acceptable answer is a mechanism that fails the
 **build**, not the browser.
 
-<!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -->
+<!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -- claims: paths-and-schemas, openapi-version, csrf-operations, principal-operations, principal-paths, if-match-operations -->
 **The source document.** The committed OpenAPI documents are the asset: `docs/api/openapi.json`
-(54 paths and 150 schemas, OpenAPI 3.1.0) is emitted by
+(57 paths and 154 schemas, OpenAPI 3.1.0) is emitted by
 `kui.gateway.api.openapi.OpenApiDocument` from the gateway's Tapir endpoints, and each service
 emits its own beside it. They are regenerated and diff-checked by the build already
 (`openApi` / `openApiCheck`), so they cannot drift from the server.
 
 **They cannot be used directly, and finding out why is the reason this section exists.** The
-committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 50 of
-its 65 operations, across 39 of its 54 paths, and `If-Match` on 2 operations more. But ADR-020
+committed aggregate describes the *service-facing* contract. It declares `X-Kui-Principal` on 52 of
+its 68 operations, across 41 of its 57 paths, and `If-Match` on 2 operations more. But ADR-020
 makes that header a signed statement the **gateway** mints, and ADR-040 makes the gateway **strip
 every inbound `X-Kui-*` header from browsers at the edge**. Generating a browser client from that
 document produces types that oblige every call site to supply an internal trust header the
@@ -140,7 +140,7 @@ So:
 - The gateway's existing generator gains a second output, **`docs/api/openapi.browser.json`** —
   the *edge view*: the aggregate with every `X-Kui-*` header parameter removed, produced by the
   same projection that `EdgeHeaders.strip` applies at runtime, in the same module, from the
-  same list. `X-Csrf-Token` on 20 operations and `If-Match` on 2 operations **stay**, because the
+  same list. `X-Csrf-Token` on 21 operations and `If-Match` on 2 operations **stay**, because the
   browser genuinely does send those and the types should force it to.
 - It is committed and `--check`ed exactly like the existing documents, so a contract change that
   is not regenerated fails CI.

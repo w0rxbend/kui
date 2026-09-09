@@ -1464,6 +1464,11 @@ object services extends Module {
         // not_configured and the dashboard's metrics cards keep their written sentence. One entry per
         // service in `ServiceContracts`, one module dependency here.
         metrics.contract.jvm,
+        // The alerts service's contract, and the ninth entry. Same rule A11 edge as the eight above: the
+        // gateway holds the published endpoint values and nothing else of `services/alerts`. The stream
+        // endpoint lives in that contract module's JVM half for exactly this reason -- a relay has to be
+        // written against an endpoint value the gateway can see.
+        alerts.contract.jvm,
         // The identity service's contract. Alone among them it is *not* proxied: `AuthRoutes` calls its
         // login, password and OpenID Connect endpoints itself, because a sign-in has to end in a session
         // cookie and sessions live at the gateway.
@@ -2357,7 +2362,12 @@ object services extends Module {
         def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
 
         def mvnDeps = super.mvnDeps() ++ Seq(
-          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // Virtual time, requested by W6-A2 and added here because `build.mill` has one owner per
+          // wave: the token cache's expiry is a rule about what is true *after* a TTL, and a suite that
+          // slept through one would be slow on every run and flaky on a loaded machine. `libs/cache`'s
+          // own test module already carries this dependency for exactly that reason.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
         )
       }
     }
@@ -2668,6 +2678,221 @@ object services extends Module {
     }
   }
 
+  /** `kui-alerts-service`: the rules KUI runs over facts it already measures, and the feed they open.
+    *
+    * The **ninth** service, and the first written against the worked example rather than inventing one. It
+    * is the metrics service's shape with two differences that are the whole of M8: it keeps a **store**,
+    * because "a log directory crossed 80% an hour ago" is a fact with a lifetime and a `SnapshotCell` only
+    * ever holds a now; and it has one **mutation**, because acknowledging an alert is a write somebody has
+    * to be named for.
+    *
+    * It holds a Kafka admin client. The facts its rules read — offline partitions, under-replicated
+    * partitions, a group stuck rebalancing, a log directory past a threshold — are all `AdminClient` facts,
+    * and reading them through another KUI service would make one service's rules a property of another
+    * service's paging (`KafkaPartitionSweeper`'s own argument, one service over).
+    */
+  object alerts extends Module {
+
+    /** The rules themselves, and nothing that can perform I/O.
+      *
+      * Rule A1 allows it `libs/kernel` and cats-core, nothing else — and that is load bearing here rather
+      * than incidental: `AlertThresholds` lives in `libs/config`, which the domain may not see, so the fold
+      * takes an `AlertLimits` of its own and the composition root maps between them. The alternative would
+      * be a rules engine that could not be evaluated without a configuration file, which is a rules engine
+      * nobody can test one rule at a time.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The use cases: read the feed, acknowledge one event, run one evaluation pass.
+      *
+      * `libs.securityCore.jvm` is here for `Principal`, `MutationOutcome` and `AuditPrincipal`, which
+      * ADR-047 declares once for every service that writes an audit record rather than once per service —
+      * the same edge the consumer and topic services declare, and for the same reason. `fs2-core` is here
+      * for `AlertStore.changes`, which is what makes the bell and the card read one source (ADR-035).
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain, libs.securityCore.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The adapters: the admin calls the rules read, the store the events live in, and the audit line an
+      * acknowledgement writes.
+      *
+      * `libs.cache` carries the `BoundedCache` the per-principal read markers are held in — one entry per
+      * principal per cluster, bounded, so a feed that a thousand people watch cannot grow without limit.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps =
+        Seq(domain, application, libs.kafka, libs.config, libs.cache, libs.kernel.jvm, libs.observability)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification, the
+      * SSE endpoint that cannot be cross-compiled, and the OpenAPI document. It starts nothing.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-core::${Versions.fs2}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.alerts.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.alerts.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // The stub interpreter runs the real interceptor chain and the real routes without a socket,
+          // which is the only way to assert that a permission refusal happens *before* the store is
+          // written rather than that a use case would have refused if it had been called.
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}"
+        )
+      }
+    }
+
+    /** The composition root: the one place in the alerts service that constructs anything concrete. */
+    object app extends KuiJvmModule {
+      def moduleDeps =
+        Seq(api, infrastructure, libs.cache, libs.config, libs.kafka, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code, and all are needed by a process with a `main`.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // Virtual time: the evaluation loop's whole contract is about what has happened after an
+          // interval, and a suite that slept through one would be slow and flaky at once.
+          mvn"org.typelevel::cats-effect-testkit::${Versions.catsEffect}"
+        )
+      }
+    }
+
+    /** The published wire shape of `kui-alerts-service`, cross-compiled so the browser decodes exactly what
+      * this service encodes, from one source (ADR-003).
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        // `src-jvm` holds the one endpoint that cannot be cross-compiled: the change stream, whose
+        // body is an event stream and therefore needs `fs2` and a stream capability. It is in the
+        // *contract* module rather than in `api` because the gateway may see a service only through
+        // its published contract (rules A4 and A11), and the gateway is what has to hold this
+        // endpoint value in order to relay it — `services/message`'s browse stream is in the same
+        // position for the same reason. The browser loses nothing: it opens the address with
+        // `EventSource`, and the frames' DTO is declared in the shared sources.
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"co.fs2::fs2-core::${Versions.fs2}",
+          // For `sttp.capabilities.fs2.Fs2Streams`. It arrives through the sttp client's fs2
+          // module, which is the coordinate this build already pins for it everywhere else.
+          mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}"
+        )
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+    }
+  }
+
 }
 
 /** Deployable processes assembled out of the modules above.
@@ -2718,6 +2943,11 @@ object apps extends Module {
       // like a service that is down.
       services.metrics.app,
       services.metrics.api,
+      // The alerts service, whose rules read facts this binary is already reading for four other
+      // services. It is here rather than optional because the bell in the frame is drawn on every
+      // screen: a deployment without this service would draw a bell nothing can ever answer for.
+      services.alerts.app,
+      services.alerts.api,
       libs.config,
       libs.observability,
       libs.http
@@ -3125,6 +3355,14 @@ object deployment extends Module {
       def entryClass       = "kui.metrics.app.Main"
       def livenessPath     = "/health/live"
       def imageDescription = "KUI metrics service"
+    }
+
+    object alerts extends KuiImage {
+      def deployable       = services.alerts.app
+      def imageName        = "kui-alerts"
+      def entryClass       = "kui.alerts.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI alerts service"
     }
 
     /** The whole product in one process (ADR-005). */

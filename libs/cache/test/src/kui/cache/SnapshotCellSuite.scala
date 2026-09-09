@@ -5,7 +5,7 @@ import java.time.Instant
 import scala.concurrent.duration.*
 
 import cats.effect.testkit.TestControl
-import cats.effect.{IO, Ref, Resource}
+import cats.effect.{Deferred, IO, Ref, Resource}
 import cats.syntax.all.*
 
 import kui.kernel.ClusterId
@@ -413,5 +413,54 @@ final class SnapshotCellSuite extends KuiIOSuite {
     assertEquals(online.toEither, Right("v"))
     assertEquals(offline.toEither.isLeft, true)
     assertEquals(Snapshot.initializing[String].toEither.isLeft, true)
+  }
+
+  test("a refresh cancelled mid-flight still wakes the callers waiting on it") {
+    // The `Outcome.Canceled()` arm of `refresh`'s `guaranteeCase`, whose comment states the failure
+    // exactly — "a cancelled refresh leaves every later caller blocked on a `Deferred` nobody will ever
+    // complete — a screen that never loads again, which is the exact failure this type exists to
+    // prevent" — and which was held by nothing: splitting the arm so that a cancellation completes
+    // nobody left 800 cases over eight `libs` modules green, and 214 more in the three service
+    // application suites that build on this type.
+    //
+    // Cancellation is not exotic here. Every reader of a cell reaches it through an HTTP request, and a
+    // browser that navigates away cancels the fiber that was loading.
+    val program = for {
+      gate <- Deferred[IO, Unit]
+      attempts <- Ref.of[IO, Int](0)
+      load = attempts.getAndUpdate(_ + 1).flatMap { attempt =>
+        // The first load is the background loop's and answers at once, so the cell has a value to
+        // hand back; every later one blocks until the test opens the gate.
+        if attempt == 0 then IO.pure("v0") else gate.get.as("v1")
+      }
+      outcome <- cellOf(load).use { cell =>
+        for {
+          // The supervised background loop refreshes once at acquire, and this is what makes the
+          // ordering deterministic rather than a race for the first load: under `TestControl` every
+          // runnable fibre runs before virtual time moves, so after this sleep the loop has taken its
+          // turn, answered `v0` and gone to sleep for the interval — and the next load is this test's.
+          _ <- IO.sleep(1.second)
+          loader <- cell.refresh.start
+          _ <- IO.sleep(1.second)
+          waiter <- cell.refresh.start
+          _ <- IO.sleep(1.second)
+          _ <- loader.cancel
+          // Ten seconds of virtual time. If the waiter is never completed this raises rather than
+          // hanging the suite, which is what makes the failure a red and not a timeout in CI.
+          woken <- waiter.joinWithNever.timeout(10.seconds)
+          // And the slot is free again: the next caller loads rather than queueing behind a fiber
+          // that no longer exists.
+          _ <- gate.complete(())
+          renewed <- cell.refresh.timeout(10.seconds)
+        } yield (woken, renewed)
+      }
+    } yield outcome
+
+    TestControl.executeEmbed(program).map { (woken, renewed) =>
+      // The waiter is handed the state as it stands — the value the first load produced — and not an
+      // error and not a hang.
+      assertEquals(woken.value, Some("v0"))
+      assertEquals(renewed.value, Some("v1"))
+    }
   }
 }

@@ -30,8 +30,10 @@ import {
   LOADING,
   NO_DISK_SIZES,
   PARTIAL_DISKS,
+  HANDLERS_NOTHING_READ,
   PRODUCERS_BY_CLIENT,
   PRODUCERS_BY_TOPIC,
+  PRODUCERS_WITH_INTERNAL_EXCLUDED,
   RECORD_SIZE_ABSENT,
   RECORD_SIZE_MEAN,
   SPARSE_SUMMARY,
@@ -59,13 +61,21 @@ import {
   THROUGHPUT_PATH,
   UNCONFIGURED_METRICS,
   dashboardHost,
+  staticAlerts,
   stubApi,
 } from "./harness.jsx";
 import { FORBIDDEN_SENTENCE, NOT_CONFIGURED_SENTENCE, NO_SAMPLES_SENTENCE } from "./ThroughputCard.jsx";
-import { NO_DISTRIBUTION } from "./TrafficCards.jsx";
 import { notConfiguredSentence } from "./NotMeasured.jsx";
-import { HANDLERS_NOUN, PRODUCERS_NOUN } from "./TrafficCards.jsx";
-import { LATENCY_NOUN } from "./LatencyCard.jsx";
+import {
+  HANDLERS_NOUN,
+  NO_DISTRIBUTION,
+  NO_HANDLER_READINGS,
+  NO_PRODUCERS,
+  PRODUCERS_NOUN,
+  RECORD_SIZE_NOUN,
+  producersTitle,
+} from "./TrafficCards.jsx";
+import { LATENCY_NOUN, NO_LATENCY_SENTENCE } from "./LatencyCard.jsx";
 import { findViolations, mount, type Mounted } from "../chrome/testing.js";
 import type { OverviewData } from "./load.js";
 
@@ -151,6 +161,29 @@ const showMetrics = async (
 };
 
 /**
+ * The dashboard over a gateway that cannot be reached for exactly one of the five endpoints.
+ *
+ * `stubApi` refuses any path it was not given, so the failure is produced by leaving one out rather
+ * than by a second kind of stub — which keeps "the gateway did not answer" one situation on this
+ * screen instead of two.
+ */
+const showWithOneFailing = async (path: string) => {
+  const answers = Object.fromEntries(
+    Object.entries(UNCONFIGURED_METRICS).filter(([each]) => each !== path),
+  );
+  const stub = stubApi(answers);
+  const mounted = keep(
+    mount(
+      dashboardHost(`${DASHBOARD}/traffic`, () => (
+        <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />
+      ), { api: stub.api }),
+    ),
+  );
+  await settle();
+  return { ...mounted, stub };
+};
+
+/**
  * Only the throughput requests, in order.
  *
  * The Traffic tab asks five endpoints, so a case about the range selector has to say which requests
@@ -182,6 +215,56 @@ const voiceOf = (container: HTMLElement): string =>
 /** Which segment the strip has marked, read the way a screen reader reads it. */
 const currentTab = (container: HTMLElement): string | null =>
   container.querySelector('[data-testid="tab-strip"] [aria-current="page"]')?.textContent?.trim() ?? null;
+
+describe("the shared alerts card", () => {
+  it("draws the store's cluster-wide count rather than counting the page rows", async () => {
+    const alerts = staticAlerts({
+      kind: "ready",
+      value: {
+        items: [
+          {
+            id: "evt-one",
+            severity: "critical",
+            tone: "danger",
+            category: "partition",
+            glyph: "partition",
+            openedAt: "2026-09-03T09:11:12Z",
+            lastSeenAt: "2026-09-03T10:11:12Z",
+            title: "2 partitions offline",
+            detail: "no leader",
+            resolution: undefined,
+          },
+        ],
+        total: 7,
+        openCount: 7,
+        unreadCount: 2,
+        lastReadAt: undefined,
+        evaluatedAt: "2026-09-03T10:11:12Z",
+        rules: [],
+      },
+    });
+    const screen = keep(
+      mount(
+        dashboardHost(
+          DASHBOARD,
+          () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+          { alerts },
+        ),
+      ),
+    );
+    await settle();
+
+    const card = screen.container.querySelector('[data-testid="panel-alerts"]');
+    expect(card?.textContent).toContain("7 open");
+    expect(card?.textContent).toContain("2 partitions offline");
+    expect(card?.querySelectorAll("li")).toHaveLength(1);
+  });
+
+  it("mounts no alerts card for an unconfigured deployment", () => {
+    const screen = show(HEALTHY);
+    expect(screen.container.querySelector('[data-testid="panel-alerts"]')).toBeNull();
+  });
+});
 
 describe("the tab comes from the route and from nowhere else", () => {
   it("opens the storage tab for the address that names it", () => {
@@ -721,6 +804,74 @@ describe("the Traffic tab", () => {
     expect(tiles[0]?.getAttribute("aria-hidden")).toBe("true");
   });
 
+  it("draws every bar against the largest rate on the card, which is the comparison it exists for", async () => {
+    // The figure this card *is*: a magnitude list compares its rows to each other. Nothing else here
+    // reads a bar's width, so `Math.max` could be — and was — `Math.min` with the whole suite green,
+    // after which every row but the quietest is pegged full and the ranking becomes unreadable.
+    const { container } = await showMetrics({ [PRODUCERS_PATH]: producersOk(PRODUCERS_BY_TOPIC) });
+    const fills = container.querySelectorAll<HTMLElement>(
+      '[data-testid="panel-top-producers"] .kui-progress__fill',
+    );
+
+    // Four bars and not five: the fifth row's rate never arrived, and an unknown value draws no
+    // fill at all rather than an empty track that reads as a measured zero.
+    expect(fills).toHaveLength(4);
+    expect(fills[0]?.style.width).toBe("100%");
+    // 3.1 MB/s against the busiest 5.4 MB/s. Rounded here, exact in the DOM.
+    expect(Math.round(parseFloat(fills[1]?.style.width ?? "0"))).toBe(57);
+    expect(Math.round(parseFloat(fills[2]?.style.width ?? "0"))).toBe(15);
+    expect(parseFloat(fills[3]?.style.width ?? "0")).toBeLessThan(10);
+  });
+
+  it("says how many of Kafka's own topics were left out, and says nothing when none were", async () => {
+    // A ranking that quietly omits rows cannot be reconciled against the exporter it came from. The
+    // figure is the server's own — a browser that subtracted two list lengths would be reporting an
+    // omission it inferred rather than one that happened.
+    const excluded = await showMetrics({
+      [PRODUCERS_PATH]: producersOk(PRODUCERS_WITH_INTERNAL_EXCLUDED),
+    });
+    const note = excluded.container.querySelector('[data-testid="producers-excluded"]');
+    expect(note?.textContent).toContain("2 of Kafka's own internal topics are not ranked");
+
+    // And never a zero: a sentence about an omission that did not happen is noise on a full card.
+    const none = await showMetrics({ [PRODUCERS_PATH]: producersOk(PRODUCERS_BY_TOPIC) });
+    expect(none.container.querySelector('[data-testid="producers-excluded"]')).toBeNull();
+  });
+
+  it("says so in a sentence when the source answered and named nobody", async () => {
+    // Real, and not the same as no source: the exporter published the family and no line carrying a
+    // topic. A titled card with an empty body is what `fallback={undefined}` leaves here, and it is
+    // the panel-renders-nothing failure this screen exists to prevent.
+    const { container } = await showMetrics({
+      [PRODUCERS_PATH]: producersOk({ measuredBy: "topic", topics: [], internalTopicsExcluded: 0 }),
+    });
+    const card = container.querySelector('[data-testid="panel-top-producers"]');
+
+    expect(card?.textContent).toContain(NO_PRODUCERS);
+    expect(card?.querySelector(".kui-progress__fill")).toBeNull();
+    expect(card?.textContent).toContain(producersTitle({ rows: [], subject: "topic", internalTopicsExcluded: 0 }));
+  });
+
+  it("draws a failed read as an unavailable card carrying its sentence and its stable code", async () => {
+    // Three props that only work together. `state="ready"` with the message and the code dropped
+    // leaves a healthy-looking card with an empty body and nothing to quote in a support
+    // conversation — and no Retry, for the one state where retrying is the right action.
+    const { container } = await showWithOneFailing(PRODUCERS_PATH);
+    const card = container.querySelector('[data-testid="panel-top-producers"]');
+
+    // The code is what somebody quotes when they ask for help, and it is drawn in its own element.
+    expect(card?.querySelector(".kui-empty-state--unavailable")).not.toBeNull();
+    expect(card?.querySelector(".kui-empty-state__code")?.textContent).toContain("UNREACHABLE");
+    // The gateway's own sentence and not `Card`'s "There is nothing to show." fallback, which is what
+    // dropping `message` leaves behind: a card that says a failure happened and not what failed.
+    const title = card?.querySelector(".kui-empty-state__title")?.textContent ?? "";
+    expect(title).not.toBe("There is nothing to show.");
+    expect(title).toContain("KUI cannot reach the server");
+    // Not the not-configured sentence: nothing here is a deployment choice.
+    expect(card?.querySelector('[data-testid="producers-not-measured"]')).toBeNull();
+    expect(card?.textContent).not.toContain(notConfiguredSentence(PRODUCERS_NOUN));
+  });
+
   it("keeps a producer whose rate did not arrive, and says so in words", async () => {
     // Dropping the row would shorten a top-five to a top-four without saying so; drawing a zero
     // would rank it last on a measurement nobody made.
@@ -887,6 +1038,11 @@ describe("the p99 latency card", () => {
     expect(
       container.querySelectorAll('[data-testid="panel-latency"] .kui-chart-legend__value'),
     ).toHaveLength(0);
+    // And the plot says which of the two nothings this is, in the card's own words: the window is
+    // real and empty, which is not the same as a deployment that measures no latency at all.
+    expect(container.querySelector('[data-testid="panel-latency"]')?.textContent).toContain(
+      NO_LATENCY_SENTENCE,
+    );
   });
 });
 
@@ -908,12 +1064,30 @@ describe("the request-handler tiles", () => {
     // The ratio arrived as `0.64`, so a fold that forgot to multiply would print `1%`.
     expect(card?.textContent).toContain("64%");
 
-    const purgatory = card?.querySelector('[data-testid="handler-purgatory"]');
+    /* One tile per delayed operation rather than one summed tile: `Fetch` is deep by design on any
+       cluster with consumers and `Produce` being deep at all means acknowledgements are waiting on
+       replicas, so adding them makes the ordinary number hide the interesting one. */
+    const purgatory = card?.querySelector('[data-testid="handler-purgatory-fetch"]');
     expect(purgatory?.querySelector(".kui-gauge")).toBeNull();
-    expect(purgatory?.textContent).toContain("38");
-    expect(purgatory?.textContent).toContain("operations");
-    expect(purgatory?.textContent).not.toContain("38%");
-    expect(card?.textContent).toContain("queue length");
+    expect(purgatory?.textContent).toContain("481");
+    expect(purgatory?.textContent).toContain("requests");
+    expect(purgatory?.textContent).not.toContain("481%");
+    expect(card?.querySelector('[data-testid="handler-purgatory-produce"]')).not.toBeNull();
+    expect(card?.textContent).toContain("queue lengths");
+  });
+
+  it("says so in a sentence when the source answered and this build read nothing out of it", async () => {
+    // The state the two mismatched wires used to produce on every request: the section decoded, the
+    // document carried nothing this build recognises, and the card drew a titled panel. The rule is
+    // that it draws the sentence — a card with a heading and an empty body is the failure this
+    // screen exists to prevent, and it is what `fallback={undefined}` here leaves behind.
+    const { container } = await showMetrics({ [HANDLERS_PATH]: handlersOk(HANDLERS_NOTHING_READ) });
+    const card = container.querySelector('[data-testid="panel-request-handlers"]');
+
+    expect(card?.textContent).toContain(NO_HANDLER_READINGS);
+    expect(card?.querySelector(".kui-gauge")).toBeNull();
+    // And the sentence is the body, not a heading with nothing under it.
+    expect((card?.textContent ?? "").length).toBeGreaterThan("Request handlers".length + 40);
   });
 
   it("draws the plain track and an em dash for a reading with no value", async () => {
@@ -961,6 +1135,15 @@ describe("the record-size card, on a cluster that is measured", () => {
     // And the throughput card beside it really is measured, so the refusal is a refusal and not the
     // absence of the code.
     expect(throughputTable(container)).not.toBeNull();
+  });
+
+  it("names what it is not measuring when the deployment has no metrics source", async () => {
+    // The card's noun, from the card, so a change to it moves this case rather than leaving the
+    // screen and the string it exports saying different things.
+    const { container } = await showMetrics({});
+    expect(container.querySelector('[data-testid="panel-message-sizes"]')?.textContent).toContain(
+      notConfiguredSentence(RECORD_SIZE_NOUN),
+    );
   });
 
   it("says a mean that did not arrive in words rather than with a dash", async () => {

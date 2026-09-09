@@ -17,7 +17,8 @@ serves the built interface and proxies `/api/` to the gateway, so the browser se
 | `kui-message`  | Browsing records, producing, resending and purging    | 8080       | `/health/live`         |
 | `kui-consumer` | Consumer groups, their lag and the offset reset       | 8080       | `/health/live`         |
 | `kui-schema`   | Subjects, versions, schemas and compatibility. Optional in the sense that a cluster with no registry answers `not_configured`; the distributed stack still runs it, because the gateway holds its contract and a contract with no address is a screen that 404s | 8080 | `/health/live` |
-| `kui-metrics`  | Broker throughput. It measures nothing in this build and says so per cluster, which is the answer a dashboard card needs rather than a service that is missing | 8080 | `/health/live` |
+| `kui-metrics`  | Broker throughput, request latency, the handler idle ratios and the per-topic byte rates, read from a Prometheus exposition beside the broker (ADR-050). A cluster with no source configured answers `not_configured` per card, which is the answer a dashboard needs rather than a service that is missing | 8080 | `/health/live` |
+| `kui-alerts`   | The rules KUI runs over facts it already measures, and the feed they open. Each rule carries its own status, so a rule whose facts could not be read says so instead of contributing a zero | 8080 | `/health/live` |
 
 The gateway serves its health probes under the public `/api/v1` prefix and a service serves them at
 the root. That is not an inconsistency: everything a browser can reach lives under `/api/v1`, and a
@@ -27,7 +28,7 @@ reaching anyway.
 ## Building them
 
 ```
-./mill deployment.docker.__.build          # all eight
+./mill deployment.docker.__.build          # all nine
 ./mill deployment.docker.gateway.docker.build   # just one
 ```
 

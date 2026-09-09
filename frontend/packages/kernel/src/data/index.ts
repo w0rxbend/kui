@@ -15,6 +15,10 @@
  * - **{@link createCapabilities}** holds what each service can currently do, from the capability
  *   stream and, when that cannot be held open, from a poller that says so. Nothing else writes into
  *   it: a feature's own request failing is that feature's business and must never dim a capability.
+ * - **{@link createAlerts}** holds the alert feed. One subscription, one open count and one read
+ *   marker, shared by the bell in the shell's chrome and the card in `@kui/feature-alerts` — two
+ *   packages that may not see each other, and which must never be able to disagree about how many
+ *   alerts are open.
  * - **{@link createPermissions}** answers what the signed-in user may do. The grants themselves
  *   arrive with the identity, which `../state/session.ts` holds, because they change with it — so
  *   this module is the *rule* and the session is the *data*, and `grantsAllow` is the one function
@@ -104,6 +108,26 @@ export {
   type CapabilitiesOptions,
   type CapabilityNotice,
 } from "./capabilities/store.js";
+
+export {
+  decodeAlertChange,
+  decodeAlertEvent,
+  decodeAlertFeed,
+  type AlertChange,
+  type AlertEvent,
+  type AlertFeed,
+  type AlertResolution,
+  type AlertRuleReport,
+} from "./alerts/events.js";
+
+export {
+  ALERTS_EVENT_NAME,
+  ALERTS_SECTION_KEY,
+  createAlerts,
+  type Alerts,
+  type AlertsOptions,
+} from "./alerts/store.js";
+export { AlertsProvider, useAlerts } from "./alerts/context.jsx";
 
 export {
   createPermissions,

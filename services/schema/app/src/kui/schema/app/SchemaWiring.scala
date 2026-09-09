@@ -10,7 +10,7 @@ import sttp.client4.httpclient.fs2.HttpClientFs2Backend
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.Interceptor
 
-import kui.config.{ClusterConfig, RegistryAuthConfig, SchemaRegistrySettings, UrlPolicy}
+import kui.config.{ClusterConfig, RegistryAuthConfig, SafeUrl, SchemaRegistrySettings, UrlPolicy}
 import kui.contracts.capability.ServiceCapabilities
 import kui.http.health.ReadinessCheck
 import kui.http.principal.PrincipalVerification
@@ -200,7 +200,13 @@ object SchemaWiring {
       // resilient backend's decision, because failover may send it to the second address.
     } yield new RegistryHttp[F](upstream.backend, settings.urls.head, credentials)
 
-  private def upstreamConfig(
+  /** `private[app]` so that `SchemaWiringSuite` can read the two fields that decide where a request goes.
+    *
+    * The alternative is a suite that starts a server and watches which port is dialled, which is what this
+    * rule had instead of a case: nothing, because building the whole composition root needs a registry to
+    * dial. The seam is one keyword and it makes the addresses a value a case can assert.
+    */
+  private[app] def upstreamConfig(
       cluster: ClusterId,
       settings: SchemaRegistrySettings,
       policy: UrlPolicy
@@ -236,16 +242,7 @@ object SchemaWiring {
       case RegistryAuthConfig.OAuth(endpoint, _, _, _) =>
         UpstreamClient
           .resource[F](
-            UpstreamConfig(
-              name = s"${RegistryCredentials.TokenUpstreamName}.${cluster.value}",
-              urls = NonEmptyList.one(endpoint),
-              callTimeout = settings.callTimeout,
-              maxConcurrent = MaxConcurrentPerRegistry,
-              // A token request is a POST, and a duplicate one costs an extra token rather than an extra
-              // side effect: issuers treat client-credentials grants as repeatable.
-              maxRetries = 1,
-              urlPolicy = policy
-            ),
+            tokenUpstreamConfig(cluster, settings, endpoint, policy),
             transport,
             telemetry,
             SchemaApi.Id,
@@ -254,6 +251,30 @@ object SchemaWiring {
           .map(client => Some(client.backend))
       case _ => Resource.pure(None)
     }
+
+  /** The token endpoint's own upstream, as a value rather than as an expression inside a `Resource`.
+    *
+    * Lifted out for the reason [[upstreamConfig]] is `private[app]`: "the issuer's address and *only* the
+    * issuer's address" is the whole rule, and while it lived inline the only way to check it was to watch a
+    * socket. Aimed at `settings.urls` instead, every case in this service stays green and KUI posts a client
+    * secret to a Schema Registry.
+    */
+  private[app] def tokenUpstreamConfig(
+      cluster: ClusterId,
+      settings: SchemaRegistrySettings,
+      endpoint: SafeUrl,
+      policy: UrlPolicy
+  ): UpstreamConfig =
+    UpstreamConfig(
+      name = s"${RegistryCredentials.TokenUpstreamName}.${cluster.value}",
+      urls = NonEmptyList.one(endpoint),
+      callTimeout = settings.callTimeout,
+      maxConcurrent = MaxConcurrentPerRegistry,
+      // A token request is a POST, and a duplicate one costs an extra token rather than an extra
+      // side effect: issuers treat client-credentials grants as repeatable.
+      maxRetries = 1,
+      urlPolicy = policy
+    )
 
   /** One INFO line per cluster that configures a registry, and one that says when none does.
     *
@@ -264,7 +285,7 @@ object SchemaWiring {
     * The "no registry configured" line matters as much as the others: it is what tells an operator who
     * expected a Schemas tab that KUI is behaving as configured rather than failing.
     */
-  private def startupLog[F[_]: Async](
+  private[app] def startupLog[F[_]: Async](
       clusters: List[ClusterConfig],
       logger: StructuredLogger[F]
   ): F[Unit] = {

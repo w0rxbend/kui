@@ -25,11 +25,28 @@
 # ------------------------------------------------------------------------------------------------
 # WHAT CHECKS THIS FILE, AND WHAT DOES NOT. Read this before assuming a green build covers it.
 #
-# CHECKED. `ShippedConfigurationSuite` in `libs/config` loads this file through the real loader on
-# every `./mill libs.config.test`, so a key spelled wrongly, an `rbac` role naming a cluster that is
-# not here, a TOPIC permission with no `value`, or a `callTimeout` that is not shorter than
-# `kui.metrics.scrapeInterval` all fail a unit test rather than a demonstration. That row was added
-# in wave 5; before it, nothing in this repository read this file at all.
+# CHECKED, AND THE LIST THAT USED TO BE HERE NAMED FOUR THINGS OF WHICH ONE IS NOT TRUE.
+# `ShippedConfigurationSuite` in `libs/config` loads this file through the real loader on every
+# `./mill libs.config.test`. Each of these was checked by making the edit and running the suite:
+#
+#   * a key spelled wrongly anywhere in the file. The loader refuses any key it does not know, and
+#     that is what the row was originally added for.
+#   * a TOPIC permission with no `value`. Deleting `value: ".*"` from the `readers` role's TOPIC
+#     permission turns the suite red: "kui-quickstart-auth.yaml does not load".
+#   * a `callTimeout` that is not shorter than `kui.metrics.scrapeInterval`. Changing the `10s`
+#     below to `60s` turns it red with "callTimeout (60 seconds) must be shorter than
+#     kui.metrics.scrapeInterval (30 seconds, which is the default)".
+#
+# NOT CHECKED, ALTHOUGH THE SENTENCE HERE CLAIMED IT WAS. An `rbac` role naming a cluster that is
+# not in this file passes. Pointing BOTH roles at `clusters: [no-such-cluster]` leaves
+# `./mill libs.config.test` at 395/395 with this suite 14/14 green: nothing cross-references
+# `kui.rbac.roles[].clusters` against `kui.clusters[]` at load time. The two roles below would then
+# grant nothing, both accounts would sign in successfully and every screen would be empty -- which
+# is exactly the demonstration failing in front of whoever is being shown it, and is what the claim
+# was written to prevent. Closing it means a new refusal in the loader, which is a change to
+# `libs/config`'s own behaviour rather than a comment here, and it is filed as such.
+#
+# That row was added in wave 5; before it, nothing in this repository read this file at all.
 #
 # NOT CHECKED, AND IT IS DELIBERATE RATHER THAN AN OVERSIGHT. No CI job runs
 # `./docker-compose.auth.yml`, so nothing automated ever signs in as either account, and nothing
@@ -131,6 +148,41 @@ kui:
         url: "http://kafka-metrics:5556/metrics"
         kind: prometheus
         callTimeout: "10s"
+
+  # ---------------------------------------------------------------------------------------------
+  # WHAT KUI SHOULD NOTICE ABOUT THIS CLUSTER, AND WHEN.
+  #
+  # There is no on/off switch under `kui.alerts` and there deliberately is not one: every rule the
+  # alerts service runs reads a fact this product already measures, so alerting is on in every
+  # deployment and the only question is where the lines are drawn. The section is here anyway,
+  # spelled out at its own defaults, because the quickstart is what a newcomer copies and a key
+  # nobody can see is a key nobody knows they may set.
+  #
+  # These numbers are local policy rather than truths. A log directory at 80% is a quiet afternoon
+  # in one deployment and a page in another, and a consumer group that has been rebalancing for
+  # five minutes is either wedged behind a dead member or is a large group doing what large groups
+  # do. What is NOT policy is the shape of the answer: a rule whose facts cannot be read says so
+  # and contributes no event, rather than reporting a comfortable zero (ADR-053).
+  #
+  # `diskUsedCriticalPercent` has to stay above `diskUsedWarningPercent` or this file is refused at
+  # start-up, because a critical bound below the warning means the warning never fires on the way
+  # past it. That refusal is asserted by `ShippedConfigurationSuite`, which loads this file.
+  alerts:
+    # Seven days. The feed's own reading is about this week -- a relative age, an open count -- and
+    # an event store with no upper bound is a slow leak with a calendar.
+    retention: "7d"
+    # A minute, which is twice the cluster service's own snapshot cadence: evaluating faster than
+    # the facts change produces the same answer twice and costs a scrape.
+    evaluationInterval: "60s"
+    thresholds:
+      # One, because a single offline partition is data nobody can read and there is no acceptable
+      # number of them. It is a key rather than a constant because a cluster mid-migration can be
+      # knowingly noisy for an hour.
+      offlinePartitions: 1
+      underReplicatedPartitions: 1
+      rebalanceDuration: "5m"
+      diskUsedWarningPercent: 80
+      diskUsedCriticalPercent: 90
 
   # ---------------------------------------------------------------------------------------------
   # The broker this quickstart starts.

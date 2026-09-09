@@ -133,17 +133,59 @@ function healthy(...clusters: readonly string[]) {
   return {
     generatedAt: "2026-09-06T09:00:00.000Z",
     entries: clusters.flatMap((cluster) =>
-      ["cluster", "topic", "message", "consumer", "schema"].map((service) =>
+      /* `alerts` joins the five the moment the ninth service is registered: a feature with no
+         entry in the picture is `degraded` with STARTING, which draws a capability badge instead of
+         its count and no tree — so a frame that left it out would have every case below asserting
+         against a drawer no operator sees for longer than a second. */
+      ["cluster", "topic", "message", "consumer", "schema", "alerts"].map((service) =>
         entry(service, cluster, cluster),
       ),
     ),
   };
 }
 
-/** Delivers a capability frame down the stream the shell opened. */
+/**
+ * The same frame, with the alerts service reporting that this deployment configures none.
+ *
+ * A `not_configured` **entry** and not a missing one, and the difference is the whole of ADR-032:
+ * an entry saying "there is no such upstream here" hides the row, while no entry at all is a
+ * picture that has not arrived, which draws the row as degraded-with-STARTING. A fixture that
+ * simply left the service out would be testing the second and claiming the first.
+ */
+function withoutAlerts(cluster: string) {
+  return {
+    generatedAt: "2026-09-06T09:00:00.000Z",
+    entries: healthy(cluster).entries.map((row) =>
+      row.key.service === "alerts"
+        ? { ...row, state: { status: CapabilityStatuses.NotConfigured } }
+        : row,
+    ),
+  };
+}
+
+/**
+ * Delivers a capability frame down the capability stream.
+ *
+ * Found by its **address** and not as "the last stream opened", which is what this was and what
+ * stopped working the moment the shell opened a second one. The alert feed's ADR-035 subscription
+ * is opened alongside the capability stream, so `live.at(-1)` began returning it; the frame went
+ * to a reader that ignores it, every feature stayed at its start-up `degraded`, and four cases
+ * about badges and trees failed with no mention of alerts anywhere in them. The address is the
+ * thing that distinguishes the two, so the address is what this looks at.
+ */
 function announce(frame: unknown): void {
-  const stream = SilentEventSource.live.at(-1);
-  if (stream === undefined) throw new Error("the capability stream was never opened");
+  /* A reverse scan rather than `findLast`, which this project's `lib` target does not carry. The
+     latest is what a case wants: `announce` may be called after a cluster switch has replaced the
+     stream, and the stale one is closed. */
+  const stream = [...SilentEventSource.live]
+    .reverse()
+    .find((source) => source.url.includes("/capabilities/stream"));
+  if (stream === undefined) {
+    throw new Error(
+      "the capability stream was never opened; the shell opened " +
+        JSON.stringify(SilentEventSource.opened),
+    );
+  }
   stream.emit(SseEventNames.Capabilities, frame);
   flush();
 }
@@ -191,6 +233,11 @@ function mountApp() {
 
 afterEach(() => {
   SilentEventSource.live.length = 0;
+  /* And the addresses, which were not reset and so accumulated across every case in this file. A
+     case that asserts a stream was *not* opened — the deferral case below is one — would then be
+     reading a list an earlier case had filled in, and would pass or fail on the order the runner
+     happened to choose. */
+  SilentEventSource.opened.length = 0;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   /* The address and the stored selection are both global, and the shell writes to both: a case that
@@ -324,7 +371,17 @@ describe("the frame, given a cluster in the address", () => {
    * @param overrides answers replacing the six above, keyed by path — for the cases that need a
    * cluster which reports something other than the healthy fixture.
    */
-  function stubCluster(overrides: Readonly<Record<string, unknown>> = {}): void {
+  function stubCluster(
+    overrides: Readonly<Record<string, unknown>> = {},
+    /**
+     * Something to wait for before `/auth/me` answers.
+     *
+     * The one thing a start-up-ordering case cannot arrange any other way: every rule about what
+     * must not go out before the session exists is a rule about the *interval* between the request
+     * and its answer, and with an immediate stub that interval is empty.
+     */
+    holdSession?: Promise<void>,
+  ): void {
     const answers: Readonly<Record<string, unknown>> = { ...CLUSTER, ...overrides };
     vi.stubGlobal("EventSource", SilentEventSource);
     vi.stubGlobal(
@@ -334,6 +391,7 @@ describe("the frame, given a cluster in the address", () => {
           typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         const path = new URL(href, "http://kui.test").pathname;
         if (path.includes("/auth/me")) {
+          if (holdSession !== undefined) await holdSession;
           return new Response(JSON.stringify(SESSION), {
             status: 200,
             headers: { "content-type": "application/json" },
@@ -478,6 +536,14 @@ describe("the frame, given a cluster in the address", () => {
    * cluster they have just registered. The row keeps its link and its badge; what it must not grow
    * is a chevron, because a disclosure opening onto an empty list is a control that appears broken.
    *
+   * **The state is now the one the prose describes**, and it was not. This case overrode
+   * `/topics/names` alone while `/topics` went on answering `page.totalItems: 128`, so what it
+   * actually built was a cluster whose count endpoint and whose name index disagreed — a real
+   * enough state, and not the one an operator meets on a cluster they have just registered. The
+   * badge it asserted was `128` over an empty tree. Both answers say nought now, and the badge is
+   * `0`: a measured zero, from a cluster that answered, which is exactly the figure this product
+   * prints and exactly the figure it refuses to invent when nobody answered.
+   *
    * This is the whole chain, and it is deliberately not the only case on the rule. The DOM cannot
    * tell `children: []` from an absent `children` — `NavItem` draws both as a leaf, which is the
    * point — so the memo's own answer is pinned where the product decides it, in
@@ -486,7 +552,13 @@ describe("the frame, given a cluster in the address", () => {
    */
   it("a memo over an empty topic list yields no subtree", async () => {
     window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
-    stubCluster({ "/api/v1/clusters/prod-kyiv-01/topics/names": { names: ok([]) } });
+    stubCluster({
+      "/api/v1/clusters/prod-kyiv-01/topics": {
+        topics: ok({ items: [], page: { totalItems: 0 } }),
+        incompleteTopics: 0,
+      },
+      "/api/v1/clusters/prod-kyiv-01/topics/names": { names: ok([]) },
+    });
     const app = mountApp();
     await settled();
 
@@ -494,11 +566,326 @@ describe("the frame, given a cluster in the address", () => {
 
     const topics = app.host.querySelector("[data-testid='nav-topics']");
     expect(topics).not.toBeNull();
-    /* The badge is still the cluster's own figure, which is what says "no topics" here — the row
-       says it better than a disclosure over nothing would. */
-    expect(topics?.textContent).toContain("128");
+    /* The badge is the cluster's own figure, and here that figure is nought. It is drawn rather
+       than dropped because the cluster answered: an absent badge is what an *unknown* count draws,
+       and telling those two apart on this row is the whole vocabulary `NavCount` exists for. */
+    expect(topics?.querySelector(".kui-nav-item__badge")?.textContent).toBe("0");
+    expect(topics?.getAttribute("aria-label")).toContain("0");
     expect(app.host.querySelector("[data-testid='nav-topics-disclosure']")).toBeNull();
     expect(app.host.querySelector("[data-testid='nav-topics-subtree']")).toBeNull();
+
+    app.dispose();
+  });
+
+  /**
+   * The alert feed, from the address the shell asks for to the badge on the bell.
+   *
+   * Two halves of one wire, and neither is checked by the compiler yet.
+   * `frontend/packages/api/src/schema.d.ts` is generated from `docs/api/openapi.browser.json` and
+   * carries no alerts path until `services/alerts` and the gateway's routing have both landed and
+   * W6-09 has regenerated it — so `data/alerts.ts` widens the client's `get` at one line, and the
+   * *spelling* it passes is checked here instead, against the URL that actually reached `fetch`.
+   * M8's exit criterion in `docs/plan/ROADMAP.md:471-476` is what fixes both ends: the section key
+   * is `events`, the rows are `items`, and the count is `openCount`.
+   *
+   * That is the whole of the defence, and it is deliberate. Wave 5 shipped an encoder writing
+   * `topics[]` and a decoder reading `entries[]`, both unit-tested against their own shape, and the
+   * card drew "the metrics source named no producers" over a source that had named five — because
+   * nothing anywhere decoded the *other side's* document. A case that mounts the application over a
+   * document in the milestone's own spelling and looks at the bell is what that wave was missing.
+   */
+  it("asks the alerts service for its feed and draws that open count on the bell", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster({
+      "/api/v1/clusters/prod-kyiv-01/alerts/events": {
+        events: {
+          status: "ok",
+          fetchedAt: "2026-09-06T09:00:00.000Z",
+          data: {
+            /* Written the way `AlertEventDto` encodes it, four fields and not two: `severity`
+               beside `tone` and `category` beside `glyph`, because the derived halves travel so
+               that the bell, the card and the panel cannot map them differently. */
+            items: [
+              {
+                id: "evt-1",
+                severity: "critical",
+                tone: "danger",
+                category: "storage",
+                glyph: "storage",
+                openedAt: "2026-09-06T08:00:00.000Z",
+                lastSeenAt: "2026-09-06T08:55:00.000Z",
+                title: "Log directory past its critical threshold",
+                detail: "broker-3 · /data/a at 94%",
+                resolution: null,
+              },
+              {
+                id: "evt-2",
+                severity: "warning",
+                tone: "warning",
+                category: "rebalance",
+                glyph: "rebalance",
+                openedAt: "2026-09-06T07:00:00.000Z",
+                lastSeenAt: "2026-09-06T08:55:00.000Z",
+                title: "orders-consumers has been rebalancing for 4m",
+                detail: "12 members",
+                resolution: null,
+              },
+            ],
+            /* Deliberately **not** two. The feed is paged and the bell is not, so the server's own
+               count is a different number from the rows this page holds — and a bell that folded
+               the page would draw `2` here and be wrong by five. Nothing else in this case could
+               tell the two apart. */
+            openCount: 7,
+            /* Two counts and neither is folded from the other. `openCount` is what the badge draws
+               and `unreadCount` is what decides its tone, and they are both counted over the whole
+               store by the service rather than over the two rows above. */
+            unreadCount: 3,
+            lastReadAt: "2026-09-06T06:00:00.000Z",
+            /* When the rules last ran. Without it the count is not a count — see the case below,
+               and `openCountOf` in `data/alerts.ts`. */
+            evaluatedAt: "2026-09-06T08:59:00.000Z",
+          },
+        },
+      },
+    });
+    const app = mountApp();
+    await settled();
+    announce(healthy("prod-kyiv-01"));
+
+    /* The URL off the `Request` the client built, not off the argument this case passed in — the
+       client is what turns a path template and its parameters into an address, and the template is
+       the half that has no compiler behind it yet. */
+    const asked = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map(
+      (call) => {
+        const first = call[0];
+        return typeof first === "string"
+          ? first
+          : first instanceof URL
+            ? first.href
+            : (first as Request).url;
+      },
+    );
+    const feedReads = asked
+      .map((url) => new URL(url, "http://kui.test"))
+      .filter((url) => url.pathname === "/api/v1/clusters/prod-kyiv-01/alerts/events");
+    expect(feedReads).not.toHaveLength(0);
+    /* And it reads without marking. Opening a page must not silently destroy the unread set of
+       somebody who came to look at something else — `markRead` is what the "Mark all read" control
+       sends, and the store takes one endpoint with a query rather than two addresses so that these
+       two calls cannot end up spelled differently. */
+    expect(feedReads.every((url) => url.searchParams.get("markRead") === "false")).toBe(true);
+    /* And the stream, whose address needs nothing from the generated schema and is therefore the
+       half that could drift silently for ever. */
+    expect(SilentEventSource.opened).toContain(
+      "/api/v1/clusters/prod-kyiv-01/alerts/stream",
+    );
+
+    const bell = app.host.querySelector("[data-testid='notifications']")!;
+    expect(bell.querySelector(".kui-bell__badge")?.textContent).toBe("7");
+    expect(bell.getAttribute("aria-label")).toBe("Notifications, 7 open alerts, unread");
+
+    /* The drawer's Alerts row carries the same figure, from the same accessor. Two readers of one
+       store is the whole reason the store is in the kernel. */
+    const row = app.host.querySelector("[data-testid='nav-alerts']");
+    expect(row?.textContent).toContain("7");
+    expect(row?.getAttribute("aria-label")).toContain("7 open");
+
+    /* And the panel lists what the bell counted, from the same store. It was a hard-coded empty
+       list for three waves, so a bell with a number over a panel saying "the cluster has been
+       quiet" is the exact self-contradiction this wiring exists to remove. */
+    (app.host.querySelector<HTMLButtonElement>("[data-testid='notifications']"))!.click();
+    flush();
+    const panel = app.host.querySelector("[data-testid='notification-panel']")!;
+    expect(panel.textContent).toContain("Log directory past its critical threshold");
+    expect(panel.textContent).toContain("orders-consumers has been rebalancing");
+    expect(panel.textContent).not.toContain("has been quiet");
+
+    /* Mark all read is the server's decision, not the browser's: the same endpoint with its own
+       query, so that the count the bell then draws is one the service recounted rather than one
+       this tab zeroed and hoped about. */
+    const before = feedReads.length;
+    (panel.querySelector<HTMLButtonElement>(".kui-notices__mark"))!.click();
+    await settled();
+    const marked = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((call) => {
+        const first = call[0];
+        return typeof first === "string" ? first : (first as Request).url;
+      })
+      .map((url) => new URL(url, "http://kui.test"))
+      .filter((url) => url.pathname === "/api/v1/clusters/prod-kyiv-01/alerts/events");
+    expect(marked.length).toBeGreaterThan(before);
+    expect(marked.some((url) => url.searchParams.get("markRead") === "true")).toBe(true);
+
+    app.dispose();
+  });
+
+  /**
+   * The same feed, over a deployment that runs no alerts service.
+   *
+   * `not_configured` is **hidden, not empty** (ADR-032), and the two halves of that rule land in
+   * two different places because the bell is not a nav row: the drawer leaves the Alerts entry out
+   * altogether, and the bell — which is part of the frame and predates the feed — draws no badge
+   * and says in words that there is no service, rather than "the cluster has been quiet", which is
+   * a claim about a cluster nobody measured.
+   */
+  it("draws no Alerts row and claims no quiet cluster where none is configured", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster({
+      "/api/v1/clusters/prod-kyiv-01/alerts/events": {
+        events: { status: "not_configured", fetchedAt: "2026-09-06T09:00:00.000Z" },
+      },
+    });
+    const app = mountApp();
+    await settled();
+    /* The row's visibility is the **capability** picture's answer and not the feed's: ADR-032 hides
+       a feature whose upstream is not configured, and that is a fact about the deployment which the
+       gateway reports before anything is read. The feed's own `not_configured` section is what the
+       bell then has to say something honest about, which is the other half of this case. */
+    announce(withoutAlerts("prod-kyiv-01"));
+
+    expect(app.host.querySelector("[data-testid='nav-alerts']")).toBeNull();
+
+    const bell = app.host.querySelector("[data-testid='notifications']")!;
+    expect(bell.querySelector(".kui-bell__badge")).toBeNull();
+    expect(bell.getAttribute("aria-label")).toBe(
+      "Notifications, the number of open alerts is not known",
+    );
+
+    (bell as HTMLButtonElement).click();
+    flush();
+    const panel = app.host.querySelector("[data-testid='notification-panel']")!;
+    expect(panel.textContent).toContain("runs no alerts service");
+    expect(panel.textContent).not.toContain("has been quiet");
+    // Nothing failed, so there is nothing to try again.
+    expect(panel.textContent).not.toContain("Try again");
+
+    app.dispose();
+  });
+
+  /**
+   * A zero the rules have never produced, which is the worst possible thing to draw as a zero.
+   *
+   * `AlertFeed.evaluatedAt` is when `services/alerts` last ran its rules over this cluster, and it
+   * is absent when it never has here — a KUI that has just started, or whose evaluation loop has
+   * not reached this cluster yet. The feed is then perfectly well-formed and `openCount` is
+   * perfectly `0`, and a bell that drew that as "no open alerts" would be putting a confident green
+   * over a question nobody has asked. It is the storage meter's em dash inverted: there, an unknown
+   * was drawn as unreadable; here, an unlooked-at cluster would be drawn as well.
+   *
+   * The whole difference is one absent field, so nothing on the screen distinguishes the two states
+   * except the sentence — which is exactly why the sentence is the assertion.
+   */
+  it("says the open count is not known for a feed whose rules have never run", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster({
+      "/api/v1/clusters/prod-kyiv-01/alerts/events": {
+        events: {
+          status: "ok",
+          fetchedAt: "2026-09-06T09:00:00.000Z",
+          // A real, readable feed. Nothing is wrong with it; nothing has been evaluated either.
+          data: { items: [], openCount: 0, unreadCount: 0 },
+        },
+      },
+    });
+    const app = mountApp();
+    await settled();
+    announce(healthy("prod-kyiv-01"));
+
+    const bell = app.host.querySelector("[data-testid='notifications']")!;
+    expect(bell.querySelector(".kui-bell__badge")).toBeNull();
+    expect(bell.getAttribute("aria-label")).toBe(
+      "Notifications, the number of open alerts is not known",
+    );
+    // And emphatically not this, which is the sentence for a cluster the rules *have* swept.
+    expect(bell.getAttribute("aria-label")).not.toContain("no open alerts");
+
+    app.dispose();
+  });
+
+  /**
+   * Nothing goes down a stream before the session exists, and there are two streams now.
+   *
+   * Both the capability stream and the alert feed's open through `deferUntilSession`, and the
+   * reason is spelled out where the first of them is built: `openEventSource` uses the browser's
+   * native `EventSource`, which the API client's middleware never sees, so the token gate in
+   * `@kui/api` cannot hold it. A cookieless stream makes the gateway mint a session and stamp
+   * `Set-Cookie` on the answer; `/auth/me` races it, the browser keeps whichever reply lands last,
+   * and the CSRF token this client holds then belongs to the other session. Every read still works
+   * — a fresh anonymous session can read what an anonymous session can read — and every **write**
+   * is refused with "X-Csrf-Token does not match the session's token". Two cookieless streams
+   * instead of one makes it twice as likely.
+   *
+   * Removing the wrapper from either left all 500 cases in this package green, because every stub
+   * in this file answers `/auth/me` on the spot and the interval the rule is about did not exist.
+   * So this case holds that answer open and looks at the interval.
+   */
+  it("opens neither stream until the session has answered", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    stubCluster({}, held);
+
+    const app = mountApp();
+    await settled();
+    /* Not "no alerts stream": **no stream at all**. The capability stream is subject to the same
+       rule and was equally unasserted, and naming only the one this packet added would leave the
+       other free to regress. */
+    expect(SilentEventSource.opened).toEqual([]);
+
+    release!();
+    await settled();
+
+    expect(SilentEventSource.opened).toContain("/api/v1/capabilities/stream");
+    expect(SilentEventSource.opened).toContain(
+      "/api/v1/clusters/prod-kyiv-01/alerts/stream",
+    );
+
+    app.dispose();
+  });
+
+  /**
+   * Switching cluster, from the alert feed's point of view.
+   *
+   * The store is built once and restarted per cluster, and the restart is the part worth pinning:
+   * the previous cluster's stream has to be closed and a new one opened against the new address.
+   * Left open, an `EventSource` for `prod` goes on delivering counts into a bell that is now
+   * describing `staging` — a number from somewhere the operator is not looking, which is the
+   * wrong-answer-that-looks-right failure the overview's own fetch effect guards against and the
+   * reason the store also checks the cluster each frame names.
+   *
+   * Asserted on the addresses opened rather than on a mock's call count, because the address is the
+   * thing that is wrong when this breaks.
+   */
+  it("re-opens the alert stream against the cluster the address moved to", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster();
+    const app = mountApp();
+    await settled();
+    announce(healthy("prod-kyiv-01", "staging-eu-01"));
+
+    const streams = () => SilentEventSource.opened.filter((url) => url.includes("/alerts/stream"));
+    expect(streams()).toContain("/api/v1/clusters/prod-kyiv-01/alerts/stream");
+    expect(streams()).not.toContain("/api/v1/clusters/staging-eu-01/alerts/stream");
+
+    const tile = app.host.querySelector<HTMLButtonElement>(
+      "[data-testid='env-tile-staging-eu-01']",
+    );
+    expect(tile).not.toBeNull();
+    tile!.click();
+    await settled();
+
+    expect(streams()).toContain("/api/v1/clusters/staging-eu-01/alerts/stream");
+    /* And the feed was re-read for the new cluster, so the bell is not left drawing the count it
+       learned for the one the operator has left. */
+    const asked = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((call) => {
+        const first = call[0];
+        return typeof first === "string" ? first : (first as Request).url;
+      })
+      .map((url) => new URL(url, "http://kui.test").pathname);
+    expect(asked).toContain("/api/v1/clusters/staging-eu-01/alerts/events");
 
     app.dispose();
   });

@@ -19,11 +19,15 @@ import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.SseEvent
 import kui.http.upstream.CircuitEvent
 import kui.kernel.error.{ApplicationError, ErrorCode, KuiError}
-import kui.kernel.{ClusterId, RoleName, ServiceId}
+import kui.kernel.{ClusterId, RoleName, ServiceId, UserName}
 import kui.metrics.contract.MetricsEndpoints
+import kui.security.PrincipalKind
+import kui.topic.contract.TopicEndpoints
 import kui.security.rbac.{
+  Action,
   ClusterFlags,
   DefaultRole,
+  Permission,
   RbacPolicy,
   Resource as RbacResource,
   ResourcePattern,
@@ -47,9 +51,54 @@ import kui.testkit.fakes.FakeStructuredLogger
 final class PolicyRbacPreCheckSuite extends CatsEffectSuite {
 
   private val metrics = ServiceId.unsafe("metrics")
+  private val topic = ServiceId.unsafe("topic")
   private val cluster = ClusterId.unsafe("prod-eu")
 
   private val throughput = "/api/v1/clusters/prod-eu/metrics/throughput?range=24h"
+
+  /** One topic pattern, and two topics: one it names and one it does not.
+    *
+    * `orders\..*` is a full match, so `orders.v1` is inside it and `payments.v1` is not — which is the whole
+    * of what a resource pattern decides and the part of `EndpointDecision` no case in this class reached
+    * until wave 6. Every direct `rbac.check` here used to pass `requestSegments = Nil`, and both route-driven
+    * cases used cluster-scoped metrics reads, which carry no `ResourceRequirement` at all.
+    */
+  private val ordersPattern: ResourcePattern =
+    ResourcePattern.compile("orders\\..*").fold(problem => fail(problem), identity)
+
+  private val insidePattern = "/api/v1/clusters/prod-eu/topics/orders.v1"
+  private val outsidePattern = "/api/v1/clusters/prod-eu/topics/payments.v1"
+
+  /** The path segments a request to `outsidePattern` arrives with, as `ContractRouting` reads them off the
+    * request rather than off the endpoint.
+    */
+  private def segmentsOf(path: String): List[String] =
+    path.takeWhile(_ != '?').split('/').toList.filter(_.nonEmpty)
+
+  /** A grant of one topic action over one pattern, and nothing else. */
+  private def topicPermission(pattern: ResourcePattern): Permission =
+    RbacPolicy.permission(RbacResource.Topic, Some(pattern), Set(Action.TopicView))
+
+  /** A policy whose *default* role grants exactly that, so an anonymous browser request carries it.
+    *
+    * Through the default role rather than a named one because the route-driven cases go through the real
+    * session middleware, which attaches `Principal.Anonymous` when nobody has signed in. The named-role
+    * shape is exercised directly below, so both paths into `Rbac.effectivePermissions` are covered.
+    */
+  private val patternScoped: RbacPolicy =
+    RbacPolicy(Nil, Some(DefaultRole(List(topicPermission(ordersPattern)))))
+
+  /** The same grant, held by a named principal through a named role on this cluster. */
+  private val ordersRole: RbacPolicy =
+    RbacPolicy(
+      List(
+        Role(RoleName.unsafe("orders-readers"), Set(cluster), Nil, List(topicPermission(ordersPattern)))
+      ),
+      defaultRole = None
+    )
+
+  private val ada: Principal =
+    Principal(UserName.unsafe("ada"), Set(RoleName.unsafe("orders-readers")), PrincipalKind.Session)
 
   /** A policy that is **on** and grants this caller nothing.
     *
@@ -102,13 +151,13 @@ final class PolicyRbacPreCheckSuite extends CatsEffectSuite {
       (new PolicyRbacPreCheck[IO](policy, _ => IO.pure(flags), logger), logger)
     )
 
-  /** A stub metrics upstream that records every call it is given, so a denial can be observed as a call that
-    * did not happen.
+  /** A stub upstream that records every call it is given, so a denial can be observed as a call that did not
+    * happen.
     */
-  private def stubClient: IO[(ServiceClient[IO], Ref[IO, List[String]])] =
+  private def stubClient(id: ServiceId): IO[(ServiceClient[IO], Ref[IO, List[String]])] =
     Ref.of[IO, List[String]](Nil).map { calls =>
       val client = new ServiceClient[IO] {
-        val service: ServiceId = metrics
+        val service: ServiceId = id
         def circuitStates: Stream[IO, CircuitEvent] = Stream.empty
 
         def call[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any], input: I)(
@@ -130,7 +179,7 @@ final class PolicyRbacPreCheckSuite extends CatsEffectSuite {
       (client, calls)
     }
 
-  private def signals: Resource[IO, CapabilitySignals[IO]] =
+  private def signals(id: ServiceId): Resource[IO, CapabilitySignals[IO]] =
     for {
       logger <- Resource.eval(FakeStructuredLogger[IO])
       registry <- CapabilityRegistry.resource[IO](
@@ -138,17 +187,24 @@ final class PolicyRbacPreCheckSuite extends CatsEffectSuite {
         GatewayTestServer.noTelemetry,
         logger
       )
-      built <- Resource.eval(CapabilitySignals.make[IO](RegistryConfig.Default, registry, List(metrics)))
+      built <- Resource.eval(CapabilitySignals.make[IO](RegistryConfig.Default, registry, List(id)))
     } yield built
 
-  /** A gateway routing the metrics contract behind the **real** permission check. */
+  /** A gateway routing one service's published contract behind the **real** permission check.
+    *
+    * The service is a parameter because the metrics contract cannot ask the question the pattern cases ask:
+    * every metrics endpoint is `EndpointAuthorization.clusterScoped`, which carries no `ResourceRequirement`
+    * at all, so no resource pattern is ever consulted for one. `topic.get` names its topic with a path
+    * parameter, which is the shape `Permission.covers` exists for.
+    */
   private def serving[A](
-      policy: RbacPolicy
+      policy: RbacPolicy,
+      id: ServiceId = metrics
   )(body: (GatewayTestServer.Running, Ref[IO, List[String]]) => IO[A]): IO[A] =
-    (signals, Resource.eval(stubClient), Resource.eval(check(policy))).tupled.use {
+    (signals(id), Resource.eval(stubClient(id)), Resource.eval(check(policy))).tupled.use {
       case (signal, (client, calls), (rbac, _)) =>
         val routes = ContractRouting
-          .derive[IO](metrics, ServiceContracts.proxied(metrics), client, signal, rbac)
+          .derive[IO](id, ServiceContracts.proxied(id), client, signal, rbac)
           .fold(problem => fail(problem), identity)
 
         GatewayTestServer.resource(extraRoutes = routes).use(body(_, calls))
@@ -230,6 +286,94 @@ final class PolicyRbacPreCheckSuite extends CatsEffectSuite {
       rbac
         .check(Principal.Anonymous, ClusterWriteEndpoints.delete, Some(cluster), Nil)
         .map(decision => assertEquals(decision, Right(())))
+    }
+  }
+
+  test("aRoleScopedToOneTopicPatternIsRefusedARequestNamingAnother") {
+    // The resource-pattern half of the model, driven through a route so that the name being matched comes
+    // out of a real request path rather than out of a literal this file wrote. `orders\..*` is a full match,
+    // `payments.v1` is outside it, and the request is refused before the topic service is asked anything —
+    // which is the property that makes a pattern a permission boundary rather than a display filter.
+    //
+    // Until wave 6 no case in this class reached this code at all: every direct check passed
+    // `requestSegments = Nil`, and both route-driven cases used cluster-scoped metrics reads that carry no
+    // `ResourceRequirement`. `EndpointDecision`'s pattern matching was reachable from the gateway and
+    // asserted by nothing in it.
+    serving(patternScoped, topic) { (server, calls) =>
+      for {
+        response <- server.get(outsidePattern)
+        asked <- calls.get
+      } yield {
+        assertEquals(response.code.code, 403, response.body)
+        val envelope = decode[ErrorEnvelope](response.body).fold(error => fail(error.getMessage), identity)
+        assertEquals(envelope.code, "KUI-FORBIDDEN")
+        // And the refusal names nothing: a 403 that said `payments.v1` would confirm the topic exists to
+        // somebody the deployment has decided may not know that.
+        assert(!response.body.contains("payments"), response.body)
+        assertEquals(asked, Nil, "the topic service was asked about a topic the pattern does not name")
+      }
+    }
+  }
+
+  test("theSamePatternAllowsTheTopicItDoesName") {
+    // The other half, and the one that stops the case above being satisfied by a gateway that refuses every
+    // topic read. Same policy, same route, a name the pattern matches: the call goes through.
+    serving(patternScoped, topic) { (server, calls) =>
+      for {
+        response <- server.get(insidePattern)
+        asked <- calls.get
+      } yield {
+        assertNotEquals(response.code.code, 403, response.body)
+        assertEquals(asked, List("topic.get"))
+      }
+    }
+  }
+
+  test("aNamedRolesPatternIsAppliedToThePrincipalWhoHoldsIt") {
+    // The same rule reached through a *named* role rather than the default one, because
+    // `Rbac.effectivePermissions` takes two different paths to get there and a policy with a default role
+    // never exercises the first. Both directions, so neither can be met by a role that grants nothing.
+    check(ordersRole).flatMap { (rbac, _) =>
+      for {
+        allowed <- rbac.check(ada, TopicEndpoints.getTopic, Some(cluster), segmentsOf(insidePattern))
+        refused <- rbac.check(ada, TopicEndpoints.getTopic, Some(cluster), segmentsOf(outsidePattern))
+      } yield {
+        assertEquals(allowed, Right(()))
+        assert(refused.isLeft, refused.toString)
+      }
+    }
+  }
+
+  test("aNameThePatternMatchesIsStillRefusedToAPrincipalWhoHoldsNoRole") {
+    // A pattern grants nothing on its own: it is held by a role, and `ada` is the only principal in this
+    // deployment who holds that one. Without it, `orders.v1` is refused exactly as `payments.v1` is — which
+    // is what stops the two cases above from being read as "the pattern is the whole check".
+    check(ordersRole).flatMap { (rbac, _) =>
+      rbac
+        .check(Principal.Anonymous, TopicEndpoints.getTopic, Some(cluster), segmentsOf(insidePattern))
+        .map(decision => assert(decision.isLeft, decision.toString))
+    }
+  }
+
+  test("anEndpointWhoseResourceIsNotInTheRequestPathIsRefusedAndLoggedAtErrorLevel") {
+    // The `Left` arm of `EndpointDecision.decide`, which is a different thing from a denial: the question
+    // could not be *formed*, because the endpoint says its topic is at a path parameter and this request's
+    // path does not carry one. Answering "allowed" because the question could not be built is how
+    // authorization bypasses happen, so it refuses — and at error level, because it is a bug in the code
+    // rather than a fact about the caller.
+    //
+    // It is also the exact shape every direct check in this file used to take: `requestSegments = Nil`
+    // against an endpoint that needs them. That combination was passing for the wrong reason on the two
+    // metrics cases, which need no segments at all.
+    check(permissive).flatMap { (rbac, logger) =>
+      for {
+        decision <- rbac.check(ada, TopicEndpoints.getTopic, Some(cluster), Nil)
+        entries <- logger.entries
+      } yield {
+        assert(decision.isLeft, decision.toString)
+        assertEquals(entries.map(_.level), List("error"))
+        assertEquals(entries.head.context.get("endpoint"), Some("topic.get"))
+      }
     }
   }
 

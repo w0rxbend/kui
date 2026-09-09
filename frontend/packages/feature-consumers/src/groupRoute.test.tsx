@@ -1,5 +1,17 @@
 /**
- * The group page's two destructive successes, and the toast each of them owes the operator.
+ * The group page's destructive controls: who is offered them, what they ask before they run, and
+ * the toast each success owes the operator.
+ *
+ * ## What was added in wave 6, and why it is in this file
+ *
+ * The file began as the two toasts and grew the forget control's receipt. What it never had was the
+ * half **above** the receipt: whether the control is offered at all. `GroupDetail` renders each of
+ * the three disabled-with-a-reason when it is handed no callback, and `consumers.test.tsx` covers
+ * that rendering — but the three ternaries that decide which it is handed are here, in the route,
+ * and the harness could only mount the route with a `permits` that said yes. All three were
+ * therefore constants that no case in the repository could observe, and the worst of them handed an
+ * account with no reset permission a live destructive button. `testContext` takes a `permits` now,
+ * for exactly that.
  *
  * ## Why this file exists rather than another case in `consumers.test.tsx`
  *
@@ -28,8 +40,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { flush } from "solid-js";
 import { createRouter, memoryHistory } from "@solidjs/router";
-import { KuiProvider, clearToasts, toasts } from "@kui/kernel";
-import type { KuiApiClient } from "@kui/api";
+import { KuiProvider, clearToasts, toasts, type KuiContextValue } from "@kui/kernel";
+import { Actions, type KuiApiClient } from "@kui/api";
 
 import { mount, testContext } from "./testing.js";
 import { GroupRoute } from "./GroupRoute.jsx";
@@ -50,6 +62,52 @@ function memberlessGroup(): unknown {
   const copy = JSON.parse(JSON.stringify(groupDocument)) as Record<string, unknown>;
   copy["members"] = [];
   return copy;
+}
+
+/** The one topic the recording holds offsets on, and the twelve partitions it holds them on. */
+const FIRST_TOPIC = "analytics.pageviews";
+/** A second topic, with a partition count that is neither the first's nor one. */
+const SECOND_TOPIC = "orders.events";
+/** A third, holding exactly one partition — the case a plural template gets wrong. */
+const SINGLE_PARTITION_TOPIC = "audit.trail";
+
+/**
+ * The recorded group with two more topics, holding different numbers of partitions.
+ *
+ * The quickstart's group subscribes to one topic, so the recording has one row in its forget list
+ * and every case that presses "the button" presses the only one there is. That is precisely the
+ * arrangement in which "the count of the topic whose button was pressed" and "the count of the
+ * first topic" are the same number, and the difference between them is the whole content of the
+ * confirmation an operator is about to approve. The extra entries are the first one copied — every
+ * field name stays the server's — with the topic renamed and the partition list cut.
+ */
+function groupHoldingThreeTopics(): unknown {
+  const copy = JSON.parse(JSON.stringify(groupDocument)) as Record<string, unknown>;
+  const topics = copy["topics"] as { topic: string; partitions: unknown[] }[];
+  const first = topics[0];
+  if (first === undefined) throw new Error("the recorded group holds no topics to copy");
+  const held = (topic: string, count: number): { topic: string; partitions: unknown[] } => {
+    const entry = JSON.parse(JSON.stringify(first)) as { topic: string; partitions: unknown[] };
+    entry.topic = topic;
+    entry.partitions = entry.partitions.slice(0, count);
+    return entry;
+  };
+  topics.push(held(SECOND_TOPIC, 3), held(SINGLE_PARTITION_TOPIC, 1));
+  return copy;
+}
+
+/**
+ * A `permits` that answers yes to everything except one action.
+ *
+ * Compared field by field rather than by identity: `Actions.…` is a frozen literal today, and a
+ * case that relied on the two being the same object would start passing for the wrong reason the
+ * day the constants are generated as a mapped type.
+ */
+function permitsAllBut(denied: {
+  readonly resource: string;
+  readonly action: string;
+}): KuiContextValue["permits"] {
+  return (asked) => asked.resource !== denied.resource || asked.action !== denied.action;
 }
 
 /** What `POST …/offsets/plan` and `POST …/offsets` both answer with: a plan, and its token. */
@@ -83,9 +141,17 @@ function stub(options: {
   readonly plan?: unknown;
   readonly applyFails?: string;
   readonly deleteFails?: string;
-  /** What `DELETE …/offsets` answers with. Absent means it removed every partition it was asked. */
-  readonly forgetAnswer?: { readonly topic: string; readonly partitions: readonly number[] };
+  /**
+   * What `DELETE …/offsets` answers with. Absent means it removed every partition it was asked.
+   *
+   * `partitions` is optional here because it is optional on the wire — `DeletedOffsetsDto` declares
+   * it so in `schema.d.ts` — and an answer that names none is therefore a state the server can
+   * really be in, not a malformed document.
+   */
+  readonly forgetAnswer?: { readonly topic: string; readonly partitions?: readonly number[] };
   readonly forgetFails?: string;
+  /** Held until this resolves, so a case can press the confirmation while the DELETE is out. */
+  readonly forgetPending?: Promise<void>;
 }): Stub {
   const calls: string[] = [];
   const forgotten: string[] = [];
@@ -137,6 +203,7 @@ function stub(options: {
          would let this suite pass over that. */
       const topic = init?.params?.query?.topic ?? "";
       forgotten.push(topic);
+      if (options.forgetPending !== undefined) await options.forgetPending;
       if (options.forgetFails !== undefined) return refuse(options.forgetFails);
       return {
         ok: true,
@@ -169,7 +236,11 @@ function stub(options: {
  * `window.location.assign`, which is a *document* navigation, and a document navigation destroys
  * the module-level toast store the line above it had just written to.
  */
-function openGroup(api: KuiApiClient): {
+function openGroup(
+  api: KuiApiClient,
+  /** Yes to everything unless a case says otherwise — see `testContext`. */
+  permits: KuiContextValue["permits"] = () => true,
+): {
   readonly container: HTMLElement;
   readonly dispose: () => void;
   readonly url: () => string;
@@ -187,7 +258,7 @@ function openGroup(api: KuiApiClient): {
     scrollRestoration: false,
   });
   const mounted = mount(() => (
-    <KuiProvider value={testContext(api)}>
+    <KuiProvider value={testContext(api, permits)}>
       <Router />
     </KuiProvider>
   ));
@@ -227,7 +298,70 @@ function confirmation(): HTMLElement {
 
 const titles = (): readonly string[] => toasts().map((toast) => toast.title);
 
-describe("the group page's toasts", () => {
+/**
+ * The forget confirmations currently in the document — normally none or one.
+ *
+ * Scoped by `testId` rather than by `role`, because the page's *other* confirmation is a
+ * `[role="dialog"]` too and "the forget confirmation closed" must not be satisfiable by the delete
+ * one having never opened.
+ */
+function forgetConfirmations(): readonly HTMLElement[] {
+  return [...document.body.querySelectorAll<HTMLElement>("[data-testid='group-forget-confirm']")];
+}
+
+/** The one open forget confirmation. */
+function forgetConfirmation(): HTMLElement {
+  const open = forgetConfirmations();
+  const last = open[open.length - 1];
+  if (last === undefined) throw new Error("no forget confirmation is open");
+  return last;
+}
+
+/**
+ * The forget row for one topic, by the topic it names.
+ *
+ * The list is per topic and its rows differ only in their topic and their held count, so a helper
+ * that took the first button would press `analytics.pageviews`'s no matter which topic the case is
+ * about — which is the exact confusion the `find` in `consequenceOfForget` exists to prevent.
+ */
+function forgetRow(root: HTMLElement, topic: string): HTMLElement {
+  const rows = [...root.querySelectorAll<HTMLElement>("li.kui-cg-forget__row")];
+  const row = rows.find(
+    (one) => (one.querySelector(".kui-cg-forget__topic")?.textContent ?? "").trim() === topic,
+  );
+  if (row === undefined) {
+    const seen = rows
+      .map((one) => (one.querySelector(".kui-cg-forget__topic")?.textContent ?? "").trim())
+      .join(" | ");
+    throw new Error(`no forget row for ${topic}; the page offers: ${seen}`);
+  }
+  return row;
+}
+
+/**
+ * The reason under one disabled control, read through that control's own `aria-describedby`.
+ *
+ * Not `document.body.querySelector('[role="tooltip"]')`: the bubble is a portal into `body`, and an
+ * earlier case's can still be there — so the first match in the document is not necessarily this
+ * button's, and a case reading it would assert a sentence from the case before it.
+ */
+async function reasonUnder(button: HTMLButtonElement): Promise<string> {
+  button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  await settle();
+  const id = button.getAttribute("aria-describedby") ?? "";
+  const bubble = id === "" ? null : document.getElementById(id);
+  if (bubble === null) throw new Error(`no tooltip is attached to ${button.textContent ?? ""}`);
+  return bubble.textContent ?? "";
+}
+
+/** Every "Forget offsets" button on the page, in the order the topics are listed. */
+function forgetButtons(root: HTMLElement): readonly HTMLButtonElement[] {
+  return [...root.querySelectorAll<HTMLButtonElement>("button")].filter(
+    (candidate) => (candidate.textContent ?? "").trim() === "Forget offsets",
+  );
+}
+
+describe("the group page's destructive controls", () => {
   beforeEach(() => {
     // Module-level state, shared by the whole process: one case's confirmation would otherwise be
     // the next case's evidence.
@@ -519,6 +653,308 @@ describe("the group page's toasts", () => {
     expect(titles()).toEqual([]);
     // The confirmation stays open carrying the server's own words, where the operator is looking.
     expect(confirmation().textContent).toContain("read-only");
+
+    dispose();
+  });
+
+  it("a principal without ConsumerGroupResetOffsets is never handed an enabled forget control", async () => {
+    /*
+     * The most serious hole this package had, and the reason a component case was not enough.
+     *
+     * `GroupDetail` renders the control disabled with a reason when it is handed no callback, and
+     * that rendering has its own case in `consumers.test.tsx`. What decides whether it is handed
+     * one is a ternary in `GroupRoute` — `onForgetOffsets={mayReset() ? … : undefined}` — and until
+     * this case nothing in the repository ever mounted the route unpermitted. Replacing the whole
+     * gate with `true` left 1449 frontend cases green while handing an account that may not reset
+     * offsets an **enabled** destructive button, and made `forgetRefusal` unreachable.
+     *
+     * Both arrangements are constructed, in one case, because a screen that disabled the control
+     * for everybody would satisfy the refusal half and be just as wrong.
+     */
+    const permitted = stub({});
+    const withPermission = openGroup(permitted.api);
+    await settle();
+
+    const allowed = forgetButtons(withPermission.container);
+    expect(allowed.length).toBeGreaterThan(0);
+    for (const button of allowed) expect(button.getAttribute("aria-disabled")).toBeNull();
+
+    withPermission.dispose();
+
+    const refused = stub({});
+    const { container, dispose } = openGroup(
+      refused.api,
+      permitsAllBut(Actions.ConsumerGroupResetOffsets),
+    );
+    await settle();
+
+    /* Present, and disabled. A control that vanished would teach the operator that KUI cannot do
+       this at all, when the truth is that this account may not. */
+    const buttons = forgetButtons(container);
+    expect(buttons).toHaveLength(allowed.length);
+    for (const button of buttons) expect(button.getAttribute("aria-disabled")).toBe("true");
+
+    // And the sentence is reachable from a keyboard, which is why the control is `aria-disabled`
+    // rather than `disabled` — the tooltip is the only place the reason is written.
+    const first = buttons[0];
+    if (first === undefined) throw new Error("the forget list drew no control at all");
+    expect(await reasonUnder(first)).toContain(
+      "You do not have permission to change this group's committed offsets.",
+    );
+
+    // Pressing it does nothing: no confirmation, and above all no request. `aria-disabled` does not
+    // stop the browser dispatching a click, so "the button is marked disabled" and "the button does
+    // nothing" are two different facts and this product has shipped the first without the second.
+    first.click();
+    await settle();
+    expect(forgetConfirmations()).toHaveLength(0);
+    expect(refused.forgotten).toEqual([]);
+
+    dispose();
+  });
+
+  it("gates each of this page's three controls on its own action", async () => {
+    /*
+     * The same hole as the case above, at the other two controls on the page, and it is a separate
+     * case because a single boolean over all three satisfies any one of them.
+     *
+     * `Reset offsets` and `Forget offsets` are both `ConsumerGroupResetOffsets` — they write the
+     * same committed positions, which is what the endpoints' own `EndpointAuthorization` says —
+     * while `Delete group` is `ConsumerGroupDelete`. So the arrangement that separates them is an
+     * account trusted to delete a group and not to move its offsets: it must be offered the delete
+     * and refused both of the others. Wave 5's topic packet named exactly this shape — "four
+     * controls wired to four actions being indistinguishable under a single boolean" — as its own
+     * worst finding, and every one of these three was a constant no case could observe.
+     */
+    const reset = (root: HTMLElement): HTMLButtonElement => {
+      const button = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+        (candidate) => (candidate.textContent ?? "").trim() === "Reset offsets",
+      );
+      if (button === undefined) throw new Error("the page offers no reset control");
+      return button;
+    };
+    const remove = (root: HTMLElement): HTMLButtonElement => {
+      const button = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+        (candidate) => (candidate.textContent ?? "").trim() === "Delete group",
+      );
+      if (button === undefined) throw new Error("the page offers no delete control");
+      return button;
+    };
+
+    // Everything held: all three are live. Without this the two refusals below are met by a screen
+    // that offers nothing to anybody.
+    const all = openGroup(stub({}).api);
+    await settle();
+    expect(reset(all.container).getAttribute("aria-disabled")).toBeNull();
+    expect(remove(all.container).getAttribute("aria-disabled")).toBeNull();
+    expect(forgetButtons(all.container)[0]?.getAttribute("aria-disabled")).toBeNull();
+    all.dispose();
+
+    // May delete, may not move offsets: the delete stays live and both offset controls refuse.
+    const offsets = openGroup(stub({}).api, permitsAllBut(Actions.ConsumerGroupResetOffsets));
+    await settle();
+    expect(remove(offsets.container).getAttribute("aria-disabled")).toBeNull();
+    const wizard = reset(offsets.container);
+    expect(wizard.getAttribute("aria-disabled")).toBe("true");
+    expect(await reasonUnder(wizard)).toContain(
+      "You do not have permission to reset this group's offsets.",
+    );
+    expect(forgetButtons(offsets.container)[0]?.getAttribute("aria-disabled")).toBe("true");
+    offsets.dispose();
+
+    // The mirror: may move offsets, may not delete the group.
+    const deletion = openGroup(stub({}).api, permitsAllBut(Actions.ConsumerGroupDelete));
+    await settle();
+    expect(reset(deletion.container).getAttribute("aria-disabled")).toBeNull();
+    expect(forgetButtons(deletion.container)[0]?.getAttribute("aria-disabled")).toBeNull();
+    const destroy = remove(deletion.container);
+    expect(destroy.getAttribute("aria-disabled")).toBe("true");
+    expect(await reasonUnder(destroy)).toContain(
+      "You do not have permission to delete this consumer group.",
+    );
+    /* And it opens nothing. The delete confirmation is the page's other `[role="dialog"]`, so this
+       is asserted on the *count* of dialogs rather than on the forget testId. */
+    destroy.click();
+    await settle();
+    expect(document.body.querySelectorAll("[role='dialog']")).toHaveLength(0);
+    deletion.dispose();
+  });
+
+  it("a successful forget closes its confirmation", async () => {
+    /*
+     * The dialog is a `<Show when={forgetting()}>`, and the success path both clears that signal
+     * and re-reads the group. Without the clear, the refetch is what hides the dialog — the page
+     * drops to `loading`, the whole subtree unmounts — and the operator watches the same armed
+     * confirmation come **back** a moment later, now describing a group that no longer holds those
+     * offsets, with a `Forget offsets` button that would take the branch the receipt calls
+     * impossible. Deleting `setForgetting(undefined)` left every other case here green because they
+     * all assert on toasts, which are raised either way.
+     */
+    const { api } = stub({});
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(forgetRow(container, FIRST_TOPIC), /^Forget offsets$/);
+    await settle();
+    expect(forgetConfirmations()).toHaveLength(1);
+
+    press(forgetConfirmation(), /^Forget offsets$/);
+    // Long enough for the refetch the success path starts to come back and redraw the page: the
+    // reopening this guards against happens *after* the reload, not instead of it.
+    await settle(24);
+
+    expect(titles()).toContain("Committed offsets forgotten");
+    expect(forgetConfirmations()).toHaveLength(0);
+
+    dispose();
+  });
+
+  it("the confirmation names the partition count of the topic whose button was pressed", async () => {
+    /*
+     * `consequenceOfForget` looks its topic up by name. Replaced with the first subscription, it
+     * stays green on every case above, because the recorded group holds exactly one topic — so the
+     * first row and the pressed row are the same row and the two readings cannot be told apart.
+     *
+     * Here the group holds two, with different partition counts, and the second one's button is
+     * pressed. The number is the whole content of the confirmation: it is what the receipt
+     * afterwards is read against, and quoting another topic's count would make the operator agree
+     * to a consequence that is not the one they are about to cause.
+     */
+    const { api } = stub({ detail: groupHoldingThreeTopics() });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(forgetRow(container, SECOND_TOPIC), /^Forget offsets$/);
+    await settle();
+
+    const asking = forgetConfirmation().textContent ?? "";
+    expect(asking).toContain(`Forget ${GROUP}'s offsets on ${SECOND_TOPIC}?`);
+    expect(asking).toContain(`3 partitions of ${SECOND_TOPIC}`);
+    // The first topic's twelve, which is what a lookup that ignored the pressed row would quote.
+    expect(asking).not.toContain("12 partitions");
+
+    dispose();
+  });
+
+  it("lists the topics a group holds offsets on in topic order", async () => {
+    /*
+     * `subscriptions()` sorts, and nothing asserted it. Unsorted, the rows come out in the order the
+     * coordinator happened to send them — which is stable for one call and not across calls, so the
+     * row an operator's hand is going towards moves between two loads of the same page. On a page
+     * whose every row carries a destructive button, the order is part of the safety of the control,
+     * not a tidiness preference.
+     *
+     * The fixture is built in wire order `analytics.pageviews, orders.events, audit.trail`
+     * precisely so that sorted and unsorted differ.
+     */
+    const { api } = stub({ detail: groupHoldingThreeTopics() });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    const drawn = [...container.querySelectorAll(".kui-cg-forget__topic")].map((one) =>
+      (one.textContent ?? "").trim(),
+    );
+    expect(drawn).toEqual([FIRST_TOPIC, SINGLE_PARTITION_TOPIC, SECOND_TOPIC]);
+
+    dispose();
+  });
+
+  it("says one partition rather than 1 partitions in the confirmation", async () => {
+    /*
+     * The singular on the way *in*. Its twin on the receipt has had a case since wave 5; this one
+     * did not, and a plural template is wrong on every single-partition topic — which is most of
+     * what a scratch cluster holds. It is the sentence the operator reads *before* deciding, so
+     * "1 partitions" is a typo in the one paragraph the product asks them to trust.
+     */
+    const { api } = stub({ detail: groupHoldingThreeTopics() });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(forgetRow(container, SINGLE_PARTITION_TOPIC), /^Forget offsets$/);
+    await settle();
+
+    const asking = forgetConfirmation().textContent ?? "";
+    expect(asking).toContain(`1 partition of ${SINGLE_PARTITION_TOPIC}`);
+    expect(asking).not.toContain("1 partitions");
+
+    dispose();
+  });
+
+  it("an answer naming no partitions is reported as nothing forgotten", async () => {
+    /*
+     * `DeletedOffsetsDto.partitions` is **optional** in `schema.d.ts`, so a 200 that carries no
+     * partitions field at all is a wire state the server can really produce — distinct from the
+     * empty array the case above covers, and the one the `?? []` in `write.ts` exists for. With a
+     * default of `[0]` the browser reports "1 partition" for a server that named none: a green
+     * success toast over an action that removed nothing, which is the exact failure the two
+     * sentences were written to prevent.
+     */
+    const { api } = stub({ forgetAnswer: { topic: FIRST_TOPIC } });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(forgetRow(container, FIRST_TOPIC), /^Forget offsets$/);
+    await settle();
+    press(forgetConfirmation(), /^Forget offsets$/);
+    await settle();
+
+    expect(titles()).toContain("Nothing was forgotten");
+    expect(titles()).not.toContain("Committed offsets forgotten");
+    const raised = toasts().find((toast) => toast.title === "Nothing was forgotten");
+    expect(raised?.tone).toBe("warning");
+    expect(raised?.message).toContain("held no committed offset");
+    // Not a count invented from a missing field: neither "1 partition" nor a zero dressed as one.
+    expect(raised?.message).not.toContain("1 partition");
+    expect(raised?.message).not.toContain("0 partitions");
+
+    dispose();
+  });
+
+  it("a second press while the request is in flight sends one request", async () => {
+    /*
+     * The double-submit guard, which is `busy={forget.busy()}` on the confirmation: `canConfirm()`
+     * is `confirmationSatisfied() && props.busy !== true`, so while the DELETE is out the confirm
+     * button is the disabled spelling and swallows the press.
+     *
+     * Both halves are asserted, and they are not the same half. That the control **says** it is
+     * running is what `busy` decides on its own — replace it with `false` and the operator is
+     * looking at a live, undisabled destructive button over a request they cannot see. That only
+     * one request goes out is defended twice: here, and by `createMutation`'s own re-entry guard
+     * one layer down. Asserting it anyway is the point — the rule is "one press, one DELETE", and a
+     * case that only watched the button would go green the day the two guards were reorganised.
+     */
+    let release = (): void => {};
+    const pending = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    const { api, forgotten } = stub({ forgetPending: pending });
+    const { container, dispose } = openGroup(api);
+    await settle();
+
+    press(forgetRow(container, FIRST_TOPIC), /^Forget offsets$/);
+    await settle();
+    press(forgetConfirmation(), /^Forget offsets$/);
+    await settle();
+
+    // In flight: the DELETE has been sent and is being held by the stub.
+    expect(forgotten).toEqual([FIRST_TOPIC]);
+    const confirm = [...forgetConfirmation().querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => (candidate.textContent ?? "").trim() === "Forget offsets",
+    );
+    expect(confirm?.getAttribute("aria-disabled")).toBe("true");
+    expect(confirm?.getAttribute("aria-busy")).toBe("true");
+
+    // The impatient second press, which a browser dispatches whatever `aria-disabled` says.
+    confirm?.click();
+    await settle();
+    expect(forgotten).toEqual([FIRST_TOPIC]);
+
+    release();
+    await settle(24);
+
+    // And the one request that did go out was reported once, as a success.
+    expect(forgotten).toEqual([FIRST_TOPIC]);
+    expect(titles()).toEqual(["Committed offsets forgotten"]);
 
     dispose();
   });

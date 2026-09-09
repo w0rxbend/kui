@@ -104,7 +104,7 @@ server {
   location = ${BASE_PATH}/ { return 302 ${BASE_PATH}/ui/; }
 
   # Vite writes a content hash into every asset filename, so an asset URL is immutable by
-  # construction: if the content changes the URL changes. \`index.html\` is the one file whose name
+  # construction: if the content changes the URL changes. index.html is the one file whose name
   # is stable, so it is the one file that must never be cached.
   location ~* ${BASE_PATH}/ui/assets/.*\.(js|css|woff2?|png|svg|map)\$ {
     expires 1y;
@@ -112,22 +112,22 @@ server {
   }
 
   # The rendered page, from tmpfs rather than from the image: the markers are substituted at start
-  # and the image itself stays read-only. `try_files` above performs an internal redirect, which
+  # and the image itself stays read-only. The try_files directive above performs an internal redirect, which
   # re-runs location matching, so a deep link lands here too.
   location = ${BASE_PATH}/ui/index.html {
     alias ${RENDERED};
     add_header Cache-Control "no-store" always;
 
     # The headers live here rather than on the directory above it, and that is not a style choice.
-    # \`try_files\` performs an *internal redirect*, so a request for /ui/ or for a deep link ends up
-    # matching this block — and nginx's \`add_header\` does not inherit into a block that declares any
+    # try_files performs an *internal redirect*, so a request for /ui/ or for a deep link ends up
+    # matching this block — and nginx's add_header does not inherit into a block that declares any
     # of its own. Set on the directory, they were dropped from every response that actually carried
     # the document. This is also the only response that needs them: the assets are hashed JavaScript
     # and CSS, and a policy on them protects nothing.
     #
     # The interface is same-origin and loads no third-party script, so the policy can be strict.
-    # \`unsafe-inline\` is for styles only: the bundler emits a style element, and there is no inline
-    # script — the bootstrap block is \`application/json\`, which is data and is never executed.
+    # unsafe-inline is for styles only: the bundler emits a style element, and there is no inline
+    # script — the bootstrap block is application/json, which is data and is never executed.
     add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;

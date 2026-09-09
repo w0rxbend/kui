@@ -47,7 +47,10 @@ object DocsRoutes {
       // service's proxied endpoints for the same reason the capability stream is: it is not a derived
       // proxy route at all — a stream is relayed, not called and re-encoded — so nothing in
       // `ServiceContracts` would ever produce it.
-      kui.gateway.api.MessageStreamRoutes.endpoints[F]
+      kui.gateway.api.MessageStreamRoutes.endpoints[F] ++
+      // The alerts change stream has the same shape: its request/response endpoints are derived, while its
+      // long-lived body is relayed by `AlertsStreamRoutes` and therefore has to be documented here.
+      kui.gateway.api.AlertsStreamRoutes.endpoints[F]
 
   /** Everything the gateway documents: its own endpoints plus every configured service it can route. */
   def documentation[F[_]](services: List[ServiceId]): List[ServiceDoc] =

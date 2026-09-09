@@ -83,6 +83,41 @@ kui:
         callTimeout: "10s"
 
   # ---------------------------------------------------------------------------------------------
+  # WHAT KUI SHOULD NOTICE ABOUT THIS CLUSTER, AND WHEN.
+  #
+  # There is no on/off switch under `kui.alerts` and there deliberately is not one: every rule the
+  # alerts service runs reads a fact this product already measures, so alerting is on in every
+  # deployment and the only question is where the lines are drawn. The section is here anyway,
+  # spelled out at its own defaults, because the quickstart is what a newcomer copies and a key
+  # nobody can see is a key nobody knows they may set.
+  #
+  # These numbers are local policy rather than truths. A log directory at 80% is a quiet afternoon
+  # in one deployment and a page in another, and a consumer group that has been rebalancing for
+  # five minutes is either wedged behind a dead member or is a large group doing what large groups
+  # do. What is NOT policy is the shape of the answer: a rule whose facts cannot be read says so
+  # and contributes no event, rather than reporting a comfortable zero (ADR-053).
+  #
+  # `diskUsedCriticalPercent` has to stay above `diskUsedWarningPercent` or this file is refused at
+  # start-up, because a critical bound below the warning means the warning never fires on the way
+  # past it. That refusal is asserted by `ShippedConfigurationSuite`, which loads this file.
+  alerts:
+    # Seven days. The feed's own reading is about this week -- a relative age, an open count -- and
+    # an event store with no upper bound is a slow leak with a calendar.
+    retention: "7d"
+    # A minute, which is twice the cluster service's own snapshot cadence: evaluating faster than
+    # the facts change produces the same answer twice and costs a scrape.
+    evaluationInterval: "60s"
+    thresholds:
+      # One, because a single offline partition is data nobody can read and there is no acceptable
+      # number of them. It is a key rather than a constant because a cluster mid-migration can be
+      # knowingly noisy for an hour.
+      offlinePartitions: 1
+      underReplicatedPartitions: 1
+      rebalanceDuration: "5m"
+      diskUsedWarningPercent: 80
+      diskUsedCriticalPercent: 90
+
+  # ---------------------------------------------------------------------------------------------
   # The broker this quickstart starts.
   #
   # `kafka:9092` and not `localhost:9092`: KUI reaches the broker across the Compose network by

@@ -1,0 +1,79 @@
+{
+  "events": {
+    "status": "ok",
+    "fetchedAt": "2026-03-04T09:41:00Z",
+    "data": {
+      "items": [
+        {
+          "id": "evt-1",
+          "severity": "critical",
+          "tone": "danger",
+          "category": "partition",
+          "glyph": "partition",
+          "openedAt": "2026-03-04T09:28:00Z",
+          "lastSeenAt": "2026-03-04T09:40:00Z",
+          "title": "2 partitions are offline",
+          "detail": "orders.payments.v2 p3, p7"
+        }
+      ],
+      "total": 1,
+      "openCount": 1,
+      "unreadCount": 1,
+      "evaluatedAt": "2026-03-04T09:40:00Z",
+      "rules": [
+        {
+          "rule": "offline-partitions",
+          "category": "partition",
+          "evaluation": {
+            "status": "ok",
+            "fetchedAt": "2026-03-04T09:40:00Z",
+            "data": {
+              "openEvents": 1,
+              "unmeasuredSubjects": 0
+            }
+          }
+        },
+        {
+          "rule": "under-replicated-partitions",
+          "category": "replication",
+          "evaluation": {
+            "status": "ok",
+            "fetchedAt": "2026-03-04T09:40:00Z",
+            "data": {
+              "openEvents": 0,
+              "unmeasuredSubjects": 0
+            }
+          }
+        },
+        {
+          "rule": "stuck-rebalance",
+          "category": "rebalance",
+          "evaluation": {
+            "status": "ok",
+            "fetchedAt": "2026-03-04T09:40:00Z",
+            "data": {
+              "openEvents": 1,
+              "unmeasuredSubjects": 0
+            }
+          }
+        },
+        {
+          "rule": "log-directory-usage",
+          "category": "storage",
+          "evaluation": {
+            "status": "unavailable",
+            "reason": "KUI-UPSTREAM-UNAVAILABLE",
+            "message": "describeLogDirs was refused for this principal."
+          }
+        },
+        {
+          "rule": "connector-task-failure",
+          "category": "connector",
+          "evaluation": {
+            "status": "not_configured"
+          }
+        }
+      ]
+    }
+  }
+}

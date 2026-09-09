@@ -100,8 +100,9 @@ describe("the drawer's topic tree", () => {
  * branch holding nothing — and `destinationFor` omits the `children` key entirely for the first.
  * The rule that a cluster with no topics is a *leaf* lived inside `App.tsx`'s memo for two waves,
  * as a `names.length === 0` clause defended by a comment that named `NavItem` as the real guard;
- * `NavItem`'s guard was deletable with all 223 cases green at the same time, so the rule was
- * claimed twice and asserted nowhere. It lives here now, where a case can call it.
+ * `NavItem`'s guard was deletable at the same time with every case
+ * `pnpm -C frontend test packages/shell` runs still green, so the rule was claimed twice and
+ * asserted nowhere. It lives here now, where a case can call it.
  */
 describe("the subtree the drawer's Topics row is given", () => {
   const subtree = (names: readonly string[]) =>
@@ -119,9 +120,30 @@ describe("the subtree the drawer's Topics row is given", () => {
     expect(subtree(["", ""])).toBeUndefined();
   });
 
+  /**
+   * The rows themselves, written out rather than compared against the fold beside them.
+   *
+   * This case used to read `expect(subtree(NAMES)).toEqual(tree())`, which is two calls to the same
+   * function through two names: a mutation inside `topicTree` moves both sides at once and the
+   * comparison goes on holding. The packet that wrote it disclosed exactly that. So the expectation
+   * is a literal list — the three prefix groups `NAMES` folds into, in the order `prefixes` puts
+   * them, with `internal` last — and the identity with `topicTree` is asserted separately, as the
+   * narrower claim it actually is.
+   */
   it("is the fold's own rows, in the fold's own order, when there are any", () => {
     const rows = subtree(NAMES);
-    expect(rows?.map((row) => row.label)).toEqual(tree().map((row) => row.label));
+    expect(rows?.map((row) => row.label)).toEqual([
+      "orders.*",
+      "analytics.*",
+      "heartbeats",
+      "internal",
+    ]);
+    /* The counts too, because a subtree that dropped a name would keep the labels and lose the
+       figures — and the figure is what the row is for. */
+    expect(rows?.map((row) => row.badge?.text)).toEqual(["3", "2", "1", "2"]);
+    // And it is the same fold and not a second one: `topicSubtree` adds the empty case and nothing
+    // else, which is the only thing it is allowed to add.
+    expect(rows).toEqual(tree());
   });
 });
 

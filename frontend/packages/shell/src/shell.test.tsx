@@ -514,6 +514,33 @@ describe("the cluster switcher's rows", () => {
     );
     expect(rows[0]?.health).toBe("unreachable");
   });
+
+  /**
+   * The order the environment rail's tiles are in, and the tie-break under it.
+   *
+   * Rows are sorted by name; the `|| a.id.localeCompare(b.id)` after it could be deleted with all
+   * 498 cases `pnpm -C frontend test packages/shell` runs still green, measured here. Two clusters
+   * carrying the same *name* is a real state — the name is whatever the operator put in their
+   * configuration and nothing makes it unique, and a cluster nobody named falls back to its id —
+   * and `Array.prototype.sort` is stable, so without the tie-break the two keep the order the
+   * **capability map** happened to hold them in. That map is rebuilt from every frame the gateway
+   * streams, which on a struggling cluster is every few seconds: the rail's tiles would then swap
+   * places under the pointer of somebody reaching for one, and switching environment is the one
+   * click in this product that changes what a later destructive action will destroy.
+   *
+   * It is the same rule as the drawer's declared order and the topic tree's alphabetical tie-break,
+   * at the third of the three places this frame sorts something.
+   */
+  it("orders by name and breaks a tie on the identifier, whatever order the frame held them in", () => {
+    const rows = (pairs: readonly (readonly [string, string])[]) =>
+      clusterSummaries(
+        new Map(pairs.map(([id]) => [`cluster/${id}`, entry(id, "available", "Production")])),
+      ).map((row) => row.id);
+
+    // One name, two clusters, offered in each order. Both must draw `eu` before `us`.
+    expect(rows([["us", "Production"], ["eu", "Production"]])).toEqual(["eu", "us"]);
+    expect(rows([["eu", "Production"], ["us", "Production"]])).toEqual(["eu", "us"]);
+  });
 });
 
 describe("changing environment", () => {
@@ -551,6 +578,23 @@ describe("which navigation entry is current", () => {
     expect(currentFeatureId("/ui/clusters/prod/brokers", "/ui")).toBe("clusters");
     expect(currentFeatureId("/kui/ui/clusters/prod/topics/orders", "/kui/ui")).toBe("topics");
     expect(currentFeatureId("/ui/clusters/prod/consumer-groups", "/ui")).toBe("consumers");
+    expect(currentFeatureId("/ui/clusters/prod/alerts", "/ui")).toBe("alerts");
+  });
+
+  /**
+   * Alerts, and the address that is not it.
+   *
+   * The screen is a route of its own — `/clusters/<id>/alerts` — and there is no dashboard tab
+   * called alerts. `/dashboard/alerts` therefore has to read as the **dashboard**, because that is
+   * what the route table matches it to; reading it as the alerts screen would highlight a drawer
+   * row for a page the reader is not on, which is the defect the dashboard and the registry both
+   * had until wave 5. The two spellings are one segment apart and the fall-through is a
+   * `segments.includes`, so this is the pair worth writing down.
+   */
+  it("marks the alerts screen as itself and the dashboard's tabs as the dashboard", () => {
+    expect(currentFeatureId("/ui/clusters/prod/alerts", "/ui")).toBe("alerts");
+    expect(currentFeatureId("/kui/ui/clusters/prod/alerts", "/kui/ui")).toBe("alerts");
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/alerts", "/ui")).toBe("overview");
   });
 
   /**
@@ -600,6 +644,13 @@ describe("the top band's trail", () => {
 
     const brokers = topCrumbs(clusters, "prod", "/ui/clusters/prod/brokers", "/ui", router);
     expect(brokers.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Brokers"]);
+
+    /* The ninth service's screen. Its label comes from the same table as the others, so a section
+       reachable from the drawer with no row in that table would drop its crumb silently — the trail
+       would read `prod-kyiv-01` alone, which is the trail for the dashboard, over a different
+       page. */
+    const alerts = topCrumbs(clusters, "prod", "/ui/clusters/prod/alerts", "/ui", router);
+    expect(alerts.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Alerts"]);
   });
 });
 

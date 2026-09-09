@@ -80,6 +80,22 @@ export function focusableWithin(root: HTMLElement): HTMLElement[] {
  */
 const trapping: HTMLElement[] = [];
 
+/**
+ * What `<body>`'s `overflow` was before the first surface locked the page.
+ *
+ * The lock is a property of the *stack*, not of each surface, and that is a correction rather than
+ * a preference. Each surface used to remember the value it found and restore it on the way out,
+ * which is right for the sequence that was tested — inner closes, then outer — and wrong for the
+ * one that was not: a route change tears the drawer down first, the drawer restores the `""` it
+ * found, and then the dialog restores the `"hidden"` *it* found, leaving the page unscrollable
+ * with no surface on screen and no way for the user to get it back short of a reload. Measured
+ * here, by writing the out-of-order case before this line existed.
+ *
+ * Held once, taken when the stack goes from empty to occupied and put back when it empties, so the
+ * order the surfaces leave in cannot matter.
+ */
+let overflowBeforeLock: string | undefined;
+
 export interface ModalBehaviourOptions {
   /** Called for `Escape`, for a click on the veil, and for the close button. */
   readonly onClose: () => void;
@@ -145,6 +161,16 @@ export function modalBehaviour(options: ModalBehaviourOptions) {
         return;
       }
       if (event.key !== "Tab") return;
+      // `Tab` belongs to the innermost surface too, and for the same reason `Escape` does: both
+      // traps listen on `document`, so every mounted surface sees every keystroke. Without this
+      // line the drawer *under* an open dialog still runs its own wrap on every `Tab` — and it is
+      // benign today only by accident of layout, because `Dialog` portals to `document.body` so
+      // `focusableWithin(drawer)` happens never to contain the dialog's stops. The day a surface
+      // renders its child in place, the outer one starts pulling focus back to its own first
+      // control while the user is tabbing through the inner one, which is unusable and looks like
+      // a browser bug. A defence that holds only while two unrelated components keep portalling is
+      // not a defence, so the stack decides here as well.
+      if (trapping[trapping.length - 1] !== element) return;
 
       const stops = focusableWithin(element);
       if (stops.length === 0) {
@@ -174,8 +200,10 @@ export function modalBehaviour(options: ModalBehaviourOptions) {
 
     // The page behind must not scroll under the surface. Restored to whatever it was rather than
     // to "", because a nested overlay would otherwise unlock the page when the inner one closes
-    // and leave the outer one floating over a scrolling document.
-    const previousOverflow = document.body.style.overflow;
+    // and leave the outer one floating over a scrolling document — and remembered against the
+    // stack rather than against this surface, so that the two cleanups running in either order
+    // give the page back exactly once. See `overflowBeforeLock`.
+    if (trapping.length === 0) overflowBeforeLock = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     trapping.push(element);
@@ -184,10 +212,18 @@ export function modalBehaviour(options: ModalBehaviourOptions) {
       document.removeEventListener("keydown", onKeyDown);
       // Spliced by identity rather than popped: a page can close an outer surface while an inner
       // one is still up — a route change tearing down a drawer takes its dialog with it, and the
-      // two cleanups do not run in a guaranteed order.
+      // two cleanups do not run in a guaranteed order. `pop()` under that sequence removes the
+      // *inner* surface's entry when the outer one tears down, after which the inner surface is
+      // still on screen, still listening, and no longer last: it ignores every `Escape` and the
+      // dead outer entry sits on top of the stack swallowing the key for everything opened
+      // afterwards. `surfaces.test.tsx`'s "a nested overlay torn down out of order leaves the
+      // stack correct" is that sequence.
       const at = trapping.lastIndexOf(element);
       if (at !== -1) trapping.splice(at, 1);
-      document.body.style.overflow = previousOverflow;
+      if (trapping.length === 0) {
+        document.body.style.overflow = overflowBeforeLock ?? "";
+        overflowBeforeLock = undefined;
+      }
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   });

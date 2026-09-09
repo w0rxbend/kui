@@ -1,16 +1,29 @@
 package kui.gateway.app
 
-import java.net.{InetAddress, ServerSocket, SocketTimeoutException}
+import java.net.{InetAddress, ServerSocket, Socket}
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import cats.effect.IO
-import cats.effect.kernel.Resource
+import cats.effect.kernel.{Ref, Resource}
+import cats.syntax.all.*
+import fs2.Stream
+import sttp.capabilities.fs2.Fs2Streams
+import sttp.tapir.{Endpoint, PublicEndpoint}
 
-import kui.config.{GatewayConfig, ServerConfig, UpstreamServiceConfig}
+import kui.config.{GatewayConfig, ServerConfig, UpstreamServiceConfig, UrlPolicy}
+import kui.contracts.ErrorEnvelope
+import kui.gateway.application.client.{CallContext, ServiceClient, ServiceClients}
 import kui.gateway.contract.dto.TopicOverviewDto
-import kui.kernel.{Host, Port, PositiveInt, ServiceId}
+import kui.http.health.HealthEndpoints
+import kui.http.sse.SseEvent
+import kui.http.upstream.CircuitEvent
+import kui.kernel.error.{InfrastructureError, KuiError}
+import kui.kernel.{CorrelationId, Host, Port, PositiveInt, ServiceId}
 import kui.observability.Telemetry
+import kui.security.{Principal, SignedPrincipal}
 import kui.testkit.KuiIOSuite
 import kui.testkit.fakes.FakeStructuredLogger
 
@@ -44,33 +57,151 @@ final class GatewayWiringSuite extends KuiIOSuite {
     )
   }
 
-  /** A socket that listens and never answers, so that "nobody connected" is an observation.
+  /** The same configuration with every scheduled poll pushed far outside the test.
     *
-    * A backlog is what makes it work: the operating system completes the handshake for a queued connection
-    * whether or not this test ever calls `accept`, so a probe issued during wiring is recorded even though
-    * nothing was reading at the time.
+    * `ReadinessPoller` jitters each service's first poll uniformly across one interval, so with the shipped
+    * ten seconds a scheduled poll can land inside a case that is measuring what *acquisition* did. An hour
+    * makes acquisition the only thing that could have contacted anybody, which is what the two
+    * contacts-nothing-while-wiring cases below need in order to mean one thing rather than two.
     */
-  private def listener: Resource[IO, ServerSocket] =
-    Resource.make(IO(new ServerSocket(0, 8, InetAddress.getLoopbackAddress)))(socket => IO(socket.close()))
+  private val idleUpstreams: GatewayServiceConfig =
+    unreachableUpstreams.copy(gateway = unreachableUpstreams.gateway.copy(readinessInterval = 1.hour))
 
-  /** The same two-service configuration, aimed at a port something really is listening on. */
-  private def pointedAt(server: ServerSocket): GatewayServiceConfig = {
+  /** A listening socket that counts every connection anybody makes to it.
+    *
+    * The counting is the point, and it is what the previous shape of this suite did not do. That version
+    * bound a socket, wired the gateway, and then called `accept()` once with a 250 ms timeout, reasoning
+    * that a connection opened during wiring would still be sitting in the backlog. It is not: a client that
+    * connects and then closes — which is what a probe whose call has already failed does — sends a FIN or an
+    * RST, and Linux drops such a connection from the accept queue before anybody accepts it. The mutation
+    * this suite is named for could therefore be applied with that case still green, which wave 6 measured
+    * rather than argued.
+    *
+    * A thread accepting in a loop from the moment the socket is bound has no such window: a connection is
+    * counted when it is accepted, and every accepted socket is held open until release, so nothing the
+    * counter has already seen can disappear again.
+    */
+  final private class CountingListener(val socket: ServerSocket) {
+    private val counter = new AtomicInteger(0)
+    private val accepted = new ConcurrentLinkedQueue[Socket]()
+
+    private val acceptor: Thread = {
+      val thread = new Thread(
+        () =>
+          try
+            while !socket.isClosed do {
+              val connection = socket.accept()
+              accepted.add(connection)
+              val _ = counter.incrementAndGet()
+            }
+          catch {
+            // Closing the socket is how this thread is asked to stop, so anything thrown after that is the
+            // ordinary shutdown path rather than a failure worth reporting.
+            case _: Throwable => ()
+          },
+        "gateway-wiring-acceptor"
+      )
+      thread.setDaemon(true)
+      thread
+    }
+
+    def start(): Unit = acceptor.start()
+
+    def connections: IO[Int] = IO(counter.get())
+
+    /** Waits for the first connection, or gives up and reports what it saw. */
+    def awaitConnection(within: FiniteDuration): IO[Int] = {
+      def loop: IO[Int] =
+        connections.flatMap(seen => if seen > 0 then IO.pure(seen) else IO.sleep(25.milliseconds) *> loop)
+
+      loop.timeoutTo(within, connections)
+    }
+
+    def close(): Unit = {
+      socket.close()
+      accepted.forEach(connection => connection.close())
+    }
+  }
+
+  private def listener: Resource[IO, CountingListener] =
+    Resource.make(IO {
+      val counting = new CountingListener(new ServerSocket(0, 64, InetAddress.getLoopbackAddress))
+      counting.start()
+      counting
+    })(counting => IO(counting.close()))
+
+  /** The same two-service configuration, aimed at a port something really is listening on.
+    *
+    * `UrlPolicy.Dev` is not decoration. The address is `127.0.0.1`, `SafeUrl` treats an address *literal* as
+    * loopback, and `ResilientBackend` re-applies the policy to every request — so under the shipped strict
+    * default every call here is refused before a socket is opened, which is what
+    * `aStrictDeploymentNeverConnectsToALoopbackUpstream` asserts on purpose. A deployment that really does
+    * point the gateway at a local process sets `KUI_ALLOW_PRIVATE_UPSTREAMS=true`, and this is that
+    * deployment.
+    */
+  private def pointedAt(
+      server: ServerSocket,
+      readinessInterval: FiniteDuration = 1.hour,
+      policy: UrlPolicy = UrlPolicy.Dev
+  ): GatewayServiceConfig = {
     val there = UpstreamServiceConfig(
       url = kui.config.SafeUrl.unsafe(s"http://127.0.0.1:${server.getLocalPort}"),
       timeout = 1.second,
       maxConcurrent = PositiveInt.unsafe(1)
     )
 
-    unreachableUpstreams.copy(gateway =
-      unreachableUpstreams.gateway.copy(services =
-        Map(ServiceId.unsafe("cluster") -> there, ServiceId.unsafe("topic") -> there)
-      )
+    unreachableUpstreams.copy(
+      gateway = unreachableUpstreams.gateway.copy(
+        services = Map(ServiceId.unsafe("cluster") -> there, ServiceId.unsafe("topic") -> there),
+        readinessInterval = readinessInterval
+      ),
+      urlPolicy = policy
     )
   }
 
-  private def wire(config: GatewayServiceConfig) =
-    FakeStructuredLogger[IO].flatMap { logger =>
-      GatewayWiring.make[IO](config, Telemetry.noop[IO], logger).use(IO.pure)
+  /** Builds the gateway and releases it again, which is what a case that only reads the assembled value
+    * wants: no poller fiber outlives the assertion.
+    */
+  private def wire(config: GatewayServiceConfig) = wiring(config).use(IO.pure)
+
+  /** The gateway, held open, for the cases whose subject is what it does *after* it has started. */
+  private def wiring(config: GatewayServiceConfig): Resource[IO, GatewayServer[IO]] =
+    Resource
+      .eval(FakeStructuredLogger[IO])
+      .flatMap(logger => GatewayWiring.make[IO](config, Telemetry.noop[IO], logger))
+
+  /** The context a poll travels under: nobody's behalf, one correlation id, no cluster. */
+  private val pollContext: CallContext =
+    CallContext(Principal.Anonymous, CorrelationId.unsafe("00000000-0000-4000-8000-000000000042"), None)
+
+  /** A client that records every call it is asked to make and reaches nothing.
+    *
+    * `GatewayWiring.over` is handed its clients and constructs none of its own, so this port is the only way
+    * the composition root can reach an upstream at all. A recording of it taken the instant acquisition
+    * returns is therefore a complete account of what acquisition asked any upstream for.
+    */
+  private def recordingClient(calls: Ref[IO, List[String]], id: ServiceId): ServiceClient[IO] =
+    new ServiceClient[IO] {
+      val service: ServiceId = id
+      def circuitStates: Stream[IO, CircuitEvent] = Stream.empty
+
+      private def record[O](what: String): IO[Either[KuiError, O]] =
+        calls
+          .update(_ :+ s"${id.value} $what")
+          .as(Left(InfrastructureError.Unreachable(id.value, "nothing is listening")))
+
+      def call[I, O](endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, O, Any], input: I)(
+          ctx: CallContext
+      ): IO[Either[KuiError, O]] = record(endpoint.info.name.getOrElse("<unnamed>"))
+
+      def callPublic[I, O](endpoint: PublicEndpoint[I, ErrorEnvelope, O, Any], input: I)(
+          ctx: CallContext
+      ): IO[Either[KuiError, O]] = record(endpoint.info.name.getOrElse("<unnamed>"))
+
+      def stream[I](
+          endpoint: Endpoint[SignedPrincipal, I, ErrorEnvelope, Stream[IO, Byte], Fs2Streams[IO]],
+          input: I
+      )(ctx: CallContext): Stream[IO, SseEvent] = Stream.empty
     }
 
   test("theGatewayStartsWithNothingConfigured") {
@@ -81,31 +212,145 @@ final class GatewayWiringSuite extends KuiIOSuite {
   }
 
   test("theGatewayStartsWhenEveryUpstreamIsUnreachable") {
-    // The claim is that no upstream is *contacted* while wiring, and it is asserted by watching a socket
-    // rather than a clock.
-    //
-    // This case used to be `wire(...).timeout(5.seconds)`, and that measured the wrong thing in both
-    // directions. It could not fail for the defect it was written for — the upstreams are at 127.0.0.1:1,
-    // which refuses a connection instantly, so a composition root that probed every one of them would still
-    // have returned in milliseconds. And it failed on one of three full-suite runs during wave 4's
-    // verification and passed in isolation, because five seconds of wall clock is not a bound on anything
-    // when sixteen forked suites are loading the sttp, tapir and otel class graphs at once: the same
-    // module's six cases take 1.5 s in isolation and its siblings take 40 to 90 s each under load.
-    //
-    // So: a real listening socket that accepts nothing, and afterwards an `accept` that must time out. A
-    // connection opened during wiring would already be sitting in the backlog and would be accepted at once,
-    // which makes this fail for the defect and for nothing else. MUnit's own 30-second timeout is what
-    // catches a composition root that hangs.
-    listener.use { server =>
-      wire(pointedAt(server)).map { gateway =>
-        assert(gateway.routes.nonEmpty)
-        server.setSoTimeout(250)
-        val connected =
-          try { server.accept().close(); true }
-          catch { case _: SocketTimeoutException => false }
+    // The gateway is Core tier, so it has to assemble against upstreams that are simply not there. This
+    // case says nothing about *when* a connection is made — the upstreams are at 127.0.0.1:1, which refuses
+    // instantly, so a composition root that probed every one of them would still return in milliseconds.
+    // `theGatewayContactsNoUpstreamWhileWiring` is what pins the timing.
+    wire(unreachableUpstreams).map { gateway =>
+      assert(gateway.routes.nonEmpty)
+      assert(gateway.interceptors.nonEmpty)
+    }
+  }
 
-        assert(!connected, "the composition root opened a connection to an upstream while wiring")
+  test("theGatewayContactsNoUpstreamWhileWiring") {
+    // The rule: nothing in the composition root reaches an upstream during `Resource` acquisition. A
+    // gateway that probed every routed service as it assembled would take the slowest upstream's timeout to
+    // start and would fail to start at all on the day one of them hangs, turning one optional service's
+    // outage into the total blackout the tier model exists to prevent.
+    //
+    // It is asserted at the port the composition root would have to use. `over` is handed its clients and
+    // builds none, so every possible contact with an upstream — a readiness probe, a capability read, a
+    // proxied call — passes through `ServiceClient`.
+    //
+    // Mutation this case is written for, applied and measured: `Resource.eval(registry.attachProbe(
+    // trigger.probe))` in `GatewayWiring.over` becomes
+    // `Resource.eval(registry.attachProbe(trigger.probe) *> routed.traverse_(trigger.probe))`. Acquisition
+    // then records two calls per service — `/health/ready` and `/capabilities` — and this fails.
+    Ref.of[IO, List[String]](Nil).flatMap { calls =>
+      val services = List(ServiceId.unsafe("cluster"), ServiceId.unsafe("topic"))
+      val wired = ServiceClients.of[IO](services.map(recordingClient(calls, _)))
+
+      FakeStructuredLogger[IO].flatMap { logger =>
+        GatewayWiring
+          .over[IO](idleUpstreams, Telemetry.noop[IO], logger, Resource.pure(wired))
+          .use(gateway =>
+            for {
+              duringAcquire <- calls.get
+              // And the recorder is not inert: the same clients, called once each, are seen. A recorder
+              // that recorded nothing would satisfy the assertion above whatever the composition root did.
+              _ <- wired.all.traverse_(_.callPublic(HealthEndpoints.ready, ())(pollContext))
+              afterwards <- calls.get
+            } yield {
+              assert(gateway.routes.nonEmpty)
+              assertEquals(
+                duringAcquire,
+                Nil,
+                "the composition root called an upstream while the gateway was being assembled"
+              )
+              assertEquals(afterwards.size, services.size, afterwards.toString)
+            }
+          )
       }
+    }
+  }
+
+  test("a configured alerts service mounts its public stream relay") {
+    Ref.of[IO, List[String]](Nil).flatMap { calls =>
+      val wired = ServiceClients.of[IO](List(recordingClient(calls, GatewayWiring.AlertsServiceId)))
+
+      FakeStructuredLogger[IO].flatMap { logger =>
+        GatewayWiring
+          .over[IO](idleUpstreams, Telemetry.noop[IO], logger, Resource.pure(wired))
+          .use(gateway => IO {
+            val routes = gateway.routes.filter(_.endpoint.info.name.contains("alerts.stream"))
+
+            assertEquals(routes.size, 1)
+            assertEquals(
+              routes.head.endpoint.showPathTemplate(showQueryParam = None),
+              "/api/v1/clusters/{clusterId}/alerts/stream"
+            )
+          })
+      }
+    }
+  }
+
+  test("noConnectionReachesAnUpstreamSocketWhileTheGatewayIsBeingAssembled") {
+    // The same rule one layer down, at a real socket rather than at the client port — because the port
+    // assertion is only as good as the claim that the port is the only way out, and this one holds even if
+    // some future composition root opens a connection of its own. The counter is proved able to move by a
+    // connection this case makes itself, so `0` is a measurement rather than a broken instrument.
+    //
+    // The gateway is released before anything is counted, so no scheduled poll can outlive the assertion.
+    listener.use { counting =>
+      for {
+        gateway <- wire(pointedAt(counting.socket))
+        // The accept loop runs on its own thread, so a connection made during acquisition is counted a
+        // moment after acquisition returns rather than at the same instant.
+        _ <- IO.sleep(300.milliseconds)
+        duringAcquire <- counting.connections
+        _ <- IO(new Socket(InetAddress.getLoopbackAddress, counting.socket.getLocalPort).close())
+        _ <- IO.sleep(300.milliseconds)
+        afterwards <- counting.connections
+      } yield {
+        assert(gateway.routes.nonEmpty)
+        assertEquals(duringAcquire, 0, "the composition root opened a connection to an upstream while wiring")
+        assertEquals(afterwards, 1, "the accept loop did not see a connection that was certainly made")
+      }
+    }
+  }
+
+  test("theReadinessPollerContactsAnUpstreamOnceTheGatewayIsRunning") {
+    // The half that makes the two above mean something. A composition root that never contacted an upstream
+    // at all would satisfy "nothing was contacted while wiring" perfectly and would leave every capability
+    // at `Unknown` for ever, which is the failure GW-003 exists to prevent. Same socket, same wiring, an
+    // interval short enough that the first jittered poll lands inside the test: a connection arrives.
+    //
+    // *An* upstream and not *every* upstream, deliberately. Both configured services point at this one
+    // socket and the process shares one HTTP backend, so two polls may legitimately reuse one pooled
+    // connection; asserting two would be asserting a property of the connection pool. That each service is
+    // polled is `ReadinessPollerSuite`'s subject, over a client it can count calls on.
+    listener.use { counting =>
+      wiring(pointedAt(counting.socket, readinessInterval = 2.seconds)).use { gateway =>
+        counting.awaitConnection(within = 20.seconds).map { seen =>
+          assert(gateway.routes.nonEmpty)
+          assert(seen > 0, "the readiness poller never contacted the upstream it was configured with")
+        }
+      }
+    }
+  }
+
+  test("aStrictDeploymentNeverConnectsToALoopbackUpstream") {
+    // The address rule, at the socket, in the direction that protects something. `UrlPolicy.Strict` is the
+    // shipped default and refuses loopback, so the poller must not reach this listener at all — not once,
+    // not after a redirect. The case beside it is the same wiring under the policy an operator has to set
+    // deliberately, so neither of the two can be satisfied by a gateway that simply never calls anybody.
+    //
+    // This pair is why `GatewayServiceConfig` carries the policy at all. Until wave 6 the client re-derived
+    // it as `UpstreamConfig`'s strict default whatever the loader had decided, so a gateway configured with
+    // `KUI_ALLOW_PRIVATE_UPSTREAMS=true` accepted `http://localhost:8081` at start-up and then answered
+    // `KUI-UPSTREAM-UNAVAILABLE` for every call to it, with no connection ever attempted — measured here,
+    // in both directions, before the policy was threaded.
+    listener.use { counting =>
+      wiring(pointedAt(counting.socket, readinessInterval = 200.milliseconds, policy = UrlPolicy.Strict))
+        .use { gateway =>
+          for {
+            _ <- IO.sleep(3.seconds)
+            seen <- counting.connections
+          } yield {
+            assert(gateway.routes.nonEmpty)
+            assertEquals(seen, 0, "a strict deployment opened a connection to a loopback upstream")
+          }
+        }
     }
   }
 

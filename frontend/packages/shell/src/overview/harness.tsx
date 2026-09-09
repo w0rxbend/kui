@@ -38,7 +38,14 @@ import { createRouter, memoryHistory, useLocation, type RouteSectionProps } from
 import type { JSX } from "@solidjs/web";
 
 import type { ApiError, KuiApiClient } from "@kui/api";
-import { KuiProvider, type KuiContextValue } from "@kui/kernel";
+import {
+  AlertsProvider,
+  KuiProvider,
+  type AlertFeed,
+  type Alerts,
+  type Fetched,
+  type KuiContextValue,
+} from "@kui/kernel";
 
 import { shellPaths } from "../routing/paths.js";
 import { shellRoutes, type RouteViews } from "../routing/routes.jsx";
@@ -119,6 +126,28 @@ export interface DashboardHostOptions {
   readonly selected?: string | undefined;
   /** The gateway. Defaults to one that answers the throughput endpoint `not_configured`. */
   readonly api?: KuiApiClient | undefined;
+  /** The application-wide alerts store. Hidden by default, as an unconfigured deployment is. */
+  readonly alerts?: Alerts | undefined;
+}
+
+export function staticAlerts(state: Fetched<AlertFeed> = { kind: "not-configured" }): Alerts {
+  const value = () => {
+    const current = state;
+    return current.kind === "ready" || current.kind === "stale" ? current.value : undefined;
+  };
+  return {
+    feed: () => state,
+    events: () => value()?.items ?? [],
+    openCount: () => value()?.openCount ?? null,
+    unreadCount: () => value()?.unreadCount ?? null,
+    unread: () => (value()?.unreadCount ?? 0) > 0,
+    lastReadAt: () => value()?.lastReadAt,
+    connection: () => ({ phase: "closed", reason: "test store" }),
+    markAllRead: () => {},
+    refresh: () => {},
+    start: () => {},
+    stop: () => {},
+  };
 }
 
 /**
@@ -174,8 +203,10 @@ export function dashboardHost(
   };
 
   return () => (
-    <KuiProvider value={context}>
-      <Router>{(route: RouteSectionProps) => route.children}</Router>
-    </KuiProvider>
+    <AlertsProvider value={options.alerts ?? staticAlerts()}>
+      <KuiProvider value={context}>
+        <Router>{(route: RouteSectionProps) => route.children}</Router>
+      </KuiProvider>
+    </AlertsProvider>
   );
 }

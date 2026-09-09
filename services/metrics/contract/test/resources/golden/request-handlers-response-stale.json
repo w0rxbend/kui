@@ -1,0 +1,13 @@
+{
+  "requestHandlers" : {
+    "status" : "stale",
+    "data" : {
+      "requestHandlerIdleRatio" : 0.8912,
+      "networkProcessorIdleRatio" : 0.7104,
+      "purgatory" : [
+      ]
+    },
+    "fetchedAt" : "2026-09-06T11:00:00.000Z",
+    "reason" : "UPSTREAM_UNAVAILABLE"
+  }
+}

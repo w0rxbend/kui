@@ -466,6 +466,13 @@ function countsOf(states: CountStates): Reading<NavCounts> {
  * not answering answers none of them — and four copies of one sentence says less than one copy of
  * it. `undefined` when every request came back *successfully* and simply carried no number, which
  * is a real state (four sections all answering `not_configured`) and one no error message fits.
+ *
+ * **Which** of several failures is quoted is deliberately not a rule, and this note is here because
+ * the shape reads like one. Reversing the scan so it answers the *last* failure instead leaves
+ * every case `pnpm -C frontend test packages/shell` runs green — measured — and it should, because
+ * both sentences are true statements about a request that really failed. The rule the paragraph
+ * above states is "one sentence and not four", and that is gated by
+ * `clusterStore.test.tsx`'s "says the counts could not be read once all four have failed".
  */
 function firstFailure(states: readonly (QueryState<unknown> | undefined)[]): string | undefined {
   for (const state of states) {

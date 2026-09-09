@@ -9,6 +9,12 @@
     { "path": "./packages/feature-clusters" },
     { "path": "./packages/feature-topics" },
     { "path": "./packages/feature-messages" },
-    { "path": "./packages/feature-consumers" }
+    { "path": "./packages/feature-consumers" },
+    /* `feature-schemas` had no reference here and was type-checked only transitively, through
+       `packages/shell/tsconfig.json` — a property nobody chose, measured in both directions in wave
+       5. Both it and the new `feature-alerts` are named now, so `tsc --build` here checks every
+       package in the workspace whatever the shell happens to depend on. */
+    { "path": "./packages/feature-schemas" },
+    { "path": "./packages/feature-alerts" }
   ]
 }

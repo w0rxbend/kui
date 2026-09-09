@@ -6,7 +6,7 @@ import java.time.Instant
 import scala.concurrent.duration.DurationInt
 
 import cats.effect.testkit.TestControl
-import cats.effect.{IO, Ref}
+import cats.effect.{Deferred, IO, Ref}
 import fs2.{Chunk, Stream}
 import io.circe.Json
 import munit.CatsEffectSuite
@@ -124,6 +124,33 @@ final class StreamProxySuite extends CatsEffectSuite {
       _ <- cancelled.get.iterateUntil(identity).timeout(5.seconds)
       seen <- cancelled.get
     } yield assert(seen)
+  }
+
+  test("cancellingWithAFullQueueDoesNotWaitForAConsumerThatHasStopped") {
+    // Hold the consumer after its first byte. That lets the producer fill the one-slot queue with the second
+    // chunk and block while offering the third. Once the consumer is released, `take(1)` cancels the relay.
+    // Its producer finaliser must not try to enqueue a termination marker into that still-full queue: nobody
+    // is left to remove it, so such an offer makes cancellation itself hang.
+    for {
+      releaseConsumer <- Deferred[IO, Unit]
+      thirdChunkReached <- Deferred[IO, Unit]
+      upstream =
+        Stream.chunk(Chunk.singleton(1.toByte)) ++
+          Stream.chunk(Chunk.singleton(2.toByte)) ++
+          Stream.eval(thirdChunkReached.complete(())).drain ++
+          Stream.chunk(Chunk.singleton(3.toByte)) ++
+          Stream.never[IO]
+      relay <- StreamProxy
+        .relay(upstream, queueSize = 1)
+        .evalTap(_ => releaseConsumer.get)
+        .take(1)
+        .compile
+        .drain
+        .start
+      _ <- thirdChunkReached.get.timeout(5.seconds)
+      _ <- releaseConsumer.complete(())
+      _ <- relay.joinWithNever.timeout(5.seconds)
+    } yield assert(true)
   }
 
   test("backpressuresRatherThanDropping") {

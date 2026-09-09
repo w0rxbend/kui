@@ -136,7 +136,9 @@ object MetricsWiring {
       buffers <- collectors[F](clusters, metrics, policy, telemetry, meter, logger)
 
       sources = new ConfiguredClusterSources[F](profiles, buffers.toMap[ClusterId, MetricsSourcePort[F]])
-      useCases = MetricsUseCases.make[F](sources)
+      // The stale threshold is the scrape cadence, from the same section: a point-in-time reading older
+      // than the interval that should have replaced it is last-known-good and is drawn as such.
+      useCases = MetricsUseCases.make[F](sources, metrics.scrapeInterval)
       capabilities = MetricsCapabilities.make[F](sources)
 
       // Readiness is deliberately empty. "Can this service answer" is true as soon as it is wired: every

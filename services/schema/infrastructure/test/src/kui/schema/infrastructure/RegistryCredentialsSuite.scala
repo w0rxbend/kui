@@ -1,7 +1,10 @@
 package kui.schema.infrastructure
 
+import scala.concurrent.duration.DurationInt
+
 import cats.effect.IO
 import cats.effect.kernel.Ref
+import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import sttp.client4.impl.cats.implicits.*
 import sttp.client4.testing.{BackendStub, ResponseStub}
@@ -192,4 +195,137 @@ final class RegistryCredentialsSuite extends KuiIOSuite {
       assertEquals(warnings.map(_.level), List("warn"))
     }
   }
+
+  test("a cached token is fetched again once it has expired") {
+    // The cache's other half, and the half that had no case: `token` hands back the cached entry only
+    // while `usableUntil` is still ahead of now, and deleting that condition leaves 141 of 141 green
+    // while KUI keeps presenting a bearer token the issuer stopped honouring hours ago — a 401 from the
+    // registry that looks exactly like a wrong client secret, which is the wrong system to go and check.
+    //
+    // Under `TestControl`, so the clock the production code reads is moved rather than waited on: a
+    // suite that slept two minutes would be slow on every run and flaky on a loaded machine.
+    val program =
+      for {
+        seen <- Ref.of[IO, List[sttp.client4.GenericRequest[?, ?]]](Nil)
+        issued <- Ref.of[IO, Int](0)
+        logger <- FakeStructuredLogger[IO]
+        backend = rotatingIssuerStub(seen, issued, expiresIn = 120)
+        headers <- RegistryCredentials
+          .fromConfig[IO](oauth(), Some(backend), logger)
+          .use { credentials =>
+            for {
+              first <- credentials.authenticate(request)
+              // One second inside the refresh margin. `usableUntil` is 120s minus the 30s margin.
+              _ <- IO.sleep(89.seconds)
+              cached <- credentials.authenticate(request)
+              _ <- IO.sleep(2.seconds)
+              renewed <- credentials.authenticate(request)
+            } yield List(first, cached, renewed).map(_.map(header(_, "Authorization")))
+          }
+        calls <- seen.get
+      } yield (headers, calls.size)
+
+    TestControl.executeEmbed(program).map { (headers, calls) =>
+      assertEquals(
+        headers,
+        List(Right("Bearer tok-1"), Right("Bearer tok-1"), Right("Bearer tok-2"))
+      )
+      // Two, not three: the middle call was still inside the token's usable window.
+      assertEquals(calls, 2, "the issuer was asked the wrong number of times")
+    }
+  }
+
+  test("a token is retired before the issuer expires it, not at the moment it does") {
+    // `RefreshMargin` is the reason the previous case renews at 90 seconds and not at 120: a token that
+    // expires *in flight* produces a 401 indistinguishable from a misconfigured credential, and an
+    // operator then goes and checks a client secret that was never wrong. Thirty seconds is comfortably
+    // longer than a registry call's own budget, so a token handed to a request outlives that request.
+    val program =
+      for {
+        seen <- Ref.of[IO, List[sttp.client4.GenericRequest[?, ?]]](Nil)
+        issued <- Ref.of[IO, Int](0)
+        logger <- FakeStructuredLogger[IO]
+        backend = rotatingIssuerStub(seen, issued, expiresIn = 120)
+        _ <- RegistryCredentials
+          .fromConfig[IO](oauth(), Some(backend), logger)
+          .use { credentials =>
+            credentials.authenticate(request) *>
+              // Still valid as far as the issuer is concerned, and already retired here.
+              IO.sleep(95.seconds) *> credentials.authenticate(request)
+          }
+        calls <- seen.get
+      } yield calls.size
+
+    TestControl.executeEmbed(program).map { calls =>
+      assertEquals(calls, 2, "a token was still in use less than 30s before the issuer expires it")
+    }
+  }
+
+  test("a token an issuer says expires in one second is still cached for thirty") {
+    // The denial-of-service rule, and it is the *floor* that makes it true rather than the minimum
+    // lifetime beside it: `(lifetime - RefreshMargin).max(MinimumLifetime / 2)` is what stops a token
+    // whose stated lifetime is shorter than the refresh margin from being born already expired. Without
+    // it, `expires_in: 1` yields a `usableUntil` in the past and KUI asks the issuer once per registry
+    // call — turning its own authentication into an attack on the identity provider.
+    val program =
+      for {
+        seen <- Ref.of[IO, List[sttp.client4.GenericRequest[?, ?]]](Nil)
+        issued <- Ref.of[IO, Int](0)
+        logger <- FakeStructuredLogger[IO]
+        backend = rotatingIssuerStub(seen, issued, expiresIn = 1)
+        _ <- RegistryCredentials
+          .fromConfig[IO](oauth(), Some(backend), logger)
+          .use(credentials => credentials.authenticate(request).replicateA(5))
+        early <- seen.get.map(_.size)
+        // and it is not cached for ever either: past the floor, the issuer is asked again.
+      } yield early
+
+    TestControl.executeEmbed(program).map { calls =>
+      assertEquals(calls, 1, "five calls inside the floor asked the issuer more than once")
+    }
+  }
+
+  test("a token cached under the floor is renewed once the floor has passed") {
+    val program =
+      for {
+        seen <- Ref.of[IO, List[sttp.client4.GenericRequest[?, ?]]](Nil)
+        issued <- Ref.of[IO, Int](0)
+        logger <- FakeStructuredLogger[IO]
+        backend = rotatingIssuerStub(seen, issued, expiresIn = 1)
+        headers <- RegistryCredentials
+          .fromConfig[IO](oauth(), Some(backend), logger)
+          .use { credentials =>
+            credentials.authenticate(request) *> IO.sleep(31.seconds) *>
+              credentials.authenticate(request)
+          }
+        calls <- seen.get.map(_.size)
+      } yield (headers.map(header(_, "Authorization")), calls)
+
+    TestControl.executeEmbed(program).map { (last, calls) =>
+      assertEquals(last, Right("Bearer tok-2"))
+      assertEquals(calls, 2)
+    }
+  }
+
+  /** An issuer that answers a different token each time and records what it was sent.
+    *
+    * The token *changes* on purpose: a cache that never expired and one that renewed correctly are
+    * indistinguishable if every answer is the same string, which is how a case can watch a renewal
+    * happen and still pass when it stops happening.
+    */
+  private def rotatingIssuerStub(
+      seen: Ref[IO, List[sttp.client4.GenericRequest[?, ?]]],
+      issued: Ref[IO, Int],
+      expiresIn: Long
+  ): Backend[IO] =
+    BackendStub[IO](summon[sttp.monad.MonadError[IO]]).whenAnyRequest
+      .thenRespondF { sent =>
+        for {
+          _ <- seen.update(_ :+ sent)
+          number <- issued.updateAndGet(_ + 1)
+        } yield ResponseStub.adjust(
+          s"""{"access_token":"tok-$number","expires_in":$expiresIn}""",
+          StatusCode.Ok
+        )
+      }
 }

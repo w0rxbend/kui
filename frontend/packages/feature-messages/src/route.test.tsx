@@ -27,7 +27,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { flush } from "solid-js";
 import { createRouter, memoryHistory } from "@solidjs/router";
 import { KuiProvider, clearToasts, toasts, type KuiContextValue, type KuiPaths } from "@kui/kernel";
-import type { KuiApiClient } from "@kui/api";
+import { Actions, type KuiApiClient } from "@kui/api";
 
 import { mount } from "./testing.js";
 import { presetsKey } from "./presets.js";
@@ -196,6 +196,11 @@ function routeAt(
    * one topic would have the second read the first's answer and assert against a count it never
    * asked for. A distinct name per case is the key being a key. */
   topic: string = TOPIC,
+  /* Yes to everything unless a case says otherwise. It is a parameter because the route is where a
+     permission becomes a control: `MessagesTab` renders the two write buttons disabled when it is
+     told to, and that has a case — what decides whether it is told is `mayProduce()` and
+     `mayResend()` here, and a harness that can only mount permitted cannot observe either. */
+  permits: KuiContextValue["permits"] = () => true,
 ): { readonly container: HTMLElement; readonly dispose: () => void; readonly url: () => string } {
   /* Mounted at `/ui`, as the product is, and this is not decoration. `navigate` resolves a `to`
    * that begins with `/` against the base, and `useLocation().pathname` already carries the base —
@@ -214,7 +219,7 @@ function routeAt(
   const value: KuiContextValue = {
     api,
     cluster: () => CLUSTER,
-    permits: () => true,
+    permits,
     paths: PATHS,
     report: () => undefined,
   };
@@ -874,5 +879,191 @@ describe("saving what is on the filter bar", () => {
     } finally {
       window.prompt = original;
     }
+  });
+});
+
+/**
+ * The permission wiring, which is a different thing from the rendering it drives.
+ *
+ * `MessagesTab` draws a write control disabled with a reason when it is handed `mayProduce={false}`
+ * or `mayResend={false}`, and `messages.test.tsx` covers that. What decides which of those it is
+ * handed is two accessors in `MessagesRoute`, and until this block every case in this package
+ * mounted the route with a `permits` that said yes to everything — so both accessors could be
+ * replaced with the constant `true` and all 158 cases stayed green, while an account holding no
+ * write permission at all was shown two live buttons over a topic it may not touch.
+ *
+ * Three arrangements, because the two controls are gated on different actions and a single boolean
+ * would satisfy any two of them. `Copy records out` reads this topic and writes another, so it
+ * needs both permissions; `Produce message` needs only the write. An account trusted to publish but
+ * not to read is therefore offered produce and refused resend, and that is the arrangement no
+ * single flag can produce.
+ */
+describe("the write controls the route offers", () => {
+  /** Yes to everything except these, compared field by field rather than by object identity. */
+  function permitsAllBut(
+    ...denied: readonly { readonly resource: string; readonly action: string }[]
+  ): KuiContextValue["permits"] {
+    return (asked) =>
+      !denied.some((one) => one.resource === asked.resource && one.action === asked.action);
+  }
+
+  function control(container: HTMLElement, label: string): HTMLButtonElement {
+    const button = [...container.querySelectorAll("button")].find(
+      (candidate) => (candidate.textContent ?? "").trim() === label,
+    );
+    if (button === undefined) throw new Error(`no button reading ${label}`);
+    return button;
+  }
+
+  /**
+   * The reason under one disabled control, read through that control's own `aria-describedby`.
+   *
+   * Not `document.body.querySelector('[role="tooltip"]')`: the bubble is a portal into `body` and
+   * an earlier case's can still be there, so the first match is not necessarily this button's — a
+   * reading that made two of these cases assert a sentence from the case before them.
+   */
+  async function reasonUnder(button: HTMLButtonElement): Promise<string> {
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await settle();
+    const id = button.getAttribute("aria-describedby") ?? "";
+    const bubble = id === "" ? null : document.getElementById(id);
+    if (bubble === null) throw new Error(`no tooltip is attached to ${button.textContent ?? ""}`);
+    return bubble.textContent ?? "";
+  }
+
+  test("offers both write controls to a principal holding both permissions", async () => {
+    // The capability working, beside the two refusals below. A screen that disabled everything for
+    // everybody would satisfy them and be exactly as wrong.
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.permitted") });
+    const { container, dispose } = routeAt("", api, "orders.permitted");
+    await settle();
+
+    expect(control(container, "Produce message").getAttribute("aria-disabled")).toBeNull();
+    expect(control(container, "Copy records out").getAttribute("aria-disabled")).toBeNull();
+
+    dispose();
+  });
+
+  test("refuses both write controls to a principal who may not produce", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.unwritable") });
+    const { container, dispose } = routeAt(
+      "",
+      api,
+      "orders.unwritable",
+      permitsAllBut(Actions.TopicMessagesProduce),
+    );
+    await settle();
+
+    /* Disabled and present, not absent: a control that vanishes teaches an operator that KUI cannot
+       publish at all, when the truth is that this account may not. */
+    const produce = control(container, "Produce message");
+    expect(produce.getAttribute("aria-disabled")).toBe("true");
+    expect(await reasonUnder(produce)).toContain(
+      "You do not have permission to publish into this topic.",
+    );
+
+    // And the copy, which writes into another topic, is refused for the same missing permission.
+    expect(control(container, "Copy records out").getAttribute("aria-disabled")).toBe("true");
+
+    dispose();
+  });
+
+  /**
+   * The track screen, which is the same feature at a different address and had the same hole.
+   *
+   * `/messages/track` names no topic — a track reads across them — so it is a different branch of
+   * this route's root and no case in this package had ever mounted it. Its Search button is
+   * disabled for two quite different reasons, and that is why the query has to be filled in first:
+   * an empty form disables Search because the form is incomplete, which would make a permission
+   * assertion pass over a gate that had been deleted.
+   */
+  function trackAt(api: KuiApiClient, permits: KuiContextValue["permits"] = () => true): {
+    readonly container: HTMLElement;
+    readonly dispose: () => void;
+  } {
+    const history = memoryHistory(`${BASE}/clusters/${CLUSTER}/messages/track`);
+    const Router = createRouter({
+      routes: [{ path: "/clusters/:clusterId/messages/track", component: Messages }],
+      base: BASE,
+      history,
+      scrollRestoration: false,
+    });
+    const value: KuiContextValue = {
+      api,
+      cluster: () => CLUSTER,
+      permits,
+      paths: PATHS,
+      report: () => undefined,
+    };
+    return mount(() => (
+      <KuiProvider value={value}>
+        <Router />
+      </KuiProvider>
+    ));
+  }
+
+  /** A complete track query, so that Search is disabled by permission and by nothing else. */
+  async function fillTrack(container: HTMLElement): Promise<void> {
+    /* Settled between the two, because `patch` spreads the query it was last **rendered** with:
+       two keystrokes in one turn read the same stale object and the second discards the first. */
+    type(container, "Topics", "orders.v1, orders.payments.v2");
+    await settle();
+    type(container, "Value", "order-4711");
+    await settle();
+  }
+
+  test("offers the track search to a principal who may read messages", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.trackable") });
+    const { container, dispose } = trackAt(api);
+    await settle();
+    await fillTrack(container);
+
+    expect(control(container, "Search").getAttribute("aria-disabled")).toBeNull();
+
+    dispose();
+  });
+
+  test("refuses the track search to a principal who may not read messages", async () => {
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.untrackable") });
+    const { container, dispose } = trackAt(api, permitsAllBut(Actions.TopicMessagesRead));
+    await settle();
+    await fillTrack(container);
+
+    const search = control(container, "Search");
+    expect(search.getAttribute("aria-disabled")).toBe("true");
+    // The permission sentence, and not "This search is not complete." — the form is complete, and
+    // telling an operator to finish a filled-in form sends them looking for a typo that is not
+    // there while the real answer is that this account may not read.
+    expect(await reasonUnder(search)).toContain(
+      "You do not have permission to read messages on this cluster.",
+    );
+
+    dispose();
+  });
+
+  test("refuses only the copy to a principal who may produce but not read", async () => {
+    /*
+     * The arrangement that separates the two gates. A single boolean over both controls agrees with
+     * the two cases above and disagrees here — which is the shape wave 5's topic-detail packet
+     * named as its own worst finding, one screen over.
+     */
+    const { api } = fakeApi({ topicAnswer: topicWith(12, "orders.writeonly") });
+    const { container, dispose } = routeAt(
+      "",
+      api,
+      "orders.writeonly",
+      permitsAllBut(Actions.TopicMessagesRead),
+    );
+    await settle();
+
+    expect(control(container, "Produce message").getAttribute("aria-disabled")).toBeNull();
+
+    const resend = control(container, "Copy records out");
+    expect(resend.getAttribute("aria-disabled")).toBe("true");
+    expect(await reasonUnder(resend)).toContain(
+      "You do not have permission to read this topic and publish into another one.",
+    );
+
+    dispose();
   });
 });

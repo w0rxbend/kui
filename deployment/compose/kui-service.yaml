@@ -1,11 +1,11 @@
-# The configuration the topic, message, consumer, schema and metrics services share in the
+# The configuration the topic, message, consumer, schema, metrics and alerts services share in the
 # distributed topology.
 #
-# One file for five containers, and that is deliberate. `kui-cluster.yaml` is separate because the
+# One file for six containers, and that is deliberate. `kui-cluster.yaml` is separate because the
 # cluster service reads a section nobody else does — `kui.store.*`, where KUI keeps its own state —
-# and mixing that into a file the other five also mount would put settings in front of processes
-# that have no business acting on them. These five, by contrast, read exactly the same things:
-# where to listen, which signing keys to accept, and which Kafka clusters exist. Five identical
+# and mixing that into a file the other six also mount would put settings in front of processes
+# that have no business acting on them. These six, by contrast, read exactly the same things:
+# where to listen, which signing keys to accept, and which Kafka clusters exist. Six identical
 # copies of that would drift, and the first symptom of the drift would be one screen working and
 # another not.
 #
@@ -83,6 +83,30 @@ kui:
         kind: prometheus
         callTimeout: "10s"
 
+  # The alerts service's dials. Every value below is the shipped default, written out rather than
+  # left implicit because this file is the worked example of the distributed shape and a reader
+  # cannot copy a key they cannot see.
+  #
+  # There is no on/off switch and there deliberately is not one: every rule the alerts service runs
+  # reads a fact this product already measures, so alerting is on in every deployment and the only
+  # question is where the lines are drawn. The thresholds are local policy -- a log directory at
+  # 80% is a quiet afternoon in one deployment and a page in another, and a consumer group that has
+  # been rebalancing for five minutes is either stuck or is a large group doing what large groups
+  # do -- which is exactly why they are configuration rather than constants.
+  #
+  # `diskUsedCriticalPercent` must stay above `diskUsedWarningPercent` or the loader refuses the
+  # file at startup: a critical bound below the warning would mean the warning never fires on the
+  # way past it.
+  alerts:
+    retention: "7d"
+    evaluationInterval: "60s"
+    thresholds:
+      offlinePartitions: 1
+      underReplicatedPartitions: 1
+      rebalanceDuration: "5m"
+      diskUsedWarningPercent: 80
+      diskUsedCriticalPercent: 90
+
   # ---------------------------------------------------------------------------------------------
   # TWO CLUSTERS ON ONE BROKER, AND ONLY ONE OF THEM MEASURABLE.
   #
@@ -101,7 +125,7 @@ kui:
   # Both name the registry `docker-compose.yml` runs, and that container is there for the same
   # reason this comment is: a configured cluster with no registry makes the schema service report
   # `not_configured` for the whole deployment, which is correct and would have meant teaching
-  # `smoke.sh` to expect a different answer for one of the six services. The check was right; the
+  # `smoke.sh` to expect a different answer for one of the seven services. The check was right; the
   # deployment was incomplete.
   clusters:
     - name: "Measured"

@@ -211,7 +211,12 @@ export function ResetWizard(props: ResetWizardProps): JSX.Element {
                 <Button
                   variant="secondary"
                   disabled
-                  disabledReason={props.refusal ?? "You do not have permission to reset this group's offsets."}
+                  /* Cluster-scoped, where the caller's sentence names the group — see the note
+                     on `GroupDetail`'s forget fallback. Two identical sentences make the caller's
+                     gate unobservable. */
+                  disabledReason={
+                    props.refusal ?? "You do not have permission to reset offsets on this cluster."
+                  }
                 >
                   Reset offsets
                 </Button>

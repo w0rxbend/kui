@@ -58,16 +58,30 @@ kui:
         url: "http://kui-metrics:8080"
         timeout: "10s"
         maxConcurrent: 32
-      # The sixth and last contract the gateway holds. It was missing from this list for a whole
-      # milestone: `services/schema` was in `ServiceContracts.byService`, had a container image
-      # nothing built, and appeared in neither this file nor `docker-compose.yml` — so the gateway
-      # published none of its routes and every schema screen reached a 404. That is the same defect
-      # the `metrics` block above was written to close, one service over, and it survived because
-      # the smoke test compared the configured addresses against the running containers and never
-      # against the contracts. It now derives all three sets, so an unaddressed contract fails the
-      # stack rather than quietly costing a screen.
+      # The sixth contract the gateway holds, and for one milestone the last one. It was missing
+      # from this list for a whole milestone: `services/schema` was in `ServiceContracts.byService`,
+      # had a container image nothing built, and appeared in neither this file nor
+      # `docker-compose.yml` — so the gateway published none of its routes and every schema screen
+      # reached a 404. That is the same defect the `metrics` block above was written to close, one
+      # service over, and it survived because the smoke test compared the configured addresses
+      # against the running containers and never against the contracts. It now derives all three
+      # sets, so an unaddressed contract fails the stack rather than quietly costing a screen.
       schema:
         url: "http://kui-schema:8080"
+        timeout: "10s"
+        maxConcurrent: 32
+      # The seventh, and the ninth service KUI has. The feed is a read of an in-memory event store
+      # and the acknowledgement is one write, so ten seconds is generous rather than tight; the
+      # bulkhead is the same 32 as everything except the message service, which is the only one
+      # that holds a connection open while a broker decides whether it has anything to send.
+      #
+      # An address here and a container in `docker-compose.yml` are two of the three facts a
+      # service needs to be reachable. The third is the contract in `ServiceContracts.byService`,
+      # and `smoke.sh` reads all three before it starts anything, because a contract with no
+      # address is absent from BOTH sides of an addresses-against-containers comparison -- which is
+      # how the metrics service and then the schema service each went a milestone unreachable.
+      alerts:
+        url: "http://kui-alerts:8080"
         timeout: "10s"
         maxConcurrent: 32
 

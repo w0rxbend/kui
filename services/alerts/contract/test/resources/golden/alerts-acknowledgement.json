@@ -1,0 +1,19 @@
+{
+  "event" : {
+    "id" : "disk-usage.broker-1-.var.lib.kafka.1756887072000",
+    "severity" : "warning",
+    "tone" : "success",
+    "category" : "storage",
+    "glyph" : "storage",
+    "openedAt" : "2026-09-03T08:11:12Z",
+    "lastSeenAt" : "2026-09-03T09:11:12Z",
+    "title" : "Log directory /var/lib/kafka is 82% full on broker 1",
+    "detail" : "threshold 80% · broker-1:/var/lib/kafka",
+    "resolution" : {
+      "at" : "2026-09-03T10:11:12Z",
+      "kind" : "acknowledged",
+      "by" : "ada"
+    }
+  },
+  "openCount" : 1
+}

@@ -1,0 +1,32 @@
+{
+  "throughput" : {
+    "status" : "ok",
+    "data" : {
+      "range" : "24h",
+      "from" : "2026-09-06T11:45:00Z",
+      "to" : "2026-09-06T12:00:00Z",
+      "stepSeconds" : 300,
+      "buckets" : [
+        {
+          "startingAt" : "2026-09-06T11:45:00Z",
+          "bytesInPerSecond" : 124800.5,
+          "bytesOutPerSecond" : 249600.75,
+          "recordsPerSecond" : 1420.75
+        },
+        {
+          "startingAt" : "2026-09-06T11:50:00Z",
+          "bytesInPerSecond" : null,
+          "bytesOutPerSecond" : null,
+          "recordsPerSecond" : null
+        },
+        {
+          "startingAt" : "2026-09-06T11:55:00Z",
+          "bytesInPerSecond" : 0.0,
+          "bytesOutPerSecond" : 0.0,
+          "recordsPerSecond" : 0.0
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-06T12:00:00.000Z"
+  }
+}

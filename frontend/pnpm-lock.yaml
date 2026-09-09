@@ -89,6 +89,24 @@ importers:
         specifier: 5.0.0
         version: 5.0.0(@types/node@22.13.0)(@vitest/coverage-v8@5.0.0)(@vitest/ui@5.0.0)(jsdom@30.0.1)(vite@8.2.2(@types/node@22.13.0)(esbuild@0.28.2))
 
+  packages/feature-alerts:
+    dependencies:
+      '@kui/api':
+        specifier: workspace:*
+        version: link:../api
+      '@kui/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@solidjs/router':
+        specifier: 2.0.0-next.21
+        version: 2.0.0-next.21(@solidjs/web@2.0.0-rc.6(solid-js@2.0.0-rc.6))(solid-js@2.0.0-rc.6)
+      '@solidjs/web':
+        specifier: 2.0.0-rc.6
+        version: 2.0.0-rc.6(solid-js@2.0.0-rc.6)
+      solid-js:
+        specifier: 2.0.0-rc.6
+        version: 2.0.0-rc.6
+
   packages/feature-clusters:
     dependencies:
       '@kui/api':
@@ -221,6 +239,9 @@ importers:
       '@kui/api':
         specifier: workspace:*
         version: link:../api
+      '@kui/feature-alerts':
+        specifier: workspace:*
+        version: link:../feature-alerts
       '@kui/feature-clusters':
         specifier: workspace:*
         version: link:../feature-clusters

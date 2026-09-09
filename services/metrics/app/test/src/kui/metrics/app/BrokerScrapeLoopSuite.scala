@@ -73,7 +73,10 @@ final class BrokerScrapeLoopSuite extends KuiIOSuite {
       new ConfiguredClusterSources[IO](
         ConfiguredClusterSources.profilesOf(clusters, configured),
         ports.view.mapValues(identity).toMap
-      )
+      ),
+      // The same value `MetricsWiring` passes, from the same configuration: a point-in-time reading older
+      // than the scrape that should have replaced it is drawn as last-known-good rather than as current.
+      configured.scrapeInterval
     )
 
   /** A source that serves whatever the test queued, one answer per scrape. */

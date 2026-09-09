@@ -5,6 +5,7 @@ import { createQueryRegistry } from "@kui/kernel";
 import { Overview } from "./Overview.jsx";
 import { toOverviewModel } from "./load.js";
 import {
+  HANDLERS_NOTHING_READ,
   HANDLER_ONE_ABSENT,
   HANDLER_READINGS,
   HEALTHY,
@@ -12,12 +13,14 @@ import {
   LATENCY_WITH_A_GAP,
   PRODUCERS_BY_CLIENT,
   PRODUCERS_BY_TOPIC,
+  PRODUCERS_WITH_INTERNAL_EXCLUDED,
   RECORD_SIZE_MEAN,
   THROUGHPUT_ALL_ABSENT,
   THROUGHPUT_NOT_CONFIGURED,
   THROUGHPUT_STALE,
   THROUGHPUT_UNAVAILABLE,
   THROUGHPUT_WITH_A_GAP,
+  handlersBody,
   handlersOk,
   latencyOk,
   producersOk,
@@ -239,3 +242,48 @@ export const NothingSampledAnywhere: Story = story(
  * under the card is the *only* thing saying this is not current.
  */
 export const StaleSeries: Story = story(answering(THROUGHPUT_STALE));
+
+/**
+ * A source that answered and served nothing this build reads.
+ *
+ * Not a failure and not an unconfigured deployment: the request went out, a `Section` came back and
+ * `ok` was in it. The card draws the sentence rather than a heading over an empty box — which is
+ * the state this whole tab was in against a real broker for a milestone, when the browser was
+ * reading `readings[]` off a document that has never had one.
+ */
+export const HandlersAnsweredNothing: Story = story(
+  serving({ ...EVERYTHING, [HANDLERS_PATH]: handlersOk(HANDLERS_NOTHING_READ) }),
+);
+
+/**
+ * A gauge whose newest scrape is older than one scrape interval.
+ *
+ * `services/metrics` answers `stale` for it, carrying the figures **and** the instant they were
+ * taken: an exporter that went away an hour ago leaves a true reading behind it, and neither
+ * throwing it away nor drawing it as current is honest. The tiles are drawn and the caption says
+ * this is the last answer KUI received.
+ */
+export const HandlersStale: Story = story(
+  serving({
+    ...EVERYTHING,
+    [HANDLERS_PATH]: handlersBody({
+      status: "stale",
+      data: HANDLER_READINGS,
+      fetchedAt: "2026-09-05T11:00:00Z",
+      reason: "UPSTREAM_UNAVAILABLE",
+    }),
+  }),
+);
+
+/**
+ * A ranking with Kafka's own topics taken out of it, and the sentence that says so.
+ *
+ * `__consumer_offsets` outruns every application topic on an idle broker by three orders of
+ * magnitude, so ranking it would report the consumer-group protocol as the cluster's busiest
+ * producer. Removing it silently would leave a card nobody could reconcile against the exporter, so
+ * the server sends the count and the card prints it. At zero there is no sentence at all — the
+ * never-a-zero rule, applied to a sentence rather than to a figure.
+ */
+export const ProducersWithInternalExcluded: Story = story(
+  serving({ ...EVERYTHING, [PRODUCERS_PATH]: producersOk(PRODUCERS_WITH_INTERNAL_EXCLUDED) }),
+);

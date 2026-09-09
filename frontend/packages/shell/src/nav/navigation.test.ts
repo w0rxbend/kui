@@ -40,6 +40,26 @@ const clusters: FeatureRegistration = {
   requiresCluster: false,
 };
 
+const consumers: FeatureRegistration = {
+  ...topics,
+  id: "consumers",
+  serviceId: "consumer",
+  viewAction: Actions.ConsumerGroupView,
+  label: "Consumers",
+  icon: "consumers",
+  order: 300,
+};
+
+const alerts: FeatureRegistration = {
+  ...topics,
+  id: "alerts",
+  serviceId: "alerts",
+  viewAction: Actions.AlertsView,
+  label: "Alerts",
+  icon: "bell",
+  order: 400,
+};
+
 const ready: FeatureState = { kind: "ready" };
 const down: FeatureState = {
   kind: "unavailable",
@@ -272,5 +292,136 @@ describe("the headings the drawer is given", () => {
   it("puts CLUSTER before ECOSYSTEM whatever order the features arrive in", () => {
     const headings = drawn().map((group) => group.heading);
     expect(headings.indexOf("CLUSTER")).toBeLessThan(headings.indexOf(ECOSYSTEM_GROUP));
+  });
+});
+
+/**
+ * The Alerts row, over a deployment that runs no alerts service.
+ *
+ * ADR-032's first rule, on the one feature this wave adds: `not_configured` is **hidden**, and it
+ * is hidden rather than drawn empty because it is not a failure. A deployment that has not
+ * configured `services/alerts` has no alerts, and an Alerts row over it — even a greyed one, even
+ * one that opens onto "nothing configured" — sends every operator who sees it hunting for an outage
+ * that does not exist. It is the same rule Kafka Connect and ksqlDB are kept out of `ECOSYSTEM` by,
+ * and the reason that heading is emitted empty rather than filled with placeholders.
+ *
+ * The row *is* drawn for a configured service, in the same shape, so this pair is a rule and not a
+ * refusal: a fold that returned `undefined` for everything would satisfy the first case alone.
+ */
+describe("the drawer's Alerts row", () => {
+  const row = (state: FeatureState) =>
+    destinationFor({ registration: alerts, state }, { landingFor: landing, cluster: "prod" });
+
+  it("draws no row at all where the deployment runs no alerts service", () => {
+    expect(row({ kind: "not_configured" })).toBeUndefined();
+    /* And through the whole fold, because that is what reaches the drawer: not a group holding an
+       empty row, and not a row with an empty badge — nothing. */
+    const drawn = navigationGroups({
+      features: [
+        { registration: topics, state: ready },
+        { registration: alerts, state: { kind: "not_configured" } },
+      ],
+      landingFor: landing,
+      cluster: "prod",
+    }).flatMap((group) => group.destinations);
+    expect(drawn.map((destination) => destination.id)).toEqual(["topics"]);
+  });
+
+  it("draws it where the service is configured, so the rule above is not a fold that refuses", () => {
+    const drawn = row(ready);
+    expect(drawn?.id).toBe("alerts");
+    expect(drawn?.label).toBe("Alerts");
+    expect(drawn?.href).toBe("/ui/clusters/prod/topics");
+    expect(drawn?.state).toBe("ready");
+  });
+
+  it("carries the open count the API answered, and no badge when nothing is open", () => {
+    /* The count is the server's own figure — `alertsBadge` in `data/alerts.ts` is where the
+       `null`/`0`/positive distinction is made and argued — and this is the seam where it becomes a
+       badge. A defect of zero and an unknown both come through as `undefined`, which the fold
+       draws as no badge rather than as a `0`. */
+    const withCount = destinationFor(
+      { registration: alerts, state: ready },
+      {
+        landingFor: landing,
+        cluster: "prod",
+        countFor: () => ({ kind: "total", value: 2, noun: "open" }),
+      },
+    );
+    expect(withCount?.badge).toMatchObject({ text: "2", tone: "neutral" });
+    expect(withCount?.badge?.description).toBe("2 open");
+
+    const quiet = destinationFor(
+      { registration: alerts, state: ready },
+      { landingFor: landing, cluster: "prod", countFor: () => undefined },
+    );
+    expect(quiet?.badge).toBeUndefined();
+  });
+});
+
+/**
+ * The declared order, which the module header calls a correctness property and nothing held.
+ *
+ * `navigationGroups` sorts by `registration.order` before it groups, and deleting that `.sort(...)`
+ * left every case this package's suite runs green. Every fixture above happens to be written in
+ * declared order already, so a fold that did nothing at all produced the same list — the shape wave
+ * 5's retrospective names, where a rule is claimed in a paragraph and the fixture agrees with the
+ * mutation as readily as with the rule.
+ *
+ * What that costs on a running cluster is stated at line 31 of `navigation.ts`: the rows would take
+ * whatever order the capability frame happened to arrive in. The frame arrives repeatedly — a
+ * struggling cluster re-announces every few seconds — so the drawer would reshuffle under the
+ * pointer, and the user, aiming at the position their muscle memory learned, clicks whatever moved
+ * into it. **A sixth feature registers this wave**, which is when a table that has always been
+ * written in order stops being written in order by accident.
+ *
+ * The expectation is written out by hand and not derived from the input, because a test that sorts
+ * its own fixture to build the answer is the rule composed twice and asserted once.
+ */
+describe("the order the drawer's rows are in", () => {
+  /* Scrambled on purpose: 300, 100, 200 in, and never the order that comes out. A registry is a
+     literal today, but the frame folds capability states over it and a table assembled from
+     anything that arrives — a stream, a merge, a lazily registered sixth package — arrives in no
+     particular order at all. */
+  const arrived = [
+    { registration: consumers, state: ready },
+    { registration: clusters, state: ready },
+    { registration: topics, state: ready },
+  ];
+
+  it("draws them in their declared order and not in the order the frame arrived", () => {
+    const rows = navigationGroups({
+      features: arrived,
+      landingFor: landing,
+      cluster: "prod",
+    }).flatMap((group) => group.destinations);
+
+    expect(rows.map((row) => row.id)).toEqual(["clusters", "topics", "consumers"]);
+    /* And the input really was in a different order, so the assertion above cannot be satisfied by
+       a fold that passes its input through. */
+    expect(arrived.map((feature) => feature.registration.id)).toEqual([
+      "consumers",
+      "clusters",
+      "topics",
+    ]);
+  });
+
+  it("keeps that order when a service goes down, so a row never moves under the pointer", () => {
+    /* The half the header argues for at length: a feature going unavailable changes how its entry
+       looks and never where it is. Two folds over the same registrations in the same arrival
+       order, differing only in one state. */
+    const idsWith = (state: FeatureState) =>
+      navigationGroups({
+        features: arrived.map((feature) =>
+          feature.registration.id === "topics" ? { ...feature, state } : feature,
+        ),
+        landingFor: landing,
+        cluster: "prod",
+      })
+        .flatMap((group) => group.destinations)
+        .map((row) => row.id);
+
+    expect(idsWith(down)).toEqual(["clusters", "topics", "consumers"]);
+    expect(idsWith(down)).toEqual(idsWith(ready));
   });
 });

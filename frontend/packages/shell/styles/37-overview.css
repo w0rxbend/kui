@@ -43,6 +43,34 @@
   gap: var(--kui-space-5);
 }
 
+.kui-alerts-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kui-alerts-summary__row {
+  display: flex;
+  gap: var(--kui-space-3);
+  align-items: center;
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-alerts-summary__severity {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--kui-color-text-muted);
+}
+
+.kui-alerts-summary__severity[data-tone="danger"] { background: var(--kui-color-danger); }
+.kui-alerts-summary__severity[data-tone="warning"] { background: var(--kui-color-warning); }
+.kui-alerts-summary__note { margin: 0 0 var(--kui-space-3); color: var(--kui-color-text-muted); }
+
 /* --- Broker health ------------------------------------------------------------------------------ */
 
 .kui-broker-health {
@@ -372,6 +400,16 @@
   color: var(--kui-color-text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A footnote about the rows that are not here. It is deliberately quieter than the rows above it —
+ * it is a caveat about the list, not an entry in it — and it sits under the whole list rather than
+ * beside any row, because what it describes is the ranking rather than a producer. */
+.kui-producers__excluded {
+  margin: var(--kui-space-3) 0 0;
+  font-size: var(--kui-font-size-xs);
+  line-height: var(--kui-font-line-height-normal);
+  color: var(--kui-color-text-muted);
 }
 
 /* --- The record-size card ------------------------------------------------------------------------

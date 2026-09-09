@@ -57,6 +57,7 @@ Reopening an Accepted ADR requires new evidence and a superseding ADR.
 | [ADR-050](docs/adr/ADR-050-metrics-source.md) | The metrics adapter reads a Prometheus exposition; `MetricsSourceKind.Jmx` stays declared and unimplemented because `SafeUrl` cannot express a JMX service URL | Accepted | 2026-09-06 |
 | [ADR-051](docs/adr/ADR-051-schema-registration.md) | Registering a schema is an endpoint of `kui-schema`, and a registry's rejection is carried to the browser as the registry's own sentence | Accepted | 2026-09-06 |
 | [ADR-052](docs/adr/ADR-052-metrics-endpoints.md) | Four more metrics reads beside throughput, and the three figures a Kafka broker will not give us: purgatory is a queue length and not a percentage, top producers is by topic and not by `client.id`, and there is no record-size distribution | Accepted | 2026-09-07 |
+| [ADR-053](docs/adr/ADR-053-alert-events.md) | The alerts service: four rules over facts KUI already reads and no rules engine, an event that carries its own severity and category, a per-principal read marker rather than a second endpoint, and an acknowledgement that stays altering — so an operator watching a read-only cluster may not clear their own bell | Accepted | 2026-09-07 |
 
 ADR-039 … ADR-043 were written at and after the architecture review (2026-09-03) to record decisions the
 M0 development plan had made that no ADR covered. Three further such decisions were folded

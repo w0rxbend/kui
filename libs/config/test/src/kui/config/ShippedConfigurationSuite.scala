@@ -1,6 +1,9 @@
 package kui.config
 
 import java.nio.file.{Files, Path}
+import java.util.stream.Collectors
+
+import scala.jdk.CollectionConverters.*
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
@@ -37,10 +40,11 @@ final class ShippedConfigurationSuite extends KuiSuite {
   private val shipped: List[(String, UrlPolicy, Map[String, String])] = List(
     ("deployment/compose/kui.yaml", UrlPolicy.Dev, signingKey),
     ("deployment/compose/kui-cluster.yaml", UrlPolicy.Dev, signingKey),
-    // THE FILE FOUR OF THE SIX SERVICE CONTAINERS MOUNT, and it was not on this list for three
+    // THE FILE SIX OF THE EIGHT SERVICE CONTAINERS MOUNT, and it was not on this list for three
     // milestones. `docker-compose.yml` gives `kui-topic`, `kui-message`, `kui-consumer`,
-    // `kui-schema` and `kui-metrics` the same `--config /etc/kui/kui-service.yaml`, so a mistake
-    // here stops five processes rather than one -- and nothing in this repository read it. Wave 4
+    // `kui-schema`, `kui-metrics` and `kui-alerts` the same `--config /etc/kui/kui-service.yaml`,
+    // so a mistake here stops six processes rather than one -- and nothing in this repository read
+    // it. Wave 4
     // measured the cost: setting `callTimeout: "60s"` beside the default 30s `scrapeInterval` in
     // this file left `./mill libs.config.test` at 395/395 and `docker compose config -q` at exit
     // 0, because YAML is well-formed whatever it says, while the process refuses to boot with
@@ -97,6 +101,105 @@ final class ShippedConfigurationSuite extends KuiSuite {
       )
     )
   )
+
+  /** Every YAML file under `deployment/` that is NOT one of KUI's own configuration files, with the reason.
+    *
+    * This is the other half of [[shipped]] and it is what makes the list above impossible to forget a row
+    * from. `deployment/compose/kui-service.yaml` went unread for three milestones because somebody added the
+    * file and nobody added the row, and no suite in this repository could tell: `shipped` is hand written, a
+    * file that is absent from it is absent from every assertion made about it, and absence is invisible from
+    * the only side anything looked at.
+    *
+    * So the two directions are reconciled against the filesystem below, the way
+    * `scripts/feature-matrix-check.sh` reconciles its manifests. A file under `deployment/` is either a KUI
+    * configuration -- in which case it is loaded through the real loader by a row in [[shipped]] -- or it is
+    * one of these, and saying which costs a line and a sentence. Matching is on the file name rather than on
+    * the whole path, because the question "is this KUI's configuration or somebody else's" is a question
+    * about the file and not about which directory it happens to sit in.
+    *
+    * Widening one of these patterns is the way to make this reconciliation stop noticing anything, so the
+    * case below also asserts that each one still matches something and that what is left over is exactly
+    * [[shipped]]: a pattern broadened until it swallowed a KUI configuration file would take that file out of
+    * the left-over set and fail on the missing row.
+    */
+  private val notKuiConfiguration: List[(String, String)] = List(
+    "docker-compose" ->
+      ("a Compose topology. It describes containers, images and mounts; every key in it would be " +
+        "rejected by KUI's loader, which is the right outcome for a file that is not KUI's configuration."),
+    "otel-collector.yaml" ->
+      ("the OpenTelemetry Collector's own configuration, mounted by docker-compose.observability.yml. " +
+        "KUI sends spans to that collector and never reads this file."),
+    "kafka-jmx-exporter.yml" ->
+      ("the Prometheus JMX exporter's ruleset (ADR-050). It is a contract with services/metrics's " +
+        "reader and it is asserted, line shape by line shape, in deployment/compose/smoke.sh -- not here.")
+  )
+
+  /** Every `.yaml` and `.yml` file under `deployment/`, relative to the repository root. */
+  private def deploymentYaml(root: Path): List[String] = {
+    val stream = Files.walk(root.resolve("deployment"))
+    try
+      stream
+        .filter(Files.isRegularFile(_))
+        .map[String](path => root.relativize(path).toString.replace('\\', '/'))
+        .filter(name => name.endsWith(".yaml") || name.endsWith(".yml"))
+        .collect(Collectors.toList[String])
+        .asScala
+        .toList
+        .sorted
+    finally stream.close()
+  }
+
+  test("every configuration file this repository ships is on the list above, and every row is a file") {
+    // THE DEFECT THIS CLOSES IS AN ABSENCE, WHICH IS WHY IT NEEDS THE FILESYSTEM. Every other case in this
+    // file reads a row of `shipped` and asserts something about the file it names. None of them can say
+    // anything at all about a file that has no row -- and that is the failure this suite was written for:
+    // `kui-service.yaml` is mounted by five containers, carried a `callTimeout` the loader refuses, and was
+    // checked by nothing for three milestones because it was missing from a hand-written list.
+    val root = repositoryRoot
+    val onDisk = deploymentYaml(root)
+
+    // A pattern that matches nothing is a pattern somebody left behind after deleting the file it named, and
+    // it is also the shape an over-broad replacement takes on the way in. Checked first, because the
+    // partition below is meaningless if one side of it is stale.
+    notKuiConfiguration.foreach { (pattern, reason) =>
+      assert(
+        onDisk.exists(_.contains(pattern)),
+        s"no file under deployment/ matches `$pattern`, which is excluded from the shipped-configuration " +
+          s"list with the reason: $reason. Delete the row, or restore the file it was written for."
+      )
+    }
+
+    val excluded = onDisk.filter(name => notKuiConfiguration.exists((pattern, _) => name.contains(pattern)))
+    val kuiConfiguration = onDisk.diff(excluded)
+    val listed = shipped.map(_._1).sorted
+
+    // Before either direction, because `diff` cannot see a repeat: a file listed twice loads twice, both
+    // set differences stay empty, and the only visible effect is a case count that no longer matches the
+    // number of files this suite is said to cover.
+    assertEquals(
+      listed.distinct,
+      listed,
+      clue = s"a file is listed twice above: ${listed.diff(listed.distinct).mkString(", ")}"
+    )
+
+    val unlisted = kuiConfiguration.diff(listed)
+    assert(
+      unlisted.isEmpty,
+      s"these files are shipped under deployment/ and nothing loads them: ${unlisted.mkString(", ")}.\n" +
+        "  Add a row to `shipped` above with the environment the file expects and the URL policy the " +
+        "deployment it describes runs under, so that a key spelled wrongly fails here rather than in front " +
+        "of whoever copied the example. If it is not a KUI configuration file at all, say so in " +
+        "`notKuiConfiguration` with the reason."
+    )
+
+    val missing = listed.diff(kuiConfiguration)
+    assert(
+      missing.isEmpty,
+      s"these rows name a file that is not a shipped configuration file: ${missing.mkString(", ")}.\n" +
+        "  Either the file was deleted or renamed and the row was left behind, or it now matches one of " +
+        "the `notKuiConfiguration` patterns, which would mean this suite has stopped loading it."
+    )
+  }
 
   shipped.foreach { (relative, policy, environment) =>
     test(s"$relative loads") {
@@ -170,16 +273,18 @@ final class ShippedConfigurationSuite extends KuiSuite {
     * the root has is more robust than any number of `../`, and it fails with a sentence rather than a
     * `NoSuchFileException` when it is wrong.
     */
-  private def resolve(relative: String): Path = {
+  private def repositoryRoot: Path = {
     val start = Path.of("").toAbsolutePath
-    val root = Iterator
+    Iterator
       .iterate(Option(start))(_.flatMap(path => Option(path.getParent)))
       .takeWhile(_.isDefined)
       .flatten
       .find(candidate => Files.exists(candidate.resolve("build.mill")))
       .getOrElse(fail(s"no build.mill above $start, so the repository root could not be found"))
+  }
 
-    val file = root.resolve(relative)
+  private def resolve(relative: String): Path = {
+    val file = repositoryRoot.resolve(relative)
     if Files.exists(file) then file
     else fail(s"$relative is listed in this suite and does not exist; delete the row or restore the file")
   }

@@ -126,10 +126,12 @@ final class FixedSource extends MetricsSourcePort[Id] {
   def latency(range: ThroughputRange, endingAt: Instant): Id[Either[KuiError, LatencySeries]] =
     Right(LatencySeries.absent(range, endingAt))
 
-  def requestHandlers(asOf: Instant): Id[Either[KuiError, RequestHandlerReading]] =
-    Right(RequestHandlerReading.Empty)
+  def requestHandlers(asOf: Instant): Id[Either[KuiError, Observed[RequestHandlerReading]]] =
+    Right(Observed(RequestHandlerReading.Empty, asOf))
 
-  def producers(count: Int, asOf: Instant): Id[Either[KuiError, TopProducers]] = Right(TopProducers.Empty)
+  def producers(count: Int, asOf: Instant): Id[Either[KuiError, Observed[TopProducers]]] =
+    Right(Observed(TopProducers.Empty, asOf))
 
-  def recordSize(asOf: Instant): Id[Either[KuiError, RecordSizeReading]] = Right(RecordSizeReading.Empty)
+  def recordSize(asOf: Instant): Id[Either[KuiError, Observed[RecordSizeReading]]] =
+    Right(Observed(RecordSizeReading.Empty, asOf))
 }

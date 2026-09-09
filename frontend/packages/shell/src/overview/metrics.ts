@@ -1,15 +1,23 @@
 /**
  * The Traffic tab's other four wires: latency, request handlers, top producers and record size.
  *
- * ## What this file codes against, and why it is a stated contract rather than a diff
+ * ## What this file codes against, and why it is a document rather than a prose contract
  *
- * The four endpoints are `services/metrics`' (W5-01) and land beside this file rather than before
- * it, so this module is written against the shape both sides agreed in wave 5's plan and in
- * ADR-052: each answers a `Section`-wrapped document under one named key, `status` is one of
- * `ok | stale | unavailable | not_configured | forbidden`, and where a series is answered it
- * carries **exactly `bucketCount` entries for the range**, with a never-sampled bucket written
- * `null`. Those are the same rules the throughput card already keeps, and `throughput.ts` sets out
- * at length why the difference between a `null` and a `0` is the whole point of the screen.
+ * The four endpoints are `services/metrics`', and this module was originally written against a
+ * shape described in prose in a wave plan. Two of the four descriptions were wrong, both sides
+ * shipped green, and two cards drew a confident false sentence about the source for a whole
+ * milestone. So the shapes below are transcribed from `services/metrics/contract`'s DTOs and are
+ * held to them by `wire.golden.test.ts`, which decodes the documents the server's own encoder
+ * renders.
+ *
+ * The rules that are the same for all four: each answers a `Section`-wrapped document under one
+ * named key, `status` is one of `ok | stale | unavailable | not_configured | forbidden`, and where
+ * a series is answered it carries **exactly `bucketCount` entries for the range**, with a
+ * never-sampled bucket written `null`. `stale` is reachable and is not dead render code: a gauge
+ * whose newest scrape is older than one `kui.metrics.scrapeInterval` answers `stale` carrying the
+ * figure and the instant it was taken (ADR-052), so a card can show a true number without claiming
+ * it is current. `throughput.ts` sets out at length why the difference between a `null` and a `0`
+ * is the whole point of the screen.
  *
  * ## Three of the design's figures a broker does not publish, and what is drawn instead
  *
@@ -22,21 +30,28 @@
  *    invented ceiling is a fabricated percentage. So a reading arrives as *either* a `ratio` or a
  *    `count`, and {@link handlerPanel} keeps them apart: a ratio draws a ring, a count draws its
  *    figure and its unit and never a ring.
- *  - **Top producers may be topics rather than clients.** §4 draws "Top producers · client.id" and a
+ *  - **Top producers are topics rather than clients.** §4 draws "Top producers · client.id" and a
  *    broker publishes no per-`client.id` byte rate unless quotas are configured; it publishes a
- *    per-*topic* `BytesInPerSec`. So the entry names what it holds — `clientId` or `topic` — and
- *    {@link producerBoard} reports which, so the card's title can say the same word the server did.
- *    A field called `clientId` carrying a topic name is the defect wave 5's rule 7 exists to stop.
+ *    per-*topic* `BytesInPerSec`. So the server sends `measuredBy` beside the rows and
+ *    {@link producerBoard} reads it, so the card's title says the same word the server did. A field
+ *    called `clientId` carrying a topic name is the defect wave 5's rule 7 exists to stop.
  *  - **There is no record-size distribution.** §3.5 draws twelve buckets and `p50 · 1.1 KB` /
  *    `p99 · 18 KB` / `max · 0.9 MB` chips. Kafka publishes a *mean* — bytes-in over messages-in —
  *    and nothing else. So {@link recordSizeReadout} carries a mean and this module builds no
  *    histogram from it: twelve buckets assembled from one number is a drawing of an assumption.
  *
- * ## Why every field is read optionally
+ * ## Why every field is read optionally, and what stops the shapes drifting again
  *
- * The same reason `throughput.ts` gives: the generated browser types stop at `unknown` inside a
- * `Section`, so these shapes are hand-transcribed and are deliberately narrow. A field this build
- * does not understand is absent, and absent is drawn as absent — never as zero.
+ * The generated browser types stop at `unknown` inside a `Section` — `Section`'s Tapir schema is
+ * `Schema.any`, so `schema.d.ts` types all five payloads opaque — and these shapes are therefore
+ * hand-transcribed and deliberately narrow. A field this build does not understand is absent, and
+ * absent is drawn as absent, never as zero.
+ *
+ * Hand-transcribing is exactly how two of the four came to be wrong, so it is no longer the only
+ * thing holding the wire together: `services/metrics/contract/test/resources/golden/*.json` are
+ * documents rendered by the **server's own encoder**, and `wire.golden.test.ts` runs them through
+ * the fetchers below. A shape that drifts from the service now fails a browser case rather than
+ * quietly answering an empty array.
  */
 
 import type { ApiError, KuiApiClient } from "@kui/api";
@@ -282,27 +297,38 @@ export async function fetchLatency(
 /* --- Request handlers --------------------------------------------------------------------------- */
 
 /**
- * One reading of the **Request handlers** card (§3.4), and the shape carries this wave's rule 7.
+ * One delayed-operation purgatory, exactly as `RequestHandlerDtos.scala` writes it.
  *
- * A reading is *either* a `ratio` — a fraction in 0..1, which is what
- * `RequestHandlerAvgIdlePercent` and `NetworkProcessorAvgIdlePercent` publish — *or* a `count`,
- * which is what `PurgatorySize` publishes. It is never both, and a `count` never becomes a
- * percentage: there is no ceiling to divide it by, and inventing one is a fabricated figure.
+ * A **count** of parked requests, not a percentage. `SCREENS-V4.md` §3.4 draws "38% PURGATORY";
+ * `DelayedOperationPurgatory.PurgatorySize` is a queue length with no ceiling to divide it by, and a
+ * count over an invented denominator is a fabricated figure. ADR-052 decides it; this is the shape
+ * that decision has on the wire.
  */
-export interface HandlerReading {
-  readonly id?: string | undefined;
-  readonly label?: string | undefined;
-  /** A fraction in 0..1. Not a pre-formatted percentage: the card decides how to print it. */
-  readonly ratio?: number | null | undefined;
-  readonly count?: number | null | undefined;
-  /** What a `count` is counted in — `requests`, `operations`. Printed beside the figure. */
-  readonly unit?: string | undefined;
-  /** Which end of the domain is the good end. See {@link handlerPanel} for the default and why. */
-  readonly goodDirection?: "high" | "low" | undefined;
+export interface PurgatoryQueue {
+  readonly operation?: string | undefined;
+  readonly delayedRequests?: number | null | undefined;
 }
 
+/**
+ * The request-handlers document, and the shape this module used to get wrong.
+ *
+ * Until wave 6 this file read `data.readings[]` of `{id, label, ratio, count, unit}` — a shape no
+ * service has ever sent. The top-level `Section` key matched, so `readMetric` unwrapped happily,
+ * `readings` was `undefined`, `handlerPanel` answered zero gauges and the card drew *"The metrics
+ * source answered and served no request-handler readings"* over a source that served three. Both
+ * sides had unit cases against their own literal; neither had a document they were both asserted
+ * against. The fields below are the server's own, and `wire.golden.test.ts` decodes the encoder's
+ * output rather than a literal written here.
+ *
+ * Both ratios are fractions in `0..1` — `RequestHandlerAvgIdlePercent` and
+ * `NetworkProcessorAvgIdlePercent` as the broker publishes them, not pre-formatted percentages —
+ * and `null` means the exporter named the reading and did not measure it. `null` is not `0`, which
+ * would say the pool was saturated.
+ */
 export interface HandlerDocument {
-  readonly readings?: readonly HandlerReading[] | undefined;
+  readonly requestHandlerIdleRatio?: number | null | undefined;
+  readonly networkProcessorIdleRatio?: number | null | undefined;
+  readonly purgatory?: readonly PurgatoryQueue[] | undefined;
 }
 
 /** One reading, decided: a ring with a percentage, or a figure with a unit and no ring. */
@@ -325,45 +351,80 @@ export interface HandlerPanel {
   readonly caption: string | undefined;
 }
 
-/** A label for a reading that arrived without one. Never blank: a gauge with no caption is a number. */
-function handlerCaption(reading: HandlerReading, index: number): string {
-  return reading.label ?? reading.id ?? `Reading ${index + 1}`;
+/** What a count is counted in, printed beside the figure. The broker parks *requests*. */
+const PURGATORY_UNIT = "requests";
+
+/** A finite number, or nothing. A `null`, a `NaN` and an absent field are all "not measured". */
+function finite(value: number | null | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /**
- * Turns the endpoint's readings into gauges.
+ * Turns the endpoint's document into the tiles §3.4 draws.
  *
- * ## The two decisions in here
+ * ## The three decisions in here
  *
- * **A ratio is a fraction and the card multiplies it.** W5-01's endpoint answers ratios rather than
+ * **A ratio is a fraction and the card multiplies it.** The endpoint answers ratios rather than
  * pre-formatted percentages precisely so that this decision is made once, here, where it is
  * testable — a server that sent `64` and a server that sent `0.64` would otherwise both draw
  * something plausible.
  *
- * **`goodDirection` defaults to `"high"`, and only because of what this endpoint publishes.**
- * `RingGauge` refuses a default of its own, for the good reason its header gives: a wrong guess
- * paints an incident green. The default here is not a guess about gauges in general — it is a fact
- * about *this* document, every reading of which is an **idle** ratio, where more idle is more
- * headroom. A reading whose good end is the low end says so on the wire, and the wire wins.
+ * **A ratio the document names and does not measure still gets its tile.** `RingGauge` paints the
+ * plain track and an em dash for an `undefined` value, which is §3.4's own absent rule, so a reader
+ * can see *which* reading is missing rather than counting the tiles that are there. A ratio the
+ * document does not mention at all — an older or a different server — gets no tile, which is what
+ * keeps {@link HandlerPanel.gauges} able to be empty and the card's sentence reachable.
+ *
+ * **`goodDirection` is `"high"` for both ratios, and only because of what they are.** `RingGauge`
+ * refuses a default of its own, for the good reason its header gives: a wrong guess paints an
+ * incident green. This is not a guess about gauges in general — both readings on this document are
+ * **idle** ratios, where more idle is more headroom.
+ *
+ * The order is the design's: NETWORK IDLE, IO IDLE, then the purgatories.
  */
 export function handlerPanel(document: HandlerDocument): HandlerPanel {
-  const gauges = (document.readings ?? []).map((reading, index): HandlerGauge => {
-    const finite = (value: number | null | undefined): number | undefined =>
-      typeof value === "number" && Number.isFinite(value) ? value : undefined;
-    const ratio = finite(reading.ratio);
-    const count = finite(reading.count);
-    const isCount =
-      reading.ratio === undefined && (reading.count !== undefined || reading.unit !== undefined);
-    return {
-      id: reading.id ?? `reading-${index}`,
-      caption: handlerCaption(reading, index),
-      kind: isCount ? "count" : "ratio",
-      percent: isCount || ratio === undefined ? undefined : ratio * 100,
-      count: isCount ? count : undefined,
-      unit: isCount ? (reading.unit ?? "") : undefined,
-      goodDirection: reading.goodDirection ?? "high",
-    };
-  });
+  const gauges: HandlerGauge[] = [];
+
+  const ratio = (
+    id: string,
+    caption: string,
+    value: number | null | undefined,
+    present: boolean,
+  ): void => {
+    if (!present) return;
+    const measured = finite(value);
+    gauges.push({
+      id,
+      caption,
+      kind: "ratio",
+      percent: measured === undefined ? undefined : measured * 100,
+      count: undefined,
+      unit: undefined,
+      goodDirection: "high",
+    });
+  };
+
+  ratio(
+    "network-idle",
+    "NETWORK IDLE",
+    document.networkProcessorIdleRatio,
+    "networkProcessorIdleRatio" in document,
+  );
+  ratio("io-idle", "IO IDLE", document.requestHandlerIdleRatio, "requestHandlerIdleRatio" in document);
+
+  for (const queue of document.purgatory ?? []) {
+    const operation = queue.operation ?? "";
+    if (operation.length === 0) continue;
+    gauges.push({
+      id: `purgatory-${operation.toLowerCase()}`,
+      caption: `${operation.toUpperCase()} PURGATORY`,
+      kind: "count",
+      percent: undefined,
+      count: finite(queue.delayedRequests),
+      unit: PURGATORY_UNIT,
+      goodDirection: "low",
+    });
+  }
 
   /* The sentence the design does not have, and the one §3.4's "38% PURGATORY" made necessary. A
      queue length sitting in a row of rings looks like a ring that failed to draw unless somebody
@@ -403,21 +464,37 @@ export async function fetchRequestHandlers(
 /* --- Top producers ------------------------------------------------------------------------------ */
 
 /**
- * One row of the **Top producers** card, named for what it holds.
+ * One row of the **Top producers** card, exactly as `ProducerDtos.scala` writes it.
  *
- * Exactly one of `clientId` and `topic` is set, and which one it is decides the card's title. This
- * is the browser's half of wave 5's rule 7: the design asked for `client.id`, a broker publishes a
- * per-topic byte rate unless quotas are configured, and a tile labelled `client.id` over a topic
- * name is the drift the rule exists to stop.
+ * A `topic` and a `bytesInPerSecond`, and the second wire this module used to get wrong: it read
+ * `data.entries[]` of `{clientId, topic, bytesPerSecond}` and the server has always sent
+ * `data.topics[]`. The card drew *"The metrics source answered and named no producers"* over a
+ * source that named five, and the browser case written to catch exactly that read the same wrong
+ * names and iterated an empty array.
  */
-export interface ProducerEntry {
-  readonly clientId?: string | undefined;
+export interface TopicProducerEntry {
   readonly topic?: string | undefined;
-  readonly bytesPerSecond?: number | null | undefined;
+  readonly bytesInPerSecond?: number | null | undefined;
 }
 
+/**
+ * The top-producers document.
+ *
+ * `measuredBy` is the field whose whole job is to say what the rows are *of*, and it is what the
+ * card's title says. §4 draws `Top producers · client.id`; a broker publishes no per-`client.id`
+ * byte rate unless quotas are configured and does publish a per-*topic* one, so the server sends
+ * `"topic"` and the heading says `topic`. Reading the subject from the data rather than writing it
+ * here is the whole of ADR-052's second refusal on the screen.
+ *
+ * `internalTopicsExcluded` counts the topic lines the exporter served that the ranking left out:
+ * Kafka's own `__`-prefixed topics, which are not anybody's application traffic and which outrun
+ * every real topic on an idle cluster. The card prints it, because a shortened list with nothing
+ * saying so is a list nobody can check against the exporter.
+ */
 export interface ProducerDocument {
-  readonly entries?: readonly ProducerEntry[] | undefined;
+  readonly measuredBy?: string | undefined;
+  readonly topics?: readonly TopicProducerEntry[] | undefined;
+  readonly internalTopicsExcluded?: number | undefined;
 }
 
 export interface ProducerRow {
@@ -430,36 +507,46 @@ export interface ProducerBoard {
   readonly rows: readonly ProducerRow[];
   /** What the rows are: the word the *server* used, which is the word the card's title says. */
   readonly subject: "client.id" | "topic" | "producer";
+  /** How many of the exporter's topic lines the ranking left out. Never a guess: the server's own. */
+  readonly internalTopicsExcluded: number;
 }
+
+/**
+ * The two words this build knows how to print, and what it does with a third.
+ *
+ * `measuredBy` is a fixed vocabulary rather than free text so that a browser can branch on it. A
+ * value this build does not recognise draws the heading that claims nothing — `producer` — rather
+ * than being printed raw, because an unrecognised word in a card's title is a claim nobody checked.
+ */
+const SUBJECTS: Readonly<Record<string, ProducerBoard["subject"]>> = {
+  topic: "topic",
+  "client.id": "client.id",
+};
 
 /**
  * Reads the rows and reports what they are.
  *
- * `subject` is derived from the field the server actually filled rather than from a constant here,
- * so a deployment that does configure client quotas draws `client.id` and one that does not draws
- * `topic`, with no second place for the two to disagree. A document whose entries name neither is
- * `producer` — a heading that claims nothing, which is the honest answer to a row this build does
- * not recognise.
+ * A row whose name is missing or blank is dropped: a bar with no label is a rate attributed to
+ * nobody. A row whose *rate* is missing is kept and says so in words — dropping it would shorten a
+ * top-five without saying so, and a zero would rank a real topic last on a number nobody measured.
  */
 export function producerBoard(document: ProducerDocument): ProducerBoard {
-  const entries = document.entries ?? [];
-  const rows = entries.flatMap((entry): readonly ProducerRow[] => {
-    const id = entry.clientId ?? entry.topic;
+  const rows = (document.topics ?? []).flatMap((entry): readonly ProducerRow[] => {
+    const id = entry.topic;
     if (id === undefined || id.length === 0) return [];
-    const rate = entry.bytesPerSecond;
-    return [
-      {
-        id,
-        bytesPerSecond: typeof rate === "number" && Number.isFinite(rate) ? rate : undefined,
-      },
-    ];
+    return [{ id, bytesPerSecond: finite(entry.bytesInPerSecond) }];
   });
 
-  const named = entries.find((entry) => entry.clientId !== undefined || entry.topic !== undefined);
+  const measuredBy = document.measuredBy;
   const subject: ProducerBoard["subject"] =
-    named === undefined ? "producer" : named.clientId !== undefined ? "client.id" : "topic";
+    measuredBy === undefined ? "producer" : (SUBJECTS[measuredBy] ?? "producer");
 
-  return { rows, subject };
+  const excluded = document.internalTopicsExcluded;
+  return {
+    rows,
+    subject,
+    internalTopicsExcluded: typeof excluded === "number" && excluded > 0 ? excluded : 0,
+  };
 }
 
 export function producersKey(clusterId: string, top: number): string {

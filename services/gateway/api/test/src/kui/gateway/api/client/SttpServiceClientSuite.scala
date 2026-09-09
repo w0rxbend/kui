@@ -10,6 +10,7 @@ import munit.CatsEffectSuite
 import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
 
 import kui.cluster.contract.ClusterEndpoints
+import kui.config.{SafeUrl, UpstreamServiceConfig, UrlPolicy}
 import kui.gateway.api.client.ServiceClientFixture as Fixture
 import kui.kernel.error.{ApplicationError, ErrorCode, InfrastructureError}
 import kui.kernel.{BrokerId, ClusterId}
@@ -88,6 +89,33 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
   /** Reads the claims back out of the in-process token, which renders them as plain JSON. */
   private def claimsOf(token: String): PrincipalClaims =
     decode[PrincipalClaims](token).fold(failure => fail(s"the token is not claims JSON: $failure"), identity)
+
+  test("theAddressRuleTheCallerHoldsIsTheOneEveryRequestIsCheckedAgainst") {
+    // `ResilientBackend` re-applies `UpstreamConfig.urlPolicy` to every request and to every redirect, so
+    // this is not a start-up setting that has already done its work — it decides, per call, whether the
+    // address may be reached at all. Until wave 6 it was left at the type's strict default here, and a
+    // gateway an operator had deliberately relaxed with `KUI_ALLOW_PRIVATE_UPSTREAMS=true` accepted a
+    // loopback upstream at start-up and then refused every call to it, with no connection ever attempted.
+    //
+    // Both directions, because the default is a fail-safe: `Strict` when nobody says otherwise is the whole
+    // protection against a configured URL turning the gateway into a reader of the link-local metadata
+    // address, and a default that drifted to `Dev` would be silent.
+    val upstream = UpstreamServiceConfig(
+      url = SafeUrl.unsafe("http://127.0.0.1:8081"),
+      timeout = 1.second,
+      maxConcurrent = kui.kernel.PositiveInt.unsafe(4)
+    )
+    val service = kui.kernel.ServiceId.unsafe("cluster")
+
+    assertEquals(SttpServiceClient.upstreamConfig(service, upstream).urlPolicy, UrlPolicy.Strict)
+    assertEquals(
+      SttpServiceClient.upstreamConfig(service, upstream, UrlPolicy.Dev).urlPolicy,
+      UrlPolicy.Dev
+    )
+    // And the two knobs an operator really does set travel with it, unchanged.
+    assertEquals(SttpServiceClient.upstreamConfig(service, upstream).callTimeout, 1.second)
+    assertEquals(SttpServiceClient.upstreamConfig(service, upstream).name, "cluster")
+  }
 
   test("sendsTheFourStandardHeaders") {
     // A recording tracer, because `traceparent` is only propagated when there is a real span to

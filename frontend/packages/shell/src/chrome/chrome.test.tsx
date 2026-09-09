@@ -23,11 +23,11 @@ import { NavDrawer } from "./NavDrawer.jsx";
 import { NavItem } from "./NavItem.jsx";
 import { NotificationPanel, type Notice } from "./Notifications.jsx";
 import { SearchField } from "./SearchField.jsx";
-import { StorageMeter } from "./StorageMeter.jsx";
+import { StorageMeter, brokerState } from "./StorageMeter.jsx";
 import { TabStrip, createRootPreference } from "@kui/kernel";
 import type { AccentChoice, DensityChoice, ThemeChoice } from "@kui/kernel";
 import { TopBar } from "./TopBar.jsx";
-import { shortcutHint } from "./SearchField.jsx";
+import { RESULT_CLICK_GRACE_MS, shortcutHint } from "./SearchField.jsx";
 import {
   CLUSTERS,
   DEFECTIVE_CLUSTER,
@@ -225,6 +225,87 @@ describe("StorageMeter", () => {
     expect(container.textContent).toContain("Disk usage could not be read for this cluster.");
     expect(container.querySelector(".kui-storage__percent--unknown")!.textContent).toBe("—");
     expect(container.textContent).not.toContain("0%");
+    dispose();
+  });
+
+  /**
+   * A broker whose capacity is zero, drawn where the meter actually decides its colour.
+   *
+   * `brokerState`'s guard is `<= 0`, and `< 0` left green every case the acceptance list of this
+   * packet runs — the six relevant paths under `packages/shell/src`. The
+   * arithmetic is the whole finding: `0 / 0` is `NaN`, `NaN >= dangerAt` and `NaN >= warnAt` are
+   * both false, so the fall-through paints a **healthy green segment** for a disk about which
+   * nothing at all is known — an unconfigured log directory reported as capacity in hand. The
+   * assertion is on the rendered segment rather than on the exported function alone, because the
+   * segment is what an operator sees and `segments()` is the line that calls the rule.
+   */
+  it("draws a broker whose capacity is zero as unknown and never as healthy", () => {
+    const { container, dispose } = mount(() => (
+      <StorageMeter
+        brokers={[
+          { id: "broker-1", usedBytes: 50, totalBytes: 200 },
+          { id: "broker-2", usedBytes: 0, totalBytes: 0 },
+        ]}
+      />
+    ));
+    const drawn = [...container.querySelectorAll(".kui-segbar__seg")].map((segment) => ({
+      title: segment.getAttribute("title"),
+      classes: segment.className,
+    }));
+    const zeroCapacity = drawn.find((segment) => segment.title?.startsWith("broker-2"));
+    expect(zeroCapacity?.title).toBe("broker-2 · capacity not known");
+    expect(zeroCapacity?.classes).toContain("kui-segbar__seg--idle");
+    expect(zeroCapacity?.classes).not.toContain("kui-segbar__seg--ok");
+    // And the arithmetic on its own, so the rule is legible without a DOM.
+    expect(brokerState({ id: "broker-2", usedBytes: 0, totalBytes: 0 })).toBe("idle");
+    dispose();
+  });
+
+  /**
+   * The two thresholds, which are the only thing that turns a fraction into a colour.
+   *
+   * `DEFAULT_WARN` and `DEFAULT_DANGER` could be moved to 0.30 and 0.35 with every one of the 477
+   * cases `pnpm -C frontend test packages/shell` runs still green — measured, not supposed — so a
+   * cluster at 40% would have been drawn as a disk about to fill up, and the amber the reader is
+   * meant to act on would appear on almost every cluster. That is the same defect as an amber count
+   * on a large-but-healthy topic list, one file over: a marker that is always on is a marker nobody
+   * looks at, and this one is the drawer's last line about storage.
+   *
+   * The boundaries are asserted as well as the middles, because `>=` and `>` differ by exactly one
+   * broker sitting on the line.
+   */
+  it("takes its colour from the two thresholds, at their boundaries and between them", () => {
+    const at = (used: number) => brokerState({ id: "b", usedBytes: used, totalBytes: 100 });
+    expect(at(50)).toBe("ok");
+    expect(at(74)).toBe("ok");
+    // 75% is warning, not the last of ok: the guard is `>=`.
+    expect(at(75)).toBe("warning");
+    expect(at(89)).toBe("warning");
+    expect(at(90)).toBe("failed");
+    expect(at(100)).toBe("failed");
+    /* And a caller's own thresholds still win, which is what the props are for — a deployment on
+       thin-provisioned storage warns earlier. */
+    expect(brokerState({ id: "b", usedBytes: 40, totalBytes: 100 }, 0.3, 0.35)).toBe("failed");
+  });
+
+  /**
+   * A disk that has been read and is empty, which is the inversion of the rule above.
+   *
+   * `<Show when={percent()}>` is falsy at zero, so this exact state — `usedBytes: 0` over a
+   * capacity the cluster reported perfectly well — drew `—` in `kui-storage__percent--unknown`
+   * with `title="Disk usage could not be read"`, one line above a caption reading `0 B of
+   * 500.0 GB`. The card contradicted itself, and the em dash asserted an unreadable disk that had
+   * been read exactly. It is the file header's own "Unknown is a track, not a zero", inverted.
+   */
+  it("draws 0% for a disk that has used none of a known capacity, and not an em dash", () => {
+    const { container, dispose } = mount(() => (
+      <StorageMeter brokers={[{ id: "broker-1", usedBytes: 0, totalBytes: 500_000_000_000 }]} />
+    ));
+    expect(container.querySelector(".kui-storage__percent")!.textContent).toBe("0%");
+    expect(container.querySelector(".kui-storage__percent--unknown")).toBeNull();
+    /* And the caption is the other half of the contradiction: the two lines have to agree, and
+       until now they did not. */
+    expect(container.querySelector(".kui-storage__caption")!.textContent).toBe("0 B of 500.0 GB");
     dispose();
   });
 });
@@ -551,14 +632,23 @@ describe("SearchField", () => {
    * when the button comes back up. `onBlur={() => setFocused(false)}` therefore removes the row
    * from under the cursor before it can be clicked, and every result in the panel becomes
    * unclickable while looking perfectly normal — a defect with no visible symptom at all. That
-   * mutation left all 223 cases in this package green.
+   * mutation left every case `pnpm -C frontend test packages/shell/src/chrome` runs green.
    *
    * The clock is faked so the wait is a fact rather than a race, and only the timer functions are
    * faked: Solid 2 batches to a microtask, and a fake `queueMicrotask` would stop the renderer
    * rather than the component. The two waits are absolute milliseconds and not the exported
    * constant, so shrinking the grace period to zero fails here too.
+   *
+   * The constant is nevertheless *read* here, and that is the second half of the same argument.
+   * `RESULT_CLICK_GRACE_MS` was exported and imported by nothing anywhere in the repository — the
+   * only other mention is a sentence of prose in `e2e/search.spec.ts` — so the export was an
+   * assertion nobody had written. Bracketing it against the two absolute waits is what those two
+   * numbers *mean*: the panel is open at 100 ms and shut by 300, and a constant outside that band
+   * would make one of the two waits assert nothing while this case went on passing.
    */
   it("keeps the results panel open long enough for a click on a result to land", () => {
+    expect(RESULT_CLICK_GRACE_MS).toBeGreaterThan(100);
+    expect(RESULT_CLICK_GRACE_MS).toBeLessThan(300);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const { container, dispose } = mount(() => (
@@ -602,8 +692,9 @@ describe("SearchField", () => {
   /**
    * The overlay needs text, not just focus.
    *
-   * `open()` is `focused() && props.value.length > 0`, and dropping the second half left all 223
-   * cases in this package green. What it costs is a panel that appears the moment the box is
+   * `open()` is `focused() && props.value.length > 0`, and dropping the second half left every
+   * case `pnpm -C frontend test packages/shell/src/chrome` runs green. What it costs is a panel
+   * that appears the moment the box is
    * tabbed through — over an empty query it can only be a boundary with nothing in it, and the ⌘K
    * shortcut puts it there on every use.
    */
@@ -665,6 +756,30 @@ describe("the notifications panel", () => {
     dispose();
   });
 
+  /**
+   * The two rules `services/alerts` opens at the same severity, which is §3.9's correction again.
+   *
+   * A partition with no leader and a partition short of replicas are both `warning`, and they are
+   * the two an operator most needs to tell apart at a glance: the first is data unavailable now,
+   * the second is data one broker away from it. A glyph table that answered the same mark for both
+   * — or that had no mark for either, which is what this component did before these two categories
+   * existed — puts two identical amber rows on the panel and loses the half that says what broke.
+   */
+  it("draws the two alert categories that share a severity with two different glyphs", () => {
+    const notices: readonly Notice[] = [
+      { id: "p", severity: "warning", category: "partition", title: "orders.v1-3 has no leader", at },
+      { id: "r", severity: "warning", category: "replication", title: "orders.v1-7 is under-replicated", at },
+    ];
+    const { container, dispose } = mount(() => (
+      <NotificationPanel feed={{ kind: "ready", notices }} now={now} />
+    ));
+
+    expect(glyphOf(container, "p")).toBe("partitions");
+    expect(glyphOf(container, "r")).toBe("topology");
+    expect(glyphOf(container, "p")).not.toBe(glyphOf(container, "r"));
+    dispose();
+  });
+
   it("falls back to the severity's glyph only for a notice that recorded no category", () => {
     /* Not a placeholder to be removed later: a notification whose category nothing recorded is a
        real case, and inventing one for it would be worse than the generic mark — a disk icon over a
@@ -698,6 +813,44 @@ describe("the notifications panel", () => {
     expect(tone("e")).toContain("kui-icon-tile--warning");
     expect(tone("f")).toContain("kui-icon-tile--danger");
     expect(glyphOf(container, "e")).toBe(glyphOf(container, "f"));
+    dispose();
+  });
+
+  /**
+   * A severity this build has no colour for, and the two rules that keep it honest.
+   *
+   * The word travels from `services/alerts` verbatim — the kernel folds nothing and neither does
+   * `data/alerts.ts`, which matches by name — so a `blocker` shipped by a later service reaches
+   * this component as `unknown`. It takes the **neutral** tile, and both alternatives are worse in
+   * opposite directions: `danger` claims a seriousness nothing established, and `info` denies one.
+   *
+   * Its glyph is the same mark `info` takes, and that is not a collapse of the two: the fallback
+   * glyph is reached only when the notification carried no category either, and its whole claim is
+   * that a notification happened. The seriousness is the tone, and the tone is different.
+   */
+  it("draws a severity it has no colour for on a neutral tile, and never as info", () => {
+    const notices: readonly Notice[] = [
+      { id: "i", severity: "unknown", title: "Sent with a word this build does not know", at },
+      { id: "j", severity: "info", title: "Cluster reconnected", at },
+    ];
+    const { container, dispose } = mount(() => (
+      <NotificationPanel feed={{ kind: "ready", notices }} now={now} />
+    ));
+
+    const tone = (id: string) =>
+      container.querySelector(`[data-testid="notice-${id}"] .kui-icon-tile`)?.className;
+    expect(tone("i")).toContain("kui-icon-tile--neutral");
+    expect(tone("i")).not.toContain("kui-icon-tile--primary");
+    expect(tone("i")).not.toContain("kui-icon-tile--danger");
+    /* Its fallback glyph is the same neutral mark `info` takes — the picture claims only that a
+       notification happened, and the seriousness is carried by the tile's tone, which differs. A
+       shape invented for the unknown case would be a picture of something nobody said. */
+    expect(glyphOf(container, "i")).toBe("info");
+    expect(glyphOf(container, "j")).toBe("info");
+    // And the row is drawn at all: an event nobody can see is an event nobody acts on.
+    expect(container.textContent).toContain("Sent with a word this build does not know");
+    // `info` still draws its own tone, so the two are not one rendering under two names.
+    expect(tone("j")).toContain("kui-icon-tile--primary");
     dispose();
   });
 
@@ -935,6 +1088,68 @@ describe("TopBar", () => {
     const { container, dispose } = mount(() => <TopBar {...base} theme="dark" unreadCount={0} />);
     expect(container.querySelector(".kui-bell__badge")).toBeNull();
     dispose();
+  });
+
+  /**
+   * The bell over an alerts feed, which is three values and three renderings.
+   *
+   * The badge is the *open count the server sent* and the read marker is its tone. The two are
+   * separate fields because they answer separate questions and the failure of collapsing them is
+   * silent: hiding the count once somebody had read it would leave the bell saying nothing while
+   * the alerts card beside it, reading the same kernel store, went on drawing `2 open`.
+   *
+   * Zero and `null` both draw no badge and they are **not** the same state. The absence of a badge
+   * cannot say which, so the accessible name does — "no open alerts" for a service that counted
+   * none, and "the number of open alerts is not known" for one that has not answered. Reading the
+   * second as the first is the reassuring misreading this whole product is built against.
+   */
+  it("carries no badge when nothing is open, and says so in words", () => {
+    const { container, dispose } = mount(() => (
+      <TopBar {...base} theme="dark" alertsOpen={0} alertsUnread={false} />
+    ));
+    const bell = container.querySelector('[data-testid="notifications"]')!;
+    expect(container.querySelector(".kui-bell__badge")).toBeNull();
+    // Not a `0`, and not silence either: the sentence is the assertion the badge cannot make.
+    expect(bell.getAttribute("aria-label")).toBe("Notifications, no open alerts");
+    expect(bell.textContent).not.toContain("0");
+    dispose();
+  });
+
+  it("carries no badge when nobody has said how many are open, and does not claim none are", () => {
+    const { container, dispose } = mount(() => (
+      <TopBar {...base} theme="dark" alertsOpen={null} />
+    ));
+    const bell = container.querySelector('[data-testid="notifications"]')!;
+    expect(container.querySelector(".kui-bell__badge")).toBeNull();
+    expect(bell.getAttribute("aria-label")).toBe(
+      "Notifications, the number of open alerts is not known",
+    );
+    dispose();
+  });
+
+  it("draws the server's open count, and its read marker as the badge's tone", () => {
+    const unread = mount(() => (
+      <TopBar {...base} theme="dark" alertsOpen={2} alertsUnread={true} />
+    ));
+    const badge = unread.container.querySelector(".kui-bell__badge")!;
+    expect(badge.textContent).toBe("2");
+    expect(badge.className).not.toContain("kui-bell__badge--read");
+    /* In words as well as in the fill, because the read/unread distinction is otherwise carried by
+       a background colour and nothing else. */
+    expect(
+      unread.container.querySelector('[data-testid="notifications"]')!.getAttribute("aria-label"),
+    ).toBe("Notifications, 2 open alerts, unread");
+    unread.dispose();
+
+    const read = mount(() => <TopBar {...base} theme="dark" alertsOpen={2} alertsUnread={false} />);
+    const tallied = read.container.querySelector(".kui-bell__badge")!;
+    // Still counted. An alert that is open is open whether or not anybody has looked at it.
+    expect(tallied.textContent).toBe("2");
+    expect(tallied.className).toContain("kui-bell__badge--read");
+    expect(
+      read.container.querySelector('[data-testid="notifications"]')!.getAttribute("aria-label"),
+    ).toBe("Notifications, 2 open alerts");
+    read.dispose();
   });
 
   it("opens the panel only when the caller says it is open", () => {
@@ -1177,7 +1392,8 @@ describe("EnvRail", () => {
     ]);
     /* And the letter itself, which is the other half of the sentence above: the comment has said
        "both drawn as P" since the rail was built and nothing had ever looked. Dropping
-       `tileLetter`'s `.toUpperCase()` left all 223 cases green over a rail of lowercase tiles. */
+       `tileLetter`'s `.toUpperCase()` left every case
+       `pnpm -C frontend test packages/shell` runs green over a rail of lowercase tiles. */
     expect(tiles.map((tile) => tile.querySelector(".kui-rail__letter")?.textContent)).toEqual([
       "P",
       "P",

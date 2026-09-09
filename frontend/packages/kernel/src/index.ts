@@ -74,6 +74,32 @@ export {
 } from "./data/capabilities/featureState.js";
 
 /**
+ * The alert feed (M8). Exported from the kernel rather than from the feature package that draws it,
+ * because the bell in the shell's chrome and the card in `@kui/feature-alerts` read the same store:
+ * a feature may not import the shell and nothing may import a feature statically, so this is the
+ * one place both can reach — and one store is what stops the two screens disagreeing about how many
+ * alerts are open.
+ */
+export {
+  decodeAlertChange,
+  decodeAlertEvent,
+  decodeAlertFeed,
+  type AlertChange,
+  type AlertEvent,
+  type AlertFeed,
+  type AlertResolution,
+  type AlertRuleReport,
+} from "./data/alerts/events.js";
+export {
+  ALERTS_EVENT_NAME,
+  ALERTS_SECTION_KEY,
+  createAlerts,
+  type Alerts,
+  type AlertsOptions,
+} from "./data/alerts/store.js";
+export { AlertsProvider, useAlerts } from "./data/alerts/context.jsx";
+
+/**
  * The data layer: the query cache, the server-sent-event client, and the capability, permission and
  * session stores. Behaviour, not components — a screen reads these and draws itself from what they
  * say, including when what they say is "this is not working and here is why".
@@ -93,4 +119,3 @@ export * from "./data/index.js";
 export { ConnectorCard, connectorChip, type ConnectorCardProps, type ConnectorState } from "./components/ConnectorCard.jsx";
 export { TaskBar, describeTasks, type TaskBarProps, type TaskState } from "./components/TaskBar.jsx";
 export { KsqlWorkspace, type KsqlObject, type KsqlWorkspaceProps } from "./components/KsqlWorkspace.jsx";
-

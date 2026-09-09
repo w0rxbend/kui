@@ -20,6 +20,7 @@ import kui.gateway.api.openapi.DocsRoutes
 import kui.gateway.api.routing.{ContractRouting, PolicyRbacPreCheck, RbacPreCheck, ServiceContracts}
 import kui.gateway.api.search.{GroupSearchSource, SubjectSearchSource, TopicSearchSource}
 import kui.gateway.api.{
+  AlertsStreamRoutes,
   CapabilityRoutes,
   ClusterOverviewRoutes,
   EdgeHeaders,
@@ -225,6 +226,9 @@ object GatewayWiring {
       // configured has no client and therefore no route, so the address 404s instead of opening a
       // stream that could only ever end in an error.
       messages = clients.all.find(_.service == MessageServiceId)
+      // The alerts change stream follows the same relay path. Its feed and acknowledgement are ordinary
+      // derived proxy routes; only the event stream needs this client to be mounted separately.
+      alerts = clients.all.find(_.service == AlertsServiceId)
       // The identity service, which the sign-in routes call one hop inward. It is the one service whose
       // contract the gateway does *not* proxy: a login is the moment a browser is given a session, and
       // sessions live here, so `AuthRoutes` serves `/api/v1/auth/*` itself and calls this client.
@@ -242,6 +246,7 @@ object GatewayWiring {
           topicOverview.toList.flatMap(TopicOverviewRoutes[F](_)) ++
           search.toList.flatMap(SearchRoutes[F](_)) ++
           messages.toList.flatMap(MessageStreamRoutes[F](_)) ++
+          alerts.toList.flatMap(AlertsStreamRoutes[F](_, rbac)) ++
           proxied ++
           DocsRoutes[F](docs, BasePath.normalize(config.server.basePath)),
         identity
@@ -316,7 +321,12 @@ object GatewayWiring {
       .resource[F]()
       .flatMap(backend => upstreams[F](config, telemetry, logger, backend))
 
-  /** One client per configured service, each with its own bulkhead and circuit breaker (PLAN §16.4). */
+  /** One client per configured service, each with its own bulkhead and circuit breaker (PLAN §16.4).
+    *
+    * `config.urlPolicy` is passed through rather than left at `UpstreamConfig`'s strict default: the address
+    * rule is re-applied to every request, so the client has to hold the same answer the configuration loader
+    * held. See `SttpServiceClient.upstreamConfig` for what the mismatch cost.
+    */
   def upstreams[F[_]: Async](
       config: GatewayServiceConfig,
       telemetry: Telemetry[F],
@@ -329,7 +339,8 @@ object GatewayWiring {
         config.gateway.services.toList
           .sortBy(_._1.value)
           .traverse((service, upstream) =>
-            SttpServiceClient.resource[F](service, upstream, codec, telemetry, logger, backend)
+            SttpServiceClient
+              .resource[F](service, upstream, codec, telemetry, logger, backend, config.urlPolicy)
           )
           .map(ServiceClients.of[F])
       )
@@ -380,6 +391,11 @@ object GatewayWiring {
     * re-encoded without buffering it, so `MessageStreamRoutes` moves its bytes instead.
     */
   val MessageServiceId: ServiceId = ServiceId.unsafe("message")
+
+  /** The service whose feed-change stream is relayed. Its JSON feed and acknowledgement remain ordinary
+    * contract-derived proxy routes.
+    */
+  val AlertsServiceId: ServiceId = ServiceId.unsafe("alerts")
 
   /** Which search source a client answers for, or none when the search does not fold over that service.
     *

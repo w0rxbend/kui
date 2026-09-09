@@ -117,10 +117,18 @@ final class MetricsMappingSuite extends FunSuite {
   test("top producers are labelled as topics on the wire, not as clients") {
     // ADR-052's second refusal, at the only place a list of topics could acquire the design's word. The
     // browser reads `measuredBy` to choose the card's title, so a wrong value here is a mislabelled card.
-    val dto = MetricsMapping.topProducers(TopProducers(List(TopicProducer("orders.v1", 900.0))))
+    val dto = MetricsMapping.topProducers(TopProducers(List(TopicProducer("orders.v1", 900.0)), 0))
 
     assertEquals(dto.measuredBy, TopProducersDto.ByTopic)
     assertEquals(dto.topics.map(_.topic), List("orders.v1"))
+  }
+
+  test("the count of internal topics left out of the ranking crosses to the wire") {
+    // The ranking drops Kafka's own topics, and a card that showed a shortened list with nothing saying so
+    // would be one nobody could reconcile against the exporter. The figure travels; the browser prints it.
+    val dto = MetricsMapping.topProducers(TopProducers(List(TopicProducer("orders.v1", 900.0)), 2))
+
+    assertEquals(dto.internalTopicsExcluded, 2)
   }
 
   test("a record size crosses as a mean with the two rates it came from and no percentile") {
@@ -145,5 +153,22 @@ final class MetricsMappingSuite extends FunSuite {
     )
 
     assertEquals(sections.distinct, List("unavailable"))
+  }
+
+  test("a stale reading keeps its figure and the instant it was taken, and is not an ok section") {
+    // The fourth arm, and the whole of what makes it different from `Ok`: the number is true and it is not
+    // current. Folded into `Ok` it would draw an hour-old gauge as the broker's present state; folded into
+    // `Unavailable` it would throw away a reading the buffer still holds and offer a Retry instead of it.
+    val reading = RequestHandlerReading(Some(0.8912), Some(0.7104), Nil)
+    val section = MetricsMapping.sectionOf(MetricsReading.Stale(reading, at))(MetricsMapping.requestHandlers)
+
+    assertEquals(section.status, "stale")
+    section match {
+      case Section.Stale(data, fetchedAt, reason) =>
+        assertEquals(data.requestHandlerIdleRatio, Some(0.8912))
+        assertEquals(fetchedAt, at)
+        assertEquals(reason, ReasonCode.UpstreamUnavailable)
+      case other => fail(s"expected a stale section, got $other")
+    }
   }
 }

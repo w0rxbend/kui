@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createShellRouter } from "./routes.jsx";
+import { createShellRouter, landingFor } from "./routes.jsx";
 import { shellPaths } from "./paths.js";
 
 /**
@@ -89,5 +89,46 @@ describe("the cluster-scoped dashboard address", () => {
     expect(router.match("/ui/clusters/prod/dashboard/overview/extra").at(-1)?.pattern).toBe(
       NotFoundPattern,
     );
+  });
+});
+
+/**
+ * Alerts is a route, not a dashboard tab, and the address the drawer links to is the one the
+ * router resolves.
+ *
+ * The two halves are still written in different files — `landingFor` builds the link and the table
+ * matches it — so nothing in the type system connects them and a 404 on an address the product
+ * itself produced is the shipped symptom. `/clusters/<id>` had exactly that defect until wave 5.
+ *
+ * The tab alternative is ruled out here rather than left to be discovered: a tab would live in the
+ * shell's `overview/`, and `@kui/feature-alerts` reaching into it would invert the dependency the
+ * feature split exists to keep. So `/dashboard/alerts` is deliberately *not* a page, and this case
+ * says so out loud, because nothing else would notice if somebody added it.
+ */
+describe("the alerts address", () => {
+  const router = createShellRouter("", views);
+
+  it("resolves the address the drawer's Alerts row links to", () => {
+    const link = landingFor(router, "alerts", "prod-kyiv-01");
+    expect(link).toBe("/ui/clusters/prod-kyiv-01/alerts");
+    const leaf = router.match(link!).at(-1);
+    expect(leaf?.pattern).toBe("/ui/clusters/:clusterId/alerts");
+    expect(leaf?.params).toMatchObject({ clusterId: "prod-kyiv-01" });
+  });
+
+  it("has nowhere to point until a cluster is chosen", () => {
+    /* The rule every cluster-scoped entry keeps: an empty segment collapses, so
+       `/ui/clusters//alerts` is `/ui/clusters/alerts`, which matches the cluster list's own
+       `/manage` neighbourhood rather than an alerts screen. `undefined` keeps the row out of the
+       drawer instead. */
+    expect(landingFor(router, "alerts", undefined)).toBeUndefined();
+  });
+
+  it("leaves the dashboard's tabs alone: alerts is not one of them", () => {
+    const tab = router.match("/ui/clusters/prod-kyiv-01/dashboard/alerts").at(-1);
+    // It *matches* — every one-segment tab does — and it matches the dashboard, which is the point:
+    // the alerts screen is somewhere else entirely, and the two must not be one address.
+    expect(tab?.pattern).toBe("/ui/clusters/:clusterId/dashboard/:tab");
+    expect(tab?.pattern).not.toBe("/ui/clusters/:clusterId/alerts");
   });
 });

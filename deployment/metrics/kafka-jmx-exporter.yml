@@ -82,13 +82,16 @@
 # else. Publishing these under an invented second family name would have been a name no other Kafka
 # deployment has, and would have made the throughput reader's "no dimension" test meaningless.
 #
-# THREE OF THESE ARE PUBLISHED AND NOT READ, AND SAYING SO IS CHEAPER THAN DISCOVERING IT. The
-# `_total` counters are not parsed by `PrometheusExposition`, which reads the `oneminuterate` line
-# for every rate it needs; `smoke.sh` reads `bytesinpersec_total` to prove its seeded traffic
-# reached the broker, and nothing in KUI reads the other two. They are kept for the reason given
-# above -- a monotonic total is what an adapter differences when it does not want to trust a moving
-# average -- but that adapter does not exist yet, so a reader who greps for a consumer of
-# `bytesoutpersec_total` will not find one and should not conclude that something is broken.
+# THREE OF THESE ARE PUBLISHED AND NOT READ BY KUI, AND SAYING SO IS CHEAPER THAN DISCOVERING IT.
+# The `_total` counters are not parsed by `PrometheusExposition`, which reads the `oneminuterate`
+# line for every rate it needs. Two of the three are read by `../compose/smoke.sh` instead, and only
+# there: `bytesinpersec_total` proves the seeded produce reached this broker and
+# `bytesoutpersec_total` proves the read-back did, which are the two facts that make every rate
+# below a measurement of something rather than of nothing. `messagesinpersec_total` is read by
+# nothing at all. All three are kept for the reason given above -- a monotonic total is what an
+# adapter differences when it does not want to trust a moving average -- but that adapter does not
+# exist yet, so a reader who greps KUI for a consumer of any of them will not find one and should
+# not conclude that something is broken.
 #
 # WHAT IS DELIBERATELY NOT HERE, AND IT IS THE EVIDENCE FOR THREE CARDS THAT CANNOT BE DRAWN. The
 # capture referred to above is the whole of what this broker publishes, and it does not contain:
@@ -141,6 +144,31 @@ rules:
   # `.+` and not `[a-zA-Z0-9._-]+`: Kafka's own topic-name rule is that character class, but a
   # pattern here that disagreed with Kafka's would silently drop whichever topic fell outside it,
   # and a card missing one row is a harder defect to see than a card missing all of them.
+  #
+  # WHAT `.+` COSTS, AND WHY THE COST IS NOT PAID HERE. It matches Kafka's own internal topics, and
+  # on an idle cluster those are the only topics with any traffic on them at all. Read off the
+  # quickstart exporter on 2026-09-07, the eight busiest per-topic lines it served:
+  #
+  #   __consumer_offsets      156.96 bytes/second
+  #   audit.log.raw           9.76e-235
+  #   orders.v1.DLQ           6.61e-235
+  #   _schemas                5.71e-235
+  #   orders.v1               5.33e-48
+  #
+  # Every seeded topic has decayed out of the one-minute window and the coordinator has not, so a
+  # Top producers card drawn from this ruleset unfiltered names `__consumer_offsets` first by
+  # eleven orders of magnitude, in a product that keeps exactly those rows off its topics screen --
+  # `kui.topics.internalPrefix`, default `"__"` (`libs/config/.../TopicsConfig.scala:135`). Note
+  # that the default prefix is two underscores, so `_schemas` is not internal by KUI's own rule and
+  # is a real topic with a real, tiny rate.
+  #
+  # THE FILTERING BELONGS TO THE READER AND NOT TO THIS FILE, and that is a decision rather than an
+  # omission. A rule here that excluded `__.*` would make the number unavailable to every consumer
+  # of this exposition, including a future card that wants to show coordinator traffic on purpose,
+  # and it would hard-code KUI's prefix into a file that is a plain Prometheus ruleset. What KUI
+  # considers internal is a configured value that this exporter cannot read. So the exposition
+  # stays complete and `services/metrics` decides -- see ADR-052, which is where the Top producers
+  # card is settled.
   # ===============================================================================================
   #
   # The `help` line has to be true of the UNLABELLED line as well, and that is not a stylistic

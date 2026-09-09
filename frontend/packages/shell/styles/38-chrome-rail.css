@@ -328,6 +328,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Alerts this principal has already read. The count stays — an open alert is open whether or not
+ * somebody has looked at it, and the card beside the bell draws the same figure — but it stops
+ * being an alarm and becomes a tally, so it loses the danger fill. The distinction is also in the
+ * bell's accessible name in words, because this rule is a colour and nothing else. */
+.kui-bell__badge--read {
+  background-color: var(--kui-color-surface-hover);
+  color: var(--kui-color-text-muted);
+}
+
 .kui-notices {
   display: flex;
   flex-direction: column;

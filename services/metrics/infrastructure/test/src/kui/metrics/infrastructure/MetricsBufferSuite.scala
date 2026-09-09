@@ -190,12 +190,21 @@ final class MetricsBufferSuite extends KuiIOSuite {
         held.record(full(noon.minusSeconds(60), 90.0, 9.0)) *>
         (held.requestHandlers(noon), held.producers(1, noon), held.recordSize(noon)).tupled.map {
           case (Right(handlers), Right(producers), Right(recordSize)) =>
-            assertEquals(handlers.requestHandlerIdleRatio, Some(0.8912))
-            assertEquals(handlers.purgatory, List(PurgatoryQueue("Fetch", 481L), PurgatoryQueue("Produce", 0L)))
+            assertEquals(handlers.value.requestHandlerIdleRatio, Some(0.8912))
+            assertEquals(
+              handlers.value.purgatory,
+              List(PurgatoryQueue("Fetch", 481L), PurgatoryQueue("Produce", 0L))
+            )
             // Ranked by rate and cut to the count asked for, in the adapter rather than in the browser.
-            assertEquals(producers.topics.map(_.topic), List("audit.log"))
+            assertEquals(producers.value.topics.map(_.topic), List("audit.log"))
             // 90 bytes/s over 0.9 records/s is 100 bytes a record, from the newest scrape and not the first.
-            assertEquals(recordSize.meanBytes, Some(100.0))
+            assertEquals(recordSize.value.meanBytes, Some(100.0))
+            // And each carries the instant of the scrape it came from rather than the moment it was asked
+            // for. Without it the layer above cannot tell a fresh gauge from an hour-old one, which is how
+            // last-known-good readings came to be drawn as current.
+            assertEquals(handlers.at, noon.minusSeconds(60))
+            assertEquals(producers.at, noon.minusSeconds(60))
+            assertEquals(recordSize.at, noon.minusSeconds(60))
           case other => fail(s"expected three readings, got $other")
         }
     }
@@ -214,6 +223,39 @@ final class MetricsBufferSuite extends KuiIOSuite {
             assert(producers.message.contains("per-topic bytes-in rate"), producers.message)
             assert(latency.message.contains("request-latency percentile"), latency.message)
           case other => fail(s"expected three refusals, got $other")
+        }
+    }
+  }
+
+  test("a window whose latest scrapes carry no percentile is a series with a gap, not a refused card") {
+    // The rule `samples.forall(_.isEmpty)` keeps and `samples.exists(_.isEmpty)` destroys. The exporter
+    // served a percentile ten minutes ago and stopped — a broker restart, a ruleset reloaded, a family that
+    // went quiet — and the window now holds one reading with a latency and two without. Refusing would throw
+    // away the reading that exists and would name a whitelist problem on a deployment that has none; the
+    // honest answer is the axis, with the last two steps blank.
+    buffer().flatMap { held =>
+      held.record(full(noon.minusSeconds(600), 10.0, 9.0)) *>
+        held.record(sample(noon.minusSeconds(300), 20.0)) *>
+        held.record(sample(noon.minusSeconds(60), 30.0)) *>
+        held.latency(range, noon).map {
+          case Left(failure) => fail(s"a window with one measured step is not a refusal; got $failure")
+          case Right(series) =>
+            assertEquals(series.buckets.size, range.bucketCount)
+            assertEquals(series.buckets.flatMap(_.produceP99Millis), List(9.0))
+            assertEquals(series.buckets.count(!_.isAbsent), 1)
+        }
+    }
+  }
+
+  test("a window in which no scrape ever carried a percentile refuses, and names the whitelist") {
+    // The other side of the same rule, so it cannot be satisfied by never refusing. Three scrapes, all of
+    // them without a `RequestMetrics` family: an axis of gaps here is indistinguishable from a KUI that
+    // started a minute ago, and only one of those two ever fills in.
+    buffer().flatMap { held =>
+      List(600L, 300L, 60L).traverse_(ago => held.record(sample(noon.minusSeconds(ago), 20.0))) *>
+        held.latency(range, noon).map {
+          case Left(failure) => assert(failure.message.contains("request-latency percentile"), failure.message)
+          case Right(series) => fail(s"a family no scrape carried must be named; got ${series.buckets.size}")
         }
     }
   }
@@ -248,7 +290,7 @@ final class MetricsBufferSuite extends KuiIOSuite {
     buffer().flatMap { held =>
       held.record(sample(noon.minusSeconds(60), 42.0).copy(topicBytesInPerSecond = Some(Nil))) *>
         held.producers(5, noon).map {
-          case Right(producers) => assertEquals(producers.topics, Nil)
+          case Right(producers) => assertEquals(producers.value.topics, Nil)
           case Left(failure) => fail(s"an empty family is an answer, not a refusal; got $failure")
         }
     }
@@ -275,9 +317,9 @@ final class MetricsBufferSuite extends KuiIOSuite {
       held.record(sample(noon.minusSeconds(60), 100.0).copy(recordsPerSecond = Some(0.0))) *>
         held.recordSize(noon).map {
           case Right(reading) =>
-            assertEquals(reading.meanBytes, None)
-            assertEquals(reading.bytesInPerSecond, Some(100.0))
-            assertEquals(reading.recordsPerSecond, Some(0.0))
+            assertEquals(reading.value.meanBytes, None)
+            assertEquals(reading.value.bytesInPerSecond, Some(100.0))
+            assertEquals(reading.value.recordsPerSecond, Some(0.0))
           case Left(failure) => fail(s"a served family is not a refusal; got $failure")
         }
     }

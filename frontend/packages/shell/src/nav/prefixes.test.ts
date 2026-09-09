@@ -79,6 +79,32 @@ describe("the topic tree's prefix groups", () => {
     expect(prefixes([...names].reverse(), 2)).toEqual(prefixes(names, 2));
   });
 
+  /**
+   * The tie-break itself, which the case above cannot reach.
+   *
+   * Its three groups have counts 3, 2 and 1, so the comparator never gets as far as its second
+   * clause — deleting `|| a.prefix.localeCompare(b.prefix)` left all 497 cases
+   * `pnpm -C frontend test packages/shell` runs green, measured here. What it costs is the failure
+   * the fold's own header names: `Array.prototype.sort` is stable, so without the tie-break two
+   * groups of equal size keep the order their *first member* happened to arrive in, and the topic
+   * name index is a server-side listing with no ordering guarantee across refetches. The drawer
+   * would then reshuffle its own rows every thirty seconds, under the cursor of somebody reaching
+   * for one — which is the same failure `navigation.ts` sorts its entries to prevent one level up.
+   *
+   * So the fixture ties: two prefixes of two, arriving in the order that disagrees with the
+   * alphabet, and the same names reversed. Both must draw `a.*` first.
+   */
+  it("breaks a tie alphabetically, not by whichever name the server listed first", () => {
+    const zFirst = ["z.1", "z.2", "a.1", "a.2"];
+    const aFirst = ["a.1", "a.2", "z.1", "z.2"];
+    const expected = [
+      { prefix: "a.*", count: 2 },
+      { prefix: "z.*", count: 2 },
+    ];
+    expect(prefixes(zFirst)).toEqual(expected);
+    expect(prefixes(aFirst)).toEqual(expected);
+  });
+
   it("has nothing to say about a cluster with no topics", () => {
     /* No rows, and in particular no `other 0`: a group of nothing is not a summary of anything. */
     expect(prefixes([])).toEqual([]);

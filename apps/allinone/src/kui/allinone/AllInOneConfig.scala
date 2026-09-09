@@ -2,6 +2,7 @@ package kui.allinone
 
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
+  AlertsConfig,
   AuthConfig,
   ClusterConfig,
   ConsumersConfig,
@@ -68,6 +69,13 @@ import kui.security.rbac.{ClusterFlags, RbacPolicy}
   *   the only thing that separates "you configured nothing" from "we cannot measure what you configured". An
   *   operator who wrote `kui.metrics.sources` and is told nothing is configured goes and re-reads their own
   *   YAML
+  * @param alerts
+  *   the thresholds the alerts service's rules compare against, and how long an event is kept. Carried for
+  *   the same reason as `metrics`: the alerts service runs in this JVM, and there is no separate process to
+  *   read `kui.alerts`. Unlike `kui.metrics` there is nothing here to leave unconfigured — every rule reads a
+  *   fact this product already measures — so dropping this section would not make a deployment look
+  *   unmeasurable, it would silently move somebody's thresholds back to the defaults and open events they had
+  *   deliberately tuned out
   */
 final case class AllInOneConfig(
     server: ServerConfig,
@@ -80,7 +88,8 @@ final case class AllInOneConfig(
     streaming: StreamingConfig,
     auth: AuthConfig,
     rbac: RbacPolicy,
-    metrics: MetricsConfig
+    metrics: MetricsConfig,
+    alerts: AlertsConfig
 ) {
 
   /** The same settings in the shape `GatewayWiring` wants.
@@ -133,7 +142,8 @@ object AllInOneConfig {
       config.streaming,
       config.auth,
       config.rbac,
-      config.metrics
+      config.metrics,
+      config.alerts
     )
 
   /** What the process runs on when nothing at all is configured: every interface, port 8080, no telemetry

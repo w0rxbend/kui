@@ -12,8 +12,10 @@ build-time bundle-shape check, and neither had happened when the banner was writ
 deleted in wave 2, and the bundle-shape check exists: wave 4 shipped
 `frontend/scripts/bundle-shape.mjs`, wired as `pnpm bundle-shape` in the frontend CI job, and closed
 TD-016's successor on the check having been *run in both directions* rather than on the check
-existing. It reads its roster of feature packages from the filesystem, so the sixth one M8 adds is
-picked up with no edit anywhere — which is the property the roster it replaced did not have.
+existing. It reads its roster of feature packages from the filesystem, so the sixth one M8 added
+was picked up with no edit anywhere — measured in wave 6, which shipped `feature-alerts` and found
+`bundle-shape.mjs` reporting six dynamically imported feature packages with nobody having edited a
+roster. That is the property the roster it replaced did not have.
 
 `docs/ROADMAP.md` stays as the historical M0–M8 record of how the backend was built and is not a
 plan for this work.
@@ -57,9 +59,18 @@ is 3,203 production lines and 825 test lines. Budget that per service, plus its 
 
 | Milestone | New service | Blocks |
 | --- | --- | --- |
-| M7 | `services/metrics` — **the shape already exists**, see below | 6 dashboard cards, 4 stat cards, the whole Traffic tab |
-| M8 | `services/alerts` | Alerts tab, the alerts card, the notification bell |
-| M9 | `services/connect`, `services/ksql` | the `ECOSYSTEM` group |
+| M7 | `services/metrics` — **built, wave 5; closed, wave 6** | 6 dashboard cards, 4 stat cards, the whole Traffic tab |
+| M8 | `services/alerts` — **built in wave 6; stream relay added in the wave-6 continuation** | Alerts tab, the alerts card, the notification bell |
+| M9 | `services/connect` (wave 7), `services/ksql` (wave 8) | the `ECOSYSTEM` group |
+
+**And the ninth service cost more than the seven registration points said it would, in one specific
+way worth budgeting for.** The first wave-6 pass left `services/alerts` complete and unreachable:
+the Mill module was in one packet, the gateway row in another, and the dependency edge between them
+(`services.gateway.api`'s `moduleDeps`) was in neither, so the routing could not compile and landed
+at integration. Its **stream** was then left out because `ContractRouting.derive` cannot carry an
+event stream and the hand-written relay was nobody's. The continuation added `AlertsStreamRoutes`
+and mounted it in both deployment shapes. Budget, per service: the six layers, the adapter, **the
+dependency edge in `build.mill` that its consumer needs**, and **one hand-written relay per stream**.
 
 **M7's estimate came down and the other two came down with it.** Wave 1 built `services/metrics` as
 a walking skeleton: twenty Scala files in all six ADR-041 layers, a Mill module with its own
@@ -339,166 +350,180 @@ registry API puts it** — and the `Register schema` control is enabled and asse
 named case — run them, do not assume them.
 
 
-## M7 — `services/metrics`  ·  the endpoints exist; two of their four wires do not match the browser  ·  **NOT CLOSED, wave 6 finishes it**
+## M7 — `services/metrics`  ·  no new service  ·  **CLOSED, wave 6**
 
-**Wave 5 built everything this milestone asked for and one thing it did not check.** ADR-052 exists,
-256 lines of it, and it settles the three house-rule-7 questions against a *measured* stock-ruleset
-exposition committed as a fixture: purgatory is a queue length and is published as a count with its
-own unit rather than as an invented percentage, Top producers is by **topic** because a broker
-publishes no per-`client.id` byte rate without quotas, and record size is a **mean** because Kafka
-publishes no distribution at all. Four endpoints ship — `…/metrics/latency?window=`,
-`…/metrics/request-handlers`, `…/metrics/producers?top=`, `…/metrics/record-size` — one scrape now
-fills one `BrokerSample` from which all five reads are views, so two cards on one screen cannot
-disagree about when *now* was. The exporter ruleset was widened and **twelve** line shapes are
-asserted by `smoke.sh` where two were. The gateway routes all four. Five cards are drawn, with
-stories for every state. `./mill services.metrics.__.test` is 146 cases green and
-`./mill __.openApiCheck` is 1967/1967.
+**Every clause of the criterion was executed here, at integration, against images built from this
+tree** — `kui-allinone:0.1.0-SNAPSHOT` `sha256:9e36c66d5bf7`, `kui-frontend:0.1.0-SNAPSHOT`
+`sha256:c697f8bf8f23`, both built after the last source change and the quickstart torn down and
+recreated on them. That is the sentence three waves of this milestone could not write.
 
-**And `./deployment/compose/smoke.sh` passes.** Three consecutive runs from a torn-down stack, twice
-over — by the packet and again by an independent verifier — each printing
-`the exporter serves all 12 line shapes the reader reads`, `the measured cluster's throughput: ok`,
-`buckets carrying a measured rate: yes` and `the unmeasured cluster's throughput: not_configured`.
-That is the measured-and-unmeasured pair on one deployment, which is the assertion two waves of this
-criterion could not make.
+**The wire that two packets guessed differently is one wire.** One packet now owns the DTO, the
+decoder and the file between them, and the file exists: `services/metrics/contract/test/resources/golden/`
+holds **ten** documents, `GoldenFilesSuite` reads all ten on the Scala side and
+`frontend/packages/shell/src/overview/wire.golden.test.ts` reads the same ten off disk on the browser
+side, failing loudly rather than skipping when one is missing — verified by moving a golden out of
+the tree and watching both sides go red. `requestHandlers` is
+`{requestHandlerIdleRatio, networkProcessorIdleRatio, purgatory[]}` on both sides and `producers` is
+`{measuredBy, topics[], internalTopicsExcluded}` on both sides.
 
-**What stops it closing is a wire, and the wire is why house rule 12 now exists.** Two packets coded
-the two ends of one contract from a prose description in a wave plan, and two of the four disagree —
-measured at integration, not reported:
+**All five reads answer real numbers through a gateway built from this tree**, measured with `curl`
+against the recreated quickstart: `throughput` 288 buckets with one carrying a rate on a
+minutes-old stack; `latency?window=24h` with a bucket at `produceP99Millis 22.0` and
+`fetchP99Millis 504.0`; `request-handlers` at `0.979` idle with `Fetch 48` delayed requests;
+`producers` naming five application topics by **topic**, `internalTopicsExcluded: 1`, with
+`__consumer_offsets` gone; `record-size` at a `220.6` byte mean. `window=1h` is refused with
+`KUI-VALIDATION` naming the three windows that exist, which is the honest half beside it.
 
-* the server sends `requestHandlers.data.{requestHandlerIdleRatio, networkProcessorIdleRatio,
-  purgatory:[{operation, delayedRequests}]}` and the browser reads `data.readings[]`;
-* the server sends `producers.data.{measuredBy, topics:[{topic, bytesInPerSecond}]}` and the browser
-  reads `data.entries[]` of `{clientId, bytesPerSecond}`.
+**`./deployment/compose/smoke.sh` passes three consecutive runs from a torn-down stack on the tree
+as it ships** — the run W6-10 could not make, because its own acceptance was blocked on a routing row
+that landed at integration. Each run prints `500 records produced to smoke-traffic, 500 read back`,
+`the exporter serves all 12 line shapes the reader reads`, the measured cluster's throughput `ok`
+with all three of `bytesInPerSecond`, `bytesOutPerSecond` and `recordsPerSecond` carrying a figure,
+both latency percentiles carrying one, and the unmeasured cluster at `not_configured` — the
+measured-and-unmeasured pair on one deployment.
 
-Latency and record size match. The `Section` key matches on both sides of all four, so the decode
-*succeeds* and answers an empty array, and the two cards then draw their empty-answer sentences —
-*"The metrics source answered and served no request-handler readings"* — over a source that served
-three readings and five topics. **A confident false sentence about the source, on the screen whose
-whole promise is that it says what it knows.** Both sides ship unit cases pinning their own shape, so
-nothing is red.
+**And the run without the `kui-metrics` `depends_on` was made and written down**, which house rule 9
+had been owed since wave 4: the stack comes up healthy in 25s, logs one WARN, files a bucket 17s
+later with no traffic produced at all, and a full `smoke.sh` on that edit **passes**. So the
+wave-4 failure that line was once thought to explain is **not** a start-order problem, the line is
+headroom rather than a repair, and `docker-compose.yml` now says so in its own comment instead of
+claiming a mechanism. The wave-4 failure itself remains unexplained and unreproduced in nine runs
+across three waves; it is recorded as unexplained rather than closed.
 
-**Three more things this milestone owes, each measured here.**
+**The browser cases that used to iterate an empty array now assert a figure.** `traffic.spec.ts` is
+10 passed / 1 skipped: the request-handlers case computes `measuredReadings` and asserts it is
+greater than zero before it iterates, the producers case takes an explicit empty branch that asserts
+the *sentence* and zero bars, and the else branch requires every wire row on the screen and one
+progress fill per row that carried a rate. The four invented figures are gone — `670` and `481` now
+match ADR-052 and the committed fixture, and each citation names a line a reader can count.
 
-* **Nobody has seen any of the four answer through a gateway built from this tree.** Against the
-  quickstart running at integration, `…/metrics/throughput` answers `"status":"ok"` and the other four
-  answer `KUI-ROUTE-NOT-FOUND`, because the `kui-allinone` image predates the endpoints. The image
-  builds clean from the working tree — that was run — and the stack was not recreated under a sibling's
-  work. So the endpoint half of the criterion has never been executed by anybody.
-* **The browser cases written to catch exactly this drift are blind to it.** `traffic.spec.ts:313`
-  reads `section.data?.readings ?? []` and `:353` reads `wire.producers.data?.entries ?? []` — the
-  same wrong names — so both loops run zero times and the producers-title assertion is skipped because
-  `first` is `undefined`. Those two cases report **green** while the cards render empty. A browser case
-  that iterates an empty array has asserted nothing.
-* **Four invented figures in shipped scaladoc**, in the packet whose brief was to delete one.
-  `BrokerReadings.scala:117`, `RecordSizeDtos.scala:15` and `PrometheusExposition.scala:34` each say
-  the stock exposition carries **680** Kafka families; ADR-052:29 and the committed fixture say
-  **670**. `BrokerReadings.scala:8` says `PurgatorySize` is **961** on the quickstart broker; ADR-052,
-  the fixture and the suite all say **481** and nothing in the tree reads 961. The prose each defends
-  is right; only the numbers are made up.
+**What it leaves behind, carried into wave 7 as owned rules rather than as notes.** Three rules in
+this milestone's own code are ungated and were found by verification, not by the packet: a *fresh*
+gauge may be stamped with the request instant instead of the scrape it came from
+(`MetricsUseCases.scala:171`, the stale half is gated and the fresh half is not); the stale caption on
+the three new Traffic cards is asserted nowhere, so an hour-old reading can draw with no badge and no
+sentence; and the purgatory reader's anti-double-count guard can be widened with everything green.
+`TD-024` records the one thing regeneration did not buy: the five `data` payloads still have no
+sub-schema, so `schema.d.ts` types them as opaque and `frontend/README.md:33` is still false.
 
-**And one thing is closed the honest way rather than the tidy way.** The compose failure wave 4
-reported — `FAILED: buckets carrying a measured rate was 'no' after 90s`, deterministic, twice — **does
-not reproduce**, in six runs across two agents. The `depends_on` is in and the assertion is green and
-the mechanism is still unknown. That is a better state than wave 4's false explanation and it is not a
-closed item: wave 6 runs the stack without the `depends_on` and records what happens, because either it
-fails and start order is demonstrable, or it passes and the README paragraph currently explains
-something that never happened.
+**Exit** (met): `./mill services.metrics.__.test` and `./mill __.openApiCheck` pass; a case decodes
+each of the five payloads from a document rendered by the server's own encoder and a golden file for
+the metrics wire exists; against a quickstart **built from the working tree, with the image id
+recorded**, each of the five reads answers `ok` with at least one measured figure;
+`./deployment/compose/smoke.sh` passes three consecutive runs from a torn-down stack and the run
+without its `kui-metrics` `depends_on` is recorded beside it; and `pnpm -C frontend e2e` asserts a
+non-empty series or reading for every card ADR-052 says can be measured — an assertion that fails
+when the array is empty — and the `NotMeasured` sentence for a cluster with no source.
 
-**What is wrong with the old exit criterion, for the third time.** It asked that the four endpoints
-answer, that the smoke test pass, and that the browser draw a series or a sentence. Every clause is
-satisfiable — and two of them are satisfied today — by a pair of sides that never met: the endpoint
-answers, the suite is green, the card draws a sentence, and the sentence is false. The form below adds
-the only clause that could have caught it, which is that a document rendered by the **server** decodes
-in the **browser**.
+## M8 — `services/alerts`  ·  **NEW SERVICE**  ·  **built in wave 6; closure fixes continued after the interrupted run**
 
-**Exit:** `./mill services.metrics.__.test` and `./mill __.openApiCheck` pass; **a case decodes each of
-the five payloads from a document rendered by the server's own encoder, and a golden file for the
-metrics wire exists** — `services/metrics/contract/test/resources/golden/*.json`, which is the only
-contract module in the repository without one; against a quickstart **built from the working tree, with
-the image id recorded in the report**,
-`curl -s '…/clusters/quickstart/metrics/throughput?range=24h' | jq -e '.throughput.status == "ok"'`
-succeeds with `bucketCount` buckets of which at least one carries a rate, and the same holds for
-`…/latency?window=`, `…/request-handlers`, `…/producers?top=` and `…/record-size`;
-`./deployment/compose/smoke.sh` passes three consecutive runs from a torn-down stack **and the run
-without its `kui-metrics` `depends_on` is recorded beside it**; and `pnpm -C frontend e2e` asserts, for
-every card ADR-052 says can be measured, **a non-empty series or reading drawn from the wire** — an
-assertion that fails when the array is empty, which the two cases it replaces do not — and the
-`NotMeasured` sentence for a cluster with no source; and for every card ADR-052 says cannot be measured,
-the sentence on **both** clusters, with the ADR naming the absent family and the captured exposition
-showing it absent.
+**The ninth service exists and it is honest.** Six ADR-041 layers, 49 Scala files, 142 cases over 17
+suites, its own `openApi`/`openApiCheck`, a `deployment.docker.alerts` image, a compose entry with a
+healthcheck, an `AllInOneWiring` entry, a `ServiceContracts` row, and ADR-053, which takes the
+decision this milestone was told to take rather than inherit: **`isAlter` does not split**, an
+acknowledgement stays refused on a read-only cluster, and the ADR names the three call sites to start
+from if that is ever revisited. Four rules ship — offline partitions, under-replicated partitions, a
+group rebalancing past `rebalanceDuration`, a log directory past its two thresholds — and the ADR
+names the two that deliberately do not. A rule whose facts cannot be read contributes no event and
+says so; it never contributes a comfortable zero.
 
+**Measured here against the recreated quickstart** (`kui-allinone` `sha256:9e36c66d5bf7`,
+`kui-frontend` `sha256:c697f8bf8f23`, both built from this tree): the feed answers
+`{"status":"ok"}` with four rule reports and an empty item list on a healthy cluster. Seeding an
+event the way the milestone means it — a threshold below the fact, `diskUsedWarningPercent: 1` in
+the quickstart's own configuration file, container restarted — produces exactly one open event,
+`severity warning`, `category storage`, *"Log directory /tmp/kafka-logs is 32% full on broker 1"*,
+`openCount: 1`, `unreadCount: 1`. With that event standing, `pnpm -C frontend e2e` is green on both
+halves the criterion names: `alerts.spec.ts`'s *the card's count is the API's own figure* takes its
+positive branch and asserts the pill reads `1 open` with one row, and `shell.spec.ts`'s *the bell
+carries the open count the alerts service answered* asserts the bell's accessible name and badge
+carry the same figure. `smoke.sh` asserts four more against the distributed stack — the feed is `ok`,
+it says when the rules last ran, it names the rules it evaluated, and at least one rule read the
+facts it needs — and `alerts capability: available` during the fault-isolation step.
 
-## M8 — `services/alerts`  ·  **NEW SERVICE**  ·  **wave 6 opens it**
+**The public stream routing gap is closed in the wave-6 continuation.**
+`GET …/alerts/stream` is now a gateway-owned SSE relay over the service's
+`AlertsStreamEndpoint`. Keeping it out of `ServiceContracts.byService` remains correct:
+`ContractRouting.derive` decodes and re-encodes JSON, which is the wrong thing to do to an event
+stream. `AlertsStreamRoutes` performs the edge authorization check, sends the signed principal to
+the service through the service client and preserves the SSE body. The route is present in the
+merged OpenAPI document and `AllInOneWiringSuite` asserts that the one-process deployment mounts
+the public stream path.
 
-No alert definition, severity, acknowledgement or event record exists anywhere. Two pieces do, and
-both were re-checked in the tree before wave 6 was written: `Resource.Alerts` with a non-altering
-`AlertsView` and an altering `AlertsAcknowledge` (`libs/security-core/.../Vocabulary.scala:69,194,206`,
-with `AlertsAcknowledge` implying `AlertsView` at `:262`), and `kui.alerts` with the five thresholds
-the rules below read, every one bounded by the loader (`libs/config/.../AlertsConfig.scala`) — both
-shipped in wave 1 so this milestone does not have to reopen the vocabulary or the config while it is
-also writing a service. `AlertsConfig`'s own scaladoc states the boundary this milestone must keep:
-*"a rule expressed in YAML is a small programming language, and `libs/config` sits below every service
-and must not grow one."* The Alerts tab, the alerts card and the bell all read one feed.
+**Three more things it owes, each measured rather than inferred.**
 
-**And the ninth service moves three hard-coded literals, which is the whole reason wave 1's worked
-example was written down.** A service-id `Set` in the gateway's `ServiceContractsSuite`, the
-startup-log string in `AllInOneWiringSuite` and the mounted-path set beside it all broke when the
-eighth was registered. They are named with owners in wave 6's guard table rather than left to a red
-build. `scripts/run-tests.sh` derives its module list from `./mill resolve __.test`, so the ninth
-service appears in it with no edit — and will be named out loud if any of its test modules ships with
-no test sources, which six modules do today.
+* **The one write in the service wakes no subscriber.** `InMemoryAlertStore.acknowledge` can have its
+  `updates.publish1` removed with all 142 cases green — the same defect as the missing relay, one
+  layer in, on the one path that changes an alert's state.
+* **The count the bell draws is ungated at both ends.** In the service, the feed's `openCount` can be
+  recomputed from the requested page with everything green — and both `acknowledge` and the SSE frame
+  read the feed with `limit = 0`, so under that mutation every acknowledgement answers `openCount: 0`.
+  In the browser, the shell re-derives the open count a second time
+  (`shell/src/data/alerts.ts`'s `openCountOf`) under a different null rule from the kernel store's
+  `openCount()`, which has no product caller at all — a second opinion in the one place the kernel
+  store was put there to prevent.
+* **The alerts card is not mounted anywhere.** The milestone says the tab, the card and the bell read
+  one feed. The tab exists and the bell exists; `AlertsFeed`'s narrow layout has no production
+  caller, because the dashboard mount was deliberately deferred rather than built.
 
-One decision was taken early and should be revisited here rather than inherited: `AlertsAcknowledge`
-is marked altering, and `isAlter` answers both the audit question and the read-only question with
-one field, so acknowledging an alert is refused on a read-only cluster even though it writes to
-KUI's own store and not to Kafka. If that is wrong, the fix is to split `isAlter`, and this is the
-milestone that knows enough to decide.
+**And the wire between the service and the browser is still two hand-written mirrors.** The kernel's
+`data/alerts/events.ts` and `feature-alerts`' `src/wire.ts` decode the same document independently,
+with two spellings of absence (`null` and `undefined`), and `ALERTS_EVENT_NAME` mirrors
+`AlertChangeDto.EventName` with nothing comparing them — the generator writes the five SSE names by
+hand and has no `SseEventName.Alerts`. That is house rule 12's shape with the golden left out;
+`services/alerts/contract` has no golden document and it is the third contract module in the
+repository without one.
 
-* Rules over facts the product already has: offline partitions, under-replicated counts, a group
-  stuck rebalancing, a log directory past a threshold, a failed connector task (M9), a schema
-  registration.
-* An event record with an opened-at, a severity, a category (§3.9 — severity chooses the tone,
-  category chooses the glyph) and a resolution, in a store, because a percentage of "1h ago" cannot
-  come from a `SnapshotCell`.
-* `GET …/events`, an open count, a per-principal read marker, and an ADR-035 stream so the card and
-  the bell cannot disagree.
-
-**A note on its exit criterion, written now because M7's was found to be satisfiable by an empty
-service.** `jq '.events.status'` being `ok` is true of a feed that has never held an event, so the
-criterion below asserts the seeded event reaches the document as well as the screen.
-
-**Exit:** `./mill services.alerts.__.test` passes; after seeding one event,
-`curl -s …/events | jq -e '.events.status == "ok" and (.events.data.items | length) > 0'` succeeds and
-`…/events | jq '.events.data.openCount'` is that event's count; and `pnpm -C frontend e2e` asserts
+**Exit** (corrected, because the form above is satisfiable by a service whose stream nobody can
+reach): `./mill services.alerts.__.test` passes; after seeding one event,
+`curl -s …/alerts/events | jq -e '.events.status == "ok" and (.events.data.items | length) > 0'`
+succeeds and `.events.data.openCount` is that event's count; **`curl -N …/alerts/stream` answers
+`200 text/event-stream` through the gateway and delivers a frame**; `pnpm -C frontend e2e` asserts
 that after the same seeded event the bell carries its unread mark and the alerts card's pill count
-equals the API's open count.
+equals the API's open count, **and that acknowledging that event moves the bell without a reload**;
+and a golden document rendered by `services/alerts`' own encoder is decoded by the kernel's reader,
+the way `services/metrics`' ten are.
 
-## M9 — `services/connect` and `services/ksql`  ·  **NEW SERVICES**
+## M9 — `services/connect` and `services/ksql`  ·  **NEW SERVICES**  ·  **splits: wave 7 takes Connect**
+
+**The split is a cost judgement made on wave 6's numbers rather than a preference.** The interrupted
+wave-6 run spent ten building packets and delivered **one** service — with its gateway routing
+landing at integration and its stream relay still absent at the limit cutoff — while opening 46 new
+ungated rules. The resumed wave closed that routing edge before M9 begins. Asking one wave for two
+new services plus 46 carried rules would still produce the same shape again: everything present,
+nothing joined. So **wave 7 builds `services/connect`**, and **wave 8 builds `services/ksql` and
+closes M10**.
 
 The vocabulary is already shipped and unused: `ConnectName`/`ConnectorName`/`TaskId`,
-`ErrorCode.ConnectRebalancing`, the whole Connect RBAC closure, and three orphan kernel components
-with no feature behind them. Wave 1 added the rest of it — `ConnectClusterSettings` and
-`KsqlSettings` per cluster (so `kui.clusters.0.ksql.url`, which used to be a *failed boot* under
-the unknown-key check, now loads), and the non-altering `KsqlView` that `KsqlExecute` implies.
-Until the services exist, ADR-032's `not_configured → hidden` rule is already the correct rendering
-and the rows must not be faked.
+`ErrorCode.ConnectRebalancing`, the whole Connect RBAC closure, `ConnectClusterSettings` and
+`KsqlSettings` per cluster (so `kui.clusters.0.ksql.url`, which used to be a *failed boot* under the
+unknown-key check, now loads), and the non-altering `KsqlView` that `KsqlExecute` implies. Three
+orphan kernel components have no feature behind them. Until the services exist, ADR-032's
+`not_configured → hidden` rule is the correct rendering and the rows must not be faked.
 
-* `services/connect` over the Connect REST API: connector list with expanded status, per-task
-  state, pause/resume/restart as mutations, deploy, and the failure reason §7.7 asks for.
-* `services/ksql`: object listing, statement execution as a mutation, push queries over ADR-035,
-  and plan→token→confirm for `DROP … DELETE TOPIC`. The read-only case is already settled:
-  `KsqlView` exists and `KsqlExecute` implies it, so a read-only cluster lists objects and refuses
-  statements, which is asserted in `RbacLawsSuite`.
+* `services/connect` over the Connect REST API: connector list with expanded status, per-task state,
+  pause/resume/restart as mutations, deploy, and the failure reason §7.7 asks for. **Wave 7.**
+* `services/ksql`: object listing, statement execution as a mutation, push queries over ADR-035, and
+  plan→token→confirm for `DROP … DELETE TOPIC`. The read-only case is already settled: `KsqlView`
+  exists and `KsqlExecute` implies it, so a read-only cluster lists objects and refuses statements,
+  which is asserted in `RbacLawsSuite`. **Wave 8.**
 * Two feature packages, two routes, `FeatureId` widened, and `ECOSYSTEM` finally has three rows.
-* The ksqlDB result region, which no capture shows — decide it here (§7.9) before building it.
+* The ksqlDB result region, which no capture shows — decide it in wave 8 (§7.9) before building it.
+
+**And a lesson from the ninth service that the tenth and eleventh must not repeat.** A push-query
+stream and a Connect task-state stream are both ADR-035, and `ContractRouting.derive` cannot carry
+either: it decodes and re-encodes JSON. **A service that ships a stream ships its gateway relay in
+the same wave, owned by the same packet as the routing, and the criterion is a `curl -N` through the
+gateway** — not a contract entry and a green suite.
 
 **Exit:** the capability document carries a `connect` row —
 `jq -e '.entries[] | select(.key.service=="connect")'`, and note the shape, which is
 `entries[].key.service` and not the `services[].id` this document used to name; with no Connect
 address configured the drawer shows no Kafka Connect row, and with one it shows the connector
-count — both asserted by `pnpm -C frontend e2e`.
+count — both asserted by `pnpm -C frontend e2e`; and a connector's task state, read through the
+gateway from a running Connect worker, appears on the screen with the image id recorded.
 
-## M10 — Close the book  ·  no new service
+## M10 — Close the book  ·  no new service  ·  **wave 8**
 
 * `docs/FEATURE_MATRIX.md` accurate against the code, re-counted with the command it publishes.
 * README, ARCHITECTURE and a newcomer's overview describing what is now true.
@@ -507,41 +532,50 @@ count — both asserted by `pnpm -C frontend e2e`.
 * The a11y sweep clean over every story in both themes; the browser suite covering all
   twenty-three screens; `docs/plan/` reduced to `README.md` and this file.
 
-**The comparing command now exists.** Wave 3 wrote `./scripts/feature-matrix-check.sh`: it re-counts
-the matrix's rows, re-derives the merged document's paths, operations, schemas and header coverage
-with `jq`, re-reads the pinned npm versions, and compares each against the prose inside
-`<!-- checked: … -->` regions in six documents. It printed `49 claims checked, all true.` here, it
-is wired into `ci.yml`'s `generated` job, and thirteen single-word mutations across four documents
-each made it exit 1. Wave 4 named the glob and closed it: the manifests are a named array, disk is
-reconciled against that array, and both halves fail loudly when broken.
+**Wave 6 closed the half of this that could be closed by a comparison, and left the half that cannot.**
+`DECISIONS.md` is now machine-compared against `docs/adr/ADR-*.md` in both directions — 53 rows over
+53 ADRs — and deleting ADR-052's row, the omission that survived a whole wave, now fails the run. The
+script grew four mechanisms (a claim registry, per-region markers, a residue check over unclaimed
+figures, and a manifest reconciliation), reports **216 claims checked over five sections**, and every
+deletion the last criterion named now fails loudly.
 
-**Wave 5 closed that and the hole moved one level up, which is the finding this milestone carries.**
-Every section now publishes a per-section **count** rather than a `> 0` floor, the milestone table is
-inside a checked region, and the script prints `105 claims checked, all true` over four sections —
-21 rows, 9 merged-document claims, 48 milestone claims and 25 dependency claims over 9 named
-manifests. All four deletions the criterion named now fail loudly, and the counterfactual was run: the
-pre-change script prints `45 claims checked, all true` against the same broken input. **But a count of
-assertions cannot see an assertion that stops asserting.** Neutering one comparison while leaving its
-`assertions=$(( assertions + 1 ))` in place lets ADR-048 publish `X-Csrf-Token on 99 operations` with
-the run green at 105; replacing the whole disk-vs-named-list reconciliation with `:` moves no number at
-all, because that function contributes no assertion; and `close_section`'s own comparison can be
-floored back with nothing in the repository noticing. A gate that counts how many times it incremented
-a variable is one refactor away from measuring its own liveness again, and this is the file whose
-entire job is to guarantee coverage about every other file. What it owes is a published record of
-**what it compared** — a checksum over the compared pairs, or an assertion registry a fixture pins —
-not a fifth count.
+**And the hole it was written to close is still open, at exactly the cost it always had.** Measured
+here, at integration, on the shipped script: changing **one** line of its `jq` — `carries("X-Csrf-Token")`
+to `carries("X-Kui-Principal")` in the tsv read at `scripts/feature-matrix-check.sh:559` — and then
+publishing `X-Csrf-Token on 52 operations` in ADR-048 and in `frontend/packages/api/README.md`
+against a document that carries it on 21 leaves the run printing `216 claims checked, all true` and
+exiting 0. The packet's own report claims that cost moved from one edit to five; it did not. The
+registry records that a claim of that *kind* was made, the marker records that the region was
+checked, `close_section` records how many were counted, and the residue check runs only over the two
+prose sections — **none of the four looks at what the claim was compared against**. The same
+one-line weakening of the dependency comparison (`[[ $row == *"$version"* ]]` → `[[ -n $row ]]`)
+lets `DEPENDENCY_MATRIX.md` record any version at all, and section 3 has no residue backstop.
+
+So what this milestone still owes is unchanged and now measured twice: a section must publish **what
+it compared**, not how many times it incremented a variable — the compared *pairs*, checksummed or
+registered, with a fixture that pins them. A fifth count will not do it, and neither did the fourth.
+
+**Two smaller things it also owes, both found by verification and neither owned yet.**
+`frontend/README.md:33` still says of `@kui/api` *"Nothing hand-written mirrors a server type"* while
+`TD-024` records that 23 properties across the aggregated responses are typed `unknown` and
+`overview/metrics.ts` hand-writes every metrics wire shape — two documents in one repository
+disagreeing about the same fact. And `BrowserConstantsMain`'s exit status is one comparison operator
+away from silent: with `if outcome.status != 0` changed to `< 0`, a genuinely stale committed
+`constants.generated.ts` passes `./mill frontend.apiConstants --check` at `234/234 SUCCESS` while
+printing *"is out of date"*.
 
 **Exit:** from a clean checkout, with every container image built from it:
 `./scripts/run-tests.sh`, `pnpm -C frontend test`, the a11y sweep (build, serve, sweep — see the
 ordering rule), `pnpm -C frontend e2e`, `./mill __.openApiCheck`, `./mill checkArchitecture` and
 `./deployment/compose/smoke.sh` all pass; `./scripts/feature-matrix-check.sh` exits 0, fails when any
 one input file is made unreadable, fails when any one section is made to check fewer claims than it
-published last time — both of which wave 5 delivered — **and fails when a comparison is neutered while
-its count is left standing**, which is the hole the count fix left behind; every count
-`docs/FEATURE_MATRIX.md` publishes about itself, the milestone table included, sits inside a checked
-region; and **`DECISIONS.md` is machine-compared against `docs/adr/ADR-*.md` in both directions**,
-because ADR-052's row went missing for a wave and no script, workflow, build target or suite in the
-repository reads that index.
+published last time, **and fails when any single comparison is weakened while its claim, its marker
+and its count all stay standing** — demonstrated on the `csrf-operations` claim and on a dependency
+row, which are the two this criterion has now been written against twice; every count
+`docs/FEATURE_MATRIX.md` publishes about itself sits inside a checked region; `DECISIONS.md` is
+machine-compared against `docs/adr/ADR-*.md` in both directions, which wave 6 delivered; and
+`./scripts/run-tests.sh` names **no** module that resolves as a test target and ships no test source,
+which today it names three.
 
 ---
 
@@ -918,3 +952,129 @@ service moves, all of which broke when the eighth was added. And M10's records t
 per-section count it asked for and that the hole moved one level up: a count of assertions cannot see an
 assertion that stops asserting, and `DECISIONS.md` — from which ADR-052's row simply went missing — is
 read by no script, workflow, build target or suite in the repository.
+
+## What wave 6 actually did
+
+Wave 6 was thirteen parallel packets over a disjoint file partition — **ten building and three
+adversarial**, the same 3:1 as wave 5 — before its integration run was interrupted. M7 closed, on
+its fourth criterion, with every clause executed against images built from the tree. At the limit
+cutoff M8 had built the ninth service but left its ADR-035 stream returning 404 through the gateway.
+The resumed integration added the gateway relay, published it in the merged contract, and mounted it
+in both deployment shapes.
+
+What changed, all of it re-measured at integration rather than read off a report.
+`./scripts/run-tests.sh` is **3,767 cases over 69 modules, 66 with tests** (wave 5: 3,462 over 63,
+57 with tests); `pnpm -C frontend test` is **1,631 over 71 files** (wave 5: 1,449);
+`./mill __.openApiCheck` covers **57 paths, 68 operations, 154 schemas**;
+`checkArchitecture` is 165 modules and 10 rules with no layering violations; `__.checkFormat`,
+`__.fix --check` and `node frontend/scripts/boundaries.mjs` (391 files, 9 packages) are green; the
+a11y sweep is clean over **762 stories** in both themes; and `./deployment/compose/smoke.sh` passes
+**three consecutive runs from a torn-down stack** with nine services routed and an alerts feed
+asserted, which is the run the packet that owns it could not make. The browser suite is 86 passed,
+2 skipped and **one failure**: `brokers.spec.ts:57` fails in the full run and passes 9/9 when its own
+spec is run alone — a load-dependent flake three independent agents saw and nobody has root-caused,
+carried into wave 7 with the instruction to run it in both directions.
+
+**Two things were red in the integrated tree and are repaired here.** `./scripts/feature-matrix-check.sh`
+— wired into CI's `generated` job and not on the integration gate list — was failing with **12
+disagreements**, because the merged documents gained the two alerts operations at integration and the
+prose figures in ADR-048 and `frontend/packages/api/README.md` still published wave 5's 54/65/150.
+The service and browser documents now publish 57/68/154, including the gateway-owned stream, and
+the feature-matrix checker compares those figures with the generated document. `services/alerts`
+had also reached the first integration pass complete but unroutable: the Mill module was W6-01's,
+the gateway row W6-03's, and the dependency edge between them was in neither packet's `Owns`. The
+integration repair added that edge; this continuation adds the separate relay that SSE requires.
+
+### Did the mechanism work? Six numbers, then the answer.
+
+**The three adversarial packets applied and scored 130 mutations, found 75 genuine ungated rules —
+58% — and closed all 75 with a case that fails.** I re-applied **ten** of those closures at
+integration, one at a time, across all three packets and both languages: the topic and message
+cancelled-mutation classifications, `MessageMapping`'s tombstone, `AuditOffsets`' render order,
+`UserDirectories`' case-insensitive key, `ClusterSnapshots`' uptime window, `RegistryCredentials`'
+expiry, `RbacGuard`'s read-only lookup, `LoggingAuthAuditSink`'s field names, `BrokerList`'s empty
+total and `SubjectList`'s `NONE` sentence. **Every one reddened the case the packet named**, and the
+tree was byte-identical afterwards. Two further "green" mutations were reported by A3 as *not*
+findings, with the reasoning shown — a redundant guard whose two values render identically, and a
+query key that never binds — which is the first time an adversary has argued a green mutation *down*
+rather than counting it.
+
+**The ten building packets closed ten of ten owned rules and shipped 46 new ungated ones.** Every
+owned rule was re-applied by an independent verifier and went red; I re-applied W6-01's myself. The
+46 were found by verification, and **37 of them — 80% — were not disclosed** by the packet that wrote
+them, under a house rule requiring exactly that disclosure. Disclosure has now moved 11% → 18% → 20%
+in three waves while the rate of holes shipped per building packet has gone **3.5 → 3.7 → 4.6**. Five
+waves of instruction have produced no measurable change in a builder's ability to find its own hole,
+and the question is settled: it is not a discipline problem and a sixth instruction will not fix it.
+
+**The one mechanism change this wave made did not happen at all.** House rule 13 said every
+verification pass owns the test tree of the packet it verifies and lands a case for every hole it
+finds. **Forty-six holes were found and zero cases were landed** — every verifier's evidence section
+ends with the tree restored byte-for-byte to how it was found, and several name the case that *would*
+close the hole without writing it. The rule cost nothing and bought nothing, and the reason is
+structural rather than lazy: a verifier runs while the packet it verifies is still the live owner of
+that test tree, so the only honest thing it can do is describe the case. Wave 5 converted nine
+readers into nine closers on paper; on the tree it converted none.
+
+**The arithmetic. Wave 4: 10 closed, 35 opened, net −25. Wave 5: 12 closed, 65 closed by adversaries,
+33 opened, net +44. Wave 6: 10 owned closed, 75 closed by adversaries, 46 opened, net +39.** Per
+packet: an adversary closed **25** rules; a builder opened **4.6**; a verification pass detected 4.6
+and closed **0**.
+
+**And the ungated rate in code nobody was editing rose again: 58%, against wave 5's 46% and wave 4's
+29% census.** Three samples, three methods, and the trend is a property of the *hunt* rather than of
+the code: random sampling found 29%, comment-guided found 46%, and wave 6's targeted sampling —
+aimed at composition roots, teardown, mapping code whose only consumer is a route, and the fourth
+clue nobody had written down, **a module that declares a test module in `build.mill` and ships no
+test source or one suite for eight production files** — found 58%, with A1 at 67%. That fourth clue
+is the strongest of the four: 22 of A1's 28 survivors sat in four such modules. The list of modules
+that resolve as test targets and contain nothing went from six to **three**.
+
+**A second pass over a package a previous adversary has already swept still pays, and pays more.**
+A3 re-swept `feature-clusters` and `feature-schemas`, which wave 5's A2 swept at 33%, and found
+**63%** — because A2's own finding (*every rule in `model.ts` is gated; sixteen of seventeen
+survivors are in a `.tsx`*) told it where to aim. One adversarial pass does not exhaust a package;
+it produces the map for the next one.
+
+**Recommendation, and it is not a fourth adversary.** Wave 7 keeps thirteen packets and the 3:1
+ratio, and **re-scopes one of the three adversaries into a closer**: A1 and A2 keep hunting code no
+building packet owns, and **A3 runs last, after the building packets freeze, owning the test trees of
+the wave's own new code with the verification reports as its input**. The case for it is the wave's
+own densest seam: 46 holes per wave live in the code the wave just wrote, at 4.6 per packet and 80%
+undisclosed, and it is the one place no adversary is permitted to hunt and no verifier may land a
+case. Converting 46 found / 0 closed into 46 found / 46 closed costs one packet of the same
+capacity that currently buys 25. House rule 13 is retired as written and replaced: **a verifier's
+finding is either an owned rule in the next wave's plan or a case in the closer's packet, and a
+finding with neither is not filed.** Every one of wave 6's 46 is an owned rule in wave 7 below.
+
+What surprised us, in three shapes.
+
+**A service can be complete, tested, imaged, documented and unreachable, and every gate can agree.**
+`services/alerts` reached the first integration pass with 142 cases, its own OpenAPI document, a
+container, a healthcheck, an `AllInOneWiring` entry and an ADR — and could not be routed, because the
+one line joining it to the gateway (`alerts.contract.jvm` in `services.gateway.api`'s `moduleDeps`)
+belonged to no packet's `Owns`. Two packets each did their half correctly. The half that was
+nobody's was the *edge*. The same shape initially ate the stream: `ContractRouting.derive` cannot
+carry SSE, the relay had to be hand-written, and no packet owned it. `AlertsStreamRoutes` and the
+all-in-one mount assertion now close that edge. **A wave plan that partitions files does not
+partition the edges between them, and an edge with no owner is invisible to every gate in the
+repository.**
+
+**The gate that was written to be un-neuterable was neutered in one line, and its own packet
+published the opposite.** W6-09 rebuilt `feature-matrix-check.sh` around a claim registry, per-region
+markers, a residue check and a manifest reconciliation, and reported that a green false figure now
+costs five edits across three files where it used to cost one. Measured here: it costs **one** —
+changing `carries("X-Csrf-Token")` to `carries("X-Kui-Principal")` in the script's own `jq`, after
+which the two documents may publish any number at all and the run prints `216 claims checked, all
+true`. The registry sees that a claim of that kind was made; nothing anywhere looks at what it was
+compared *against*. This is the third wave in which the packet assigned to close a class of defect
+created a fresh instance of it while closing the named one, and the second in which a packet's own
+report asserted a gate that does not exist.
+
+**The instruction to build a wire in one packet worked, and it is the only instruction that has.**
+House rule 12 — one packet owns the DTO, the decoder and the golden between them, and the binding
+case decodes the encoder's own output — produced ten golden documents read by a Scala suite and a
+browser suite over the same files, and both halves go red when one is moved. Two waves of prose
+contracts produced two mismatched wires and a card that lied about its source. The rule is cheap,
+mechanical and the reason M7 closed; wave 7 applies it to the alerts wire, which is still two
+hand-written mirrors of one document with `ALERTS_EVENT_NAME` copied by eye.

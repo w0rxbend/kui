@@ -10,6 +10,8 @@ import cats.syntax.all.*
 
 import kui.cluster.app.ClusterServiceConfig
 import kui.config.{
+  AlertsConfig,
+  AlertThresholds,
   AuthConfig,
   ClusterConfig,
   ConsumersConfig,
@@ -87,6 +89,24 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           paths.contains("/api/v1/clusters"),
           s"the in-process cluster service's route was not proxied; served $paths"
         )
+        // The ninth service, and the reason a named path is asserted here rather than only a count. Adding
+        // a service to `Services` above without wiring one changes this list not at all -- the roster is a
+        // list of ids and the router is built from the clients -- so the case below that compares the two
+        // catches a roster that is short and not a roster that is long. This is the other direction: a
+        // path only the alerts service publishes, served by the one listener this process binds.
+        //
+        // `pathSegments` reads the FIXED segments off the endpoint's input, so a capture contributes
+        // nothing: `clusters / {clusterId} / alerts / events` renders here as the string below. That is
+        // also why it cannot be confused with any other service's route -- no other contract has an
+        // `alerts` segment at all.
+        assert(
+          paths.contains("/api/v1/clusters/alerts/events"),
+          s"the in-process alerts service's feed was not proxied; served $paths"
+        )
+        assert(
+          paths.contains("/api/v1/clusters/alerts/stream"),
+          s"the public alerts stream relay was not mounted; served $paths"
+        )
         assert(paths.contains("/api/v1/health/live"), s"the process's own probes are missing from $paths")
       }
     }
@@ -107,6 +127,7 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           rbac = RbacPolicy.Disabled,
           store = StoreConfig.Default,
           metrics = MetricsConfig.Default,
+          alerts = AlertsConfig.Default,
           Telemetry.noop[IO],
           AllInOneFixture.principals,
           logger
@@ -197,7 +218,10 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         .map { entries =>
           val context = entries.headOption.map(_.context).getOrElse(Map.empty)
           assertEquals(context.get("deployment"), Some("all-in-one"))
-          val expected = "cluster,consumer,identity,message,metrics,schema,topic"
+          // Nine services now, and this string broke the last time one was added -- which is what it is
+          // for. It is the first line of a KUI log and the one a reader checks against the roadmap to
+          // find out which milestone's services are actually in the binary they are running.
+          val expected = "alerts,cluster,consumer,identity,message,metrics,schema,topic"
           assertEquals(context.get("services"), Some(expected))
         }
     }
@@ -266,6 +290,30 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         )
       }
     }
+  }
+
+  test("theAlertsSectionSurvivesTheSliceRatherThanBecomingItsDefault") {
+    // The twin of the metrics case above, and it exists because the alerts section fails MORE quietly than
+    // the metrics one. A dropped `kui.metrics` makes a configured deployment report `not_configured`, which
+    // an operator eventually argues with. A dropped `kui.alerts` changes no status anywhere: the feed still
+    // answers `ok`, the rules still run, and the thresholds are silently the shipped defaults instead of
+    // the ones somebody wrote -- so a cluster deliberately tuned to tolerate a migration starts opening
+    // events again and nothing in the product says why.
+    //
+    // This closes the slice half of the journey and only that half, which its name says. The other half is
+    // the argument `resource` passes to `services`, and it cannot be asserted here today: unlike
+    // `MetricsWiring`, `AlertsWiring` writes no start-up line naming what it was configured with, so a
+    // wiring that handed it `AlertsConfig.Default` produces a process indistinguishable from a correct one
+    // until a threshold is crossed against a real broker. That is filed rather than faked.
+    val configured = AlertsConfig.Default.copy(
+      retention = 36.hours,
+      thresholds = AlertThresholds.Default.copy(diskUsedWarningPercent = 55)
+    )
+
+    assertEquals(AllInOneConfig.from(KuiConfig.Default.copy(alerts = configured)).alerts, configured)
+    // And the default is still the default, so a deployment that configured nothing is not made to look
+    // like one that tuned something.
+    assertEquals(AllInOneConfig.Default.alerts, AlertsConfig.Default)
   }
 
   /** One cluster, so that the metrics service has a row to have an answer about.

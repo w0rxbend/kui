@@ -163,6 +163,10 @@ function GroupScreen(props: { readonly clusterId: string; readonly groupId: stri
             {(topic) => (
               <ConfirmDialog
                 open
+                /* Named, because this page opens two confirmations and both are portalled into
+                   `document.body` as `[role="dialog"]`. "This confirmation is no longer open" has
+                   to be an assertion about *this* one, and by role alone it is not. */
+                testId="group-forget-confirm"
                 onClose={() => setForgetting(undefined)}
                 title={`Forget ${props.groupId}'s offsets on ${topic()}?`}
                 consequence={consequenceOfForget(detail(), topic())}

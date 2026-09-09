@@ -147,23 +147,27 @@ object MetricsBuffer {
         // Scraped, repeatedly, and not one reading carried a percentile: the exporter is up and its
         // whitelist has no `RequestMetrics` rule in it. An axis of gaps here would be indistinguishable
         // from a KUI that started a minute ago, and only one of those two ever fills in.
+        // `forall` and deliberately not `exists`. A window that carried a percentile an hour ago and stopped
+        // carrying one is a series with a gap on its end — the exporter is up, the family was whitelisted,
+        // and the chart's own blank steps say the rest. Refusing the whole card for it would throw away every
+        // reading that *did* arrive, and would report a whitelist problem for a broker that has one.
         if samples.nonEmpty && samples.forall(_.isEmpty) then
           refusal(notServed("request-latency percentile", samples.size)).asLeft
         else LatencySeries.over(range, endingAt, samples).asRight
       }
 
-    def requestHandlers(asOf: Instant): F[Either[KuiError, RequestHandlerReading]] =
+    def requestHandlers(asOf: Instant): F[Either[KuiError, Observed[RequestHandlerReading]]] =
       newest(asOf, "request-handler idle ratio or purgatory depth")(sample =>
         Option.when(!sample.handlers.isEmpty)(sample.handlers)
       )
 
-    def producers(count: Int, asOf: Instant): F[Either[KuiError, TopProducers]] =
+    def producers(count: Int, asOf: Instant): F[Either[KuiError, Observed[TopProducers]]] =
       // `Some(Nil)` is an answer and not a refusal: the exporter published the family and no line carrying
       // a topic. Nothing here decides *why* — a quiet cluster and a ruleset with no per-topic rule are
       // indistinguishable in an exposition — so the empty list travels and the card's sentence names both.
       newest(asOf, "per-topic bytes-in rate")(_.producers.map(TopProducers.of(_, count)))
 
-    def recordSize(asOf: Instant): F[Either[KuiError, RecordSizeReading]] =
+    def recordSize(asOf: Instant): F[Either[KuiError, Observed[RecordSizeReading]]] =
       newest(asOf, "bytes-in and records-in rate to divide")(sample =>
         Option.when(!sample.recordSize.isEmpty)(sample.recordSize)
       )
@@ -175,11 +179,17 @@ object MetricsBuffer {
       */
     private def newest[A](asOf: Instant, family: String)(
         pick: BrokerSample => Option[A]
-    ): F[Either[KuiError, A]] =
+    ): F[Either[KuiError, Observed[A]]] =
       cell.read(asOf).map { window =>
         window.latest.map(_.value) match {
           case None => refusal(NothingScrapedYet).asLeft
-          case Some(sample) => pick(sample).toRight(refusal(notServed(family, window.size)))
+          case Some(sample) =>
+            // The sample's own instant and not `asOf`. A window keeps readings for `kui.metrics.retention`,
+            // so the newest one can be hours old and still be handed out; stamping it with the moment of the
+            // request is what made every card claim a last-known-good reading was current.
+            pick(sample)
+              .map(Observed(_, sample.at))
+              .toRight(refusal(notServed(family, window.size)))
         }
       }
   }

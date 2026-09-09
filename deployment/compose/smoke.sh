@@ -17,8 +17,8 @@
 #
 #   ./deployment/compose/smoke.sh
 #
-# Requires the images. `./mill deployment.docker.__.build` builds the backend's eight: the gateway,
-# the six services this file runs, and the all-in-one binary it does not. The interface's image is
+# Requires the images. `./mill deployment.docker.__.build` builds the backend's nine: the gateway,
+# the seven services this file runs, and the all-in-one binary it does not. The interface's image is
 # not a Mill target at all -- Mill never builds a browser bundle -- and `docker compose up` builds
 # it from `deployment/frontend/Dockerfile` on the first run, which takes a few minutes once.
 #
@@ -354,22 +354,27 @@ await "proxied cluster list" "ok" \
   "curl -sf $base/api/v1/clusters | jq -r .clusters.status"
 
 # ==================================================================================================
-# SOMETHING TO MEASURE, BECAUSE AN IDLE BROKER PUBLISHES ALMOST NOTHING.
+# SOMETHING TO MEASURE, AND EXACTLY TWO ASSERTIONS DEPEND ON IT.
 #
-# This is not a workaround and it is not a way of making a number look better. Kafka creates most of
-# its MBeans lazily, on the first event of the kind they count, and until wave 5 this stack asserted
-# only the three broker-wide `BrokerTopicMetrics` meters -- which exist from boot because
-# `BrokerTopicStats.allTopicsStats` is constructed eagerly. Checked here against this stack, idle:
-# those three are served and read `0.0`, and NOTHING ELSE THE DASHBOARD NEEDS IS THERE AT ALL. No
-# `RequestMetrics{request=Produce}` bean, because nothing has produced; no
-# `RequestMetrics{request=FetchConsumer}`, because nothing has consumed; no per-topic byte rate,
-# because the broker had no topics.
+# WHAT THIS BLOCK USED TO SAY IS FALSE, AND IT IS WORTH SAYING WHAT REPLACED IT. It said that on an
+# idle broker only the three broker-wide `BrokerTopicMetrics` meters are served and "nothing else
+# the dashboard needs is there at all" -- no `RequestMetrics{request=Produce}` bean because nothing
+# has produced, none for `FetchConsumer` because nothing has consumed. Measured on this stack, cold,
+# up 25 seconds, with no client of any kind having touched the broker: the exporter serves ALL
+# TWELVE of the line shapes listed below. Produce and FetchConsumer p99 at `0.0`, both purgatory
+# sizes at `0.0`, `requesthandleravgidlepercent` at 0.958 and `networkprocessoravgidlepercent` at
+# 0.399. Kafka creates `RequestMetrics` beans eagerly, one per ApiKey it can serve; what is lazy is
+# the per-TOPIC slice of `BrokerTopicMetrics`, which needs that topic's first byte.
 #
-# So the widened exporter ruleset could not be asserted against this stack without traffic, and the
-# assertion is the whole point of the ruleset. Producing a few hundred records and reading them back
-# creates every one of those beans, and it also turns the throughput assertion below from "a bucket
-# carrying a measured zero" into "a bucket carrying a number somebody caused" -- which is closer to
-# what M7's criterion means by a real number, and cost one topic.
+# So the traffic step earns its place here for exactly two assertions and not for the twelve:
+#
+#   1. the per-topic byte rate the Top producers card is drawn from, which really does not exist
+#      until a topic has taken a byte, and
+#   2. `bytesinpersec_total > 0` and `bytesoutpersec_total > 0` -- that the numbers this run reads
+#      are numbers this run caused, rather than twelve honest zeroes.
+#
+# That is a smaller claim than the one it replaces and it is the one the run can support. Producing
+# five hundred records and reading them back costs one topic and about fifteen seconds.
 #
 # Through the broker's own CLI rather than through KUI's produce API. The point is to put bytes
 # through Kafka, and routing them through the message service would make this step fail for reasons
@@ -399,12 +404,29 @@ seq 1 "$TRAFFIC_RECORDS" |
     --bootstrap-server localhost:9092 --topic "$TRAFFIC_TOPIC" >/dev/null 2>&1 ||
   fail "could not produce to $TRAFFIC_TOPIC"
 
-# And read them back, which is the only way to make the broker publish a `FetchConsumer` percentile:
-# a produce alone leaves that bean uncreated and the latency card with one series instead of two.
-kafka_cli kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic "$TRAFFIC_TOPIC" \
-  --from-beginning --max-messages "$TRAFFIC_RECORDS" --timeout-ms 30000 >/dev/null 2>&1 ||
+# And read them back. The sentence that used to sit here said this was "the only way to make the
+# broker publish a `FetchConsumer` percentile" and that a produce alone leaves the bean uncreated.
+# It is not: the block above records the exposition of an idle broker, and that percentile is in it
+# at `0.0`. What the read-back is actually for is `BytesOutPerSec`, which nothing else on this stack
+# moves -- a produce moves bytes in and leaves bytes out at zero for ever -- and the counter is
+# asserted below.
+#
+# THE COUNT IS READ NOW, AND IT USED TO BE THROWN AWAY. The consumer's output went to /dev/null and
+# only its exit status was looked at, so a run that read four records printed exactly the same
+# "500 records produced to smoke-traffic and read back" as a run that read five hundred, and no
+# assertion anywhere could tell the two apart. A line the run cannot detect is false is not a
+# report; deleting this whole step left a full run PASSED and still printed it.
+read_back="$(kafka_cli kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic "$TRAFFIC_TOPIC" --from-beginning --max-messages "$TRAFFIC_RECORDS" \
+  --timeout-ms 30000 2>/dev/null | wc -l)" ||
   fail "could not read back the $TRAFFIC_RECORDS records just produced to $TRAFFIC_TOPIC"
-printf '  %s records produced to %s and read back\n' "$TRAFFIC_RECORDS" "$TRAFFIC_TOPIC"
+[[ "$read_back" == "$TRAFFIC_RECORDS" ]] ||
+  fail "$read_back of the $TRAFFIC_RECORDS records produced to $TRAFFIC_TOPIC came back.
+  The consumer exited without an error and returned a different number of records than the producer
+  wrote, which means either the produce above did not land what it reported or this broker is not
+  the one it landed on. Every measurement below is about bytes this step was supposed to move."
+printf '  %s records produced to %s, %s read back\n' \
+  "$TRAFFIC_RECORDS" "$TRAFFIC_TOPIC" "$read_back"
 
 # ==================================================================================================
 # THE MEASUREMENT, WHICH IS THE HALF M7 SPENT TWO WAVES UNABLE TO PROVE.
@@ -490,10 +512,19 @@ log "the broker beside this stack is measurable, and KUI measures it"
 
 exposition="$("${compose[@]}" exec -T kui-gateway \
   curl -fsS http://kafka-metrics:5556/metrics 2>/dev/null || true)"
-# The same guard the image preflight has, for the same reason: everything below is a loop over this
-# body, and a loop over an empty body runs zero times and reports that every family was found.
+# A BETTER MESSAGE, AND NOT THE GUARD ITS OWN COMMENT CLAIMED. This used to say it was "the same
+# guard the image preflight has, for the same reason: a loop over an empty body runs zero times and
+# reports that every family was found". The hazard is real where it was copied from and cannot occur
+# here: the loop below is over `EXPORTER_LINES`, twelve fixed patterns, not over the body. With an
+# empty body every one of the twelve `grep -qE` calls fails and the step fails loudly naming all
+# twelve. Checked by running it against an empty string.
+#
+# So this line is kept for what it does do -- turn twelve confusing "served nothing matching" lines
+# into one sentence saying the exporter answered nothing at all, which is a different fault with a
+# different fix -- and the claim that it is load bearing is gone.
 [[ -n "$exposition" ]] || fail "the JMX exporter at kafka-metrics:5556 answered nothing at all.
-  Every assertion below reads that body, so an empty one would pass all of them."
+  Every assertion below reads that body. This is a sidecar that is not serving, not a rule that was
+  renamed: check that kafka-metrics is up and that it can reach the broker's JMX port."
 
 # Every pattern is anchored at `^`, which is doing real work rather than being tidy: without it
 # `..._bytesinpersec_oneminuterate` would be reported as present by a line for
@@ -517,7 +548,9 @@ printf '  the exporter serves all %s line shapes the reader reads\n' "${#EXPORTE
 # broker-wide byte rate, dimensioned by a `topic` label -- Kafka's own convention, and what
 # `PrometheusExposition`'s aggregates-and-slices rule was written against. The list above cannot see
 # it: the unlabelled aggregate satisfies that pattern on its own, so the per-topic rule could be
-# deleted whole and every one of the thirteen shapes above would still be found.
+# deleted whole and every one of the twelve shapes above would still be found. (Twelve, which is
+# what `${#EXPORTER_LINES[@]}` prints two lines up. This said thirteen, and so did
+# ../compose/README.md, against an array nothing had counted.)
 #
 # It is asserted here and not at start-up because the traffic step above is what makes it exist:
 # Kafka creates a per-topic `BrokerTopicMetrics` bean on that topic's first byte and not before, so
@@ -544,6 +577,18 @@ bytes_in="$(grep -E '^kafka_server_brokertopicmetrics_bytesinpersec_total ' <<<"
   the exporter is attached to a different JVM than the one KUI's cluster service is writing to."
 printf '  the broker has taken %s bytes in since it started\n' "$bytes_in"
 
+# And out, which is the counter the READ-BACK moves and the only thing on this stack that moves it.
+# Without this line the consume step had no assertion of its own at all: it could be deleted whole,
+# and the run stayed green with all twelve line shapes served, because the percentile its comment
+# said it created is published from boot.
+bytes_out="$(grep -E '^kafka_server_brokertopicmetrics_bytesoutpersec_total ' <<<"$exposition" |
+  awk '{ print $2 }')"
+[[ -n "$bytes_out" ]] && awk -v v="$bytes_out" 'BEGIN { exit !(v > 0) }' ||
+  fail "the broker reports $bytes_out bytes out since it started, after $read_back records were read
+  back from $TRAFFIC_TOPIC. A produce alone leaves this counter at zero, so either the consume above
+  read from somewhere else or this exporter is attached to a different broker than that consumer."
+printf '  the broker has served %s bytes out since it started\n' "$bytes_out"
+
 # Then KUI. `await` and not a single call: the scrape loop runs at `kui.metrics.scrapeInterval`, so
 # a stack that came up two seconds ago has correctly sampled nothing yet, and the honest answer at
 # that instant is a series with no values in it. What is asserted is that it fills, not that it was
@@ -558,16 +603,95 @@ await "the measured cluster's throughput" "ok" "$(throughput measured .throughpu
 # is asserted: at least one bucket carrying a rate that is not null. A bucket that was never sampled
 # is null and stays null -- it is a gap in the line and never a zero -- which is why this counts
 # non-null buckets rather than checking the array's length.
-await "buckets carrying a measured rate" "yes" \
-  "$(throughput measured \
-    'if [.throughput.data.buckets[]? | select(.bytesInPerSecond != null)] | length > 0
-      then "yes" else "no" end')"
+#
+# EVERY FIELD A BUCKET CARRIES, AND NOT ONLY THE FIRST OF THEM. This asked about `bytesInPerSecond`
+# and nothing else, which is one of the three families the throughput reader parses. A KUI-side
+# regression that stopped reading `messagesinpersec` -- the family behind `recordsPerSecond` -- left
+# this job entirely green while the Traffic tab drew a records line made of nulls, and the exporter
+# check above cannot see it either: that check asserts the family is on the wire, which is exactly
+# the state a broken reader is in. Three `await`s and not one compound expression, so the failure
+# names the field.
+for field in bytesInPerSecond bytesOutPerSecond recordsPerSecond; do
+  await "buckets carrying a measured $field" "yes" \
+    "$(throughput measured \
+      "if [.throughput.data.buckets[]? | select(.$field != null)] | length > 0
+        then \"yes\" else \"no\" end")"
+done
 
 # And the other half, on the same deployment and the same broker: a cluster with no
 # `kui.metrics.sources` entry says so. This is the assertion M7's criterion has been passing on
 # alone for two milestones; it is correct and it is worth nothing without the two above it.
 await "the unmeasured cluster's throughput" "not_configured" \
   "$(throughput unmeasured .throughput.status)"
+
+# ==================================================================================================
+# AND THE OTHER FOUR DOCUMENTS, BECAUSE THE THROUGHPUT ONE WAS NEVER THE WHOLE READER.
+#
+# `services/metrics` serves five documents from one exposition, and until now this script asserted
+# one of them. The four below read the request-latency percentiles, the two idle ratios and the
+# purgatory queues, the per-topic byte rates and the record-size mean -- families that are asserted
+# to be ON THE WIRE by EXPORTER_LINES above and were asserted to be READ by nothing at all. That
+# gap is the whole distance between "the sidecar publishes it" and "a card can draw it", and this
+# stack is the only place in the repository where both halves are running.
+#
+# The latency document names its two fields because they are settled; the last three are asserted
+# as "the document carries at least one number" and deliberately not field by field. Their payload
+# shapes are being moved this wave (ADR-052, and the browser reads names that do not match the
+# server's), so a second copy of those names here would be a contract written down in the one place
+# whose owner is not the one changing it. What cannot move is that a document whose status is `ok`
+# has to carry a figure: an `ok` over an empty object is the exact failure the Top producers card is
+# in today, and it is a failure this shape does catch.
+metric() {
+  printf "curl -sf '%s/api/v1/clusters/measured/metrics/%s' | jq -r '%s'" "$base" "$1" "$2"
+}
+
+for field in produceP99Millis fetchP99Millis; do
+  await "latency buckets carrying a measured $field" "yes" \
+    "$(metric 'latency?range=24h' \
+      "if [.latency.data.buckets[]? | select(.$field != null)] | length > 0
+        then \"yes\" else \"no\" end")"
+done
+
+carries_a_number() {
+  printf 'if [%s | .. | numbers] | length > 0 then "yes" else "no" end' "$1"
+}
+
+await "the request-handlers document carries a figure" "yes" \
+  "$(metric request-handlers "$(carries_a_number .requestHandlers.data)")"
+await "the top-producers document carries a figure" "yes" \
+  "$(metric producers "$(carries_a_number .producers.data)")"
+await "the record-size document carries a figure" "yes" \
+  "$(metric record-size "$(carries_a_number .recordSize.data)")"
+
+# ==================================================================================================
+# THE NINTH SERVICE, AND THE ONE THING AN ALERTS FEED MUST NOT DO.
+#
+# This stack's broker is healthy, so the honest answer here is an empty feed: no offline partition,
+# no under-replicated partition, no group stuck rebalancing. That is a measured zero and it is a
+# perfectly good answer -- but it is also exactly what a service that ran no rules at all would
+# answer, and what a service pointed at a broker it cannot reach would answer if it were willing to
+# invent one. So the assertion is not about the events. It is about the evidence beside them:
+#
+#   * `evaluatedAt` is set, which says the rules have actually run against this broker;
+#   * `rules` is non-empty, so the document names what was evaluated rather than only the result;
+#   * at least one of those rules reports `ok`, which is a rule that read the facts it needed.
+#
+# ADR-053 puts a `Section` on each rule rather than one on the document for this reason: a rule
+# whose facts could not be read says so and costs one row, and a feed of zeros from a service that
+# could measure nothing is distinguishable from a feed of zeros from a healthy cluster. A zero that
+# cannot be told apart from a refusal is the failure this whole product is written against.
+log "the ninth service answers, and says what it evaluated"
+
+alerts() { printf "curl -sf '%s/api/v1/clusters/measured/alerts/events' | jq -r '%s'" "$base" "$1"; }
+
+await "the alerts feed" "ok" "$(alerts .events.status)"
+await "the alerts feed says when the rules last ran" "yes" \
+  "$(alerts 'if .events.data.evaluatedAt == null then "no" else "yes" end')"
+await "the alerts feed names the rules it evaluated" "yes" \
+  "$(alerts 'if [.events.data.rules[]?] | length > 0 then "yes" else "no" end')"
+await "at least one alert rule read the facts it needs" "yes" \
+  "$(alerts 'if [.events.data.rules[]? | select(.evaluation.status == "ok")] | length > 0
+      then "yes" else "no" end')"
 
 log "stopping kui-cluster: one real process dies"
 "${compose[@]}" stop kui-cluster >/dev/null

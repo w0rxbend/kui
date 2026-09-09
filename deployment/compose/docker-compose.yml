@@ -1,4 +1,4 @@
-# KUI in its distributed shape: the interface, the gateway and all six services as separate
+# KUI in its distributed shape: the interface, the gateway and all seven services as separate
 # containers.
 #
 # THIS IS A DEVELOPMENT AND TEST ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. The signing key comes
@@ -143,6 +143,9 @@ services:
         condition: service_healthy
         required: false
       kui-schema:
+        condition: service_healthy
+        required: false
+      kui-alerts:
         condition: service_healthy
         required: false
       kui-cluster:
@@ -355,6 +358,13 @@ services:
     # are about something real. `required: false`, like every other entry in this file, because a
     # metrics service that refused to start without its exporter would be the opposite of what this
     # stack demonstrates.
+    #
+    # AND IT HAS NOW BEEN RUN WITHOUT, which is what "headroom rather than a repair" was still
+    # owed. This block was deleted and the stack brought up cold from a torn-down state: healthy in
+    # 25s, one WARN from `kui-metrics`, and `buckets carrying a measured rate: yes` 17 seconds
+    # after that with no traffic produced at all. A full `smoke.sh` on the same edit PASSED. The
+    # wave-4 failure this line was once thought to explain is therefore NOT a start-order problem,
+    # and nothing here claims it is any more; see README.md.
     depends_on:
       kafka-metrics:
         condition: service_healthy
@@ -364,6 +374,48 @@ services:
       # Carried although this service signs nothing: it mounts the file the other three mount, and
       # that file resolves `kui.streaming.cursorKey` from this variable, so a container without it
       # fails the load rather than ignoring a key it does not read.
+      KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-service.yaml:/etc/kui/kui-service.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # The alerts service: the rules KUI runs over facts it already measures, and the feed they open.
+  #
+  # It is the ninth service and the first one added since the eighth, which is why three literals
+  # elsewhere in this repository broke the last time and are named in this wave's guard table. This
+  # file is not one of them and that is the point of the arrangement described in the slot below:
+  # `smoke.sh` derives the contract set from `ServiceContracts.byService`, the address set from the
+  # running gateway and the container set from this file, and CI derives its build list from the
+  # `image:` lines here. A service added to those three places is a service every check picks up
+  # with nobody remembering anything.
+  #
+  # It mounts `kui-service.yaml` like the five services above it, and reads one more section of it
+  # than they do: `kui.alerts`, whose retention and evaluation interval and thresholds are the
+  # numbers its rules compare against. Those thresholds are local policy -- a log directory at 80%
+  # is a quiet afternoon in one deployment and a page in another -- so they are configuration and
+  # not constants, and this stack sets them explicitly rather than by default so that the file
+  # shows an operator what there is to set.
+  kui-alerts:
+    image: kui-alerts:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-alerts
+    command: ["--config", "/etc/kui/kui-service.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Carried for the same reason `kui-schema` carries it: this container mounts the file the
+      # other five mount, and that file resolves `kui.streaming.cursorKey` from this variable, so a
+      # container without it fails the load rather than ignoring a key it does not read.
       KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
       KUI_TELEMETRY_LOGFORMAT: text
     volumes:
@@ -498,18 +550,17 @@ services:
     restart: unless-stopped
 
   # ===============================================================================================
-  # THE SLOT FOR THE THREE SERVICES THAT DO NOT EXIST YET.
+  # THE SLOT FOR THE TWO SERVICES THAT DO NOT EXIST YET.
   #
-  # M8 adds `services/alerts`, and M9 `services/connect` and `services/ksql` (docs/plan/ROADMAP.md).
-  # Each is a container exactly like `kui-consumer` above: no published port, `kui-service.yaml`
-  # mounted read-only, a read-only root with a tmpfs at /tmp, and no restart policy so a test that
-  # stops it can assert what happens next without racing Docker.
+  # M9 adds `services/connect` and `services/ksql` (docs/plan/ROADMAP.md). Each is a container
+  # exactly like `kui-consumer` above: no published port, `kui-service.yaml` mounted read-only, a
+  # read-only root with a tmpfs at /tmp, and no restart policy so a test that stops it can assert
+  # what happens next without racing Docker.
   #
-  # The names and the addresses are decided HERE, once, rather than three times by three people:
+  # The names and the addresses are decided HERE, once, rather than twice by two people:
   #
   #   service    container       address on this network     configuration
   #   ---------  --------------  --------------------------  ---------------------------------
-  #   alerts     kui-alerts      http://kui-alerts:8080      kui-service.yaml
   #   connect    kui-connect     http://kui-connect:8080     kui-service.yaml
   #   ksql       kui-ksql        http://kui-ksql:8080        kui-service.yaml
   #
@@ -522,10 +573,10 @@ services:
   # under `kui-gateway` with `condition: service_healthy` and `required: false` — the same
   # ordered-not-gated relationship every service already has, for the reason spelled out there.
   #
-  # `kui-metrics` above is that recipe already applied: it was the commented entry in this block
-  # until `services/metrics` had an image to run, which it now has. The row it used to occupy is
-  # gone from the table because the address it names is a live container thirty lines up, and a
-  # slot that still listed it would be a plan for something already built.
+  # `kui-metrics` and `kui-alerts` above are that recipe already applied: each was a row in this
+  # table until its service had an image to run. Both rows are gone from it, because the addresses
+  # they named are live containers a little way up this file, and a slot that still listed one
+  # would be a plan for something already built.
 
 networks:
   kui:

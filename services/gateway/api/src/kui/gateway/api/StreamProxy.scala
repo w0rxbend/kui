@@ -2,7 +2,7 @@ package kui.gateway.api
 
 import java.nio.charset.StandardCharsets
 
-import cats.effect.kernel.{Async, Ref}
+import cats.effect.kernel.{Async, Ref, Resource}
 import cats.effect.std.Queue
 import cats.syntax.all.*
 import fs2.{Chunk, Stream}
@@ -69,7 +69,13 @@ object StreamProxy {
         val producer =
           upstream.chunks
             .evalMap(chunk => queue.offer(Some(chunk)))
-            .onFinalize(queue.offer(None))
+            .onFinalizeCase {
+              // A normal upstream completion still has a live consumer, so waiting for room preserves every
+              // queued chunk before the termination marker. If the producer is being cancelled, the consumer
+              // has already stopped: a blocking offer into a full queue would make that cancellation hang.
+              case Resource.ExitCase.Succeeded => queue.offer(None)
+              case Resource.ExitCase.Canceled | Resource.ExitCase.Errored(_) => Async[F].unit
+            }
 
         // `concurrently` is what gives all three rules at once: the producer is cancelled when the consumer
         // finishes or is cancelled, and a producer failure is raised into the consumer rather than leaving

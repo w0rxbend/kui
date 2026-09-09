@@ -39,6 +39,14 @@ final class BrokerReadingsSuite extends FunSuite {
     assert(RecordSizeReading.from(None, None).isEmpty)
   }
 
+  test("a mean record size keeps the fraction it was divided to, because the browser does the rounding") {
+    // 2049 bytes over 2 records is 1024.5 bytes a record, and rounding it here would be this service
+    // choosing a precision for every client that will ever read the field — the same argument the
+    // idle ratios travel as ratios for. Every other fixture in this service divides to a whole
+    // number, so the rounding was ungated until this case: `Math.round` in `from` was invisible.
+    assertEquals(RecordSizeReading.from(Some(2049.0), Some(2.0)).meanBytes, Some(1024.5))
+  }
+
   test("top producers are ranked by rate and cut to the count asked for") {
     // Ranked in the service and not in whichever card draws it, so two screens asking for three and for
     // ten cannot disagree about which topic is busiest.
@@ -51,6 +59,48 @@ final class BrokerReadingsSuite extends FunSuite {
     assertEquals(TopProducers.of(topics, 2).topics.map(_.topic), List("orders.v1", "payments.transactions"))
     assertEquals(TopProducers.of(topics, 10).topics.size, 3)
     assertEquals(TopProducers.of(topics, 0).topics, Nil)
+  }
+
+  test("Kafka's own topics are not ranked as producers, and the count of them travels") {
+    // Measured, not supposed: the committed capture
+    // `services/metrics/infrastructure/test/resources/exposition/kafka-broker-stock-ruleset.txt:38-40` has
+    // `__consumer_offsets` at 156.97 bytes/s against `orders.v1` at 5.95e-20 on an idle quickstart broker.
+    // Ranked, the card would report the consumer-group protocol as the busiest producer on the cluster by a
+    // factor of a thousand. The count of what was removed travels so the browser can say so rather than
+    // showing a silently shortened list.
+    val mixed = List(
+      TopicProducer("__consumer_offsets", 156.9725527287428),
+      TopicProducer("__transaction_state", 3.0),
+      TopicProducer("orders.v1", 5.950733067299049e-20)
+    )
+
+    assertEquals(TopProducers.of(mixed, 5).topics.map(_.topic), List("orders.v1"))
+    assertEquals(TopProducers.of(mixed, 5).internalTopicsExcluded, 2)
+  }
+
+  test("a topic with one leading underscore is a customer's and stays in the ranking") {
+    // The narrow prefix is the point. `kui.topics.internalPrefix` ships as `"_"`, which is the topics
+    // screen's own broader rule and an operator can turn it off there with `?showInternal=1`; borrowing it
+    // here would drop a customer's `_audit` topic out of a producer ranking with nothing on the screen
+    // saying so, and losing a real producer is a worse answer than keeping an internal one.
+    val topics = List(TopicProducer("_audit", 40.0), TopicProducer("__consumer_offsets", 90.0))
+
+    assertEquals(TopProducers.of(topics, 5).topics.map(_.topic), List("_audit"))
+    assertEquals(TopProducers.of(topics, 5).internalTopicsExcluded, 1)
+    assertEquals(TopProducers.InternalTopicPrefix, "__")
+  }
+
+  test("the internal topics are removed before the count is cut, not after") {
+    // Removed after the `take`, a five-row card on a cluster whose two busiest topics are Kafka's own would
+    // show three rows and nothing would say why the other two are missing.
+    val topics = List(
+      TopicProducer("__consumer_offsets", 900.0),
+      TopicProducer("__transaction_state", 800.0),
+      TopicProducer("orders.v1", 70.0),
+      TopicProducer("payments.v1", 60.0)
+    )
+
+    assertEquals(TopProducers.of(topics, 2).topics.map(_.topic), List("orders.v1", "payments.v1"))
   }
 
   test("two topics on the same rate are ordered by name rather than by the exporter's line order") {

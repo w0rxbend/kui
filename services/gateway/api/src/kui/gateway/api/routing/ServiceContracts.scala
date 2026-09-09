@@ -2,6 +2,7 @@ package kui.gateway.api.routing
 
 import sttp.tapir.AnyEndpoint
 
+import kui.alerts.contract.AlertsEndpoints
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
@@ -67,7 +68,13 @@ object ServiceContracts {
       // service and the shortest entry in this map, which is the point of it — a service is added here
       // in one line, and its endpoints arrive without one. M7 adds four reads to that list and this
       // entry does not move.
-      ServiceId.unsafe("metrics") -> MetricsEndpoints.all
+      ServiceId.unsafe("metrics") -> MetricsEndpoints.all,
+      // One list, and the ninth service. `AlertsEndpoints.all` is the feed read and the acknowledgement
+      // write; the stream is deliberately not here, because `ContractRouting.derive` decodes and
+      // re-encodes an upstream's JSON and that is the wrong thing to do to an event stream. A stream is
+      // relayed by hand, the way `MessageStreamRoutes` relays the browse feed, so the endpoint value in
+      // `AlertsStreamEndpoint` is held for that relay rather than for this map.
+      ServiceId.unsafe("alerts") -> AlertsEndpoints.all
     )
 
   /** The identity service is **deliberately absent** from the map above, and must stay absent.

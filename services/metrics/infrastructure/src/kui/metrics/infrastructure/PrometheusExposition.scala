@@ -31,12 +31,14 @@ object PrometheusSample {
   *
   * ==What it recognises, and what it does with everything else==
   *
-  * A JMX exporter in front of a Kafka broker serves several hundred families — 680 of them under the stock
-  * ruleset, measured against the quickstart broker and recorded in ADR-052. This parser reads eight of them.
-  * Everything else — log-flush percentiles, JVM heap, the controller's own beans, the exporter's scrape
-  * duration — is ignored rather than refused. An adapter that failed on a family it did not know would break
-  * on the next Kafka release, and the honest reading of an exposition carrying information KUI does not use
-  * is the information KUI does use.
+  * A JMX exporter in front of a Kafka broker serves several hundred families — 670 of them under the stock
+  * ruleset, measured against the quickstart broker, recorded in ADR-052:29 and counted in the header of the
+  * capture committed beside this file
+  * (`services/metrics/infrastructure/test/resources/exposition/kafka-broker-stock-ruleset.txt:7`). This
+  * parser reads eight of them. Everything else — log-flush percentiles, JVM heap, the controller's own beans,
+  * the exporter's scrape duration — is ignored rather than refused. An adapter that failed on a family it did
+  * not know would break on the next Kafka release, and the honest reading of an exposition carrying
+  * information KUI does not use is the information KUI does use.
   *
   * The one thing it will not do is answer from nothing: a body carrying none of the eight is a `Left`,
   * because a source that publishes nothing this service reads is a misconfiguration an operator has to be

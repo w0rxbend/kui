@@ -12,7 +12,9 @@ import kui.contracts.Section
   *
   * `SCREENS-V4.md` §3.5 draws a twelve-bucket histogram with `p50 · 1.1 KB`, `p99 · 18 KB` and `max · 0.9 MB`
   * chips. Kafka publishes **no** record-size distribution of any kind: a stock-ruleset exposition of the
-  * quickstart broker carries 680 Kafka families and not one histogram bucket among them (ADR-052). What it
+  * quickstart broker carries 670 Kafka families and not one histogram bucket among them (ADR-052:29, and
+  * counted in the committed capture's own header,
+  * `services/metrics/infrastructure/test/resources/exposition/kafka-broker-stock-ruleset.txt:7`). What it
   * does publish is a bytes-in rate and a records-in rate, whose quotient is a mean record size. There is no
   * `p50`, no `p99` and no `max` on this DTO, and the absence is the point: a browser cannot draw a percentile
   * it was never sent, and the card says in words that the distribution cannot be measured.

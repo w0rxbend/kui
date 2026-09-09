@@ -161,4 +161,82 @@ final class RbacGuardSuite extends CatsEffectSuite {
         .map(entries => assertEquals(entries.map(_.level), List("warn")))
     }
   }
+
+  /** A cluster-scoped **write**, which is what a read-only cluster is allowed to refuse. */
+  private val altering: AnyEndpoint =
+    endpoint.post
+      .in("internal" / "v1" / "clusters" / path[String]("clusterId") / "topics")
+      .attribute(
+        EndpointAuthorization.Key,
+        EndpointAuthorization.one(
+          "createTopic",
+          ResourceRequirement.unnamed(Resource.Topic, Action.TopicCreate)
+        )
+      )
+
+  test("a write to a read-only cluster is refused by the service's own guard") {
+    // ADR-021's second enforcement point, and the half of it nothing reached. Every existing case in
+    // this file — and every route-driven case in the five service suites — hands the guard
+    // `_ => ClusterFlags.Writable`, so `flagsFor`'s answer was never anything else: replacing the
+    // lookup with a constant `Writable` left `libs.http.test` at 150, `services.cluster.api.test` at
+    // 109 and the four other service `api` suites at 125, all green, with a read-only cluster's writes
+    // allowed by the only check that runs when a caller reaches a service port directly.
+    //
+    // A service knows read-only from its own configuration precisely so the refusal does not depend on
+    // the gateway having been asked first.
+    val rbac = policy(Resource.Topic, Action.TopicCreate, Action.TopicView)
+
+    FakeStructuredLogger[IO].flatMap { logger =>
+      val guard = RbacGuard.fromPolicy[IO](rbac, _ => ClusterFlags(readOnly = true), logger)
+
+      guard
+        .authorize(principal(reader), altering, s"/internal/v1/clusters/${Cluster.value}/topics")
+        .map(decision => assertEquals(decision.left.map(_.code.wire), Left("KUI-FORBIDDEN")))
+    }
+  }
+
+  test("the same write to a writable cluster is allowed, so the refusal is the flag and not the role") {
+    // The other half, and it is what stops the case above from passing against a guard that refuses
+    // every write: one caller, one policy, one endpoint, one bit different.
+    val rbac = policy(Resource.Topic, Action.TopicCreate, Action.TopicView)
+
+    FakeStructuredLogger[IO].flatMap { logger =>
+      RbacGuard
+        .fromPolicy[IO](rbac, _ => ClusterFlags.Writable, logger)
+        .authorize(principal(reader), altering, s"/internal/v1/clusters/${Cluster.value}/topics")
+        .map(decision => assertEquals(decision, Right(())))
+    }
+  }
+
+  test("a read of a read-only cluster is still allowed, because read-only refuses writes and not reads") {
+    FakeStructuredLogger[IO].flatMap { logger =>
+      RbacGuard
+        .fromPolicy[IO](policy(Resource.Topic, Action.TopicView), _ => ClusterFlags(readOnly = true), logger)
+        .authorize(principal(reader), declared, s"/internal/v1/clusters/${Cluster.value}/topics")
+        .map(decision => assertEquals(decision, Right(())))
+    }
+  }
+
+  test("the cluster the flags are looked up for is the one named in the request path") {
+    // Stated separately from the refusal above because the two failures are different: a guard that
+    // ignores `flagsFor` and a guard that asks it about the wrong cluster both allow the write, and a
+    // deployment with one read-only cluster beside three writable ones is where the second one hides.
+    // `flagsFor` is a pure function, so what it was asked is recorded beside it rather than in `IO`.
+    val asked = new java.util.concurrent.atomic.AtomicReference[List[String]](Nil)
+
+    FakeStructuredLogger[IO].flatMap { logger =>
+      val guard = RbacGuard.fromPolicy[IO](
+        policy(Resource.Topic, Action.TopicCreate, Action.TopicView),
+        id => {
+          asked.updateAndGet(seen => seen :+ id.value)
+          ClusterFlags(readOnly = true)
+        },
+        logger
+      )
+
+      guard
+        .authorize(principal(reader), altering, "/internal/v1/clusters/frozen/topics")
+        .map(_ => assertEquals(asked.get, List("frozen")))
+    }
+  }
 }

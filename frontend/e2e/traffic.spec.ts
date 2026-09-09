@@ -57,31 +57,34 @@ interface WireLatency {
   };
 }
 
+/**
+ * The request-handlers document, as `RequestHandlerDtos.scala` writes it.
+ *
+ * It used to be declared here as `data.readings[]` — a shape no service has ever sent — so the case
+ * below iterated an empty array, asserted nothing, and reported green while the card drew a
+ * confident false sentence about the source. The fields are the server's own now, and the cases
+ * assert the arrays are **non-empty** before they iterate.
+ */
 interface WireHandlers {
   readonly requestHandlers?: {
     readonly status: string;
     readonly data?: {
-      readonly readings?: readonly {
-        readonly id?: string;
-        readonly label?: string;
-        readonly ratio?: number | null;
-        readonly count?: number | null;
-        readonly unit?: string;
-      }[];
+      readonly requestHandlerIdleRatio?: number | null;
+      readonly networkProcessorIdleRatio?: number | null;
+      readonly purgatory?: readonly { readonly operation?: string; readonly delayedRequests?: number }[];
     };
   };
   readonly "request-handlers"?: WireHandlers["requestHandlers"];
 }
 
+/** The top-producers document, as `ProducerDtos.scala` writes it. The same repair as above. */
 interface WireProducers {
   readonly producers?: {
     readonly status: string;
     readonly data?: {
-      readonly entries?: readonly {
-        readonly clientId?: string;
-        readonly topic?: string;
-        readonly bytesPerSecond?: number | null;
-      }[];
+      readonly measuredBy?: string;
+      readonly topics?: readonly { readonly topic?: string; readonly bytesInPerSecond?: number | null }[];
+      readonly internalTopicsExcluded?: number;
     };
   };
 }
@@ -310,28 +313,71 @@ test.describe("the Traffic tab", () => {
     await expect(page.getByRole("heading", { name: "Request handlers" })).toBeVisible();
 
     if (section?.status === "ok" || section?.status === "stale") {
-      const readings = section.data?.readings ?? [];
-      for (const reading of readings) {
-        const tile = card.locator(`[data-testid="handler-${reading.id ?? ""}"]`);
+      const data = section.data;
+      const purgatory = data?.purgatory ?? [];
+
+      /*
+       * Asserted before anything is iterated, and this is the repair rather than a nicety. The
+       * previous version of this case read `data.readings`, a field no service has ever sent, so
+       * every loop below ran zero times and the case reported green against a card drawing nothing.
+       * A browser case that iterates an empty array has asserted nothing, so the array's emptiness
+       * is now the first thing that can fail. The service refuses the whole section when a scrape
+       * carried none of the three, so an `ok` document always carries at least one of them.
+       */
+      const measuredReadings =
+        (typeof data?.requestHandlerIdleRatio === "number" ? 1 : 0) +
+        (typeof data?.networkProcessorIdleRatio === "number" ? 1 : 0) +
+        purgatory.length;
+      expect(measuredReadings, `an ok section must carry a reading: ${JSON.stringify(section)}`).toBeGreaterThan(0);
+
+      const ratios: readonly [string, number | null | undefined][] = [
+        ["handler-network-idle", data?.networkProcessorIdleRatio],
+        ["handler-io-idle", data?.requestHandlerIdleRatio],
+      ];
+      for (const [id, value] of ratios) {
+        const tile = card.locator(`[data-testid="${id}"]`);
         await expect(tile).toBeVisible();
-        if (typeof reading.ratio === "number") {
-          /* A ratio in 0..1 arrives from the endpoint and the card multiplies it. A gauge printing
-             `0%` for a broker that is 71% idle is what a missing multiply looks like. */
+        if (typeof value === "number") {
+          /*
+           * A ratio in 0..1 arrives from the endpoint and the card multiplies it. A gauge printing
+           * `1%` for a broker that is 99.98% idle is what a missing multiply looks like, and that
+           * is what this compares — *within five points*, not exactly. These are live readings: the
+           * request this spec made and the request the page made are two scrapes apart, and pinning
+           * the digit would make the case fail on a broker whose idle ratio moved rather than on a
+           * browser that read the wrong field. Five points is far tighter than the factor of a
+           * hundred a missing multiply costs.
+           */
           await expect(tile.locator(".kui-gauge")).toHaveCount(1);
-          await expect(tile).toContainText(`${Math.round(reading.ratio * 100)}%`);
-        } else if (typeof reading.count === "number") {
-          /* §3.4 draws "38% PURGATORY" and this is not a percentage of anything: there is no
-             ceiling to divide a queue length by, and dividing it by an invented one is a fabricated
-             figure. So no ring, no per cent sign, and the card says why in words. */
-          await expect(tile.locator(".kui-gauge")).toHaveCount(0);
-          await expect(tile).toContainText(String(reading.count));
-          await expect(tile).not.toContainText("%");
-          await expect(card).toContainText("queue length");
+          const drawn = Number(((await tile.textContent()) ?? "").match(/(\d+)\s*%/)?.[1] ?? NaN);
+          expect(drawn, `${id} drew no percentage at all`).not.toBeNaN();
+          expect(Math.abs(drawn - value * 100)).toBeLessThanOrEqual(5);
         } else {
           // Served the name and not the value: the plain track and an em dash, never a full ring.
           await expect(tile.locator(".kui-gauge__arc")).toHaveCount(0);
           await expect(tile).toContainText("—");
         }
+      }
+
+      /*
+       * Every delayed operation the API named has a tile, and no tile names an operation the API did
+       * not — which is the drift this case exists for, and is a comparison a live counter cannot
+       * make flaky. The depth itself is a queue length that changes several times a second, so what
+       * is asserted about the figure is that it *is* a figure, grouped as this product groups
+       * thousands, and that it is not a percentage: §3.4 draws "38% PURGATORY" and there is no
+       * ceiling to divide a queue length by, so dividing it by an invented one is a fabricated
+       * figure.
+       */
+      const operations = purgatory.map((queue) => (queue.operation ?? "").toLowerCase()).sort();
+      const tiles = card.locator('[data-testid^="handler-purgatory-"]');
+      await expect(tiles).toHaveCount(operations.length);
+      for (const operation of operations) {
+        const tile = card.locator(`[data-testid="handler-purgatory-${operation}"]`);
+        await expect(tile).toBeVisible();
+        await expect(tile.locator(".kui-gauge")).toHaveCount(0);
+        await expect(tile).not.toContainText("%");
+        const drawn = ((await tile.textContent()) ?? "").replace(/[\s,\u00a0\u202f]/g, "");
+        expect(drawn, `${operation} purgatory drew no figure`).toMatch(/\d/);
+        await expect(card).toContainText("queue length");
       }
     } else if (section?.status === "not_configured") {
       await expect(card).toContainText(NOT_CONFIGURED);
@@ -350,27 +396,51 @@ test.describe("the Traffic tab", () => {
     const card = page.locator('[data-testid="panel-top-producers"]');
 
     if (wire.producers?.status === "ok" || wire.producers?.status === "stale") {
-      const entries = wire.producers.data?.entries ?? [];
-      const first = entries.find((entry) => entry.clientId !== undefined || entry.topic !== undefined);
-      if (first !== undefined) {
+      const data = wire.producers.data;
+      const topics = data?.topics ?? [];
+
+      /*
+       * §4 draws `Top producers · client.id` and a broker publishes no per-`client.id` byte rate
+       * unless quotas are configured — it publishes a per-*topic* one. The heading has to say
+       * whichever the server actually measured, because a tile labelled `client.id` over a topic
+       * name is the drift wave 5's rule 7 exists to stop. `measuredBy` is the server's own word for
+       * it, so the same case passes on a deployment with quotas and on one without.
+       */
+      const subject = data?.measuredBy === "client.id" ? "client.id" : "topic";
+      await expect(page.getByRole("heading", { name: `Top producers · ${subject}` })).toBeVisible();
+
+      if (topics.length === 0) {
+        /* An answer and not a failure: the exporter published the family and served no line
+           carrying a topic. The card says so in a sentence rather than drawing an empty box, and
+           this branch is what stops the one below from being satisfied by a card that drew nothing.
+           On the quickstart stack this is the branch a freshly restarted KUI takes for a minute. */
+        await expect(card).toContainText("named no producers");
+        await expect(card.locator(".kui-progress__fill")).toHaveCount(0);
+      } else {
         /*
-         * §4 draws `Top producers · client.id` and a broker publishes no per-`client.id` byte rate
-         * unless quotas are configured — it publishes a per-*topic* one. The heading has to say
-         * whichever the server actually sent, because a tile labelled `client.id` over a topic name
-         * is the drift wave 5's rule 7 exists to stop. Asserted against the wire, so the same case
-         * passes on a deployment with quotas and on one without.
+         * The repair. This used to read `data.entries`, which the service has never sent, so the
+         * loop ran zero times, `first` was `undefined` and the heading assertion above was skipped
+         * entirely — a case reporting green against a card that had rendered its empty-answer
+         * sentence. Every row the API named is now required to be on the screen.
          */
-        const subject = first.clientId !== undefined ? "client.id" : "topic";
-        await expect(page.getByRole("heading", { name: `Top producers · ${subject}` })).toBeVisible();
-        await expect(card).toContainText(first.clientId ?? first.topic ?? "");
+        for (const entry of topics) {
+          const name = entry.topic;
+          expect(name, `a ranked row must carry a topic: ${JSON.stringify(entry)}`).toBeTruthy();
+          await expect(card).toContainText(name ?? "");
+          // A named producer whose rate did not arrive keeps its place and says so in words:
+          // dropping it shortens a top-five without saying so, and a zero ranks it last on nothing.
+          if (entry.bytesInPerSecond === null) await expect(card).toContainText("not measured");
+        }
+        // As many bars as rows that carried a rate, and no bar for a row that did not.
+        const rated = topics.filter((entry) => typeof entry.bytesInPerSecond === "number").length;
+        await expect(card.locator(".kui-progress__fill")).toHaveCount(rated);
       }
-      for (const entry of entries) {
-        const name = entry.clientId ?? entry.topic;
-        if (name === undefined) continue;
-        // A named producer whose rate did not arrive keeps its place and says so in words: dropping
-        // it shortens a top-five without saying so, and a zero ranks it last on nothing.
-        if (entry.bytesPerSecond === null) await expect(card).toContainText("not measured");
-      }
+
+      /* Kafka's own topics are not ranked, and the card says how many were left out rather than
+         showing a silently shortened list. Never a zero: at zero there is no sentence at all. */
+      const excluded = data?.internalTopicsExcluded ?? 0;
+      if (excluded > 0) await expect(card).toContainText(`${excluded} of Kafka's own internal`);
+      else await expect(card.getByTestId("producers-excluded")).toHaveCount(0);
     } else if (wire.producers?.status === "not_configured") {
       await expect(card).toContainText(NOT_CONFIGURED);
       await expect(card.locator(".kui-progress")).toHaveCount(0);

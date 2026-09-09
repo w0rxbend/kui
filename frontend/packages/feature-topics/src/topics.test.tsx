@@ -5,6 +5,25 @@
  * zero, a count that describes a filtered table as if it were the whole cluster, a destructive
  * action that looks like an ordinary one, and a forbidden action that has been hidden rather than
  * explained.
+ *
+ * ## Three of the seven suites carry an explicit budget, and which three is measured rather than
+ * guessed
+ *
+ * Vitest's default is five seconds a case. Every case in `the topics screen, wired`, `the export,
+ * and the sentence above the list` and `a destructive success says so` waits on **real timers** —
+ * `settle()` is eight `setTimeout(0)` hops through the event loop and the create-poll case sleeps
+ * 700 ms — so their wall time is set by what else the machine is doing rather than by the work they
+ * do. The other four suites mount a component and `flush()` and await no timer at all, so they are
+ * left on the default.
+ *
+ * The figures, and where to read them back: `vitest run packages/feature-topics
+ * --reporter=verbose` prints a duration per case, and on an idle machine the whole file is about
+ * four seconds with exactly one case over 100 ms — `a created topic is waited for until the list
+ * can see it`, at 772 ms. Wave 6's brief reports 7,829 ms for `the consumers tab prints host:port`
+ * under whole-repository load, a case that measures 23 ms alone here; nothing in this tree
+ * reproduces that reading, which is the reason the budget below is generous rather than tuned to
+ * it. Thirty seconds is roughly four times the worst dilation anyone has recorded and still fails a
+ * genuinely stuck case while somebody is watching.
  */
 
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -38,6 +57,12 @@ import {
 import { topicsCsv, topicsVoice } from "./topicList.js";
 import { bulkSentence, toTopicQuery } from "./TopicsRoute.jsx";
 import type { TopicRow } from "./types.js";
+
+/**
+ * The budget for a suite whose cases wait on real timers. See the note at the top of this file for
+ * the measurements behind it; it is a ceiling on a stuck case, not a target any case comes near.
+ */
+const THIRTY_SECONDS = 30_000;
 
 const rows: readonly TopicRow[] = [
   {
@@ -1201,6 +1226,95 @@ describe("the topics screen, wired", () => {
     dispose();
   });
 
+  test("the bulk Empty asks for a different word and promises the topics survive", async () => {
+    /*
+     * The bar's two destructive actions share one `ConfirmDialog`, and every word in it is a
+     * ternary on which one was pressed: the title, the sentence, the button's label and the word
+     * the operator has to type. Collapsing any of them onto the delete branch left this package
+     * green, because the only bulk confirmation ever driven here was the delete one. What that
+     * ships is an Empty that demands the word "delete", offers a button reading "Delete topics",
+     * and says it removes the topics — over a dialog that removes no topic at all. On the one
+     * screen whose whole purpose is that its words are read before an irreversible thing happens,
+     * that is the worst possible place to be wrong.
+     *
+     * Nothing is confirmed here. What is asserted is the dialog, which is where the difference is,
+     * and the fact that the gate will not open on the other action's word.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/bulk-empty-cluster/topics",
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const tickRow = async (index: number): Promise<void> => {
+      const boxes = [
+        ...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]'),
+      ];
+      expect(boxes.length).toBeGreaterThan(index);
+      boxes[index]?.click();
+      await settle();
+    };
+    await tickRow(0);
+    await tickRow(1);
+
+    [
+      ...(container.querySelector('[data-testid="topic-bulk-bar"]')?.querySelectorAll("button") ??
+        []),
+    ]
+      .find((button) => button.textContent?.trim() === "Empty")
+      ?.click();
+    await settle();
+
+    /*
+     * Everything is read off the screen first and asserted after the dialog is gone. A modal lives
+     * on `document.body` rather than inside this case's container, so an assertion that throws
+     * mid-dialog leaves it in the document for every case that follows — which turns one red into
+     * seven and hides which one is the finding. Ask the questions, tear down, then answer them.
+     */
+    const confirmState = (): string | undefined =>
+      [...document.querySelectorAll<HTMLButtonElement>("button")]
+        .find((one) => one.textContent?.trim() === "Empty topics")
+        ?.getAttribute("aria-disabled") ?? "enabled";
+    const gate = document.querySelector<HTMLInputElement>(".kui-confirm__input");
+    const type = async (word: string): Promise<void> => {
+      if (gate === null) return;
+      gate.value = word;
+      gate.dispatchEvent(new Event("input", { bubbles: true }));
+      await settle();
+    };
+
+    const seen = {
+      // The word the gate is asking for, off its own label rather than out of the props.
+      expected: document.querySelector(".kui-confirm__expected")?.textContent,
+      labels: [...document.querySelectorAll("button")].map((one) => one.textContent?.trim()),
+      consequence: document.querySelector(".kui-confirm__consequence")?.textContent ?? "",
+      hasGate: gate !== null,
+      untyped: confirmState(),
+      // The other action's word, which a dialog with one spelling for both would have accepted.
+      afterDelete: (await type("delete"), confirmState()),
+      afterEmpty: (await type("empty"), confirmState()),
+      // Nothing left for the server while the operator was reading: the gate is before the send.
+      sent: host.stub.requests.filter((request) => request.body !== undefined).length,
+    };
+    dispose();
+
+    expect(seen.expected).toBe("empty");
+    expect(seen.labels).toContain("Empty topics");
+    expect(seen.labels).not.toContain("Delete topics");
+    /* Named rather than counted, because a confirmation that says "2 topics" is one the operator
+       cannot check — and the promise that distinguishes this dialog from the other one. */
+    expect(seen.consequence).toContain("orders.payments.v2");
+    expect(seen.consequence).toContain("orders.refunds.v1");
+    expect(seen.consequence).toContain("left as they are");
+    expect(seen.hasGate).toBe(true);
+    expect(seen.untyped).toBe("true");
+    expect(seen.afterDelete).toBe("true");
+    expect(seen.afterEmpty).toBe("enabled");
+    expect(seen.sent).toBe(0);
+  });
+
   test("the bulk bar's Export hands over the ticked rows and not the page", async () => {
     /*
      * Found by mutation and gated afterwards: `onSelect: () => exportRows(result().topics)` — the
@@ -1360,11 +1474,17 @@ describe("the topics screen, wired", () => {
   });
   test("each control on the topic page is gated on its own action", async () => {
     /*
-     * Four controls, four actions, and `writeBlockedReason` takes whichever one it is handed —
-     * swapping `TopicMessagesDelete` for `TopicDelete` on the purge left this package green,
-     * because every case that had ever exercised permissions answered one `false` for everything.
-     * With one answer for all four, a control wired to the wrong action is disabled at exactly the
-     * moments the right one would be, and no assertion can tell the two apart.
+     * Two controls and two actions — this page's header, and no more than that. `TopicsRoute` calls
+     * `writeBlockedReason` seven times over four actions across its two screens (`grep -c` in
+     * `TopicsRoute.tsx` counts the seven), and this case reaches two of them: the list screen's
+     * three are "each control on the topic list screen is gated on its own action" below, and the
+     * two behind the tabs are the case after that.
+     *
+     * `writeBlockedReason` takes whichever action it is handed — swapping `TopicMessagesDelete` for
+     * `TopicDelete` on the purge left this package green, because every case that had ever
+     * exercised permissions answered one `false` for everything. With one answer for both, a
+     * control wired to the wrong action is disabled at exactly the moments the right one would be,
+     * and no assertion can tell the two apart.
      *
      * So the principal here holds exactly one of them: they may empty this topic and may not delete
      * it. That is a real role — an operator trusted to reclaim disk and not to destroy a stream —
@@ -1432,6 +1552,221 @@ describe("the topics screen, wired", () => {
     expect(await offered("deleter-cluster", "DELETE")).toEqual({
       "Empty topic": false,
       "Delete topic": true,
+    });
+  });
+  test("each control on the topic list screen is gated on its own action", async () => {
+    /*
+     * The same hole as the case above, forty lines further up the same file and left there when
+     * that one was closed. `createBlocked`, `purgeBlocked` and `deleteBlocked` on the **list**
+     * screen each name an action, and nothing in this package could tell one naming from another:
+     * wiring Create to `TopicDelete`, Empty to `TopicDelete` and Delete to `TopicMessagesDelete`
+     * left all 145 cases green. What that ships is an enabled bulk **Empty** for a principal
+     * trusted to remove a topic and not to destroy the records in one, an enabled bulk **Delete**
+     * for the mirror of that person, and a Create button gated on an action about deletion.
+     *
+     * Three principals, each holding exactly one grant, because two arrangements cannot separate
+     * three actions: given only "may create" and "may delete", an Empty wired to `TopicDelete` is
+     * indistinguishable from an Empty wired to `TopicMessagesDelete`. Each row below is a real
+     * role, which is why the wiring is observable at all.
+     */
+    withMeasuredRows();
+
+    /**
+     * Whether each of the list screen's three write controls is offered, for one principal.
+     *
+     * `aria-disabled` rather than the `disabled` attribute, which is `Button`'s own deliberate
+     * choice: a disabled element is skipped by Tab and fires no pointer events, so the sentence
+     * explaining the refusal would be unreachable by hover and by keyboard both. The control is
+     * present either way — §3.7's rule is that a forbidden action is explained, never hidden — so
+     * a control this cannot find fails the case rather than reading as a quiet `false`.
+     */
+    const offered = async (cluster: string, held: string): Promise<Record<string, boolean>> => {
+      const host = topicsHost({
+        at: `/clusters/${cluster}/topics`,
+        permits: (action) => action.action === held,
+        answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+      });
+      const { container, dispose } = mount(host.view);
+      await settle();
+
+      /* The bulk bar does not exist at zero selection (§3.7), so two of the three controls cannot
+         be read until a row is ticked. One tick is enough: the wiring does not vary with the size
+         of the set, and what the bar counts is asserted elsewhere. */
+      container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]')?.click();
+      await settle();
+
+      const bar = container.querySelector('[data-testid="topic-bulk-bar"]');
+      expect(bar, "the bulk bar carries two of the three controls this case reads").not.toBeNull();
+
+      const enabled = (within: ParentNode, label: string): boolean => {
+        const button = [...within.querySelectorAll<HTMLButtonElement>("button")].find(
+          (one) => one.textContent?.trim() === label,
+        );
+        expect(button, `${label} must be on screen whoever is looking at it`).toBeDefined();
+        return button?.getAttribute("aria-disabled") !== "true";
+      };
+      const state = {
+        "Create topic": enabled(container, "Create topic"),
+        Empty: bar !== null && enabled(bar, "Empty"),
+        Delete: bar !== null && enabled(bar, "Delete"),
+      };
+      dispose();
+      forgetQueries();
+      return state;
+    };
+
+    // May add a topic, and may destroy nothing that is in one.
+    expect(await offered("list-creator-cluster", "CREATE")).toEqual({
+      "Create topic": true,
+      Empty: false,
+      Delete: false,
+    });
+    // May reclaim disk, may not remove a stream.
+    expect(await offered("list-purger-cluster", "MESSAGES_DELETE")).toEqual({
+      "Create topic": false,
+      Empty: true,
+      Delete: false,
+    });
+    // And the mirror, which is what makes the set a gate rather than three assertions of `false`.
+    expect(await offered("list-deleter-cluster", "DELETE")).toEqual({
+      "Create topic": false,
+      Empty: false,
+      Delete: true,
+    });
+  });
+  test("adding partitions and changing settings are gated on the topic-edit action", async () => {
+    /*
+     * The last two of `TopicsRoute`'s seven `writeBlockedReason` calls, and the two the case above
+     * this one does not reach because they live behind tabs. Both are `TopicEdit` — there is no
+     * separate "add partitions" action in the server's vocabulary — and neither was observable:
+     * pointing either at `TopicMessagesDelete` left this package green, and what that ships is an
+     * Add-partitions button offered to whoever may empty a topic and withheld from the person the
+     * cluster trusts to change it.
+     *
+     * Two principals, holding one grant each, because "gated on `TopicEdit`" and "gated on
+     * anything at all" are the same assertion under a single arrangement.
+     *
+     * The Settings control is the one place on these screens where a refusal is not a disabled
+     * button, and that is deliberate: there is one Edit control per configuration key, so a
+     * disabled one would repeat the same sentence thirty-three times. `TopicSettings` states it
+     * once above the table and offers no per-key control, so both halves are read here — the
+     * control's absence *and* the sentence, because an absence on its own is also what a broken
+     * table looks like.
+     */
+    const editable = {
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+        topic: {
+          status: "ok",
+          fetchedAt: "2026-09-06T00:00:00Z",
+          data: {
+            row: {
+              name: "orders.v1",
+              internal: false,
+              partitionCount: 1,
+              replicationFactor: 1,
+              outOfSyncReplicas: 0,
+              offlinePartitions: 0,
+            },
+            partitions: [],
+          },
+        },
+      },
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/partitions": {
+        partitions: {
+          status: "ok",
+          data: [
+            {
+              partition: 0,
+              leader: 1,
+              replicas: [{ broker: 1, leader: true, inSync: true }],
+              earliestOffset: 0,
+              latestOffset: 4,
+            },
+          ],
+        },
+      },
+      /* One key, and one that is neither read-only nor sensitive: `TopicSettings` withholds the
+         per-key control for both of those on its own, which would answer this case's question with
+         a fact about the key rather than about the principal. */
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/config": {
+        config: {
+          status: "ok",
+          data: {
+            status: "entries",
+            values: [
+              {
+                name: "retention.ms",
+                value: "604800000",
+                defaultValue: "604800000",
+                source: "dynamic-topic",
+                sensitive: false,
+                readOnly: false,
+                documentation: null,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    /* One tab, mounted and settled. The two tabs are two mounts rather than one navigation because
+       `useTabQuery` opens a tab's own query when the tab becomes current, and a case that walked
+       from one to the other would be asserting the second answer through the first tab's cache. */
+    const onTab = async (
+      cluster: string,
+      held: string,
+      tab: string,
+    ): Promise<ReturnType<typeof mount>> => {
+      const host = topicsHost({
+        at: `/clusters/${cluster}/topics/orders.v1?tab=${tab}`,
+        permits: (action) => action.action === held,
+        answers: editable,
+      });
+      const mounted = mount(host.view);
+      await settle();
+      return mounted;
+    };
+
+    const offered = async (
+      cluster: string,
+      held: string,
+    ): Promise<Record<string, boolean | undefined>> => {
+      const partitions = await onTab(cluster, held, "partitions");
+      const add = [...partitions.container.querySelectorAll<HTMLButtonElement>("button")].find(
+        (one) => one.textContent?.trim() === "Add partitions",
+      );
+      expect(add, "Add partitions must be on screen whoever is looking at it").toBeDefined();
+      const mayAdd = add?.getAttribute("aria-disabled") !== "true";
+      partitions.dispose();
+      forgetQueries();
+
+      const settings = await onTab(cluster, held, "settings");
+      const state = {
+        "Add partitions": mayAdd,
+        "Edit a setting": [
+          ...settings.container.querySelectorAll<HTMLButtonElement>("button"),
+        ].some((one) => one.textContent?.trim() === "Edit"),
+        "Told why not": settings.container.textContent?.includes(
+          "You do not have permission to change this topic's settings.",
+        ),
+      };
+      settings.dispose();
+      forgetQueries();
+      return state;
+    };
+
+    // The cluster trusts this principal to change the topic, and with nothing else.
+    expect(await offered("editor-tab-cluster", "EDIT")).toEqual({
+      "Add partitions": true,
+      "Edit a setting": true,
+      "Told why not": false,
+    });
+    /* A destructive grant and no edit: both controls close, and the screen says which permission
+       is missing rather than looking like a topic with one key and no way to reach it. */
+    expect(await offered("purger-tab-cluster", "MESSAGES_DELETE")).toEqual({
+      "Add partitions": false,
+      "Edit a setting": false,
+      "Told why not": true,
     });
   });
   test("a plan the server withheld a token for cannot be confirmed", async () => {
@@ -1691,10 +2026,17 @@ describe("the topics screen, wired", () => {
      * can list it. A screen that re-read the list once therefore shows the list without the topic
      * the operator just made, and the first thing they do is make it again.
      *
-     * The stub answers the listing without the new topic on the first read and with it afterwards,
-     * which is the race as it actually happens. Replacing the settle loop with a no-op left every
-     * case in this package green, so the poll — a whole commit's worth of behaviour — was carried
-     * by nothing.
+     * The stub answers the listing without the new topic for the first **three** reads and with it
+     * afterwards, which is the race as it actually happens. Replacing the settle loop with a no-op
+     * left every case in this package green, so the poll — a whole commit's worth of behaviour —
+     * was carried by nothing.
+     *
+     * Three and not one, because one gates only that the loop runs at all: with the topic on the
+     * second read, `attempt < 1` — a poll that gives up immediately, which is the bug this whole
+     * mechanism exists to prevent — still finds it and every case here stays green. Withholding it
+     * until the fourth read means the screen has to come back for it twice more, so the bound is
+     * observable rather than merely the first iteration. The upper end of the bound is a different
+     * rule and this does not gate it: see the note in `settleAfterCreate` for why it stops at all.
      */
     withMeasuredRows();
     const created = {
@@ -1713,7 +2055,7 @@ describe("the topics screen, wired", () => {
           // The POST goes to the same templated path; only the reads are counted and answered.
           if (request.body !== undefined) return { name: created.name, partitions: 3 };
           listReads += 1;
-          if (listReads <= 1) return threeRows;
+          if (listReads <= 3) return threeRows;
           return {
             topics: {
               status: "ok",
@@ -1750,15 +2092,18 @@ describe("the topics screen, wired", () => {
       ?.click();
     await settle();
 
-    /* One poll interval, plus room for the fetch it starts. The loop's own comment sets 500ms as
-       "long enough for the fetch the reload just started to have landed". */
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    /* Three poll intervals, plus room for the fetch the last one starts. The loop's own comment
+       sets 500 ms as "long enough for the fetch the reload just started to have landed", and the
+       stub withholds the topic for three reads, so the screen makes three passes before it can
+       see it. Generous rather than tight: this is a real timer, and the suite's budget is 30 s. */
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
     await settle();
 
-    expect(listReads).toBeGreaterThan(1);
+    // Four reads: the one the screen makes on mount, and the three the poll had to make.
+    expect(listReads).toBeGreaterThan(3);
     expect(container.textContent).toContain("orders.new.v1");
     dispose();
-  }, 10_000);
+  });
 
   test("the bulk bar's dismiss clears the ticks and not just the bar", async () => {
     /*
@@ -1798,7 +2143,7 @@ describe("the topics screen, wired", () => {
     ).toHaveLength(0);
     dispose();
   });
-});
+}, THIRTY_SECONDS); // see the note at the top of this file
 
 describe("the consumers tab's columns", () => {
   test("no column heading is empty, and the dormant column's is Activity", async () => {
@@ -1945,7 +2290,7 @@ describe("the export, and the sentence above the list", () => {
     expect(topicsVoice(3, 128, undefined)).toBe("3 of 128 topics match");
     expect(topicsVoice(undefined, undefined, undefined)).toBe("");
   });
-});
+}, THIRTY_SECONDS); // see the note at the top of this file
 
 describe("a destructive success says so", () => {
   afterEach(() => {
@@ -2016,10 +2361,6 @@ describe("a destructive success says so", () => {
     expect(toasts()[0]?.message).toContain("recreate");
     dispose();
   });
-
-
-
-
 
   test("a purge that partly refused raises a warning toast", async () => {
     /*
@@ -2180,4 +2521,4 @@ describe("a destructive success says so", () => {
       bulkSentence("deleted", { done: ["a"], failed: [{ topic: "b", reason: "Not permitted." }] }),
     ).toBe("1 topic deleted. 1 refused: b — Not permitted.");
   });
-});
+}, THIRTY_SECONDS); // see the note at the top of this file

@@ -142,5 +142,16 @@
  * its headline, and one subject's versions and schema text. */
 @import "../../feature-schemas/styles/60-schemas.css";
 
+/* The alerts feed and the alerts screen (M8). One sheet for both widths — §3.8 draws the same rows
+ * one third wide on the dashboard and full width on the Alerts screen — and its class names are
+ * prefixed `.kui-alerts-`, so it restyles nothing above it. Appended after the other feature sheets
+ * rather than interleaved by number, for the reason at the top of this file: the pre-migration order
+ * is preserved on purpose and a new screen joins the end of it.
+ *
+ * The file is `@kui/feature-alerts`'s and the line is the kernel's, because `build-tests`'
+ * `CssReferences` requires every stylesheet on disk to be named here exactly once and this index is
+ * the only place that can name it. */
+@import "../../feature-alerts/styles/80-alerts.css";
+
 /* Kafka Connect and ksqlDB. No service behind either; see `29-connect-ksql.css`. */
 @import "./29-connect-ksql.css";

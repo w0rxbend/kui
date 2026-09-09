@@ -27,8 +27,11 @@ final class SearchSuite extends CatsEffectSuite {
 
   /** The call context a route would have built: anonymous, one correlation id, one cluster.
     *
-    * Only the two cases that drive a `SearchSource` directly need it — everything else goes through the
-    * route, which builds its own from the request.
+    * Only `aTopicSearchReturnsNoMoreHitsThanTheCallerAskedFor` needs it — it is the one case that drives a
+    * `SearchSource` directly, because the cap it asserts is the gateway's own `.take` and the fold's
+    * out-going cut hides its absence completely. Everything else goes through the route, which builds its
+    * own context from the request. The case is named rather than counted: this comment said "the two cases"
+    * for two waves after the second one stopped existing, and a count with nothing behind it drifts.
     */
   private val context: CallContext =
     CallContext(Principal.Anonymous, CorrelationId.unsafe("00000000-0000-4000-8000-000000000001"),

@@ -233,6 +233,88 @@ Until the whitelist is widened, the four new endpoints answer `unavailable` with
 family-not-served sentence on a deployment whose throughput card is drawing. That is the correct
 rendering and it is the reason the two refusals in §7 are spelled differently.
 
+## Amendment, wave 6 — the wire, the fourth section state, and the topics that are not producers
+
+The four endpoints above shipped and two of them were read wrongly. §§9–11 are decided here rather
+than in a diff, because that is what the first two were missing: this document said what the server
+sends and the browser was written from a paragraph in a wave plan that said something else.
+
+### 9. Where the two mismatched wires were repaired, and why the browser moved and not the server
+
+**Measured, not reported.** `services/metrics/contract/.../RequestHandlerDtos.scala` sends
+`requestHandlers.data.{requestHandlerIdleRatio, networkProcessorIdleRatio, purgatory:[{operation,
+delayedRequests}]}` and the browser read `data.readings[]` of `{id, label, ratio, count, unit,
+goodDirection}`. `ProducerDtos.scala` sends `producers.data.{measuredBy, topics:[{topic,
+bytesInPerSecond}]}` and the browser read `data.entries[]` of `{clientId, topic, bytesPerSecond}`.
+Latency and record size matched. The top-level `Section` key matched on all four, so the decode
+*succeeded* and answered an empty array, and both cards then drew their answered-and-served-nothing
+sentence over a source that had served three readings and five topics.
+
+**The browser moved.** The spellings above are §§2 and 3's, taken from what the broker publishes and
+argued for here; the browser's were inventions with no document behind them, and `goodDirection` in
+particular was a per-reading wire field for a decision this document had already made — every
+reading on that endpoint is an *idle* ratio. Nothing on the server was wrong, so nothing on the
+server changed.
+
+**What stops it happening again is an artefact rather than a rule.** Every other contract module in
+the repository commits encoded-instance goldens and this one never had any.
+`services/metrics/contract/test/resources/golden/*.json` now holds ten documents rendered by the
+service's own encoders; `MetricsResponsesSuite` asserts each is exactly what `asJson` produces, and
+`frontend/packages/shell/src/overview/wire.golden.test.ts` reads the same files off disk and pushes
+them through the browser's own fetchers. Two hand-written literals that agree with the code beside
+them and with nothing else is what produced this, and neither side has one now.
+
+### 10. `Section.Stale` is reachable, and a gauge is what makes it necessary
+
+`MetricsMapping.sectionOf` had three arms and no code path produced `stale`, while the browser
+carried a stale branch for all five cards. One of the two had to go.
+
+**The buffer answers `stale`, and the fourth arm stays.** The reason is a defect the three-arm
+version had: `MetricsBuffer` keeps samples for `kui.metrics.retention` — hours — and hands out the
+newest one it still holds, and `MetricsUseCases` stamped that reading with `now`. An exporter that
+stopped answering an hour ago therefore left an hour-old idle ratio on a card *marked as current*,
+which is last-known-good data drawn as fresh: the defect the brokers screen was repaired for.
+
+So the three point-in-time reads — request handlers, top producers, record size — come back from the
+port as `Observed(value, at)` carrying the instant of the scrape they were taken from, and a reading
+older than **one `kui.metrics.scrapeInterval`** is `Section.Stale(data, at, UPSTREAM_UNAVAILABLE)`:
+the figure, the moment it was true, and a reason. One interval is deliberately tight, and the cost
+of being tight is a caption rather than a wrong number — a card that says "this is the last answer
+KUI received" one interval early has still shown the true figure and the true instant.
+
+**The two range answers are never `stale`, and that asymmetry is the same one §7 records.** A series
+has an axis: a window nobody fed for an hour draws that hour as gaps and says so without a badge. A
+gauge has one number and no way to show its age.
+
+### 11. Kafka's own topics are not producers, so they are not ranked
+
+The per-topic exporter rule is `topic=(.+)` and nothing downstream filtered it. On the live
+quickstart the exporter serves `…bytesinpersec…{topic="__consumer_offsets"} 156.97` against
+`{topic="orders.v1"} 5.95e-20` — the two lines quoted in §3 — so the card would report the
+consumer-group protocol as the cluster's busiest producer by three orders of magnitude, in a product
+whose `kui.topics.internalPrefix` exists to keep exactly those rows off the topics screen.
+
+**The filtering belongs to the reader and not to the ruleset**, because the ruleset is also what the
+throughput aggregate is read from and a `topic=` rule that dropped lines would change a number this
+card does not own. `TopProducers.of` removes topics beginning with `__` before it cuts the list to
+`?top=`.
+
+**`__` and not `kui.topics.internalPrefix`.** Two characters is what *Kafka* names its own topics
+with — `__consumer_offsets`, `__transaction_state` — which is a fact about the broker rather than a
+deployment's preference, and therefore something a domain forbidden to read configuration (ADR-041
+rule A1) may state. `kui.topics.internalPrefix` is the deployment's own, broader rule: it defaults
+to `__` in `libs/config/src/kui/config/TopicsConfig.scala` and every shipped file sets it to `_`,
+and the topics screen lets an operator turn it off with `?showInternal=1`. Borrowing the wider one
+here would drop a customer's `_audit` topic out of a producer ranking with nothing on screen saying
+so,
+and losing a real producer is a worse answer than keeping an internal one.
+
+**The omission is not silent.** `TopProducersDto` gained `internalTopicsExcluded`, the count of the
+topic lines the ranking left out, and the card prints a sentence when it is non-zero and nothing
+at all when it is zero. A list that quietly omits rows is a list nobody can reconcile against the
+exporter it came from — and the count is the *server's*, never a difference the browser worked out
+between its own page and something else.
+
 ## Consequences
 
 - `MetricsEndpoints.all` grows from one to five, so `services/metrics/api/openapi.json` gains four
@@ -254,3 +336,18 @@ rendering and it is the reason the two refusals in §7 are spelled differently.
   producers by `client.id` needs client quotas configured on the broker, or a different source
   entirely. Nothing here stubs it: `measuredBy` says `topic`, and the day a deployment has quotas
   there is a second value for that field and a second title for the card.
+
+Consequences of the wave-6 amendment:
+
+- `TopProducersDto` gained `internalTopicsExcluded` and `MetricsReading` gained a `Stale` case, and
+  **neither moves `services/metrics/api/openapi.json` by a byte.** `Section[A]`'s Tapir schema is
+  `Schema.any` (`libs/contracts-core/src/kui/contracts/Section.scala`), so every `data` payload is
+  published as an opaque object and no field inside one appears in the document at all. That is why
+  `frontend/packages/api/src/schema.d.ts` types all five metrics payloads `unknown` and why
+  `overview/metrics.ts` hand-transcribes every wire shape — which is how two of them came to be
+  wrong. Fixing it means giving `Section` a real schema, in a module no packet owns.
+- `MetricsSourcePort`'s three point-in-time methods return `Observed[A]`; `MetricsUseCases.make`
+  takes the scrape interval. `kui.metrics` gained no key and `MetricsSourceSettings` did not widen.
+- The exposition fixture `kafka-jmx-exporter.txt` now writes each decoy line *before* the real one
+  contains, because both readers take the first match and a fixture whose correct line comes first
+  cannot make an unanchored name test fail.

@@ -188,9 +188,16 @@ export function GroupDetail(props: GroupDetailProps): JSX.Element {
                         variant="secondary"
                         icon="trash"
                         disabled
+                        /* The fallback speaks about the cluster, not about this group, and the
+                           difference is not stylistic: the caller's sentence names the group and
+                           this one cannot, because a component handed no callback has not been
+                           told which permission is missing. Wording them identically made the two
+                           indistinguishable on screen, so the route's ternary could be deleted
+                           with every case still green — the same shape the delete control above
+                           already avoids. */
                         disabledReason={
                           props.forgetRefusal ??
-                          "You do not have permission to change this group's committed offsets."
+                          "You do not have permission to change committed offsets on this cluster."
                         }
                       >
                         Forget offsets

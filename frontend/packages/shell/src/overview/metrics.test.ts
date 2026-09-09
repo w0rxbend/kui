@@ -137,86 +137,128 @@ describe("a request-handler reading", () => {
     // The endpoint answers ratios rather than pre-formatted percentages precisely so this decision
     // is made once, here, where it is testable: a server sending `64` and one sending `0.64` would
     // otherwise both draw something plausible and only one of them would be right.
-    const panel = handlerPanel({ readings: [{ id: "io", label: "IO IDLE", ratio: 0.64 }] });
-    expect(panel.gauges[0]?.kind).toBe("ratio");
-    expect(panel.gauges[0]?.percent).toBeCloseTo(64);
+    const panel = handlerPanel({ requestHandlerIdleRatio: 0.64, networkProcessorIdleRatio: 0.71 });
+    const io = panel.gauges.find((gauge) => gauge.id === "io-idle");
+    expect(io?.kind).toBe("ratio");
+    expect(io?.percent).toBeCloseTo(64);
   });
 
-  it("keeps a count a count, with its unit and no percentage", () => {
+  it("draws the two ratios in the design's order, network first", () => {
+    // §3.4 reads "71% NETWORK IDLE, 64% IO IDLE, 38% PURGATORY" left to right, and the order is not
+    // the document's: the wire is one object with two named fields and no order at all.
+    const panel = handlerPanel({ requestHandlerIdleRatio: 0.64, networkProcessorIdleRatio: 0.71 });
+    expect(panel.gauges.map((gauge) => gauge.id)).toEqual(["network-idle", "io-idle"]);
+  });
+
+  it("keeps a purgatory a count, with its unit and no percentage", () => {
     // §3.4 draws "38% PURGATORY" and `DelayedOperationPurgatory` publishes a queue *length*. There
     // is no ceiling to divide it by, and dividing it by an invented one is a fabricated percentage
     // — the defect wave 5's rule 7 exists to stop, in the one card that would have drawn it.
-    const panel = handlerPanel({
-      readings: [{ id: "purgatory", label: "PURGATORY", count: 38, unit: "operations" }],
-    });
+    const panel = handlerPanel({ purgatory: [{ operation: "Fetch", delayedRequests: 481 }] });
     expect(panel.gauges[0]?.kind).toBe("count");
+    expect(panel.gauges[0]?.id).toBe("purgatory-fetch");
+    expect(panel.gauges[0]?.caption).toBe("FETCH PURGATORY");
     expect(panel.gauges[0]?.percent).toBeUndefined();
-    expect(panel.gauges[0]?.count).toBe(38);
-    expect(panel.gauges[0]?.unit).toBe("operations");
+    expect(panel.gauges[0]?.count).toBe(481);
+    expect(panel.gauges[0]?.unit).toBe("requests");
     expect(panel.caption).toContain("queue length");
   });
 
-  it("leaves a ratio the exporter did not serve unmeasured rather than at zero", () => {
-    const panel = handlerPanel({ readings: [{ id: "io", label: "IO IDLE", ratio: null }] });
-    expect(panel.gauges[0]?.kind).toBe("ratio");
-    expect(panel.gauges[0]?.percent).toBeUndefined();
-  });
-
-  it("takes the good direction from the wire, and only defaults it for the idle readings", () => {
-    // `RingGauge` refuses a default of its own because a wrong guess paints an incident green. The
-    // default here is a fact about *this* document — every reading it publishes is an idle ratio,
-    // where more idle is more headroom — and a reading that says otherwise wins.
+  it("draws one tile per delayed operation rather than one summed tile", () => {
+    // `Fetch` is deep by design on any cluster with consumers and `Produce` being deep at all means
+    // acknowledgements are waiting on replicas. Summing them makes the ordinary number hide the
+    // interesting one.
     const panel = handlerPanel({
-      readings: [
-        { id: "io", ratio: 0.64 },
-        { id: "saturation", ratio: 0.9, goodDirection: "low" },
+      purgatory: [
+        { operation: "Fetch", delayedRequests: 481 },
+        { operation: "Produce", delayedRequests: 0 },
       ],
     });
-    expect(panel.gauges[0]?.goodDirection).toBe("high");
-    expect(panel.gauges[1]?.goodDirection).toBe("low");
+    expect(panel.gauges.map((gauge) => gauge.count)).toEqual([481, 0]);
+    expect(panel.caption).toContain("queue lengths");
+  });
+
+  it("leaves a ratio the exporter named and did not serve unmeasured rather than at zero", () => {
+    // `null` is "nobody looked" and `0` is "the pool was saturated". The tile is still drawn, so a
+    // reader can see *which* reading is missing rather than counting the tiles that are there.
+    const panel = handlerPanel({ requestHandlerIdleRatio: null, networkProcessorIdleRatio: 0.71 });
+    const io = panel.gauges.find((gauge) => gauge.id === "io-idle");
+    expect(io?.kind).toBe("ratio");
+    expect(io?.percent).toBeUndefined();
+    expect(panel.gauges).toHaveLength(2);
+  });
+
+  it("gives both idle ratios the high-is-good direction, and a queue the low one", () => {
+    // `RingGauge` refuses a default of its own because a wrong guess paints an incident green. This
+    // is not a guess about gauges in general: both readings on this document are *idle* ratios,
+    // where more idle is more headroom, and a queue is the other way round.
+    const panel = handlerPanel({
+      requestHandlerIdleRatio: 0.64,
+      networkProcessorIdleRatio: 0.71,
+      purgatory: [{ operation: "Fetch", delayedRequests: 481 }],
+    });
+    expect(panel.gauges.map((gauge) => gauge.goodDirection)).toEqual(["high", "high", "low"]);
   });
 
   it("says nothing extra when every reading is a ring", () => {
-    const panel = handlerPanel({ readings: [{ id: "io", ratio: 0.64 }] });
+    const panel = handlerPanel({ requestHandlerIdleRatio: 0.64 });
     expect(panel.caption).toBeUndefined();
   });
 
-  it("is empty rather than invented when the document carries no readings", () => {
+  it("is empty rather than invented when the document carries nothing this build reads", () => {
+    // The card's own sentence depends on this being reachable: a document with none of the three
+    // keys is what an older or a different server sends, and it is drawn as words rather than as
+    // two em-dashed tiles claiming the exporter named two readings it did not.
     expect(handlerPanel({}).gauges).toEqual([]);
+    expect(handlerPanel({ purgatory: [] }).gauges).toEqual([]);
+  });
+
+  it("drops a purgatory row with no operation name, because a count belongs to something", () => {
+    expect(handlerPanel({ purgatory: [{ delayedRequests: 12 }] }).gauges).toEqual([]);
   });
 });
 
 describe("the top producers, and what the card is allowed to call them", () => {
-  it("says `topic` when the server named topics", () => {
+  it("says `topic` because the server said `topic`", () => {
     // §4 draws "Top producers · client.id" and a broker publishes no per-`client.id` byte rate
-    // unless quotas are configured. The heading follows the answer, which is the whole of rule 7:
-    // the design's word may not be printed over a different measurement.
-    const board = producerBoard(PRODUCERS_BY_TOPIC as { entries: readonly { topic: string }[] });
+    // unless quotas are configured. The heading follows `measuredBy`, which is the field whose whole
+    // job is to say what the rows are of: the design's word may not be printed over a different
+    // measurement.
+    const board = producerBoard(PRODUCERS_BY_TOPIC as { measuredBy: string });
     expect(board.subject).toBe("topic");
     expect(board.rows[0]?.id).toBe("orders.payments");
     expect(board.rows[0]?.bytesPerSecond).toBe(5_400_000);
   });
 
-  it("says `client.id` when the server named client ids", () => {
-    const board = producerBoard(PRODUCERS_BY_CLIENT as { entries: readonly { clientId: string }[] });
+  it("says `client.id` when a deployment with quotas says so", () => {
+    const board = producerBoard(PRODUCERS_BY_CLIENT as { measuredBy: string });
     expect(board.subject).toBe("client.id");
     expect(board.rows.map((row) => row.id)).toEqual(["checkout-svc", "payments"]);
   });
 
-  it("claims nothing about rows it does not recognise", () => {
-    expect(producerBoard({ entries: [{ bytesPerSecond: 1 }] }).subject).toBe("producer");
+  it("claims nothing when the server used a word this build does not know", () => {
+    // An unrecognised value printed raw would put a word nobody checked in a card's title.
+    expect(producerBoard({ measuredBy: "partition", topics: [] }).subject).toBe("producer");
     expect(producerBoard({}).subject).toBe("producer");
   });
 
   it("keeps a named producer whose rate did not arrive, with no rate", () => {
     // Dropping the row would silently shorten a top-five to a top-four; drawing a zero would rank
     // it last on a measurement nobody made. It keeps its place and says nothing about its rate.
-    const board = producerBoard({ entries: [{ topic: "audit.trail", bytesPerSecond: null }] });
+    const board = producerBoard({ topics: [{ topic: "audit.trail", bytesInPerSecond: null }] });
     expect(board.rows).toEqual([{ id: "audit.trail", bytesPerSecond: undefined }]);
   });
 
   it("drops a row that names nobody, because a bar with no label is not a row", () => {
-    expect(producerBoard({ entries: [{ topic: "", bytesPerSecond: 5 }] }).rows).toEqual([]);
+    expect(producerBoard({ topics: [{ topic: "", bytesInPerSecond: 5 }] }).rows).toEqual([]);
+  });
+
+  it("reports the server's own count of unranked internal topics, and never one it worked out", () => {
+    // The browser holds a five-row page, not the exporter's list, so a count it subtracted would be
+    // a figure about its own page rather than about the cluster.
+    expect(producerBoard({ topics: [], internalTopicsExcluded: 2 }).internalTopicsExcluded).toBe(2);
+    expect(producerBoard({ topics: [] }).internalTopicsExcluded).toBe(0);
+    expect(producerBoard({ topics: [], internalTopicsExcluded: -1 }).internalTopicsExcluded).toBe(0);
   });
 });
 
@@ -278,7 +320,7 @@ describe("asking the four endpoints", () => {
   });
 
   it("asks for a bounded number of producers, because a card draws a handful", async () => {
-    const { api, asked } = recording(producersOk({ entries: [] }));
+    const { api, asked } = recording(producersOk({ measuredBy: "topic", topics: [] }));
     await fetchTopProducers(api, "prod-kyiv-01");
     expect(asked[0]?.init).toEqual({
       params: { path: { clusterId: "prod-kyiv-01" }, query: { top: "5" } },
@@ -286,7 +328,7 @@ describe("asking the four endpoints", () => {
   });
 
   it("sends no query at all for the two readings that have no window", async () => {
-    const handlers = recording(handlersOk({ readings: [] }));
+    const handlers = recording(handlersOk({ purgatory: [] }));
     await fetchRequestHandlers(handlers.api, "prod");
     expect(handlers.asked[0]?.init).toEqual({ params: { path: { clusterId: "prod" } } });
 
@@ -308,7 +350,7 @@ describe("asking the four endpoints", () => {
   it("reads the section under either spelling of a hyphenated key", async () => {
     // `requestHandlers` is how Circe writes it and `request-handlers` is how the path spells it.
     // They are one field written down twice, exactly as `startingAt`/`at` are on a bucket.
-    const kebab = recording({ "request-handlers": { status: "ok", data: { readings: [] } } });
+    const kebab = recording({ "request-handlers": { status: "ok", data: { purgatory: [] } } });
     expect((await fetchRequestHandlers(kebab.api, "prod")).kind).toBe("ready");
   });
 

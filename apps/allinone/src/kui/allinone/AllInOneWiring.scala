@@ -8,9 +8,12 @@ import cats.syntax.all.*
 import fs2.io.file.Files
 import org.typelevel.log4cats.StructuredLogger
 
+import kui.alerts.api.AlertsApi
+import kui.alerts.app.AlertsWiring
 import kui.cluster.api.ClusterApi
 import kui.cluster.app.{ClusterServiceConfig, ClusterWiring}
 import kui.config.{
+  AlertsConfig,
   AuthConfig,
   ClusterConfig,
   ConsumersConfig,
@@ -134,6 +137,7 @@ object AllInOneWiring {
         config.rbac,
         config.store,
         config.metrics,
+        config.alerts,
         telemetry,
         principals,
         logger
@@ -160,6 +164,7 @@ object AllInOneWiring {
     */
   val Services: List[ServiceId] =
     List(
+      AlertsApi.Id,
       ClusterApi.Id,
       ConsumerApi.Id,
       IdentityApi.Id,
@@ -192,6 +197,13 @@ object AllInOneWiring {
       // measure what you configured". Nothing observable differed while no collector existed; the reason
       // did, and a reason is what an operator reads.
       metrics: MetricsConfig,
+      // Passed for the reason `metrics` above is passed, and the reason is worth repeating because the
+      // defect it prevents is silent in a different way. A dropped `kui.metrics` makes a configured
+      // deployment answer as though nothing were configured, which an operator eventually notices. A
+      // dropped `kui.alerts` changes no status anywhere: the feed answers `ok`, the rules run, and the
+      // thresholds are simply the defaults instead of the ones somebody wrote -- so a cluster tuned to
+      // tolerate a migration starts opening events again and nothing says why.
+      alerts: AlertsConfig,
       telemetry: Telemetry[F],
       principals: PrincipalCodec[F],
       logger: StructuredLogger[F]
@@ -271,6 +283,16 @@ object AllInOneWiring {
       // — "this deployment has no metrics source" is an answer the browser needs from a running service,
       // and a service missing from the process reads instead as a service that is down.
       metricsService <- MetricsWiring.make[F](clusters, metrics, telemetry, principals, logger)
+      // The alerts service, and the ninth. It reads the same `kui.clusters[]` the topic, consumer and
+      // message services read, for the same reason: this process is holding the list, and calling itself
+      // over a socket to read it would add a listener, a timeout and a failure mode to a lookup that
+      // cannot fail.
+      //
+      // It takes `rbac` because an acknowledgement is a mutation -- `AlertsAcknowledge` on
+      // `Resource.Alerts` -- and is refused on a read-only cluster. It takes no cursor key: an
+      // acknowledgement loses nothing, so it carries no ADR-045 plan token and there is nothing here to
+      // sign.
+      alertsService <- AlertsWiring.make[F](clusters, alerts, rbac, telemetry, principals, logger)
     } yield ServiceClients.of[F](
       List[ServiceClient[F]](
         InProcessServiceClient.make[F](
@@ -313,6 +335,12 @@ object AllInOneWiring {
           MetricsApi.Id,
           metricsService.routes,
           metricsService.interceptors,
+          principals
+        ),
+        InProcessServiceClient.make[F](
+          AlertsApi.Id,
+          alertsService.routes,
+          alertsService.interceptors,
           principals
         )
       )

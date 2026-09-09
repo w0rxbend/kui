@@ -3,6 +3,7 @@ package kui.gateway.api.routing
 import munit.FunSuite
 import sttp.tapir.AnyEndpoint
 
+import kui.alerts.contract.AlertsEndpoints
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
@@ -25,6 +26,7 @@ final class ServiceContractsSuite extends FunSuite {
   private val message = ServiceId.unsafe("message")
   private val schema = ServiceId.unsafe("schema")
   private val metrics = ServiceId.unsafe("metrics")
+  private val alerts = ServiceId.unsafe("alerts")
 
   /** The public address of one endpoint, including its path parameters.
     *
@@ -38,7 +40,10 @@ final class ServiceContractsSuite extends FunSuite {
   }
 
   test("everyConfiguredServiceHasItsContract") {
-    assertEquals(ServiceContracts.byService.keySet, Set(cluster, topic, consumer, message, schema, metrics))
+    assertEquals(
+      ServiceContracts.byService.keySet,
+      Set(cluster, topic, consumer, message, schema, metrics, alerts)
+    )
     // Both of the cluster service's lists. `ClusterWriteEndpoints` used to be deliberately absent, so
     // that the one write M1 shipped had no public route while it had no screen; the administration screen
     // exists now, and an endpoint the browser cannot reach would make it a set of buttons that answer 404.
@@ -80,6 +85,11 @@ final class ServiceContractsSuite extends FunSuite {
     // it there is no second object to forget. The count is deliberately not asserted: M7 adds four reads
     // to that list and this entry does not move.
     assertEquals(ServiceContracts.of(metrics), MetricsEndpoints.all)
+    // The alerts service's one list, and the ninth entry. `AlertsEndpoints.all` is the feed read and the
+    // acknowledgement write. Its third endpoint is the change stream, which this derivation cannot proxy
+    // for the message browse stream's reason -- a stream is relayed rather than called and re-encoded --
+    // so `AlertsStreamEndpoint` is deliberately not in the map and this assertion is what says so.
+    assertEquals(ServiceContracts.of(alerts), AlertsEndpoints.all)
   }
 
   test("theSchemaServicesTwoListsAreTheSizeTheMapSaysTheyAre") {

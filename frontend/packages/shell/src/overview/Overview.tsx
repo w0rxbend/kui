@@ -78,9 +78,11 @@ import {
   formatBytes,
   formatCount,
   formatPercent,
+  useAlerts,
   useKui,
   useQuery,
   type Fetched,
+  type Alerts,
   type IconName,
   type MagnitudeEntry,
   type QueryRegistry,
@@ -130,6 +132,7 @@ import {
   type Tone,
 } from "./model.js";
 import type { Reading } from "./reading.js";
+import { AlertsCard } from "./AlertsCard.jsx";
 
 /**
  * Everything the screen draws, already decided.
@@ -213,6 +216,7 @@ function figureOf(reading: Reading<number>, unit?: string): StatFigure {
 export function Overview(props: OverviewProps): JSX.Element {
   const params = useParams<{ readonly clusterId?: string; readonly tab?: string }>();
   const kui = useKui();
+  const alerts = useAlerts();
 
   const tab = (): DashboardTab => dashboardTab(params.tab);
 
@@ -389,6 +393,7 @@ export function Overview(props: OverviewProps): JSX.Element {
           setSearch({ [RANGE_PARAM]: chosen });
         }}
         onRetry={throughput.reload}
+        alerts={alerts}
       />
     </div>
   );
@@ -476,6 +481,7 @@ function bodyFor(tab: DashboardTab): BodyComponent {
  * what it means for the throughput query to belong to the two tabs that draw the card.
  */
 interface BodyProps {
+  readonly alerts: Alerts;
   readonly model: OverviewModel;
   readonly throughput: Fetched<ThroughputSeries>;
   readonly latency: Fetched<LatencySeries>;
@@ -588,6 +594,7 @@ function OverviewBody(props: BodyProps): JSX.Element {
 
       <div class="kui-overview__charts">
         <StorageCard reading={props.model.storage} />
+        <AlertsCard alerts={props.alerts} />
       </div>
     </>
   );

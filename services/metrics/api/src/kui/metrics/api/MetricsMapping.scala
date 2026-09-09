@@ -86,7 +86,10 @@ object MetricsMapping {
       // Stated rather than assumed: the card's title is drawn from this field, and a list of topics
       // labelled "top producers by client id" is exactly the mislabelling ADR-052 forbids.
       measuredBy = TopProducersDto.ByTopic,
-      topics = producers.topics.map(topic => TopicProducerDto(topic.topic, topic.bytesInPerSecond))
+      topics = producers.topics.map(topic => TopicProducerDto(topic.topic, topic.bytesInPerSecond)),
+      // Carried rather than dropped: a ranking that silently omits rows cannot be reconciled against the
+      // exporter it came from, and this one omits Kafka's own topics on purpose (ADR-052).
+      internalTopicsExcluded = producers.internalTopicsExcluded
     )
 
   def recordSize(reading: RecordSizeReading): RecordSizeDto =
@@ -98,7 +101,7 @@ object MetricsMapping {
 
   /** A reading as the section a card renders.
     *
-    * The three cases are the three renderings, and keeping the mapping here — rather than letting each route
+    * The four cases are the four renderings, and keeping the mapping here — rather than letting each route
     * decide — is what stops "no source configured" reaching one screen as an empty chart and another as an
     * error. It is written once for all five endpoints so that a sixth cannot spell them differently.
     *
@@ -107,11 +110,17 @@ object MetricsMapping {
     * service wrote, and the *reason* is still available per cluster on the capability document. `Unreadable`
     * keeps its message, because that one is not a deployment choice — it names an exporter that is down or a
     * whitelist that is missing a family, and no card copy could know which.
+    *
+    * `Stale` carries the reading **and** the instant it was taken, which is the whole of what makes it
+    * different from `Ok`: the figure is true and it is not current. `UpstreamUnavailable` is its reason
+    * because that is what has happened — the exporter has not answered since `at` — and `ReasonCode.sentence`
+    * renders it as "the cluster is not answering", beside a timestamp a reader can subtract.
     */
   def sectionOf[A, B](reading: MetricsReading[A])(toDto: A => B): Section[B] = reading match {
     case MetricsReading.Measured(value, at) => Section.Ok(toDto(value), at)
     case MetricsReading.NotMeasured(_) => Section.NotConfigured
     case MetricsReading.Unreadable(failure, at) => unavailable(failure.message, ReasonCode.of(failure), at)
+    case MetricsReading.Stale(value, at) => Section.Stale(toDto(value), at, ReasonCode.UpstreamUnavailable)
   }
 
   private def unavailable[B](message: String, reason: ReasonCode, at: Instant): Section[B] =

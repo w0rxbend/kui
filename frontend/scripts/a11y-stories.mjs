@@ -36,6 +36,10 @@
  *       in this case, and the message says so in as many words — the previous version printed the
  *       theme failure with the same `✗ <story id>` prefix a violation uses, and two wave-4 packets
  *       read a loaded machine as an a11y regression because of it.
+ *
+ * A story whose theme lands *after* the last budget expires is **not** exit 2. The attribute is
+ * read back before the failure is declared, and when it turns out to be right the story is swept
+ * normally with a note saying how long it took — see the block below the retry loop.
  */
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -120,19 +124,39 @@ for (const theme of ["dark", "light"]) {
     }
 
     if (!themed) {
+      /*
+       * Read the attribute back before calling this a failure, because the last budget expiring is
+       * not the same fact as the theme never arriving.
+       *
+       * `waitForFunction` polls, so it can time out in the gap between the attribute landing and
+       * the next poll — and under the load this retry exists for, that gap is exactly where a slow
+       * render finishes. The previous version went straight to the message below and printed
+       * `asked for the dark theme and got dark`, which is self-contradictory in precisely the case
+       * the whole retry was written for: two wave-4 packets read a loaded machine as an a11y
+       * regression, and this line was the reason the third reader could not tell which it was.
+       *
+       * When it did arrive, the story is themed and axe below is measuring the right palette, so
+       * the sweep continues and says the wait was long rather than failing a CI run over it.
+       */
       const applied = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
       const seconds = Math.round(waitedMs / 1000);
-      // Deliberately not the `✗ <id>` shape a violation is printed with. This story was never
-      // checked, so the run has found nothing about it either way, and the two must not read alike.
-      console.error(`\nHARNESS FAILURE — nothing was checked here, and this is not a violation.`);
-      console.error(`  ${id}: asked for the ${theme} theme and got ${applied ?? "none"}, after`);
-      console.error(`  ${THEME_WAIT_MS.length} navigations and ${seconds}s of waiting in total.`);
-      console.error(`  A theme that never applied means the sweep would check one theme twice,`);
-      console.error(`  so it stops here rather than report a pass it did not earn.`);
-      console.error(`  Re-run this story on its own before reporting a defect:`);
-      console.error(`      node scripts/a11y-stories.mjs '^${id}$'`);
-      await browser.close();
-      process.exit(2);
+      if (applied === theme) {
+        console.error(`  ${id}: the ${theme} theme landed after the last budget expired — ${seconds}s`);
+        console.error(`  of waiting across ${THEME_WAIT_MS.length} navigations. Checked anyway: the`);
+        console.error(`  attribute is right, so what axe measures below is the right palette.`);
+      } else {
+        // Deliberately not the `✗ <id>` shape a violation is printed with. This story was never
+        // checked, so the run has found nothing about it either way, and the two must not read alike.
+        console.error(`\nHARNESS FAILURE — nothing was checked here, and this is not a violation.`);
+        console.error(`  ${id}: asked for the ${theme} theme and got ${applied ?? "none"}, after`);
+        console.error(`  ${THEME_WAIT_MS.length} navigations and ${seconds}s of waiting in total.`);
+        console.error(`  A theme that never applied means the sweep would check one theme twice,`);
+        console.error(`  so it stops here rather than report a pass it did not earn.`);
+        console.error(`  Re-run this story on its own before reporting a defect:`);
+        console.error(`      node scripts/a11y-stories.mjs '^${id}$'`);
+        await browser.close();
+        process.exit(2);
+      }
     }
 
     /*

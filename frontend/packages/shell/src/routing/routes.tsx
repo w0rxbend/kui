@@ -147,6 +147,13 @@ export function shellRoutes(views: RouteViews) {
                 { path: "/:groupId", component: gate("consumers") },
               ],
             },
+            /* The alerts screen is a **route and a nav destination**, not a dashboard tab, and that
+               is settled here rather than discovered. A tab would put it in `overview/`, which the
+               dashboard owns, and `@kui/feature-alerts` reaching into the shell's dashboard would
+               invert the dependency the whole feature split exists to keep. One address, no
+               parameters below it: the feed is filtered in the screen, and a filter is not a
+               page. */
+            { path: "/alerts", component: gate("alerts") },
             {
               path: "/schemas",
               children: [
@@ -209,6 +216,8 @@ export function landingFor(
       return cluster === undefined ? undefined : paths.clusters(cluster)["consumer-groups"]();
     case "schemas":
       return cluster === undefined ? undefined : paths.clusters(cluster).schemas();
+    case "alerts":
+      return cluster === undefined ? undefined : paths.clusters(cluster).alerts();
     case "messages":
       // Its URL names a topic as well as a cluster, and the navigation has no topic to name.
       return undefined;

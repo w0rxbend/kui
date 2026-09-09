@@ -277,19 +277,22 @@ jobs:
   compose:
     name: distributed stack + fault isolation
     runs-on: ubuntu-latest
-    # Assembles a jar and builds a container image for the gateway and for each of the six services
-    # the distributed stack runs, then builds the interface's image inside `docker compose up` and
-    # pulls three third-party ones — the Kafka broker this stack now runs, the JMX exporter beside
-    # it, which is what lets the smoke test assert a measurement rather than a refusal, and the
-    # Schema Registry that keeps the schema service's capability row honest about it.
+    # Assembles a jar and builds a container image for the gateway and for each of the seven
+    # services the distributed stack runs, then builds the interface's image inside
+    # `docker compose up` and pulls three third-party ones — the Kafka broker this stack now runs,
+    # the JMX exporter beside it, which is what lets the smoke test assert a measurement rather
+    # than a refusal, and the Schema Registry that keeps the schema service's capability row honest
+    # about it.
     #
-    # Raised from 25, which was written when the job built five images. Measured here rather than
-    # guessed, on a warm Scala compile cache: the seven Mill images take 83s, and `smoke.sh` takes
-    # 126s and 105s on two consecutive runs against images that already exist. Neither figure
-    # includes the two things a cold runner also pays for and this machine did not — the Scala
-    # compile behind those images, and `docker compose` building `kui-frontend` from the pnpm
-    # workspace, which is the single largest cost in the job and the reason the old ceiling was
-    # already close.
+    # Raised from 25, which was written when the job built five images. Measured rather than
+    # guessed, on a warm Scala compile cache: seven Mill images took 83s and `smoke.sh` took 126s
+    # and 105s on two consecutive runs against images that already existed. The derived list is
+    # eight now — `services/alerts` is the ninth service and the eighth image this job builds — and
+    # that measurement has not been re-taken since, so read it as a floor rather than as today's
+    # number. Neither figure includes the two things a cold runner also pays for and the machine
+    # that measured it did not — the Scala compile behind those images, and `docker compose`
+    # building `kui-frontend` from the pnpm workspace, which is the single largest cost in the job
+    # and the reason the old ceiling was already close.
     #
     # Forty minutes is therefore a backstop against a hung build and not a budget: it is far above
     # anything measured, and low enough that a genuine hang is still reported inside the hour.

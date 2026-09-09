@@ -4,6 +4,25 @@ import java.time.Instant
 
 import kui.kernel.error.KuiError
 
+/** A point-in-time reading and the instant of the scrape it was taken from.
+  *
+  * ==Why the instant travels with the value rather than being taken from a clock==
+  *
+  * A gauge is a claim about *now*. The buffer keeps samples for `kui.metrics.retention`, which is hours, and
+  * hands out the newest one it still holds — so a reading answered at noon may have been scraped at eleven,
+  * and until this type existed the layer above stamped it `now` and every card said it was current. Carrying
+  * the scrape's own instant is what lets [[kui.metrics.application.MetricsReading]] tell a fresh reading from
+  * a last-known-good one, which is the difference between an `ok` section and a `stale` one (ADR-052).
+  *
+  * The three range answers do not need it: a series carries its own axis, and a window nobody fed for an hour
+  * already draws that hour as gaps.
+  */
+final case class Observed[+A](value: A, at: Instant)
+
+object Observed {
+  given [A] => CanEqual[Observed[A], Observed[A]] = CanEqual.derived
+}
+
 /** One cluster's source of broker metrics, reduced to the questions this service asks.
   *
   * Stated in domain terms and implemented in `infrastructure`, which is the dependency direction rule A1
@@ -57,20 +76,21 @@ trait MetricsSourcePort[F[_]] {
     *
     * A moment rather than a range: the card is three gauges and a gauge shows now. `asOf` is still a
     * parameter, because a reading older than the retention window has to be dropped rather than shown as
-    * current.
+    * current, and because the [[Observed]] instant that comes back is what decides whether the section is
+    * `ok` or `stale`.
     */
-  def requestHandlers(asOf: Instant): F[Either[KuiError, RequestHandlerReading]]
+  def requestHandlers(asOf: Instant): F[Either[KuiError, Observed[RequestHandlerReading]]]
 
   /** The `count` topics receiving the most bytes as of the last scrape at or before `asOf`.
     *
     * Topics and not clients: a broker publishes no per-`client.id` byte rate unless quotas are configured
     * (ADR-052), and the field is named for what it holds.
     */
-  def producers(count: Int, asOf: Instant): F[Either[KuiError, TopProducers]]
+  def producers(count: Int, asOf: Instant): F[Either[KuiError, Observed[TopProducers]]]
 
   /** The mean size of a record on this cluster as of the last scrape at or before `asOf`.
     *
     * A mean and never a distribution: Kafka publishes no record-size histogram (ADR-052).
     */
-  def recordSize(asOf: Instant): F[Either[KuiError, RecordSizeReading]]
+  def recordSize(asOf: Instant): F[Either[KuiError, Observed[RecordSizeReading]]]
 }

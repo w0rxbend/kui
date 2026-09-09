@@ -187,6 +187,16 @@ final class MetricsProxySuite extends CatsEffectSuite {
     // service's capability is untouched by it — so the Traffic tab keeps drawing every other card and the
     // sidebar entry stays lit. A 5xx here, or a dimmed capability, would take the whole tab away for one
     // dead family, which is precisely what `Section` exists to prevent.
+    //
+    // **What each half of this case is worth, stated because they are not worth the same.** The status code
+    // and the body are a gateway rule and are failable here: a proxy that re-encoded the section, or turned a
+    // 200 carrying `unavailable` into a 5xx, fails on the two lines below. The *capability* assertion is not.
+    // `reportIfInfrastructure` keys off `InfrastructureError` alone and a `Section.Unavailable` arrives as a
+    // `Right`, so it never reaches that function at all and no gateway-side change can make the last
+    // assertion fail. It pins the stub's shape — this document really does travel as a success — rather than
+    // a rule. The rule underneath it is "only a transport failure dims a capability", and it is gated where
+    // it can fail: `aMetricsApplicationErrorDoesNotDimTheMetricsCapability` below, and
+    // `TopicProxySuite.a topic that does not exist does not dim the topic capability`.
     val unavailable: Section[ThroughputSeriesDto] =
       Section.Unavailable(ReasonCode.UpstreamUnavailable, "the exporter did not answer", Some(at))
     val document = ThroughputResponse(unavailable).asJson.noSpaces
@@ -226,6 +236,32 @@ final class MetricsProxySuite extends CatsEffectSuite {
           clusterInputs.readiness,
           Some(ReadinessSignal.Unknown: ReadinessSignal),
           "the cluster service was never called, so nothing may have been learned about it"
+        )
+      }
+    }
+  }
+
+  test("aMetricsApplicationErrorDoesNotDimTheMetricsCapability") {
+    // The rule the case above only appears to make, at the place the decision is taken. A caller asking for
+    // a cluster that does not exist gets a 404, and that 404 says something about the request rather than
+    // about the metrics service, which answered correctly and promptly. Reporting it would let anybody dim
+    // the Traffic tab for every other user by typing a bad cluster id into the address bar.
+    //
+    // `reportIfInfrastructure` is where that is decided, so a mutation removing its `InfrastructureError`
+    // guard — reporting every failure — fails here and fails nowhere in the case above.
+    val missing = kui.kernel.error.ApplicationError
+      .NotFound("cluster", "prod-eu", kui.kernel.error.ErrorCode.ClusterNotFound)
+
+    serving(Left(missing)) { (server, _, signal) =>
+      for {
+        response <- server.get("/api/v1/clusters/prod-eu/metrics/throughput?range=24h")
+        inputs <- signal.inputs(CapabilityKey(metrics, None))
+      } yield {
+        assertEquals(response.code.code, 404, response.body)
+        assert(response.body.contains("KUI-CLUSTER-NOT-FOUND"), response.body)
+        assert(
+          !notReady(inputs.readiness),
+          "a request about a cluster that does not exist dimmed the metrics service, which answered"
         )
       }
     }

@@ -130,6 +130,14 @@ export function BrokerList(props: BrokerListProps): JSX.Element {
   const totalLeaders = createMemo<number | undefined>(() => {
     // `undefined` rather than a sum that silently treats an unreadable broker as zero: a total that
     // is quietly short is worse than one that admits it is not known.
+    //
+    // An empty list is the second way this figure is not known, and it used to be missing from this
+    // test: `reduce` over no brokers is `0`, so a cluster that answered and named no broker at all
+    // drew a bare `0` under TOTAL LEADERS — the figure this milestone forbids — while the chip that
+    // exists to say `no broker answered` was unreachable, because that arm is read only when this
+    // memo is `undefined` and only a broker carrying a null count could make it so. Adding the
+    // length test is what makes the chip reachable and the tile honest at the same time.
+    if (props.brokers.length === 0) return undefined;
     if (props.brokers.some((broker) => broker.leaderPartitions === null)) return undefined;
     return props.brokers.reduce((sum, broker) => sum + (broker.leaderPartitions ?? 0), 0);
   });

@@ -5,11 +5,13 @@ package kui.metrics.domain
   * ==A length, and the design asked for a percentage==
   *
   * `SCREENS-V4.md` §3.4 draws a third ring gauge reading "38% PURGATORY". A broker publishes
-  * `kafka.server:type=DelayedOperationPurgatory,name=PurgatorySize` and it is a **queue length** — 961 on the
-  * quickstart broker, all of it long-polling consumer fetches. There is no ceiling to divide it by, so there
-  * is no percentage: any denominator KUI chose would be invented, and the ring would be a picture of that
-  * invention. ADR-052 redraws the sub-tile as the count it is, with its own unit, and this type is that
-  * decision in the type system — nothing here can be read as a fraction.
+  * `kafka.server:type=DelayedOperationPurgatory,name=PurgatorySize` and it is a **queue length** — 481 on the
+  * quickstart broker, counted in
+  * `services/metrics/infrastructure/test/resources/exposition/kafka-broker-stock-ruleset.txt:54`, all of it
+  * long-polling consumer fetches. There is no ceiling to divide it by, so there is no percentage: any
+  * denominator KUI chose would be invented, and the ring would be a picture of that invention. ADR-052
+  * redraws the sub-tile as the count it is, with its own unit, and this type is that decision in the type
+  * system — nothing here can be read as a fraction.
   *
   * Per operation rather than summed, because the sum is not a thing an operator acts on: `Fetch` is deep by
   * design on any cluster with consumers, and `Produce` being deep at all means acknowledgements are waiting
@@ -89,21 +91,57 @@ object TopicProducer {
   * cluster where nothing is producing and an exporter whose ruleset has no per-topic rule serve the same
   * bytes. Both were produced against a live broker while this was being written. The empty list is therefore
   * an honest "nothing to rank" and the card's sentence names both causes rather than picking one.
+  *
+  * @param topics
+  *   the ranking, largest rate first, with Kafka's own internal topics already taken out — see
+  *   [[TopProducers.InternalTopicPrefix]] for why the exclusion is here and not on the screen
+  * @param internalTopicsExcluded
+  *   how many topic lines the exposition carried that this ranking left out. It travels rather than being
+  *   dropped because a list that quietly omits rows is a list nobody can check: on the quickstart broker
+  *   `__consumer_offsets` outruns every application topic by three orders of magnitude, and an operator
+  *   comparing this card against the exporter has to be able to see that it was removed on purpose.
   */
-final case class TopProducers(topics: List[TopicProducer])
+final case class TopProducers(topics: List[TopicProducer], internalTopicsExcluded: Int)
 
 object TopProducers {
 
-  val Empty: TopProducers = TopProducers(Nil)
+  val Empty: TopProducers = TopProducers(Nil, 0)
 
-  /** The `count` busiest, largest rate first and ties broken by name.
+  /** The two characters Kafka names its own topics with, and the reason this service picks them rather than
+    * `kui.topics.internalPrefix`.
+    *
+    * Kafka's internal topics are `__consumer_offsets` and `__transaction_state`, both created by the broker
+    * itself and neither of them anybody's application traffic. That is a fact about Kafka rather than a
+    * deployment's preference, which is what makes it safe to write down in a domain that may not read
+    * configuration (ADR-041 rule A1). `kui.topics.internalPrefix` is the deployment's *own*, broader rule —
+    * shipped as `"_"` in `deployment/quickstart/kui-quickstart.yaml:49` and defaulting to `"__"` in
+    * `libs/config/src/kui/config/TopicsConfig.scala:135` — and it belongs to the topics screen, where an
+    * operator can turn it off with `?showInternal=1`. Borrowing the wider one here would drop a customer's
+    * `_audit` topic out of a producer ranking with nothing on the screen saying so, and losing a real
+    * producer is a worse answer than keeping an internal one.
+    *
+    * The evidence for the exclusion mattering is measured and committed:
+    * `services/metrics/infrastructure/test/resources/exposition/kafka-broker-stock-ruleset.txt:38-40` is a
+    * real capture in which `__consumer_offsets` carries 156.97 bytes/s against `orders.v1`'s 5.95e-20.
+    */
+  val InternalTopicPrefix: String = "__"
+
+  /** The `count` busiest application topics, largest rate first and ties broken by name.
     *
     * Ordered here rather than by whichever card draws it, so that two screens asking for three and for ten
     * cannot disagree about which topic is busiest — and so that a repeat request with unchanged traffic
     * returns the same order rather than the exporter's.
+    *
+    * The internal topics are removed **before** the `take`, which is the only order that works: removed after
+    * it, a five-row card on an idle cluster would show one application topic and four blanks.
     */
-  def of(topics: List[TopicProducer], count: Int): TopProducers =
-    TopProducers(topics.sortBy(topic => (-topic.bytesInPerSecond, topic.topic)).take(Math.max(count, 0)))
+  def of(topics: List[TopicProducer], count: Int): TopProducers = {
+    val (internal, application) = topics.partition(_.topic.startsWith(InternalTopicPrefix))
+    TopProducers(
+      topics = application.sortBy(topic => (-topic.bytesInPerSecond, topic.topic)).take(Math.max(count, 0)),
+      internalTopicsExcluded = internal.size
+    )
+  }
 
   given CanEqual[TopProducers, TopProducers] = CanEqual.derived
 }
@@ -114,9 +152,11 @@ object TopProducers {
   *
   * `SCREENS-V4.md` §3.5 draws a twelve-bucket histogram with `p50 · 1.1 KB`, `p99 · 18 KB` and `max · 0.9 MB`
   * chips. **Kafka publishes no record-size distribution of any kind** — verified against a stock-ruleset
-  * exposition of the quickstart broker, 680 Kafka families and not one histogram or bucket among them. What
-  * can be measured is the quotient of two rates the broker does publish, which is a mean and is labelled as
-  * one (ADR-052). Twelve buckets assembled from a mean would be a drawing of an assumption.
+  * exposition of the quickstart broker, 670 Kafka families — the count is in that capture's own header,
+  * `services/metrics/infrastructure/test/resources/exposition/kafka-broker-stock-ruleset.txt:7` — and not one
+  * histogram or bucket among them. What can be measured is the quotient of two rates the broker does publish,
+  * which is a mean and is labelled as one (ADR-052). Twelve buckets assembled from a mean would be a drawing
+  * of an assumption.
   *
   * The two rates it was computed from travel with it, so a card can say what the figure is rather than
   * leaving a reader to assume it is a median.

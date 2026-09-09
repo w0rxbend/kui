@@ -69,16 +69,25 @@ export function describeViolations(violations: axe.Result[]): string {
  * point — `GroupsScreen` is where the page number, the server's total and the mapping meet, and a
  * test that drives `GroupList` alone cannot see any of that wiring.
  *
- * The api is supplied by the caller and everything else is the smallest honest answer: `permits`
- * says yes because permissions are not what these cases are about, and `paths` builds the one
- * address this screen links to. There is no `report` behaviour because the shell's connectivity
- * tracker is not mounted.
+ * The api is supplied by the caller and everything else is the smallest honest answer: `paths`
+ * builds the one address this screen links to, and there is no `report` behaviour because the
+ * shell's connectivity tracker is not mounted.
+ *
+ * `permits` defaults to yes, and is a **parameter** because the route is where a permission is
+ * turned into a control. `GroupDetail` renders a disabled button with a reason when it is handed
+ * no callback, and that rendering has a case; what decides whether it is handed one is a ternary in
+ * `GroupRoute`, and a suite that can only mount the route permitted cannot observe it at all. So
+ * the deciding half was a constant `true` for two waves, and replacing the whole gate with `true`
+ * left every case green.
  */
-export function testContext(api: KuiApiClient): KuiContextValue {
+export function testContext(
+  api: KuiApiClient,
+  permits: KuiContextValue["permits"] = () => true,
+): KuiContextValue {
   return {
     api,
     cluster: () => undefined,
-    permits: () => true,
+    permits,
     paths: {
       home: () => "/ui",
       settings: () => "/ui/settings",

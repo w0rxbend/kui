@@ -83,12 +83,33 @@ final class PrometheusExpositionSuite extends FunSuite {
   }
 
   test("replicationbytesinpersec is not read as bytesinpersec, though it contains it") {
-    // Replication traffic is a real number and it is not the cluster's throughput. The name test has to
-    // be anchored at a `_`, and the fixture is what makes the unanchored version fail.
+    // Replication traffic is a real number and it is not the cluster's throughput. The name test has to be
+    // anchored at a `_`, and the fixture is what makes the unanchored version fail: the replication line is
+    // written *before* the aggregate, and `aggregateOf` takes the first undimensioned line that matches. So
+    // an unanchored `name.contains(attribute)` reads 61200.0 here, and this case is what says so.
     val samples = PrometheusExposition.parse(lowercased)
+    val decoyIsFirst =
+      samples.indexWhere(_.name.contains("replicationbytesinpersec")) <
+        samples.indexWhere(sample => sample.name == "kafka_server_brokertopicmetrics_bytesinpersec_oneminuterate")
 
+    assert(decoyIsFirst, "the fixture must put the decoy first or this case gates nothing")
     assertEquals(samples.find(_.name.contains("replicationbytesinpersec")).map(_.value), Some(61200.0))
     assertEquals(sampleOf(lowercased).bytesInPerSecond, Some(124800.5))
+  }
+
+  test("a body carrying only the replication family reports no cluster throughput at all") {
+    // The same rule with the decoy alone, which is the shape that cannot be satisfied by line order. An
+    // exporter whose ruleset whitelists ReplicationBytesInPerSec and not BytesInPerSec measures the traffic
+    // between brokers and none of the traffic from producers; charting it would draw a cluster's
+    // throughput out of its own replication.
+    val replicationOnly =
+      """kafka_server_brokertopicmetrics_replicationbytesinpersec_oneminuterate 61200.0
+        |kafka_server_brokertopicmetrics_bytesoutpersec_oneminuterate 20.0
+        |""".stripMargin
+
+    val sample = sampleOf(replicationOnly)
+    assertEquals(sample.bytesInPerSecond, None)
+    assertEquals(sample.topicBytesInPerSecond, None)
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -126,9 +147,37 @@ final class PrometheusExpositionSuite extends FunSuite {
 
   test("the broker and controller handler pools are not read as the request handler pool") {
     // Three attributes whose names contain each other, published together on every broker. A substring
-    // match reads whichever comes first, and on the captured body that is the broker pool at 1.0006.
+    // match reads whichever comes first, and in both bodies the decoys are written first — in the capture
+    // because that is the order the broker really published them, and in the hand-written fixture because
+    // an anchor whose decoys come last is an anchor nothing can make fail.
+    //
+    // The two bodies exercise two different halves of `isAttribute`. The capture spells the attribute in a
+    // `name` label, which is compared whole, so the anchor is not what saves it; the lowercased fixture
+    // spells it inside the metric name, which is where the `_` anchor is the only thing between
+    // `requesthandleravgidlepercent` and the broker pool's 1.0006.
+    val samples = PrometheusExposition.parse(lowercased)
+    val decoyIsFirst =
+      samples.indexWhere(_.name.contains("brokerrequesthandleravgidlepercent")) <
+        samples.indexWhere(_.name == "kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate")
+
+    assert(decoyIsFirst, "the fixture must put the decoy pools first or this case gates nothing")
+    assertEquals(sampleOf(lowercased).requestHandlerIdleRatio, Some(0.8912))
     assertEquals(sampleOf(captured).requestHandlerIdleRatio, Some(0.9993945459789384))
     assert(PrometheusExposition.parse(captured).exists(_.name.contains("kafkarequesthandlerpool")))
+  }
+
+  test("a body carrying only the broker pool reports no request-handler idle ratio") {
+    // The decoy alone, so the rule holds whatever order an exporter publishes in. `BrokerRequestHandler`
+    // is a different pool doing different work: reported as the request handler's idle ratio it would draw
+    // a saturated broker as idle, or the reverse, with nothing on the card able to tell.
+    val decoyOnly =
+      """kafka_server_kafkarequesthandlerpool_brokerrequesthandleravgidlepercent_oneminuterate 1.0006
+        |kafka_network_socketserver_networkprocessoravgidlepercent 0.7104
+        |""".stripMargin
+
+    val sample = sampleOf(decoyOnly)
+    assertEquals(sample.requestHandlerIdleRatio, None)
+    assertEquals(sample.networkProcessorIdleRatio, Some(0.7104))
   }
 
   test("purgatory arrives as a count per delayed operation, and no percentage exists to read") {

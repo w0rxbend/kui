@@ -55,6 +55,28 @@ describe("share", () => {
     noValue.dispose();
   });
 
+  it("a share of a negative quantity draws an empty bar", () => {
+    // Both sides negative is the case the guard is written as `of <= 0` rather than `of === 0`
+    // for, and the arithmetic is what makes it dangerous rather than merely odd: `-4212 / -100`
+    // is `42.12`, which clamps to a **full** track. A denominator that came back negative is a
+    // figure nothing measured — a byte total read as a difference, a capacity from a broker that
+    // answered garbage — and a full bar is the loudest possible claim to make about it.
+    const bothNegative = mount(() => (
+      <MagnitudeBar inline value="" fraction={share(-4_212, -100)} />
+    ));
+    expect(fillWidth(bothNegative.container)).toBe("0%");
+    bothNegative.dispose();
+
+    // And with only the denominator negative, where the quotient is negative and `MagnitudeBar`'s
+    // own clamp would have caught it: the two halves are asserted separately so that neither can
+    // stand in for the other.
+    const negativeDenominator = mount(() => (
+      <MagnitudeBar inline value="" fraction={share(4_212, -100)} />
+    ));
+    expect(fillWidth(negativeDenominator.container)).toBe("0%");
+    negativeDenominator.dispose();
+  });
+
   it("draws a share that is real, and clamps one that is out of range", () => {
     // The refusal above is only honest beside this: the guard must not be a helper that always
     // answers zero.

@@ -8,16 +8,28 @@
 # names contain one of them, the purgatory queues, four of the several hundred families it knows nothing
 # about, a NaN and a +Inf.
 #
-# The slices are written BEFORE the aggregate they belong to, deliberately. Nothing in the exposition
-# format orders a family's lines, and a parser that took the first line matching a name would read
-# `98000.0` here — which is a real number, from a real topic, and not the cluster's throughput. Put the
-# aggregate first and the skip-the-slices rule cannot be made to fail.
+# THE ORDER OF THE LINES IS PART OF THE FIXTURE, and it is adversarial on purpose. Nothing in the
+# exposition format orders a family's lines, and both readers in PrometheusExposition take the FIRST
+# line that matches, so a fixture whose correct line comes first cannot make a name test fail:
+#
+#   * the per-topic slices are written BEFORE the aggregate they belong to. A parser that took the
+#     first matching line would read `98000.0` — a real number, from a real topic, and not the
+#     cluster's throughput.
+#   * the replication family is written BEFORE the `bytesinpersec` aggregate, and the two decoy handler
+#     pools BEFORE the pool KUI reads. Both decoy names CONTAIN the name being looked for, so an
+#     attribute test that is not anchored at a `_` reads the decoy: 61200.0 of replication traffic
+#     charted as cluster throughput, and the broker pool's 1.0006 drawn as the request handler's idle
+#     ratio. With the correct lines first neither mutation is observable; in this order the two cases
+#     that name them go red.
 # HELP jmx_exporter_build_info JMX Exporter build information
 # TYPE jmx_exporter_build_info gauge
 jmx_exporter_build_info{version="1.4.0",name="jmx_prometheus_javaagent",} 1.0
 # HELP jvm_memory_bytes_used Used bytes of a given JVM memory area.
 # TYPE jvm_memory_bytes_used gauge
 jvm_memory_bytes_used{area="heap",} 5.36870912E8
+# HELP kafka_server_brokertopicmetrics_replicationbytesinpersec Attribute exposed for management
+# TYPE kafka_server_brokertopicmetrics_replicationbytesinpersec untyped
+kafka_server_brokertopicmetrics_replicationbytesinpersec_oneminuterate 61200.0
 # HELP kafka_server_brokertopicmetrics_bytesinpersec Attribute exposed for management
 # TYPE kafka_server_brokertopicmetrics_bytesinpersec untyped
 kafka_server_brokertopicmetrics_bytesinpersec_count 1.2884901888E10
@@ -34,9 +46,12 @@ kafka_server_brokertopicmetrics_bytesoutpersec_oneminuterate 249600.75
 # HELP kafka_server_brokertopicmetrics_messagesinpersec Attribute exposed for management
 # TYPE kafka_server_brokertopicmetrics_messagesinpersec untyped
 kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate 1420.75
-# HELP kafka_server_brokertopicmetrics_replicationbytesinpersec Attribute exposed for management
-# TYPE kafka_server_brokertopicmetrics_replicationbytesinpersec untyped
-kafka_server_brokertopicmetrics_replicationbytesinpersec_oneminuterate 61200.0
+# Two pools whose attribute names CONTAIN the one KUI reads. A substring match reads whichever comes
+# first, and on a real broker the broker pool is published first -- see the captured fixture beside this
+# file, where it also reads above 1.0.
+# HELP kafka_server_kafkarequesthandlerpool_brokerrequesthandleravgidlepercent_oneminuterate Attribute exposed for management
+kafka_server_kafkarequesthandlerpool_brokerrequesthandleravgidlepercent_oneminuterate 1.0006
+kafka_server_kafkarequesthandlerpool_controllerrequesthandleravgidlepercent_oneminuterate 0.9995
 # HELP kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent Attribute exposed for management
 # TYPE kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent untyped
 kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_oneminuterate 0.8912
@@ -49,12 +64,6 @@ kafka_network_requestmetrics_totaltimems_99thpercentile{request="Produce",} 9.0
 kafka_network_requestmetrics_totaltimems_99thpercentile{request="FetchConsumer",} 502.0
 # A third request kind the screens do not draw. It parses and is ignored, which is the whole rule.
 kafka_network_requestmetrics_totaltimems_99thpercentile{request="FetchFollower",} 0.0
-# Two pools whose attribute names CONTAIN the one KUI reads. A substring match reads whichever comes
-# first, and on a real broker the broker pool is published first -- see the captured fixture beside this
-# file, where it also reads above 1.0.
-# HELP kafka_server_kafkarequesthandlerpool_brokerrequesthandleravgidlepercent_oneminuterate Attribute exposed for management
-kafka_server_kafkarequesthandlerpool_brokerrequesthandleravgidlepercent_oneminuterate 1.0006
-kafka_server_kafkarequesthandlerpool_controllerrequesthandleravgidlepercent_oneminuterate 0.9995
 # HELP kafka_network_socketserver_networkprocessoravgidlepercent Attribute exposed for management
 # TYPE kafka_network_socketserver_networkprocessoravgidlepercent gauge
 kafka_network_socketserver_networkprocessoravgidlepercent 0.7104
