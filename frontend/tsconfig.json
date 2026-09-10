@@ -1,5 +1,13 @@
 // The solution file. `tsc --build` here type-checks every package in dependency order, which is
 // what `./mill frontend.typecheck` runs. It holds no sources of its own.
+//
+// Comments in it: this file is JSONC and every comment below is `//`, which is the form the rest of
+// the workspace's tsconfigs use. Wave 6 left a `/* … */` block here and wave 7's plan asked whether
+// it endangered a strict JSON parser somewhere. Measured on 2026-09-10 rather than assumed:
+// `grep -rl tsconfig` over the repository, excluding `node_modules` and `.git`, matches `.gitignore`
+// and `repo.txt` and nothing else — no script, no Mill task and no workflow step parses this file.
+// `tsc` is its only reader and accepts both comment forms, so the block was not a hazard and `//`
+// is not a fix; it is one spelling for the whole file instead of two.
 {
   "files": [],
   "references": [
@@ -10,11 +18,12 @@
     { "path": "./packages/feature-topics" },
     { "path": "./packages/feature-messages" },
     { "path": "./packages/feature-consumers" },
-    /* `feature-schemas` had no reference here and was type-checked only transitively, through
-       `packages/shell/tsconfig.json` — a property nobody chose, measured in both directions in wave
-       5. Both it and the new `feature-alerts` are named now, so `tsc --build` here checks every
-       package in the workspace whatever the shell happens to depend on. */
+    // `feature-schemas` had no reference here and was type-checked only transitively, through
+    // `packages/shell/tsconfig.json` — a property nobody chose, measured in both directions in wave
+    // 5. Every feature package is named now, so `tsc --build` here checks the whole workspace
+    // whatever the shell happens to depend on.
     { "path": "./packages/feature-schemas" },
-    { "path": "./packages/feature-alerts" }
+    { "path": "./packages/feature-alerts" },
+    { "path": "./packages/feature-connect" }
   ]
 }

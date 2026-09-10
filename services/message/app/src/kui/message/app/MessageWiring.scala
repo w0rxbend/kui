@@ -252,8 +252,11 @@ object MessageWiring {
     *
     * `SecureRandom` and not a fixed literal: a predictable key would let anyone mint a cursor naming any
     * cluster, and a cursor is trusted precisely because it was signed.
+    *
+    * `private[app]` so that `MessageWiringSuite` can take two keys and compare them. Reaching it through
+    * `make` would need a Kafka client and a registry; this module had no test source at all until then.
     */
-  private def newCursorKey[F[_]: Async]: F[Secret[Array[Byte]]] =
+  private[app] def newCursorKey[F[_]: Async]: F[Secret[Array[Byte]]] =
     Async[F].delay {
       val bytes = new Array[Byte](CursorKeyBytes)
       new java.security.SecureRandom().nextBytes(bytes)

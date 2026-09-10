@@ -13,16 +13,16 @@
  * sufficient, which is why the end-to-end case exists beside them rather than instead of them.
  */
 import { describe, expect, it } from "vitest";
+import type { KuiApiClient } from "@kui/api";
 import type { AlertEvent, AlertFeed, Fetched } from "@kui/kernel";
 
 import {
-  ALERTS_FEED_PATH,
   alertsBadge,
   alertsStreamUrl,
+  loadAlertFeed,
   noticeGlyphOf,
   noticeToneOf,
   noticesOf,
-  openCountOf,
 } from "./alerts.js";
 
 /**
@@ -73,8 +73,36 @@ describe("the addresses the shell asks the alerts service for", () => {
    * written in `jq` against `.events.data.items`, which is what fixes the read's shape; the path
    * itself is wave 6's `/api/v1/clusters/{clusterId}/alerts/…` contract row.
    */
-  it("names the feed and its stream under the cluster the frame is describing", () => {
-    expect(ALERTS_FEED_PATH).toBe("/api/v1/clusters/{clusterId}/alerts/events");
+  it("names the feed and its stream under the cluster the frame is describing", async () => {
+    /* The read is asserted **through `loadAlertFeed`** rather than against the constant it uses.
+       A case comparing the constant with a copy of the same string is a rule that cannot fail for
+       any reason a reader would care about: it moves when somebody edits the line above it and at
+       no other time. What matters is the template and the parameters the client is handed, because
+       that is what becomes a URL. */
+    const asked: { path: string; options: unknown }[] = [];
+    const api = {
+      get: (path: string, options: unknown) => {
+        asked.push({ path, options });
+        return Promise.resolve({ ok: true, value: {} });
+      },
+    } as unknown as KuiApiClient;
+
+    await loadAlertFeed(api, "prod-kyiv-01", false);
+    expect(asked).toEqual([
+      {
+        path: "/api/v1/clusters/{clusterId}/alerts/events",
+        options: { params: { path: { clusterId: "prod-kyiv-01" }, query: { markRead: false } } },
+      },
+    ]);
+
+    /* And the mark, which is the same endpoint with the same query the other way round — two
+       addresses would be two spellings of one page, and the second of them was never exercised
+       until an operator pressed "Mark all read". */
+    await loadAlertFeed(api, "prod-kyiv-01", true);
+    expect(asked[1]?.options).toEqual({
+      params: { path: { clusterId: "prod-kyiv-01" }, query: { markRead: true } },
+    });
+
     expect(alertsStreamUrl("/api/v1", "prod-kyiv-01")).toBe(
       "/api/v1/clusters/prod-kyiv-01/alerts/stream",
     );
@@ -120,48 +148,6 @@ describe("the figure the drawer's Alerts row carries", () => {
     expect(alertsBadge(null)).toBeUndefined();
     expect(alertsBadge(Number.NaN)).toBeUndefined();
     expect(alertsBadge(-3)).toBeUndefined();
-  });
-});
-
-/**
- * The count the bell is allowed to draw, which is not always the count the feed carries.
- *
- * `evaluatedAt` is the field that turns a number into a measurement. Absent, the service's rules
- * have never run over this cluster here, and `openCount: 0` says only that nothing has been looked
- * at — so drawing it is a green claim about a cluster nobody has swept. Present, a `0` is a real
- * zero and is drawn as one.
- */
-describe("the open count the bell is allowed to draw", () => {
-  it("is the server's figure once the rules have run, zero included", () => {
-    expect(openCountOf(ready({ openCount: 7 }))).toBe(7);
-    /* A measured zero **is** drawn, and that is the other half of the rule: the bell then says "no
-       open alerts", which is a statement this deployment can support. */
-    expect(openCountOf(ready({ items: [], openCount: 0 }))).toBe(0);
-  });
-
-  it("is not known for a feed whose rules have never run, however well-formed it is", () => {
-    expect(openCountOf(ready({ items: [], openCount: 0, evaluatedAt: undefined }))).toBeNull();
-    /* Even a positive count is untrustworthy without it — though in practice the service cannot
-       produce one, which is why the zero above is the case that matters. */
-    expect(openCountOf(ready({ openCount: 7, evaluatedAt: undefined }))).toBeNull();
-  });
-
-  it("is not known for any state that holds no feed at all", () => {
-    expect(openCountOf({ kind: "loading" })).toBeNull();
-    expect(openCountOf({ kind: "forbidden" })).toBeNull();
-    expect(openCountOf({ kind: "not-configured" })).toBeNull();
-    expect(openCountOf({ kind: "failed", message: "no", code: "KUI-X" })).toBeNull();
-  });
-
-  it("still answers for a stale feed, which is old and not absent", () => {
-    /* Stale is data KUI really received and is showing under a warning; refusing to count it would
-       blank the bell over an outage, which is when the count matters most. */
-    const stale: Fetched<AlertFeed> = {
-      kind: "stale",
-      value: feed({ openCount: 4 }),
-      reason: "The stream closed.",
-    };
-    expect(openCountOf(stale)).toBe(4);
   });
 });
 

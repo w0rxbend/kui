@@ -13,6 +13,11 @@ import munit.FunSuite
   */
 final class SseWireSuite extends FunSuite {
 
+  // These two cases are what makes the class's claim about comment lines true. They assert the behaviour
+  // and not the implementation, which is why they stayed green when the `filterNot(_.startsWith(":"))` that
+  // appeared to deliver it was removed as inert: a `:`-leading line has an empty field name, and no
+  // `collect` pattern in `parseFrame` matches one. Re-adding a filter for them would be a second statement
+  // of a rule the field grammar already makes.
   test("a comment line is skipped rather than read as a field") {
     // `:` with no name is the SSE grammar's comment, and it is what a heartbeat looks like on the wire.
     // Parsed as a field it becomes the name `""`, which is not a field this parser knows — but a comment

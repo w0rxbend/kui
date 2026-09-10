@@ -1,6 +1,7 @@
 package kui.metrics.application
 
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicReference
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
@@ -20,12 +21,28 @@ import kui.metrics.domain.*
 final class FakeSource(failure: Option[KuiError] = None, scrapedAgo: FiniteDuration = 0.seconds)
     extends MetricsSourcePort[IO] {
 
+  /** The use case's own `now`, as it was handed to this port on the last point-in-time read.
+    *
+    * Recorded because it is the only way to pin the instant a `Measured` carries. Comparing that instant
+    * with `Instant.now()` cannot do it: the use case's `now` is always before the assertion runs, so a
+    * reading stamped with the *request* instant reads as "earlier than now" exactly like one stamped with
+    * the scrape's, and the case passes on the defect it was written to catch.
+    */
+  private val lastAskedAt = new AtomicReference[Option[Instant]](None)
+
+  def askedAt: Option[Instant] = lastAskedAt.get()
+
+  /** Where the scrape behind a reading taken at `asOf` was actually taken. */
+  def scrapedAt(asOf: Instant): Instant = asOf.minusNanos(scrapedAgo.toNanos)
+
   /** When the newest scrape behind the three point-in-time answers was taken, relative to the moment the
     * port is asked. Zero is a reading taken this instant; anything past the use case's `staleAfter` is
     * last-known-good and has to come back as `Stale` rather than as `Measured`.
     */
-  private def observed[A](asOf: Instant, value: A): Observed[A] =
-    Observed(value, asOf.minusNanos(scrapedAgo.toNanos))
+  private def observed[A](asOf: Instant, value: A): Observed[A] = {
+    lastAskedAt.set(Some(asOf))
+    Observed(value, scrapedAt(asOf))
+  }
 
   def throughput(range: ThroughputRange, endingAt: Instant): IO[Either[KuiError, ThroughputSeries]] =
     IO.pure(failure.toLeft(ThroughputSeries.absent(range, endingAt)))
@@ -236,7 +253,15 @@ final class MetricsUseCasesSuite extends CatsEffectSuite {
     useCase(List(profile(local, hasSource = true)), Map(local -> fresh)).requestHandlers(local).map {
       case Right(MetricsReading.Measured(reading, at)) =>
         assertEquals(reading.requestHandlerIdleRatio, Some(0.64d))
-        assert(at.isBefore(Instant.now()), s"the reading's instant is the scrape's, not the request's: $at")
+
+        // The instant, exactly, and not "earlier than now". The port was asked at the use case's own
+        // `now` and put its scrape 29 seconds before that; `Measured` must carry the second of those two
+        // instants. Stamping it with the first is the whole defect — a gauge read from a scrape that is
+        // nearly a scrape-interval old, presented as taken at the moment of the request.
+        val asked = fresh.askedAt.getOrElse(fail("the port was never asked for a reading"))
+
+        assertEquals(at, fresh.scrapedAt(asked), clue = s"the request was made at $asked")
+        assertNotEquals(at, asked, clue = "the reading carries the request's instant, not the scrape's")
       case other => fail(s"expected Measured, got $other")
     }
   }

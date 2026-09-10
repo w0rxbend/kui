@@ -59,12 +59,53 @@ test.describe("the brokers screen", () => {
   }) => {
     await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
 
-    await expect(page.getByRole("heading", { name: "Brokers", exact: true })).toBeVisible();
+    /*
+     * Scoped to the page head, and that scope is the whole of what wave 6 recorded as a flake.
+     * `BrokerList` draws its `PageHeader` and, while the broker list is still in flight, a loading
+     * `Card` also titled "Brokers" — so an unscoped `getByRole("heading", { name: "Brokers" })`
+     * resolves to two elements for as long as the answer takes, and Playwright's strict mode throws
+     * on that immediately rather than polling until one of them goes. Whether this case sampled
+     * that window depended on whether the brokers query beat the route's chunk, which is why it
+     * passed 9/9 alone and failed in the full run, where `alerts.spec.ts` is the only file that
+     * precedes it. A longer timeout cannot help: the violation is raised, not retried.
+     */
+    const head = page.locator('[data-testid="brokers-head"]');
+    await expect(head.getByRole("heading", { name: "Brokers", exact: true })).toBeVisible();
     // The quickstart runs one broker, advertised as `kafka:9092`. By visible string, not by testid:
     // this asserts that a person can read the broker's address off the card.
     await expect(page.getByText("kafka:9092").first()).toBeVisible();
     await expect(page.locator("body")).not.toContainText("[object Object]");
     await expect(page.locator("body")).not.toContainText("undefined");
+  });
+
+  test("carries one heading named Brokers once the list has landed, and two while it has not", async ({
+    page,
+  }) => {
+    /*
+     * The case wave 6 recorded as a flake and nobody root-caused, written so that it cannot flake:
+     * the answer is held open rather than raced against. While the brokers are in flight the screen
+     * legitimately draws two headings named "Brokers" -- the `PageHeader` and the loading `Card` --
+     * and once the answer lands the loading card goes, leaving one. The case above asserted the
+     * screen's title with an unscoped role locator, which is only unambiguous in the second of
+     * those two states, so which state the run sampled decided whether it passed. Assert both
+     * states here, and the case above stays scoped to the head.
+     */
+    await page.route(`**/api/v1/clusters/${CLUSTER}/brokers`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+      await route.continue();
+    });
+    await page.goto(`/ui/clusters/${CLUSTER}/brokers`);
+
+    const titles = page.getByRole("heading", { name: "Brokers", exact: true });
+    const head = page.locator('[data-testid="brokers-head"]');
+    // In flight: the page head still names the screen exactly once, whatever else is on the page.
+    await expect(head.getByRole("heading", { name: "Brokers", exact: true })).toHaveCount(1);
+    await expect(page.locator('[data-testid="brokers-loading"]')).toBeVisible();
+    await expect(titles).toHaveCount(2);
+
+    // Landed: the loading card is gone and the screen names itself once.
+    await expect(page.locator('[data-testid="brokers-loading"]')).toHaveCount(0, { timeout: 20_000 });
+    await expect(titles).toHaveCount(1);
   });
 
   test("the four stat tiles carry figures or say why they do not", async ({ page }) => {

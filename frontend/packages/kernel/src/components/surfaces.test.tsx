@@ -38,9 +38,15 @@ const LONG_SENTENCE =
   "this panel are the last ones it returned, and the count of groups needing attention in the " +
   "navigation drawer has been withheld rather than shown as zero.";
 
-/** A real click on a real element. See the note at the `Dialog` veil test. */
-function clickOn(element: HTMLElement): void {
-  element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+/**
+ * A real click on a real element. See the note at the `Dialog` veil test.
+ *
+ * `init` carries the modifiers, because that is the only way to express them: `userEvent.click`
+ * has no ⌘ and the modifier keys are what separate "open this row" from "open its link somewhere
+ * else". A `MouseEvent` is what the browser delivers either way.
+ */
+function clickOn(element: HTMLElement, init: MouseEventInit = {}): void {
+  element.dispatchEvent(new MouseEvent("click", { bubbles: true, ...init }));
 }
 
 afterEach(() => {
@@ -1318,6 +1324,94 @@ describe("DataTable selection", () => {
 
     // And the row itself still opens, so the guard stopped one click rather than every click.
     await userEvent.click(container.querySelectorAll<HTMLElement>(".kui-table__row")[1]!);
+    flush();
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+});
+
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * A modified click on a clickable row, in both tables, because it is one rule and two call sites.
+ *
+ * Filed by wave 6's third adversarial pass and measured on the shipped build: a ⌘/ctrl/shift-click
+ * on a link inside a clickable row opened a background tab **and** navigated the tab the operator
+ * was reading, because the row's handler took no event and therefore could not tell the two
+ * gestures apart. There is no "open this row elsewhere" for `onRowClick` to do instead — it
+ * navigates the current document — so declining is the whole behaviour.
+ *
+ * Both tables are asserted here rather than one, for the reason the file header already gives about
+ * the select cell: the two draw the same row and a guard fixed in one of them and not the other is
+ * this project's most repeated defect.
+ */
+describe("row activation and the modifier keys", () => {
+  interface Topic {
+    readonly name: string;
+  }
+  const rows: readonly Topic[] = [{ name: "orders" }, { name: "payments" }];
+  const columns: readonly Column<Topic>[] = [
+    { id: "name", header: "Topic", render: (topic) => topic.name },
+  ];
+
+  /** Every gesture that means "somewhere else", and the one that means "here". */
+  const elsewhere: readonly (readonly [string, MouseEventInit])[] = [
+    ["⌘-click, a background tab on macOS", { metaKey: true }],
+    ["ctrl-click, the same gesture on Linux and Windows", { ctrlKey: true }],
+    ["shift-click, a new window", { shiftKey: true }],
+    ["alt-click, which downloads rather than opens", { altKey: true }],
+    ["a button that is not the primary one", { button: 1 }],
+  ];
+
+  it("does not navigate the current tab when DataTable's row is click-modified", () => {
+    const onRowClick = vi.fn();
+    const { container, dispose } = mount(() => (
+      <DataTable
+        caption="Topics"
+        columns={columns}
+        rows={rows}
+        rowKey={(topic) => topic.name}
+        onRowClick={onRowClick}
+      />
+    ));
+    const row = container.querySelector<HTMLElement>(".kui-table__row")!;
+
+    for (const [gesture, init] of elsewhere) {
+      clickOn(row, init);
+      flush();
+      expect(onRowClick, gesture).not.toHaveBeenCalled();
+    }
+
+    // And the plain click still opens the row, so the guard declined five gestures rather than all
+    // of them — which is the shape of the fix that breaks the feature instead of the defect.
+    clickOn(row);
+    flush();
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("does not navigate the current tab when VirtualizedTable's row is click-modified", () => {
+    const onRowClick = vi.fn();
+    const { container, dispose } = mount(() => (
+      <VirtualizedTable
+        caption="Topics"
+        columns={columns}
+        rows={rows}
+        rowKey={(topic: Topic) => topic.name}
+        viewportHeight={240}
+        compact={false}
+        onRowClick={onRowClick}
+      />
+    ));
+    const row = container.querySelector<HTMLElement>(".kui-vtable__row")!;
+
+    for (const [gesture, init] of elsewhere) {
+      clickOn(row, init);
+      flush();
+      expect(onRowClick, gesture).not.toHaveBeenCalled();
+    }
+
+    clickOn(row);
     flush();
     expect(onRowClick).toHaveBeenCalledTimes(1);
     dispose();

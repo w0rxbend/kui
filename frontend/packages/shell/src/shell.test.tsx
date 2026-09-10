@@ -598,6 +598,23 @@ describe("which navigation entry is current", () => {
   });
 
   /**
+   * The tenth service's screen, which arrives with the same trap the ninth's did.
+   *
+   * Every test under the dashboard line is a `segments.includes`, so a section with no line of its
+   * own does not fail loudly: it falls through to the `clusters` fall-through below and comes back
+   * `"overview"`. The drawer would then highlight the dashboard while `@kui/feature-connect` drew
+   * the connector list, and the trail would read `prod-kyiv-01` alone — the trail for a different
+   * page. That is the exact defect the case above this one exists to record, and it is written here
+   * rather than discovered because the fall-through is silent.
+   */
+  it("marks the Connect screen as itself and not as the dashboard it falls through to", () => {
+    expect(currentFeatureId("/ui/clusters/prod/connect", "/ui")).toBe("connect");
+    expect(currentFeatureId("/kui/ui/clusters/prod/connect", "/kui/ui")).toBe("connect");
+    // And a dashboard tab spelled the same way is still the dashboard, as it is for alerts.
+    expect(currentFeatureId("/ui/clusters/prod/dashboard/connect", "/ui")).toBe("overview");
+  });
+
+  /**
    * The address the product opens on, which was marking the wrong entry.
    *
    * `/clusters/<id>/dashboard/overview` fell through to the `clusters` fall-through, so the drawer
@@ -651,6 +668,12 @@ describe("the top band's trail", () => {
        page. */
     const alerts = topCrumbs(clusters, "prod", "/ui/clusters/prod/alerts", "/ui", router);
     expect(alerts.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Alerts"]);
+
+    /* And the tenth's. The failure this asserts against is silent in both directions: a section
+       missing from the label table drops its crumb, and a section missing from `currentFeatureId`
+       draws the *dashboard's* trail over somebody else's page. */
+    const connect = topCrumbs(clusters, "prod", "/ui/clusters/prod/connect", "/ui", router);
+    expect(connect.map((crumb) => crumb.label)).toEqual(["prod-kyiv-01", "Connect"]);
   });
 });
 

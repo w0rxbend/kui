@@ -117,6 +117,51 @@ final class KafkaRecordSourceSuite extends KuiIOSuite {
     )
   }
 
+  test("a partition with nothing at or after the timestamp shows nothing, not its whole log") {
+    /*
+     * Ungated until now: `found.get(partition).flatten.getOrElse(0L)` in `startOffsets` left
+     * `./mill services.message.__.test` at 204/204 green, because the case above gives every partition an
+     * answer. `offsetsForTimes` returns no offset for a partition whose last record predates the moment
+     * asked about, and the method's own comment says why that must become the partition's *end* rather
+     * than zero: treating "no answer" as zero replays the entire partition from the beginning, which is
+     * the loudest possible wrong answer to "show me what happened after 10am".
+     */
+    val log = Map(
+      // Partition 0 stops before the timestamp; partition 1 runs past it.
+      FakeBrowseConsumer.partition(0, 4),
+      FakeBrowseConsumer.partition(1, 12)
+    )
+
+    browse(log, request(SeekMode.AtTimestamp(9L), Direction.Forward, limit = 50)).map { records =>
+      assertEquals(offsets(records).filter((partition, _) => partition == 0), Nil)
+      // And the other half, so the case cannot pass by refusing everything: the partition that does have
+      // records at or after the timestamp still shows them, and only them.
+      assertEquals(offsets(records).filter((partition, _) => partition == 1).map(_._2), List(9L, 10L, 11L))
+    }
+  }
+
+  test("a browse rides out the empty polls that follow an assignment, at the tuning KUI ships") {
+    /*
+     * Ungated until now: `emptyPollsBeforeEnd = 8` -> `0` in `BrowseTuning.Default` left the suite at
+     * 204/204 green, because every case in this file constructs its own tuning with `0` and no case
+     * reads the shipped value. `BrowseTuning`'s comment states the rule: the first polls after an
+     * assignment routinely return nothing while the consumer finds the leaders, and a browse that gave up
+     * there would report an empty topic that is not empty -- on a healthy cluster, at random.
+     */
+    val log = Map(FakeBrowseConsumer.partition(0, 5))
+
+    for {
+      closed <- Ref.of[IO, Boolean](false)
+      // The shipped tuning, not one this test chose. That is the whole point of the case.
+      source = new KafkaRecordSource[IO](
+        FakeBrowseConsumer.openingSilentAtFirst(log, closed, silentPolls = 5),
+        BrowseTuning.Default
+      )
+      read = request(SeekMode.Beginning, Direction.Forward, limit = 50)
+      records <- source.browse(read, budget).compile.toList
+    } yield assertEquals(offsets(records), List((0, 0L), (0, 1L), (0, 2L), (0, 3L), (0, 4L)))
+  }
+
   test("a per-partition seek browses the partitions it names and no others") {
     // `seekTo=0::1&seekTo=2::0` is a request about two partitions. Reading a third — from wherever its
     // own default happened to be — answers a question nobody asked with records the caller cannot place.

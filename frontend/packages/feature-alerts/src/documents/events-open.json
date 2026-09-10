@@ -1,129 +1,133 @@
 {
-  "events": {
-    "status": "ok",
-    "fetchedAt": "2026-03-04T09:41:00Z",
-    "data": {
-      "items": [
+  "events" : {
+    "status" : "ok",
+    "data" : {
+      "items" : [
         {
-          "id": "evt-1",
-          "severity": "critical",
-          "tone": "danger",
-          "category": "partition",
-          "glyph": "partition",
-          "openedAt": "2026-03-04T09:28:00Z",
-          "lastSeenAt": "2026-03-04T09:40:00Z",
-          "title": "2 partitions are offline",
-          "detail": "orders.payments.v2 p3, p7"
+          "id" : "evt-1",
+          "severity" : "critical",
+          "tone" : "danger",
+          "category" : "partition",
+          "glyph" : "partition",
+          "openedAt" : "2026-03-04T09:28:00Z",
+          "lastSeenAt" : "2026-03-04T09:40:00Z",
+          "title" : "2 partitions are offline",
+          "detail" : "orders.payments.v2 p3, p7",
+          "resolution" : null
         },
         {
-          "id": "evt-2",
-          "severity": "warning",
-          "tone": "warning",
-          "category": "storage",
-          "glyph": "storage",
-          "openedAt": "2026-03-04T08:11:00Z",
-          "lastSeenAt": "2026-03-04T09:40:00Z",
-          "title": "A log directory is past its warning threshold",
-          "detail": "broker-2 · /var/lib/kafka/data · 84% of 500.0 GB"
+          "id" : "evt-2",
+          "severity" : "warning",
+          "tone" : "warning",
+          "category" : "storage",
+          "glyph" : "storage",
+          "openedAt" : "2026-03-04T08:11:00Z",
+          "lastSeenAt" : "2026-03-04T09:40:00Z",
+          "title" : "A log directory is past its warning threshold",
+          "detail" : "broker-2 · /var/lib/kafka/data · 84% of 500.0 GB",
+          "resolution" : null
         },
         {
-          "id": "evt-3",
-          "severity": "warning",
-          "tone": "warning",
-          "category": "rebalance",
-          "glyph": "rebalance",
-          "openedAt": "2026-03-04T09:30:00Z",
-          "lastSeenAt": "2026-03-04T09:40:00Z",
-          "title": "analytics-indexer has been rebalancing for 11 minutes",
-          "detail": "12 members · threshold 5 minutes"
+          "id" : "evt-3",
+          "severity" : "warning",
+          "tone" : "warning",
+          "category" : "rebalance",
+          "glyph" : "rebalance",
+          "openedAt" : "2026-03-04T09:30:00Z",
+          "lastSeenAt" : "2026-03-04T09:40:00Z",
+          "title" : "analytics-indexer has been rebalancing for 11 minutes",
+          "detail" : "12 members · threshold 5 minutes",
+          "resolution" : null
         },
         {
-          "id": "evt-4",
-          "severity": "warning",
-          "tone": "success",
-          "category": "replication",
-          "glyph": "replication",
-          "openedAt": "2026-03-04T07:02:00Z",
-          "lastSeenAt": "2026-03-04T07:06:00Z",
-          "title": "inventory.stock.events p7 is back in sync",
-          "detail": "under-replicated for 4 minutes",
-          "resolution": {
-            "at": "2026-03-04T07:06:00Z",
-            "kind": "cleared"
+          "id" : "evt-4",
+          "severity" : "warning",
+          "tone" : "success",
+          "category" : "replication",
+          "glyph" : "replication",
+          "openedAt" : "2026-03-04T07:02:00Z",
+          "lastSeenAt" : "2026-03-04T07:06:00Z",
+          "title" : "inventory.stock.events p7 is back in sync",
+          "detail" : "under-replicated for 4 minutes",
+          "resolution" : {
+            "at" : "2026-03-04T07:06:00Z",
+            "kind" : "cleared",
+            "by" : null
           }
         },
         {
-          "id": "evt-5",
-          "severity": "critical",
-          "tone": "success",
-          "category": "partition",
-          "glyph": "partition",
-          "openedAt": "2026-03-03T22:15:00Z",
-          "lastSeenAt": "2026-03-03T22:49:00Z",
-          "title": "1 partition was offline",
-          "detail": "orders.payments.v2 p3",
-          "resolution": {
-            "at": "2026-03-03T22:49:00Z",
-            "kind": "acknowledged",
-            "by": "ops@example.test"
+          "id" : "evt-5",
+          "severity" : "critical",
+          "tone" : "success",
+          "category" : "partition",
+          "glyph" : "partition",
+          "openedAt" : "2026-03-03T22:15:00Z",
+          "lastSeenAt" : "2026-03-03T22:49:00Z",
+          "title" : "1 partition was offline",
+          "detail" : "orders.payments.v2 p3",
+          "resolution" : {
+            "at" : "2026-03-03T22:49:00Z",
+            "kind" : "acknowledged",
+            "by" : "ops@example.test"
           }
         }
       ],
-      "total": 5,
-      "openCount": 3,
-      "unreadCount": 2,
-      "lastReadAt": "2026-03-04T08:00:00Z",
-      "evaluatedAt": "2026-03-04T09:40:00Z",
-      "rules": [
+      "total" : 5,
+      "openCount" : 3,
+      "unreadCount" : 2,
+      "lastReadAt" : "2026-03-04T08:00:00Z",
+      "evaluatedAt" : "2026-03-04T09:40:00Z",
+      "rules" : [
         {
-          "rule": "offline-partitions",
-          "category": "partition",
-          "evaluation": {
-            "status": "ok",
-            "fetchedAt": "2026-03-04T09:40:00Z",
-            "data": {
-              "openEvents": 1,
-              "unmeasuredSubjects": 0
-            }
+          "rule" : "offline-partitions",
+          "category" : "partition",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 1,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-03-04T09:40:00.000Z"
           }
         },
         {
-          "rule": "under-replicated-partitions",
-          "category": "replication",
-          "evaluation": {
-            "status": "ok",
-            "fetchedAt": "2026-03-04T09:40:00Z",
-            "data": {
-              "openEvents": 0,
-              "unmeasuredSubjects": 0
-            }
+          "rule" : "under-replicated-partitions",
+          "category" : "replication",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 0,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-03-04T09:40:00.000Z"
           }
         },
         {
-          "rule": "stuck-rebalance",
-          "category": "rebalance",
-          "evaluation": {
-            "status": "ok",
-            "fetchedAt": "2026-03-04T09:40:00Z",
-            "data": {
-              "openEvents": 1,
-              "unmeasuredSubjects": 0
-            }
+          "rule" : "stuck-rebalance",
+          "category" : "rebalance",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 1,
+              "unmeasuredSubjects" : 0
+            },
+            "fetchedAt" : "2026-03-04T09:40:00.000Z"
           }
         },
         {
-          "rule": "log-directory-usage",
-          "category": "storage",
-          "evaluation": {
-            "status": "ok",
-            "fetchedAt": "2026-03-04T09:40:00Z",
-            "data": {
-              "openEvents": 1,
-              "unmeasuredSubjects": 2
-            }
+          "rule" : "log-directory-usage",
+          "category" : "storage",
+          "evaluation" : {
+            "status" : "ok",
+            "data" : {
+              "openEvents" : 1,
+              "unmeasuredSubjects" : 2
+            },
+            "fetchedAt" : "2026-03-04T09:40:00.000Z"
           }
         }
       ]
-    }
+    },
+    "fetchedAt" : "2026-03-04T09:41:00.000Z"
   }
 }

@@ -41,9 +41,14 @@ import kui.testkit.fakes.FakeStructuredLogger
   * Wave 4's verification found six rules decided in `MetricsWiring` that no suite executed, for one reason:
   * **nothing constructed `MetricsWiring`**. The scrape cadence, the call-timeout budget, the bulkhead width,
   * the retry count, the bucket step and the sample ceiling were all read from configuration, passed into
-  * something, and never observed. `ThroughputScrapeLoopSuite`'s own header admitted it assembled the
-  * collector "the way `MetricsWiring` assembles it" — by hand, in the test, which is the arrangement rather
-  * than the product. Every case below goes through `MetricsWiring` itself.
+  * something, and never observed. `BrokerScrapeLoopSuite`'s own header admitted it assembled the collector
+  * "the way `MetricsWiring` assembles it" — by hand, in the test, which is the arrangement rather than the
+  * product. Every case below goes through `MetricsWiring` itself.
+  *
+  * The suite was called `ThroughputScrapeLoopSuite` when that sentence was written, and its subject
+  * `ThroughputScrapeLoop`; both were renamed when the scrape stopped being about throughput alone. Wave 6
+  * corrected `MT-002`'s note in `docs/FEATURE_MATRIX.md:589-591` for exactly this and missed the copy
+  * here, which is the third time a renamed class has survived in prose that nothing compiles.
   *
   * ==Two seams, and why each is used where it is==
   *

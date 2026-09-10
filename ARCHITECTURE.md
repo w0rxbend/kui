@@ -151,17 +151,43 @@ Per-service specifics (what each `domain` module models; details in `docs/domain
 
 | Service | Key aggregates / value objects | Ports in `domain` | Adapters in `infrastructure` |
 | --- | --- | --- | --- |
-| cluster | `ClusterProfile` (config + resolved endpoints + security), `ClusterDescription`, `Broker`, `LogDir`, `ClusterFeature` set | `ClusterAdmin[F]`, `ClusterConfigStore[F]`, `ConnectivityProbe[F]` | kui-kafka admin adapter, Kafka `ConfigStore` adapter (file adapter for dev), probe clients |
-| topic | `Topic` (NonEmptyList[Partition], ISR ⊆ replicas), `TopicConfig`, `TopicAnalysis` | `TopicAdmin[F]`, `ClusterProfileSource[F]`, `TopicAnalysisPort[F]` | kui-kafka, cluster-service contract client, datasketches |
-| message | `BrowseRequest`, `SeekMode`, `PollingMode`, `OffsetRange`, `MaskingPolicy`, `TrackQuery` | `MessageBrowsePort[F]`, `SerdeRegistry[F]`, `MessageFilterPort[F]`, `ClusterProfileSource[F]` | fs2-kafka consumer/producer, kui-serde, kui-filter (CEL) |
-| consumer | `ConsumerGroup`, `Member`, `PartitionLag` (`Option[Lag]` + anomaly flags), `ResetSpec` | `GroupAdmin[F]`, `ClusterProfileSource[F]` | kui-kafka |
-| security | `AclBinding`, `AclFilter`, `ClientQuotaEntity`, `AclPreset` | `SecurityAdmin[F]`, `ClusterProfileSource[F]` | kui-kafka, fs2-data-csv |
+| cluster | `ClusterProfile` (config + resolved endpoints + security), `ClusterDescription`, `Broker`, `LogDir`, `ClusterFeature` set | `ClusterAdmin[F]`, `ClusterConfigStore[F]`, `ConnectivityProbe[F]`, `ClockPort[F]` | kui-kafka admin adapter, Kafka `ConfigStore` adapter (file adapter for dev), probe clients |
+| topic | `Topic` (NonEmptyList[Partition], ISR ⊆ replicas), `TopicConfig`, `TopicAnalysis` | `TopicAdmin[F]`, `TopicWriter[F]`, `ClusterProfiles[F]`, `ClockPort[F]` | kui-kafka, cluster-service contract client, datasketches |
+| message | `BrowseRequest`, `SeekMode`, `PollingMode`, `OffsetRange`, `MaskingPolicy`, `TrackQuery` | `ClusterProfileSource[F]`, `SerdeSource[F]`, `FilterSource[F]`, `CompiledFilter[F]`, `RecordDeleter[F]` | fs2-kafka consumer/producer, kui-serde, kui-filter (CEL) |
+| consumer | `ConsumerGroup`, `Member`, `PartitionLag` (`Option[Lag]` + anomaly flags), `ResetSpec` | `GroupAdminPort[F]` | kui-kafka |
+| security | `AclBinding`, `AclFilter`, `ClientQuotaEntity`, `AclPreset` | **not built**: there is no `services/security`, and this row is the intent | not built |
 | schema | `Subject`, `SchemaVersion`, `CompatibilityLevel` | `SchemaRegistryPort[F]` | own sttp client (ADR-014) |
-| connect | `ConnectCluster`, `Connector`, `Task`, `Plugin` | `ConnectPort[F]` | sttp client with 409 retry (ADR-037) |
-| ksql | `Statement`, `QueryResult` stream | `KsqlPort[F]` | sttp HTTP/2 `/query-stream` with `/query` fallback |
-| metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `BrokerMetricsScraper[F]`, `MetricsStore[F]`, `TopicSnapshotSource[F]`, `GroupSnapshotSource[F]` | JMX, Prometheus HTTP, contract clients |
-| alerts | `AlertEvent` (opened-at, severity, category, resolution), `ClusterFacts`, `AlertLimits` | `ClusterFactsPort[F]`, `AlertStore[F]`, `AcknowledgementSink[F]` | kui-kafka admin, in-memory event store |
-| identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `IdentityProviderPort[F]`, `OidcProviderPort[F]`, `SessionStore[F]`, `RolePolicySource[F]`, `AuditSink[F]` | UnboundID LDAP, nimbus OIDC, bcrypt users, in-memory/Kafka session and audit sinks |
+| connect | `ConnectCluster`, `Connector`, task, plugin | **not built** when this row was last checked: `services/connect` is M9's first service | sttp client with 409 retry (ADR-037) |
+| ksql | `Statement`, query-result stream | **not built**: `services/ksql` is M9's second service | sttp HTTP/2 `/query-stream` with `/query` fallback |
+| metrics | `MetricSnapshot`, `GraphDescription`, `PromQuery` | `MetricsSourcePort[F]` | Prometheus scrape and exposition, per-cluster source resolution, the bounded sample buffer |
+| alerts | `AlertEvent` (opened-at, severity, category, resolution), `ClusterFacts`, `AlertLimits` | `ClusterFactsPort[F]` | kui-kafka admin facts, in-memory event store, logging acknowledgement sink, configured profile source |
+| identity | `Principal`, `Session`, `Role`, `Subject`, `Permission` (from kui-security-core), `AuditRecord` | `UserDirectory[F]`, `PasswordHasher[F]` | UnboundID LDAP, nimbus OIDC, PBKDF2 users, in-memory/Kafka session and audit sinks |
+
+**A service's outbound ports are not all in `domain`, and the column above names only the ones that
+are.** A port whose subject is a *store* or another *process* rather than the domain is declared in
+`application`, where the use case that owns it lives: `services/alerts` is the worked example, with
+`AlertStore[F]` and `AcknowledgementSink[F]` in `services/alerts/application/` and only
+`ClusterFactsPort[F]` in `services/alerts/domain/`. Rule A1 is what forces the split — a `domain`
+module may depend on `libs/kernel` and cats-core and nothing else — so a port that needs to speak of
+anything wider cannot live there.
+
+The column was re-read against the tree in wave 7 and **six of the eight built services** named at
+least one identifier that is not a `trait` declared in that service's own `domain`: `topic`,
+`message`, `consumer`, `metrics`, `alerts` and `identity`. `cluster` and `schema` were correct.
+Three of the six named a port that is real and lives in `application` (`alerts`, `consumer`,
+`identity`); the rest named identifiers the tree declares nowhere — `TopicAnalysisPort[F]`,
+`MessageBrowsePort[F]`, `MessageFilterPort[F]`, `BrokerMetricsScraper[F]`, `MetricsStore[F]`,
+`TopicSnapshotSource[F]`, `GroupSnapshotSource[F]`, `IdentityProviderPort[F]` and
+`RolePolicySource[F]` — or named one that
+belongs to a library or to another service (`SerdeRegistry[F]` in `libs/serde`, `AuditSink[F]` in
+`libs/security-core`, `GroupAdmin[F]` in `libs/kafka`, `SessionStore[F]` in the gateway's own
+`application`). Nothing read this column, so it drifted for six milestones.
+
+`ArchitectureDocumentSuite` (in `services/gateway/api/test/`) reads this table off disk and fails
+when an identifier in the ports column is not a `trait` declared under that service's own
+`domain/src`, and when a built service has no row at all. A row for a service that does not exist
+yet says so in words and is checked no further; that exemption is the one hole in this gate and is
+deliberate, because the row is a plan rather than a description until the service lands.
 
 The gateway has `contract` (its own `/api/v1` endpoint definitions, so
 the frontend derives typed clients from them), `application` (aggregations, capability

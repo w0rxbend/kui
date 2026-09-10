@@ -46,6 +46,10 @@ import type {
  * dots, `success` is a *resolved* row and `primary` is an informational one that **no rule this
  * service ships opens**. A filter chip for a severity nothing can open is a chip that always
  * answers nothing, so there are two chips and not four.
+ *
+ * The argument is checked rather than left to this paragraph: `alertsRoute.test.tsx`'s "the
+ * severity filter offers one chip per severity this service opens events at, and no others" reads
+ * the rendered chip bar, so a third entry here draws a third chip and that case fails.
  */
 export const SEVERITIES = ["critical", "warning"] as const;
 
@@ -138,13 +142,13 @@ export function categoryWords(event: AlertEvent): string {
 }
 
 /**
- * How an event closed.
+ * How an event closed, and one row of the feed — both the kernel's.
  *
- * `cleared` and `acknowledged` are not the same fact and the wire keeps them apart deliberately:
- * the first is the cluster saying the condition stopped, the second is a person saying they know
- * about it. Collapsing them into a boolean answers *"is it fixed?"* with *"somebody looked at it"*.
+ * The feature renders the kernel's one decoded event and owns no second wire model. `cleared` and
+ * `acknowledged` are not the same fact and the wire keeps them apart deliberately: the first is the
+ * cluster saying the condition stopped, the second is a person saying they know about it.
+ * Collapsing them into a boolean answers *"is it fixed?"* with *"somebody looked at it"*.
  */
-/** The feature renders the kernel's one decoded event; it owns no second wire model. */
 export type AlertResolution = KernelAlertResolution;
 export type AlertEvent = KernelAlertEvent;
 
@@ -200,6 +204,12 @@ export const NO_OPEN_COUNT =
  * and is said in words; a count of zero over rules that have never run is not a count at all and
  * says so; a count that never arrived draws no pill and is explained in the caption. `0 open` over
  * a cluster nobody has looked at is the most reassuring possible way to be wrong.
+ *
+ * **The order of the first two guards is the rule, not an accident.** A feed with neither figure —
+ * no evaluation and no count — is a cluster nobody has looked at, and that is what it must say;
+ * checking the count first would answer such a feed with no pill at all, which reads as "there is
+ * simply nothing to show". The two guards are swapped in `alerts.test.tsx`'s "a feed carrying
+ * neither figure says the cluster has not been looked at, and not nothing".
  */
 export function openPill(feed: AlertsFeedPage): { text: string; tone: PillTone } | undefined {
   if (feed.evaluatedAt === undefined) return { text: "Not evaluated yet", tone: "neutral" };
@@ -215,6 +225,13 @@ export function openPill(feed: AlertsFeedPage): { text: string; tone: PillTone }
  * about *which* alert it is, and the browser does not know that; writing it anyway would be the
  * product asserting something nobody measured. So the count is stated and the aside is dropped,
  * which is SPEC §6.3 rule 3's own instruction for a state that is not the healthy one.
+ *
+ * **The first arm is this packet's owned rule.** Delete it and a cluster KUI has never evaluated
+ * reads *"Nothing is open. The bell is quiet."* at the top of its own Alerts screen, over an
+ * `openCount: 0` that measures nothing — the most reassuring possible rendering of the one thing
+ * nobody looked at, in the largest sentence on the page. `AlertsFeed`'s card is gated for that
+ * document; this line is the one above it, and the case that fails when it goes is
+ * `alertsRoute.test.tsx`'s "a cluster the rules have never run on is told so in the voice line".
  */
 export function feedVoice(feed: AlertsFeedPage): string {
   if (feed.evaluatedAt === undefined) return "KUI has not run its alert rules on this cluster yet.";
@@ -278,6 +295,12 @@ export function pageCaption(shown: number, held: number): string {
  * `AlertRuleReportDto`'s own words: *"`ok` with `openEvents: 0` is a measurement; `unavailable` is
  * the absence of one"*. This is the sentence for the second one, and it names the rule so that a
  * reader can tell which of the four is dark.
+ *
+ * `stale` is **not** one of them and is excluded beside `ok` for that reason: a stale evaluation
+ * carries a real figure that was measured, just not recently, and answering it with *"KUI could not
+ * evaluate…"* throws away a measurement and replaces it with a refusal. `RuleReports` draws the
+ * figure and captions it; `alerts.test.tsx`'s "a stale rule keeps the figure it measured and says
+ * it is not current" is what fails when this arm is dropped.
  */
 export function ruleRefusal(report: RuleReport): string | undefined {
   if (report.status === "ok" || report.status === "stale") return undefined;

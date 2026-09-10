@@ -169,8 +169,11 @@ object TopicWiring {
     * The fallback is logged loudly rather than being silent, because its consequence is invisible until a
     * second replica exists: a plan minted by one process is refused by the other, and the operator sees a
     * confirmation that will not confirm.
+    *
+    * `private[app]` so that `TopicWiringSuite` can assert both branches and the line each writes. Reaching
+    * them through `make` would need a broker; this module had no test source at all until then.
     */
-  private def signingKey[F[_]: Async](
+  private[app] def signingKey[F[_]: Async](
       configured: Option[Secret[String]],
       logger: StructuredLogger[F]
   ): F[Secret[Array[Byte]]] =

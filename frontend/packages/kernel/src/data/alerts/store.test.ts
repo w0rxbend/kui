@@ -67,21 +67,40 @@ function answering(value: unknown): Promise<ApiResult<unknown>> {
   return Promise.resolve<ApiResult<unknown>>({ ok: true, value });
 }
 
+/**
+ * A stream that behaves the way `../sse/stream.ts` does, including the two things a counter misses.
+ *
+ * Every `open()` produces a **new** handle with its own connection signal, and `close()` moves that
+ * handle to `closed / "closed by the client"` — which is what `SseTransport.close()` does, through
+ * `closeWith`. Both matter to this store: it releases one handle and opens another, and a fake that
+ * shared one signal across opens, or that counted `close()` without emitting anything, would let a
+ * store that kept following a released stream pass a case the transport fails.
+ */
 function fakeStream() {
-  const [connection, setConnection] = createSignal<SseConnection>(
-    { phase: "connecting" },
-    { ownedWrite: true },
-  );
   let subscriber: SseSubscriber<AlertChange> | undefined;
   let opens = 0;
   let closes = 0;
+  let live: { readonly handle: SseHandle; readonly set: (next: SseConnection) => void } | undefined;
 
-  const handle: SseHandle = {
-    connection,
-    close: () => {
-      closes += 1;
-    },
-    endMarker: () => undefined,
+  function openOne(): { handle: SseHandle; set: (next: SseConnection) => void } {
+    const [connection, setConnection] = createSignal<SseConnection>(
+      { phase: "connecting" },
+      { ownedWrite: true },
+    );
+    const handle: SseHandle = {
+      connection,
+      close: () => {
+        closes += 1;
+        setConnection({ phase: "closed", reason: "closed by the client" });
+      },
+      endMarker: () => undefined,
+    };
+    return { handle, set: setConnection };
+  }
+
+  const setConnection = (next: SseConnection): void => {
+    if (live === undefined) throw new Error("nothing is open");
+    live.set(next);
   };
 
   return {
@@ -97,8 +116,8 @@ function fakeStream() {
     open(next: SseSubscriber<AlertChange>): SseHandle {
       subscriber = next;
       opens += 1;
-      setConnection({ phase: "connecting" });
-      return handle;
+      live = openOne();
+      return live.handle;
     },
     /** Feeds a frame the way the wire does: as the text of one `data:` line. */
     send(frame: unknown): void {
@@ -340,6 +359,72 @@ describe("the alert feed store", () => {
     });
   });
 
+  it("does not read a resolution that carries no time as an event that ended", async () => {
+    /* Filed by W7-A3. `readResolution`'s own comment argues that "a resolution without a time
+       cannot establish that the condition ended" — and nothing asserted it. A resolution that
+       carried a `kind` and a `by` and no `at` would have been enough to make `isOpen` answer
+       false and the alerts screen's `resolved` filter hide a live event, and the mutation that
+       kept it (answering `{ at: "", kind, by }`) left all 452 kernel cases green.
+
+       An event the server has not said ended is open, and that is the direction the mistake has
+       to fall in: an open event drawn as resolved is one nobody goes and looks at. */
+    const timeless = decodeAlertFeed(
+      wireFeed({
+        items: [wireEvent({ id: "no-time", resolution: { kind: "acknowledged", by: "alice" } })],
+      }),
+    );
+    expect(timeless.ok).toBe(true);
+    expect(timeless.ok && timeless.value.items[0]?.resolution).toBeUndefined();
+
+    // Nor one whose instant is a word rather than an instant.
+    const nonsense = decodeAlertFeed(
+      wireFeed({
+        items: [wireEvent({ id: "bad-time", resolution: { at: "yesterday", kind: "cleared" } })],
+      }),
+    );
+    expect(nonsense.ok && nonsense.value.items[0]?.resolution).toBeUndefined();
+  });
+
+  it("refuses an instant that is not one, rather than carrying the server's word for a date", async () => {
+    /* Filed by W7-A3. `optionalInstant` parses before it accepts, and the whole decoder rests on
+       it: `openedAt` is required, so a row whose `openedAt` is unparseable must refuse the feed
+       rather than reach a screen that renders `new Date("last Tuesday")` as `Invalid Date` and
+       prints it beside a severity. Deleting the `Date.parse` check left all 452 cases green,
+       because every document in this file carries well-formed instants.
+
+       `lastReadAt` takes the same route and matters for a different reason: it is compared
+       lexically against `openedAt` to decide what this principal has read, and a value that is
+       not an RFC 3339 instant would mark rows read or unread by string order alone. */
+    const unparseable = decodeAlertFeed(
+      wireFeed({ items: [wireEvent({ id: "when", openedAt: "last Tuesday" })] }),
+    );
+    expect(unparseable.ok).toBe(false);
+    expect(!unparseable.ok && unparseable.cause).toContain("openedAt");
+
+    const marker = decodeAlertFeed(wireFeed({ lastReadAt: "soon" }));
+    expect(marker.ok && marker.value.lastReadAt).toBeUndefined();
+
+    // And a real instant still arrives in the server's own spelling, unreformatted.
+    const good = decodeAlertFeed(wireFeed({ lastReadAt: "2026-09-06T09:03:00Z" }));
+    expect(good.ok && good.value.lastReadAt).toBe("2026-09-06T09:03:00Z");
+  });
+
+  it("refuses a feed whose rules are not a list, rather than reporting no rules", async () => {
+    /* Filed by W7-A3. `RuleReports` draws nothing at all when `rules` is empty, and its whole
+       argument is that a feed drawn without the rule rows "looks identical whether four rules ran
+       and found nothing or whether one of them has been refused by an ACL all afternoon". So a
+       `rules` value this build cannot read has to refuse the document; silently answering `[]`
+       hides the one panel that says which of the two the reader is looking at. Neutering the
+       guard left all 452 cases green. */
+    const wrong = decodeAlertFeed(wireFeed({ rules: { partition: "ok" } }));
+    expect(wrong.ok).toBe(false);
+    expect(!wrong.ok && wrong.cause).toContain("rules");
+
+    // An absent `rules` key is still the ordinary case and is not a refusal.
+    const absent = decodeAlertFeed(wireFeed({ rules: undefined }));
+    expect(absent.ok && absent.value.rules).toEqual([]);
+  });
+
   it("says what the transport says about the connection, holding no second opinion", async () => {
     await createRoot(async (dispose) => {
       const world = harness();
@@ -434,6 +519,123 @@ describe("the alert feed store", () => {
       // A second stop changes nothing, and a stopped store opens nothing.
       world.alerts.stop();
       expect(world.stream.opens).toBe(1);
+      dispose();
+    });
+  });
+
+  it("says the teardown was its own, and stops following the stream it released", async () => {
+    await createRoot(async (dispose) => {
+      const world = harness();
+      world.alerts.start();
+      await world.settle();
+      world.stream.live();
+      expect(world.alerts.connection()).toEqual({ phase: "open" });
+
+      world.alerts.stop();
+      flush();
+      // The close is itself a connection event on the handle. What the store publishes is its own
+      // sentence about a deliberate teardown — the frame's connectivity banner reads this, and an
+      // operator told the feed went down when they navigated away goes looking for an outage.
+      const byTheClient = { phase: "closed", reason: "closed by the client" };
+      expect(world.alerts.connection()).toEqual(byTheClient);
+
+      // And a released handle is no longer followed: a transport retrying on a stream nobody is
+      // reading would otherwise repaint the banner as `reconnecting` on a store the shell has torn
+      // down. `releaseHandle()` holds that with two guards — clearing `handle` and disposing the
+      // watcher — and this line was measured against both: it goes red when they are removed
+      // together and green when either survives, because either is sufficient alone.
+      world.stream.reconnecting(4);
+      expect(world.alerts.connection()).toEqual(byTheClient);
+      dispose();
+    });
+  });
+
+  it("a completed read supersedes the count the frame carried", async () => {
+    await createRoot(async (dispose) => {
+      let served = 2;
+      const world = harness({ load: () => answering(body(wireFeed({ openCount: served }))) });
+      world.alerts.start();
+      await world.settle();
+      expect(world.alerts.openCount()).toBe(2);
+
+      // The frame lands first and moves the bell at once; that is the whole reason the service puts
+      // a count on it. Then the read it triggered answers with the server's settled figure — which
+      // here is neither the old count nor the one the frame guessed at.
+      served = 4;
+      world.stream.send(wireChange({ openCount: 9 }));
+      expect(world.alerts.openCount()).toBe(9);
+      await world.settle();
+
+      // The hint is a round trip's worth of head start and not a second source. Kept alive past the
+      // read, it wins over every later answer for the life of the tab: the bell draws 9 while the
+      // panel it opens lists the 4 the same store just decoded.
+      expect(world.alerts.openCount()).toBe(4);
+      expect(world.alerts.feed().kind).toBe("ready");
+      dispose();
+    });
+  });
+
+  it("a live count does not outlive the refusal that answered it", async () => {
+    await createRoot(async (dispose) => {
+      let refused = false;
+      const world = harness({
+        load: () =>
+          refused ? answering({ events: { status: "forbidden" } }) : answering(body(wireFeed())),
+      });
+      world.alerts.start();
+      await world.settle();
+      expect(world.alerts.openCount()).toBe(2);
+
+      // The principal loses the capability between one frame and the next read — a role change, or
+      // a cluster they no longer see. The frame still arrives and still carries a number.
+      refused = true;
+      world.stream.send(wireChange({ openCount: 9 }));
+      await world.settle();
+
+      // A bell reading 9 over "You do not have permission to see this cluster's alerts" is two
+      // answers from one store, and the more confident of them is the wrong one.
+      expect(world.alerts.feed().kind).toBe("forbidden");
+      expect(world.alerts.openCount()).toBeNull();
+      dispose();
+    });
+  });
+
+  it("answers unknown for a count the rules have never evaluated", async () => {
+    await createRoot(async (dispose) => {
+      const world = harness({
+        load: () => answering(body(wireFeed({ openCount: 7, evaluatedAt: null }))),
+      });
+      world.alerts.start();
+      await world.settle();
+
+      // `evaluatedAt` absent means the rules have not run against this cluster here — after a
+      // restart, or before the first pass. Whatever `openCount` says beside that is not a
+      // measurement, and the bell must not draw it. The rows are still real and still shown.
+      expect(world.alerts.feed().kind).toBe("ready");
+      expect(world.alerts.events()).toHaveLength(1);
+      expect(world.alerts.openCount()).toBeNull();
+      dispose();
+    });
+  });
+
+  it("a refresh issued after stop() is not applied", async () => {
+    await createRoot(async (dispose) => {
+      let served = 2;
+      const world = harness({ load: () => answering(body(wireFeed({ openCount: served }))) });
+      world.alerts.start();
+      await world.settle();
+      expect(world.alerts.openCount()).toBe(2);
+
+      // A Retry click landing in the same tick the frame unmounts. `stop()` raises the episode, so
+      // the read this issues matches its own episode and only `stopped` can refuse it — which is
+      // why that clause is not the redundant half of the guard it looks like.
+      world.alerts.stop();
+      served = 9;
+      world.alerts.refresh();
+      await world.settle();
+
+      expect(world.reads).toEqual([false, false]);
+      expect(world.alerts.openCount()).toBe(2);
       dispose();
     });
   });
@@ -601,7 +803,7 @@ describe("the alert feed store", () => {
   });
 
   it("names the section key and the rows the milestone will be closed against", () => {
-    // `docs/plan/ROADMAP.md:470-474` closes M8 with
+    // M8's exit criterion in `docs/plan/ROADMAP.md` closes the milestone with
     // `jq -e '.events.status == "ok" and (.events.data.items | length) > 0'` and
     // `jq '.events.data.openCount'`, and `AlertDtos.scala` writes exactly those three. A rename on
     // either side has to break something before it reaches a released build; this is the something.

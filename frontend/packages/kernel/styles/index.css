@@ -153,5 +153,20 @@
  * the only place that can name it. */
 @import "../../feature-alerts/styles/80-alerts.css";
 
-/* Kafka Connect and ksqlDB. No service behind either; see `29-connect-ksql.css`. */
+/* The kernel's Connect and ksqlDB primitives: `ConnectorCard`, `TaskBar` and `KsqlWorkspace`. They
+ * were written before either service existed and keep their place in the order for the reason at
+ * the top of this file — `services/connect` arriving does not make this a screen sheet. */
 @import "./29-connect-ksql.css";
+
+/* The Kafka Connect screen (M9), and everything *around* the connector card: the failure reason,
+ * the refusal sentence, and the panel for a connector whose tasks the worker would not describe.
+ * After `29-connect-ksql.css` deliberately — that sheet styles the card this screen composes, and a
+ * screen must be able to adjust a primitive inside itself without winning a specificity war, which
+ * is the fourth rule at the top of this file. Its own class names are prefixed `.kui-connect__` and
+ * `.kui-connect-`, so it restyles nothing above it either way.
+ *
+ * The file is `@kui/feature-connect`'s and this line is the kernel's, for the same reason the
+ * alerts line above is: `build-tests`' `CssReferences` requires every stylesheet on disk to be
+ * named here exactly once, and this index is the only place that can name it. Two packets, one
+ * line each. */
+@import "../../feature-connect/styles/81-connect.css";

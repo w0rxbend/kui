@@ -74,7 +74,7 @@ component that is built, tested, green and wired into nothing. `MS-007` (the CEL
 state today. They are marked `IMPLEMENTING`, never `COMPLETE`, because what they need is wiring
 rather than a new implementation.
 
-<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: state-total, capability-rows, out-of-scope-rows, in-scope-delivered, delivered-percent -->
+<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: state-total, capability-rows, out-of-scope-rows, in-scope-delivered, delivered-percent, residue -->
 **Counts as of the 2026-09-07 wave-6 recount** (189 capability rows): 70 `COMPLETE`, 18 `REVIEW`,
 8 `IMPLEMENTING`, 1 `SERVICE DONE, NO UI`, 2 `PARTIAL`, 79 `RESEARCHING` (not started),
 7 `DEFERRED`, 4 `REJECTED`, and no `BLOCKED` row. Excluding the 11 deferred and rejected rows,
@@ -589,6 +589,22 @@ coordinator's own topic list, and `CL-004`, whose five metrics cards draw agains
 from this tree. `MT-002`'s note was corrected without a state change: it named
 `PrometheusThroughputScrape` and `ThroughputScrapeLoop`, and the tree has
 `PrometheusBrokerScrape.scala` and `BrokerScrapeLoop.scala`.
+
+**A record of the wave-7 pass, 2026-09-10:** 189 rows, of which 79 `RESEARCHING`, 70 `COMPLETE`,
+18 `REVIEW`, 8 `IMPLEMENTING`, 2 `PARTIAL`, 1 `SERVICE DONE, NO UI`, 7 `DEFERRED`, 4 `REJECTED`, and
+no `BLOCKED` row. **No row moved, and the reason is the standard this file sets rather than a
+shortage of work.** Wave 7 shipped `services/connect` — the tenth service, its endpoints, its
+container, its gateway routing and a `feature-connect` package — which is the read half of `KC-001`,
+`KC-002`, `KC-005` and `KC-006`. Every one of those rows is `RESEARCHING`, and this file's own rule
+is that a row is set *by driving the running application*, not by reading a packet's report: the
+pass that would move them needs the quickstart stack built from this tree with a Connect worker in
+it, and this pass did not run one. The four rows are named here so that the next pass has a list
+rather than a search, and so that "no row moved" is a measurement with a scope on it and not a
+claim that nothing shipped. The two documents this pass *did* re-derive are
+`docs/api/openapi.json` and `docs/api/openapi.browser.json`, which went from 57 paths, 68
+operations and 154 schemas to **61 paths, 72 operations and 156 schemas**; the figures published
+about them in ADR-048 and `frontend/packages/api/README.md` moved with them and are compared by
+`./scripts/feature-matrix-check.sh`.
 
 Every P0 and P1 row has a milestone. After editing rows, run the checker rather than recounting by
 hand:

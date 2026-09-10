@@ -97,4 +97,90 @@ test.describe("the shell", () => {
     await expect(bell).toHaveAttribute("aria-label", new RegExp(`Notifications, ${open} open`));
     await expect(bell.locator(".kui-bell__badge")).toHaveText(open > 9 ? "9+" : String(open));
   });
+
+  /**
+   * The other half of M8, and the half no gate in this repository has ever covered: the **stream**.
+   *
+   * `services/alerts` publishes a change frame when an event is acknowledged, the gateway relays it
+   * as ADR-035 SSE, and the kernel store takes the count off the frame and re-reads the feed. Every
+   * one of those three has unit cases. What none of them can establish is that they are joined:
+   * `ContractRouting.derive` decodes and re-encodes JSON and therefore cannot carry a stream at
+   * all, so the relay is hand-written and separate — and a contract entry with a green suite looks
+   * exactly like a routed stream, which is how wave 6 shipped one that answered 404 through the
+   * gateway with every suite passing.
+   *
+   * So the assertion is a browser watching a number change **with no navigation**: the page is
+   * stamped before the acknowledgement and the stamp is checked afterwards, because a bell that
+   * came back right after a reload proves only that the *feed* is readable, which the case above
+   * already covers.
+   *
+   * Acknowledging closes the event (`InMemoryAlertStore.acknowledge` resolves it as
+   * `Acknowledged`), so the open count falls by one. It is done over the API rather than through
+   * `@kui/feature-alerts`' own control, so that a failure here is a failure of the stream and not
+   * of a button in another package.
+   *
+   * **Skipped, with the reason said out loud, on a deployment with nothing open.** The seeded event
+   * comes from setting `diskUsedWarningPercent: 1` in the quickstart configuration; with the
+   * shipped threshold the feed is legitimately empty and there is nothing to acknowledge. A silent
+   * skip is what let three of `alerts.spec.ts`'s four cases pass while asserting nothing.
+   */
+  test("acknowledging an open event moves the bell, with no reload", async ({ page, api }) => {
+    const body = (await api.get(`/api/v1/clusters/${CLUSTER}/alerts/events`)) as {
+      events?: {
+        status?: string;
+        data?: {
+          openCount?: number | null;
+          items?: readonly { id?: string; resolution?: unknown }[];
+        };
+      };
+    };
+    const section = body.events;
+    const open = section?.data?.openCount;
+    const unresolved = (section?.data?.items ?? []).filter(
+      (row) =>
+        typeof row.id === "string" && (row.resolution === null || row.resolution === undefined),
+    );
+
+    test.skip(
+      (section?.status !== "ok" && section?.status !== "stale") ||
+        typeof open !== "number" ||
+        open < 1 ||
+        unresolved.length === 0,
+      "this deployment's alerts feed holds no open event, so there is nothing to acknowledge; " +
+        "seed one with diskUsedWarningPercent: 1 in the quickstart configuration",
+    );
+
+    await page.goto(`/ui/clusters/${CLUSTER}/dashboard/overview`);
+    const bell = page.getByTestId("notifications");
+    await expect(bell).toHaveAttribute("aria-label", new RegExp(`Notifications, ${open} open`));
+
+    /* The stamp. A reload replaces the window, so this value not surviving is exactly the thing
+       that would make the assertion below meaningless. */
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>)["__kuiStreamWitness"] = "before";
+    });
+
+    const eventId = unresolved[0]!.id!;
+    await api.post(
+      `/api/v1/clusters/${CLUSTER}/alerts/events/${encodeURIComponent(eventId)}/acknowledgement`,
+    );
+
+    const after = (open as number) - 1;
+    /* `toHaveAttribute` retries, which is what lets this wait for the frame rather than sleep for
+       it. If the relay is not routed the bell simply never moves and this fails on its timeout —
+       the symptom the 404 stream had, seen from the browser. */
+    await expect(bell).toHaveAttribute(
+      "aria-label",
+      after === 0
+        ? "Notifications, no open alerts"
+        : new RegExp(`Notifications, ${after} open`),
+    );
+
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>)["__kuiStreamWitness"],
+      ),
+      "the page reloaded, so this proves the feed is readable and says nothing about the stream",
+    ).toBe("before");
+  });
 });

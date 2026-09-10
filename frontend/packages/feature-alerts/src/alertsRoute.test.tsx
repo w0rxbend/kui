@@ -31,11 +31,24 @@ import {
 import { Actions, ErrorCodes, type KuiApiClient } from "@kui/api";
 
 import { mount, findViolations, describeViolations, testContext } from "./testing.js";
-import Alerts, { ACKNOWLEDGEMENT_PATH, EVENTS_PATH } from "./index.jsx";
+import Alerts, { ACKNOWLEDGEMENT_PATH, SEVERITIES } from "./index.jsx";
 import openDocument from "./documents/events-open.json" with { type: "json" };
 import notConfiguredDocument from "./documents/events-not-configured.json" with { type: "json" };
+import neverEvaluatedDocument from "./documents/events-never-evaluated.json" with { type: "json" };
 
 const BASE = "/ui";
+
+/**
+ * The feed's address, spelled out here because this file is the harness and not the product.
+ *
+ * The read that fills this screen is the **shell's**: `packages/shell/src/App.tsx` builds one
+ * `createAlerts` store for the whole application against `packages/shell/src/data/alerts.ts`'s
+ * `ALERTS_FEED_PATH`, so that the bell in the chrome and the card here cannot disagree about how
+ * many alerts are open. `open()` below stands in for that wiring, so it spells the address the way
+ * the shell does rather than importing a constant this package would then be exporting for no
+ * product caller — which is what it did until wave 7.
+ */
+const EVENTS_PATH = "/api/v1/clusters/{clusterId}/alerts/events";
 
 /** Solid batches writes onto a microtask; a router navigation takes a couple of turns to settle. */
 async function settle(times = 8): Promise<void> {
@@ -149,6 +162,32 @@ function open(
   return mount(Host);
 }
 
+/**
+ * The same default export, at a path that carries no `clusterId`.
+ *
+ * The route reads the cluster off the address, so "no cluster is selected" is a real address, not
+ * a prop nobody passes: the shell mounts this feature under a cluster, and a bookmark, a sign-out,
+ * or a cluster that has been removed lands a reader on the feature with nothing to read.
+ */
+function openWithoutCluster(api: KuiApiClient): {
+  readonly container: HTMLElement;
+  readonly dispose: () => void;
+} {
+  const history = memoryHistory(`${BASE}/alerts`);
+  const Router = createRouter({
+    routes: [{ path: "/alerts", component: Alerts }],
+    base: BASE,
+    history,
+    scrollRestoration: false,
+  });
+  const Host = () => (
+    <KuiProvider value={testContext(api)}>
+      <Router />
+    </KuiProvider>
+  );
+  return mount(Host);
+}
+
 function rows(container: HTMLElement): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="alert-row"]')];
 }
@@ -182,10 +221,17 @@ describe("the alerts route", () => {
       path: "/api/v1/clusters/{clusterId}/alerts/events",
       params: { clusterId: "quickstart" },
       /*
-       * And no `markRead`. The endpoint defaults it to false and its description says why: *"so a
-       * card polling the feed does not clear somebody's bell"*. This screen polls, so a `true` here
-       * would empty the bell of anybody who left a tab open on it — and marking read is the bell's
-       * own control, in the shell's chrome.
+       * And `markRead: false`. The endpoint defaults it to false and its description says why:
+       * *"so a card polling the feed does not clear somebody's bell"*.
+       *
+       * This screen does **not** poll — there is no interval in this package or in the store, and
+       * `useQuery` is given none — and the sentence that said it did was wrong for two waves. The
+       * reason to send `false` is the one that survives: this read is re-issued by things the
+       * reader did not do. Every frame on the alerts stream makes the store re-read the feed, and
+       * so does every successful acknowledgement, so a `true` here would clear the unread marker of
+       * somebody who left a tab open at the moment an alert *opened* — the bell going quiet exactly
+       * when it should have rung. `unreadCount` is per-principal, and marking read is a deliberate
+       * act with its own control, `markAllRead()`, beside the bell in the shell's chrome.
        */
       query: { markRead: false },
     });
@@ -223,6 +269,80 @@ describe("the alerts route", () => {
     expect(
       container.querySelector('[data-testid="alerts-open-count"]')?.textContent,
     ).toContain("3 open");
+    dispose();
+  });
+
+  /**
+   * **This packet's owned rule.** The voice line over a cluster nobody has looked at.
+   *
+   * `feedVoice`'s first arm is the one that separates *"the rules ran here and opened nothing"*
+   * from *"the rules have never run here"*, and it is the only thing between an unevaluated
+   * cluster and the sentence "Nothing is open. The bell is quiet." printed in the largest type on
+   * its own Alerts screen — over an `openCount: 0` that measures nothing at all.
+   *
+   * The card below the header was already gated for this document; the `PageHeader` above it was
+   * not, because no case mounted the route over an unevaluated feed. Delete that arm and this case
+   * is what fails.
+   *
+   * The whole route is mounted rather than `feedVoice` called, for the reason wave 5's
+   * consumer-group control taught: a function that returns the right sentence is worth nothing if
+   * nothing puts it on the screen. `voiceOf` decides whether the line is drawn at all, and it is
+   * between the store and the header.
+   */
+  it("a cluster the rules have never run on is told so in the voice line", async () => {
+    const client = stub();
+    client.answerWith(neverEvaluatedDocument);
+    const { container, dispose } = open("unevaluated-cluster", client.api);
+    await settle();
+
+    const voice = container.querySelector(".kui-page-head__voice");
+    expect(voice?.textContent).toBe("KUI has not run its alert rules on this cluster yet.");
+    /* The two sentences this must never be. Both are about a cluster somebody has checked, and this
+       one has not been: "nothing is open" is a claim about the cluster, and "0 open alerts" is a
+       count of a thing nobody counted. */
+    expect(container.textContent).not.toContain("Nothing is open");
+    expect(container.textContent).not.toContain("open alerts");
+    // And the card underneath agrees with the header, which is the point of one store.
+    expect(
+      container.querySelector('[data-testid="alerts-open-count"]')?.textContent,
+    ).toContain("Not evaluated yet");
+    dispose();
+  });
+
+  /**
+   * The severity chips, against the list they are built from.
+   *
+   * `SEVERITIES` is two entries and `model.ts` spends two paragraphs arguing why: of §3.8's four
+   * dots, `success` is a *resolved* row and `primary` is an informational one that **no rule this
+   * service ships opens**, so a third chip is a control that can only ever answer nothing. Nothing
+   * checked the argument — the list could gain `"info"` with every case in the workspace green —
+   * and the chip bar is where it is visible, so the chip bar is what this reads.
+   *
+   * The labels are written out rather than mapped from `SEVERITIES` through `severityChip`: a case
+   * that built its expectation from the same list the product built the chips from would assert
+   * that a list equals itself, and would stay green for every one of the mutations that matter.
+   */
+  it("the severity filter offers one chip per severity this service opens events at, and no others", async () => {
+    const client = stub();
+    const { container, dispose } = open("chip-cluster", client.api);
+    await settle();
+
+    const bar = container.querySelector('[data-testid="alerts-severity-filter"]');
+    const labels = [...(bar?.querySelectorAll("button") ?? [])].map((chip) =>
+      (chip.textContent ?? "").trim(),
+    );
+    expect(labels).toEqual(["All severities", "Critical", "Warning"]);
+    // The list behind them, said once, so that the failure names the cause rather than the symptom.
+    expect([...SEVERITIES]).toEqual(["critical", "warning"]);
+
+    // And each chip filters to a non-empty set on this document, which is what "a chip that can
+    // never match a row" would break: five events, two critical and three warning.
+    const critical = [...(bar?.querySelectorAll("button") ?? [])].find(
+      (chip) => (chip.textContent ?? "").trim() === "Critical",
+    );
+    critical?.click();
+    await settle();
+    expect(rows(container).length).toBeGreaterThan(0);
     dispose();
   });
 
@@ -380,6 +500,61 @@ describe("the alerts route", () => {
     // The heading stays: a bookmark has to land somewhere, and the row that vanishes is the
     // navigation's, which is the shell's to draw.
     expect(container.querySelector("h1")?.textContent).toBe("Alerts");
+    dispose();
+  });
+
+  /**
+   * The rules panel, on the route.
+   *
+   * `RuleReports` has its own cases over a document, and they are worth nothing if the screen hands
+   * it the wrong list: `reports={[]}` draws no panel at all, and a screen with no "What KUI
+   * checked" on it looks exactly like a screen whose service reported no rules. That is the seam this case
+   * covers and no case did — the panel is the answer to the question an empty feed raises, so the
+   * screen losing it is the failure that matters most on the day nothing is open.
+   */
+  it("hands the rules panel the reports the feed carried, and not an empty list", async () => {
+    const client = stub();
+    const { container, dispose } = open("rules-cluster", client.api);
+    await settle();
+
+    const named = [...container.querySelectorAll<HTMLElement>('[data-testid="alert-rule"]')].map(
+      (row) => row.dataset["rule"],
+    );
+    // The four rules `events-open.json` carries, in the order the document lists them.
+    expect(named).toEqual([
+      "offline-partitions",
+      "under-replicated-partitions",
+      "stuck-rebalance",
+      "log-directory-usage",
+    ]);
+    expect(container.querySelector('[data-testid="alerts-rules"]')).not.toBeNull();
+    dispose();
+  });
+
+  /**
+   * The address with no cluster on it.
+   *
+   * Reachable by a bookmark, by a sign-out, and by a cluster being removed from the configuration
+   * while somebody has its Alerts screen open. Nothing mounted this branch, so the sentence it
+   * draws and the way out of it were both unasserted: a screen that said nothing here would leave
+   * a reader on an empty page with no explanation and no link, which is the one state a router can produce
+   * that no amount of care in the feed can rescue.
+   *
+   * And no read is issued, because there is no cluster to read.
+   */
+  it("says which cluster is missing rather than drawing an empty feed", async () => {
+    const client = stub();
+    const { container, dispose } = openWithoutCluster(client.api);
+    await settle();
+
+    expect(container.textContent).toContain("No cluster is selected");
+    const away = container.querySelector("a");
+    expect(away?.getAttribute("href")).toBe("/ui/clusters");
+    expect(away?.textContent).toBe("Choose a cluster");
+    // No card, no rules panel, and nothing asked of the API.
+    expect(container.querySelector('[data-testid="alerts-feed"]')).toBeNull();
+    expect(container.querySelector('[data-testid="alerts-rules"]')).toBeNull();
+    expect(client.calls).toHaveLength(0);
     dispose();
   });
 

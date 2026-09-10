@@ -1,0 +1,113 @@
+{
+  "connectors" : {
+    "status" : "ok",
+    "data" : {
+      "workers" : [
+        {
+          "connect" : "payments",
+          "connectors" : {
+            "status" : "ok",
+            "data" : {
+              "items" : [
+                {
+                  "connect" : "payments",
+                  "name" : "archive-sink",
+                  "kind" : "sink",
+                  "state" : "PAUSED",
+                  "workerId" : "10.0.0.1:8083",
+                  "reason" : null,
+                  "failed" : false,
+                  "runningTasks" : 0,
+                  "taskCount" : 1,
+                  "tasks" : [
+                    {
+                      "id" : 0,
+                      "state" : "PAUSED",
+                      "workerId" : "10.0.0.1:8083",
+                      "reason" : null,
+                      "trace" : null
+                    }
+                  ]
+                },
+                {
+                  "connect" : "payments",
+                  "name" : "elastic-sink",
+                  "kind" : "sink",
+                  "state" : "RUNNING",
+                  "workerId" : "10.0.0.1:8083",
+                  "reason" : "org.apache.kafka.connect.errors.ConnectException: connection refused to es-01:9200",
+                  "failed" : true,
+                  "runningTasks" : 1,
+                  "taskCount" : 2,
+                  "tasks" : [
+                    {
+                      "id" : 0,
+                      "state" : "RUNNING",
+                      "workerId" : "10.0.0.1:8083",
+                      "reason" : null,
+                      "trace" : null
+                    },
+                    {
+                      "id" : 1,
+                      "state" : "FAILED",
+                      "workerId" : "10.0.0.2:8083",
+                      "reason" : "org.apache.kafka.connect.errors.ConnectException: connection refused to es-01:9200",
+                      "trace" : "org.apache.kafka.connect.errors.ConnectException: connection refused to es-01:9200\n\tat org.apache.kafka.connect.runtime.WorkerSinkTask.deliverMessages(WorkerSinkTask.java:586)\n\tat org.apache.kafka.connect.runtime.WorkerSinkTask.poll(WorkerSinkTask.java:329)"
+                    }
+                  ]
+                },
+                {
+                  "connect" : "payments",
+                  "name" : "orders-source",
+                  "kind" : "source",
+                  "state" : "RUNNING",
+                  "workerId" : "10.0.0.1:8083",
+                  "reason" : null,
+                  "failed" : false,
+                  "runningTasks" : 3,
+                  "taskCount" : 3,
+                  "tasks" : [
+                    {
+                      "id" : 0,
+                      "state" : "RUNNING",
+                      "workerId" : "10.0.0.1:8083",
+                      "reason" : null,
+                      "trace" : null
+                    },
+                    {
+                      "id" : 1,
+                      "state" : "RUNNING",
+                      "workerId" : "10.0.0.2:8083",
+                      "reason" : null,
+                      "trace" : null
+                    },
+                    {
+                      "id" : 2,
+                      "state" : "RUNNING",
+                      "workerId" : "10.0.0.2:8083",
+                      "reason" : null,
+                      "trace" : null
+                    }
+                  ]
+                }
+              ],
+              "unreadable" : [
+              ]
+            },
+            "fetchedAt" : "2026-09-03T10:11:12.000Z"
+          }
+        },
+        {
+          "connect" : "analytics",
+          "connectors" : {
+            "status" : "unavailable",
+            "reason" : "STARTING",
+            "message" : "the Kafka Connect cluster 'analytics' is rebalancing and cannot answer yet: Cannot complete request momentarily due to stale configuration (typically caused by a concurrent config change)",
+            "since" : "2026-09-03T10:11:12.000Z"
+          }
+        }
+      ]
+    },
+    "fetchedAt" : "2026-09-03T10:11:12.000Z"
+  }
+}

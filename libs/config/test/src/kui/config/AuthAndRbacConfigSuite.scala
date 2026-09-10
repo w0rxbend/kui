@@ -380,4 +380,84 @@ final class AuthAndRbacConfigSuite extends KuiSuite {
     )
     assert(found.exists(_.key == "kui.rbac.roles.0.permissions"), found.map(_.key).toString)
   }
+
+  // -----------------------------------------------------------------------------------------------
+  // A role on a cluster that is not here
+  // -----------------------------------------------------------------------------------------------
+
+  /** One configured cluster and one role, with the role's cluster list left to the caller.
+    *
+    * PLAINTEXT and one bootstrap address, because nothing here opens a socket: the cluster exists so that
+    * `kui.clusters[]` is non-empty and has an id worth naming or mis-naming.
+    */
+  private def oneClusterAndARoleOn(named: String, extra: String = ""): String =
+    s"""kui:
+       |  clusters:
+       |    - name: "Local"
+       |      id: "local"
+       |      bootstrapServers:
+       |        - "kafka:9092"
+       |$extra
+       |  rbac:
+       |    roles:
+       |      - name: developers
+       |        clusters: [$named]
+       |        subjects:
+       |          - provider: FORM
+       |            kind: group
+       |            value: devs
+       |        permissions:
+       |          - resource: TOPIC
+       |            value: ".*"
+       |            actions: [VIEW]
+       |""".stripMargin
+
+  test("a role on a cluster this file does not configure is refused, and the message names both") {
+    // THE DEMONSTRATION THIS PREVENTS IS THE ONE IN `kui-quickstart-auth.yaml`. Both of its roles named a
+    // cluster; if either id were wrong the file still loaded, both accounts still signed in, and every
+    // screen was empty -- because `RbacPolicy.held` matches a role's cluster ids against the registry's and
+    // a role that matches nothing grants nothing. That file's own comment claimed this suite caught it,
+    // which it did not until this case existed.
+    val found = problems(oneClusterAndARoleOn("no-such-cluster"))
+
+    assertEquals(found.map(_.key), List("kui.rbac.roles.0.clusters"))
+    assert(
+      found.head.problem.contains("'no-such-cluster'"),
+      s"the message must name the id that is wrong: ${found.head.problem}"
+    )
+    assert(
+      found.head.problem.contains("local"),
+      s"and the ids that are right, or the operator cannot see the typo: ${found.head.problem}"
+    )
+  }
+
+  test("a role on a cluster this file does configure loads, and keeps the id it named") {
+    // The other half, and the reason the case above cannot be satisfied by refusing every role: the shipped
+    // `kui-quickstart-auth.yaml` is exactly this shape and has to keep loading.
+    val policy = loaded(oneClusterAndARoleOn("local")).rbac
+
+    assertEquals(policy.roles.head.clusters, Set(ClusterId.unsafe("local")))
+  }
+
+  test("a file that configures no cluster at all says nothing about a role's clusters") {
+    // `kui.clusters: []` is not an empty set of clusters, it is a deployment that registered none *here* --
+    // the M0 default and the Compose gateway's own `kui.yaml`. There is no set to compare against, so the
+    // rule stays quiet rather than refusing a file it cannot judge. Every other case in this section relies
+    // on it: they all write `clusters: [local]` on a role with no `kui.clusters` anywhere.
+    val policy = loaded(ValidRoles).rbac
+
+    assertEquals(policy.roles.head.clusters, Set(ClusterId.unsafe("local")))
+  }
+
+  test("a deployment with a metadata store may name a cluster this file has never heard of") {
+    // ADR-036 as amended by ADR-042: the store's records overlay `kui.clusters[]` at run time, so an
+    // operator who registered `prod-3` through the UI and wrote a role for it is correct, and this file
+    // cannot see the cluster to agree. Refusing there would refuse a working deployment at start-up.
+    //
+    // A directory store rather than a Kafka one, because `checkStoreRules` demands an encryption key
+    // alongside `kui.store.kafka.bootstrapServers` and that is a different rule being exercised.
+    val stored = loaded(oneClusterAndARoleOn("prod-3", extra = "  store:\n    dir: \"/var/lib/kui\"")).rbac
+
+    assertEquals(stored.roles.head.clusters, Set(ClusterId.unsafe("prod-3")))
+  }
 }

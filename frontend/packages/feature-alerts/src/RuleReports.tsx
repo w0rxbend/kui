@@ -58,10 +58,14 @@ export function RuleReports(props: RuleReportsProps): JSX.Element {
                           <span class="kui-alerts-rules__unmeasured">{sentence()}</span>
                         )}
                       </Show>
-                      <Show when={report.status === "stale" ? report.reason : undefined}>
-                        {(reason) => (
-                          <span class="kui-alerts-rules__refusal">{`Last known reading: ${reason()}`}</span>
-                        )}
+                      {/* A stale evaluation always says it is stale, whether or not a reason came
+                          with it. `Section.Stale` puts a bare `reason` **code** on the wire and no
+                          `message` (`libs/contracts-core/.../Section.scala`), and the kernel's
+                          `readRule` reads `message`, so for a document this service actually emits
+                          the reason is `undefined` — a `Show` on the reason alone would draw a
+                          figure from 05:00 with nothing to say it was not measured just now. */}
+                      <Show when={report.status === "stale"}>
+                        <span class="kui-alerts-rules__refusal">{staleWords(report.reason)}</span>
                       </Show>
                     </>
                   }
@@ -98,7 +102,21 @@ function openWords(openEvents: number | null): string {
   return openEvents === 1 ? "1 open event." : `${openEvents} open events.`;
 }
 
-/** The subjects a rule could not judge, or nothing when there were none to mention. */
+/** What a figure that has not been refreshed says about itself. */
+function staleWords(reason: string | undefined): string {
+  return reason === undefined
+    ? "This is the last reading KUI took; the rule has not been re-evaluated since."
+    : `Last known reading: ${reason}`;
+}
+
+/**
+ * The subjects a rule could not judge, or nothing when there were none to mention.
+ *
+ * `skipped === 0` returns nothing, and that guard is the whole point of the line. "0 subjects were
+ * skipped because the figures they compare were not measured" is a rendered zero in the one panel
+ * whose entire argument is against them, and it would appear under three of the four rules on a
+ * perfectly healthy cluster. The sentence exists to qualify a figure; there is nothing to qualify.
+ */
 function unmeasured(report: RuleReport): string | undefined {
   const skipped = report.unmeasuredSubjects;
   if (skipped === null || skipped === 0) return undefined;

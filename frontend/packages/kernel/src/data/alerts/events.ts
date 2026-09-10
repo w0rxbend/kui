@@ -14,19 +14,25 @@
  * `services/alerts/contract/src/kui/alerts/contract/dto/AlertDtos.scala`, and every field below is
  * read from the `Json.obj(…)` in it:
  *
- * - `AlertFeedResponse` is `events: Section[AlertFeedDto]` (`:265`) — one section under the key
- *   `events`, which is also what M8's exit criterion greps for (`docs/plan/ROADMAP.md:470-474`,
- *   `jq '.events.status'`).
- * - `AlertFeedDto` (`:219`) is `items`, `total`, `openCount`, `unreadCount`, `lastReadAt`,
- *   `evaluatedAt`, `rules`.
- * - `AlertEventDto` (`:72`) is `id`, `severity`, `tone`, `category`, `glyph`, `openedAt`,
- *   `lastSeenAt`, `title`, `detail`, `resolution` — and `AlertResolutionDto` (`:22`) is
- *   `at`, `kind`, `by`.
- * - The stream frame is `AlertChangeDto` (`:322`): `cluster`, `openCount`, `at`, under the event
- *   name `AlertChangeDto.EventName` = `"alerts"`. **It deliberately carries no events**; its own
+ * - `AlertFeedResponse` is `events: Section[AlertFeedDto]` — one section under the key `events`,
+ *   which is also what M8's exit criterion greps for (`jq '.events.status'`).
+ * - `AlertFeedDto` is `items`, `total`, `openCount`, `unreadCount`, `lastReadAt`, `evaluatedAt`,
+ *   `rules`.
+ * - `AlertEventDto` is `id`, `severity`, `tone`, `category`, `glyph`, `openedAt`, `lastSeenAt`,
+ *   `title`, `detail`, `resolution` — and `AlertResolutionDto` is `at`, `kind`, `by`.
+ * - The stream frame is `AlertChangeDto`: `cluster`, `openCount`, `at`, under the event name
+ *   `AlertChangeDto.EventName` = `"alerts"`. **It deliberately carries no events**; its own
  *   scaladoc says a subscriber that sees a count it does not hold re-reads the feed it is already
  *   authorized for, which is what keeps one principal's unread count off every other subscriber's
  *   socket.
+ *
+ * Those are **symbol** citations and were line citations until wave 7, when three of the four in
+ * this file were measured pointing eleven lines above the type they named — `AlertFeedResponse` at
+ * `:265` when it is at `:276`, `AlertFeedDto` at `:219` for `:230`, `AlertChangeDto` at `:322` for
+ * `:333`. Nothing in this repository compares a comment to a line number, so the drift was silent
+ * and cost a reader eleven lines of scrolling to discover the comment was stale rather than the
+ * code. A symbol survives an edit above it. What checks the field names themselves is
+ * `./wire.golden.test.ts`, which decodes the service's own committed documents through this file.
  *
  * ## Why the decoder refuses instead of defaulting
  *

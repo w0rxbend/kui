@@ -192,6 +192,25 @@ final class PrometheusExpositionSuite extends FunSuite {
     )
   }
 
+  test("a purgatory line carrying a second dimension is a slice too, and is skipped") {
+    // The twin of the throughput rule two sections up, and it had no case of its own. `delayedOperation`
+    // is the only dimension this family carries today; a line that carries another one is narrower than
+    // the queue length the card draws, and admitting it would put two rows called `Fetch` on one card
+    // carrying different numbers — which is the defect the `NumDelayedOperations` case below exists for,
+    // arrived at from the other direction.
+    //
+    // Written out rather than taken from a capture, because no exporter serves this line today. That is
+    // the point: the rule is a bound on what a *future* ruleset may add, and a parser that accepted any
+    // dimensioned line would start summing slices into a broker-wide figure with nothing failing.
+    val family = "kafka_server_delayedoperationpurgatory_value"
+    val dimensioned =
+      s"""$family{delayedoperation="Fetch",name="PurgatorySize"} 481.0
+         |$family{delayedoperation="Fetch",broker="1",name="PurgatorySize"} 7.0
+         |""".stripMargin
+
+    assertEquals(sampleOf(dimensioned).purgatory, List(PurgatoryQueue("Fetch", 481L)))
+  }
+
   test("the same purgatory queue is not read twice from its NumDelayedOperations sibling") {
     // Both attributes live under one MBean with one `delayedOperation` key. Reading both would put two
     // rows called `Fetch` on one card, carrying different numbers.

@@ -133,6 +133,46 @@ describe("a subject row's format badge", () => {
   });
 });
 
+describe("a format badge for a schema language this build has never heard of", () => {
+  it("takes the neutral tone and still shows the registry's own word", async () => {
+    /*
+     * Filed by W7-A3's third pass. Mutation: `formatTone`'s final `return "neutral"` →
+     * `return "info"`. Green over 80 of 80 in this package, and over the 194 in the two packages
+     * this file's header measured — because every fixture and every golden row is `AVRO`, `JSON`
+     * or `PROTOBUF`, and the fallback arm is the one no document reaches.
+     *
+     * `formatTone`'s own comment is the rule: *"a format nobody here has heard of is `neutral` and
+     * still shows its own name: the registry knows about schema languages this browser does not,
+     * and inventing a colour for one would say more than we know."* With the mutation a registry
+     * answering `THRIFT` draws it in the exact blue this screen uses to mean Avro, on a page whose
+     * whole job is to say which reader a record needs.
+     */
+    const unknown = list({ subjects: [{ ...ROW, format: "THRIFT" }] });
+    await flush();
+    const badge = unknown.container.querySelector(".kui-schemas__format");
+    expect(badge?.textContent).toBe("THRIFT");
+    expect(badge?.classList.contains("kui-tag--neutral")).toBe(true);
+    expect(badge?.classList.contains("kui-tag--info")).toBe(false);
+    unknown.dispose();
+
+    // And the three this build does know keep their own tones, so the fallback declines a word
+    // rather than the whole mapping.
+    for (const [format, tone] of [
+      ["AVRO", "info"],
+      ["JSON", "success"],
+      ["PROTOBUF", "warning"],
+    ] as const) {
+      const known = list({ subjects: [{ ...ROW, format }] });
+      await flush();
+      expect(
+        known.container.querySelector(".kui-schemas__format")?.classList.contains(`kui-tag--${tone}`),
+        format,
+      ).toBe(true);
+      known.dispose();
+    }
+  });
+});
+
 describe("a subject list with no rows on it", () => {
   it("says a search matched nothing, and never that the registry is empty", async () => {
     /*

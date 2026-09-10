@@ -4,6 +4,7 @@ import sttp.tapir.AnyEndpoint
 
 import kui.alerts.contract.AlertsEndpoints
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
+import kui.connect.contract.ConnectEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
@@ -18,7 +19,7 @@ import kui.topic.contract.{TopicAdminEndpoints, TopicEndpoints}
   * written here is only the association between the id an operator configures and the endpoint list to derive
   * routes from.
   *
-  * It grows by one line per service across M1 to M8. A service the gateway has no contract for is not an
+  * It grows by one line per service across M1 to M9. A service the gateway has no contract for is not an
   * error: it is configured, polled, and reported in the capability snapshot, it simply has no proxied routes
   * yet. That is what lets a service be deployed before the gateway build that routes it.
   */
@@ -74,7 +75,15 @@ object ServiceContracts {
       // re-encodes an upstream's JSON and that is the wrong thing to do to an event stream. A stream is
       // relayed by hand, the way `MessageStreamRoutes` relays the browse feed, so the endpoint value in
       // `AlertsStreamEndpoint` is held for that relay rather than for this map.
-      ServiceId.unsafe("alerts") -> AlertsEndpoints.all
+      ServiceId.unsafe("alerts") -> AlertsEndpoints.all,
+      // One list, and the tenth service. `ConnectEndpoints.all` is the connector read and the three
+      // operations — pause, resume and restart — published from the same object rather than from a second
+      // one, because none of them is destructive: a paused connector is resumed and a restarted one
+      // re-reads its own committed offsets, so ADR-045's plan → token → confirm does not apply and there
+      // is no marker to group by. They are still writes, they still carry the CSRF header and an audit
+      // record, and `MergedDocumentShapeSuite` asserts their count so that a fourth operation added to
+      // `ConnectEndpoints.writes` and forgotten here is a failure rather than a silent omission.
+      ServiceId.unsafe("connect") -> ConnectEndpoints.all
     )
 
   /** The identity service is **deliberately absent** from the map above, and must stay absent.

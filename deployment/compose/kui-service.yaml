@@ -1,11 +1,11 @@
-# The configuration the topic, message, consumer, schema, metrics and alerts services share in the
-# distributed topology.
+# The configuration the topic, message, consumer, schema, metrics, alerts and connect services
+# share in the distributed topology.
 #
-# One file for six containers, and that is deliberate. `kui-cluster.yaml` is separate because the
+# One file for seven containers, and that is deliberate. `kui-cluster.yaml` is separate because the
 # cluster service reads a section nobody else does — `kui.store.*`, where KUI keeps its own state —
-# and mixing that into a file the other six also mount would put settings in front of processes
-# that have no business acting on them. These six, by contrast, read exactly the same things:
-# where to listen, which signing keys to accept, and which Kafka clusters exist. Six identical
+# and mixing that into a file the other seven also mount would put settings in front of processes
+# that have no business acting on them. These seven, by contrast, read exactly the same things:
+# where to listen, which signing keys to accept, and which Kafka clusters exist. Seven identical
 # copies of that would drift, and the first symptom of the drift would be one screen working and
 # another not.
 #
@@ -125,8 +125,9 @@ kui:
   # Both name the registry `docker-compose.yml` runs, and that container is there for the same
   # reason this comment is: a configured cluster with no registry makes the schema service report
   # `not_configured` for the whole deployment, which is correct and would have meant teaching
-  # `smoke.sh` to expect a different answer for one of the seven services. The check was right; the
-  # deployment was incomplete.
+  # `smoke.sh` to expect a different answer for one of the eight services. The check was right; the
+  # deployment was incomplete -- and `kafka-connect` beside it is the same sentence applied to the
+  # tenth service one wave later.
   clusters:
     - name: "Measured"
       id: "measured"
@@ -138,6 +139,24 @@ kui:
       schemaRegistry:
         url:
           - "http://schema-registry:8080/apis/ccompat/v7"
+      # The Kafka Connect worker `docker-compose.yml` runs, and both clusters name it for the same
+      # reason they both name the registry.
+      #
+      # A LIST because an organisation routinely runs one Connect cluster for sources and another
+      # for sinks against the same brokers, and the screens address a connector as (Connect cluster,
+      # connector name). `url` is itself a list inside each entry: every worker in one Connect
+      # cluster serves the same REST API and forwards what it cannot answer, so a second address
+      # there is failover rather than a second system. There is one of each here.
+      #
+      # `name` is written out although the loader would default it to `connect-0`, because that name
+      # appears in URLs and in RBAC rules and is meant to survive the deployment moving. The
+      # `callTimeout` is the shipped default, written out because this file is the worked example of
+      # the distributed shape.
+      connect:
+        - name: "compose"
+          url:
+            - "http://kafka-connect:8083"
+          callTimeout: "10s"
     - name: "Unmeasured"
       id: "unmeasured"
       bootstrapServers:
@@ -148,5 +167,11 @@ kui:
       schemaRegistry:
         url:
           - "http://schema-registry:8080/apis/ccompat/v7"
+      # The same worker, for the same reason the same registry is named twice.
+      connect:
+        - name: "compose"
+          url:
+            - "http://kafka-connect:8083"
+          callTimeout: "10s"
 
   rbac: {}

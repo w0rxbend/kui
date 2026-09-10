@@ -38,8 +38,16 @@ import type {
 } from "../chrome/Notifications.jsx";
 import type { NavCount } from "../chrome/types.js";
 
-/** The feed read, as a template with the cluster still in it. One spelling, one file. */
-export const ALERTS_FEED_PATH = "/api/v1/clusters/{clusterId}/alerts/events";
+/**
+ * The feed read, as a template with the cluster still in it. One spelling, one file.
+ *
+ * Module-private. It was exported and the only thing that ever named it was a case asserting the
+ * constant against a copy of itself, which is a rule that cannot fail for any reason a reader would
+ * care about. What pins the address is what {@link loadAlertFeed} actually hands the client —
+ * asserted in `alerts.test.ts` through the function, and end to end off the real `Request` in
+ * `app.render.test.tsx`.
+ */
+const ALERTS_FEED_PATH = "/api/v1/clusters/{clusterId}/alerts/events";
 
 /**
  * The query that asks the server to mark the feed read for this principal while it answers.
@@ -47,11 +55,22 @@ export const ALERTS_FEED_PATH = "/api/v1/clusters/{clusterId}/alerts/events";
  * `AlertsEndpoints.MarkReadParam` — one endpoint and one query rather than a second address,
  * because a read and a read-and-mark differ in what the *server* records and in nothing the
  * browser draws. Two addresses would be two spellings of one page.
+ *
+ * Module-private, and it was exported. Nothing outside this file ever named it, in production or in
+ * a test, and an export with no caller is a promise this module is not being asked for: the two
+ * spellings that matter are the ones {@link loadAlertFeed} sends, which
+ * `app.render.test.tsx`'s "asks the alerts service for this cluster's feed" reads back off the URL
+ * the client actually built.
  */
-export const ALERTS_MARK_READ_PARAM = "markRead";
+const ALERTS_MARK_READ_PARAM = "markRead";
 
-/** The feed's ADR-035 stream, relative to the deployment's API base. */
-export const ALERTS_STREAM_SEGMENT = "alerts/stream";
+/**
+ * The feed's ADR-035 stream, relative to the deployment's API base.
+ *
+ * Module-private for the same reason as the query above: `alertsStreamUrl` is the caller, the
+ * address it produces is asserted end to end, and the segment on its own was named by nothing.
+ */
+const ALERTS_STREAM_SEGMENT = "alerts/stream";
 
 /**
  * The read, through the generated API client and emphatically not through a bare `fetch`.
@@ -110,28 +129,22 @@ export function alertsBadge(openCount: number | null): NavCount | undefined {
   return { kind: "total", value: openCount, noun: "open" };
 }
 
-/**
- * The open count the bell and the drawer are allowed to draw, out of what the feed holds.
+/*
+ * There was a second open count here, and it is gone.
  *
- * **A zero the rules have never produced is not a zero.** `AlertFeed.evaluatedAt` is when the
- * service last ran its rules, and it is absent when it never has here — a KUI that has just
- * started, or one whose evaluation loop has not reached this cluster. `openCount: 0` beside an
- * absent `evaluatedAt` therefore says only that nothing has been looked at, and drawing it as
- * "no open alerts" is the reassuring misreading this product is built against: it is the same
- * defect as the storage meter's em dash over a disk it had read, inverted — a confident *green*
- * over a question nobody has asked yet.
+ * `openCountOf(feed)` re-derived the bell's figure from the `Fetched<AlertFeed>` this file could
+ * see, under its own reading of the `evaluatedAt` rule, while the kernel store's `openCount()` did
+ * the same thing over the same feed **and** over the count the newest stream frame carried. Two
+ * derivations of one number is the shape this whole store exists to prevent: they agreed on the
+ * feed and disagreed the moment a frame arrived, because only the kernel's had ever heard of
+ * `streamed`. Nothing in the product called this one — it had a test and no caller — so the
+ * kernel's accessor is the number, and the drawer's badge, the bell and the dashboard's alerts card
+ * all read `Alerts.openCount()`.
  *
- * So it comes back `null`, which the bell renders as no badge and an accessible name saying the
- * number is not known. The moment the rules have run, a real `0` is drawn as a real `0` and the
- * bell says "no open alerts", which is a statement KUI can then support.
- *
- * Every state other than a feed in hand is `null` too — loading, refused, unreadable, not
- * configured — because none of them has counted anything either.
+ * The rule itself is unchanged and still stated where it is now applied
+ * (`@kui/kernel`'s `knownOpenCount`): a zero the service's rules have never produced is not a zero,
+ * so an absent `evaluatedAt` answers `null` however well-formed the feed is.
  */
-export function openCountOf(feed: Fetched<AlertFeed>): number | null {
-  if (feed.kind !== "ready" && feed.kind !== "stale") return null;
-  return feed.value.evaluatedAt === undefined ? null : feed.value.openCount;
-}
 
 /**
  * The alert feed as the notifications panel draws it.

@@ -47,6 +47,26 @@ final class Pbkdf2PasswordHasherSuite extends KuiIOSuite {
     }
   }
 
+  test("the salt is as wide as the published parameter, not merely different every time") {
+    /*
+     * Ungated until now: `SaltBytes` 16 -> 1 left `./mill services.identity.__.test` at 79/79 green,
+     * because the case above only asks that two salts differ -- and a one-byte salt still differs about
+     * 255 times in 256. Width is the property that matters: it is what makes a precomputed table useless,
+     * and it is the parameter OWASP publishes alongside the iteration count this file already pins. A
+     * one-byte salt has 256 possible values, so one table per value cracks every password in the file.
+     */
+    for {
+      hasher <- Pbkdf2PasswordHasher.make[IO]
+      hashed <- hasher.hash(password)
+    } yield {
+      val salt = java.util.Base64.getUrlDecoder.decode(hashed.saltBase64)
+
+      assertEquals(salt.length, 16)
+      // The derived key too, so a suite that pins the salt cannot be read as pinning the whole shape.
+      assertEquals(java.util.Base64.getUrlDecoder.decode(hashed.hashBase64).length, 32)
+    }
+  }
+
   test("the hash is written with the current algorithm and its published cost") {
     for {
       hasher <- Pbkdf2PasswordHasher.make[IO]

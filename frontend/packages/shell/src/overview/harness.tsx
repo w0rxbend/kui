@@ -130,6 +130,16 @@ export interface DashboardHostOptions {
   readonly alerts?: Alerts | undefined;
 }
 
+/**
+ * A store that holds one state and asks nobody anything.
+ *
+ * It is a double for `createAlerts`, so its accessors have to answer what the kernel's answer or a
+ * case here passes against a rule the product does not have. `openCount` is where that bites:
+ * `value()?.openCount ?? null` would hand a card the `0` of a cluster the service's rules have
+ * never swept, which the real store answers `null` for — and the dashboard's alerts card would then
+ * draw a green *"None open"* pill in a story and a `null` in the product. The one open count is the
+ * kernel's, and a double that disagrees with it is a second derivation wearing a test's clothes.
+ */
 export function staticAlerts(state: Fetched<AlertFeed> = { kind: "not-configured" }): Alerts {
   const value = () => {
     const current = state;
@@ -138,7 +148,10 @@ export function staticAlerts(state: Fetched<AlertFeed> = { kind: "not-configured
   return {
     feed: () => state,
     events: () => value()?.items ?? [],
-    openCount: () => value()?.openCount ?? null,
+    openCount: () => {
+      const held = value();
+      return held?.evaluatedAt === undefined ? null : held.openCount;
+    },
     unreadCount: () => value()?.unreadCount ?? null,
     unread: () => (value()?.unreadCount ?? 0) > 0,
     lastReadAt: () => value()?.lastReadAt,

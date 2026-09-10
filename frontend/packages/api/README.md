@@ -34,9 +34,9 @@ Three build failures, and a browser never enters into it. Measured, not asserted
 
 ## Why the browser has its own document
 
-<!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -- claims: principal-operations, principal-paths, csrf-operations, if-match-operations -->
+<!-- checked: merged-document -- verified by ./scripts/feature-matrix-check.sh -- claims: principal-operations, principal-paths, csrf-operations, if-match-operations, residue -->
 `docs/api/openapi.json` describes the contract KUI's *services* speak, and that contract requires
-`X-Kui-Principal` on 52 of its 68 operations, across 41 of its 57 paths. Those are two figures and
+`X-Kui-Principal` on 56 of its 72 operations, across 45 of its 61 paths. Those are two figures and
 not one: a path with a `GET` and a `DELETE` carries the header on both operations and is still one
 path. This paragraph used to pair the *operation* count with the *path* total as though they were
 the same denominator, which is why it is now checked rather than maintained. The gateway mints that
@@ -47,7 +47,7 @@ security boundary.
 
 `docs/api/openapi.browser.json` is the edge view: the same document with those headers removed, by
 the same rule `EdgeHeaders.isForbidden` applies at runtime, in the same module, from the same list.
-`X-Csrf-Token` on 21 operations and `If-Match` on 2 operations stay, because the browser really does
+`X-Csrf-Token` on 24 operations and `If-Match` on 2 operations stay, because the browser really does
 send them and the types should force it to. It is computed, never maintained: `BrowserProjection` in
 `services/gateway/api` produces it and `openApiCheck` keeps it honest.
 <!-- /checked -->
@@ -98,16 +98,16 @@ Four things the client does that no caller should have to remember:
 
 ## Known gap: sections are `unknown`
 
-Twenty-three properties across the aggregated responses — `TopicsResponse.topics`,
-`GroupsResponse.groups`, `ClusterOverviewDto.clusters` and twenty more — are typed `unknown`,
+Twenty-four properties across the aggregated responses — `TopicsResponse.topics`,
+`GroupsResponse.groups`, `ClusterOverviewDto.clusters` and twenty-one more — are typed `unknown`,
 because the server documents `Section[A]` with `Schema.any`. Count them with
-`grep -c ': unknown;' src/schema.d.ts` and subtract the 136 index signatures, or read the list in
+`grep -c ': unknown;' src/schema.d.ts` and subtract the 144 index signatures, or read the list in
 `TECH_DEBT.md` TD-024, which carries the measurement and the proposed server-side fix. (This
 paragraph said *fifteen* and cited a `BLOCKERS.md` that is not in this repository; three files
 still cite it. The figure had drifted with the contract and the citation had never resolved.)
 
 `section.ts` is the single boundary that narrows them. Use `decodeSection` there; do not cast at a
-call site. **Five of the twenty-three are the metrics reads** — `LatencyResponse.latency`,
+call site. **Five of the twenty-four are the metrics reads** — `LatencyResponse.latency`,
 `ThroughputResponse.throughput`, `TopProducersResponse.producers`,
 `RecordSizeResponse.recordSize` and `RequestHandlersResponse.requestHandlers` — and they are the
 ones this gap has actually cost something, because they are the five whose payload shape no other

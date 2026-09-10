@@ -1,0 +1,125 @@
+/* ------------------------------------------------------------------------------------------------
+ * Kafka Connect: the connectors screen
+ *
+ * `SCREENS-V4.md` §3.14 draws four `ConnectorCard`s in a row, and the card itself is the kernel's —
+ * `29-connect-ksql.css` styles `.kui-connector*` and `.kui-taskbar*` and has done since before there
+ * was a service. This sheet styles only what is **around** the card, which is the part §3.14 does
+ * not draw and §7.7 says is missing: the failure reason, the refusal sentence, and the panel for a
+ * connector whose tasks the worker would not describe.
+ *
+ * Every class here is prefixed `.kui-connect__` or `.kui-connect-`, so nothing in it can restyle a
+ * kernel primitive or another screen. The one exception is `.kui-connect__undescribed`, which sits
+ * *beside* `.kui-connector` on the same element: that panel is a connector card with a sentence
+ * where the task bar would be, and giving it the card's own class is what keeps the two looking
+ * like the same object rather than like two designs.
+ *
+ * Numbered 81 because `feature-alerts`' sheet is 80 and the last group in
+ * `kernel/styles/index.css` is in the order the product shipped, with a new screen joining the end
+ * of it. The `@import` naming this file is in that index, which is `@kui/kernel`'s and not this
+ * package's: `build-tests`' `CssReferences` requires every stylesheet on disk to be named there
+ * exactly once, and the index is the only place that can name it.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-connect-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-5);
+}
+
+.kui-connect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-4);
+}
+
+/* §3.14 draws four across. `auto-fill` rather than a fixed four: the drawer, the rail and a narrow
+   window all take width away from this region, and a fixed count makes the fourth card 90px wide
+   before it wraps. The minimum is the width at which a connector name and its state pill still sit
+   on one line. */
+.kui-connect__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--kui-space-4);
+  align-items: start;
+}
+
+.kui-connect__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kui-space-2);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The failure reason (§7.7)
+ *
+ * A block of its own under the card rather than a line inside it. The trace line is the worker's
+ * own text and can be any length at all, and a card whose height is set by somebody else's stack
+ * trace would make the grid above jump every time a connector failed.
+ * ---------------------------------------------------------------------------------------------- */
+
+.kui-connect__reason {
+  padding: var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  border-left: 3px solid var(--kui-color-danger);
+  background: var(--kui-color-surface-raised);
+}
+
+.kui-connect__reason-head {
+  margin: 0 0 var(--kui-space-2);
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-xs);
+}
+
+/* Monospaced, selectable and wrapped. An operator pastes this line into a search box or a ticket,
+   so it must be the worker's characters exactly — and it must wrap rather than scroll, because a
+   line that runs off the right edge is a line nobody reads the end of. */
+.kui-connect__reason-line {
+  margin: 0;
+  font-family: var(--kui-font-family-mono);
+  font-size: var(--kui-font-size-sm);
+  color: var(--kui-color-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.kui-connect__reason-more,
+.kui-connect__reason-none {
+  margin: var(--kui-space-2) 0 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-connect__reason-none {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The two sentences a card cannot hold
+ * ---------------------------------------------------------------------------------------------- */
+
+/* The refusal, in words as well as on the disabled control. A tooltip is reachable by hover and by
+   focus and by nothing else, and this screen refuses per connector — so on a page of eight cards
+   with one disabled button, the tooltip alone makes somebody hunt for which one and why. */
+.kui-connect__refusal {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}
+
+.kui-connect__command-failure {
+  margin: 0;
+  padding: var(--kui-space-2) var(--kui-space-3);
+  border-radius: var(--kui-radius-md);
+  color: var(--kui-color-danger);
+  background: var(--kui-color-danger-container);
+  font-size: var(--kui-font-size-sm);
+}
+
+/* Where the task bar would be. Deliberately not styled as an error: the worker answered, it simply
+   did not say — and a red block here would send somebody to look for an outage that is not there. */
+.kui-connect__undescribed-note {
+  margin: 0;
+  color: var(--kui-color-text-muted);
+  font-size: var(--kui-font-size-sm);
+}

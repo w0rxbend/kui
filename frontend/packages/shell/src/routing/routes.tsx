@@ -154,6 +154,13 @@ export function shellRoutes(views: RouteViews) {
                parameters below it: the feed is filtered in the screen, and a filter is not a
                page. */
             { path: "/alerts", component: gate("alerts") },
+            /* Kafka Connect (M9), and a **route and a nav destination** rather than a dashboard tab
+               for the same reason Alerts is: a tab would live in the shell's `overview/`, and
+               `@kui/feature-connect` reaching into the dashboard would invert the dependency the
+               feature split exists to keep. One address with no parameters below it — a connector
+               is selected inside the screen, and a selection is not a page, which is also what
+               keeps the connector's own name out of an address an operator would paste. */
+            { path: "/connect", component: gate("connect") },
             {
               path: "/schemas",
               children: [
@@ -218,6 +225,8 @@ export function landingFor(
       return cluster === undefined ? undefined : paths.clusters(cluster).schemas();
     case "alerts":
       return cluster === undefined ? undefined : paths.clusters(cluster).alerts();
+    case "connect":
+      return cluster === undefined ? undefined : paths.clusters(cluster).connect();
     case "messages":
       // Its URL names a topic as well as a cluster, and the navigation has no topic to name.
       return undefined;

@@ -279,14 +279,62 @@ describe("the headings the drawer is given", () => {
     expect(nested(down)?.children).toBeUndefined();
   });
 
-  it("declares ECOSYSTEM and emits it empty until M9 registers something into it", () => {
-    /* Its only state today. It is emitted rather than skipped so that adding Kafka Connect and
-     * ksqlDB registers two features and changes nothing else — and so that the empty case is a
+  it("declares ECOSYSTEM and emits it empty while nothing is registered into it", () => {
+    /* The state it had for six waves. It is emitted rather than skipped so that adding Kafka
+     * Connect and ksqlDB registers two features and changes nothing else — and so that the empty
+     * case is a
      * state something produces, which is what makes `NavDrawer`'s "draw nothing at all" rule
      * testable against real output rather than against a hand-written fixture. */
     const ecosystem = drawn().find((group) => group.heading === ECOSYSTEM_GROUP);
     expect(ecosystem).toBeDefined();
     expect(ecosystem?.destinations).toEqual([]);
+  });
+
+  /**
+   * The other half of that rule, and the half M9 turns on.
+   *
+   * The heading is folded from the registration's own `group` string, so a feature that declares
+   * `"Ecosystem"` has to land under `ECOSYSTEM` — not under a second heading spelled the same
+   * way in different capitals, and not appended after `CLUSTER` in arrival order.
+   * `@kui/feature-connect` is the first registration this has ever been true of, and it lives in a
+   * package this one may not import, so the seam is asserted here over a registration of its shape.
+   */
+  it("puts a feature declaring Ecosystem into ECOSYSTEM, however it capitalised it", () => {
+    const connect: FeatureRegistration = {
+      ...topics,
+      id: "connect",
+      serviceId: "connect",
+      viewAction: Actions.ConnectView,
+      label: "Connect",
+      icon: "stream",
+      group: "Ecosystem",
+      order: 500,
+    };
+
+    const groups = navigationGroups({
+      features: [
+        { registration: connect, state: ready },
+        { registration: topics, state: ready },
+      ],
+      landingFor: (registration, cluster) =>
+        registration.id === "connect"
+          ? `/ui/clusters/${cluster}/connect`
+          : landing(registration, cluster),
+      cluster: "prod",
+    });
+
+    const headings = groups.map((group) => group.heading);
+    expect(headings.indexOf("CLUSTER")).toBeLessThan(headings.indexOf(ECOSYSTEM_GROUP));
+    // Exactly one ECOSYSTEM heading: a fold that passed the declared string through would produce a
+    // second group called "Ecosystem" beside the seeded empty one, and the drawer would draw both.
+    expect(headings.filter((heading) => heading.toUpperCase() === ECOSYSTEM_GROUP)).toHaveLength(1);
+
+    const ecosystem = groups.find((group) => group.heading === ECOSYSTEM_GROUP);
+    expect(ecosystem?.destinations.map((destination) => destination.label)).toEqual(["Connect"]);
+    expect(ecosystem?.destinations[0]?.href).toBe("/ui/clusters/prod/connect");
+    // And it did not also land beside Topics, which is what a fold that matched loosely would do.
+    const cluster = groups.find((group) => group.heading === "CLUSTER");
+    expect(cluster?.destinations.map((destination) => destination.label)).toEqual(["Topics"]);
   });
 
   it("puts CLUSTER before ECOSYSTEM whatever order the features arrive in", () => {

@@ -30,10 +30,10 @@ can only import what its own `package.json` declares.
 
 | Package | Holds |
 | --- | --- |
-| `@kui/api` | types **generated** from `docs/api/openapi.browser.json`, and the typed client. Nothing hand-written mirrors a server type |
+| `@kui/api` | types **generated** from `docs/api/openapi.browser.json`, and the typed client. Nothing *inside this package* mirrors a server type by hand; outside it, `shell/src/overview/metrics.ts` still does, for the five metrics payloads generation answers `unknown` for (`TECH_DEBT.md` TD-024) |
 | `@kui/kernel` | design system, query cache, SSE wrappers, capability and permission stores, theme |
 | `@kui/shell` | router, layout, navigation, feature registry, error pages |
-| `@kui/feature-clusters` … `-schemas` | one feature microfrontend each: clusters, topics, messages, consumers, schemas |
+| `@kui/feature-clusters` … `-connect` | one feature microfrontend each: clusters, topics, messages, consumers, schemas, alerts, connect |
 
 Two rules about those edges:
 

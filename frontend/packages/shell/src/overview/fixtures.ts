@@ -420,6 +420,25 @@ export const handlersOk = (document: unknown): unknown =>
   handlersBody({ status: "ok", data: document, fetchedAt: "2026-09-05T12:00:00Z" });
 export const HANDLERS_NOT_CONFIGURED: unknown = handlersBody({ status: "not_configured" });
 
+/**
+ * The same readings, an hour old, because the exporter stopped answering.
+ *
+ * One of the three fixtures that carry `TrafficCards`' shared `captionOf` into a render case. Its
+ * stale arm — `if (state.kind !== "stale") return own;` — could be replaced by `|| true` with the
+ * whole frontend suite green, after which these three cards draw last-known-good figures with **no
+ * badge and no sentence**: `Fetched.stale` carries no `asOf`, so `Card`'s stale badge is
+ * deliberately not used here and the caption is the *only* thing on the card that says the numbers
+ * are old. The one assertion of that sentence anywhere covered `ThroughputCard`, which has its own
+ * copy of the helper.
+ */
+export const HANDLERS_STALE: unknown = handlersBody({
+  status: "stale",
+  data: HANDLER_READINGS,
+  fetchedAt: "2026-09-05T11:58:00Z",
+  reason: "KUI-UPSTREAM-UNAVAILABLE",
+  message: "The exporter has not answered since 11:58.",
+});
+
 /* --- Top producers ------------------------------------------------------------------------------ */
 
 /**
@@ -470,6 +489,15 @@ export const producersOk = (document: unknown): unknown =>
   producersBody({ status: "ok", data: document, fetchedAt: "2026-09-05T12:00:00Z" });
 export const PRODUCERS_NOT_CONFIGURED: unknown = producersBody({ status: "not_configured" });
 
+/** The same ranking, out of date. See {@link HANDLERS_STALE} for what the state is here to hold. */
+export const PRODUCERS_STALE: unknown = producersBody({
+  status: "stale",
+  data: PRODUCERS_BY_TOPIC,
+  fetchedAt: "2026-09-05T11:58:00Z",
+  reason: "KUI-UPSTREAM-UNAVAILABLE",
+  message: "The exporter has not answered since 11:58.",
+});
+
 /* --- Record size --------------------------------------------------------------------------------- */
 
 /** The one figure a broker publishes about record size: a mean, as bytes in over messages in. */
@@ -482,3 +510,19 @@ export const recordSizeBody = (section: unknown): unknown => ({ recordSize: sect
 export const recordSizeOk = (document: unknown): unknown =>
   recordSizeBody({ status: "ok", data: document, fetchedAt: "2026-09-05T12:00:00Z" });
 export const RECORD_SIZE_NOT_CONFIGURED: unknown = recordSizeBody({ status: "not_configured" });
+
+/**
+ * The same mean, out of date — and the card that already had a caption of its own.
+ *
+ * `RecordSizeCard` passes `readout()?.window` into the shared `captionOf`, so this is the fixture
+ * that proves the stale sentence is put **in front of** what the card had to say rather than
+ * instead of it. A card that dropped "Averaged over the last hour." while adding the staleness
+ * would have traded one honest sentence for another.
+ */
+export const RECORD_SIZE_STALE: unknown = recordSizeBody({
+  status: "stale",
+  data: RECORD_SIZE_MEAN,
+  fetchedAt: "2026-09-05T11:58:00Z",
+  reason: "KUI-UPSTREAM-UNAVAILABLE",
+  message: "The exporter has not answered since 11:58.",
+});

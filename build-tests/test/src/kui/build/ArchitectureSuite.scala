@@ -375,8 +375,9 @@ final class ArchitectureSuite extends FunSuite {
 
   test("the rule count is the number of rules check actually applies") {
     // A rule silently dropped from `check` would otherwise be a green build. A7 is not in this number
-    // because it cannot be seen in a module graph: `checkBundleShape` enforces it against linked
-    // JavaScript, and ADR-041's rule table says so.
+    // because it cannot be seen in a module graph: `frontend/scripts/bundle-shape.mjs` enforces it against
+    // the Vite manifest, and ADR-041's rule table says so. This line named `checkBundleShape`, a Mill task
+    // ADR-048 deleted, until 2026-09-10.
     assertEquals(ArchitectureRules.ruleCount, 10)
   }
 }

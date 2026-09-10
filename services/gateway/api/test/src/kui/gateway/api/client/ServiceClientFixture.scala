@@ -130,4 +130,31 @@ object ServiceClientFixture {
         stub.backend
       )
     } yield client
+
+  /** The same client with the outbound address rule stated out loud.
+    *
+    * It is a separate method rather than a defaulted parameter on [[client]] so that [[client]] keeps
+    * calling `resource` with **no** `policy` argument, which is how every other case here exercises the
+    * fail-safe default. `SttpServiceClientSuite`'s loopback case deliberately does not go through either
+    * of these: it calls `SttpServiceClient.resource` itself, so that the one case which asserts the
+    * default cannot be weakened by an edit to this file.
+    */
+  def clientUnder(
+      service: ServiceId,
+      stub: StubService,
+      config: UpstreamServiceConfig,
+      policy: UrlPolicy
+  ): Resource[IO, ServiceClient[IO]] =
+    for {
+      logger <- Resource.eval(FakeStructuredLogger[IO])
+      client <- SttpServiceClient.resource[IO](
+        service,
+        config,
+        PrincipalCodec.inProcess[IO],
+        Telemetry.noop[IO],
+        logger,
+        stub.backend,
+        policy
+      )
+    } yield client
 }

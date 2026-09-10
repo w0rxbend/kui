@@ -2,10 +2,22 @@ import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Button, Card, StatusPill, type Alerts } from "@kui/kernel";
 
+/**
+ * How many rows the compact card draws, however many the feed holds.
+ *
+ * §3.8 gives this card **one third of the row** on the Overview tab; the full-width layout with all
+ * five rows is the alerts route's, in `@kui/feature-alerts`. Unbounded, a cluster mid-incident with
+ * forty open events would push the storage card beside it off the bottom of a dashboard whose whole
+ * point is to be read in one glance — and the card would still be *correct*, which is why nothing
+ * would report it. The pill above the rows is the server's own count, so the card never pretends
+ * that the three it draws are all there are.
+ */
+const ROWS_ON_THE_DASHBOARD = 3;
+
 /** The dashboard's compact view of the same store used by the bell and the alerts route. */
 export function AlertsCard(props: { readonly alerts: Alerts }): JSX.Element {
   const state = () => props.alerts.feed();
-  const rows = () => props.alerts.events().slice(0, 3);
+  const rows = () => props.alerts.events().slice(0, ROWS_ON_THE_DASHBOARD);
   const failure = () => {
     const current = state();
     return current.kind === "failed" ? current : undefined;

@@ -1,5 +1,7 @@
 package kui.tools
 
+import java.nio.file.Paths
+
 import munit.FunSuite
 
 import kui.kernel.error.ErrorCode
@@ -56,5 +58,53 @@ final class ErrorCodeDocSuite extends FunSuite {
       ErrorCodeDoc.render(ErrorCode.values.toList),
       ErrorCodeDoc.render(ErrorCode.values.toList.reverse)
     )
+  }
+
+  test("--check fails on a missing document and on a stale one, and passes on the one it would write") {
+    val target = Paths.get("docs", "api", "error-codes.md")
+    val expected = ErrorCodeDoc.render(ErrorCode.values.toList)
+
+    val missing = ErrorCodeDocMain.decide(target, checkOnly = true, expected, None)
+    assertEquals(missing.status, 1)
+    assert(missing.message.contains("does not exist"), missing.message)
+
+    val stale = ErrorCodeDocMain.decide(target, checkOnly = true, expected, Some("something else"))
+    assertEquals(stale.status, 1)
+    assert(stale.message.contains("out of date"), stale.message)
+
+    val fresh = ErrorCodeDocMain.decide(target, checkOnly = true, expected, Some(expected))
+    assertEquals(fresh.status, 0)
+    assertEquals(fresh.write, None, clue = "--check must never write")
+    assert(fresh.message.contains("up to date"), fresh.message)
+  }
+
+  test("without --check the rendering is what gets written, byte for byte") {
+    val target = Paths.get("docs", "api", "error-codes.md")
+    val expected = ErrorCodeDoc.render(ErrorCode.values.toList)
+
+    // The committed content is deliberately different: a write mode that consulted it would be a check.
+    val outcome = ErrorCodeDocMain.decide(target, checkOnly = false, expected, Some("stale"))
+
+    assertEquals(outcome.status, 0)
+    assertEquals(outcome.write, Some(expected))
+    assert(outcome.message.startsWith("wrote "), outcome.message)
+  }
+
+  test("a stale --check ends the process non-zero, and a fresh one does not end it at all") {
+    /*
+     * Everything above this case was inside `main` until 2026-09-10, so none of it could be driven: this
+     * object had no suite over its two modes at all, and the operator that turns a decision into an exit
+     * status is where its sibling's measured hole was (`!= 0` -> `< 0`, after which a stale file printed
+     * "is out of date" and exited zero). Both halves are asserted, because a translation that always exits
+     * and one that never does are equally wrong and only one of them is loud.
+     */
+    val target = Paths.get("docs", "api", "error-codes.md")
+    val expected = ErrorCodeDoc.render(ErrorCode.values.toList)
+
+    val stale = ErrorCodeDocMain.decide(target, checkOnly = true, expected, Some("something else"))
+    assertEquals(ErrorCodeDocMain.exitStatus(stale), Some(1))
+
+    val fresh = ErrorCodeDocMain.decide(target, checkOnly = true, expected, Some(expected))
+    assertEquals(ErrorCodeDocMain.exitStatus(fresh), None)
   }
 }

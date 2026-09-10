@@ -75,6 +75,31 @@ final class IdentityMappingSuite extends FunSuite {
     assertEquals(IdentityMapping.grant(granted).clusters, List(ClusterScope.EveryWire))
   }
 
+  test("a grant with no resource pattern travels with none, and never as a wildcard") {
+    /*
+     * Ungated until now: `value = granted.permission.value.map(_.raw).orElse(Some("*"))` left
+     * `./mill services.identity.__.test` at 79/79 green. `Policy.scala` states what `None` means -- "the
+     * unnamed one": a permission over AUDIT names nothing because there is one audit trail, and a
+     * permission over TOPIC with no pattern therefore grants *nothing*, "which makes a forgotten `value`
+     * deny rather than grant". The browser evaluates the same rule from this same list, so a `None`
+     * published as `*` is the one transformation that turns a grant that denies into a grant of
+     * everything -- with the server still refusing every request the screen then offers.
+     */
+    val unnamed = ClusterPermission(
+      clusters = ClusterScope.Every,
+      permission = Permission(Resource.Audit, None, Set(Action.AuditView))
+    )
+    val named = ClusterPermission(
+      clusters = ClusterScope.Every,
+      permission = Permission(Resource.Topic, Some(ResourcePattern.Everything), Set(Action.TopicView))
+    )
+
+    assertEquals(IdentityMapping.grant(unnamed).value, None)
+    // The pair, because "absent" only means anything beside the pattern that is genuinely a wildcard.
+    assertEquals(IdentityMapping.grant(named).value, Some(ResourcePattern.Everything.raw))
+    assertNotEquals(IdentityMapping.grant(unnamed).value, IdentityMapping.grant(named).value)
+  }
+
   test("a forced password change carries the challenge and no principal at all") {
     IdentityMapping.login(LoginResult.MustChangePassword(kui.kernel.Secret("a-challenge"))) match {
       case LoginResponse.PasswordChangeRequired(challenge) => assertEquals(challenge, "a-challenge")

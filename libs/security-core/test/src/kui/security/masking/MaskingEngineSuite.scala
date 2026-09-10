@@ -257,6 +257,23 @@ final class MaskingEngineSuite extends ScalaCheckSuite {
     assertEquals(masked, """{"pin":"**🎉"}""")
   }
 
+  test("a rule that keeps a negative number of characters masks everything and lengthens nothing") {
+    // `maskKeepingEnds` clamps both ends, and only the two `.max(0)` clamps do anything: with either one
+    // removed the masked value comes out *longer than the value it replaced* and keeps none of the
+    // original, which is a mask that has changed the shape of the data it was hiding. `KeepEnds` is a
+    // plain pair of `Int`s with no validation, so a negative is constructible by any caller.
+    //
+    // The two `.min` clamps beside them are inert, and measurably so: without them the arithmetic only
+    // ever drives `maskedCount` below zero, which returns the input unchanged — exactly what the clamped
+    // path returns. The case above ("keeping more than there is masks everything") covers the reachable
+    // half of that pair.
+    val negativePrefix = maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(-1, 0)), "pin")), """{"pin":"1234"}""")
+    val negativeSuffix = maskValue(List(onField(MaskingKind.Mask("*", KeepEnds(0, -1)), "pin")), """{"pin":"1234"}""")
+
+    assertEquals(negativePrefix, """{"pin":"****"}""")
+    assertEquals(negativeSuffix, """{"pin":"****"}""")
+  }
+
   property("masking never fails, for any rule set and any document") {
     forAll(documents, Arbitrary.arbitrary[String]) { (document, name) =>
       val rules = List(onField(stars, name), onField(MaskingKind.Remove, name))

@@ -119,8 +119,20 @@ final class ShippedConfigurationSuite extends KuiSuite {
     *
     * Widening one of these patterns is the way to make this reconciliation stop noticing anything, so the
     * case below also asserts that each one still matches something and that what is left over is exactly
-    * [[shipped]]: a pattern broadened until it swallowed a KUI configuration file would take that file out of
-    * the left-over set and fail on the missing row.
+    * [[shipped]].
+    *
+    * THAT SENTENCE USED TO CONTINUE *"a pattern broadened until it swallowed a KUI configuration file would
+    * take that file out of the left-over set and fail on the missing row"*, AND IT WAS FALSE FOR THE ONE
+    * WIDENING ANYBODY WOULD MAKE. Measured on this tree before the case below existed: replacing
+    * `"kafka-jmx-exporter.yml"` with `".yml"` left `./mill libs.config.test` at 395/395 with this suite
+    * 14/14 green. Nothing on disk needed the widened pattern to stay honest -- every row of [[shipped]] is a
+    * `*.yaml`, a `.yaml` name does not contain the text `.yml`, and every `docker-compose*.yml` was already
+    * excluded by the row above -- so the partition did not move at all and the "still matches something"
+    * check passed on the Compose files. The reconciliation was inert for exactly the class of file it was
+    * written to notice: the next `*.yml` KUI configuration anybody ships.
+    *
+    * So the widening is checked against files that do not exist yet rather than against the ones that do,
+    * by [[excludedBy]] and the probe assertion in the case below.
     */
   private val notKuiConfiguration: List[(String, String)] = List(
     "docker-compose" ->
@@ -133,6 +145,31 @@ final class ShippedConfigurationSuite extends KuiSuite {
       ("the Prometheus JMX exporter's ruleset (ADR-050). It is a contract with services/metrics's " +
         "reader and it is asserted, line shape by line shape, in deployment/compose/smoke.sh -- not here.")
   )
+
+  /** The [[notKuiConfiguration]] row that claims a file, if one does.
+    *
+    * Extracted so that the partition below and the probe beside it cannot ask the question two different
+    * ways. A probe with its own copy of `contains` would keep passing after somebody changed the real
+    * matcher to a suffix test or a `Path.getFileName` comparison, which is the failure this whole suite is
+    * about: two hand-written halves that agree by coincidence until one of them moves.
+    */
+  private def excludedBy(name: String): Option[(String, String)] =
+    notKuiConfiguration.find((pattern, _) => name.contains(pattern))
+
+  /** The file names a widened exclusion pattern would swallow, none of which exist on disk.
+    *
+    * `shipped` is the roster of files KUI's loader must accept, so its `.yml` twins are exactly the names
+    * the *next* KUI configuration file plausibly takes -- the eleventh row, written `.yml` because half the
+    * YAML in this repository already is. They are the class [[notKuiConfiguration]] must never claim, and
+    * they are derived from `shipped` rather than invented so that a file added there is probed with no
+    * second list to remember.
+    *
+    * On-disk names cannot carry this assertion and that is the whole point: every file the reconciliation
+    * can see today is a `*.yaml`, so a `.yml` pattern moves nothing and both directions of the set
+    * difference stay empty. The rule is about the files that are not here.
+    */
+  private def widenedExclusionProbes: List[String] =
+    shipped.map((relative, _, _) => relative.stripSuffix(".yaml") + ".yml")
 
   /** Every `.yaml` and `.yml` file under `deployment/`, relative to the repository root. */
   private def deploymentYaml(root: Path): List[String] = {
@@ -169,7 +206,7 @@ final class ShippedConfigurationSuite extends KuiSuite {
       )
     }
 
-    val excluded = onDisk.filter(name => notKuiConfiguration.exists((pattern, _) => name.contains(pattern)))
+    val excluded = onDisk.filter(name => excludedBy(name).isDefined)
     val kuiConfiguration = onDisk.diff(excluded)
     val listed = shipped.map(_._1).sorted
 
@@ -199,6 +236,33 @@ final class ShippedConfigurationSuite extends KuiSuite {
         "  Either the file was deleted or renamed and the row was left behind, or it now matches one of " +
         "the `notKuiConfiguration` patterns, which would mean this suite has stopped loading it."
     )
+  }
+
+  test("no exclusion pattern is broad enough to swallow a KUI configuration file that is not here yet") {
+    // THE OTHER DIRECTION OF THE PATTERN QUESTION, AND THE ONE THE WIDENING DEFEATS. The case above asks
+    // whether each pattern still matches a file that is on disk; a widened pattern passes that more easily
+    // than a narrow one, because it matches more. This asks whether it matches a file that is NOT on disk
+    // and would be KUI's own if somebody wrote it tomorrow -- which is the only direction in which `".yml"`
+    // and `"kafka-jmx-exporter.yml"` differ, because every KUI configuration this repository has today is a
+    // `*.yaml` and no `.yaml` name contains the text `.yml`.
+    //
+    // Measured before this case existed: the widening left `./mill libs.config.test` at 395/395 with this
+    // suite 14/14 green. The reconciliation could not fail for the class of file it was written to notice.
+    widenedExclusionProbes.foreach { probe =>
+      excludedBy(probe) match {
+        case None => ()
+        case Some((pattern, reason)) =>
+          fail(
+            s"`$pattern` would exclude `$probe` from the shipped-configuration reconciliation, and that " +
+              "name is a KUI configuration file: it is a row of `shipped` with a .yml extension.\n" +
+              s"  The row's stated reason is: $reason\n" +
+              "  A pattern this broad takes the next *.yml KUI configuration out of the left-over set in " +
+              "silence, so nothing would load it and nothing would say so -- which is the single failure " +
+              "this reconciliation exists to prevent. Name the file the row was written for rather than " +
+              "its extension."
+          )
+      }
+    }
   }
 
   shipped.foreach { (relative, policy, environment) =>

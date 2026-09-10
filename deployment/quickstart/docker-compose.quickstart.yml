@@ -173,6 +173,62 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------------------------
+  # A Kafka Connect worker, so that the Connect screens have a real worker to be honest about.
+  #
+  # It is the stock `apache/kafka` image running `connect-distributed.sh` -- the same image this
+  # file already pulls three times over for the broker and the two seeders -- so it adds a container
+  # and no download. The shipped `connect-distributed.properties` already sets every
+  # `*.storage.replication.factor` to 1, which is what this single-node broker needs, so the only
+  # things rewritten are `bootstrap.servers` and the group the three internal topics are coordinated
+  # under. The rewrite goes to /tmp rather than into a mounted properties file because a second
+  # configuration file in this directory would be one more thing `ShippedConfigurationSuite` has to
+  # be told is not KUI's own.
+  #
+  # NOTHING REGISTERS A CONNECTOR AND NOTHING SHOULD. This worker runs zero connectors, so the
+  # Connect screens show a real worker that is running none -- which is a different answer from
+  # "this deployment configured no Connect cluster" (the `not_configured` a quickstart without this
+  # container would give) and from "the worker will not answer". Seeding a connector to make the
+  # screen look busy would erase exactly the distinction the product is built on.
+  #
+  # NO PUBLISHED PORT, for the reason the exporter above gives: the REST API is for KUI. To read it
+  # by hand:
+  #
+  #   docker compose -f deployment/quickstart/docker-compose.quickstart.yml exec kui curl -s \
+  #     http://kafka-connect:8083/connectors
+  # ---------------------------------------------------------------------------------------------
+  kafka-connect:
+    image: apache/kafka:4.3.1
+    container_name: kui-quickstart-kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        sed -e 's|^bootstrap.servers=.*|bootstrap.servers=kafka:9092|' \
+            -e 's|^group.id=.*|group.id=kui-quickstart-connect|' \
+            /opt/kafka/config/connect-distributed.properties > /tmp/connect-distributed.properties
+        printf 'listeners=http://:8083\nplugin.discovery=hybrid_warn\n' >> /tmp/connect-distributed.properties
+        exec /opt/kafka/bin/connect-distributed.sh /tmp/connect-distributed.properties
+    healthcheck:
+      # A real GET of the resource KUI reads, not a port check: Jetty accepts connections before
+      # Connect has finished publishing its routes. bash's `/dev/tcp` and `CMD` naming bash
+      # explicitly, for the reason spelled out on the exporter above -- this image has no curl, and
+      # Compose's `CMD-SHELL` runs dash, which has no `/dev/tcp`.
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - "exec 3<>/dev/tcp/127.0.0.1/8083 && printf 'GET /connectors HTTP/1.0\r\n\r\n' >&3 && grep -q '200 OK' <&3"
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 15s
+    networks:
+      - kui-quickstart
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------------------------
   # A one-shot container that puts something worth looking at into the broker, then exits.
   #
   # The script, the topic table and the message files all live in ./seed; see ./seed/README.md for
@@ -304,6 +360,12 @@ services:
         # KUI probes the registry once per cluster while it builds its serdes, and reports the
         # result in the serde picker. Waiting here means the first look at the picker shows the
         # registry working rather than the outage it was in for the first two seconds.
+        condition: service_healthy
+        required: false
+      kafka-connect:
+        # Ordered, not gated, exactly like the registry above. KUI reads the worker when a Connect
+        # screen is opened rather than at start-up, so waiting here buys only that the first look at
+        # the screen shows the worker answering instead of the twenty seconds it spends starting.
         condition: service_healthy
         required: false
       seed:

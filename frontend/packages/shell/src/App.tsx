@@ -932,15 +932,15 @@ export function App() {
               notificationsOpen={noticesOpen()}
               onToggleNotifications={() => setNoticesOpen(!noticesOpen())}
               /* The bell's two facts, and neither is folded here. The figure is the alerts
-                 service's own **cluster-wide** open count — `null` while nothing has said, which
-                 the bell renders as no badge and an accessible name that admits it, and which
-                 `openCountOf` also answers for a `0` the service's rules have never actually
-                 produced — and the mark
-                 is that service's **per-principal** unread count, a different number counted over
-                 the same store. Both are the server's; the browser recomputes neither, because the
-                 feed is paged and the bell is not. The drawer's Alerts badge and the alerts
-                 screen's card read the same accessors, which is what makes the three unable to
-                 disagree. */
+                 service's own **cluster-wide** open count, straight off the kernel store's one
+                 derivation — `null` while nothing has said, and `null` too for a `0` the service's
+                 rules have never actually produced — and the mark is that service's
+                 **per-principal** unread count, a different number counted over the same store.
+                 Both are the server's; the browser recomputes neither, because the feed is paged
+                 and the bell is not. The drawer's Alerts badge, this bell and the dashboard's
+                 alerts card call the same accessor, which is what makes the three unable to
+                 disagree — a second derivation in `data/alerts.ts` was deleted this wave for
+                 exactly that reason. */
               alertsOpen={alerts.openCount()}
               alertsUnread={alerts.unread()}
               /* The panel is the same feed the bell counts, which is what §4.16 means by putting it
@@ -1081,6 +1081,7 @@ export function topCrumbs(
     consumers: "Consumers",
     schemas: "Schema Registry",
     alerts: "Alerts",
+    connect: "Connect",
     settings: "Settings",
   };
   // "overview" adds nothing: the cluster crumb already links there, and a trail that repeats itself
@@ -1279,6 +1280,7 @@ export function currentFeatureId(pathname: string, uiPrefix: string): string | u
   if (segments.includes("consumer-groups")) return "consumers";
   if (segments.includes("schemas")) return "schemas";
   if (segments.includes("alerts")) return "alerts";
+  if (segments.includes("connect")) return "connect";
   // `/clusters/<id>`, with or without `/dashboard/<tab>` after it. Both are the same page.
   if (segments[1] !== undefined && segments[1] !== "manage" && !segments.includes("brokers")) {
     return "overview";

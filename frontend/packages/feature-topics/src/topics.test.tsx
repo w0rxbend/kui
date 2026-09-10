@@ -55,7 +55,7 @@ import {
   type StubRequest,
 } from "./harness.jsx";
 import { topicsCsv, topicsVoice } from "./topicList.js";
-import { bulkSentence, toTopicQuery } from "./TopicsRoute.jsx";
+import { bulkSentence, pollUntilListed, toTopicQuery } from "./TopicsRoute.jsx";
 import type { TopicRow } from "./types.js";
 
 /**
@@ -1226,6 +1226,115 @@ describe("the topics screen, wired", () => {
     dispose();
   });
 
+  test("a finished bulk delete drops the ticks and re-reads the list", async () => {
+    /*
+     * The two lines after the toast in `TopicsRoute`'s bulk `onConfirm`, and both were carried by
+     * nothing.
+     *
+     * Deleting `setSelected(new Set())` leaves the bar up, still reading "2 topics selected", over
+     * rows that have just been destroyed — and the next gesture an operator makes from that bar
+     * acts on a set whose members no longer exist. Deleting `reload()` leaves the screen showing
+     * the topics it has just deleted, which is the most convincing kind of wrong data there is: the
+     * operator confirms twice, and the second attempt fails with "topic does not exist".
+     *
+     * Both are asserted off the screen and off the stub's own request log rather than off the
+     * mutation's return value, because what the operator sees afterwards is the whole rule.
+     */
+    withMeasuredRows();
+    /* The list answers with the three rows until the delete has run, and with one row afterwards —
+       which is what a re-read is *for*. Counting reads alone would be satisfied by a `reload()`
+       that fetched and threw the answer away. */
+    let deleted = false;
+    let listReads = 0;
+    const host = topicsHost({
+      at: "/clusters/bulk-aftermath-cluster/topics",
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": (request: StubRequest) => {
+          if (request.body !== undefined) return { name: "unused", partitions: 1 };
+          listReads += 1;
+          if (!deleted) return threeRows;
+          return {
+            topics: {
+              status: "ok",
+              fetchedAt: "2026-09-06T00:00:00Z",
+              data: {
+                items: threeRows.topics.data.items.slice(2),
+                page: { page: 1, pageSize: 32, totalItems: 1 },
+              },
+            },
+            incompleteTopics: 0,
+          };
+        },
+        "/api/v1/clusters/{clusterId}/topics/{topicName}/deletion/plan": (
+          request: StubRequest,
+        ) => ({
+          topic: request.params.path?.["topicName"] ?? "",
+          partitions: 6,
+          records: 16,
+          autoCreateEnabled: false,
+          warnings: [],
+          token: "tok-1",
+          expiresAt: "2026-09-06T00:05:00Z",
+        }),
+        "/api/v1/clusters/{clusterId}/topics/{topicName}": () => {
+          deleted = true;
+          return { topic: "orders.payments.v2", partitions: 6, records: 16, warnings: [] };
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+    const readsBefore = listReads;
+
+    const tickRow = async (index: number): Promise<void> => {
+      const boxes = [
+        ...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]'),
+      ];
+      expect(boxes.length).toBeGreaterThan(index);
+      boxes[index]?.click();
+      await settle();
+    };
+    await tickRow(0);
+    await tickRow(1);
+    expect(container.querySelector('[data-testid="topic-bulk-bar"]')).not.toBeNull();
+
+    [
+      ...(container.querySelector('[data-testid="topic-bulk-bar"]')?.querySelectorAll("button") ??
+        []),
+    ]
+      .find((button) => button.textContent?.trim() === "Delete")
+      ?.click();
+    await settle();
+
+    const gate = document.querySelector<HTMLInputElement>(".kui-confirm__input");
+    expect(gate).not.toBeNull();
+    if (gate !== null) {
+      gate.value = "delete";
+      gate.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await settle();
+
+    [...document.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Delete topics")
+      ?.click();
+    await settle();
+
+    /* The bar is gone because the selection is empty — §3.7's "absent at zero selection" — and not
+       because it was hidden: the ticks that are left on screen are the assertion underneath it. */
+    expect(container.querySelector('[data-testid="topic-bulk-bar"]')).toBeNull();
+    const stillTicked = [
+      ...container.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]'),
+    ].filter((box) => box.checked);
+    expect(stillTicked).toHaveLength(0);
+
+    // And the list was asked again, and drew the answer: the two deleted rows are off the screen.
+    expect(listReads).toBeGreaterThan(readsBefore);
+    expect(container.textContent).not.toContain("orders.payments.v2");
+    expect(container.textContent).toContain("orders.audit.v1");
+
+    dispose();
+  });
+
   test("the bulk Empty asks for a different word and promises the topics survive", async () => {
     /*
      * The bar's two destructive actions share one `ConfirmDialog`, and every word in it is a
@@ -1290,6 +1399,20 @@ describe("the topics screen, wired", () => {
       expected: document.querySelector(".kui-confirm__expected")?.textContent,
       labels: [...document.querySelectorAll("button")].map((one) => one.textContent?.trim()),
       consequence: document.querySelector(".kui-confirm__consequence")?.textContent ?? "",
+      /* The largest text on the dialog, and the last thing left ungated when the word, the label
+         and the consequence were closed. Forced to the Delete branch it reads "Delete 2 topics?"
+         over a button reading "Empty topics" — and the heading is what an operator skims before
+         they read anything else, so it is the half of the dialog most likely to be the only half
+         that is read. It is also `Dialog`'s `aria-labelledby`, so it is the accessible name of the
+         modal: a screen reader announces this sentence and nothing else on arrival. */
+      title: document.querySelector(".kui-modal__title")?.textContent ?? "",
+      /* And the glyph beside the confirm label, which is the other half of "the same gesture must
+         not look like two different irreversible things": `trash` on an Empty says records and the
+         topic are both going. */
+      confirmGlyph: [...document.querySelectorAll<HTMLButtonElement>("button")]
+        .find((one) => one.textContent?.trim() === "Empty topics")
+        ?.querySelector("[data-icon]")
+        ?.getAttribute("data-icon"),
       hasGate: gate !== null,
       untyped: confirmState(),
       // The other action's word, which a dialog with one spelling for both would have accepted.
@@ -1303,6 +1426,8 @@ describe("the topics screen, wired", () => {
     expect(seen.expected).toBe("empty");
     expect(seen.labels).toContain("Empty topics");
     expect(seen.labels).not.toContain("Delete topics");
+    expect(seen.title).toBe("Empty 2 topics?");
+    expect(seen.confirmGlyph).toBe("minus");
     /* Named rather than counted, because a confirmation that says "2 topics" is one the operator
        cannot check — and the promise that distinguishes this dialog from the other one. */
     expect(seen.consequence).toContain("orders.payments.v2");
@@ -1634,6 +1759,183 @@ describe("the topics screen, wired", () => {
       Delete: true,
     });
   });
+  test("a refused control on the list screen says why, in a reachable sentence", async () => {
+    /*
+     * The other half of the case above. That one asserts *which* action each control is gated on;
+     * this one asserts that the refusal is **explained**. §3.7: "an action the principal may not
+     * perform is disabled with a stated reason, not hidden" — and a control that is disabled with
+     * an empty reason is hidden in the only sense that matters, because the operator is left with a
+     * dead button and no idea whose problem it is.
+     *
+     * Both `disabledReason` expressions could be emptied with all 148 cases in this package green:
+     * `TopicListPage`'s `disabledReason: props.createDisabledReason` and `TopicsRoute`'s
+     * `{ disabledReason: purgeBlocked() }` on the bulk bar. Every case that had ever looked at a
+     * refused control read `aria-disabled`, which stays `"true"` either way.
+     *
+     * The sentence is read through the button's own `aria-describedby` rather than through the
+     * first `[role="tooltip"]` in the document: bubbles are portalled into `body` and an earlier
+     * case's can still be there, so a query across the body can answer with somebody else's words.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/list-reasons-cluster/topics",
+      // Holds nothing. One arrangement is enough here because the case is about the sentence being
+      // present at all; which action each control names is the case above.
+      permits: false,
+      answers: { "/api/v1/clusters/{clusterId}/topics": threeRows },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]')?.click();
+    await settle();
+
+    const bar = container.querySelector('[data-testid="topic-bulk-bar"]');
+    expect(bar, "the bulk bar carries two of the three controls this case reads").not.toBeNull();
+
+    const reasonUnder = async (within: ParentNode, label: string): Promise<string> => {
+      const button = [...within.querySelectorAll<HTMLButtonElement>("button")].find(
+        (one) => one.textContent?.trim() === label,
+      );
+      expect(button, `${label} must be on screen whoever is looking at it`).toBeDefined();
+      if (button === undefined) return "";
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      await settle();
+      const described = button.getAttribute("aria-describedby") ?? "";
+      const bubble = described === "" ? null : document.getElementById(described);
+      expect(bubble, `${label} is disabled and says nothing about why`).not.toBeNull();
+      return bubble?.textContent ?? "";
+    };
+
+    expect(await reasonUnder(container, "Create topic")).toBe(
+      "You do not have permission to create a topic on this cluster.",
+    );
+    if (bar !== null) {
+      expect(await reasonUnder(bar, "Empty")).toBe(
+        "You do not have permission to empty topics on this cluster.",
+      );
+      expect(await reasonUnder(bar, "Delete")).toBe(
+        "You do not have permission to delete topics on this cluster.",
+      );
+    }
+
+    dispose();
+  });
+
+  test("a read-only cluster refuses every write, and blames the deployment", async () => {
+    /*
+     * ADR-047's flag, which reached none of these screens until wave 7: all seven of
+     * `TopicsRoute`'s `writeBlockedReason` calls passed a hard-coded `readOnly: false`, so a
+     * cluster somebody had deliberately registered read-only offered a live `Create topic`, a live
+     * bulk `Delete` and a live `Empty` — and the refusal arrived from the server *after* the
+     * operator had read a consequence and typed the word "delete". The permission half of the same
+     * gate was closed in wave 5 and this half was wired to a constant on the screen being audited.
+     *
+     * The principal here holds **everything**, which is what makes the case a gate rather than a
+     * second reading of the permission one: only the cluster's own flag can refuse these controls,
+     * and the sentence has to say so. `writeBlockedReason` prints a different sentence for each
+     * because they need different actions from the reader — asking an administrator for a
+     * permission you already hold wastes an afternoon.
+     */
+    withMeasuredRows();
+    const host = topicsHost({
+      at: "/clusters/readonly-flag-cluster/topics",
+      permits: true,
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}": {
+          cluster: {
+            id: "readonly-flag-cluster",
+            name: "Read only",
+            readOnly: true,
+            bootstrapServers: "kafka:9092",
+            origin: "file",
+            security: {
+              protocol: "PLAINTEXT",
+              keystoreConfigured: false,
+              truststoreConfigured: false,
+            },
+            summary: { status: "unavailable" },
+          },
+        },
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]')?.click();
+    await settle();
+    const bar = container.querySelector('[data-testid="topic-bulk-bar"]');
+    expect(bar).not.toBeNull();
+
+    const reasonUnder = async (within: ParentNode, label: string): Promise<string> => {
+      const button = [...within.querySelectorAll<HTMLButtonElement>("button")].find(
+        (one) => one.textContent?.trim() === label,
+      );
+      expect(button, `${label} must be on screen whoever is looking at it`).toBeDefined();
+      if (button === undefined) return "";
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      await settle();
+      const described = button.getAttribute("aria-describedby") ?? "";
+      const bubble = described === "" ? null : document.getElementById(described);
+      expect(bubble, `${label} is disabled and says nothing about why`).not.toBeNull();
+      return bubble?.textContent ?? "";
+    };
+
+    // The deployment's sentence, not the principal's: this account holds every one of them.
+    expect(await reasonUnder(container, "Create topic")).toBe(
+      "This cluster is configured read-only in KUI, so nothing here can create a topic on this " +
+        "cluster.",
+    );
+    if (bar !== null) {
+      expect(await reasonUnder(bar, "Empty")).toContain("configured read-only in KUI");
+      expect(await reasonUnder(bar, "Delete")).toContain("configured read-only in KUI");
+    }
+    dispose();
+    forgetQueries();
+
+    /* And the same cluster answering `readOnly: false` leaves all three live — without this the
+       case is met by a screen that refuses everybody, which is the shape the permission gate above
+       already rules out and which this one would otherwise re-introduce. */
+    const writable = topicsHost({
+      at: "/clusters/writable-flag-cluster/topics",
+      permits: true,
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}": {
+          cluster: {
+            id: "writable-flag-cluster",
+            name: "Writable",
+            readOnly: false,
+            bootstrapServers: "kafka:9092",
+            origin: "file",
+            security: {
+              protocol: "PLAINTEXT",
+              keystoreConfigured: false,
+              truststoreConfigured: false,
+            },
+            summary: { status: "unavailable" },
+          },
+        },
+      },
+    });
+    const open = mount(writable.view);
+    await settle();
+    open.container.querySelector<HTMLInputElement>('tbody input[type="checkbox"]')?.click();
+    await settle();
+    const liveBar = open.container.querySelector('[data-testid="topic-bulk-bar"]');
+    const live = (within: ParentNode, label: string): boolean =>
+      [...within.querySelectorAll<HTMLButtonElement>("button")]
+        .find((one) => one.textContent?.trim() === label)
+        ?.getAttribute("aria-disabled") !== "true";
+    expect(live(open.container, "Create topic")).toBe(true);
+    expect(liveBar !== null && live(liveBar, "Empty")).toBe(true);
+    expect(liveBar !== null && live(liveBar, "Delete")).toBe(true);
+    open.dispose();
+  });
+
   test("adding partitions and changing settings are gated on the topic-edit action", async () => {
     /*
      * The last two of `TopicsRoute`'s seven `writeBlockedReason` calls, and the two the case above
@@ -1769,6 +2071,190 @@ describe("the topics screen, wired", () => {
       "Told why not": true,
     });
   });
+  test("a cluster that has not answered yet is not treated as read-only", async () => {
+    /*
+     * The other half of `useClusterReadOnly`, and the half a case that settles first cannot see.
+     *
+     * The accessor answers `false` until the cluster's own document arrives, which is the same
+     * choice `useKui().permits` documents and makes for the same reason: disabling every write
+     * control on a fact KUI does not have puts a screenful of refusals in front of every reader for
+     * the length of one request, and the server is the authority either way. Made to answer `true`
+     * while the question is out, `Create topic` flickers disabled on every single load — a control
+     * that is dead when a page opens and alive a moment later is one an operator stops trusting.
+     *
+     * So the cluster document is **held** here and never released. The list answers, the table
+     * draws, and the header action is read while the read-only question is still out.
+     */
+    withMeasuredRows();
+    const held = new Promise<never>(() => {
+      /* deliberately never settles: the question is out for the length of this case */
+    });
+    const host = topicsHost({
+      at: "/clusters/unanswered-flag-cluster/topics",
+      permits: true,
+      answers: {
+        "/api/v1/clusters/{clusterId}/topics": threeRows,
+        "/api/v1/clusters/{clusterId}": () => held,
+      },
+    });
+    const { container, dispose } = mount(host.view);
+    await settle();
+
+    const create = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (one) => one.textContent?.trim() === "Create topic",
+    );
+    expect(create, "the header action must be on screen before the cluster answers").toBeDefined();
+    expect(create?.getAttribute("aria-disabled")).not.toBe("true");
+    dispose();
+  });
+
+  test("a read-only cluster refuses the topic page's four write controls too", async () => {
+    /*
+     * The other four of `TopicsRoute`'s seven `writeBlockedReason` calls — `Empty topic`,
+     * `Delete topic`, `Add partitions` and the settings editor — all of which hard-coded
+     * `readOnly: false` alongside the three on the list screen. They are a separate case because
+     * two of them live behind tabs, and because the list-screen case cannot fail for them: putting
+     * the constant back on these four alone left it green.
+     *
+     * The principal holds everything again, so the only thing that can refuse these controls is the
+     * cluster's own registration, and the sentence has to name it.
+     */
+    const answers = {
+      "/api/v1/clusters/{clusterId}": {
+        cluster: {
+          id: "readonly-topic-cluster",
+          name: "Read only",
+          readOnly: true,
+          bootstrapServers: "kafka:9092",
+          origin: "file",
+          security: {
+            protocol: "PLAINTEXT",
+            keystoreConfigured: false,
+            truststoreConfigured: false,
+          },
+          summary: { status: "unavailable" },
+        },
+      },
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/overview": {
+        topic: {
+          status: "ok",
+          fetchedAt: "2026-09-06T00:00:00Z",
+          data: {
+            row: {
+              name: "orders.v1",
+              internal: false,
+              partitionCount: 1,
+              replicationFactor: 1,
+              outOfSyncReplicas: 0,
+              offlinePartitions: 0,
+            },
+            partitions: [],
+          },
+        },
+      },
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/partitions": {
+        partitions: {
+          status: "ok",
+          data: [
+            {
+              partition: 0,
+              leader: 1,
+              replicas: [{ broker: 1, leader: true, inSync: true }],
+              earliestOffset: 0,
+              latestOffset: 4,
+            },
+          ],
+        },
+      },
+      "/api/v1/clusters/{clusterId}/topics/{topicName}/config": {
+        config: {
+          status: "ok",
+          data: {
+            status: "entries",
+            values: [
+              {
+                name: "retention.ms",
+                value: "604800000",
+                defaultValue: "604800000",
+                source: "dynamic-topic",
+                sensitive: false,
+                readOnly: false,
+                documentation: null,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const reasonUnder = async (within: ParentNode, label: string): Promise<string> => {
+      const button = [...within.querySelectorAll<HTMLButtonElement>("button")].find(
+        (one) => one.textContent?.trim() === label,
+      );
+      expect(button, `${label} must be on screen whoever is looking at it`).toBeDefined();
+      if (button === undefined) return "";
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      await settle();
+      const described = button.getAttribute("aria-describedby") ?? "";
+      const bubble = described === "" ? null : document.getElementById(described);
+      expect(bubble, `${label} is disabled and says nothing about why`).not.toBeNull();
+      return bubble?.textContent ?? "";
+    };
+
+    const header = topicsHost({
+      at: "/clusters/readonly-topic-cluster/topics/orders.v1",
+      permits: true,
+      answers,
+    });
+    const page = mount(header.view);
+    await settle();
+    expect(await reasonUnder(page.container, "Empty topic")).toBe(
+      "This cluster is configured read-only in KUI, so nothing here can empty this topic.",
+    );
+    expect(await reasonUnder(page.container, "Delete topic")).toBe(
+      "This cluster is configured read-only in KUI, so nothing here can delete this topic.",
+    );
+    page.dispose();
+    forgetQueries();
+
+    const grow = topicsHost({
+      at: "/clusters/readonly-topic-cluster/topics/orders.v1?tab=partitions",
+      permits: true,
+      answers,
+    });
+    const partitions = mount(grow.view);
+    await settle();
+    expect(await reasonUnder(partitions.container, "Add partitions")).toBe(
+      "This cluster is configured read-only in KUI, so nothing here can add partitions to this " +
+        "topic.",
+    );
+    partitions.dispose();
+    forgetQueries();
+
+    /* The settings editor's refusal is a sentence above the table rather than a disabled control —
+       there is one Edit per key and repeating the reason thirty-three times would be unreadable —
+       so this is read off the page's own text, and the absence of the control is read beside it
+       because an absence on its own is also what a broken table looks like. */
+    const settingsHost = topicsHost({
+      at: "/clusters/readonly-topic-cluster/topics/orders.v1?tab=settings",
+      permits: true,
+      answers,
+    });
+    const settings = mount(settingsHost.view);
+    await settle();
+    expect(settings.container.textContent).toContain(
+      "This cluster is configured read-only in KUI, so nothing here can change this topic's " +
+        "settings.",
+    );
+    expect(
+      [...settings.container.querySelectorAll<HTMLButtonElement>("button")].some(
+        (one) => one.textContent?.trim() === "Edit",
+      ),
+    ).toBe(false);
+    settings.dispose();
+  });
+
   test("a plan the server withheld a token for cannot be confirmed", async () => {
     /*
      * ADR-045's refusal shape: a read-only cluster answers the *plan* — so the operator can see
@@ -2105,6 +2591,42 @@ describe("the topics screen, wired", () => {
     dispose();
   });
 
+  test("the create poll stops asking rather than spinning", async () => {
+    /*
+     * The **upper** half of `settleAfterCreate`'s bound, and the half nothing could reach through
+     * the screen. "A created topic is waited for until the list can see it" above gates the lower
+     * half — that the screen comes back more than once — and it says in its own note that it does
+     * not gate this one. Raising the bound from 6 to 100 draws exactly the same page: the only
+     * difference is that a browser left on a cluster which never lists the topic keeps asking the
+     * gateway twice a second for fifty seconds instead of three. That is a request loop nobody can
+     * see, on a screen an operator has already walked away from.
+     *
+     * So the loop is a function with one caller — `settleAfterCreate`, twelve lines below it — and
+     * this drives the function. Two facts, and the second is what makes it a gate rather than a
+     * count: it **finishes**, and it made exactly six passes when it did. Raising the bound reddens
+     * both, because the race below hands back `"still going"` long before a hundred passes are
+     * done.
+     *
+     * The literal 6 rather than `CREATE_POLL_ATTEMPTS`: a case that imported the constant would
+     * move with it, and the bound is the rule.
+     */
+    let reloads = 0;
+    // Never listed, which is the state the bound exists for: a topic the cluster will not show.
+    const polled = pollUntilListed(
+      () => {
+        reloads += 1;
+      },
+      () => false,
+    );
+    const outcome = await Promise.race([
+      polled.then(() => "finished" as const),
+      new Promise<"still going">((resolve) => setTimeout(() => resolve("still going"), 5_000)),
+    ]);
+
+    expect(outcome).toBe("finished");
+    expect(reloads).toBe(6);
+  });
+
   test("the bulk bar's dismiss clears the ticks and not just the bar", async () => {
     /*
      * Dismissing the bar is the operator saying "never mind", and the ticks are the selection: a
@@ -2225,6 +2747,17 @@ describe("the export, and the sentence above the list", () => {
     });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => undefined });
 
+    /* The name the file lands under, which nothing asserted: `download("topics.csv", …)` is green
+       on every case here, and two clusters exported into one folder then produce `topics.csv` and
+       `topics (1).csv` — two files of Kafka topics with nothing on either to say which cluster it
+       came from. The anchor is removed immediately after the click, so the name is captured from
+       the click rather than read off the document afterwards. */
+    let savedAs: string | undefined;
+    const realClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function saved(this: HTMLAnchorElement): void {
+      savedAs = this.download;
+    };
+
     const host = topicsHost({
       at: "/clusters/export-cluster/topics",
       answers: {
@@ -2276,7 +2809,10 @@ describe("the export, and the sentence above the list", () => {
        tidiness point: one stray link per export accumulates in a tab somebody keeps open all day.
        Dropping `anchor.remove()` left every other case in this package green. */
     expect(document.querySelectorAll("a[download]")).toHaveLength(0);
+    // Named for the cluster it came from, so two of these in one folder are two different files.
+    expect(savedAs).toBe("export-cluster-topics.csv");
 
+    HTMLAnchorElement.prototype.click = realClick;
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: original });
     dispose();
   });

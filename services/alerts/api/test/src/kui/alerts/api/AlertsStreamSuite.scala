@@ -32,14 +32,23 @@ final class AlertsStreamSuite extends CatsEffectSuite {
   private val neighbour = ClusterId.unsafe("prod-eu-2")
   private val at = Instant.parse("2026-09-07T12:00:00Z")
 
-  /** A store whose feed answers a fixed open count per cluster and whose changes are a fixed list. */
+  /** A store whose feed answers a fixed open count per cluster and whose changes are a fixed list.
+    *
+    * It also records how each read was **asked for**, because the third property decided in
+    * `AlertsRoutes.changes` is not visible in a frame at all: reading a stream must not mark the feed read.
+    */
   private final class Publishing(published: List[ClusterId], counts: Map[ClusterId, Int])
       extends AlertStore[IO] {
 
+    private val asked = scala.collection.mutable.ListBuffer.empty[(Int, Option[Instant])]
+
+    def reads: List[(Int, Option[Instant])] = asked.toList
+
     def feed(id: ClusterId, principal: Principal, limit: Int, markRead: Option[Instant]): IO[AlertFeed] =
-      IO.pure(
+      IO {
+        asked += ((limit, markRead))
         AlertFeed(Nil, 0, counts.getOrElse(id, 0), Map.empty, 0, None, Some(at), Nil)
-      )
+      }
 
     def acknowledge(
         id: ClusterId,
@@ -100,6 +109,24 @@ final class AlertsStreamSuite extends CatsEffectSuite {
           clue = frames.head.data.noSpaces
         )
       }
+  }
+
+  test("a frame is not a read, so the stream never clears the bell it exists to ring") {
+    // `changes` states this rule in words — *"a bell that cleared itself because its own stream delivered
+    // a frame would be a bell that never lit up"* — and nothing asserted it: passing `Some(now)` instead
+    // of `None` left all 1,289 alerts tasks green. It cannot be seen in a frame, because what `markRead`
+    // changes is the principal's marker and not the document; so it is asserted on the argument.
+    //
+    // The page size is here for the same reason and is `0` on purpose: the frame needs a count and no
+    // rows, and a stream that asked for a page would carry one subscriber's events into the cost of every
+    // other subscriber's notification.
+    val store = new Publishing(List(watched, watched), Map(watched -> 4))
+
+    AlertsRoutes
+      .changes[IO](store, watched, Principal.Anonymous)
+      .compile
+      .toList
+      .map(_ => assertEquals(store.reads, List((0, None), (0, None))))
   }
 
   test("a frame carries no events, so one subscriber's feed never reaches another's socket") {

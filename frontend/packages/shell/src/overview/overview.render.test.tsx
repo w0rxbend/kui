@@ -31,11 +31,14 @@ import {
   NO_DISK_SIZES,
   PARTIAL_DISKS,
   HANDLERS_NOTHING_READ,
+  HANDLERS_STALE,
   PRODUCERS_BY_CLIENT,
   PRODUCERS_BY_TOPIC,
+  PRODUCERS_STALE,
   PRODUCERS_WITH_INTERNAL_EXCLUDED,
   RECORD_SIZE_ABSENT,
   RECORD_SIZE_MEAN,
+  RECORD_SIZE_STALE,
   SPARSE_SUMMARY,
   THROUGHPUT_ALL_ABSENT,
   THROUGHPUT_FORBIDDEN,
@@ -260,9 +263,254 @@ describe("the shared alerts card", () => {
     expect(card?.querySelectorAll("li")).toHaveLength(1);
   });
 
+  /**
+   * The compact card is compact, and the pill says how much it is not showing.
+   *
+   * `events().slice(0, 3)` could be written `events()` with every case in this package green: the
+   * case above it hands the store one event, so the cap has never had more rows than it caps. A
+   * cluster mid-incident with forty open events would then push `Storage by broker` off the bottom
+   * of a dashboard that exists to be read in one glance — and every row on it would be true, which
+   * is why nothing would report it.
+   *
+   * The pill is the other half: it draws the **server's** count, so the card is never claiming the
+   * three rows are all there are.
+   */
+  it("draws three rows however many the feed holds, over the real count", async () => {
+    const event = (id: string, title: string) => ({
+      id,
+      severity: "warning" as const,
+      tone: "warning",
+      category: "rebalance",
+      glyph: "rebalance",
+      openedAt: "2026-09-03T09:11:12Z",
+      lastSeenAt: "2026-09-03T10:11:12Z",
+      title,
+      detail: undefined,
+      resolution: undefined,
+    });
+    const alerts = staticAlerts({
+      kind: "ready",
+      value: {
+        items: [
+          event("evt-1", "first"),
+          event("evt-2", "second"),
+          event("evt-3", "third"),
+          event("evt-4", "fourth"),
+          event("evt-5", "fifth"),
+        ],
+        total: 12,
+        openCount: 12,
+        unreadCount: 5,
+        lastReadAt: undefined,
+        evaluatedAt: "2026-09-03T10:11:12Z",
+        rules: [],
+      },
+    });
+    const screen = keep(
+      mount(
+        dashboardHost(
+          DASHBOARD,
+          () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+          { alerts },
+        ),
+      ),
+    );
+    await settle();
+
+    const card = screen.container.querySelector('[data-testid="panel-alerts"]')!;
+    expect(card.querySelectorAll("li")).toHaveLength(3);
+    expect(card.textContent).toContain("third");
+    expect(card.textContent).not.toContain("fourth");
+    /* Twelve, not three and not five: the count is the service's, over the whole cluster, and the
+       card would otherwise be a smaller number wearing the same pill. */
+    expect(card.querySelector(".kui-pill")?.textContent).toContain("12 open");
+  });
+
+  /**
+   * A feed KUI knows is out of date, on the one card on this page that is not drawn from the model.
+   *
+   * The stale arm is the same rule the traffic cards keep and it was gated by nothing here:
+   * deleting the note left every case in this package green, and the card then drew a stream that
+   * had dropped as though it were live. `Fetched.stale` carries no `asOf`, so `Card`'s stale badge
+   * is not available and this sentence is the only thing on the card that says the rows are old.
+   *
+   * The rows are still drawn beside it, which is the rest of the rule: last-known-good alerts at
+   * the moment the stream drops are worth more than a blank card.
+   */
+  it("says an alert feed is out of date, and still draws what it holds", async () => {
+    const alerts = staticAlerts({
+      kind: "stale",
+      reason: "The alert stream closed and KUI has not been able to re-open it.",
+      value: {
+        items: [
+          {
+            id: "evt-one",
+            severity: "critical",
+            tone: "danger",
+            category: "partition",
+            glyph: "partition",
+            openedAt: "2026-09-03T09:11:12Z",
+            lastSeenAt: "2026-09-03T10:11:12Z",
+            title: "2 partitions offline",
+            detail: "no leader",
+            resolution: undefined,
+          },
+        ],
+        total: 3,
+        openCount: 3,
+        unreadCount: 1,
+        lastReadAt: undefined,
+        evaluatedAt: "2026-09-03T10:11:12Z",
+        rules: [],
+      },
+    });
+    const screen = keep(
+      mount(
+        dashboardHost(
+          DASHBOARD,
+          () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+          { alerts },
+        ),
+      ),
+    );
+    await settle();
+
+    const card = screen.container.querySelector('[data-testid="panel-alerts"]')!;
+    expect(card.querySelector(".kui-alerts-summary__note")?.textContent).toBe(
+      "The alert stream closed and KUI has not been able to re-open it.",
+    );
+    expect(card.textContent).toContain("2 partitions offline");
+    expect(card.querySelector(".kui-pill")?.textContent).toContain("3 open");
+  });
+
   it("mounts no alerts card for an unconfigured deployment", () => {
     const screen = show(HEALTHY);
     expect(screen.container.querySelector('[data-testid="panel-alerts"]')).toBeNull();
+  });
+
+  /**
+   * The pill, over a cluster the service's rules have never run on.
+   *
+   * The card's `headerEnd` is `<Show when={openCount() !== null}>`, and the store answers `null`
+   * for exactly this feed: `openCount: 0` beside an absent `evaluatedAt` is not a measured zero, it
+   * is a cluster nobody has swept. Drawn as *"None open"* in a green pill, on the dashboard, beside
+   * the storage card, it is the most reassuring thing this screen can say and it would be about
+   * nothing at all — the same defect as the storage meter's em dash over a disk it had read,
+   * inverted.
+   *
+   * Nothing had ever mounted the card in this state, so the guard was free to be deleted; and the
+   * card's body sentence is the only thing left saying what is actually true, which is why it is
+   * asserted here beside the absence of the pill rather than instead of it.
+   */
+  it("draws no pill for a feed with nothing behind its zero, and says why", async () => {
+    const alerts = staticAlerts({
+      kind: "ready",
+      value: {
+        items: [],
+        total: 0,
+        openCount: 0,
+        unreadCount: 0,
+        lastReadAt: undefined,
+        evaluatedAt: undefined,
+        rules: [],
+      },
+    });
+    const screen = keep(
+      mount(
+        dashboardHost(
+          DASHBOARD,
+          () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+          { alerts },
+        ),
+      ),
+    );
+    await settle();
+
+    const card = screen.container.querySelector('[data-testid="panel-alerts"]');
+    expect(card).not.toBeNull();
+    expect(card?.querySelector(".kui-pill")).toBeNull();
+    expect(card?.textContent).toContain("KUI has not evaluated this cluster's alert rules yet.");
+    // And emphatically not the sentence for a cluster the rules *have* swept.
+    expect(card?.textContent).not.toContain("None open");
+    expect(card?.textContent).not.toContain("holding no events");
+  });
+
+  it("draws a measured zero as a pill: a cluster the rules swept clean is a fact", async () => {
+    /* The other half of the same rule, and the reason the guard is `!== null` rather than
+       `> 0`: once the rules have run, "nothing is open" is a measurement and the card says so. */
+    const alerts = staticAlerts({
+      kind: "ready",
+      value: {
+        items: [],
+        total: 0,
+        openCount: 0,
+        unreadCount: 0,
+        lastReadAt: undefined,
+        evaluatedAt: "2026-09-03T10:11:12Z",
+        rules: [],
+      },
+    });
+    const screen = keep(
+      mount(
+        dashboardHost(
+          DASHBOARD,
+          () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+          { alerts },
+        ),
+      ),
+    );
+    await settle();
+
+    const card = screen.container.querySelector('[data-testid="panel-alerts"]');
+    /* The same selector the case above asserts is absent, so that neither of the two is passing on
+       a class name this card stopped using. */
+    expect(card?.querySelector(".kui-pill")?.textContent).toContain("None open");
+    expect(card?.textContent).toContain("holding no events for this cluster");
+  });
+
+  /**
+   * A refusal is not a failure, on the card as on the bell.
+   *
+   * `stateAction`'s `Show` is on `kind === "failed"`, so a principal who may not read this
+   * cluster's alerts gets the sentence and no Retry — pressing it would be refused every time.
+   */
+  it("offers no Retry on a refusal, and one on a read that did not answer", async () => {
+    const refused = keep(
+      mount(
+        dashboardHost(
+          DASHBOARD,
+          () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+          { alerts: staticAlerts({ kind: "forbidden" }) },
+        ),
+      ),
+    );
+    await settle();
+    const refusedCard = refused.container.querySelector('[data-testid="panel-alerts"]');
+    expect(refusedCard?.textContent).toContain("You do not have permission");
+    expect(refusedCard?.querySelector("button")).toBeNull();
+
+    const broken = keep(
+      mount(
+        dashboardHost(
+          DASHBOARD,
+          () => <Overview model={toOverviewModel(HEALTHY)} queries={createQueryRegistry()} />,
+          {
+            alerts: staticAlerts({
+              kind: "failed",
+              message: "The alerts service did not answer.",
+              code: "KUI-UPSTREAM-UNAVAILABLE",
+            }),
+          },
+        ),
+      ),
+    );
+    await settle();
+    const brokenCard = broken.container.querySelector('[data-testid="panel-alerts"]');
+    expect(brokenCard?.textContent).toContain("The alerts service did not answer.");
+    // The code beside the sentence: it is the part of a failure that survives being pasted into a
+    // ticket.
+    expect(brokenCard?.textContent).toContain("KUI-UPSTREAM-UNAVAILABLE");
+    expect(brokenCard?.querySelector("button")?.textContent).toContain("Retry");
   });
 });
 
@@ -1252,6 +1500,59 @@ describe("an answer KUI knows is out of date", () => {
     // instead of it.
     expect(caption?.textContent).toContain("20 of the 288 5-minute steps");
     expect(throughputTable(container)?.querySelectorAll("tbody tr")).toHaveLength(288);
+  });
+
+  /**
+   * The same rule on the three cards that share one helper, and this is W7-02's third metrics rule
+   * — it lives in this tree rather than in `services/metrics`, which is why it is written here.
+   *
+   * `TrafficCards.captionOf` opens `if (state.kind !== "stale") return own;`, and widening that to
+   * `if (state.kind !== "stale" || true)` was green across the whole frontend suite. Request
+   * handlers, Top producers and Message size would then draw hour-old figures with **no badge and
+   * no sentence** — the badge deliberately, because `Fetched.stale` carries no `asOf` and drawing
+   * one would mean inventing a timestamp, which leaves the caption as the only thing on the card
+   * that says the numbers are old. The only assertion of that caption in the repository covered
+   * `ThroughputCard`, which has a *separate* copy of the helper one file over, so the three cards
+   * this file is named for were gated by nothing at all.
+   *
+   * All three in one case on purpose: they share the function, and a case naming one of them would
+   * leave a "fix" that special-cases that card and drops the sentence from the other two.
+   */
+  it("says so on all three of the cards that share the Traffic tab's caption", async () => {
+    const { container } = await showMetrics({
+      [HANDLERS_PATH]: HANDLERS_STALE,
+      [PRODUCERS_PATH]: PRODUCERS_STALE,
+      [RECORD_SIZE_PATH]: RECORD_SIZE_STALE,
+    });
+    const caption = (panel: string): string =>
+      container.querySelector(`[data-testid="${panel}"] .kui-panel__caption`)?.textContent ?? "";
+
+    for (const panel of ["panel-request-handlers", "panel-top-producers", "panel-message-sizes"]) {
+      expect(caption(panel)).toContain("This is the last answer KUI received:");
+      expect(caption(panel)).toContain("The exporter has not answered since 11:58.");
+    }
+
+    /* The card's own sentence survives behind the staleness: the record-size card had a window to
+       state, and the stale reason is added to it rather than instead of it. */
+    expect(caption("panel-message-sizes")).toContain("Averaged over the last hour.");
+
+    /* And the figures are still on screen, which is the other half of the rule. A blank panel at
+       the moment something is wrong is worse than an old number that says it is old. */
+    // Four tiles: the two idle ratios, and one per purgatory queue the exporter named.
+    expect(
+      container.querySelectorAll('[data-testid="panel-request-handlers"] .kui-handlers__tile'),
+    ).toHaveLength(4);
+    expect(
+      container.querySelector('[data-testid="panel-top-producers"]')?.textContent,
+    ).toContain("orders.payments");
+    expect(
+      container.querySelector('[data-testid="record-size-mean"]')?.textContent,
+    ).toContain("1.2 kB");
+    /* Not drawn as a failure either: a stale read is data, so there is no unavailable state and no
+       Retry — which is what separates this case from the one about a read that did not answer. */
+    expect(
+      container.querySelector('[data-testid="panel-top-producers"] button'),
+    ).toBeNull();
   });
 });
 

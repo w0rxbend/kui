@@ -14,6 +14,7 @@ import org.apache.kafka.common.{KafkaFuture, Node, TopicPartition as KafkaTopicP
 import kui.kafka.SkipReason
 import kui.kernel.ClusterId
 import kui.kernel.cluster.{AdminTuning, BootstrapServers, ClientProperties, ClusterConnection, ClusterSecurity}
+import kui.kernel.error.ErrorCode
 import kui.kernel.{Offset, PartitionId, TopicName, TopicPartition}
 import kui.testkit.KuiIOSuite
 
@@ -39,6 +40,16 @@ final class OffsetLookupSuite extends KuiIOSuite {
     TopicPartition(TopicName.unsafe("orders"), PartitionId.unsafe(n))
 
   private def kafkaPartition(n: Int): KafkaTopicPartition = new KafkaTopicPartition("orders", n)
+
+  /** Kafka's own "there is no leader" value on the metadata path.
+    *
+    * `TopicPartitionInfo.leader` is documented as null when there is no leader, and `KafkaAdminClient`
+    * builds these from `MetadataResponse`, which carries a leader id of `-1` and turns it into
+    * `Node.noNode()` rather than into a null. Both shapes therefore reach KUI, and the second is the one a
+    * real broker sends.
+    */
+  private def noNodeLeader(n: Int): TopicPartitionInfo =
+    new TopicPartitionInfo(n, Node.noNode(), List(leader).asJava, List(leader).asJava)
 
   private def info(n: Int, hasLeader: Boolean): TopicPartitionInfo =
     new TopicPartitionInfo(
@@ -137,6 +148,54 @@ final class OffsetLookupSuite extends KuiIOSuite {
     exploding
       .endOffsets(connection, Set.empty)
       .map(answer => assertEquals(answer.map(_.isEmpty), Right(true)))
+  }
+
+  test("a partition the broker answered without an offset is a skip, never a zero") {
+    // `required`'s own docstring: "a skip with a stated reason, never a substituted zero. A zero here
+    // would read on screen as 'this partition is empty', which is a different and quite specific lie."
+    // Nothing asserted it: substituting `Offset.unsafe(0)` for the missing partition left all 279 cases
+    // in this module, `libs/kafka-auth` and `libs/serde-confluent` green. Both partitions have leaders
+    // here, so the filter is not what removes the second one — the broker simply did not answer for it.
+    for {
+      pair <- lookupWith(
+        List(info(0, hasLeader = true), info(1, hasLeader = true)),
+        Map(kafkaPartition(0) -> 100L)
+      )
+      (lookup, _) = pair
+      answer <- lookup.endOffsets(connection, Set(partition(0), partition(1)))
+    } yield {
+      assertEquals(answer.map(_.values), Right(Map(partition(0) -> Offset.unsafe(100L))))
+      assertEquals(
+        answer.map(_.values.get(partition(1))),
+        Right(None),
+        clue = "a partition with no answer was given a number instead of a reason"
+      )
+      assertEquals(answer.map(_.skipped.keySet), Right(Set(partition(1))))
+      assertEquals(
+        answer.map(_.skipped.get(partition(1)).map {
+          case SkipReason.Failed(code, _) => code
+          case other => fail(s"expected a stated failure, got $other")
+        }),
+        Right(Some(ErrorCode.UpstreamUnavailable))
+      )
+    }
+  }
+
+  test("a leader Kafka reports as the no-node is no leader, and no request is sent for it") {
+    // The branch a real broker takes. `Option(info.leader).isEmpty` alone is true only for the null
+    // shape; dropping the `info.leader.id < 0` half of the test left every case in this module green
+    // while restoring the sixty-second timeout this component exists to prevent.
+    for {
+      pair <- lookupWith(List(noNodeLeader(0)), Map.empty)
+      (lookup, calls) = pair
+      offline <- lookup.leaderless(connection, Set(partition(0)))
+      answer <- lookup.endOffsets(connection, Set(partition(0)))
+      made <- calls.get
+    } yield {
+      assertEquals(offline, Right(Set(partition(0))))
+      assertEquals(answer.map(_.skipped), Right(Map(partition(0) -> SkipReason.NoLeader)))
+      assertEquals(made, 0, clue = "listOffsets was sent for a partition whose leader is node -1")
+    }
   }
 
   test("leaderless names the offline partitions, so a reset can refuse before it plans") {

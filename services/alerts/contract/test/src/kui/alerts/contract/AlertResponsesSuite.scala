@@ -71,6 +71,36 @@ final class AlertResponsesSuite extends FunSuite {
     assertEquals(change.asJson.as[AlertChangeDto], Right(change))
   }
 
+  test("an SSE frame is exactly its golden document, event name included") {
+    // The name is the half of this wire that is not a DTO. `AlertsRoutes` writes frames under
+    // `AlertChangeDto.EventName` and the browser listens under a constant of its own; committing the pair
+    // in one document is what turns a hand-copied mirror into a compared one.
+    assertGolden("alerts-stream-frame.json", streamFrame)
+    assertEquals(streamFrame.hcursor.get[String]("event"), Right(AlertChangeDto.EventName))
+    assertEquals(streamFrame.hcursor.downField("data").as[AlertChangeDto], Right(change))
+  }
+
+  test("a row and its resolution decode on their own, out of the document the feed was rendered to") {
+    // `AlertEventDto` and `AlertResolutionDto` have no file of their own because they have no envelope of
+    // their own: they are how a row is written *inside* the feed and the acknowledgement. Cutting them out
+    // of the committed feed document and decoding them alone is what says the browser may read a row
+    // wherever one appears, rather than only where a whole-document decoder happens to look.
+    val row = parse(golden("alerts-feed-response.json"))
+      .flatMap(_.hcursor.downField("events").downField("data").downField("items").downN(1).as[AlertEventDto])
+
+    assertEquals(row, Right(resolved))
+    assertEquals(
+      row.map(_.resolution),
+      Right(Some(AlertResolutionDto(fetchedAt, "acknowledged", Some("ada"))))
+    )
+
+    val resolution = parse(golden("alerts-acknowledgement.json"))
+      .flatMap(_.hcursor.downField("event").downField("resolution").as[AlertResolutionDto])
+
+    assertEquals(resolution.map(_.kind), Right("acknowledged"))
+    assertEquals(resolution.map(_.by), Right(Some("ada")))
+  }
+
   test("a resolved row keeps its severity and changes only its tone") {
     // The pair SCREENS-V4 §3.8's fourth dot needs. A browser that derived the tone from the severity could
     // not draw the capture, and a browser that derived the severity from the tone would report a resolved

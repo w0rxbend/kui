@@ -215,6 +215,28 @@ final class AlertsRoutesSuite extends CatsEffectSuite {
     }
   }
 
+  test("a markRead=true query reaches the store rather than being decoded and thrown away") {
+    // ADR-053 §6's whole argument is that this parameter *is* the read marker: there is no second
+    // endpoint and no second RBAC action for it. Dropping it between the route and the use case leaves
+    // every case green — the response is byte-identical, because what `markRead` changes is the *next*
+    // read — so the claim has to be made against what the store was handed.
+    resource().use { rig =>
+      for {
+        marked <- get(rig, s"${feedPath(cluster)}?markRead=true")
+        plain <- get(rig, feedPath(cluster))
+        asked <- rig.store.reads.get
+      } yield {
+        assertEquals(marked.code.code, 200, marked.body)
+        assertEquals(plain.code.code, 200, plain.body)
+        assertEquals(asked.size, 2, clue = "one read per request reached the store")
+        assert(asked.head.isDefined, clue = "markRead=true did not reach the store")
+        // And the default is not "mark read": the dashboard's card polls this endpoint, and a poll that
+        // moved the marker would mean the bell never lit up on any screen that also draws the card.
+        assertEquals(asked(1), None)
+      }
+    }
+  }
+
   test("a request with no principal header is refused before any route runs") {
     resource()
       .use(rig =>

@@ -331,6 +331,86 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/pause": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Pause one connector
+         * @description Asks the Connect cluster to stop this connector's tasks. Nothing is deleted and `resume` puts it back, so there is no typed confirmation; it is audited, and it is refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.
+         */
+        readonly post: operations["connect.connector.pause"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/restart": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Restart one connector and its tasks
+         * @description Asks the Connect cluster to restart this connector and its tasks. The connector resumes from its own committed offsets; what it costs is a gap in delivery while the tasks come back. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.
+         */
+        readonly post: operations["connect.connector.restart"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/resume": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Resume one paused connector
+         * @description Asks the Connect cluster to start this connector's tasks again. Audited, and refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.
+         */
+        readonly post: operations["connect.connector.resume"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/clusters/{clusterId}/connect/connectors": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The connectors this cluster's Connect workers are running
+         * @description One section per configured Connect cluster, so a worker that is down costs one row rather than the screen, and a worker that is rebalancing says so instead of reporting no connectors. Each connector carries its tasks with their states and the worker's own failure trace. No throughput is published: the Connect REST API measures none.
+         */
+        readonly get: operations["connect.connectors"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/clusters/{clusterId}/consumer-groups": {
         readonly parameters: {
             readonly query?: never;
@@ -1487,6 +1567,25 @@ export interface components {
             readonly detail?: string;
             readonly reachable: boolean;
             readonly status: string;
+        };
+        /**
+         * ConnectorListResponse
+         * @description The connectors of every Connect cluster configured for this Kafka cluster. `not_configured` with a 200 when this cluster configures none
+         */
+        readonly ConnectorListResponse: {
+            /** @description A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data */
+            readonly connectors: unknown;
+        };
+        /**
+         * ConnectorOperationDto
+         * @description The worker accepted the operation. It carries no connector state: Connect applies these asynchronously, and the next read of the connector list is where the change appears
+         */
+        readonly ConnectorOperationDto: {
+            /** Format: date-time */
+            readonly acceptedAt: string;
+            readonly connect: string;
+            readonly connector: string;
+            readonly operation: string;
         };
         /**
          * CreatedTopicDto
@@ -3251,6 +3350,147 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["BrokerConfigsResponse"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connector.pause": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it */
+                readonly connectName: string;
+                /** @description The connector's name, as the worker reported it */
+                readonly connectorName: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorOperationDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connector.restart": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it */
+                readonly connectName: string;
+                /** @description The connector's name, as the worker reported it */
+                readonly connectorName: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorOperationDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connector.resume": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description The session's CSRF token (ADR-019). Required on every mutation */
+                readonly "X-Csrf-Token": string;
+            };
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+                /** @description The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it */
+                readonly connectName: string;
+                /** @description The connector's name, as the worker reported it */
+                readonly connectorName: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorOperationDto"];
+                };
+            };
+            readonly default: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    readonly "connect.connectors": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The configured cluster's slug id */
+                readonly clusterId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectorListResponse"];
                 };
             };
             readonly default: {

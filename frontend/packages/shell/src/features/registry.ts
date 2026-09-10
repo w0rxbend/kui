@@ -29,7 +29,7 @@ import { Actions } from "@kui/api";
 import { featureModule, type FeatureRegistration } from "@kui/kernel";
 
 /**
- * The features this build contains, in navigation order — six of them, counted in this array.
+ * The features this build contains, in navigation order — seven of them, counted in this array.
  *
  * The orders leave wide gaps: they are a product decision about where an operator's eye goes, and
  * the sequence — the cluster, then its topics, then the records in them, then who is reading them —
@@ -132,6 +132,30 @@ export const featureRegistry: readonly FeatureRegistration[] = [
        because a feature may not import the shell and the shell must not statically import a
        feature. */
     load: () => import("@kui/feature-alerts").then(featureModule),
+  },
+  {
+    id: "connect",
+    // The seventh feature and the first under `ECOSYSTEM`. Feature and service are the same word
+    // again, and it is stated again for the reason `clusters`/`cluster` gives above.
+    serviceId: "connect",
+    // `CONNECT:VIEW` and not `CONNECTOR:VIEW`. The screen lists the connectors on a *connect
+    // cluster*, so the permission that decides whether the destination exists at all is the one on
+    // the connect cluster; a principal who may see it and may operate only some of its connectors
+    // gets a page with some of its buttons disabled, which is decided per row and not here.
+    viewAction: Actions.ConnectView,
+    label: "Kafka Connect",
+    icon: "connect",
+    /* `SCREENS-V4.md` §2.2's second heading, empty since it was declared: Connect and ksqlDB are
+       what it was declared for. `navigation.ts` uppercases it, so "Ecosystem" and "ECOSYSTEM" are
+       one group and not two halves of one list. */
+    group: "Ecosystem",
+    order: 600,
+    // Every Connect worker KUI knows about is configured under a Kafka cluster
+    // (`kui.clusters.<n>.connect`), so there is nothing for this entry to point at until one is
+    // chosen — the same rule the five cluster-scoped entries above follow.
+    requiresCluster: true,
+    sidebar: true,
+    load: () => import("@kui/feature-connect").then(featureModule),
   },
 ];
 

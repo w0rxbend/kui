@@ -1,0 +1,19 @@
+{
+  "name": "@kui/feature-connect",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The Kafka Connect microfrontend: connectors, their tasks, the worker's own failure reason, and pause/resume/restart",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@kui/api": "workspace:*",
+    "@kui/kernel": "workspace:*",
+    "@solidjs/router": "2.0.0-next.21",
+    "solid-js": "2.0.0-rc.6",
+    "@solidjs/web": "2.0.0-rc.6"
+  }
+}

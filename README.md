@@ -48,7 +48,10 @@ of it flows from Kafka to the browser without buffering whole topics in memory.
 **It can be one process or nine.** The same modules compose into a single JVM for local use, or
 into a gateway and eight services in separate containers for production. No code changes between the
 two: `deployment/compose/docker-compose.yml` runs the second shape, and
-`deployment/compose/smoke.sh` stops one of its containers and shows the other five carrying on.
+`deployment/compose/smoke.sh` stops one of its containers and shows the other seven carrying on.
+Seven, because the script derives that list from `ServiceContracts.byService` — eight contracted
+services — and checks every one of them except the container it stopped; it said five while there
+were six, and the count is now read out of the script rather than remembered.
 
 ## What is built, and what is not
 
@@ -106,7 +109,7 @@ reason the architecture is shaped the way it is, and it is tested rather than as
 - The masking engine exists and is tested but is not yet reachable from a screen; it is marked
   `IMPLEMENTING` rather than `COMPLETE` in the feature matrix.
 
-<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: in-scope-delivered, delivered-percent -->
+<!-- checked: rows -- verified by ./scripts/feature-matrix-check.sh -- claims: in-scope-delivered, delivered-percent, residue -->
 70 of 178 in-scope capabilities tracked in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) are
 delivered end to end — about 39%.
 <!-- /checked -->

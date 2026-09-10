@@ -762,6 +762,47 @@ describe("the group detail page", () => {
     dispose();
   });
 
+  it("still says why forgetting is refused when the caller supplied no sentence", async () => {
+    /*
+     * The `??` fallback beside `forgetRefusal`, which nothing asserted: emptied, this ships a
+     * destructive control that is disabled and will not say why — the one class §3.7 rules out and
+     * the class this component's own header names. The two sentences differ deliberately and the
+     * difference is not stylistic: the caller's names *this group*, and a component that was handed
+     * no callback has not been told which permission is missing, so its own can only speak about
+     * the cluster. Wording them identically is what made the route's ternary unobservable in
+     * wave 5.
+     *
+     * Read through the button's own `aria-describedby` rather than through the first
+     * `[role="tooltip"]` in the document: bubbles are portalled into `body` and an earlier case's
+     * can still be there, so a query across the body can answer with somebody else's sentence.
+     */
+    const { container, dispose } = mount(() => (
+      <GroupDetail
+        group={SAMPLE_GROUP_DETAIL}
+        listHref="/groups"
+        reset={{
+          plan: async () => ({ ok: false, problem: "no" }),
+          apply: async () => ({ ok: false, problem: "no" }),
+        }}
+      />
+    ));
+    await flush();
+
+    const button = container.querySelector<HTMLButtonElement>(
+      '[data-testid="group-forget-offsets"] button',
+    );
+    expect(button?.getAttribute("aria-disabled")).toBe("true");
+    button?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await flush();
+    const described = button?.getAttribute("aria-describedby") ?? "";
+    const bubble = described === "" ? null : document.getElementById(described);
+    expect(bubble, "a disabled control must carry a reason a keyboard can reach").not.toBeNull();
+    expect(bubble?.textContent).toBe(
+      "You do not have permission to change committed offsets on this cluster.",
+    );
+    dispose();
+  });
+
   it("has no axe violations with the forget rows on the page", async () => {
     // The new section is a list of rows each carrying a destructive control, which is exactly the
     // shape that produces `list`, `button-name` and `aria-*` findings if it is assembled loosely.
@@ -963,6 +1004,41 @@ describe("the reset wizard", () => {
     button?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     await flush();
     expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain("do not have permission");
+    mounted.dispose();
+  });
+
+  it("still says why a reset is refused when the caller supplied no sentence", async () => {
+    /*
+     * `ResetWizard`'s own `??` fallback, the twin of `GroupDetail`'s forget one and ungated for the
+     * same reason: every case that reached the refusal branch passed a `refusal` in, so the default
+     * behind it could be emptied with this package green. What that ships is a disabled destructive
+     * control with nothing to say, which reads as a broken product rather than as a permission the
+     * account does not hold.
+     *
+     * Cluster-scoped rather than group-scoped, deliberately: a component handed `permitted={false}`
+     * and no sentence has not been told which group's permission is missing, and two identical
+     * sentences would make the caller's gate — the `mayReset()` ternary in `GroupRoute` — invisible
+     * again.
+     */
+    const mounted = mount(() => (
+      <ResetWizard
+        topics={topics}
+        permitted={false}
+        plan={async () => ({ ok: true, plan: SAMPLE_PLAN })}
+        apply={async () => ({ ok: true, receipt: SAMPLE_PLAN })}
+      />
+    ));
+    await flush();
+    const button = mounted.container.querySelector<HTMLButtonElement>("button");
+    expect(button?.getAttribute("aria-disabled")).toBe("true");
+    button?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await flush();
+    const described = button?.getAttribute("aria-describedby") ?? "";
+    const bubble = described === "" ? null : document.getElementById(described);
+    expect(bubble, "a disabled control must carry a reason a keyboard can reach").not.toBeNull();
+    expect(bubble?.textContent).toBe(
+      "You do not have permission to reset offsets on this cluster.",
+    );
     mounted.dispose();
   });
 

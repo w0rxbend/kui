@@ -181,11 +181,23 @@ final class ProfileChangeListenerSuite extends KuiIOSuite {
     // secrets to a subscriber entitled only to a redacted view.
     listening(_ => IO.unit) { (listener, store, _) =>
       for {
-        collected <- listener.changes.take(1).compile.toList.start
-        _ <- IO.sleep(50.millis)
+        seen <- Ref.of[IO, List[ProfileChanged]](Nil)
+        watching <- listener.changes.evalMap(event => seen.update(event :: _)).compile.drain.start
+        /*
+         * Subscribing is not ordered with respect to pushing, and this test used to bridge the two with
+         * `IO.sleep(50.millis)`. `changes` is `topic.subscribeUnbounded`, so the fibre above may still be
+         * starting when the listener publishes, and a publication with no subscriber is dropped: the test
+         * then waits out its five-second timeout on an event that was never delivered. That is the shape
+         * that failed once under sixteen-way parallel load, and with the sleep at zero it fails three times
+         * out of three on an idle machine. A budget is not an ordering. Pushing fresh clusters until one
+         * arrives makes the subscription *observably* live before the change under test is pushed.
+         */
+        _ <- warmUntilSubscribed(store, seen)
         _ <- store.hold(recordFor(profile("prod", 1L), 1L))
         _ <- store.push(StoreChange.Upserted(recordFor(profile("prod", 1L), 1L)))
-        events <- collected.joinWithNever.timeout(5.seconds)
+        _ <- eventually(seen.get)(_.exists(_.clusterId.value == "prod"))
+        events <- seen.get.map(_.reverse.filter(_.clusterId.value == "prod"))
+        _ <- watching.cancel
       } yield {
         assertEquals(events.map(_.clusterId.value), List("prod"))
         assertEquals(events.map(_.kind), List(ProfileChanged.Kind.Added))
@@ -258,6 +270,21 @@ final class ProfileChangeListenerSuite extends KuiIOSuite {
         store.setHealth(ConfigHealth.ReadOnly("running from files", Nil)) *> adapter.health
       }
     } yield assertEquals(health, DomainHealth.NotConfigured)
+  }
+
+  /** Pushes clusters nobody has seen until one comes back, which is the first moment the subscription in
+    * `changes` is known to be registered. Each attempt uses a fresh id so that every push is a genuine
+    * addition: re-pushing one the listener has already recorded publishes nothing at all, which is why
+    * retrying the change under test would not have worked.
+    */
+  private def warmUntilSubscribed(store: StubConfigStore, seen: Ref[IO, List[ProfileChanged]]): IO[Unit] = {
+    def attempt(n: Int): IO[Unit] = {
+      val record = recordFor(profile(s"warm-$n", 1L), 1L)
+      store.hold(record) *> store.push(StoreChange.Upserted(record)) *> IO.sleep(10.millis) *>
+        seen.get.flatMap(observed => if observed.nonEmpty then IO.unit else attempt(n + 1))
+    }
+
+    attempt(1).timeout(5.seconds)
   }
 
   private def eventually[A](read: IO[A])(holds: A => Boolean): IO[A] =

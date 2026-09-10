@@ -147,6 +147,30 @@ kui:
         url:
           - "http://schema-registry:8080/apis/ccompat/v7"
 
+      # The Kafka Connect worker this quickstart starts beside the broker.
+      #
+      # Setting this is the whole on/off switch for the Connect screens on this cluster, exactly as
+      # `schemaRegistry` above is for schema-aware decoding: with it, KUI reads the worker's own
+      # REST API and shows the connectors it is running and each task's state; without it the
+      # connect service answers `not_configured` and ADR-032's rule hides the row rather than
+      # showing one that can never fill.
+      #
+      # A LIST, because an organisation routinely runs one Connect cluster for sources and another
+      # for sinks against the same brokers, and a connector is addressed as (Connect cluster,
+      # connector name). `url` inside an entry is a list too: every worker in one Connect cluster
+      # serves the same REST API and forwards what it cannot answer itself, so a second address
+      # there is failover rather than a second system. This quickstart has one of each.
+      #
+      # THE WORKER RUNS NO CONNECTORS. That is the honest state of a demonstration nobody has
+      # configured a pipeline into, and the Connect screen says so as a measured empty list rather
+      # than as an outage. Registering one here to make the screen look busy would erase the
+      # difference between "this worker is running nothing" and "this worker cannot be reached",
+      # which is the distinction the whole product is built on.
+      connect:
+        - name: "quickstart"
+          url:
+            - "http://kafka-connect:8083"
+
       # Which serde reads which topic.
       #
       # `defaultValue` is deliberately NOT set to SchemaRegistry here. Only one topic in this

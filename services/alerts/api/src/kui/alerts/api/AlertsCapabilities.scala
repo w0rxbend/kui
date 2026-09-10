@@ -68,14 +68,15 @@ object AlertsCapabilities {
     * can answer it.
     */
   def featuresFor(readOnly: Boolean): List[String] =
-    if readOnly then AlertsEndpoints.all.flatMap(_.info.name).filterNot(_ == AcknowledgeFeature)
-    else AlertsEndpoints.all.flatMap(_.info.name)
+    if readOnly then Features.filterNot(_ == AcknowledgeFeature) else Features
 
-  /** Everything this service does, each named by its own endpoint. */
+  /** Everything this service does, each named by its own endpoint.
+    *
+    * Read by [[featuresFor]] rather than restated there, so that the roster has one definition. It was a
+    * `val` no code path reached for a milestone, asserted only against the expression it is defined as — a
+    * case that could not fail beside a constant nothing read.
+    */
   val Features: List[String] = AlertsEndpoints.all.flatMap(_.info.name)
-
-  /** The feed the card and the bell both ask about, named once for the callers that only care about it. */
-  val EventsFeature: String = "alerts.events"
 
   /** The write, named once, because two places need to be able to leave it out. */
   val AcknowledgeFeature: String = "alerts.acknowledge"

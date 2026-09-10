@@ -116,6 +116,19 @@ test.describe("the schema registry", () => {
     await page.goto(`/ui/clusters/${CLUSTER}/schemas`);
     await expect(page.getByText("No subject selected.")).toBeVisible();
 
+    /*
+     * Searched for rather than picked off the first page, and that is not tidiness. This file leaves
+     * four scratch subjects behind on every run -- `compat-subject`, `compat-check`, `compat-none` and
+     * `register` -- because a Confluent-compatible registry has no subject delete in this product, so a
+     * unique name is the isolation. Measured on the quickstart: one run took the registry from 1 subject
+     * to 5. The list pane asks for 50 rows and the registry answers alphabetically, and every one of
+     * those names begins `kui-e2e-`, which sorts before `orders`. So on the fiftieth accumulated scratch
+     * subject -- about twelve more runs against a registry nobody tore down -- `orders.avro-value` falls
+     * off page one and a click that reads it off the list stops finding it, with nothing wrong with the
+     * product. Searching for the subject is what the screen offers a person in that situation, and it
+     * makes this case independent of how many times the suite has been run.
+     */
+    await page.getByLabel("Search subjects").fill("orders.avro-value");
     await page.getByRole("link", { name: /orders\.avro-value/ }).first().click();
 
     await expect(page).toHaveURL(/\/schemas\/orders\.avro-value/);

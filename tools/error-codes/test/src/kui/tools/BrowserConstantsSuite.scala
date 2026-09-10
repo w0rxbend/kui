@@ -156,4 +156,28 @@ final class BrowserConstantsSuite extends FunSuite {
     assertEquals(outcome.write, Some(expected))
     assert(outcome.message.startsWith("wrote "), outcome.message)
   }
+
+  test("a stale --check ends the process non-zero, and a fresh one does not end it at all") {
+    /*
+     * The seam the case above does not have. `decide` was already a value, and the mutation that mattered was
+     * one operator past it: `if outcome.status != 0 then sys.exit(...)` was the last line of `main`, so
+     * changing `!= 0` to `< 0` left `./mill tools.errorCodes.test` and `./mill frontend.apiConstants --check`
+     * both green while a genuinely stale `constants.generated.ts` printed "is out of date" and exited zero.
+     * The CI step that exists to catch a forgotten regeneration would have passed it. `exitStatus` is that
+     * operator as a value, driven here from the two outcomes `decide` actually produces rather than from a
+     * hand-built `Outcome`, so the case fails if either half of the translation is reversed.
+     */
+    val target = Paths.get("frontend", "packages", "api", "src", "constants.generated.ts")
+    val rendered = Right("export const CsrfHeaderName = \"X-Csrf-Token\" as const;\n")
+
+    val stale = BrowserConstantsMain.decide(target, checkOnly = true, rendered, Some("something else"))
+    assertEquals(BrowserConstantsMain.exitStatus(stale), Some(1))
+
+    val fresh = BrowserConstantsMain.decide(target, checkOnly = true, rendered, rendered.toOption)
+    assertEquals(BrowserConstantsMain.exitStatus(fresh), None)
+
+    // The refusal too: a vocabulary that cannot be rendered must not exit zero either.
+    val refused = BrowserConstantsMain.decide(target, checkOnly = false, Left("a renamed fallback"), None)
+    assertEquals(BrowserConstantsMain.exitStatus(refused), Some(1))
+  }
 }

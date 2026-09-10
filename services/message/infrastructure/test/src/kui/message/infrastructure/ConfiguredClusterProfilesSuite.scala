@@ -74,6 +74,31 @@ final class ConfiguredClusterProfilesSuite extends KuiIOSuite {
       .map(answer => assertEquals(answer.left.map(_.code), Left(ErrorCode.ClusterNotFound)))
   }
 
+  test("a profile read from this process's own configuration is fresh, and says it is not stale") {
+    /*
+     * Two more rules that were ungated: `stale = true` and a constant `fetchedAt` each left
+     * `./mill services.message.__.test` at 204/204 green. The class comment argues both: there is no
+     * upstream here to be out of date with, so the answer is fresh by construction -- and both fields
+     * exist because the distributed shape *will* answer this over HTTP from a cache, at which point a
+     * screen has to be able to say how old its picture of the cluster is. A `stale` that is always true
+     * puts an "out of date" caption over a value read a microsecond ago; a `fetchedAt` that does not move
+     * ages for ever and eventually says the cluster was read in 1970.
+     */
+    for {
+      before <- cats.effect.Clock[IO].realTimeInstant
+      answer <- profiles.cluster(ClusterId.unsafe("prod"))
+      after <- cats.effect.Clock[IO].realTimeInstant
+    } yield {
+      val profile = answer.getOrElse(fail("the configured cluster must answer"))
+
+      assertEquals(profile.stale, false)
+      assert(
+        !profile.fetchedAt.isBefore(before) && !profile.fetchedAt.isAfter(after),
+        s"fetchedAt ${profile.fetchedAt} is outside the call it was read in ($before..$after)"
+      )
+    }
+  }
+
   test("the id list is what a per-cluster component is built from, in configuration order") {
     assertEquals(profiles.ids.map(_.value), List("prod", "staging"))
   }

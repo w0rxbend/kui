@@ -500,6 +500,62 @@ object KuiConfigSource {
       metrics,
       alerts
     ).mapN((_, s, g, t, st, tp, cn, sr, cs, a, r, m, al) => Draft(s, g, t, st, tp, cn, sr, cs, a, r, m, al))
+      // The one rule that needs two decoded sections at once, so it cannot live in either of them.
+      // `.andThen` and not a fourteenth `mapN` argument: if any section above is invalid this stays quiet,
+      // which is `checkStoreRules`' discipline applied one level up -- a role naming an unknown cluster is
+      // not worth reporting when the cluster list itself did not decode.
+      .andThen(draft => rolesNameConfiguredClusters(draft).map(_ => draft))
+
+  /** A role may only name a cluster this deployment has, when this file is the whole list of them.
+    *
+    * `kui.rbac.roles[].clusters` is matched against `kui.clusters[].id` by `RbacPolicy.held`, and a role
+    * naming an id that does not exist grants nothing to anybody, anywhere, for ever. Nothing said so:
+    * `deployment/quickstart/kui-quickstart-auth.yaml` pointed both of its roles at `no-such-cluster` and the
+    * file loaded, both demonstration accounts signed in, and every screen was empty -- which is the
+    * demonstration failing in front of whoever is being shown it. The file's own comment claimed this was
+    * caught and it was not; that claim is what this rule makes true.
+    *
+    * ==The two deployments it deliberately says nothing about==
+    *
+    * **A file with `kui.clusters: []`.** There is no set to check against. That is not an empty set of
+    * clusters, it is a deployment that registered none here -- the M0 default, the Compose gateway's own
+    * `kui.yaml`, and every fixture that exercises `kui.rbac` without also writing a cluster.
+    *
+    * **A deployment with a metadata store.** ADR-036 as amended by ADR-042 lets the store's records overlay
+    * `kui.clusters[]` at run time, so an operator who registers `prod-3` through the UI and writes a role for
+    * it is correct and this file cannot see it. Refusing there would refuse a working deployment at start-up,
+    * which is a worse answer than the one this rule exists to improve on.
+    *
+    * Both exemptions are stated rather than derived, because each is a hole somebody will otherwise find and
+    * report as a bug in this rule.
+    */
+  private def rolesNameConfiguredClusters(draft: Draft): Problems[Unit] = {
+    val configured = draft.clusters.map(_.id).toSet
+    val storeMayAddMore = draft.store.kafka.isDefined || draft.store.dir.isDefined
+
+    if configured.isEmpty || storeMayAddMore then ().validNel
+    else
+      draft.rbac.roles.zipWithIndex.flatMap { (role, index) =>
+        role.clusters.toList
+          .filterNot(configured.contains)
+          .sortBy(_.value)
+          .map { unknown =>
+            ConfigProblem(
+              s"kui.rbac.roles.$index.clusters",
+              s"role '${role.name.value}' names '${unknown.value}', which is not a configured cluster; " +
+                s"this file configures ${configured.toList.map(_.value).sorted.mkString(", ")}. " +
+                "A role on a cluster that is not here grants nothing to anybody: everyone in it signs in " +
+                "and sees empty screens. Fix the id, add the cluster, or -- if the cluster is registered " +
+                "at run time through kui.store -- configure the store so this file is no longer the whole " +
+                "list",
+              ConfigSourceName.Default
+            )
+          }
+      } match {
+        case Nil => ().validNel
+        case first :: rest => cats.data.Validated.Invalid(NonEmptyList(first, rest))
+      }
+  }
 
   private def decodeServer[F[_]: Async](layers: Layers): F[Problems[ServerConfig]] =
     for {

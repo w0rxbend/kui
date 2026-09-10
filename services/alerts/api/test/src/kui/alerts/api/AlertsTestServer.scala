@@ -48,21 +48,25 @@ object AlertsTestServer {
 
   val operator: RoleName = RoleName.unsafe("operator")
 
-  /** A store that records every acknowledgement it was **asked** to make, refused or not.
+  /** A store that records every acknowledgement it was **asked** to make, refused or not, and the
+    * `markRead` argument of every read it was asked for.
     *
     * That counter is the whole point of this fixture: a stub that answered a constant could not tell a
     * caller who was refused from one who was never allowed to reach it, and "refused before the store is
-    * written" is a statement about which of those happened.
+    * written" is a statement about which of those happened. `reads` is there for the same kind of claim
+    * about the read: `markRead` is decoded, validated and documented, and the only way to see that the
+    * route passed it on is to ask the thing on the other side of the route what it was given.
     */
   final class CountingStore(
       state: Ref[IO, List[AlertEvent]],
       val attempts: Ref[IO, List[AlertEventId]],
+      val reads: Ref[IO, List[Option[Instant]]],
       reports: List[RuleReport],
       evaluatedAt: Option[Instant]
   ) extends AlertStore[IO] {
 
     def feed(id: ClusterId, principal: Principal, limit: Int, markRead: Option[Instant]): IO[AlertFeed] =
-      state.get.map { events =>
+      reads.update(_ :+ markRead) >> state.get.map { events =>
         val ordered = events.sorted
 
         AlertFeed(
@@ -145,7 +149,8 @@ object AlertsTestServer {
         interceptors <- AlertsApi.interceptors[IO](Telemetry.noop[IO], rejections, logger)
         held <- Ref.of[IO, List[AlertEvent]](events)
         attempts <- Ref.of[IO, List[AlertEventId]](Nil)
-        store = new CountingStore(held, attempts, reports, evaluatedAt)
+        reads <- Ref.of[IO, List[Option[Instant]]](Nil)
+        store = new CountingStore(held, attempts, reads, reports, evaluatedAt)
         profiles = new Profiles
         guard = MutationGuard.make[IO](profiles, AcknowledgementSink.noop[IO], logger)
         useCases = AlertUseCases.make[IO](profiles, store, guard)
@@ -185,7 +190,8 @@ object AlertsTestServer {
       rejections <- PrincipalVerification.rejectionCounter[IO](meter)
       held <- Ref.of[IO, List[AlertEvent]](Nil)
       attempts <- Ref.of[IO, List[AlertEventId]](Nil)
-      store = new CountingStore(held, attempts, Nil, None)
+      reads <- Ref.of[IO, List[Option[Instant]]](Nil)
+      store = new CountingStore(held, attempts, reads, Nil, None)
       profiles = new Profiles
       guard = MutationGuard.make[IO](profiles, AcknowledgementSink.noop[IO], logger)
     } yield AlertsApi.routes[IO](

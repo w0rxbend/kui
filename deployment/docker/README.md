@@ -1,9 +1,11 @@
 # KUI container images
 
-Eight backend images, built by Mill. You do not need a Scala toolchain to run them; you do need a
-JDK to build them, and nothing else — the interface is not in any of these.
+Ten backend images, built by Mill — one row per line of the table below, which is also what
+`grep -c 'extends KuiImage' build.mill` counts. You do not need a Scala toolchain to run them; you
+do need a JDK to build them, and nothing else — the interface is not in any of these. (This said
+"eight" over a nine-row table before `kui-connect` made it ten.)
 
-The **interface is a ninth image**, and it is not built here: it comes from the pnpm workspace
+The **interface is an eleventh image**, and it is not built here: it comes from the pnpm workspace
 under `frontend/` through `deployment/frontend/Dockerfile`, and it needs Node rather than a JDK. It
 serves the built interface and proxies `/api/` to the gateway, so the browser sees one origin
 (ADR-048). Nothing below serves a user interface.
@@ -19,6 +21,7 @@ serves the built interface and proxies `/api/` to the gateway, so the browser se
 | `kui-schema`   | Subjects, versions, schemas and compatibility. Optional in the sense that a cluster with no registry answers `not_configured`; the distributed stack still runs it, because the gateway holds its contract and a contract with no address is a screen that 404s | 8080 | `/health/live` |
 | `kui-metrics`  | Broker throughput, request latency, the handler idle ratios and the per-topic byte rates, read from a Prometheus exposition beside the broker (ADR-050). A cluster with no source configured answers `not_configured` per card, which is the answer a dashboard needs rather than a service that is missing | 8080 | `/health/live` |
 | `kui-alerts`   | The rules KUI runs over facts it already measures, and the feed they open. Each rule carries its own status, so a rule whose facts could not be read says so instead of contributing a zero | 8080 | `/health/live` |
+| `kui-connect`  | The connectors each configured Kafka Connect worker is running, their tasks' states and the worker's own failure trace, plus pause, resume and restart. It holds no Kafka client and no store: every fact comes from a worker's REST API and nothing outlives a request. A cluster with no `connect:` entry answers `not_configured` | 8080 | `/health/live` |
 
 The gateway serves its health probes under the public `/api/v1` prefix and a service serves them at
 the root. That is not an inconsistency: everything a browser can reach lives under `/api/v1`, and a
@@ -28,7 +31,7 @@ reaching anyway.
 ## Building them
 
 ```
-./mill deployment.docker.__.build          # all nine
+./mill deployment.docker.__.build          # all ten
 ./mill deployment.docker.gateway.docker.build   # just one
 ```
 

@@ -12,10 +12,11 @@ build-time bundle-shape check, and neither had happened when the banner was writ
 deleted in wave 2, and the bundle-shape check exists: wave 4 shipped
 `frontend/scripts/bundle-shape.mjs`, wired as `pnpm bundle-shape` in the frontend CI job, and closed
 TD-016's successor on the check having been *run in both directions* rather than on the check
-existing. It reads its roster of feature packages from the filesystem, so the sixth one M8 added
-was picked up with no edit anywhere — measured in wave 6, which shipped `feature-alerts` and found
-`bundle-shape.mjs` reporting six dynamically imported feature packages with nobody having edited a
-roster. That is the property the roster it replaced did not have.
+existing. It reads its roster of feature packages from the filesystem, so the sixth one M8 added and
+the seventh M9 added were both picked up with no edit anywhere — measured again in wave 7, where
+`bundle-shape.mjs` reported **seven** dynamically imported feature packages, none reachable statically
+from the entry chunk, with nobody having edited a roster. That is the property the roster it replaced
+did not have.
 
 `docs/ROADMAP.md` stays as the historical M0–M8 record of how the backend was built and is not a
 plan for this work.
@@ -60,8 +61,14 @@ is 3,203 production lines and 825 test lines. Budget that per service, plus its 
 | Milestone | New service | Blocks |
 | --- | --- | --- |
 | M7 | `services/metrics` — **built, wave 5; closed, wave 6** | 6 dashboard cards, 4 stat cards, the whole Traffic tab |
-| M8 | `services/alerts` — **built in wave 6; stream relay added in the wave-6 continuation** | Alerts tab, the alerts card, the notification bell |
-| M9 | `services/connect` (wave 7), `services/ksql` (wave 8) | the `ECOSYSTEM` group |
+| M8 | `services/alerts` — **built wave 6; CLOSED wave 7, on a frame delivered through the gateway** | Alerts tab, the alerts card, the notification bell |
+| M9 | `services/connect` — **built and routed, wave 7; milestone open on the browser half**; `services/ksql` (wave 8) | the `ECOSYSTEM` group |
+
+**The tenth service cost what this table says, and the edge lesson held.** `services/connect` shipped
+in one packet with `connect.contract.jvm` landed on `services.gateway.api`'s `moduleDeps` **before any
+of its own work**, and nothing about its routing arrived at integration — which is the whole of what
+went wrong with the ninth. Budget the six layers, the adapter, the edge and the relay; the edge is one
+line and it is the line that costs a wave when it is nobody's.
 
 **And the ninth service cost more than the seven registration points said it would, in one specific
 way worth budgeting for.** The first wave-6 pass left `services/alerts` complete and unreachable:
@@ -415,7 +422,61 @@ without its `kui-metrics` `depends_on` is recorded beside it; and `pnpm -C front
 non-empty series or reading for every card ADR-052 says can be measured — an assertion that fails
 when the array is empty — and the `NotMeasured` sentence for a cluster with no source.
 
-## M8 — `services/alerts`  ·  **NEW SERVICE**  ·  **built in wave 6; closure fixes continued after the interrupted run**
+## M8 — `services/alerts`  ·  **NEW SERVICE**  ·  **CLOSED, wave 7**
+
+**Every clause of the criterion was executed at wave 7's integration, on a quickstart torn down and
+recreated on images built from this tree** — `kui-allinone:0.1.0-SNAPSHOT` `d39a08971ffd`,
+`kui-frontend:0.1.0-SNAPSHOT` `827368273ecd`. That is the sentence two waves of this milestone could
+not write, and the clause that had never once been run is this one:
+
+```
+$ curl -sN http://localhost:8080/api/v1/clusters/quickstart/alerts/stream
+HTTP/1.1 200 OK
+Content-Type: text/event-stream; charset=UTF-8
+X-Kui-Correlation-Id: 0c5061fdaa39f9ef
+
+event: alerts
+data: {"cluster":"quickstart","openCount":0,"at":"2026-09-10T22:22:34.435078Z"}
+```
+
+The frame is not a heartbeat and not a keepalive: with the stream held open and nothing changing, it
+is **silent for fifteen seconds**. What produced it was a `POST
+…/alerts/events/{id}/acknowledgement` issued three seconds after the stream opened, against an event
+seeded the way this milestone means it (`diskUsedWarningPercent: 1`, container restarted, exactly one
+`storage` event, `openCount: 1`). So the two halves that were each other's blockers — W7-02's rule
+that an acknowledgement publishes a frame, and W7-03's hand-written gateway relay — met end to end
+for the first time, and the count in the frame is the count the write changed.
+
+**The browser half is green on the same stack.** `e2e/shell.spec.ts:127` — *acknowledging an open
+event moves the bell, with no reload* — **passes**, where at wave 7's verification it ran and skipped
+because the feed it was pointed at had nothing open. `shell.spec.ts:64`'s bell case and all four of
+`alerts.spec.ts`' non-refusal cases pass beside it. The fifth `alerts.spec.ts` case skips, correctly,
+because this deployment does configure alerts.
+
+**And the three things the milestone owed are discharged, each by a case that fails when reverted.**
+The acknowledgement publishes a frame (`InMemoryAlertStoreSuite`); the feed's `openCount` is the whole
+store's and not the page's, asserted against the shipped store on the `limit = 0` page that
+`acknowledge` and the stream actually make; the shell's second derivation is gone and the bell reads
+the kernel store's one accessor; and the dashboard's alerts card is mounted at `Overview.tsx:597`
+with six cases on it. The wire is no longer two hand-written mirrors: `services/alerts/contract`
+now carries six golden documents including `alerts-stream-frame.json`, `GoldenFilesSuite` reads the
+directory in both directions, and the browser's `wire.golden.test.ts` reads the same files off disk
+and asserts `ALERTS_EVENT_NAME` against the golden's own `event` field. House rule 12, applied to the
+one wire wave 6 left out.
+
+**What it leaves behind, carried into wave 8 as owned rules.** `InMemoryAlertStore.record`'s
+publication condition has a **resolved** half that is asserted by nothing — the exact twin of the
+rule this wave closed, on the other branch — so a condition that stops firing closes its event and
+wakes no tab. `MaxReadMarkers` is a bound nothing exercises. `AlertsStreamRoutes.relay`'s terminal
+error frame — the promise that a browser never sees an SSE connection just stop — can be deleted with
+all 387 gateway cases green. And the alerts screen's *Alert state* chip bar can have Open and Resolved
+swapped with all 61 `feature-alerts` cases green, because no case in that package ever clicks either
+chip.
+
+---
+
+### The record of how it was built
+
 
 **The ninth service exists and it is honest.** Six ADR-041 layers, 49 Scala files, 142 cases over 17
 suites, its own `openApi`/`openApiCheck`, a `deployment.docker.alerts` image, a compose entry with a
@@ -450,29 +511,10 @@ the service through the service client and preserves the SSE body. The route is 
 merged OpenAPI document and `AllInOneWiringSuite` asserts that the one-process deployment mounts
 the public stream path.
 
-**Three more things it owes, each measured rather than inferred.**
-
-* **The one write in the service wakes no subscriber.** `InMemoryAlertStore.acknowledge` can have its
-  `updates.publish1` removed with all 142 cases green — the same defect as the missing relay, one
-  layer in, on the one path that changes an alert's state.
-* **The count the bell draws is ungated at both ends.** In the service, the feed's `openCount` can be
-  recomputed from the requested page with everything green — and both `acknowledge` and the SSE frame
-  read the feed with `limit = 0`, so under that mutation every acknowledgement answers `openCount: 0`.
-  In the browser, the shell re-derives the open count a second time
-  (`shell/src/data/alerts.ts`'s `openCountOf`) under a different null rule from the kernel store's
-  `openCount()`, which has no product caller at all — a second opinion in the one place the kernel
-  store was put there to prevent.
-* **The alerts card is not mounted anywhere.** The milestone says the tab, the card and the bell read
-  one feed. The tab exists and the bell exists; `AlertsFeed`'s narrow layout has no production
-  caller, because the dashboard mount was deliberately deferred rather than built.
-
-**And the wire between the service and the browser is still two hand-written mirrors.** The kernel's
-`data/alerts/events.ts` and `feature-alerts`' `src/wire.ts` decode the same document independently,
-with two spellings of absence (`null` and `undefined`), and `ALERTS_EVENT_NAME` mirrors
-`AlertChangeDto.EventName` with nothing comparing them — the generator writes the five SSE names by
-hand and has no `SseEventName.Alerts`. That is house rule 12's shape with the golden left out;
-`services/alerts/contract` has no golden document and it is the third contract module in the
-repository without one.
+**Three things it owed at the end of wave 6, all three closed in wave 7.** The one write in the
+service woke no subscriber; the count the bell draws was ungated at both ends and derived twice; and
+the alerts card was mounted nowhere. All three are now gated, and the wire that was two hand-written
+mirrors is one golden directory read from both sides.
 
 **Exit** (corrected, because the form above is satisfiable by a service whose stream nobody can
 reach): `./mill services.alerts.__.test` passes; after seeding one event,
@@ -484,7 +526,47 @@ equals the API's open count, **and that acknowledging that event moves the bell 
 and a golden document rendered by `services/alerts`' own encoder is decoded by the kernel's reader,
 the way `services/metrics`' ten are.
 
-## M9 — `services/connect` and `services/ksql`  ·  **NEW SERVICES**  ·  **splits: wave 7 takes Connect**
+## M9 — `services/connect` and `services/ksql`  ·  **NEW SERVICES**  ·  **Connect built in wave 7; the milestone does not close**
+
+**The tenth service exists, is routed, and answers through the gateway on a stack built from this
+tree.** Six ADR-041 layers, 129 cases over 13 suites, its own `openApi`/`openApiCheck`, a
+`deployment.docker.connect` image, a compose entry, an `AllInOneWiring` entry, a `ServiceContracts`
+row, ADR-054, and — landed *first*, as house rule 15 demands — `connect.contract.jvm` on
+`services.gateway.api`'s `moduleDeps`, which is the edge whose absence made the ninth service
+unroutable. Measured at wave 7's integration on `kui-allinone` `d39a08971ffd`:
+
+```
+$ curl -s .../clusters/quickstart/connect/connectors
+{"connectors":{"status":"ok","data":{"workers":[{"connect":"quickstart",
+ "connectors":{"status":"ok","data":{"items":[],"unreadable":[]},"fetchedAt":"…"}}]},"fetchedAt":"…"}}
+$ ... /capabilities | jq '.entries[] | select(.key.service=="connect")'
+{"key":{"service":"connect","cluster":"quickstart"},"state":{"status":"available"}, …}
+```
+
+`feature-connect` is the seventh feature package, 21 files, 62 cases, code-split like the other six,
+20 stories clean under axe in both themes, and its decoder is bound to the service's own goldens by a
+suite that reads the directory off disk and counts connectors out of the raw JSON.
+
+**And the milestone does not close, for two reasons that are one measurement each.**
+
+* **The browser has never seen a connector.** The quickstart's Connect worker runs and has nothing
+  deployed on it, so `connect.spec.ts`'s two positive cases *skip* and the criterion's last
+  clause — a connector's task state read through the gateway from a running worker, on the screen —
+  is unmet. This is not a build problem; it is one connector short of proved.
+* **The browser case that would have caught it is written against a wire that does not exist.**
+  `e2e/connect.spec.ts:56` hand-writes `connectors.data.items` — the pre-rewrite prose shape — where
+  the service renders `connectors.data.workers[].connectors.data.items`. Against the stale image it
+  failed on a 404; against a correctly routed server built from this tree it now **fails on its own
+  assertion**, `expect(Array.isArray(section.data?.items)).toBe(true)`, measured at integration. So
+  the one spec written to prove the tenth service reachable is the one file the golden suite does not
+  cover, and it carries the exact defect the package it tests was written to remove.
+
+`services/ksql` is wave 8's, unchanged.
+
+---
+
+### The record of how the split was made
+
 
 **The split is a cost judgement made on wave 6's numbers rather than a preference.** The interrupted
 wave-6 run spent ten building packets and delivered **one** service — with its gateway routing
@@ -516,12 +598,18 @@ either: it decodes and re-encodes JSON. **A service that ships a stream ships it
 the same wave, owned by the same packet as the routing, and the criterion is a `curl -N` through the
 gateway** — not a contract entry and a green suite.
 
-**Exit:** the capability document carries a `connect` row —
-`jq -e '.entries[] | select(.key.service=="connect")'`, and note the shape, which is
-`entries[].key.service` and not the `services[].id` this document used to name; with no Connect
-address configured the drawer shows no Kafka Connect row, and with one it shows the connector
-count — both asserted by `pnpm -C frontend e2e`; and a connector's task state, read through the
-gateway from a running Connect worker, appears on the screen with the image id recorded.
+**Exit** (Connect half unmet on its last two clauses, both measured at wave 7's integration): the
+capability document carries a `connect` row — `jq -e '.entries[] | select(.key.service=="connect")'`,
+and note the shape, which is `entries[].key.service` and not the `services[].id` this document used to
+name — **met**; with no Connect address configured the drawer shows no Kafka Connect row, and with one
+it shows the connector count, both asserted by `pnpm -C frontend e2e` — **unmet, and the reason is the
+spec rather than the product**: `e2e/connect.spec.ts` decodes `connectors.data.items` against a server
+that renders `connectors.data.workers[].connectors.data.items`, so its positive half can never run and
+its shape assertion fails against a correctly routed server; and a connector's task state, read
+through the gateway from a running Connect worker, appears on the screen with the image id
+recorded — **unmet: no connector has ever been deployed on the quickstart's worker**, so the two cases
+that would assert it skip. Wave 8 deploys one, rewrites the spec against the golden the service already
+ships, and runs both against images built from the tree.
 
 ## M10 — Close the book  ·  no new service  ·  **wave 8**
 
@@ -533,36 +621,58 @@ gateway from a running Connect worker, appears on the screen with the image id r
   twenty-three screens; `docs/plan/` reduced to `README.md` and this file.
 
 **Wave 6 closed the half of this that could be closed by a comparison, and left the half that cannot.**
-`DECISIONS.md` is now machine-compared against `docs/adr/ADR-*.md` in both directions — 53 rows over
-53 ADRs — and deleting ADR-052's row, the omission that survived a whole wave, now fails the run. The
+`DECISIONS.md` is now machine-compared against `docs/adr/ADR-*.md` in both directions — 54 rows over
+54 ADRs after wave 7 added ADR-054 and its row — and deleting ADR-052's row, the omission that survived a whole wave, now fails the run. The
 script grew four mechanisms (a claim registry, per-region markers, a residue check over unclaimed
-figures, and a manifest reconciliation), reports **216 claims checked over five sections**, and every
+figures, and a manifest reconciliation), reports **251 claims checked over six sections** after wave
+7's pass, and every
 deletion the last criterion named now fails loudly.
 
-**And the hole it was written to close is still open, at exactly the cost it always had.** Measured
-here, at integration, on the shipped script: changing **one** line of its `jq` — `carries("X-Csrf-Token")`
-to `carries("X-Kui-Principal")` in the tsv read at `scripts/feature-matrix-check.sh:559` — and then
-publishing `X-Csrf-Token on 52 operations` in ADR-048 and in `frontend/packages/api/README.md`
-against a document that carries it on 21 leaves the run printing `216 claims checked, all true` and
-exiting 0. The packet's own report claims that cost moved from one edit to five; it did not. The
-registry records that a claim of that *kind* was made, the marker records that the region was
-checked, `close_section` records how many were counted, and the residue check runs only over the two
-prose sections — **none of the four looks at what the claim was compared against**. The same
-one-line weakening of the dependency comparison (`[[ $row == *"$version"* ]]` → `[[ -n $row ]]`)
-lets `DEPENDENCY_MATRIX.md` record any version at all, and section 3 has no residue backstop.
+**And the hole it was written to close is still open. Wave 7 doubled its price and published a
+figure four times that.** W7-09 rebuilt the checker's header comparison so that the fact each claim is
+measured against is derived a second time, independently, and reported in `TECH_DEBT.md`'s TD-023
+that a green false figure now costs **four edits inside the script**. Measured at wave 7's
+integration, on the shipped script, it costs **two**:
 
-So what this milestone still owes is unchanged and now measured twice: a section must publish **what
-it compared**, not how many times it incremented a variable — the compared *pairs*, checksummed or
-registered, with a fixture that pins them. A fifth count will not do it, and neither did the fourth.
+```
+# (a) in check_document_region's `HEADER on N operations` loop, after the fact lookup:
+    [[ $header == X-Csrf-Token ]] && fact=${header_ops[X-Kui-Principal]}
+# (b) in header_for_kind:
+    csrf) printf 'X-Kui-Principal' ;;
+```
 
-**Two smaller things it also owes, both found by verification and neither owned yet.**
-`frontend/README.md:33` still says of `@kui/api` *"Nothing hand-written mirrors a server type"* while
-`TD-024` records that 23 properties across the aggregated responses are typed `unknown` and
-`overview/metrics.ts` hand-writes every metrics wire shape — two documents in one repository
-disagreeing about the same fact. And `BrowserConstantsMain`'s exit status is one comparison operator
-away from silent: with `if outcome.status != 0` changed to `< 0`, a genuinely stale committed
-`constants.generated.ts` passes `./mill frontend.apiConstants --check` at `234/234 SUCCESS` while
-printing *"is out of date"*.
+With those two lines in place, publishing `X-Csrf-Token on 56 operations` in ADR-048 and in
+`frontend/packages/api/README.md` — against documents that carry it on **24** — leaves the run
+printing `251 claims checked, all true` and exiting 0. The registry sees a claim of that kind was
+made, the marker sees the region was checked, `close_section` sees the count, and the independent
+re-derivation now agrees, because both of its sides were pointed at the same wrong header. That is
+genuine progress — one edit became two, and wave 6's single-line attack no longer works — and it is
+**the third wave running in which the packet assigned to close this hole published a price for it
+that measurement does not support**. House rule 17 exists for exactly this and was not obeyed by the
+packet that wrote it into the plan.
+
+Five further guards this same rebuild shipped survive mutation with the run green, four of them
+guards the wave plan asked for by name: `header_fact_from_document`'s independence (replace its body
+with a read of the table it exists to be independent of — green), `claim`'s refusal of a claim that
+records without comparing (`if false` — green), the empty-marked-block refusal in *both* region loops
+(green), `reconcile_region`'s refusal of a marker with no `claims:` list (green), and
+`close_section`'s count assertion, which weakens from `==` to `<=` in one character (green).
+
+So what this milestone still owes is unchanged and now measured three times: a section must publish
+**what it compared**, not how many times it incremented a variable, and the thing that derives the
+fact must be pinned by a fixture rather than trusted to be independent. A fifth count will not do it,
+a second derivation did not do it, and the next attempt should be a packet that attacks its own gate
+before it reports rather than after.
+
+**Both of the smaller things it owed are closed, and one of them left a new one behind.**
+`frontend/README.md`'s `@kui/api` row now says what is true — nothing *inside* that package mirrors a
+server type, and `shell/src/overview/metrics.ts` outside it still does, with TD-024 cited — so the two
+documents agree. `BrowserConstantsMain` and `ErrorCodeDocMain` both grew a real `exitStatus` seam and
+both directions are gated: changing `!= 0` to `< 0` reddens `BrowserConstantsSuite.scala:174` and
+`ErrorCodeDocSuite`, re-verified at wave 7's integration. What it left behind is one sentence of the
+same class it was closing: **TD-024 names a type that does not exist.** `ConnectorsResponse.connectors`
+is nowhere in `schema.d.ts`; the property the wave actually added is `ConnectorListResponse.connectors`
+at `schema.d.ts:1575`, and the delta is one property, not the two the row implies.
 
 **Exit:** from a clean checkout, with every container image built from it:
 `./scripts/run-tests.sh`, `pnpm -C frontend test`, the a11y sweep (build, serve, sweep — see the
@@ -574,8 +684,9 @@ and its count all stay standing** — demonstrated on the `csrf-operations` clai
 row, which are the two this criterion has now been written against twice; every count
 `docs/FEATURE_MATRIX.md` publishes about itself sits inside a checked region; `DECISIONS.md` is
 machine-compared against `docs/adr/ADR-*.md` in both directions, which wave 6 delivered; and
-`./scripts/run-tests.sh` names **no** module that resolves as a test target and ships no test source,
-which today it names three.
+`./scripts/run-tests.sh` names **no** module that resolves as a test target and ships no test source
+— **met in wave 7**: W7-A2 wrote the first test sources `services/{identity,message,topic}/app` have
+ever had, the list went three → zero, and the run is 75 modules with 75 carrying tests.
 
 ---
 
@@ -1078,3 +1189,151 @@ browser suite over the same files, and both halves go red when one is moved. Two
 contracts produced two mismatched wires and a card that lied about its source. The rule is cheap,
 mechanical and the reason M7 closed; wave 7 applies it to the alerts wire, which is still two
 hand-written mirrors of one document with `ALERTS_EVENT_NAME` copied by eye.
+
+## What wave 7 actually did
+
+Wave 7 was thirteen parallel packets over a disjoint file partition — **ten building and three
+adversarial**, the same 3:1 as waves 5 and 6, with the third adversary re-scoped as a **closer** that
+was to run after the builders froze and land a case for every hole their verifiers had filed. It
+closed **M8**, on the clause that had never once been executed, and it built and routed the tenth
+service without leaving its routing to the integrator. **M9 did not close** and **M10 was not
+attempted**.
+
+What changed, all of it re-measured at this integration rather than read off a report.
+`./scripts/run-tests.sh` is **3,987 cases over 75 modules — and 75 of the 75 carry tests**, which is
+the first time in this project's history that the runner names no module resolving as a test target
+with nothing in it (wave 6: 3,767 over 69, 66 with tests; the list has gone six → three → zero).
+`pnpm -C frontend test` is **1,767 over 77 files** (wave 6: 1,631 over 71). `./mill __.openApiCheck`
+is 2408/2408 over **61 paths, 72 operations, 156 schemas** (57/68/154). `checkArchitecture` is 180
+modules and 10 rules with no layering violations; `__.checkFormat` (234/234), `__.fix --check`
+(4962/4962), `pnpm typecheck` and `node frontend/scripts/boundaries.mjs` (409 files in 10 packages)
+are green; the a11y sweep is clean over **780 stories** in both themes;
+`./scripts/feature-matrix-check.sh` is **251 claims, all true**; and `./deployment/compose/smoke.sh`
+passes with ten services routed, a `connect capability: available` row and the connect read asserted.
+
+**M8 closed on a frame.** Held open with nothing changing, the gateway's alerts stream is silent; a
+`POST …/acknowledgement` three seconds in produced
+`event: alerts` / `data: {"cluster":"quickstart","openCount":0,"at":"…"}`, and `shell.spec.ts:127`
+— *acknowledging an open event moves the bell, with no reload* — passed on the same stack, where at
+verification it had run and skipped. Both halves are quoted in M8 above with the image ids.
+
+**One gate was red at integration and is repaired here.** `./mill __.fix --check` — added to the
+integration list this wave — failed on `apps.allinone.fix`: scalafix wanted the two new
+`kui.connect.*` imports moved below the multi-line `kui.config` block in `AllInOneWiring.scala`. Two
+packets wrote into that file and neither owns its style gate. Repaired with `./mill apps.allinone.fix`
+(import order only) and re-verified. No previous wave's integration ran that gate; it caught exactly
+the class of thing it was added for, on its first run.
+
+### Did the mechanism work? Seven numbers, then the answer.
+
+**The ten building packets closed ten of ten owned rules.** Every one was re-applied by an independent
+verifier who watched the named case go red and then restored the tree from bytes. That is **40 of 40
+across four waves**. Naming the rule, in the packet that owns the file, remains the only mechanism in
+this project with a perfect record, and nothing here should be changed about it.
+
+**The same ten packets shipped 44 new ungated rules — 4.4 each — and disclosed six of them.** That is
+a disclosure rate of **14%**, against 11% → 18% → 20% in the three waves before it. Wave 7 is the
+first wave in which every builder was told in its own plan that an adversary would run over its
+frozen code afterwards, and disclosure **fell**. Six waves of instruction have now produced no
+measurable improvement, and one wave of pre-announcing the audit made it worse. The question is
+closed: it is not a discipline problem, a seventh instruction will not fix it, and the only thing
+that has ever found a builder's hole is somebody else mutating the builder's code.
+
+**The three adversaries scored 113 mutations, found 51 genuine ungated rules, and closed 44 with a
+case that fails.** A1: 36 scored, 25 ungated (**69%**), 22 closed. A2: 32 scored, 16 green of which
+15 genuine (**50%**), 11 closed. A3: 45 scored, 12 green of which 11 genuine (**25%**), 11 closed.
+The seven left open are each named with the production seam they need — a Kafka `Admin` stub two
+modules do not have, a keystore whose zero-fill is unobservable from outside, a Caffeine bound that
+evicts approximately, and one timing property a unit case cannot honestly assert, which the packet
+said rather than faked. **Two green mutations were argued *down* as non-defects** with the reasoning
+shown — an inert SSE comment filter whose behaviour comes from the field grammar, and a
+`rest > 0 ? rest : undefined` whose consumer already swallows both values — and one of those
+corrected a **false gate claim a previous wave's adversary had written into a case comment**.
+
+**I re-applied eleven of the 44 closures at this integration, across all three adversaries and both
+languages, one at a time, restoring from saved bytes after each.** `ConnectCapabilities.degraded`'s
+features, `WireFormat`'s schema id zero, `OffsetLookup`'s no-node leader, `SchemaWiring`'s bulkhead,
+`Pbkdf2`'s salt width, `ConfiguredProfileSource`'s fallback connection, `feature-connect`'s
+whitespace trace, the kernel's timeless resolution, `feature-alerts`' acknowledger, `feature-schemas`'
+neutral format tone and `feature-clusters`' absent scrape instant. **Every one reddened the case the
+packet named**, by name, and the tree was byte-identical afterwards.
+
+**The arithmetic. Wave 4: 10 closed, 35 opened, net −25. Wave 5: 12 + 65 closed, 33 opened, net +44.
+Wave 6: 10 + 75 closed, 46 opened, net +39. Wave 7: 10 + 44 closed, 44 opened, net +10.** Per packet:
+an adversary closed **14.7** (wave 6: 25, wave 5: 22); a builder opened **4.4**; a verification pass
+detected 4.4 and closed **0**, for the third wave running.
+
+**And the fall is explained by the two seams running out and by the closer never running.** A1 and A2
+both report the clue that produced wave 6's 58% is **spent**: "declares a test module in `build.mill`
+and ships no test source" went three → zero *during this wave*, because A2 wrote the suites. A3's
+third pass over `feature-clusters` and `feature-schemas` found **23%**, against 63% and 33% on the
+same two packages — and every one of its three findings was in a `.tsx`, while all seven mutations it
+put on the two `model.ts` files were gated. That is the first evidence this project has that a part
+of it is finished being hunted: **the pure-data modules of those two packages are swept.**
+
+### The closer did not run, and the pre-commitment measured the wrong thing
+
+Wave 6's pre-commitment was: if the closer shuts more rules than the two hunters together, it becomes
+permanent and one hunter is dropped to 4:1. It closed 11 against their 33, so by the letter the ratio
+stays. **That answer is not usable, because the closer never received its input.** Its own report says
+so plainly: *"the ten verification reports are not in the repository and were not handed to me… with
+no reports on disk I hunted the same code from scratch instead."* The mechanism that was to be tested
+— 44 filed findings arriving as 44 landed cases — was never run. What ran was a third hunter pointed
+at frozen code, and it yielded 25% where a hunter on unowned code yielded 69%.
+
+**The number that matters instead is the overlap, and it is zero.** A3 hunted the same code ten
+verification passes had just mutated, and **not one of its eleven findings is among the verifiers'
+44**. Its kernel findings are in `data/alerts/events.ts`; the verifier's two are in `store.ts`. Its
+three `feature-connect` findings are none of that verifier's eleven. Its `feature-alerts` finding is
+not among that verifier's three. So the wave's own new code holds **at least 55** ungated rules — 44
+found by reading and mutating against a report, 11 found by mutating blind — and the two methods found
+disjoint sets. The seam is real and it is denser than anyone has measured; what is missing is a wire
+from the finding to the case, and that wire is a **file**, not a good intention. Wave 8 writes the
+verification reports into the tree as the packets freeze, and the closer's `Owns` includes them.
+
+**Recommendation, stated as a change rather than a ratio.** Wave 8 keeps thirteen packets and 3:1, and
+changes exactly one thing: **the closer is handed a list, not a licence.** Each verification pass
+writes `docs/plan/verification/W8-<packet>.md` with its findings in the shape the closer consumes —
+file, exact mutation, the case that closes it — and the closer's acceptance is *a case per filed
+finding*, verified red. The pre-commitment is re-run properly: **if a closer handed the wave's own
+filed findings closes thirty or more of them, it becomes permanent and replaces one hunter at 4:1; if
+it cannot, the closer is retired for good and every finding becomes an owned rule in the next plan,**
+which is the mechanism with the 40/40 record. And the hunters retire the spent clue for A1's new one,
+which is the sharpest thing either of them found: *every ungated rule in a file that already had a
+suite was ungated because the fixture could not express the failing input, or because no assertion
+ever read that field.* A hard-coded `headers = Nil` in a test helper is cheaper to grep for than a
+missing suite.
+
+What surprised us, in three shapes.
+
+**A spec can be the only thing standing between a finished service and a closed milestone, and it can
+fail for the reason it was written to prevent.** `services/connect` is built, routed, imaged, capable
+and answering real documents through the gateway. `e2e/connect.spec.ts` hand-writes
+`connectors.data.items` where the service renders `connectors.data.workers[].connectors.data.items`,
+so its two positive cases skip forever and its shape assertion **fails against a correctly routed
+server** — measured here, on images built from this tree, after the 404 that had been masking it went
+away. The package it tests was rewritten mid-wave for exactly that wire, and the golden suite that
+binds the decoder to the service's own documents does not cover `e2e/`. House rule 12 has a hole in
+it the shape of the browser suite.
+
+**A packet can measure its own gate honestly and still publish a false price for it, three waves
+running.** House rule 17 was written in this wave's own plan because wave 6's checker packet claimed
+five edits where it cost one. Wave 7's checker packet raised the real price from one to **two** — a
+genuine improvement, and the single-line attack no longer works — and published **four**. It is
+reproduced above in two lines. Five further guards in the same rebuild, four of them asked for by
+name in the plan, survive mutation with the run green. The pattern is now specific enough to state as
+a rule of estimation: a packet's claim about the cost of defeating its own gate should be treated as
+unmeasured until someone else defeats it.
+
+**A wave can close a milestone with a command nobody in the wave ran.** M8's outstanding clause was a
+`curl -N` delivering a frame and an e2e case asserting the bell moves. Both were within reach of every
+packet in the wave; one packet ran the curl on an instance it then destroyed and left no capture, and
+the packet that owns the e2e case reported it as *not run* when in fact it runs and skips. At
+integration both took under ten minutes, needing only two images built from the tree and one
+`diskUsedWarningPercent: 1`. **The gap between "the code is right" and "the criterion is met" was two
+commands, and thirteen packets left it open.** Wave 8's plan therefore makes the stack rebuild an
+explicit, owned, first-hour act rather than a line inside somebody's acceptance list.
+
+No milestone changed order. Two exit criteria were corrected: M9's, which is now recorded clause by
+clause with the two that are unmet and why, and M10's, which records that the price of a green false
+figure moved from one edit to two and that its packet published four.

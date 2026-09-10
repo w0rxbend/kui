@@ -50,11 +50,13 @@ import { TopicConsumers, type ConsumersFailure } from "./TopicConsumers.jsx";
 import { AddPartitionsDialog } from "./AddPartitionsDialog.jsx";
 import { fetchTopicConfig, type TopicConfig } from "./config.js";
 import {
+  fetchClusterWriteState,
   fetchPartitions,
   fetchTopicConsumers,
   fetchTopicOverview,
   fetchTopicStatistics,
   fetchTopics,
+  type ClusterWriteState,
   type PartitionRow,
   type TopicConsumerRow,
   type TopicListResult,
@@ -151,6 +153,38 @@ function useTabQuery<T>(
     registry: TAB_QUERIES,
   });
   return { state: query.state, reload: query.reload };
+}
+
+/**
+ * Whether this cluster is registered read-only, for every write gate on these two screens.
+ *
+ * ADR-047's flag is a property of the **deployment**, not of the principal, and
+ * `writeBlockedReason` prints a different sentence for each because the two need different actions
+ * from the reader. All seven of this file's calls passed a hard-coded `false` until wave 7, so a
+ * cluster somebody had deliberately registered read-only still offered `Create topic`, the bulk
+ * `Delete` and `Empty topic` as live controls, and the refusal arrived from the server *after* the
+ * operator had typed a confirmation. The permission half of that gate was closed in wave 5; this
+ * is its other half.
+ *
+ * One query, keyed by the cluster and by nothing else, on the shared registry: the flag does not
+ * move when a search box does, and the list screen and the topic page ask once between them.
+ *
+ * Answers `false` while the question is still out, and `false` when it could not be asked at all —
+ * the same choice `useKui().permits` documents for the same reason. Disabling every write control
+ * on a fact KUI does not have would put a screenful of refusals in front of every reader for the
+ * length of one request, and the server is the authority either way: this decides only whether a
+ * control explains itself in advance instead of failing afterwards.
+ */
+function useClusterReadOnly(clusterId: () => string): () => boolean {
+  const kui = useKui();
+  const query = useQuery<ClusterWriteState>({
+    key: () => `cluster-write-state|${clusterId()}`,
+    load: () => fetchClusterWriteState(kui.api, clusterId()),
+  });
+  return () => {
+    const current = query.state();
+    return (current.kind === "ready" || current.kind === "stale") && current.value.readOnly;
+  };
 }
 
 /**
@@ -255,6 +289,48 @@ function download(filename: string, text: string, type: string): void {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * How many times the list is re-read after a create before the screen stops asking.
+ *
+ * Six at half a second is three seconds, which is far longer than the controller takes. The bound
+ * exists so the poll **stops rather than spinning**: a topic still absent after three seconds is a
+ * fact about the cluster and not a race, and a screen that kept asking would issue a request every
+ * half second for as long as the tab stayed open.
+ */
+export const CREATE_POLL_ATTEMPTS = 6;
+
+/**
+ * Long enough for the fetch a reload just started to have landed, short enough that the list is on
+ * screen well before anybody wonders.
+ */
+export const CREATE_POLL_INTERVAL_MS = 500;
+
+/**
+ * Re-reads the list until the new topic is in it, or until it is time to stop asking.
+ *
+ * Kafka's `createTopics` returns when the *controller has accepted* the create, not when every
+ * broker will list the topic — so a single re-fetch straight afterwards is a race, and losing it
+ * means an operator creates a topic and does not see it. They then create it again, and the second
+ * attempt fails with "topic already exists", which reads as the product being broken twice.
+ *
+ * The row is not spliced in locally instead, because the row this screen would invent is a guess at
+ * what the broker decided about the defaults it was not given — and a guessed partition count on a
+ * topic somebody is about to produce to is worse than a short wait.
+ *
+ * Lifted out of `TopicsScreen` so that both halves of the rule can be gated. The lower half — that
+ * it polls at all, rather than re-reading once — is observable through the screen and has a case.
+ * The **upper** half is not: a bound of 6 and a bound of 100 draw the same page, and differ only in
+ * how long the browser keeps asking a cluster that is never going to answer. Nothing could see that
+ * through the DOM, so the loop is a function with a caller and the caller is one line below.
+ */
+export async function pollUntilListed(reload: () => void, listed: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < CREATE_POLL_ATTEMPTS; attempt += 1) {
+    reload();
+    await new Promise((resolve) => setTimeout(resolve, CREATE_POLL_INTERVAL_MS));
+    if (listed()) return;
+  }
+}
+
 function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
   const kui = useKui();
 
@@ -297,6 +373,10 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
     key: () => `topic-statistics|${props.clusterId}`,
     load: () => fetchTopicStatistics(kui.api, props.clusterId),
   });
+
+  /* The deployment's own answer to "may anything here write at all", which the three gates below
+     ask before they ask about the principal. See `useClusterReadOnly`. */
+  const readOnly = useClusterReadOnly(() => props.clusterId);
 
   createEffect(
     () => state(),
@@ -375,57 +455,34 @@ function TopicsScreen(props: { readonly clusterId: string }): JSX.Element {
 
   const create = createMutation((topic: NewTopic) => createTopic(kui.api, props.clusterId, topic));
 
+  const settleAfterCreate = (name: string): Promise<void> =>
+    // `result()` is the screen's own view of the answer, with the same fallback the table uses, so
+    // this asks exactly the question the operator is about to ask: is it on the list?
+    pollUntilListed(reload, () => result().topics.some((one) => one.name === name));
+
   /*
    * Two separate reasons, and the button says which one applies. A read-only cluster is ADR-047's
    * own state rather than a permission problem, and telling an operator to ask an administrator for
    * a permission they already hold wastes their afternoon.
    */
-  /**
-   * Re-reads the list until the new topic is in it, or until it is time to stop asking.
-   *
-   * Kafka's `createTopics` returns when the *controller has accepted* the create, not when every
-   * broker will list the topic — so a single re-fetch straight afterwards is a race, and losing it
-   * means an operator creates a topic and does not see it. They then create it again, and the second
-   * attempt fails with "topic already exists", which reads as the product being broken twice.
-   *
-   * The row is not spliced in locally instead, because the row this screen would invent is a guess
-   * at what the broker decided about the defaults it was not given — and a guessed partition count
-   * on a topic somebody is about to produce to is worse than a short wait.
-   *
-   * Bounded, and it stops rather than spinning: three seconds is far longer than the controller
-   * takes, and a topic still absent after that is a fact about the cluster rather than a race. The
-   * list then shows what the server actually returned, which is the honest answer.
-   */
-  const settleAfterCreate = async (name: string): Promise<void> => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      reload();
-      // Long enough for the fetch the reload just started to have landed, and short enough that the
-      // list is on screen well before anybody wonders.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      // `result()` is the screen's own view of the answer, with the same fallback the table uses,
-      // so this asks exactly the question the operator is about to ask: is it on the list?
-      if (result().topics.some((one) => one.name === name)) return;
-    }
-  };
-
   const createBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicCreate),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "create a topic on this cluster",
     });
 
   const purgeBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicMessagesDelete),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "empty topics on this cluster",
     });
 
   const deleteBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicDelete),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "delete topics on this cluster",
     });
 
@@ -591,6 +648,9 @@ function TopicScreen(props: {
   const state = overviewQuery.state;
   const reload = overviewQuery.reload;
 
+  /* The same one question the list screen asks, on the same key, so the two share one request. */
+  const readOnly = useClusterReadOnly(() => props.clusterId);
+
   createEffect(
     () => state(),
     (current) => {
@@ -674,14 +734,14 @@ function TopicScreen(props: {
   const purgeBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicMessagesDelete),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "empty this topic",
     });
 
   const deleteBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicDelete),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "delete this topic",
     });
 
@@ -696,14 +756,14 @@ function TopicScreen(props: {
   const growBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicEdit),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "add partitions to this topic",
     });
 
   const editBlocked = (): string | undefined =>
     writeBlockedReason({
       permitted: kui.permits(Actions.TopicEdit),
-      readOnly: false,
+      readOnly: readOnly(),
       action: "change this topic's settings",
     });
 

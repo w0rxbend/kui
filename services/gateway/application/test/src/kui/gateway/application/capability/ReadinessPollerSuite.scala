@@ -137,6 +137,47 @@ final class ReadinessPollerSuite extends CatsEffectSuite {
     TestControl.executeEmbed(program).assertEquals(CapabilityState.Available)
   }
 
+  test("aServiceSlowerThanThePollBudgetIsUnavailableThoughItAnswersInsideTheInterval") {
+    // `MaxPollTimeout` is the whole of "a readiness check that has not answered in five seconds has
+    // answered". It could be raised from five seconds to fifty-five with every one of the gateway's cases
+    // green, because none of them distinguished a service slower than the *budget* from one slower than
+    // the *interval*: the budget is `interval.min(MaxPollTimeout)`, so at this suite's ten-second interval
+    // any value at or above ten leaves the poller behaving exactly as if the constant did not exist.
+    //
+    // Two services on either side of the five-second line, polled on the same interval, so the assertion
+    // is about the budget and not about slowness. `Hanging` above cannot make this point: a service that
+    // never answers is refused by any budget shorter than for ever.
+    val program =
+      (stub(cluster, ServiceHealth.Slow(8.seconds)), stub(topic, ServiceHealth.Slow(3.seconds))).tupled
+        .flatMap { (slower, quicker) =>
+          fixture(List(slower, quicker)).use { (registry, _, _) =>
+            IO.sleep(interval * 6) *>
+              (registry.state(keyOf(cluster)), registry.state(keyOf(topic))).tupled
+          }
+        }
+
+    TestControl.executeEmbed(program).map { (slowerState, quickerState) =>
+      assert(
+        slowerState match {
+          case CapabilityState.Unavailable(_, _, _) => true
+          case _ => false
+        },
+        s"a service answering after 8s, past the ${ReadinessPoller.MaxPollTimeout} poll budget, was $slowerState"
+      )
+      // Not `Available`: three seconds is inside the budget but outside the registry's latency threshold,
+      // so this one is reported `Degraded`. That is the contrast the case needs — it answered, and the
+      // poller believed it — and asserting the exact state here would be asserting `RegistryConfig`'s
+      // thresholds, which are `CapabilityRegistrySuite`'s subject and not this one's.
+      assert(
+        quickerState match {
+          case CapabilityState.Unavailable(_, _, _) => false
+          case _ => true
+        },
+        s"a service answering inside the poll budget was refused as $quickerState"
+      )
+    }
+  }
+
   test("aHangingServiceDoesNotBlockOtherServicesPolls") {
     // Fault isolation at the poller level: one service that never answers must not stop the gateway
     // learning about the other ten.

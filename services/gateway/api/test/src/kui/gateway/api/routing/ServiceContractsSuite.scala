@@ -5,6 +5,7 @@ import sttp.tapir.AnyEndpoint
 
 import kui.alerts.contract.AlertsEndpoints
 import kui.cluster.contract.{ClusterEndpoints, ClusterWriteEndpoints}
+import kui.connect.contract.ConnectEndpoints
 import kui.consumer.contract.{ConsumerEndpoints, ConsumerMutationEndpoints}
 import kui.kernel.ServiceId
 import kui.message.contract.{FilterEndpoints, MessageMutationEndpoints, TrackEndpoints}
@@ -27,6 +28,7 @@ final class ServiceContractsSuite extends FunSuite {
   private val schema = ServiceId.unsafe("schema")
   private val metrics = ServiceId.unsafe("metrics")
   private val alerts = ServiceId.unsafe("alerts")
+  private val connect = ServiceId.unsafe("connect")
 
   /** The public address of one endpoint, including its path parameters.
     *
@@ -42,7 +44,7 @@ final class ServiceContractsSuite extends FunSuite {
   test("everyConfiguredServiceHasItsContract") {
     assertEquals(
       ServiceContracts.byService.keySet,
-      Set(cluster, topic, consumer, message, schema, metrics, alerts)
+      Set(cluster, topic, consumer, message, schema, metrics, alerts, connect)
     )
     // Both of the cluster service's lists. `ClusterWriteEndpoints` used to be deliberately absent, so
     // that the one write M1 shipped had no public route while it had no screen; the administration screen
@@ -90,6 +92,12 @@ final class ServiceContractsSuite extends FunSuite {
     // for the message browse stream's reason -- a stream is relayed rather than called and re-encoded --
     // so `AlertsStreamEndpoint` is deliberately not in the map and this assertion is what says so.
     assertEquals(ServiceContracts.of(alerts), AlertsEndpoints.all)
+    // The connect service's one list, and the tenth entry. Unlike topic, consumer and schema it has no
+    // second object to forget: its three operations are not destructive -- a paused connector is resumed
+    // and a restarted one re-reads its own committed offsets -- so there is no ADR-045 marker to group
+    // them by and they are published alongside the read. Which endpoint list is in the map is asserted
+    // here, and the count of the writes inside it is asserted in `MergedDocumentShapeSuite`.
+    assertEquals(ServiceContracts.of(connect), ConnectEndpoints.all)
   }
 
   test("theSchemaServicesTwoListsAreTheSizeTheMapSaysTheyAre") {
@@ -109,7 +117,17 @@ final class ServiceContractsSuite extends FunSuite {
     // A service deployed before the gateway build that routes it is configured, polled and reported in the
     // capability snapshot; it simply has no proxied routes yet. No service is in that position today, so
     // the case is made with an id nothing serves rather than left untested until one is.
-    assertEquals(ServiceContracts.of(ServiceId.unsafe("connect")), Nil)
+    //
+    // It used to be made with `connect`, which stopped being an id nothing serves the moment the tenth
+    // service landed -- the case would have kept passing only because `getOrElse` answers `Nil` for a key
+    // that is absent, and it is absent from nothing now. `ksql` is M9's second service and is the next id to
+    // move; whoever routes it moves this line, and a stale one fails here rather than silently asserting
+    // something true of every string.
+    assertEquals(ServiceContracts.of(ServiceId.unsafe("ksql")), Nil)
+    assert(
+      !ServiceContracts.byService.keySet.contains(ServiceId.unsafe("ksql")),
+      "ksql is routed now; this case needs an id the gateway really has no contract for"
+    )
   }
 
   test("theTopicEndpointsAreProxiedAndNoneIsAggregated") {

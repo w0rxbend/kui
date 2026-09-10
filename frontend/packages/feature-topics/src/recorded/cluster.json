@@ -1,0 +1,38 @@
+{
+    "cluster": {
+        "id": "quickstart",
+        "name": "Quickstart (local)",
+        "readOnly": false,
+        "bootstrapServers": "kafka:9092",
+        "security": {
+            "protocol": "PLAINTEXT",
+            "mechanism": null,
+            "truststoreConfigured": false,
+            "keystoreConfigured": false
+        },
+        "summary": {
+            "status": "ok",
+            "data": {
+                "kafkaClusterId": "kui-quickstart-0000000001",
+                "version": "4.3",
+                "controllerId": 1,
+                "controllerKind": "kraft",
+                "brokerCount": 1,
+                "onlinePartitionCount": null,
+                "offlinePartitionCount": null,
+                "underReplicatedPartitionCount": null,
+                "totalDiskUsageBytes": null,
+                "features": [],
+                "scrapedAt": "2026-09-10T17:41:31.880Z",
+                "controllerUptime": {
+                    "percent": null,
+                    "windowSeconds": 21600,
+                    "coverageSeconds": 0
+                }
+            },
+            "fetchedAt": "2026-09-10T17:41:31.880Z"
+        },
+        "version": null,
+        "origin": "static"
+    }
+}

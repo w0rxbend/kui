@@ -131,8 +131,12 @@ object IdentityWiring {
 
   /** One line at start-up saying what this deployment will do, because "why does KUI not ask me to log in" is
     * otherwise answered by reading a YAML file on a machine somebody else deployed.
+    *
+    * `private[app]` for the reason `SchemaWiring.upstreamConfig` is: the alternative is a suite that builds
+    * the whole composition root, which needs a metadata store and a provider, and this module had no suite at
+    * all until then — so the sentence an operator relies on was carried by nothing.
     */
-  private def announce[F[_]](config: IdentityConfig, logger: StructuredLogger[F]): F[Unit] =
+  private[app] def announce[F[_]](config: IdentityConfig, logger: StructuredLogger[F]): F[Unit] =
     logger.info(
       Map(
         "auth.type" -> config.mode.wire,

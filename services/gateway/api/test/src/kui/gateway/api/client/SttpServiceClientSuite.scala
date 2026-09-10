@@ -342,4 +342,60 @@ final class SttpServiceClientSuite extends CatsEffectSuite {
       result <- Fixture.client(Fixture.Cluster, stub).use(_.call(getCluster, cluster)(Fixture.context()))
     } yield assertEquals(result.map(_.cluster.name), Right("Production EU"))
   }
+
+  test("aClientBuiltThroughResourceWithNoPolicyRefusesALoopbackUpstream") {
+    // `resource`'s `policy` parameter defaults to `UrlPolicy.Strict`, and that default is the SSRF guard's
+    // fail-safe: a composition root that says nothing gets the safe answer rather than the convenient one.
+    // Until this case existed the default could be changed to `UrlPolicy.Dev` with every gateway suite
+    // green, because the only caller that exercised it — `ServiceClientFixture.client` — pointed at
+    // `http://cluster:8081`, and `SafeUrl` never resolves a host *name*, so `Strict` and `Dev` decide that
+    // address identically. A loopback literal is the cheapest address the two policies disagree about.
+    //
+    // The refusal is asserted through a real call rather than by reading the parameter back, because the
+    // parameter is not where the rule bites: it is threaded into `UpstreamConfig.urlPolicy` and re-applied
+    // by `ResilientBackend` to every request and every redirect.
+    val loopback = Fixture.config(base = "http://127.0.0.1:8081")
+
+    for {
+      stub <- Fixture.stub(ServiceBehaviour.Ok(clusterBody))
+      logger <- kui.testkit.fakes.FakeStructuredLogger[IO]
+      // `SttpServiceClient.resource` is called here rather than through `ServiceClientFixture.client`,
+      // deliberately. The fixture is the only other caller that omits the policy, and a later edit adding
+      // an explicit `UrlPolicy.Strict` there would look harmless and would silently re-open this hole. The
+      // argument list below is the assertion: there is no `policy` at the end of it.
+      refused <- SttpServiceClient
+        .resource[IO](
+          Fixture.Cluster,
+          loopback,
+          PrincipalCodec.inProcess[IO],
+          Telemetry.noop[IO],
+          logger,
+          stub.backend
+        )
+        .use(_.call(getCluster, cluster)(Fixture.context()))
+      afterRefusal <- stub.sent
+      // The other direction, so that a case which passed because *nothing* can reach the stub would fail:
+      // told `Dev` explicitly, the very same address and the very same stub answer.
+      allowed <- Fixture
+        .clientUnder(Fixture.Cluster, stub, loopback, UrlPolicy.Dev)
+        .use(_.call(getCluster, cluster)(Fixture.context()))
+      afterAllowed <- stub.sent
+    } yield {
+      // `message` is the sentence a browser is shown — "cluster could not be reached" — so the reason is
+      // read off the typed value's `cause`, which is where `ResilientBackend` puts the violation.
+      val cause = refused.left.toOption.collect { case InfrastructureError.Unreachable(_, why) => why }
+
+      assertEquals(refused.left.map(_.code), Left(ErrorCode.UpstreamUnavailable), refused.toString)
+      assert(cause.exists(_.contains("refused by the URL policy")), refused.toString)
+      assert(
+        cause.exists(_.contains("a loopback address is only allowed in development")),
+        refused.toString
+      )
+      // Refused before a connection is attempted: the stub records every request that reaches it, and the
+      // policy check runs in front of the transport rather than after a failed dial.
+      assertEquals(afterRefusal, Nil, "the refused call still reached the upstream")
+      assertEquals(allowed.map(_.cluster.name), Right("Production EU"))
+      assertEquals(afterAllowed.size, 1, afterAllowed.toString)
+    }
+  }
 }

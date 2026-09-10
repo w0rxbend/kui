@@ -1152,6 +1152,51 @@ describe("TopBar", () => {
     read.dispose();
   });
 
+  /**
+   * The cap, which is a layout rule and was asserted nowhere in this package.
+   *
+   * `count > 9 ? "9+" : String(count)` could be written `String(count)` with every one of the 506
+   * shell cases green, because the only assertion of the cap anywhere in the repository is inside a
+   * browser case that needs a stack to run. A cluster mid-incident with 147 open events would then
+   * draw a three-digit badge — wider than the bell it is anchored to, so it overhangs the search
+   * field beside it — and nothing in this suite would notice.
+   *
+   * The exact number stays in the accessible name, which is where a figure belongs: the badge is a
+   * marker and `9+` is honest about being one, while "Notifications, 147 open alerts" is the
+   * sentence a screen reader gets and the one a person can act on.
+   */
+  it("caps the badge at 9+ and keeps the exact figure in the accessible name", () => {
+    const many = mount(() => (
+      <TopBar {...base} theme="dark" alertsOpen={147} alertsUnread={true} />
+    ));
+    expect(many.container.querySelector(".kui-bell__badge")?.textContent).toBe("9+");
+    expect(
+      many.container.querySelector('[data-testid="notifications"]')!.getAttribute("aria-label"),
+    ).toBe("Notifications, 147 open alerts, unread");
+    many.dispose();
+
+    // Nine is the last figure drawn as itself, and ten is the first that is not. A cap asserted
+    // only well past its boundary is a cap that can move by one and stay green.
+    const nine = mount(() => <TopBar {...base} theme="dark" alertsOpen={9} />);
+    expect(nine.container.querySelector(".kui-bell__badge")?.textContent).toBe("9");
+    nine.dispose();
+
+    const ten = mount(() => <TopBar {...base} theme="dark" alertsOpen={10} />);
+    expect(ten.container.querySelector(".kui-bell__badge")?.textContent).toBe("9+");
+    ten.dispose();
+  });
+
+  it("caps the unread badge too, where no alerts feed sits behind the bell", () => {
+    /* The other branch of the same expression. `unreadCount` is what every caller that is not the
+       frame passes — the stories, the notification cases — so a cap asserted only over `alertsOpen`
+       would leave half of `badgeText` free. */
+    const { container, dispose } = mount(() => <TopBar {...base} theme="dark" unreadCount={23} />);
+    expect(container.querySelector(".kui-bell__badge")?.textContent).toBe("9+");
+    const marked = container.querySelector('[data-testid="notifications"]')!;
+    expect(marked.getAttribute("aria-label")).toBe("Notifications, 23 unread");
+    dispose();
+  });
+
   it("opens the panel only when the caller says it is open", () => {
     // The panel's open state is the caller's, so that Escape and a click elsewhere can close it
     // from outside the bar. A bar that owned it would be a panel nothing else could dismiss.

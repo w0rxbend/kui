@@ -57,7 +57,8 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       val listing: Ref[IO, Either[KuiError, GroupListingResult]],
       val described: Ref[IO, Either[KuiError, BatchResult[GroupId, GroupDescription]]],
       val committed: Ref[IO, Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]],
-      val altered: Ref[IO, List[(GroupId, Map[TopicPartition, Offset])]]
+      val altered: Ref[IO, List[(GroupId, Map[TopicPartition, Offset])]],
+      deleteSkips: Ref[IO, Map[GroupId, SkipReason]]
   ) extends GroupAdmin[IO] {
 
     def listGroups(conn: ClusterConnection, states: Set[GroupState]) = listing.get
@@ -78,8 +79,15 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
     def deleteOffsets(conn: ClusterConnection, group: GroupId, partitions: Set[TopicPartition]) =
       IO.pure(Right(()))
 
+    /** What the broker answers a `deleteGroups` with. A skip here is a per-group refusal, which is the
+      * shape `BatchResult` exists to carry and the one a caller most easily reads as success.
+      */
+    val deletions: Ref[IO, Map[GroupId, SkipReason]] = deleteSkips
+
     def deleteGroups(conn: ClusterConnection, ids: List[GroupId]) =
-      IO.pure(Right(BatchResult.complete(ids.map(_ -> ()).toMap)))
+      deletions.get.map(skips =>
+        Right(BatchResult(ids.filterNot(skips.contains).map(_ -> ()).toMap, skips))
+      )
   }
 
   final private class FakeOffsets(
@@ -115,7 +123,8 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       describedRef <- Ref.of[IO, Either[KuiError, BatchResult[GroupId, GroupDescription]]](described)
       committedRef <- Ref.of[IO, Either[KuiError, BatchResult[GroupId, List[CommittedOffset]]]](committed)
       altered <- Ref.of[IO, List[(GroupId, Map[TopicPartition, Offset])]](Nil)
-      admin = new FakeAdmin(listing, describedRef, committedRef, altered)
+      deleteSkips <- Ref.of[IO, Map[GroupId, SkipReason]](Map.empty)
+      admin = new FakeAdmin(listing, describedRef, committedRef, altered, deleteSkips)
       lookup = new FakeOffsets(ends.map(batch => BatchResult(batch.values, endsSkipped)), ends, offline)
       logger <- FakeStructuredLogger[IO]
     } yield (KafkaGroupAdminPort.make[IO](admin, lookup, connection, logger), admin)
@@ -251,5 +260,54 @@ final class KafkaGroupAdminPortSuite extends KuiIOSuite {
       _ <- port.applyOffsets(orders, Map(partition(0) -> Offset.unsafe(5L)))
       written <- admin.altered.get
     } yield assertEquals(written.map((g, offsets) => g -> offsets.values.map(_.value).toList), List(orders -> List(5L)))
+  }
+
+  test("a group the broker refused to delete is a failure, and never an empty success") {
+    /*
+     * Ungated until now: answering `Right(())` for a per-group skip left
+     * `./mill services.consumer.__.test` at 201/201 green -- `FakeAdmin.deleteGroups` could only ever
+     * answer a complete success, so the branch that reads the skip had no input that reached it. Forget
+     * group is a destructive operation behind ADR-045's confirmation, and a refusal reported as success
+     * tells an operator the group is gone while it is still there with its offsets intact. The screen has
+     * no second way to find out.
+     */
+    for {
+      rigged <- rig()
+      (port, admin) = rigged
+      _ <- admin.deletions.set(Map(orders -> SkipReason.NotAuthorized("DELETE on group orders-consumer")))
+      refused <- port.deleteGroup(orders)
+      _ <- admin.deletions.set(Map.empty)
+      accepted <- port.deleteGroup(orders)
+    } yield {
+      assertEquals(refused.isLeft, true)
+      assertEquals(refused.left.toOption.map(_.code), Some(kui.kernel.error.ErrorCode.Forbidden))
+      // The other direction, so the case cannot pass by refusing everything.
+      assertEquals(accepted, Right(()))
+    }
+  }
+
+  test("a row built from a listing alone says what it does not know, rather than reporting zeros") {
+    /*
+     * Ungated until now: `completeness = GroupCompleteness.Complete` on a listing-derived summary left the
+     * suite at 201/201 green. A listing knows a group exists and nothing else, so its `memberCount`,
+     * `topicCount` and `partitionCount` are placeholders; marked complete, the list screen draws them as
+     * measurements and a running group reads as a group with no members and no lag. `GroupCompleteness`
+     * exists precisely so that "nobody is running this" and "KUI did not ask" cannot render the same.
+     */
+    for {
+      rigged <- rig()
+      (port, _) = rigged
+      listed <- port.list(Set.empty)
+    } yield {
+      val summary = listed.toOption.flatMap(_.groups.headOption).getOrElse(fail("the listing must answer"))
+
+      assertEquals(summary.groupId, orders)
+      assertEquals(summary.completeness.isComplete, false)
+      assertEquals(summary.completeness.membersKnown, false)
+      assertEquals(summary.completeness.committedOffsetsKnown, false)
+      assertEquals(summary.completeness.endOffsetsKnown, false)
+      // The three figures the flags are about, so the reason they must not be trusted is on the page.
+      assertEquals((summary.memberCount, summary.topicCount, summary.partitionCount), (0, 0, 0))
+    }
   }
 }

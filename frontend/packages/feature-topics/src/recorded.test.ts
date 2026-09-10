@@ -7,8 +7,10 @@ import partitionsDocument from "./recorded/partitions.json" with { type: "json" 
 import consumersDocument from "./recorded/topic-consumers.json" with { type: "json" };
 import statisticsDocument from "./recorded/statistics.json" with { type: "json" };
 import planDocument from "./recorded/partition-plan.json" with { type: "json" };
+import clusterDocument from "./recorded/cluster.json" with { type: "json" };
 import { fetchTopicConfig, sourceOf } from "./config.js";
 import {
+  fetchClusterWriteState,
   fetchPartitions,
   fetchTopicConsumers,
   fetchTopicOverview,
@@ -486,5 +488,50 @@ describe("the recorded topic consumers", () => {
     const answer = await fetchTopicOverview(client(overviewDocument), "quickstart", "orders.v1");
     if (answer.kind !== "ready") throw new Error("expected ready");
     expect(answer.value.consumerGroups).toBe(1);
+  });
+});
+
+describe("the recorded cluster document", () => {
+  /*
+   * `GET /api/v1/clusters/{clusterId}`, captured from the quickstart with:
+   *
+   *   curl -s localhost:8080/api/v1/clusters/quickstart | python3 -m json.tool > src/recorded/cluster.json
+   *
+   * It is here because the topic screens' write gates read exactly one field out of it, and
+   * `readOnly` is nested under `cluster` rather than at the top level — a mapping that reached for
+   * `answer.value.readOnly` would be type-correct, answer `undefined`, and leave every write
+   * control on a read-only cluster live. That is the failure this whole recording discipline
+   * exists for: the payload is `unknown` on this side, so a wrong field name is silent.
+   */
+  it("reads the read-only flag from where the server actually puts it", async () => {
+    const answer = await fetchClusterWriteState(client(clusterDocument), "quickstart");
+    expect(answer.kind).toBe("ready");
+    expect(answer.kind === "ready" && answer.value.readOnly).toBe(false);
+  });
+
+  it("reads a cluster the deployment registered read-only as read-only", async () => {
+    // The recorded document with the one field flipped: the quickstart is writable, and a case
+    // that only ever saw `false` could not tell the mapping from a constant.
+    const readOnly = JSON.parse(JSON.stringify(clusterDocument)) as {
+      cluster: { readOnly: boolean };
+    };
+    readOnly.cluster.readOnly = true;
+    const answer = await fetchClusterWriteState(client(readOnly), "quickstart");
+    expect(answer.kind === "ready" && answer.value.readOnly).toBe(true);
+  });
+
+  it("does not call a cluster read-only because the field was missing", async () => {
+    /*
+     * Never invent a fact about somebody's cluster. A document with no `readOnly` at all — an older
+     * gateway, or a section that failed to serialise — is KUI not having been told, and refusing
+     * every write control over it would blame a deployment for something nobody said. The server is
+     * the authority in any case: this flag only decides whether a control explains itself in
+     * advance instead of failing after a confirmation has been typed.
+     */
+    const answer = await fetchClusterWriteState(client({ cluster: { id: "quickstart" } }), "q");
+    expect(answer.kind === "ready" && answer.value.readOnly).toBe(false);
+    // And a document with no cluster at all, which is what a 200 with an empty body would be.
+    const empty = await fetchClusterWriteState(client({}), "q");
+    expect(empty.kind === "ready" && empty.value.readOnly).toBe(false);
   });
 });

@@ -158,8 +158,11 @@ object ArchitectureRules {
     * [[check]] shows up in the build log as a number that went down rather than as a green build.
     *
     * Ten, not eleven, with A11 in place: ADR-041's **A7** — the shell holding no static reference to a
-    * feature class — cannot be seen in a module graph at all. It is enforced by `checkBundleShape`, against
-    * the linked JavaScript, and the ADR's own rule table says so.
+    * feature class — cannot be seen in a module graph at all. It is enforced by
+    * `frontend/scripts/bundle-shape.mjs`, against the Vite manifest `pnpm build` writes, and the ADR's own
+    * rule table says so. It read `checkBundleShape` until 2026-09-10: that Mill task went with the Scala.js
+    * linker in ADR-048 and nothing checks a comment naming a build task, which is why this copy and the one
+    * in `ArchitectureSuite` outlived two rounds of the same correction elsewhere.
     */
   val ruleCount: Int = 10
 

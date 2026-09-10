@@ -190,6 +190,39 @@ test.describe("the topic list", () => {
     await expect(page.locator("body")).not.toContainText("analytics.pageviews");
   });
 
+  test("asks the gateway whether the cluster is registered read-only", async ({ page }) => {
+    /*
+     * The edge, driven through the browser's own path.
+     *
+     * `TopicsRoute` gates all seven of its write controls on ADR-047's read-only flag, and the
+     * flag lives on `GET /api/v1/clusters/{clusterId}` — a different service from the one that
+     * answers for topics. Every unit case in `feature-topics` stubs that path, so all of them would stay
+     * green if the request 404'd, 502'd or never reached the gateway at all: the accessor answers
+     * "not read-only" when it cannot ask, which is deliberate and which makes a broken edge
+     * completely silent. Wave 6 lost a whole service to exactly that shape.
+     *
+     * So this asserts the **response**, through nginx's `/api` proxy, which is the only path the
+     * browser uses. And the flag the quickstart really carries is `false`, so the Create control is
+     * live beside it: a 200 carrying `readOnly: true` would be a different failure and this
+     * separates the two.
+     */
+    const answered = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/v1/clusters/${CLUSTER}` &&
+        response.request().method() === "GET",
+    );
+    await page.goto(`/ui/clusters/${CLUSTER}/topics`);
+    const response = await answered;
+    expect(response.status()).toBe(200);
+    const body = (await response.json()) as { cluster?: { readOnly?: boolean } };
+    expect(body.cluster?.readOnly).toBe(false);
+
+    // And the screen agrees with it: the quickstart is writable, so the header action is offered.
+    const create = page.getByRole("button", { name: /create topic/i }).first();
+    await expect(create).toBeVisible();
+    await expect(create).not.toHaveAttribute("aria-disabled", "true");
+  });
+
   test("remembers whether the reader prefers cards", async ({ page }) => {
     // The design is explicit that the choice persists per user: an operator who prefers cards and
     // gets a table on every navigation concludes the control does not work.

@@ -114,6 +114,45 @@ export interface TopicOverview {
   readonly consumerGroups: number | undefined;
 }
 
+/**
+ * The one fact about the cluster itself that every write control on these screens needs.
+ *
+ * ADR-047's read-only flag is a property of the **deployment**, not of the person, which is why
+ * `writeBlockedReason` takes it separately from `permitted` and prints a different sentence for it:
+ * telling somebody to ask an administrator for a permission they already hold wastes their
+ * afternoon. Until wave 7 all seven of `TopicsRoute`'s calls passed a hard-coded `false`, so a
+ * cluster registered read-only offered a live `Create topic`, a live bulk `Delete` and a live
+ * `Empty topic`, and the refusal arrived from the server after the confirmation had been typed.
+ */
+export interface ClusterWriteState {
+  readonly readOnly: boolean;
+}
+
+/** What `GET /api/v1/clusters/{clusterId}` carries. Only the one field these screens gate on. */
+interface ClusterDetailPayload {
+  readonly cluster?: { readonly readOnly?: boolean } | null;
+}
+
+/**
+ * Whether this deployment has the cluster marked read-only.
+ *
+ * Not a section: `cluster.get` answers a plain document, so there is no ADR-039 envelope to unwrap
+ * and a failure is a failure. The caller decides what an unanswered question means — see
+ * `TopicsRoute`, which treats it as "not read-only" rather than disabling every control on a fact
+ * it does not have.
+ */
+export async function fetchClusterWriteState(
+  api: KuiApiClient,
+  clusterId: string,
+): Promise<Fetched<ClusterWriteState>> {
+  const answer = await api.get("/api/v1/clusters/{clusterId}", {
+    params: { path: { clusterId } },
+  });
+  if (!answer.ok) return apiFailure(answer.error);
+  const payload = answer.value as ClusterDetailPayload;
+  return { kind: "ready", value: { readOnly: payload.cluster?.readOnly === true } };
+}
+
 function figure(value: number | null | undefined): number | undefined {
   // `undefined` rather than `null` here, because `TopicRow`'s optional fields are `?: number` — the
   // screens distinguish "absent" by the property being missing. The rule is the same either way and

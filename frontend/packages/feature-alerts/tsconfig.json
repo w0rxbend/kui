@@ -4,9 +4,11 @@
     "outDir": "../../.tsbuild/feature-alerts",
     "tsBuildInfoFile": "../../.tsbuild/feature-alerts.tsbuildinfo",
     "rootDir": "src",
-    // `src/documents/*.json`: whole events documents in the wire's own shape, decoded by
-    // `wire.test.ts` so that the field names this package reads are checked against a document
-    // rather than against a literal written beside the assertion.
+    // `src/documents/*.json`: whole events documents in the shape `AlertDtos`' encoder renders,
+    // decoded through `@kui/kernel`'s store by `alerts.test.tsx` so that the field names this
+    // package reads are checked against a document rather than against a literal written beside
+    // the assertion. `alertsGolden.test.tsx` reads the service's committed goldens at runtime
+    // instead, so those are not imports and are not covered by this option.
     "resolveJsonModule": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],

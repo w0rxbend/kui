@@ -427,6 +427,26 @@ counts *open* items, which is fewer than the rows: two of the five are resolved.
 
 **Absent.** No feed at all is the not-configured sentence, not an empty card.
 
+**As built: two components over one store, and the pill is not a fold over the rows.** The two
+layouts are two components in two packages, because the shell may not statically import a feature
+package — `frontend/scripts/bundle-shape.mjs` fails the build on it — so the dashboard's third-width
+card is the shell's (`packages/shell/src/overview/AlertsCard.tsx`, beside `Storage by broker` in row
+4 of §4.1) and the full-width layout is `@kui/feature-alerts`'. Neither holds a feed: both read the
+kernel's `Alerts` store, which the frame constructs once, and the bell in the top band and the
+drawer's Alerts badge read the same accessor. That is what makes one number in three places unable
+to disagree, and it is the reason the design's fourth reader — the tab — was not built: **Alerts is
+a route** at `/clusters/<id>/alerts`, not a dashboard tab, so §4.4's strip position is a row in the
+drawer's `CLUSTER` group instead. A tab would have put the screen in the shell's `overview/` and
+inverted the dependency the feature split exists to keep.
+
+The pill is the **server's own `openCount`** and never a count of the rows on screen. The feed is
+paged and the pill is not, so folding the page would draw a smaller number wearing the same badge —
+which is exactly what §3.8's own note about "fewer than the rows" would be read as licence to do.
+And it has a third state the capture cannot show: `openCount: 0` beside an absent `evaluatedAt` is a
+cluster the service's rules have **never run over**, so the card draws no pill at all and says so in
+words. A green `None open` there would be the most reassuring thing this screen can say and it would
+be about nothing at all.
+
 ### 3.9 `NotificationPanel`, corrected
 
 **Shows.** Anchored under the bell, `--kui-color-surface-overlay`, heading `Notifications` with

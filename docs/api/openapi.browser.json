@@ -556,6 +556,259 @@
         }
       }
     },
+    "/api/v1/clusters/{clusterId}/connect/connectors" : {
+      "get" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "The connectors this cluster's Connect workers are running",
+        "description" : "One section per configured Connect cluster, so a worker that is down costs one row rather than the screen, and a worker that is rebalancing says so instead of reporting no connectors. Each connector carries its tasks with their states and the worker's own failure trace. No throughput is published: the Connect REST API measures none.",
+        "operationId" : "connect.connectors",
+        "parameters" : [
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorListResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/pause" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Pause one connector",
+        "description" : "Asks the Connect cluster to stop this connector's tasks. Nothing is deleted and `resume` puts it back, so there is no typed confirmation; it is audited, and it is refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.pause",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/resume" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Resume one paused connector",
+        "description" : "Asks the Connect cluster to start this connector's tasks again. Audited, and refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.resume",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/restart" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Restart one connector and its tasks",
+        "description" : "Asks the Connect cluster to restart this connector and its tasks. The connector resumes from its own committed offsets; what it costs is a gap in delivery while the tasks come back. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.restart",
+        "parameters" : [
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clusters/{clusterId}/consumer-groups" : {
       "get" : {
         "tags" : [
@@ -4668,6 +4921,45 @@
           },
           "detail" : {
             "type" : "string"
+          }
+        }
+      },
+      "ConnectorListResponse" : {
+        "title" : "ConnectorListResponse",
+        "description" : "The connectors of every Connect cluster configured for this Kafka cluster. `not_configured` with a 200 when this cluster configures none",
+        "type" : "object",
+        "required" : [
+          "connectors"
+        ],
+        "properties" : {
+          "connectors" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "ConnectorOperationDto" : {
+        "title" : "ConnectorOperationDto",
+        "description" : "The worker accepted the operation. It carries no connector state: Connect applies these asynchronously, and the next read of the connector list is where the change appears",
+        "type" : "object",
+        "required" : [
+          "connect",
+          "connector",
+          "operation",
+          "acceptedAt"
+        ],
+        "properties" : {
+          "connect" : {
+            "type" : "string"
+          },
+          "connector" : {
+            "type" : "string"
+          },
+          "operation" : {
+            "type" : "string"
+          },
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

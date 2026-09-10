@@ -17,8 +17,10 @@
 #
 #   ./deployment/compose/smoke.sh
 #
-# Requires the images. `./mill deployment.docker.__.build` builds the backend's nine: the gateway,
-# the seven services this file runs, and the all-in-one binary it does not. The interface's image is
+# Requires the images. `./mill deployment.docker.__.build` builds every backend image: the gateway,
+# the eight services this file runs, and the all-in-one binary it does not. The number is not
+# written down and does not need to be -- the preflight below derives the list from this stack's own
+# compose file and names anything that is missing. The interface's image is
 # not a Mill target at all -- Mill never builds a browser bundle -- and `docker compose up` builds
 # it from `deployment/frontend/Dockerfile` on the first run, which takes a few minutes once.
 #
@@ -26,10 +28,11 @@
 # one used to surface as `pull access denied for kui-metrics, repository does not exist` -- a
 # message about a registry, for a build step somebody skipped. The first thing this script does is
 # therefore to check that each of them exists on this machine, and to name the Mill target that
-# makes the missing one. The three third-party images -- the Kafka broker, the JMX exporter beside
-# it that makes this stack measurable at all, and the Schema Registry -- are pulled by Compose like
-# any other published image and are deliberately not in that check: there is no Mill target it
-# could name.
+# makes the missing one. The third-party images -- the Kafka broker, the JMX exporter beside it that
+# makes this stack measurable at all, the Schema Registry, and the Kafka Connect worker, which runs
+# the broker's own image and so is a fourth container rather than a fourth image -- are pulled by
+# Compose like any other published image and are deliberately not in that check: there is no Mill
+# target it could name.
 
 set -euo pipefail
 
@@ -210,6 +213,33 @@ probe="$(routable_contracts "$(printf 'alpha\nbeta')" "")"
 [[ "$probe" == "$(printf 'alpha\nbeta')" ]] || fail "the unrouted-contract subtraction dropped an
   entry when nothing was unrouted: [alpha beta] became [$(echo "$probe" | tr '\n' ' ')]."
 
+# WHICH SIDE OF THE COMPARISON IS SHORT, because the two sides need opposite repairs.
+#
+# A contract with no container is a screen that 404s and the fix is a container plus an address. A
+# container with no contract is a container and an address that may both be perfectly correct, and
+# the fix is the row in `ServiceContracts.byService`. The failure message used to give the first
+# advice for both, and in wave 6 it fired on the second -- naming the two facts that were already
+# there while the missing one went unmentioned.
+contracted_not_run() { comm -23 <(printf '%s\n' "$1") <(printf '%s\n' "$2"); }
+run_not_contracted() { comm -13 <(printf '%s\n' "$1") <(printf '%s\n' "$2"); }
+
+# Self-tested for the same reason `routable_contracts` is, and it is a stronger reason here: both
+# sides of this comparison are equal on every passing run, so both functions answer empty every time
+# anybody looks. A pair that had been swapped -- which is one character in each name -- would print
+# exactly reversed advice on the one run that matters and nothing on every other, so the mistake
+# could only ever be found by the person it was about to mislead.
+probe="$(contracted_not_run "$(printf 'alpha\nbeta')" "$(printf 'alpha')")"
+[[ "$probe" == "beta" ]] || fail "the contracted-but-not-run split is broken: contracts
+  [alpha beta] against containers [alpha] gave [$(echo "$probe" | tr '\n' ' ')] and not [beta]."
+probe="$(run_not_contracted "$(printf 'alpha')" "$(printf 'alpha\nbeta')")"
+[[ "$probe" == "beta" ]] || fail "the run-but-not-contracted split is broken: contracts [alpha]
+  against containers [alpha beta] gave [$(echo "$probe" | tr '\n' ' ')] and not [beta]."
+# And both empty when the two sets agree, which is what every passing run sees. Without this line a
+# pair of functions that answered everything would still satisfy the two probes above.
+probe="$(contracted_not_run "$(printf 'alpha')" "$(printf 'alpha')")$(run_not_contracted "$(printf 'alpha')" "$(printf 'alpha')")"
+[[ -z "$probe" ]] || fail "the contract/container split reported a difference between two identical
+  sets: [alpha] against [alpha] gave [$(echo "$probe" | tr '\n' ' ')]."
+
 # 2. Every service the gateway is routing, read from the gateway itself.
 routed_services() {
   curl -sf "$base/api/v1/capabilities" | jq -r '[.entries[].key.service] | unique | .[]'
@@ -298,10 +328,40 @@ declared="$(service_containers)"
 unrouted="$(printf '%s\n' "$UNROUTED_CONTRACTS" | grep -v '^$' | LC_ALL=C sort -u || true)"
 expected="$(routable_contracts "$contracts" "$UNROUTED_CONTRACTS")"
 if [[ "$expected" != "$declared" ]]; then
+  # THE ADVICE IS PER DIRECTION, BECAUSE THE TWO DIRECTIONS NEED OPPOSITE REPAIRS AND ONE OF THEM
+  # WAS THE FAILURE THIS CHECK ACTUALLY PRINTED. It used to say "give the missing one a container in
+  # docker-compose.yml and an address in kui.yaml" whichever way the sets disagreed. In wave 6 it
+  # fired on `kui-alerts`, whose container was in this file and whose address was in kui.yaml, while
+  # the *contract* was missing -- the gateway could not hold one, because `alerts.contract.jvm` was
+  # absent from `services.gateway.api`'s moduleDeps. So the advice named the two facts that were
+  # present and not the one that was absent, and the reader went looking in the file that was right.
+  #
+  # The two functions above, self-tested at the top of this file, rather than two `comm` calls
+  # written here -- which is the arrangement `routable_contracts` already has and for the same
+  # reason: on every passing run both answers are empty, so an inverted pair is invisible until the
+  # run it is about to mislead. `comm` needs both sides sorted and both are: `gateway_contracts` and
+  # `service_containers` each end in `sort`, and `routable_contracts` preserves that order.
+  contracted_only="$(contracted_not_run "$expected" "$declared")"
+  container_only="$(run_not_contracted "$expected" "$declared")"
+  advice=""
+  if [[ -n "$contracted_only" ]]; then
+    advice="$advice
+  CONTRACTED BUT NOT RUN: [$(echo "$contracted_only" | tr '\n' ' ')]. The gateway will publish these
+  services' routes and have nowhere to send them, so every screen behind one 404s against a stack
+  that looks healthy. Give each a container in docker-compose.yml and an address under
+  kui.gateway.services in kui.yaml -- or, if it is deliberately not routed here, name it in
+  UNROUTED_CONTRACTS above with the reason."
+  fi
+  if [[ -n "$container_only" ]]; then
+    advice="$advice
+  RUN BUT NOT CONTRACTED: [$(echo "$container_only" | tr '\n' ' ')]. The container and its address
+  may both be perfectly correct and are not what is missing: the gateway holds no contract for the
+  service, so it publishes none of its routes whatever this file says. Add the row to
+  ServiceContracts.byService in services/gateway/api -- that is the third of the three facts, and
+  the one an addresses-against-containers comparison cannot see. Or remove the container."
+  fi
   fail "the gateway holds contracts for [$(echo "$contracts" | tr '\n' ' ')] \
-and this stack runs [$(echo "$declared" | tr '\n' ' ')].
-  Give the missing one a container in docker-compose.yml and an address in kui.yaml, or name it in
-  UNROUTED_CONTRACTS above with the reason it is deliberately not routed."
+and this stack runs [$(echo "$declared" | tr '\n' ' ')].$advice"
 fi
 # `$expected` and not `$contracts`. The two are the same list until `UNROUTED_CONTRACTS` names one,
 # and printing the wrong one meant that the moment somebody deliberately left a service out, this
@@ -692,6 +752,62 @@ await "the alerts feed names the rules it evaluated" "yes" \
 await "at least one alert rule read the facts it needs" "yes" \
   "$(alerts 'if [.events.data.rules[]? | select(.evaluation.status == "ok")] | length > 0
       then "yes" else "no" end')"
+
+# ==================================================================================================
+# THE TENTH SERVICE, AND THE THREE ANSWERS ITS SCREENS MUST NOT CONFUSE.
+#
+# A Connect screen has three honest states and they are told apart by the `Section` status alone:
+#
+#   * `not_configured` -- no cluster in `kui-service.yaml` names a `connect:` worker;
+#   * an upstream refusal -- a worker is configured and will not answer;
+#   * `ok` with an empty list -- a worker answered and is running no connectors.
+#
+# This stack is the third. `kafka-connect` is a real Kafka Connect worker started by
+# `docker-compose.yml` and nothing registers a connector into it, so the honest answer here is an
+# empty list, and asserting on its emptiness would assert nothing: a service that never called the
+# worker at all answers the same shape. What separates them is the STATUS, which is `ok` only when
+# a worker was reached, so that is what is asserted -- the same argument the alerts feed above is
+# asserted under, one service over.
+log "the tenth service answers, on a path the gateway derives rather than one written here"
+
+# The read path, taken from the gateway's own merged OpenAPI document.
+#
+# WRITTEN HERE IT WOULD BE THE FOURTH COPY OF A ROUTE AND THE FIRST ONE NOTHING CHECKS. The whole
+# defect this file exists to catch is a service that is complete, imaged and unroutable, and a
+# hard-coded `/api/v1/clusters/measured/connect/connectors` cannot see it: a gateway publishing none
+# of the connect contract answers 404 for the path this script invented, which is indistinguishable
+# from the path being wrong. Read off the running gateway instead, an empty derivation IS the
+# failure, and the message can say so.
+#
+# The filter is every GET whose path is `clusters/{clusterId}/connect` plus fixed segments and no
+# further template -- so a per-connector or per-task route, which needs a name this stack has none
+# of, is excluded -- and the shortest of those is the collection read.
+connect_read_path() {
+  curl -sf "$base/api/v1/openapi.json" |
+    jq -r '.paths | to_entries[]
+           | select(.value.get != null)
+           | .key
+           | select(test("^/api/v1/clusters/\\{clusterId\\}/connect(/[A-Za-z0-9._-]+)*$"))' |
+    awk '{ print length, $0 }' | LC_ALL=C sort -n | head -1 | cut -d' ' -f2-
+}
+
+await "the connect capability" "available" "$(status_of connect)"
+
+connect_path="$(connect_read_path)"
+[[ -n "$connect_path" ]] || fail "the gateway publishes no readable connect path at all.
+  Every /api/v1/clusters/{clusterId}/connect... GET was expected in the merged document at
+  $base/api/v1/openapi.json and none is there. The container is running and its capability row is
+  above, so this is the third of the three facts: the contract is in ServiceContracts.byService and
+  the routes are derived from it, or it is not and this service is reachable by nothing."
+printf '  the gateway publishes the connect read at: %s\n' "$connect_path"
+
+# `to_entries[0].value.status` and not a field name. Every KUI read answers one `Section` under one
+# key (ADR-034), and which key this one is belongs to `services/connect`'s contract; naming it here
+# would be a fifth copy of somebody else's decision, and one that goes stale silently -- a `jq`
+# selecting a key that is not there answers `null`, and `await` would spend ninety seconds on it
+# and then report `null` rather than reporting the rename.
+await "the connect read on a cluster that names a worker" "ok" \
+  "curl -sf '$base${connect_path/\{clusterId\}/measured}' | jq -r 'to_entries[0].value.status'"
 
 log "stopping kui-cluster: one real process dies"
 "${compose[@]}" stop kui-cluster >/dev/null

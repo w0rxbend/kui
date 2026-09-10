@@ -2,6 +2,9 @@ package kui.alerts.contract
 
 import java.time.Instant
 
+import io.circe.Json
+import io.circe.syntax.*
+
 import kui.alerts.contract.dto.*
 import kui.contracts.Section
 import kui.contracts.capability.ReasonCode
@@ -134,4 +137,35 @@ object AlertDocuments {
   val acknowledgement: AcknowledgementDto = AcknowledgementDto(resolved, 1)
 
   val change: AlertChangeDto = AlertChangeDto("prod-eu", 1, fetchedAt)
+
+  /** One SSE frame, as `SseEvent.data` puts it on the wire: the event **name** and the payload.
+    *
+    * The name is here because it is the one part of this wire that nothing could check. `AlertsRoutes`
+    * encodes frames under [[kui.alerts.contract.dto.AlertChangeDto.EventName]]; the browser registers its
+    * listener under a `ALERTS_EVENT_NAME` constant typed into `frontend/packages/kernel`, and the two are
+    * a hand-copied pair. Renaming the event server-side leaves every gate in this repository green and
+    * stops the bell updating, because `tools/error-codes` writes the five SSE names by hand and there is
+    * no `SseEventName.Alerts` for either side to read.
+    *
+    * So the name travels in a committed document instead. The browser's constant is asserted against this
+    * file's `event` field, which makes the mirror a checked one — the same move that closed the metrics
+    * wire in M7, applied to the one field of this wire that is not a DTO.
+    */
+  val streamFrame: Json =
+    Json.obj("event" -> Json.fromString(AlertChangeDto.EventName), "data" -> change.asJson)
+
+  /** Every committed document, by the file name it is committed under.
+    *
+    * The roster is here rather than repeated in each suite so that one list is what
+    * `AlertResponsesSuite` asserts, what `GoldenFilesSuite` reconciles against the directory, and what a
+    * reader consults to find out which files the browser is entitled to expect.
+    */
+  val all: List[(String, Json)] = List(
+    "alerts-feed-response.json" -> feed.asJson,
+    "alerts-feed-blind-rule.json" -> blindRule.asJson,
+    "alerts-feed-unevaluated.json" -> unevaluated.asJson,
+    "alerts-acknowledgement.json" -> acknowledgement.asJson,
+    "alerts-change.json" -> change.asJson,
+    "alerts-stream-frame.json" -> streamFrame
+  )
 }

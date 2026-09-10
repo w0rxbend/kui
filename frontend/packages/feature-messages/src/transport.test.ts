@@ -96,4 +96,91 @@ describe("createBrowseTransport", () => {
     expect(events).toContainEqual({ kind: "phase", name: "seeking" });
     vi.unstubAllGlobals();
   });
+
+  it("asks for the browse as a GET with the whole query in the address", async () => {
+    /*
+     * The property `transport.ts` argues for in its own comment and nothing asserted: "the whole
+     * query is in the URL, which is what makes a browse a link somebody can paste to a colleague".
+     * Changing `method: "GET"` to `"POST"` left all 163 cases in this package green — and what that
+     * ships is a browse nobody can share, plus a request shape the gateway's streaming route does
+     * not answer at all, so every browse fails at once with a method error rather than with
+     * anything a reader could act on.
+     *
+     * Read off the `fetch` the transport actually made, which is the only place the verb exists.
+     */
+    let seen: { method?: string; body?: unknown } | undefined;
+    const fetchImpl = vi.fn((_input: unknown, init?: { method?: string; body?: unknown }) => {
+      seen = { ...(init ?? {}) };
+      return new Promise<Response>(() => {
+        /* never settles: this case is about the request, not the answer */
+      });
+    });
+    vi.stubGlobal("fetch", fetchImpl as unknown as typeof globalThis.fetch);
+
+    const handle = createBrowseTransport().open(
+      "/api/v1/clusters/quickstart/topics/orders.v1/messages?partition=0",
+      {
+        onEvent: () => undefined,
+        onFailure: () => undefined,
+        onConnection: () => undefined,
+      },
+    );
+    await Promise.resolve();
+
+    expect(seen?.method).toBe("GET");
+    // And nothing in a body, which is the other half of "the query is in the address".
+    expect(seen?.body ?? null).toBeNull();
+    // The address the caller gave, unchanged: a transport that rewrote it would break the link too.
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      "/api/v1/clusters/quickstart/topics/orders.v1/messages?partition=0",
+    );
+
+    handle.close();
+    vi.unstubAllGlobals();
+  });
+
+  it("reports a frame it could not read as a decode failure, naming the frame", async () => {
+    /*
+     * `toFailure`'s own docstring: "a `decode` failure is deliberately *not* terminal: one record
+     * whose payload this build cannot read must not end a browse that is otherwise delivering good
+     * records." The mapping that keeps that promise is one `case` in a `switch`, and folding it
+     * onto the `transport` branch left all 163 cases in this package green.
+     *
+     * The difference is not cosmetic. A `transport` failure is the session's "this browse is over"
+     * shape; a `decode` failure is "skip this one and carry on", and it carries the **event name**
+     * as its own field because the status line says which kind of frame it could not read. Collapse
+     * the two and one unreadable record ends a browse that was otherwise working — which is the
+     * failure mode this whole streaming path was built to avoid.
+     *
+     * `data: {` is not JSON, so `decodeBrowseEvent` refuses it and the kernel reports a decode
+     * error on the `message` event, which is exactly the frame this mapping is about.
+     */
+    const body = ["event: message", "data: {", "", ""].join("\n");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(body, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      ),
+    );
+
+    const failures: BrowseFailure[] = [];
+    createBrowseTransport().open("/api/v1/stream", {
+      onEvent: () => undefined,
+      onFailure: (failure) => failures.push(failure),
+      onConnection: () => undefined,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(failures).toHaveLength(1);
+    const only = failures[0];
+    expect(only?.kind).toBe("decode");
+    // The name, separable from the prose, which is what a reader chasing it needs.
+    expect(only?.kind === "decode" && only.event).toBe("message");
+    vi.unstubAllGlobals();
+  });
 });

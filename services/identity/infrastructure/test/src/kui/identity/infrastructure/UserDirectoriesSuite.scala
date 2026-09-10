@@ -2,7 +2,7 @@ package kui.identity.infrastructure
 
 import java.time.Instant
 
-import cats.effect.IO
+import cats.effect.{IO, Ref}
 import fs2.Stream
 import io.circe.{Json, JsonObject}
 
@@ -114,6 +114,90 @@ final class UserDirectoriesSuite extends KuiIOSuite {
       found <- stored.find("nobody")
     } yield assertEquals(found, None)
   }
+
+  test("a password change is written against the version it read, so one change cannot erase another") {
+    /*
+     * Ungated until now: `existing.map(_.version)` filtered to `None` left
+     * `./mill services.identity.__.test` at 79/79 green. The store's `put` takes the base version it is
+     * expected to be replacing (ADR-042); passing `None` for a key that exists is a blind write, and two
+     * operators changing one account's password at the same time then silently lose one of the two
+     * changes, with the loser told it succeeded. The store cannot refuse what it is never told to check.
+     */
+    for {
+      logger <- FakeStructuredLogger[IO]
+      writes <- Ref.of[IO, List[(String, Option[Long], Json)]](Nil)
+      present = StoredUserDirectory.make[IO](configured, recording(writes, Some(4L)), logger)
+      _ <- present.update(account.copy(hash = changed))
+      afterExisting <- writes.get
+      fresh <- Ref.of[IO, List[(String, Option[Long], Json)]](Nil)
+      absent = StoredUserDirectory.make[IO](configured, recording(fresh, None), logger)
+      _ <- absent.update(account.copy(hash = changed))
+      afterMissing <- fresh.get
+    } yield {
+      assertEquals(afterExisting.map((_, version, _) => version), List(Some(4L)))
+      // And the other direction, which is what makes the first assertion mean "the version it read":
+      // a key nothing holds yet is written as a create, not against a version that does not exist.
+      assertEquals(afterMissing.map((_, version, _) => version), List(None))
+    }
+  }
+
+  test("the stored password hash carries the secret marker, which is what makes the store encrypt it") {
+    /*
+     * Ungated until now: writing the hash as a bare `Json.fromString` left the suite at 79/79 green.
+     * ADR-044's field encryption is driven by `SecretJson`'s `$secret` marker and by nothing else -- the
+     * write path encrypts the paths `plaintextPaths` finds and asserts that none survives -- so a hash
+     * written without the marker is a password hash in the clear on a compacted Kafka topic every
+     * replica reads. The class comment claims the marker; nothing checked it.
+     */
+    for {
+      logger <- FakeStructuredLogger[IO]
+      writes <- Ref.of[IO, List[(String, Option[Long], Json)]](Nil)
+      stored = StoredUserDirectory.make[IO](configured, recording(writes, None), logger)
+      _ <- stored.update(account.copy(hash = changed))
+      written <- writes.get
+    } yield {
+      val payload = written.map((_, _, json) => json).headOption.getOrElse(Json.Null)
+
+      assertEquals(SecretJson.plaintextPaths(payload), List("passwordHash"))
+      // The value inside the marker is the hash, so the marker is not merely present but wrapping the
+      // thing that must not be readable.
+      assertEquals(
+        payload.hcursor.downField("passwordHash").as[Secret[String]](using SecretJson.decoder).map(_.value),
+        Right(changed.encoded)
+      )
+    }
+  }
+
+  /** A store that records what was written and reports whether the key already held anything. */
+  private def recording(
+      writes: Ref[IO, List[(String, Option[Long], Json)]],
+      held: Option[Long]
+  ): ConfigStore[IO] =
+    new StubStore {
+      override def get(key: StoreKey): IO[Option[StoreRecord]] =
+        IO.pure(held.map(version => storedAt(key, version)))
+
+      override def put(
+          key: StoreKey,
+          payload: Json,
+          baseVersion: Option[Long],
+          updatedBy: String
+      ): IO[Either[KuiError, StoreRecord]] =
+        writes
+          .update(_ :+ (key.render, baseVersion, payload))
+          .as(Right(storedAt(key, baseVersion.getOrElse(0L) + 1L)))
+    }
+
+  private def storedAt(key: StoreKey, version: Long): StoreRecord =
+    StoreRecord(
+      envelopeVersion = 1,
+      key = key,
+      version = version,
+      updatedAt = Instant.parse("2026-09-06T10:00:00Z"),
+      updatedBy = "admin",
+      deleted = false,
+      payload = payloadOf(hash)
+    )
 
   private def payloadOf(value: PasswordHash): Json =
     Json.fromJsonObject(JsonObject("passwordHash" -> SecretJson.encoder(Secret(value.encoded))))

@@ -1,7 +1,5 @@
 package kui.alerts.api
 
-import java.time.Instant
-
 import cats.Parallel
 import cats.effect.kernel.{Async, Sync}
 import cats.syntax.all.*
@@ -147,8 +145,4 @@ object AlertsApi {
 
   /** The document's version, which is the *contract's* version and not the build's. */
   val Version: String = "1.0.0"
-
-  /** The instant a document is stamped with, when one has to be. Fixed, for the same reason as the version.
-    */
-  val GeneratedAt: Instant = Instant.EPOCH
 }

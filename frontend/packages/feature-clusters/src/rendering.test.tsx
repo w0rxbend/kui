@@ -396,6 +396,60 @@ describe("managing which clusters KUI knows about", () => {
     return bubble.textContent ?? "";
   }
 
+  it("lists every reason the form cannot be saved, and not only the first", async () => {
+    /*
+     * Filed by W7-A3's third pass. Mutation: `<Show when={problems().length > 0}>` around the
+     * problem list → `when={false}`. Green over 115 of 115 in this package, because every case in
+     * it that touches the form either has a valid one or reads the Save button's tooltip.
+     *
+     * The Save button's `disabledReason` is `problems()[0]` — one reason — so with the list gone an
+     * operator who left the name, the brokers and the username empty is told about the name,
+     * fixes it, and is told about the brokers. The comment above the list is the rule: *"Every
+     * reason at once. Somebody who got three fields wrong should be told about all three rather
+     * than discovering them one save at a time."* Three saves to learn three facts the form
+     * already knew is the shape this list exists to prevent.
+     */
+    const broken = {
+      ...EMPTY_CLUSTER_FORM,
+      protocol: "SASL_SSL",
+      mechanism: "SCRAM-SHA-512",
+    };
+    const { container, dispose } = admin([stored], { id: undefined, form: broken });
+    await flush();
+
+    const listed = [...container.querySelectorAll(".kui-cluster-admin__problems li")].map((one) =>
+      (one.textContent ?? "").trim(),
+    );
+    // Four fields are wrong at once, and all four are on screen together.
+    expect(listed).toContain("A name is required.");
+    expect(listed).toContain("At least one broker address is required.");
+    expect(listed).toContain("A SASL connection needs a username.");
+    expect(listed).toContain("A SASL connection needs a password.");
+    expect(listed.length).toBeGreaterThan(1);
+
+    // And the Save button's own reason is one of them rather than a different sentence — the
+    // tooltip is the summary, the list is the account.
+    const save = [...container.querySelectorAll("button")].find(
+      (one) => (one.textContent ?? "").trim() === "Save",
+    ) as HTMLButtonElement;
+    expect(listed).toContain((await reasonUnder(save)).trim());
+    dispose();
+  });
+
+  it("shows no problem list at all for a form that has none", async () => {
+    // The other direction: a permanently present empty list is the marker nobody reads.
+    const complete = {
+      ...EMPTY_CLUSTER_FORM,
+      id: "spare-2",
+      name: "spare 2",
+      bootstrapServers: "spare-2:9092",
+    };
+    const { container, dispose } = admin([stored], { id: undefined, form: complete });
+    await flush();
+    expect(container.querySelector(".kui-cluster-admin__problems")).toBeNull();
+    dispose();
+  });
+
   it("offers no Edit for a cluster the deployment's configuration file defines", async () => {
     /*
      * Mutation: `when={isEditable(cluster.origin)}` → `when={true}`. Green over 162 cases, although
@@ -534,10 +588,19 @@ describe("the brokers screen", () => {
 
   it("offers no 'more settings' line for a broker whose settings all fit on the card", async () => {
     /*
-     * Mutation: `return rest > 0 ? rest : undefined;` → `return rest;`. Green over 162 cases. The
-     * card's own guard is the other half of this rule and is closed above; this is the half that
-     * produces the figure, and a screen answering `0` here is what puts "0 more settings" on a card
-     * that is showing everything.
+     * Mutation: `return rest > 0 ? rest : undefined;` → `return rest;`.
+     *
+     * **Re-measured by W7-A3, and the sentence that used to be here was wrong.** It claimed that
+     * mutation reddens this case. It does not: `moreFor` answers `0` for a broker with exactly a
+     * cardful and a negative for one with fewer, and `BrokerCard`'s own `(props.configsMore ?? 0) >
+     * 0` swallows both — so the two guards are not two halves of one rule, they are one rule held
+     * twice, and either alone keeps "0 more settings" off the card. The mutation that does redden
+     * this case is the card's guard, `> 0` → `>= 0`, which is the case above.
+     *
+     * That is disclosed rather than repaired. Deleting the screen's guard would leave the rule
+     * standing on one line in a component three screens share, and redundant depth is worth having
+     * where it is measured and said out loud — house rule 17 asks for the measurement, not for the
+     * line.
      */
     const { asked, api } = gateway({
       "/api/v1/clusters/{clusterId}/brokers": {
@@ -565,6 +628,94 @@ describe("the brokers screen", () => {
       expect(container.textContent).not.toContain("more settings");
     } finally {
       dispose();
+    }
+  });
+});
+
+describe("how old the brokers page says its picture is", () => {
+  const fetchedAt = "2026-09-06T09:00:00.000Z";
+  const ok = (data: unknown) => ({ status: "ok", data, fetchedAt });
+
+  function gateway(answers: Readonly<Record<string, unknown>>) {
+    const get = vi.fn(async (path: string) => {
+      const answer = answers[path];
+      return answer === undefined
+        ? { ok: false, error: { kind: "unreachable", cause: `nothing stubbed for ${path}` } }
+        : { ok: true, value: answer };
+    });
+    return { get, post: get, put: get, delete: get, patch: get, raw: {} } as unknown as KuiApiClient;
+  }
+
+  /** `scrapedAt` omitted entirely is how this decoder is told the scrape did not say when. */
+  function answers(scrapedAt: string | undefined): Readonly<Record<string, unknown>> {
+    return {
+      "/api/v1/clusters/{clusterId}/brokers": {
+        brokers: ok([
+          { id: 1, host: "kafka", port: 9092, rack: null, isController: true, leaderCount: 86, replicaCount: 86 },
+        ]),
+      },
+      "/api/v1/clusters/{clusterId}": {
+        cluster: {
+          id: "quickstart",
+          name: "Quickstart",
+          readOnly: false,
+          bootstrapServers: "kafka:9092",
+          summary: ok({
+            version: "4.3",
+            controllerKind: "kraft",
+            brokerCount: 1,
+            underReplicatedPartitionCount: 0,
+            ...(scrapedAt === undefined ? {} : { scrapedAt }),
+          }),
+        },
+      },
+      "/api/v1/clusters/{clusterId}/log-dirs": { logDirs: ok([]) },
+    };
+  }
+
+  function screen(scrapedAt: string | undefined) {
+    sharedQueries.invalidateWhere(() => true);
+    const api = gateway(answers(scrapedAt));
+    return mount(() => (
+      <KuiProvider value={testContext(api)}>
+        <BrokersScreen clusterId="quickstart" clustersHref="/ui/clusters" hrefFor={(id) => `/b/${id}`} now={() => new Date(fetchedAt)} />
+      </KuiProvider>
+    ));
+  }
+
+  it("says nothing at all when the scrape did not say when it happened", async () => {
+    /*
+     * Filed by W7-A3's third pass. Mutation: `if (at === null || at === undefined) return
+     * undefined;` → `return "unknown";` in `BrokersScreen.observedAgo`. Green over 114 of 114 in
+     * this package, because every fixture carries a `scrapedAt`.
+     *
+     * `observedAgo`'s own comment states the rule and nothing held it: *"Absent rather than
+     * 'unknown' when the scrape did not say: the freshness line under the cards exists to make a
+     * page that does not refresh acceptable, and a line reading 'Read unknown ago' does the
+     * opposite of that."* With the mutation the page prints **Read unknown ago. Nothing on this
+     * page refreshes on its own.** — a sentence whose only content is that KUI cannot date what is
+     * on the screen, in the line placed there to reassure the reader it can.
+     */
+    const missing = screen(undefined);
+    try {
+      await settle(missing.container);
+      expect(missing.container.querySelector('[data-testid="brokers-freshness"]')).toBeNull();
+      expect(missing.container.textContent).not.toContain("unknown ago");
+    } finally {
+      missing.dispose();
+    }
+
+    // And a scrape that did say when it happened still dates the page, so the guard declines an
+    // absence rather than the line.
+    const dated = screen("2026-09-06T08:59:36.000Z");
+    try {
+      await settle(dated.container);
+      const line = dated.container.querySelector('[data-testid="brokers-freshness"]');
+      expect(line?.textContent).toContain("Read");
+      expect(line?.textContent).toContain("Nothing on this page refreshes on its own.");
+      expect(line?.textContent).not.toContain("unknown");
+    } finally {
+      dated.dispose();
     }
   });
 });

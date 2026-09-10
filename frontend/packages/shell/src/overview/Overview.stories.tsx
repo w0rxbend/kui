@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
-import { createQueryRegistry } from "@kui/kernel";
+import { createQueryRegistry, type AlertFeed, type Fetched } from "@kui/kernel";
 
 import { Overview } from "./Overview.jsx";
 import { toOverviewModel } from "./load.js";
@@ -13,7 +13,7 @@ import {
   UNHEALTHY,
   ZERO_BYTE_DISKS,
 } from "./fixtures.js";
-import { dashboardHost } from "./harness.jsx";
+import { dashboardHost, staticAlerts } from "./harness.jsx";
 import type { OverviewData } from "./load.js";
 
 /**
@@ -181,3 +181,121 @@ export const NoClusterInTheAddress: Story = {
   render: (args) =>
     dashboardHost("/ui", () => <Overview model={args.model} queries={createQueryRegistry()} />)(),
 };
+
+/* --- The alerts card, drawn from a store rather than from the model --------------------------- */
+
+/**
+ * `Alerts & events` (§3.8) on the Overview tab, in the states the store can be in.
+ *
+ * The card is the shell's, not `@kui/feature-alerts`': the shell may not statically import a
+ * feature package — `frontend/scripts/bundle-shape.mjs` fails the build on it — so the dashboard's
+ * compact view and the alerts screen's full-width one are two components over **one** kernel store.
+ * That is what makes the bell, the drawer's Alerts badge and this pill unable to disagree, and it
+ * is why these stories vary a store instead of a prop.
+ *
+ * Every other story on this page leaves the store at its default `not-configured`, which is the
+ * honest state for a fixture deployment with no alerts service and is why the card is absent from
+ * all of them: `not_configured` is **hidden, not empty** (ADR-032), because "the cluster has been
+ * quiet" is a claim about a cluster nothing has looked at.
+ */
+const alertsStory = (state: Fetched<AlertFeed>): Story => ({
+  args: { model: toOverviewModel(HEALTHY) },
+  render: (args) =>
+    dashboardHost(
+      DASHBOARD,
+      () => <Overview model={args.model} queries={createQueryRegistry()} />,
+      { selected: "prod-kyiv-01", alerts: staticAlerts(state) },
+    )(),
+});
+
+/** One severity per row, and a `7 open` pill that is larger than the rows the card holds. */
+export const AlertsOpen: Story = alertsStory({
+  kind: "ready",
+  value: {
+    items: [
+      {
+        id: "evt-storage",
+        severity: "critical",
+        tone: "danger",
+        category: "storage",
+        glyph: "storage",
+        openedAt: "2026-09-03T08:00:00Z",
+        lastSeenAt: "2026-09-03T10:11:12Z",
+        title: "Log directory past its critical threshold",
+        detail: "broker-3 · /data/a at 94%",
+        resolution: undefined,
+      },
+      {
+        id: "evt-rebalance",
+        severity: "warning",
+        tone: "warning",
+        category: "rebalance",
+        glyph: "rebalance",
+        openedAt: "2026-09-03T09:20:00Z",
+        lastSeenAt: "2026-09-03T10:11:12Z",
+        title: "orders-consumers has been rebalancing for 4m",
+        detail: "12 members",
+        resolution: undefined,
+      },
+    ],
+    /* Deliberately larger than the two rows above. The feed is paged and the pill is not, so the
+       server's own count is what the card draws — a pill folded from the page would be a smaller
+       number wearing the same badge. */
+    total: 7,
+    openCount: 7,
+    unreadCount: 2,
+    lastReadAt: undefined,
+    evaluatedAt: "2026-09-03T10:11:12Z",
+    rules: [],
+  },
+});
+
+/**
+ * A cluster the rules have swept clean, which is a measurement and is drawn as one.
+ *
+ * Look for a `None open` pill over a sentence saying the service is holding no events. Both are
+ * claims this deployment can support, because `evaluatedAt` says when they were established.
+ */
+export const AlertsNoneOpen: Story = alertsStory({
+  kind: "ready",
+  value: {
+    items: [],
+    total: 0,
+    openCount: 0,
+    unreadCount: 0,
+    lastReadAt: undefined,
+    evaluatedAt: "2026-09-03T10:11:12Z",
+    rules: [],
+  },
+});
+
+/**
+ * The same document with one field missing, and the whole card changes its mind.
+ *
+ * `evaluatedAt` is absent, so the rules have never run over this cluster here — a KUI that has just
+ * started, or one whose evaluation loop has not reached it. Look for **no pill at all**: `None
+ * open` here would be a confident green over a question nobody has asked yet, which is the
+ * reassuring misreading this product is built against. The body says what is actually true.
+ */
+export const AlertsNeverEvaluated: Story = alertsStory({
+  kind: "ready",
+  value: {
+    items: [],
+    total: 0,
+    openCount: 0,
+    unreadCount: 0,
+    lastReadAt: undefined,
+    evaluatedAt: undefined,
+    rules: [],
+  },
+});
+
+/** A principal who may not read this cluster's alerts: the sentence, and no Retry beside it. */
+export const AlertsRefused: Story = alertsStory({ kind: "forbidden" });
+
+/** A read that did not answer: the sentence, the `KUI-` code, and a Retry that could work. */
+export const AlertsUnavailable: Story = alertsStory({
+  kind: "failed",
+  message: "The alerts service did not answer.",
+  code: "KUI-UPSTREAM-UNAVAILABLE",
+});

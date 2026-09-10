@@ -18,7 +18,7 @@ never builds the browser bundle — but both compose files carry a `build:` stan
 | File                            | What runs                                       | What it demonstrates                     |
 | ------------------------------- | ----------------------------------------------- | ---------------------------------------- |
 | `docker-compose.allinone.yml`   | The backend in one container, and the interface  | The fastest possible start               |
-| `docker-compose.yml`            | The gateway and all seven services, apart, and the interface | Fault isolation between real processes |
+| `docker-compose.yml`            | The gateway and all eight services, apart, and the interface | Fault isolation between real processes |
 
 They run the same code. That is ADR-005's whole argument, and it is why the distributed environment
 is worth having even though the all-in-one one starts faster: the all-in-one process is a single
@@ -58,14 +58,17 @@ docker compose -f deployment/compose/docker-compose.yml up -d --wait
 open http://localhost:8090/ui/
 ```
 
-Twelve containers: `kui-frontend` and `kui-gateway`, which publish a port each, plus `kui-cluster`,
-`kui-topic`, `kui-message`, `kui-consumer`, `kui-schema`, `kui-metrics` and `kui-alerts`, which
-publish none, plus the three things they now have something to say about — a single-node Kafka
-broker (`kafka`), a Prometheus JMX exporter beside it (`kafka-metrics`) and a Schema Registry
-(`schema-registry`) — which publish none either. The eight services are reachable only from inside
-the compose network,
-which is the same rule `ARCHITECTURE.md` §14 states for a real deployment — a service must not be
-exposed outside the cluster network.
+Fourteen containers, which is what `docker compose -f deployment/compose/docker-compose.yml config
+--services | wc -l` prints. Two publish a port — `kui-frontend` and `kui-gateway`. **Eight** are KUI
+services and publish none: `kui-cluster`, `kui-topic`, `kui-message`, `kui-consumer`, `kui-schema`,
+`kui-metrics`, `kui-alerts` and `kui-connect` — count them, because the sentence that used to be
+here said "eight" over a list of seven, having been changed from "six" when a seventh was added. The
+remaining four are the upstreams those services have something to say about, and publish nothing
+either: a single-node Kafka broker (`kafka`), a Prometheus JMX exporter beside it
+(`kafka-metrics`), a Schema Registry (`schema-registry`) and a Kafka Connect worker
+(`kafka-connect`). The eight services are reachable only from inside the compose network, which is
+the same rule `ARCHITECTURE.md` §14 states for a real deployment — a service must not be exposed
+outside the cluster network.
 
 **The broker is new, and it is here for one reason.** This stack ran with `clusters: []` for three
 milestones because its subject is process isolation rather than Kafka. M7 ended that: the throughput
@@ -77,13 +80,15 @@ point: whether KUI can measure a cluster is a fact about the deployment's config
 about the broker, and until now only the refusal could be produced — which is why a metrics
 service containing no adapter satisfied every clause of M7's old exit criterion.
 
-Seven containers is every contract the gateway holds, and that equality is the property rather than
-the number. `services/schema` was once in `ServiceContracts.byService`, had a
-`deployment.docker.schema` image target nothing built, and appeared in neither `kui.yaml` nor this
-compose file — so the gateway published none of its routes and the smoke test could not notice,
-because a contract with no address is missing from both sides of an addresses-against-containers
-comparison. `smoke.sh` now reads the contract set as well, and
-`docker-compose.yml` has no room left for a service that is declared and unreachable.
+**Those eight `kui-*` service containers are exactly the contracts the gateway holds, and the
+equality is the property rather than the number** — `smoke.sh` derives both sides and compares them
+before it starts anything, so neither figure has to be remembered. `services/schema` was once in
+`ServiceContracts.byService`, had a `deployment.docker.schema` image target nothing built, and
+appeared in neither `kui.yaml` nor this compose file — so the gateway published none of its routes
+and the smoke test could not notice, because a contract with no address is missing from both sides
+of an addresses-against-containers comparison. It reads the contract set as well now, and its
+failure message says *which* of the three facts is missing: in wave 6 it fired with the container
+and the address both present and told the reader to add the two things that were already there.
 
 `kui-metrics` answers both ways here, which it could not do before: `ok` with a series for the
 `measured` cluster, and a 200 saying `not_configured` for `unmeasured`, whose dashboard cards then
@@ -92,15 +97,28 @@ the gateway derives a service's public routes from the contract it holds *and* t
 given — so a metrics container that is absent is not a quiet feature, it is a feature the browser
 cannot tell apart from an outage.
 
-This is the stack that grows. `kui-alerts` is M8's, and it is here: the alerts service runs the
-rules KUI applies to facts it already measures, and `smoke.sh` asserts that its feed answers with an
-`evaluatedAt` and a named list of the rules it ran, rather than that it found something — a healthy
-broker correctly produces no events, and a feed of zeros nobody can distinguish from a service that
-evaluated nothing is precisely what this product refuses. M9 adds two more beside it, and
-`docker-compose.yml` still carries a commented slot naming the container and the address each of
-`kui-connect` and `kui-ksql` will take, so that adding one is a copy of `kui-consumer` and two more
-edits rather than a reshaping of the file. `kui-metrics` and `kui-alerts` are that recipe already
-applied, and are the worked examples to read beside it.
+This is the stack that grows. `kui-alerts` is M8's: the alerts service runs the rules KUI applies to
+facts it already measures, and `smoke.sh` asserts that its feed answers with an `evaluatedAt` and a
+named list of the rules it ran, rather than that it found something — a healthy broker correctly
+produces no events, and a feed of zeros nobody can distinguish from a service that evaluated nothing
+is precisely what this product refuses.
+
+`kui-connect` is M9's first half and is here on the same terms. `kafka-connect` beside it is a
+real Kafka Connect worker with **no connector registered in it**, and that is deliberate: an empty
+list from a worker that answered is a measured empty list, and a connector planted to make the
+screen look busy would erase the difference between it and a worker that cannot be reached.
+`smoke.sh` therefore asserts the `Section` status rather than the length of the list — and it reads
+the path to ask on out of the gateway's own merged OpenAPI document rather than writing one here,
+because a hard-coded path that 404s cannot be told apart from a path that was typed wrongly, and an
+unroutable service is the thing this file's checks exist to catch.
+
+M9's other half adds `kui-ksql`, and `docker-compose.yml` still carries a commented slot naming the
+container and the address it will take, so that adding it is a copy of `kui-consumer` and three more
+edits rather than a reshaping of the file. `kui-metrics`, `kui-alerts` and `kui-connect` are that
+recipe already applied, and are the worked examples to read beside it — `kui-connect` in particular,
+because it is the one that added the fourth edit: a service whose whole subject is an upstream this
+stack does not already run needs that upstream here too, or the capability document reports the
+whole service `not_configured` and `smoke.sh` is right to refuse it.
 
 Check that the gateway can reach every service, and that a request really does travel through one:
 
@@ -223,11 +241,32 @@ reader is in.
 **The traffic step is smaller than this file used to claim, and the claim was measured wrong.** It
 said Kafka creates most of its MBeans on the first event they count, so an idle broker publishes
 only the three broker-wide `BrokerTopicMetrics` meters and nothing else the dashboard needs.
-Measured on this stack, cold, twenty-five seconds after `up --wait`, with no client having touched
-the broker: **all twelve line shapes are served.** Produce and FetchConsumer p99 at `0.0`, both
-purgatory sizes at `0.0`, `requesthandleravgidlepercent` at 0.958, `networkprocessoravgidlepercent`
-at 0.399. Kafka creates `RequestMetrics` beans eagerly, one per ApiKey; what is lazy is the
-per-**topic** slice of `BrokerTopicMetrics`, which needs that topic's first byte.
+Measured on this stack, cold, with no client having touched the broker: **all twelve line shapes are
+served.** Produce and FetchConsumer p99 at `0.0` and both purgatory sizes at `0.0`. Kafka creates
+`RequestMetrics` beans eagerly, one per ApiKey; what is lazy is the per-**topic** slice of
+`BrokerTopicMetrics`, which needs that topic's first byte.
+
+**The two idle ratios are not a fixed reading, and this file used to publish one of them as though
+they were.** It quoted `requesthandleravgidlepercent` at 0.958 and `networkprocessoravgidlepercent`
+at 0.399 as *the* cold-idle values. They are the values at one moment. Re-measured here on
+`apache/kafka:4.3.1` with `docker compose up -d --wait kafka kafka-metrics` and nothing else running,
+sampling the exporter every twenty seconds from the instant Compose called it healthy:
+
+| seconds after `up --wait` returned | `networkprocessor` | `requesthandler` (1-min rate) |
+| ---------------------------------- | ------------------ | ----------------------------- |
+| ~5                                 | 0.377              | 0.973                         |
+| ~15                                | 0.485              | 0.976                         |
+| ~35                                | 0.998              | 0.984                         |
+| ~75                                | 0.999              | 0.991                         |
+| ~115                               | 1.000              | 0.996                         |
+
+Both are warm-up transients on a stack with no traffic in it: the broker's own start-up — the
+controller handshake, the coordinator's first writes — is the only thing in the window, and the
+window then empties. So the old 0.399 and the 0.999 a later reader will get are the same broker at
+different ages, and neither reading contradicts the other. **Nothing in this repository asserts
+either number**: `smoke.sh` asserts that both line shapes are *served*, which is the property the
+ring gauges need, and says nothing about their values. Quote a value from this table only with the
+age beside it.
 
 So the traffic step earns its place for two assertions rather than twelve: the per-topic byte rate
 the Top producers card is drawn from, and `bytesinpersec_total`/`bytesoutpersec_total` above zero,
@@ -236,11 +275,14 @@ twelve honest zeroes. The read-back specifically is what moves bytes **out**; a 
 that counter at zero for ever. It used to be justified by a sentence saying it was the only way to
 make the broker publish a `FetchConsumer` percentile, which the paragraph above disproves.
 
-CI runs it in the end-to-end job, right after the eight backend images are built, so that a broken
-compose file is caught by the same run that builds the artefacts it describes. That list is derived
-from this compose file rather than written into the workflow, because it was written into the
-workflow, said five, and was wrong for a milestone. The interface's image is not one of the eight
-and Compose builds it here, which adds a few minutes to a cold run and nothing to a warm one.
+CI runs it in the end-to-end job, right after the backend images are built, so that a broken compose
+file is caught by the same run that builds the artefacts it describes. **The count is not written
+down anywhere and that is the point**: the list is derived from the `image: kui-*` lines in this
+compose file rather than typed into the workflow, because it was once typed into the workflow, said
+five, and was wrong for a milestone. It is nine today — the gateway and the eight services — and
+`docker compose -f deployment/compose/docker-compose.yml config --format json` is what says so. The
+interface's image is not one of them: it carries a `build:` stanza and Compose makes it here, which
+adds a few minutes to a cold run and nothing to a warm one.
 
 The interface is unaffected throughout. It is a static file server that proxies `/api/`, so it has
 nothing to lose when a KUI service dies: the page still loads, and what an operator sees is the

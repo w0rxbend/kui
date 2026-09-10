@@ -45,11 +45,11 @@ export {
   type SeverityFilter,
   type StateFilter,
 } from "./model.js";
-export { feedSection, FEED_KEY } from "./wire.js";
-export {
-  acknowledge,
-  ACKNOWLEDGEMENT_PATH,
-  EVENTS_PATH,
-} from "./data.js";
+/*
+ * No feed reader and no feed address. Both are `@kui/kernel`'s: one `createAlerts` store answers
+ * the bell in the shell's chrome and this screen's card, and a second decoder beside it is what
+ * wave 5's producers wire cost. `data.ts`'s header says which side of the wire lives where.
+ */
+export { acknowledge, ACKNOWLEDGEMENT_PATH } from "./data.js";
 
 export { default } from "./AlertsRoute.jsx";

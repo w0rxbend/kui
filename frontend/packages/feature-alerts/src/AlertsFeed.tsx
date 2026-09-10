@@ -130,6 +130,10 @@ export function AlertsFeed(props: AlertsFeedProps): JSX.Element {
       case "forbidden":
         return "You do not have permission to read this cluster's alerts.";
       default: {
+        /* A page the *reader's* filter emptied and a feed the *service* is holding nothing in are
+           two different facts with two different things to do about them, and only one of them is
+           about the cluster. Saying `NO_EVENTS` here would tell an operator who had just clicked
+           "Critical" that KUI is holding no events at all. */
         if (cardState() === "filtered") return NO_MATCHES;
         if (cardState() !== "empty") return undefined;
         /* Two empty feeds, two opposite facts. Rules that have run and opened nothing is a
@@ -159,6 +163,10 @@ export function AlertsFeed(props: AlertsFeedProps): JSX.Element {
         code={props.state.kind === "failed" ? props.state.code : undefined}
         caption={caption()}
         stateAction={
+          /* `failed` and nothing else. A `forbidden` read is not a read that might work next time,
+             and a Retry beside it teaches the operator that this product's retries do nothing —
+             the rule this file's header states and `alerts.test.tsx`' "offers no retry on a read
+             this principal may not make" is the case for. */
           <Show when={props.state.kind === "failed" && props.onRetry !== undefined}>
             <Button variant="secondary" icon="refresh" onClick={() => props.onRetry?.()}>
               Retry
@@ -210,6 +218,13 @@ export function AlertsFeed(props: AlertsFeedProps): JSX.Element {
       </Card>
     </Show>
   );
+}
+
+/** Why acknowledgement is unavailable, in the caller's words or in the general ones. */
+function refusalReason(given: string | undefined): string {
+  return given === undefined || given.trim() === ""
+    ? "You do not have permission to acknowledge alerts on this cluster."
+    : given;
 }
 
 interface AlertRowProps {
@@ -285,10 +300,11 @@ function AlertRow(props: AlertRowProps): JSX.Element {
                 variant="secondary"
                 icon="check"
                 disabled
-                disabledReason={
-                  props.acknowledgeRefusal ??
-                  "You do not have permission to acknowledge alerts on this cluster."
-                }
+                /* A disabled control that does not say why is a dead end: the operator cannot tell
+                   "you may not do this" from "this build is broken". `??` alone would let a caller
+                   pass an empty string and produce exactly that, so a blank reason falls back too —
+                   there is no arrangement of props that draws this button without a sentence. */
+                disabledReason={refusalReason(props.acknowledgeRefusal)}
               >
                 Acknowledge
               </Button>

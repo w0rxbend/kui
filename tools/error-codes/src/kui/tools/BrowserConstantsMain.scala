@@ -73,6 +73,21 @@ object BrowserConstantsMain {
         }
     }
 
+  /** The one decision `main` had left: whether this outcome ends the process, and with what.
+    *
+    * `if outcome.status != 0 then sys.exit(outcome.status)` was the last line of `main`, so it was reachable
+    * by no case: changing `!= 0` to `< 0` left `./mill frontend.apiConstants --check` at `234/234 SUCCESS`
+    * while it printed *"is out of date"* over a genuinely stale committed file, and the CI step that exists
+    * to catch a forgotten regeneration would have passed it. [[decide]] was already a seam and the mutation
+    * was not in [[decide]] -- it was in the two characters that translate a decision into an exit status,
+    * which is why the fix is another value and not another case over the same function.
+    *
+    * `None` means the process ends normally. A `Some` is the status `sys.exit` is called with, and `main` may
+    * do nothing else with it.
+    */
+  private[tools] def exitStatus(outcome: Outcome): Option[Int] =
+    Option.when(outcome.status != 0)(outcome.status)
+
   def main(args: Array[String]): Unit = {
     val checkOnly = args.contains("--check")
     val target = args.find(!_.startsWith("--")).map(Paths.get(_)).getOrElse(defaultTarget)
@@ -80,7 +95,7 @@ object BrowserConstantsMain {
     val outcome = decide(target, checkOnly, BrowserConstants.render(ErrorCode.values.toList), read(target))
     outcome.write.foreach(content => write(target, content))
     println(outcome.message)
-    if outcome.status != 0 then sys.exit(outcome.status)
+    exitStatus(outcome).foreach(status => sys.exit(status))
   }
 
   private def read(target: Path): Option[String] =

@@ -32,6 +32,7 @@ import { render } from "@solidjs/web";
 import { flush } from "solid-js";
 
 import { Actions, CapabilityStatuses, Resources, SseEventNames } from "@kui/api";
+import { ALERTS_EVENT_NAME } from "@kui/kernel";
 
 import { App } from "./App.jsx";
 import { SEARCH_DEBOUNCE_MS } from "./data/search.js";
@@ -187,6 +188,33 @@ function announce(frame: unknown): void {
     );
   }
   stream.emit(SseEventNames.Capabilities, frame);
+  flush();
+}
+
+/**
+ * Delivers one ADR-053 change frame down a named cluster's alert stream.
+ *
+ * The address again, and not "the newest stream": there are two kinds of stream open and, on a case
+ * that switches cluster, more than one of this kind. `announce`'s own comment records what
+ * `live.at(-1)` cost when the shell opened its second stream, and this is the same rule applied to
+ * the streams that arrived with it.
+ *
+ * Frames are delivered **without** letting the re-read they trigger land, deliberately. The count
+ * on the frame is what the bell draws in the moment before the read answers — that is the whole
+ * reason `AlertChangeDto` carries one — and a case that awaited the read would be asserting the
+ * read's count instead, which is the same number from the same place and proves nothing about the
+ * frame.
+ */
+function announceAlerts(cluster: string, frame: unknown): void {
+  const address = `/api/v1/clusters/${cluster}/alerts/stream`;
+  const stream = [...SilentEventSource.live].reverse().find((source) => source.url === address);
+  if (stream === undefined) {
+    throw new Error(
+      `no alert stream is open at ${address}; the shell opened ` +
+        JSON.stringify(SilentEventSource.opened),
+    );
+  }
+  stream.emit(ALERTS_EVENT_NAME, frame);
   flush();
 }
 
@@ -642,7 +670,8 @@ describe("the frame, given a cluster in the address", () => {
             unreadCount: 3,
             lastReadAt: "2026-09-06T06:00:00.000Z",
             /* When the rules last ran. Without it the count is not a count — see the case below,
-               and `openCountOf` in `data/alerts.ts`. */
+               and the kernel store's `knownOpenCount`, which is now the only place that rule is
+               applied. */
             evaluatedAt: "2026-09-06T08:59:00.000Z",
           },
         },
@@ -888,6 +917,171 @@ describe("the frame, given a cluster in the address", () => {
     expect(asked).toContain("/api/v1/clusters/staging-eu-01/alerts/events");
 
     app.dispose();
+  });
+
+  /** A feed the rules have run over, so the bell has a real figure to be moved off. */
+  const EVALUATED_FEED: unknown = {
+    events: {
+      status: "ok",
+      fetchedAt: "2026-09-06T09:00:00.000Z",
+      data: {
+        items: [],
+        openCount: 7,
+        unreadCount: 0,
+        evaluatedAt: "2026-09-06T08:59:00.000Z",
+      },
+    },
+  };
+
+  const badgeOf = (host: HTMLElement): string | undefined =>
+    host.querySelector("[data-testid='notifications'] .kui-bell__badge")?.textContent ?? undefined;
+
+  /**
+   * Which cluster a stream frame is allowed to move this bell for.
+   *
+   * The guard is one line in `App.tsx` — `cluster: () => clusterForFrame()` on the store's options
+   * — and the kernel reads it as `if (mine !== undefined && change.cluster !== mine) return`.
+   * Passing `() => undefined` therefore does not *loosen* the check, it **deletes** it: the store
+   * stops having a cluster to compare against and every frame on the connection moves the count.
+   * That was green across every case in this package, because nothing had ever pushed a frame
+   * naming a cluster other than the one the frame is describing.
+   *
+   * It is not a hypothetical shape. The gateway's relay carries one cluster's stream today, and the
+   * store is built **once** and restarted per cluster — so a frame in flight when the operator
+   * switches, or a relay that ever multiplexes, lands on a bell that is now describing somewhere
+   * else. A number from a cluster nobody is looking at, on the one control that is meant to say
+   * whether this cluster is on fire.
+   *
+   * Both directions in one case, because the refusal alone is satisfiable by a store that ignores
+   * every frame — which is exactly what the wave-6 stream did for two weeks.
+   */
+  it("takes a stream frame for its own cluster, and refuses one for another", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster({ "/api/v1/clusters/prod-kyiv-01/alerts/events": EVALUATED_FEED });
+    const app = mountApp();
+    await settled();
+    announce(healthy("prod-kyiv-01", "staging-eu-01"));
+
+    expect(badgeOf(app.host)).toBe("7");
+
+    /* A frame naming the cluster the operator has *not* got open, down the connection this cluster
+       opened. 147 rather than 8, so the mutation's symptom is unmistakable: the badge would read
+       `9+`, which no other state on this case can produce. */
+    announceAlerts("prod-kyiv-01", {
+      cluster: "staging-eu-01",
+      openCount: 147,
+      at: "2026-09-06T09:01:00.000Z",
+    });
+    expect(badgeOf(app.host)).toBe("7");
+
+    /* And this cluster's own frame moves it in the same breath, which is what makes the line above
+       a filter rather than a bell that has stopped listening. */
+    announceAlerts("prod-kyiv-01", {
+      cluster: "prod-kyiv-01",
+      openCount: 9,
+      at: "2026-09-06T09:02:00.000Z",
+    });
+    expect(badgeOf(app.host)).toBe("9");
+
+    app.dispose();
+  });
+
+  /**
+   * No cluster in the address, and therefore no feed at all.
+   *
+   * The guard is `if (chosen === undefined) return undefined;` at the head of the per-cluster
+   * effect, and deleting it left every case green — because every case that cares about alerts
+   * mounts on a cluster's address. What it costs is two requests to addresses that match no route:
+   * `GET /api/v1/clusters//alerts/events` and an `EventSource` on
+   * `/api/v1/clusters//alerts/stream`, the second of which reconnects on its own schedule for as
+   * long as the operator stays on `/ui/settings`. The comment block above the guard discusses at
+   * length which *other* line in the same effect is safely deletable, which is precisely the kind
+   * of paragraph that reads as a test and is not one.
+   *
+   * The capability stream is asserted open in the same case, so this cannot pass by the shell
+   * having failed to start.
+   */
+  it("opens no alert feed and no alert stream until an address names a cluster", async () => {
+    window.history.replaceState({}, "", "/ui/settings");
+    stubCluster();
+    const app = mountApp();
+    await settled();
+
+    expect(SilentEventSource.opened.filter((url) => url.includes("/alerts/"))).toEqual([]);
+    expect(SilentEventSource.opened).toContain("/api/v1/capabilities/stream");
+
+    const asked = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((call) => {
+        const first = call[0];
+        return typeof first === "string" ? first : (first as Request).url;
+      })
+      .map((url) => new URL(url, "http://kui.test").pathname);
+    expect(asked.filter((path) => path.includes("/alerts/"))).toEqual([]);
+    // And nothing was asked about the empty cluster under any other spelling either.
+    expect(asked.filter((path) => path.startsWith("/api/v1/clusters//"))).toEqual([]);
+
+    app.dispose();
+  });
+
+  /**
+   * A refusal is not a retry, and the widening that breaks it does not look like a widening.
+   *
+   * `onRetryNotifications` is handed over only when the feed `kind` is `failed`. Widening that to
+   * `!== "loading"` is green across the whole package, and it puts a Try-again button under *"You
+   * do not have permission to see this cluster's alerts."* — a control that is refused every time
+   * it is pressed, which is the one thing this product's error copy is written to avoid.
+   *
+   * The packet that shipped the guard disclosed it as gated, citing the not-configured case above.
+   * That case cannot fail: `NotificationPanel` draws no retry in its `not_configured` arm at all,
+   * whatever `onRetry` it is handed. `forbidden` is the status that reaches the panel *as* a
+   * failure — `noticesOf` maps it to `{ kind: "failed" }` with a permission sentence — so it is the
+   * only state where the widening is visible, and it is the state this case drives.
+   */
+  it("offers no Try again under a refusal, and one when the read actually failed", async () => {
+    window.history.replaceState({}, "", "/ui/clusters/prod-kyiv-01");
+    stubCluster({
+      "/api/v1/clusters/prod-kyiv-01/alerts/events": {
+        events: { status: "forbidden", fetchedAt: "2026-09-06T09:00:00.000Z" },
+      },
+    });
+    const refused = mountApp();
+    await settled();
+    announce(healthy("prod-kyiv-01"));
+
+    refused.host.querySelector<HTMLButtonElement>("[data-testid='notifications']")!.click();
+    flush();
+    const refusedPanel = refused.host.querySelector("[data-testid='notification-panel']")!;
+    expect(refusedPanel.textContent).toContain("You do not have permission");
+    expect(refusedPanel.textContent).not.toContain("Try again");
+    refused.dispose();
+
+    /* The other half, so the rule is a distinction and not a button nobody ever draws. An upstream
+       that did not answer is worth asking again, and this is the state that says so. */
+    SilentEventSource.live.length = 0;
+    SilentEventSource.opened.length = 0;
+    stubCluster({
+      "/api/v1/clusters/prod-kyiv-01/alerts/events": {
+        events: {
+          status: "unavailable",
+          fetchedAt: "2026-09-06T09:00:00.000Z",
+          /* The envelope's own spelling: `reason` is the code and `message` is the sentence beside
+             it, which is what `decodeSection` reads and what `readReason` folds into a
+             `SectionReason`. */
+          reason: "KUI-UPSTREAM-UNAVAILABLE",
+          message: "The alerts service did not answer.",
+        },
+      },
+    });
+    const broken = mountApp();
+    await settled();
+    announce(healthy("prod-kyiv-01"));
+
+    broken.host.querySelector<HTMLButtonElement>("[data-testid='notifications']")!.click();
+    flush();
+    const brokenPanel = broken.host.querySelector("[data-testid='notification-panel']")!;
+    expect(brokenPanel.textContent).toContain("The alerts service did not answer.");
+    expect(brokenPanel.textContent).toContain("Try again");
+    broken.dispose();
   });
 
   /**

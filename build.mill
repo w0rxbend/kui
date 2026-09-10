@@ -1469,6 +1469,13 @@ object services extends Module {
         // endpoint lives in that contract module's JVM half for exactly this reason -- a relay has to be
         // written against an endpoint value the gateway can see.
         alerts.contract.jvm,
+        // The connect service's contract, and the tenth entry. This edge is landed by the packet that owns
+        // `build.mill` **before** any of its own work, and it is house rule 15 rather than a preference:
+        // `services/alerts` shipped complete and unroutable in wave 6 because exactly this line — one
+        // service's contract on the gateway's `moduleDeps` — belonged to no packet, so the module was
+        // built, the row was written, and the edge between them was nobody's. A partition over files does
+        // not partition the edges between them.
+        connect.contract.jvm,
         // The identity service's contract. Alone among them it is *not* proxied: `AuthRoutes` calls its
         // login, password and OpenID Connect endpoints itself, because a sign-in has to end in a session
         // cookie and sessions live at the gateway.
@@ -2893,6 +2900,209 @@ object services extends Module {
     }
   }
 
+  /** `kui-connect-service`: the connectors a Kafka Connect cluster is running, and the three buttons.
+    *
+    * The **tenth** service, and the second written against `services/metrics` as the worked example rather
+    * than inventing a shape. It differs from the metrics service in one way and from the alerts service in
+    * another, and both differences are visible in the module list below.
+    *
+    * It holds **no Kafka client**. Every fact it reports comes from the Connect workers' REST API, which is
+    * why `libs.kafka` appears nowhere here and `services/schema` — the other service whose whole subject is
+    * an HTTP upstream — is what its `infrastructure` module looks like.
+    *
+    * It keeps **no store**. A connector's state is a fact the worker holds and KUI reads; there is nothing
+    * with a lifetime for KUI to remember, so there is no buffer, no evaluation loop and no retention. That is
+    * also what decides the answer to "what does an operator see while a restart is in flight": the next read
+    * of the worker, and ADR-054 §5 says so rather than implying a stream that does not exist.
+    */
+  object connect extends Module {
+
+    /** What a connector and its tasks *are*, and nothing that can perform I/O.
+      *
+      * Rule A1 allows it `libs/kernel` and cats-core. `ConnectName`, `ConnectorName` and `TaskId` are all
+      * `libs/kernel` types shipped in wave 1 and unused until now, so the domain names a connector the way
+      * the rest of the product already does rather than passing strings.
+      */
+    object domain extends KuiPureModule with KuiJvmModule {
+      def moduleDeps = Seq(libs.kernel.jvm)
+      def mvnDeps    = Seq(mvn"org.typelevel::cats-core::${Versions.cats}")
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm)
+      }
+    }
+
+    /** The use cases: list the connectors of every configured worker, and pause, resume or restart one.
+      *
+      * `libs.securityCore.jvm` is here for `Principal`, `MutationOutcome` and `AuditPrincipal`, which ADR-047
+      * declares once for every service that writes an audit record — the same edge the consumer, topic and
+      * alerts services declare, and for the same reason.
+      */
+    object application extends KuiJvmModule {
+      def moduleDeps = Seq(domain, libs.securityCore.jvm)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The adapters: the Connect REST API, the credentials each worker wants, and the audit line an
+      * operation writes.
+      *
+      * `libs.config` carries `ConnectClusterSettings`, which is the only place the workers' addresses exist.
+      * There is no `libs.cache` and no `libs.kafka`: nothing here is remembered between requests and nothing
+      * here speaks to a broker.
+      */
+    object infrastructure extends KuiJvmModule {
+      def moduleDeps = Seq(domain, application, libs.config, libs.kernel.jvm, libs.http, libs.observability)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"io.circe::circe-parser::${Versions.circe}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** Server logic: contract to application, `KuiError` to the HTTP envelope, principal verification and the
+      * OpenAPI document. It starts nothing.
+      */
+    object api extends KuiJvmModule {
+      def moduleDeps = Seq(
+        application,
+        contract.jvm,
+        libs.kernel.jvm,
+        libs.contractsCore.jvm,
+        libs.securityCore.jvm,
+        libs.observability,
+        libs.http
+      )
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"io.circe::circe-core::${Versions.circe}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-cats-effect::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-openapi-docs::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.apispec::openapi-circe::${Versions.apispec}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      private def openApiTarget: String = (moduleDir / "openapi.json").toString
+
+      def openApi(): Command[Unit] = Task.Command {
+        runMain("kui.connect.api.OpenApiDocument", openApiTarget)()
+      }
+
+      def openApiCheck(): Command[Unit] = Task.Command {
+        runMain("kui.connect.api.OpenApiDocument", openApiTarget, "--check")()
+      }
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}",
+          // The stub interpreter runs the real interceptor chain and the real routes without a socket,
+          // which is the only way to assert that a permission refusal happens *before* the worker is
+          // called rather than that a use case would have refused if it had been reached.
+          mvn"com.softwaremill.sttp.tapir::tapir-sttp-stub4-server::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+          mvn"com.softwaremill.sttp.client4::cats::${Versions.sttp}",
+          mvn"io.circe::circe-parser::${Versions.circe}"
+        )
+      }
+    }
+
+    /** The composition root: the one place in the connect service that constructs anything concrete. */
+    object app extends KuiJvmModule {
+      def moduleDeps = Seq(api, infrastructure, libs.config, libs.observability, libs.http)
+
+      def mvnDeps = Seq(
+        mvn"org.typelevel::cats-core::${Versions.cats}",
+        mvn"org.typelevel::cats-effect::${Versions.catsEffect}",
+        mvn"co.fs2::fs2-io::${Versions.fs2}",
+        mvn"com.softwaremill.sttp.client4::core::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.client4::fs2::${Versions.sttp}",
+        mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+        mvn"com.softwaremill.sttp.tapir::tapir-server::${Versions.tapir}",
+        mvn"org.typelevel::log4cats-core::${Versions.log4cats}",
+        mvn"org.typelevel::otel4s-core::${Versions.otel4s}"
+      )
+
+      /** The same runtime set every KUI process needs: a logging backend, a JSON encoder for it and the
+        * telemetry exporters. None is named in code, and all are needed by a process with a `main`.
+        */
+      def runMvnDeps = Seq(
+        mvn"ch.qos.logback:logback-classic:${Versions.logback}",
+        mvn"net.logstash.logback:logstash-logback-encoder:${Versions.logstash}",
+        mvn"io.opentelemetry:opentelemetry-exporter-otlp:${Versions.otelSdk}",
+        mvn"io.opentelemetry:opentelemetry-exporter-prometheus:${Versions.otelSdk}-alpha"
+      )
+
+      object test extends ScalaTests with KuiTests {
+        def moduleDeps = super.moduleDeps ++ Seq(libs.testkit.jvm, domain.test)
+
+        def mvnDeps = super.mvnDeps() ++ Seq(
+          mvn"org.typelevel::munit-cats-effect::${Versions.munitCatsEffect}"
+        )
+      }
+    }
+
+    /** The published wire shape of `kui-connect-service`, cross-compiled so the browser decodes exactly what
+      * this service encodes, from one source (ADR-003).
+      *
+      * There is no `src-jvm` here and no stream endpoint. Connect publishes no change feed of its own — its
+      * REST API is poll-only — so there is nothing to relay and house rule 16 has nothing to ask for.
+      * ADR-054 §5 states that as a decision with its cost rather than leaving it to be inferred from an
+      * absent file.
+      */
+    object contract extends Module {
+
+      trait Shared extends KuiModule with PlatformScalaModule {
+        def mvnDeps = Seq(
+          mvn"org.typelevel::cats-core::${Versions.cats}",
+          mvn"io.circe::circe-core::${Versions.circe}",
+          mvn"io.circe::circe-parser::${Versions.circe}",
+          mvn"com.softwaremill.sttp.tapir::tapir-core::${Versions.tapir}",
+          mvn"com.softwaremill.sttp.tapir::tapir-json-circe::${Versions.tapir}"
+        )
+      }
+
+      object jvm extends Shared with KuiJvmModule {
+        def moduleDeps = Seq(libs.contractsCore.jvm, libs.securityCore.jvm)
+
+        object test extends ScalaTests with KuiTests with KuiCrossTests
+      }
+
+    }
+  }
+
 }
 
 /** Deployable processes assembled out of the modules above.
@@ -2948,6 +3158,13 @@ object apps extends Module {
       // screen: a deployment without this service would draw a bell nothing can ever answer for.
       services.alerts.app,
       services.alerts.api,
+      // The connect service, whose answer for a deployment that configures no Connect worker is
+      // `not_configured` per cluster — which is a fact the drawer needs from a running service, exactly as
+      // it is for the schema and metrics services. This edge is landed with the module rather than by the
+      // packet that writes the `AllInOneWiring` entry, because that packet does not own `build.mill` and
+      // an edge with no owner is invisible to every gate here (house rule 15).
+      services.connect.app,
+      services.connect.api,
       libs.config,
       libs.observability,
       libs.http
@@ -3363,6 +3580,22 @@ object deployment extends Module {
       def entryClass       = "kui.alerts.app.Main"
       def livenessPath     = "/health/live"
       def imageDescription = "KUI alerts service"
+    }
+
+    /** The Connect service: the connectors each configured worker is running, and the three operations.
+      *
+      * Packaged like every other service even though most deployments configure no Connect cluster at all.
+      * Running it then is correct and is what the all-in-one image does: it answers `not_configured` per
+      * cluster, which is the fact the browser needs in order to hide the row rather than draw one that can
+      * never fill. The image target is named here because the packet that adds the container cannot edit
+      * this file (house rule 15).
+      */
+    object connect extends KuiImage {
+      def deployable       = services.connect.app
+      def imageName        = "kui-connect"
+      def entryClass       = "kui.connect.app.Main"
+      def livenessPath     = "/health/live"
+      def imageDescription = "KUI Kafka Connect service"
     }
 
     /** The whole product in one process (ADR-005). */

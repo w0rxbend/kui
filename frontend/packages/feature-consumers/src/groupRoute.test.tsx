@@ -44,7 +44,8 @@ import { KuiProvider, clearToasts, toasts, type KuiContextValue } from "@kui/ker
 import { Actions, type KuiApiClient } from "@kui/api";
 
 import { mount, testContext } from "./testing.js";
-import { GroupRoute } from "./GroupRoute.jsx";
+import { GroupRoute, consequenceOfDelete, consequenceOfForget } from "./GroupRoute.jsx";
+import { SAMPLE_GROUP_DETAIL } from "./fixtures.js";
 import groupDocument from "./recorded/group.json" with { type: "json" };
 
 const CLUSTER = "quickstart";
@@ -61,6 +62,22 @@ async function settle(times = 8): Promise<void> {
 function memberlessGroup(): unknown {
   const copy = JSON.parse(JSON.stringify(groupDocument)) as Record<string, unknown>;
   copy["members"] = [];
+  return copy;
+}
+
+/**
+ * A second group id, held by nobody in the recording.
+ *
+ * Chosen so that it is not a substring of anything else the recorded document carries — the member
+ * ids contain `indexer`, the topics contain `analytics` — because the case that uses it asks
+ * whether the *other* group's name is on the page.
+ */
+const OTHER_GROUP = "orders-writer";
+
+/** The recorded group renamed, so that "which group is drawn" is readable off the page. */
+function groupNamed(groupId: string): unknown {
+  const copy = memberlessGroup() as Record<string, unknown>;
+  copy["groupId"] = groupId;
   return copy;
 }
 
@@ -97,17 +114,38 @@ function groupHoldingThreeTopics(): unknown {
 }
 
 /**
- * A `permits` that answers yes to everything except one action.
+ * A `permits` that answers yes to everything except one action — optionally, except on one group.
  *
  * Compared field by field rather than by identity: `Actions.…` is a frozen literal today, and a
  * case that relied on the two being the same object would start passing for the wrong reason the
  * day the constants are generated as a mapped type.
+ *
+ * ## `exceptOn`, and why this helper had to grow a second parameter
+ *
+ * For two waves this compared `{resource, action}` and **discarded the name**, so it answered the
+ * same thing to `permits(action)` and to `permits(action, groupId)`. That made the subject in
+ * `GroupRoute`'s `mayReset`/`mayDelete` unobservable: dropping `props.groupId` from either call
+ * left every case in this package green. A grant carries a *pattern* —
+ * `kernel/src/state/session.ts` is explicit that the subjectless form asks "the weaker question …
+ * the right answer for a list heading and the wrong one for a row's delete button" — so an account
+ * granted `CONSUMER_GROUP:RESET_OFFSETS` on `analytics.*` answers **yes** to the subjectless
+ * question and **no** on `orders-writer`. `exceptOn` is that principal: denied the action everywhere except on
+ * the group it names, and yes when nobody names a group at all.
  */
-function permitsAllBut(denied: {
-  readonly resource: string;
-  readonly action: string;
-}): KuiContextValue["permits"] {
-  return (asked) => asked.resource !== denied.resource || asked.action !== denied.action;
+function permitsAllBut(
+  denied: {
+    readonly resource: string;
+    readonly action: string;
+  },
+  options: { readonly exceptOn?: string } = {},
+): KuiContextValue["permits"] {
+  return (asked, name) => {
+    if (asked.resource !== denied.resource || asked.action !== denied.action) return true;
+    if (options.exceptOn === undefined) return false;
+    // The weaker question, answered the way the server answers it: they do hold this action on
+    // something, and only a named subject can turn that into a refusal.
+    return name === undefined || name === options.exceptOn;
+  };
 }
 
 /** What `POST …/offsets/plan` and `POST …/offsets` both answer with: a plan, and its token. */
@@ -152,6 +190,17 @@ function stub(options: {
   readonly forgetFails?: string;
   /** Held until this resolves, so a case can press the confirmation while the DELETE is out. */
   readonly forgetPending?: Promise<void>;
+  /**
+   * A detail document per group id, for the one case that visits two groups.
+   *
+   * The route's fetch is keyed by `{clusterId, groupId}` and the effect that runs it has a
+   * cancellation guard; the only way to observe that guard is to have two groups answering
+   * differently and to make the *first* one land last. `detail` stays for every other case, which
+   * asks about one group and does not care which.
+   */
+  readonly detailByGroup?: Readonly<Record<string, unknown>>;
+  /** Held until this resolves, per group id, so a case can move on while a GET is still out. */
+  readonly detailPending?: Readonly<Record<string, Promise<void>>>;
 }): Stub {
   const calls: string[] = [];
   const forgotten: string[] = [];
@@ -167,10 +216,17 @@ function stub(options: {
     },
   });
 
-  const get = async (path: string) => {
+  const get = async (
+    path: string,
+    init?: { readonly params?: { readonly path?: { readonly groupId?: string } } },
+  ) => {
     calls.push(`GET ${path}`);
     if (path === "/api/v1/clusters/{clusterId}/consumer-groups/{groupId}") {
-      return { ok: true, value: options.detail ?? memberlessGroup() };
+      const groupId = init?.params?.path?.groupId ?? GROUP;
+      const held = options.detailPending?.[groupId];
+      if (held !== undefined) await held;
+      const named = options.detailByGroup?.[groupId];
+      return { ok: true, value: named ?? options.detail ?? memberlessGroup() };
     }
     return { ok: false, error: { kind: "unreachable", cause: "nothing answers that here" } };
   };
@@ -240,12 +296,22 @@ function openGroup(
   api: KuiApiClient,
   /** Yes to everything unless a case says otherwise — see `testContext`. */
   permits: KuiContextValue["permits"] = () => true,
+  /** Where to start. Only the case that visits a second group ever passes this. */
+  at: string = `${BASE}/clusters/${CLUSTER}/consumer-groups/${GROUP}`,
 ): {
   readonly container: HTMLElement;
   readonly dispose: () => void;
   readonly url: () => string;
+  /**
+   * Moves the mounted route to another address, the way the group list's link does.
+   *
+   * A push onto the same history rather than a second mount: the route's cancellation guard is on
+   * the *effect that re-runs when `groupId` changes*, and a case that mounted twice would never run
+   * that effect a second time and could not see the guard at all.
+   */
+  readonly goTo: (address: string) => void;
 } {
-  const history = memoryHistory(`${BASE}/clusters/${CLUSTER}/consumer-groups/${GROUP}`);
+  const history = memoryHistory(at);
   const Router = createRouter({
     routes: [
       { path: "/clusters/:clusterId/consumer-groups/:groupId", component: GroupRoute },
@@ -262,7 +328,11 @@ function openGroup(
       <Router />
     </KuiProvider>
   ));
-  return { ...mounted, url: () => history.get() };
+  return {
+    ...mounted,
+    url: () => history.get(),
+    goTo: (address: string) => history.set({ value: address }),
+  };
 }
 
 /** A button inside one root, by the words on it. */
@@ -780,6 +850,135 @@ describe("the group page's destructive controls", () => {
     deletion.dispose();
   });
 
+  it("asks about this group, not about groups in general, before offering a delete", async () => {
+    /*
+     * ## The rule this case exists for
+     *
+     * `GroupRoute` asks `kui.permits(Actions.ConsumerGroupResetOffsets, props.groupId)` and
+     * `kui.permits(Actions.ConsumerGroupDelete, props.groupId)`. The **subject** is the rule: a
+     * grant carries a pattern, so an account granted `CONSUMER_GROUP:RESET_OFFSETS` on
+     * `analytics.*` holds the action and may not use it here. `kernel/src/state/session.ts` says
+     * it in the accessor's own docstring — the subjectless form asks "the weaker question … the
+     * right answer for a list heading and the wrong one for a row's delete button" — and this page
+     * is nothing but row-level destructive buttons.
+     *
+     * ## Why nothing could see it until now
+     *
+     * The two cases above drive `permitsAllBut`, which compared `{resource, action}` and threw the
+     * name away, so it answered identically to `permits(action)` and `permits(action, groupId)`.
+     * Dropping `props.groupId` from either call therefore left all 110 of this package's cases
+     * green while putting a **live** Forget button and a live Delete in front of an account whose
+     * grant names another group. The helper takes `exceptOn` now, which is that principal.
+     *
+     * ## The arrangement
+     *
+     * Both directions, in one case, because a screen that refused everybody would satisfy the
+     * refusal half and be just as wrong. The grant is on `analytics-indexer` in the first half and
+     * on `orders-writer` in the second, and the page is `analytics-indexer` throughout.
+     */
+    const heldHere = openGroup(
+      stub({}).api,
+      permitsAllBut(Actions.ConsumerGroupResetOffsets, { exceptOn: GROUP }),
+    );
+    await settle();
+    const resetHere = [...heldHere.container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (one) => (one.textContent ?? "").trim() === "Reset offsets",
+    );
+    expect(resetHere?.getAttribute("aria-disabled")).toBeNull();
+    expect(forgetButtons(heldHere.container)[0]?.getAttribute("aria-disabled")).toBeNull();
+    heldHere.dispose();
+
+    // The same account, with the same action, granted on a group that is not this one.
+    const heldElsewhere = openGroup(
+      stub({}).api,
+      permitsAllBut(Actions.ConsumerGroupResetOffsets, { exceptOn: OTHER_GROUP }),
+    );
+    await settle();
+    const resetElsewhere = [
+      ...heldElsewhere.container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((one) => (one.textContent ?? "").trim() === "Reset offsets");
+    expect(resetElsewhere).toBeDefined();
+    expect(resetElsewhere?.getAttribute("aria-disabled")).toBe("true");
+    if (resetElsewhere !== undefined) {
+      expect(await reasonUnder(resetElsewhere)).toContain(
+        "You do not have permission to reset this group's offsets.",
+      );
+    }
+    const forgetElsewhere = forgetButtons(heldElsewhere.container);
+    expect(forgetElsewhere.length).toBeGreaterThan(0);
+    for (const button of forgetElsewhere) {
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+    }
+    /* And it does nothing when pressed. `aria-disabled` does not stop a click reaching the
+       handler, so "marked disabled" and "does nothing" are two facts and this product has shipped
+       the first without the second. */
+    forgetElsewhere[0]?.click();
+    await settle();
+    expect(forgetConfirmations()).toHaveLength(0);
+    heldElsewhere.dispose();
+
+    // The delete control's own subject, which is a second `permits` call on a second action.
+    const deleteElsewhere = openGroup(
+      stub({}).api,
+      permitsAllBut(Actions.ConsumerGroupDelete, { exceptOn: OTHER_GROUP }),
+    );
+    await settle();
+    const destroy = [
+      ...deleteElsewhere.container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((one) => (one.textContent ?? "").trim() === "Delete group");
+    expect(destroy?.getAttribute("aria-disabled")).toBe("true");
+    if (destroy !== undefined) {
+      expect(await reasonUnder(destroy)).toContain(
+        "You do not have permission to delete this consumer group.",
+      );
+    }
+    deleteElsewhere.dispose();
+  });
+
+  it("discards a group's answer that arrives after the reader has moved on", async () => {
+    /*
+     * The `if (!cancelled)` guard in `GroupRoute`'s fetch effect, which nothing could reach while
+     * every case mounted one group and waited.
+     *
+     * The failure it prevents is the worst kind this product has: real figures for the wrong
+     * subject. The group list links straight to a group, so following two links in quick
+     * succession is an ordinary gesture; without the guard the slower request wins, and the page
+     * then shows one group's title with another group's committed offsets underneath it — which is
+     * exactly what a reset is composed from.
+     *
+     * `analytics-indexer` is held until this case releases it, so it lands *after* `orders-writer`
+     * has already been drawn. Deleting the guard leaves the last write standing and the page
+     * reverts to the group nobody is looking at.
+     */
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { api } = stub({
+      detailByGroup: { [GROUP]: groupNamed(GROUP), [OTHER_GROUP]: groupNamed(OTHER_GROUP) },
+      detailPending: { [GROUP]: held },
+    });
+    const { container, dispose, goTo } = openGroup(api);
+    await settle();
+    // Still out: the page is on its loading sentence and has drawn no group at all.
+    expect(container.textContent).toContain("Asking the coordinator");
+
+    goTo(`${BASE}/clusters/${CLUSTER}/consumer-groups/${OTHER_GROUP}`);
+    await settle();
+    expect(container.textContent).toContain(OTHER_GROUP);
+
+    release();
+    await settle();
+
+    // The heading is the assertion: `GroupDetail` draws `group.groupId`, so this is the document
+    // that reached the screen and not merely the address in the bar.
+    const heading = container.querySelector(".kui-page-head__title")?.textContent ?? "";
+    expect(heading).toBe(OTHER_GROUP);
+    expect(container.textContent).not.toContain(GROUP);
+
+    dispose();
+  });
+
   it("a successful forget closes its confirmation", async () => {
     /*
      * The dialog is a `<Show when={forgetting()}>`, and the success path both clears that signal
@@ -975,5 +1174,65 @@ describe("the group page's destructive controls", () => {
     expect(url()).toBe(`${BASE}/clusters/${CLUSTER}/consumer-groups/${GROUP}`);
 
     dispose();
+  });
+});
+
+/**
+ * The two sentences a confirmation is composed from, read directly.
+ *
+ * Both are exported from `GroupRoute` and both are called by it — `consequence={…}` on each of the
+ * page's two `ConfirmDialog`s. They are asserted here rather than only through the screen because
+ * one of `consequenceOfForget`'s two branches cannot be reached from the screen at all: the forget
+ * list is built from the offsets the group holds, so a topic it holds none on has no row to press.
+ * That branch exists for the race its own docstring names — the page was fetched before somebody
+ * else's reset landed — and deleting it is green through every case that goes via the DOM.
+ */
+describe("what a destructive confirmation promises", () => {
+  it("says KUI last read the group as holding nothing there, rather than printing a zero", () => {
+    /*
+     * The never-zero rule, in the one paragraph this product asks an operator to read before an
+     * irreversible action. With the `held === 0` branch gone the sentence reads "Removes this
+     * group's committed offsets on 0 partitions of orders.events" — a confirmation that describes
+     * an action on nothing as though it were an action, over a button that will then report
+     * "Nothing was forgotten". The two halves of that exchange have to agree before the click as
+     * well as after it, and only the receipt half had a case.
+     */
+    const nothingHeld = consequenceOfForget(SAMPLE_GROUP_DETAIL, "orders.events");
+    expect(nothingHeld).toContain(
+      "KUI last read this group as holding no committed offset on orders.events",
+    );
+    expect(nothingHeld).not.toContain("0 partitions");
+    expect(nothingHeld).not.toContain("Removes this group's committed offsets");
+
+    // And the branch beside it still names the figure, so this is a gate on the *choice* rather
+    // than an assertion that the function says something.
+    const held = consequenceOfForget(SAMPLE_GROUP_DETAIL, "clickstream");
+    expect(held).toContain("Removes this group's committed offsets on 4 partitions of clickstream");
+    // The singular, on a topic holding exactly one — `sessions` in the fixture.
+    expect(consequenceOfForget(SAMPLE_GROUP_DETAIL, "sessions")).toContain(
+      "1 partition of sessions",
+    );
+
+    // Both branches carry the part an operator forgets and the part that decides whether this is
+    // safe: nothing is deleted, and a consumer that comes back follows its own auto.offset.reset.
+    for (const sentence of [nothingHeld, held]) {
+      expect(sentence).toContain("No records are deleted");
+      expect(sentence).toContain("auto.offset.reset");
+    }
+  });
+
+  it("counts the partitions the group delete costs, in the group's own figures", () => {
+    /* The fixture holds five committed positions across two topics; the delete is about all of
+       them, which is why this counts `offsets` and not `subscriptions`. */
+    expect(consequenceOfDelete(SAMPLE_GROUP_DETAIL)).toContain(
+      "Removes the group and its committed offsets on 5 partitions",
+    );
+    expect(
+      consequenceOfDelete({
+        ...SAMPLE_GROUP_DETAIL,
+        offsets: SAMPLE_GROUP_DETAIL.offsets.slice(0, 1),
+      }),
+    ).toContain("on 1 partition.");
+    expect(consequenceOfDelete(SAMPLE_GROUP_DETAIL)).toContain("No records are deleted");
   });
 });

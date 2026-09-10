@@ -60,6 +60,26 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
     }
   }
 
+  test("retention runs from when an event opened, not from when it was last seen firing") {
+    // `bounded`'s own scaladoc states the anchor — *"An event is kept for `retention` after it opened,
+    // resolved or not"* — and nothing asserted it: swapping `_.openedAt` for `_.lastSeenAt` left the
+    // whole alerts tree green. The consequence is not cosmetic. A condition that keeps firing has its
+    // `lastSeenAt` moved on every pass, so anchoring there would keep a persistently-firing event for
+    // ever and the bound would stop being a bound. It is also the wrong question: an incident review
+    // reads a week of events, and `retention` is what the operator configured that week to mean.
+    val old = at.minusMillis(retention.toMillis + 1000L)
+    val stale = event("broker-1:/persistent", old)
+
+    store.use { held =>
+      for {
+        _ <- held.record(cluster, opening(List(stale)), old)
+        // Still firing, so this pass moves `lastSeenAt` to now and leaves `openedAt` where it was.
+        _ <- held.record(cluster, Evaluation(Nil, List(stale.id), Nil, AlertRuleState.empty, Nil), at)
+        feed <- held.feed(cluster, ada, 100, None)
+      } yield assertEquals(feed.total, 0, clue = "an event past its retention survived by still firing")
+    }
+  }
+
   test("the store keeps at most 500 events per cluster, oldest first out") {
     // 620 and 500 are both literals. Building the input as `MaxEventsPerCluster + 1` is how wave 5's
     // schema packet shipped a bound that could be raised a thousandfold with every suite green, and it is
@@ -125,6 +145,90 @@ final class InMemoryAlertStoreSuite extends CatsEffectSuite {
       } yield {
         assertEquals(feed.events.head.openedAt, at)
         assertEquals(feed.events.head.lastSeenAt, at.plusSeconds(300))
+      }
+    }
+  }
+
+  test("the open count is the whole store's and not the page's, against the shipped store") {
+    // Three open events and a page of one, asserted against `InMemoryAlertStore` rather than against a
+    // fixture that re-implements it. `AlertsRig.FakeStore` and `AlertsTestServer.CountingStore` each
+    // hand-write this method, so a case that reads one of them proves the fixture counts correctly and
+    // says nothing about the store the process runs.
+    //
+    // The `limit = 0` read is the one that matters. `AlertUseCases.acknowledge` and `AlertsRoutes.changes`
+    // both ask for zero rows and read `openCount` off the answer, so a count taken over the page would
+    // make every acknowledgement response and every SSE frame carry `openCount = 0` — the pill and the
+    // bell going dark on a cluster with three open events, with no gate in this repository red.
+    val open = List(
+      event("broker-1:/var", at),
+      event("broker-2:/var", at.plusSeconds(1)),
+      event("broker-3:/var", at.plusSeconds(2))
+    )
+
+    store.use { held =>
+      for {
+        _ <- held.record(cluster, opening(open), at.plusSeconds(2))
+        page <- held.feed(cluster, ada, 1, None)
+        none <- held.feed(cluster, ada, 0, None)
+      } yield {
+        assertEquals(page.events.size, 1)
+        assertEquals(page.total, 3)
+        assertEquals(page.openCount, 3)
+        assertEquals(page.openByRule, Map(AlertRule.DiskUsage -> 3))
+
+        assertEquals(none.events, Nil)
+        assertEquals(none.openCount, 3, clue = "the read the stream and the acknowledgement make")
+        assertEquals(none.openByRule, Map(AlertRule.DiskUsage -> 3))
+      }
+    }
+  }
+
+  test("markRead moves the marker after the unread count is taken, against the shipped store") {
+    // The read that clears the bell still reports what it cleared. Moving the marker write ahead of the
+    // count in `feed` answers `unreadCount = 0` for ever with every other case green, because the case
+    // beside this one reads the count *back* on a second request and zero is what it expects there.
+    val opened = List(event("broker-1:/var", at), event("broker-2:/var", at.plusSeconds(1)))
+
+    store.use { held =>
+      for {
+        _ <- held.record(cluster, opening(opened), at.plusSeconds(1))
+        first <- held.feed(cluster, ada, 100, Some(at.plusSeconds(60)))
+        second <- held.feed(cluster, ada, 100, None)
+      } yield {
+        assertEquals(first.unreadCount, 2, clue = "the read that clears the bell still reports it")
+        assertEquals(first.lastReadAt, None, clue = "and it reports the marker it replaced, not the new one")
+        assertEquals(second.unreadCount, 0)
+        assertEquals(second.lastReadAt, Some(at.plusSeconds(60)))
+      }
+    }
+  }
+
+  test("an acknowledgement publishes a frame, so the bell moves without a reload") {
+    // The service's one write, and the only thing an SSE subscriber can be woken by that is not a rule
+    // pass. `record`'s publication has a case above; dropping `acknowledge`'s left every case green,
+    // which means acknowledging on one tab would leave every other tab's bell showing the old count
+    // until its next poll.
+    //
+    // Deterministic in the same way as the case above: the subscription is confirmed live by recording
+    // until a frame arrives, and only then is the acknowledgement made. The wait is bounded so that a
+    // store which publishes nothing fails on the count rather than on the suite's timeout.
+    val open = event("broker-1:/var", at)
+
+    store.use { held =>
+      for {
+        seen <- Ref.of[IO, List[ClusterId]](Nil)
+        watching <- held.changes.evalMap(id => seen.update(_ :+ id)).compile.drain.start
+        _ <- (held.record(cluster, opening(List(open)), at) >> IO.sleep(20.millis))
+          .untilM_(seen.get.map(_.nonEmpty))
+        before <- seen.get.map(_.size)
+        closed <- held.acknowledge(cluster, open.id, at.plusSeconds(30), "ada")
+        _ <- IO.sleep(20.millis).untilM_(seen.get.map(_.size > before)).timeoutTo(2.seconds, IO.unit)
+        after <- seen.get
+        _ <- watching.cancel
+      } yield {
+        assertEquals(closed.map(_.isOpen), Right(false))
+        assertEquals(after.size, before + 1, clue = "the acknowledgement woke no subscriber")
+        assertEquals(after.distinct, List(cluster))
       }
     }
   }

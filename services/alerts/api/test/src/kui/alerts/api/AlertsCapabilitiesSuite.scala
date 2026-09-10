@@ -36,9 +36,16 @@ final class AlertsCapabilitiesSuite extends CatsEffectSuite {
   }
 
   test("the feature names are the endpoints' own, so one string is read on both sides") {
-    assertEquals(AlertsCapabilities.Features, AlertsEndpoints.all.flatMap(_.info.name))
-    assert(AlertsCapabilities.Features.contains(AlertsCapabilities.EventsFeature))
-    assert(AlertsCapabilities.Features.contains(AlertsCapabilities.AcknowledgeFeature))
+    // Literals, not the expression `Features` is defined as. `assertEquals(Features,
+    // AlertsEndpoints.all.flatMap(_.info.name))` restates the definition and cannot fail for any change
+    // to either side; these are the two strings the browser's capability check compares against, and a
+    // name retyped in an endpoint's `.name(...)` is exactly the drift a mirror is supposed to catch.
+    assertEquals(AlertsCapabilities.Features, List("alerts.events", "alerts.acknowledge"))
+    assertEquals(AlertsCapabilities.AcknowledgeFeature, "alerts.acknowledge")
+
+    // And every published endpoint carries a name. A nameless one drops silently out of the roster the
+    // browser reads, rather than failing anything.
+    assertEquals(AlertsCapabilities.Features.size, AlertsEndpoints.all.size)
   }
 
   test("the capability document names this service by the id the gateway is configured with") {

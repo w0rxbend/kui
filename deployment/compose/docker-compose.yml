@@ -1,5 +1,9 @@
-# KUI in its distributed shape: the interface, the gateway and all seven services as separate
+# KUI in its distributed shape: the interface, the gateway and all eight services as separate
 # containers.
+#
+# The count is prose. `docker compose -f deployment/compose/docker-compose.yml config --services`
+# is what actually says how many, and `smoke.sh` compares that set against the gateway's own
+# contract map before it starts anything, so neither number has to be remembered here.
 #
 # THIS IS A DEVELOPMENT AND TEST ENVIRONMENT, NOT A PRODUCTION DEPLOYMENT. The signing key comes
 # from an environment variable with a default in this file, there is no TLS, and the session cookie
@@ -10,7 +14,7 @@
 # `docker compose stop kui-cluster` kills an actual process, and the gateway has to keep serving the
 # UI and report the cluster service as unavailable rather than falling over with it. That is KUI's
 # central promise, and this file is where it stops being a claim. The same is true one service at a
-# time for the other five: stopping `kui-topic` must leave the messages and consumer-group screens
+# time for every other one: stopping `kui-topic` must leave the messages and consumer-group screens
 # working, which is a stronger statement than "the gateway survives" and is only checkable here.
 #
 #   docker compose -f deployment/compose/docker-compose.yml up -d --wait
@@ -34,8 +38,8 @@ services:
   # answers 503 at /ui/ and demonstrates a product nobody can look at.
   #
   # It is a first-class member of this file rather than an overlay because THIS is the stack that
-  # grows: M8 and M9 each add a service beside the six below, and every one of them has to work
-  # through a browser that is already here. The overlay `../frontend/docker-compose.frontend.yml`
+  # grows: M8 added a service beside the ones below and M9 adds two, of which Connect is the first,
+  # and every one of them has to work through a browser that is already here. The overlay `../frontend/docker-compose.frontend.yml`
   # stays for the quickstart, whose two halves are deliberately composed at the command line.
   #
   # The browser talks only to this container: nginx serves /ui/ and proxies /api/ to the gateway, so
@@ -146,6 +150,9 @@ services:
         condition: service_healthy
         required: false
       kui-alerts:
+        condition: service_healthy
+        required: false
+      kui-connect:
         condition: service_healthy
         required: false
       kui-cluster:
@@ -279,8 +286,8 @@ services:
 
   # The schema service: subjects, their versions and the compatibility level each one is under.
   #
-  # It is here because the gateway holds six service contracts and this was the sixth with no
-  # address. Until this container existed `/api/v1/capabilities` answered `cluster consumer message
+  # It is here because the gateway held six service contracts at the time and this was the sixth
+  # with no address. Until this container existed `/api/v1/capabilities` answered `cluster consumer message
   # metrics topic`, every schema screen reached a gateway that holds the contract and has nowhere to
   # send it, and the smoke test could not say so -- both sides of its equality simply omitted the
   # service. That is the identical defect `kui-metrics` was added to close one service over, and it
@@ -433,6 +440,50 @@ services:
       retries: 5
       start_period: 20s
 
+  # The connect service: the connectors each configured Kafka Connect worker is running, and the
+  # three buttons that pause, resume and restart one.
+  #
+  # It is the tenth service, and the first one whose whole subject is an HTTP upstream that is
+  # neither the broker nor the registry. `kafka-connect` below is that upstream, and it is here for
+  # exactly the reason `schema-registry` is: the capability document folds the per-cluster rows into
+  # one verdict per service (ADR-039 §2, `NotConfigured` beats everything), so a deployment where no
+  # cluster names a Connect worker reports the whole service as `not_configured` -- correct, and it
+  # would have meant teaching `smoke.sh` to expect a different answer for one of the eight. Bending
+  # the check to fit an incomplete deployment is the wrong repair, which is the sentence
+  # `schema-registry` was added under and it has not changed.
+  #
+  # The worker runs zero connectors and nothing here seeds one. That is a MEASURED empty list --
+  # a real worker was asked and named none -- and it is a different answer from `not_configured`
+  # (no address configured) and from an upstream that will not answer, which is the distinction this
+  # whole product exists to keep. A connector planted to make a screen look busy would destroy it.
+  kui-connect:
+    image: kui-connect:${KUI_VERSION:-0.1.0-SNAPSHOT}
+    container_name: kui-connect
+    command: ["--config", "/etc/kui/kui-service.yaml"]
+    environment:
+      KUI_PRINCIPAL_KEY: ${KUI_PRINCIPAL_KEY:-compose-development-key-not-for-any-real-deployment}
+      # Carried for the same reason `kui-schema` and `kui-alerts` carry it: this container mounts the
+      # file the other six mount, and that file resolves `kui.streaming.cursorKey` from this
+      # variable, so a container without it fails the load rather than ignoring a key it does not
+      # read. A pause or a restart is audited but carries no ADR-045 plan token -- neither loses
+      # anything that cannot be undone by the opposite button -- so nothing here actually signs.
+      KUI_CURSOR_KEY: ${KUI_CURSOR_KEY:-compose-development-cursor-key-not-for-any-real-deployment}
+      KUI_TELEMETRY_LOGFORMAT: text
+    volumes:
+      - ./kui-service.yaml:/etc/kui/kui-service.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - kui
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
   # ===============================================================================================
   # A BROKER, AND THE EXPORTER THAT MAKES IT MEASURABLE.
   #
@@ -549,19 +600,87 @@ services:
       - kui
     restart: unless-stopped
 
+  # A Kafka Connect worker, for the reason the registry above it is here: `kui-connect` reports what
+  # a worker tells it, and a stack with no worker makes the whole service report `not_configured`.
+  #
+  # It is the stock `apache/kafka` image running `connect-distributed.sh`, which is the same image
+  # this file already pulls for the broker -- so it adds a container and no download. The shipped
+  # `connect-distributed.properties` already sets every `*.storage.replication.factor` to 1, which
+  # is what a single-node broker needs, so the only thing rewritten is `bootstrap.servers` and the
+  # consumer group the three internal topics are coordinated under. The rewrite is a `sed` into
+  # /tmp rather than a mounted properties file, because a fourth configuration file in this
+  # directory would be one more thing `ShippedConfigurationSuite` has to be told is not KUI's.
+  #
+  # `plugin.discovery=hybrid_warn` because this worker has no plugin path of its own: the only
+  # connectors on its classpath are the MirrorMaker ones the image ships, none of which is started.
+  # Without it the worker logs a migration error about plugins it does not have.
+  #
+  # NOTHING PRODUCES A CONNECTOR HERE AND NOTHING SHOULD. `GET /connectors?expand=status` answers
+  # `{}` and that is the honest state of a worker nobody has configured; `smoke.sh` asserts that the
+  # connect service reports it as `ok` rather than that it found something, exactly as the alerts
+  # feed is asserted on `evaluatedAt` and its rule list rather than on having opened an event.
+  kafka-connect:
+    image: apache/kafka:4.3.1
+    container_name: kui-compose-kafka-connect
+    # ORDERED AFTER THE BROKER, AND THIS IS HEADROOM RATHER THAN A REPAIR -- run in both directions
+    # before the line was written, because the last `depends_on` in this file to be described as a
+    # repair turned out not to be one (see `kui-metrics` above, and house rule 9).
+    #
+    # Measured on this machine, cold from a torn-down stack, `up -d --wait` three times:
+    #
+    #   with this block:     healthy in 41s and 38s, 15 WARN/ERROR lines from the worker, none of
+    #                        them about reaching the broker
+    #   without this block:  healthy in 35s, 38 WARN/ERROR lines, 23 of them
+    #                        `Connection to node -1 (kafka:9092) could not be established`
+    #
+    # So dropping it costs nothing the stack notices: Connect's admin client retries, the worker
+    # comes up, `GET /connectors` answers, and `smoke.sh`'s connect assertion passes either way. What
+    # the block buys is that a cold `docker compose up` produces no WARN about a broker that was
+    # simply not started yet, so the warnings an operator does see are about something real. It is
+    # not `required: false` only because this is a third-party container with no KUI opinion about
+    # partial availability; the broker is genuinely the only thing it needs.
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        sed -e 's|^bootstrap.servers=.*|bootstrap.servers=kafka:9092|' \
+            -e 's|^group.id=.*|group.id=kui-compose-connect|' \
+            /opt/kafka/config/connect-distributed.properties > /tmp/connect-distributed.properties
+        printf 'listeners=http://:8083\nplugin.discovery=hybrid_warn\n' >> /tmp/connect-distributed.properties
+        exec /opt/kafka/bin/connect-distributed.sh /tmp/connect-distributed.properties
+    healthcheck:
+      # bash's `/dev/tcp` and `CMD` naming bash explicitly, for the reason `kafka-metrics` gives:
+      # this image carries neither curl nor wget, and Compose's `CMD-SHELL` runs dash, which has no
+      # `/dev/tcp` at all. A real GET of the REST resource KUI reads rather than a port check --
+      # Jetty accepts connections before Connect has finished publishing its routes.
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - "exec 3<>/dev/tcp/127.0.0.1/8083 && printf 'GET /connectors HTTP/1.0\r\n\r\n' >&3 && grep -q '200 OK' <&3"
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 15s
+    networks:
+      - kui
+    restart: unless-stopped
+
   # ===============================================================================================
-  # THE SLOT FOR THE TWO SERVICES THAT DO NOT EXIST YET.
+  # THE SLOT FOR THE ONE SERVICE THAT DOES NOT EXIST YET.
   #
-  # M9 adds `services/connect` and `services/ksql` (docs/plan/ROADMAP.md). Each is a container
-  # exactly like `kui-consumer` above: no published port, `kui-service.yaml` mounted read-only, a
-  # read-only root with a tmpfs at /tmp, and no restart policy so a test that stops it can assert
-  # what happens next without racing Docker.
+  # M9's other half adds `services/ksql` (docs/plan/ROADMAP.md); M9 was split, and Connect above is
+  # the half that landed first. It is a container exactly like
+  # `kui-consumer` above: no published port, `kui-service.yaml` mounted read-only, a read-only root
+  # with a tmpfs at /tmp, and no restart policy so a test that stops it can assert what happens next
+  # without racing Docker.
   #
-  # The names and the addresses are decided HERE, once, rather than twice by two people:
+  # The name and the address are decided HERE, once, rather than twice by two people:
   #
   #   service    container       address on this network     configuration
   #   ---------  --------------  --------------------------  ---------------------------------
-  #   connect    kui-connect     http://kui-connect:8080     kui-service.yaml
   #   ksql       kui-ksql        http://kui-ksql:8080        kui-service.yaml
   #
   # Every service listens on 8080 INSIDE its own container and publishes nothing, so there is no
@@ -573,10 +692,17 @@ services:
   # under `kui-gateway` with `condition: service_healthy` and `required: false` — the same
   # ordered-not-gated relationship every service already has, for the reason spelled out there.
   #
-  # `kui-metrics` and `kui-alerts` above are that recipe already applied: each was a row in this
-  # table until its service had an image to run. Both rows are gone from it, because the addresses
-  # they named are live containers a little way up this file, and a slot that still listed one
-  # would be a plan for something already built.
+  # There is a FOURTH edit whenever the new service's whole subject is an upstream this stack does
+  # not already run, and `kui-connect` is what taught it: `kafka-connect` had to be added beside the
+  # service, because a deployment where no cluster configures a worker makes the capability
+  # document report the whole service `not_configured`, and `smoke.sh`'s "every routed service is
+  # available" loop is right to refuse that. `services/ksql` will need a ksqlDB server for the same
+  # reason. `kui-schema` and `schema-registry` are the older worked example of the same pairing.
+  #
+  # `kui-metrics`, `kui-alerts` and `kui-connect` above are that recipe already applied: each was a
+  # row in this table until its service had an image to run. All three rows are gone from it,
+  # because the addresses they named are live containers a little way up this file, and a slot that
+  # still listed one would be a plan for something already built.
 
 networks:
   kui:

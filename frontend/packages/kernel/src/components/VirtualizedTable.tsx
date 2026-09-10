@@ -6,6 +6,7 @@ import { nextSort } from "./DataTable.jsx";
 import { EmptyState } from "./EmptyState.jsx";
 import { COMPACT_ROW_SAVING_PX, createIsCompact } from "./density.js";
 import { Icon } from "./Icon.jsx";
+import { activatesRow } from "./rowActivation.js";
 import { slice, trailingHeightPx } from "./window.js";
 
 /**
@@ -505,7 +506,18 @@ function VirtualRow<Row>(props: VirtualRowProps<Row>): JSX.Element {
       // keys do the rest. Every other row is reachable but not in the tab order.
       tabindex={props.focused ? 0 : -1}
       onFocus={() => props.onFocused(props.index)}
-      onClick={props.onActivate === undefined ? undefined : () => props.onActivate?.(props.row)}
+      // The same rule as `DataTable`'s row, from the same function: a modified click asks for the
+      // target to be opened elsewhere and this handler can only navigate the current document, so
+      // honouring it would move the tab the operator is reading out from under them while the
+      // browser opens the background tab they actually asked for. See `./rowActivation.ts`.
+      onClick={
+        props.onActivate === undefined
+          ? undefined
+          : (event: MouseEvent) => {
+              if (!activatesRow(event)) return;
+              props.onActivate?.(props.row);
+            }
+      }
     >
       <Show when={props.selection}>
         {(selection) => (
@@ -513,8 +525,9 @@ function VirtualRow<Row>(props: VirtualRowProps<Row>): JSX.Element {
             class="kui-table__cell kui-table__cell--select"
             /* A row with `onRowClick` is a control, and the checkbox is inside it. Without this,
                ticking a row would also open the object — and the list the operator was selecting
-               from would be gone, along with the ticks. `DataTable` has the same shape and does not
-               do this yet; when it is fixed there, this comment is the reason. */
+               from would be gone, along with the ticks. `DataTable` draws the same cell with the
+               same guard, and `surfaces.test.tsx` asserts both; the note that used to stand here
+               saying the other table had not been fixed yet outlived the fix. */
             onClick={(event: MouseEvent) => event.stopPropagation()}
           >
             <Checkbox

@@ -19,13 +19,23 @@
  * is the harness, not the component — in the product these all render inside the frame's `<main>`.
  * It is the only rule turned off, and turning off a second one needs a reason written here.
  *
- * ## Usage
+ * ## Usage: three commands, and the first two are not optional
  *
- *   pnpm storybook            # in one terminal
- *   node scripts/a11y-stories.mjs
- *   node scripts/a11y-stories.mjs 'chrome-|surfaces-'   # only matching story ids
+ *   pnpm build-storybook
+ *   npx --yes http-server storybook-static -p 6017 -s &      # what CI does, in the background
+ *   pnpm a11y                                                # or: node scripts/a11y-stories.mjs
+ *   node scripts/a11y-stories.mjs 'chrome-|surfaces-'        # only matching story ids
  *
- * `SB` overrides the Storybook origin (default `http://localhost:6017`).
+ * The default origin is `http://localhost:6017`, which is the **built** Storybook served as static
+ * files — the shape CI runs and the shape the sweep is calibrated against. `pnpm storybook` is the
+ * dev server and listens on **6006**, so pointing this at it needs `SB=http://localhost:6006` and
+ * gets a different thing measured: stories are compiled on demand, so the first visit to a story
+ * competes with its own build and the theme wait below is doing two jobs at once. This block used
+ * to say `pnpm storybook` and nothing else, on a port the script has never read, so the documented
+ * invocation exited 2 with "Could not reach Storybook" — the message is right and the instruction
+ * above it was wrong.
+ *
+ * `SB` overrides the origin.
  *
  * ## Exit codes, because two very different things used to look the same
  *

@@ -39,6 +39,21 @@ final class SchemaWiringSuite extends KuiIOSuite {
     )
   }
 
+  test("the bulkhead this service pins is the one the registry's upstream is built with") {
+    // The case above asserts the number; nothing asserted that the number reaches anything. Replacing
+    // `maxConcurrent = MaxConcurrentPerRegistry` with `PositiveInt.unsafe(512)` inside `upstreamConfig`
+    // left all 154 cases of this service green, so the cap in front of a single-writer registry was a
+    // constant with no consumer — which is the shape this suite was written to close for `MaxRetries`
+    // and left open beside it.
+    val registry = SchemaWiring.upstreamConfig(cluster, oauthSettings, UrlPolicy.Dev)
+    val token = SchemaWiring.tokenUpstreamConfig(cluster, oauthSettings, issuer, UrlPolicy.Dev)
+
+    assertEquals(registry.maxConcurrent.value, 16)
+    // The token endpoint is capped too: it is a separate upstream, so its own bulkhead is the only
+    // thing bounding how many client-credentials grants KUI has in flight at once.
+    assertEquals(token.maxConcurrent.value, 16)
+  }
+
   test("a refused connection is retried, because everything this service sends is idempotent") {
     // Setting a level to BACKWARD twice leaves it BACKWARD, and registering the same schema under the
     // same subject twice is idempotent by the registry's own definition — the second call answers the id

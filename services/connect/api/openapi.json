@@ -1,0 +1,627 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "KUI Connect service",
+    "version" : "1.0.0"
+  },
+  "paths" : {
+    "/internal/v1/clusters/{clusterId}/connect/connectors" : {
+      "get" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "The connectors this cluster's Connect workers are running",
+        "description" : "One section per configured Connect cluster, so a worker that is down costs one row rather than the screen, and a worker that is rebalancing says so instead of reporting no connectors. Each connector carries its tasks with their states and the worker's own failure trace. No throughput is published: the Connect REST API measures none.",
+        "operationId" : "connect.connectors",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorListResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/pause" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Pause one connector",
+        "description" : "Asks the Connect cluster to stop this connector's tasks. Nothing is deleted and `resume` puts it back, so there is no typed confirmation; it is audited, and it is refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.pause",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/resume" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Resume one paused connector",
+        "description" : "Asks the Connect cluster to start this connector's tasks again. Audited, and refused on a read-only cluster. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.resume",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/clusters/{clusterId}/connect/{connectName}/connectors/{connectorName}/restart" : {
+      "post" : {
+        "tags" : [
+          "connect"
+        ],
+        "summary" : "Restart one connector and its tasks",
+        "description" : "Asks the Connect cluster to restart this connector and its tasks. The connector resumes from its own committed offsets; what it costs is a gap in delivery while the tasks come back. The answer says what was accepted and when, and carries no connector state: the cluster applies these asynchronously and the next read of the connector list is where the change appears.",
+        "operationId" : "connect.connector.restart",
+        "parameters" : [
+          {
+            "name" : "X-Kui-Principal",
+            "in" : "header",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "X-Csrf-Token",
+            "in" : "header",
+            "description" : "The session's CSRF token (ADR-019). Required on every mutation",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "clusterId",
+            "in" : "path",
+            "description" : "The configured cluster's slug id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectName",
+            "in" : "path",
+            "description" : "The Connect cluster's name, as kui.clusters.<n>.connect[].name gives it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "name" : "connectorName",
+            "in" : "path",
+            "description" : "The connector's name, as the worker reported it",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorOperationDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid value for: header X-Kui-Principal, Invalid value for: header X-Csrf-Token",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live" : {
+      "get" : {
+        "description" : "Whether the process should be restarted. Never depends on an upstream.",
+        "operationId" : "health.live",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LivenessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready" : {
+      "get" : {
+        "description" : "Whether the service can serve requests now, and which checks say otherwise.",
+        "operationId" : "health.ready",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities" : {
+      "get" : {
+        "description" : "What this service can currently do, per cluster.",
+        "operationId" : "capabilities",
+        "responses" : {
+          "200" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceCapabilities"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CheckResult" : {
+        "title" : "CheckResult",
+        "description" : "One readiness check and its result",
+        "type" : "object",
+        "required" : [
+          "name",
+          "healthy"
+        ],
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "healthy" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClusterCapability" : {
+        "title" : "ClusterCapability",
+        "type" : "object",
+        "required" : [
+          "configured",
+          "status"
+        ],
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "features" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ConnectorListResponse" : {
+        "title" : "ConnectorListResponse",
+        "description" : "The connectors of every Connect cluster configured for this Kafka cluster. `not_configured` with a 200 when this cluster configures none",
+        "type" : "object",
+        "required" : [
+          "connectors"
+        ],
+        "properties" : {
+          "connectors" : {
+            "description" : "A part of an aggregated response: status is one of ok, stale, unavailable, forbidden, not_configured; ok and stale carry data"
+          }
+        }
+      },
+      "ConnectorOperationDto" : {
+        "title" : "ConnectorOperationDto",
+        "description" : "The worker accepted the operation. It carries no connector state: Connect applies these asynchronously, and the next read of the connector list is where the change appears",
+        "type" : "object",
+        "required" : [
+          "connect",
+          "connector",
+          "operation",
+          "acceptedAt"
+        ],
+        "properties" : {
+          "connect" : {
+            "type" : "string"
+          },
+          "connector" : {
+            "type" : "string"
+          },
+          "operation" : {
+            "type" : "string"
+          },
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "ErrorDetail" : {
+        "title" : "ErrorDetail",
+        "description" : "One request field and every rule it breaks",
+        "type" : "object",
+        "properties" : {
+          "field" : {
+            "type" : "string"
+          },
+          "restrictions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorEnvelope" : {
+        "title" : "ErrorEnvelope",
+        "description" : "The error shape every KUI endpoint returns (ADR-034)",
+        "type" : "object",
+        "required" : [
+          "code",
+          "message",
+          "correlationId",
+          "timestamp",
+          "retryable"
+        ],
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ErrorDetail"
+            }
+          },
+          "correlationId" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          },
+          "retryable" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "LivenessReport" : {
+        "title" : "LivenessReport",
+        "description" : "Whether the process should be restarted",
+        "type" : "object",
+        "required" : [
+          "alive",
+          "at"
+        ],
+        "properties" : {
+          "alive" : {
+            "type" : "boolean"
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "Map_ClusterId_ClusterCapability" : {
+        "title" : "Map_ClusterId_ClusterCapability",
+        "type" : "object",
+        "additionalProperties" : {
+          "$ref" : "#/components/schemas/ClusterCapability"
+        }
+      },
+      "ReadinessReport" : {
+        "title" : "ReadinessReport",
+        "description" : "Whether the service can serve requests now",
+        "type" : "object",
+        "required" : [
+          "ready",
+          "at"
+        ],
+        "properties" : {
+          "ready" : {
+            "type" : "boolean"
+          },
+          "checks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CheckResult"
+            }
+          },
+          "at" : {
+            "description" : "RFC 3339 timestamp in UTC",
+            "type" : "string"
+          }
+        }
+      },
+      "ServiceCapabilities" : {
+        "title" : "ServiceCapabilities",
+        "type" : "object",
+        "required" : [
+          "service",
+          "clusters"
+        ],
+        "properties" : {
+          "service" : {
+            "description" : "a KUI service: cluster, topic, message, ...",
+            "type" : "string"
+          },
+          "clusters" : {
+            "$ref" : "#/components/schemas/Map_ClusterId_ClusterCapability"
+          }
+        }
+      }
+    }
+  }
+}

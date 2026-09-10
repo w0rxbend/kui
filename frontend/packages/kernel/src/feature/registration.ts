@@ -22,8 +22,15 @@
  * All of that is *data*: a label, an icon name, a service id, a sort order. Linking against it costs
  * a few bytes in the entry chunk and pulls no feature code with it. What must never appear on this
  * side of the line is the feature's component: that is the dynamic half, reached only through
- * {@link FeatureRegistration.load}'s `import()`, and `frontend.checkBundleShape` fails the build if
- * it leaks into the entry chunk's static imports.
+ * {@link FeatureRegistration.load}'s `import()`, and `frontend/scripts/bundle-shape.mjs` — run as
+ * `pnpm bundle-shape`, and in CI — fails the build if it leaks into the entry chunk's static
+ * imports.
+ *
+ * That used to read `frontend.checkBundleShape`, a Mill task that has not existed since ADR-048:
+ * `build-tests`' `BundleShape.scala` parsed Scala.js linker output, and there is no linker output
+ * any more. This is the third copy of that sentence to be corrected; the other two were in
+ * `shell/src/features/registry.ts` and `shell/src/App.tsx`, and the reason it survived here is that
+ * a comment naming a build task is checked by nothing at all.
  */
 import type { Component } from "solid-js";
 import type { PermissionAction } from "@kui/api";
@@ -35,7 +42,17 @@ import type { IconName } from "../icon.jsx";
  * A string union rather than an enum so that a registration table is checked exhaustively and a
  * bookmark naming a feature this build does not have simply fails to match.
  */
-export type FeatureId = "clusters" | "topics" | "messages" | "consumers" | "schemas" | "alerts";
+export type FeatureId =
+  | "clusters"
+  | "topics"
+  | "messages"
+  | "consumers"
+  | "schemas"
+  | "alerts"
+  // The seventh package, `@kui/feature-connect` (M9). Widened here rather than in W7-04's own tree
+  // because this union is the kernel's and a feature may not edit it — the same two-line seam the
+  // sixth package used.
+  | "connect";
 
 /**
  * The service that backs a feature.

@@ -13,6 +13,7 @@ import kui.kernel.cluster.*
 import kui.kernel.error.ErrorCode
 import kui.kernel.{ClusterId, Secret}
 import kui.testkit.KuiIOSuite
+import kui.testkit.fakes.FakeStructuredLogger
 
 /** The seam between the three pieces of this module: the classpath check, the materializer and the
   * renderer.
@@ -93,6 +94,42 @@ final class ConnectionPropertiesSuite extends KuiIOSuite {
       location.exists(path => !JFiles.exists(JPath.of(path))),
       "the truststore outlived the properties that named it"
     )
+  }
+
+  test("turningHostnameVerificationOffIsWarnedAboutInTheLogOfTheProcessThatDidIt") {
+    // `report`'s own reason: "turning certificate hostname checking off is a decision that should
+    // appear in the log of every process that made it, not only in the configuration file of the
+    // person who made it". Deleting the warning left all 279 cases in this module and its two
+    // neighbours green — the one class of TLS downgrade KUI accepts became silent.
+    val insecure = ClusterSecurity.Ssl(TlsConfig.default.copy(verifyHostname = false))
+
+    FakeStructuredLogger[IO].flatMap { fake =>
+      ConnectionProperties
+        .resource[IO](connection(insecure), ClientPurpose.Admin, "kui-admin-prod-1", Some(fake))
+        .use(_ => fake.entries)
+        .map { entries =>
+          val warnings = entries.filter(_.level == "warn")
+          assertEquals(warnings.size, 1, clue = entries.toString)
+          assert(
+            warnings.head.message.contains("prod"),
+            clue = s"the warning does not say which cluster: ${warnings.head.message}"
+          )
+          assert(
+            warnings.head.message.contains("hostname verification"),
+            clue = warnings.head.message
+          )
+        }
+    }
+  }
+
+  test("a cluster that verifies hostnames is not warned about") {
+    // The other half, so the case above cannot be satisfied by warning on every TLS connection.
+    FakeStructuredLogger[IO].flatMap { fake =>
+      ConnectionProperties
+        .resource[IO](connection(inlineTls), ClientPurpose.Admin, "kui-admin-prod-1", Some(fake))
+        .use(_ => fake.entries)
+        .map(entries => assertEquals(entries.count(_.level == "warn"), 0, clue = entries.toString))
+    }
   }
 
   test("aMissingCloudHandlerFailsBeforeAnyFileIsWritten") {

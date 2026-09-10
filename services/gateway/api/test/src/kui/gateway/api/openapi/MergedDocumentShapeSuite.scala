@@ -5,6 +5,7 @@ import io.circe.syntax.*
 import munit.FunSuite
 import sttp.apispec.openapi.circe.*
 
+import kui.connect.contract.ConnectEndpoints
 import kui.gateway.api.routing.ServiceContracts
 import kui.gateway.contract.{ClusterOverviewEndpoints, TopicOverviewEndpoints}
 import kui.kernel.ServiceId
@@ -20,6 +21,7 @@ final class MergedDocumentShapeSuite extends FunSuite {
 
   private val cluster = ServiceId.unsafe("cluster")
   private val topic = ServiceId.unsafe("topic")
+  private val connect = ServiceId.unsafe("connect")
 
   private val merged = DocsRoutes
     .document[IO](List(cluster, topic), List("/"))
@@ -91,6 +93,32 @@ final class MergedDocumentShapeSuite extends FunSuite {
       .filter(_.info.name.exists(Set("cluster.put", "cluster.delete", "cluster.probe")))
 
     assertEquals(writes.size, 3, writes.flatMap(_.info.name).toString)
+
+    writes.foreach(endpoint =>
+      assert(
+        endpoint.attribute(kui.contracts.rbac.EndpointAuthorization.Key).isDefined,
+        s"${endpoint.info.name} carries no authorization declaration"
+      )
+    )
+  }
+
+  test("everyPublishedConnectOperationCarriesItsPermissionDeclaration") {
+    // The tenth service's three writes, counted at the gateway rather than in the contract that publishes
+    // them. `ConnectEndpoints` puts pause, resume and restart in the same object as the read, because none
+    // of them is destructive and there is no ADR-045 marker to group them by — which means the failure the
+    // topic and consumer services are protected from by having a second list is exactly the failure connect
+    // has no protection against: a write that never reaches `ServiceContracts` looks identical to a write
+    // that was never written. The names are hard-coded here for that reason. A fourth operation moves this
+    // number and has to be argued for in the change that adds it.
+    val names = Set("connect.connector.pause", "connect.connector.resume", "connect.connector.restart")
+    val writes = ServiceContracts.proxied(connect).filter(_.info.name.exists(names))
+
+    assertEquals(writes.size, 3, ServiceContracts.proxied(connect).flatMap(_.info.name).toString)
+    assertEquals(
+      writes.flatMap(_.info.name).sorted,
+      ConnectEndpoints.writes.flatMap(_.info.name).sorted,
+      "the writes the gateway proxies are not the writes the connect contract publishes"
+    )
 
     writes.foreach(endpoint =>
       assert(

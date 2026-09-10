@@ -147,7 +147,8 @@ rules:
   #
   # WHAT `.+` COSTS, AND WHY THE COST IS NOT PAID HERE. It matches Kafka's own internal topics, and
   # on an idle cluster those are the only topics with any traffic on them at all. Read off the
-  # quickstart exporter on 2026-09-07, the eight busiest per-topic lines it served:
+  # quickstart exporter on 2026-09-07, every per-topic line it served -- five of them, which is what
+  # the list below is and what the sentence introducing it used to call eight:
   #
   #   __consumer_offsets      156.96 bytes/second
   #   audit.log.raw           9.76e-235
@@ -156,19 +157,31 @@ rules:
   #   orders.v1               5.33e-48
   #
   # Every seeded topic has decayed out of the one-minute window and the coordinator has not, so a
-  # Top producers card drawn from this ruleset unfiltered names `__consumer_offsets` first by
-  # eleven orders of magnitude, in a product that keeps exactly those rows off its topics screen --
-  # `kui.topics.internalPrefix`, default `"__"` (`libs/config/.../TopicsConfig.scala:135`). Note
-  # that the default prefix is two underscores, so `_schemas` is not internal by KUI's own rule and
-  # is a real topic with a real, tiny rate.
+  # Top producers card drawn from this ruleset unfiltered names `__consumer_offsets` first -- by
+  # about FIFTY orders of magnitude over the largest of the rest (`orders.v1`, 5.33e-48: the ratio
+  # is 2.9e49) and by more than TWO HUNDRED over the next line in this list (`audit.log.raw`: the
+  # ratio is 1.6e236). This said "eleven", which is no reading of these five figures; the two
+  # comparisons are given separately because they are the two a reader might mean and they differ
+  # by a factor of 1e187.
   #
   # THE FILTERING BELONGS TO THE READER AND NOT TO THIS FILE, and that is a decision rather than an
   # omission. A rule here that excluded `__.*` would make the number unavailable to every consumer
   # of this exposition, including a future card that wants to show coordinator traffic on purpose,
-  # and it would hard-code KUI's prefix into a file that is a plain Prometheus ruleset. What KUI
-  # considers internal is a configured value that this exporter cannot read. So the exposition
-  # stays complete and `services/metrics` decides -- see ADR-052, which is where the Top producers
-  # card is settled.
+  # and it would hard-code a prefix into a file that is a plain Prometheus ruleset. So the exposition
+  # stays complete and `services/metrics` decides -- see ADR-052 §11, which is where the Top
+  # producers card is settled.
+  #
+  # AND THE PREFIX THE READER USES IS KAFKA'S, NOT KUI'S, which this comment had backwards for a
+  # wave. `TopProducers.InternalTopicPrefix` in
+  # `services/metrics/domain/src/kui/metrics/domain/BrokerReadings.scala` is the literal `"__"`,
+  # chosen because `__consumer_offsets` and `__transaction_state` are named by the broker itself --
+  # a fact about Kafka, which is what makes it something a domain forbidden to read configuration
+  # (ADR-041 rule A1) may state. `kui.topics.internalPrefix` is the deployment's own, broader rule;
+  # it defaults to `"__"` in `libs/config/src/kui/config/TopicsConfig.scala:135` and the quickstart
+  # ships it as `"_"`, and ADR-052 §11 is explicit that the ranking must NOT borrow it, because
+  # doing so would drop a customer's `_audit` topic out of a producer list with nothing on screen
+  # saying so. That is also why `_schemas` above is a real topic with a real, tiny rate rather than
+  # an excluded one: one underscore, not two.
   # ===============================================================================================
   #
   # The `help` line has to be true of the UNLABELLED line as well, and that is not a stylistic

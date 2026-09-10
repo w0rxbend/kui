@@ -4,10 +4,14 @@ import java.time.Instant
 
 import munit.FunSuite
 
+import cats.effect.IO
+
 import kui.cache.SnapshotStatus
-import kui.consumer.application.SnapshotFreshness
+import kui.consumer.application.{ClusterProfileSource, GroupSnapshots, SnapshotFreshness}
+import kui.consumer.domain.ClusterProfileView
 import kui.contracts.Section
 import kui.contracts.capability.{CapabilityState, DegradedReason, ReasonCode}
+import kui.kernel.ClusterId
 import kui.kernel.error.{ApplicationError, InfrastructureError, KuiError}
 
 /** What the consumer service is allowed to say about itself, and how a stale list is marked.
@@ -29,6 +33,8 @@ final class ConsumerCapabilitySuite extends FunSuite {
 
   private val At: Instant = Instant.parse("2026-09-06T10:00:00Z")
 
+  private val Configured: ClusterId = ClusterId.unsafe("prod")
+
   private val Broken: KuiError = InfrastructureError.Unreachable("kafka", "the coordinator is not answering")
 
   /** The `degraded` discriminator, read off the enum for the reason the production code reads it off. */
@@ -43,6 +49,45 @@ final class ConsumerCapabilitySuite extends FunSuite {
     assert(starting.configured, "a cluster that came from the profile source is configured")
     assertEquals(starting.status, Degraded)
     assertEquals(starting.reason, Some(ConsumerCapabilities.StartingMessage))
+  }
+
+  test("a configured cluster the registry has no cell for is reported as starting, not left out") {
+    /*
+     * `ConsumerCapabilities.make` is where the two sources meet, and its `case None => starting` arm was
+     * reachable by no case at all: every assertion in this file called `capabilityOf` directly. Replacing
+     * that arm with a healthy capability left `./mill services.consumer.__.test` at 201/201 green. The arm
+     * is what happens in the seconds after a restart and every time a cluster is added at run time -- the
+     * profile source already has it, the snapshot registry has not built its cell yet -- and the two wrong
+     * answers are opposite: "available" draws a healthy row over a service that cannot answer a single
+     * query, and dropping the entry makes the row vanish from the sidebar as `not_configured`.
+     */
+    val capabilities = ConsumerCapabilities.make[IO](
+      profiles = new ClusterProfileSource[IO] {
+        def profileOf(cluster: ClusterId) =
+          IO.pure(Right(ClusterProfileView(cluster, "Production", readOnly = false)))
+        def all = IO.pure(List(ClusterProfileView(Configured, "Production", readOnly = false)))
+        def changes = fs2.Stream.empty
+      },
+      // The registry that has not caught up: it holds no cell for the cluster the profile source names.
+      snapshots = new GroupSnapshots[IO] {
+        def of(cluster: ClusterId) = IO.pure(None)
+        def all = IO.pure(Nil)
+        def previousOf(cluster: ClusterId) = IO.pure(None)
+        def requestRefresh(cluster: ClusterId) = IO.pure(false)
+        def invalidate(cluster: ClusterId, reason: String) = IO.unit
+      }
+    )
+
+    capabilities.report
+      .map { reported =>
+        val entry = reported.get(Configured).getOrElse(fail("the configured cluster must be in the map"))
+
+        assertEquals(reported.keySet, Set(Configured))
+        assert(entry.configured, "a cluster the profile source named is configured")
+        assertEquals(entry.status, Degraded)
+        assertEquals(entry.reason, Some(ConsumerCapabilities.StartingMessage))
+      }
+      .unsafeRunSync()(using cats.effect.unsafe.implicits.global)
   }
 
   test("a cluster whose scrape is failing is degraded and never available") {

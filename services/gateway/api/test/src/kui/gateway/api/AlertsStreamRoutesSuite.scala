@@ -16,13 +16,22 @@ import sttp.tapir.{Endpoint, PublicEndpoint}
 import kui.alerts.contract.AlertsStreamEndpoint
 import kui.alerts.contract.dto.AlertChangeDto
 import kui.contracts.ErrorEnvelope
-import kui.gateway.api.routing.RbacPreCheck
+import kui.gateway.api.routing.{PolicyRbacPreCheck, RbacPreCheck}
 import kui.gateway.application.client.{CallContext, ServiceClient}
 import kui.http.sse.{Sse, SseEvent}
 import kui.http.upstream.CircuitEvent
 import kui.kernel.error.KuiError
 import kui.kernel.{ClusterId, ServiceId}
+import kui.security.rbac.{
+  Action,
+  ClusterFlags,
+  DefaultRole,
+  Permission,
+  RbacPolicy,
+  Resource as RbacResource
+}
 import kui.security.SignedPrincipal
+import kui.testkit.fakes.FakeStructuredLogger
 
 /** The alerts stream's gateway-specific promises, exercised through a real listener. */
 final class AlertsStreamRoutesSuite extends CatsEffectSuite {
@@ -171,4 +180,77 @@ final class AlertsStreamRoutesSuite extends CatsEffectSuite {
       assertEquals(calls, Nil, "the denied request opened an upstream stream")
     }
   }
+
+  test("a principal without ALERTS:VIEW is refused the stream before an upstream connection is made") {
+    // The case above proves the *seam* is consulted and says nothing about which permission decides. It
+    // injects `denyAll`, which refuses a caller holding every grant in the vocabulary just as readily as one
+    // holding none, so `AlertsStreamEndpoint`'s `ResourceRequirement.unnamed(Alerts, AlertsView)` could be
+    // changed to any other action, or dropped for a permission the deployment always grants, and the whole
+    // gateway suite would stay green. This one runs the gateway's real `PolicyRbacPreCheck` over two
+    // policies that differ in exactly that one grant.
+    //
+    // Both directions, because a suite that only watched the refusal would pass against a check that
+    // refuses everyone, and a stream nobody may open is not a permission model.
+    for {
+      logger <- FakeStructuredLogger[IO]
+      // One frame and then silence. `Stream.never` alone would leave the allowed half waiting on a byte
+      // that is never produced, which reads as a hang rather than as a refusal.
+      source = Stream.emit(
+        SseEvent.data(
+          AlertsStreamEndpoint.EventName,
+          AlertChangeDto(cluster.value, 2, Instant.EPOCH).asJson
+        )
+      ).covary[IO] ++ Stream.never[IO]
+      built <- client(source)
+      (upstream, opened) = built
+      check = (policy: RbacPolicy) =>
+        new PolicyRbacPreCheck[IO](policy, _ => IO.pure(ClusterFlags.Writable), logger)
+      refused <- GatewayTestServer
+        .resource(extraRoutes = AlertsStreamRoutes[IO](upstream, check(everythingButAlerts)))
+        .use(_.get(path))
+      afterRefusal <- opened.get
+      allowedResponse <- GatewayTestServer
+        .resource(extraRoutes = AlertsStreamRoutes[IO](upstream, check(alertsViewOnly)))
+        .use { server =>
+          basicRequest
+            .get(server.at(path))
+            .response(asStreamAlwaysUnsafe(Fs2Streams[IO]))
+            .send(server.backend)
+            .flatMap(response => response.body.take(1).compile.drain.as(response.code.code))
+        }
+      afterAllowance <- opened.get
+    } yield {
+      assertEquals(refused.code.code, 403, refused.body)
+      val envelope = decode[ErrorEnvelope](refused.body).fold(error => fail(error.getMessage), identity)
+      assertEquals(envelope.code, "KUI-FORBIDDEN")
+      // The point of the case: the subscription is never opened, so a caller who may not read the feed
+      // costs the alerts service nothing at all — no connection, no fiber, no `Topic` subscriber to leak.
+      assertEquals(afterRefusal, Nil, "a caller without ALERTS:VIEW opened an upstream stream")
+
+      assertEquals(allowedResponse, 200)
+      assertEquals(afterAllowance.size, 1, afterAllowance.toString)
+    }
+  }
+
+  /** Every action on every resource except the alerts ones, held through the default role.
+    *
+    * `Resource.Alerts` is excluded whole rather than by naming `AlertsView`, because `AlertsAcknowledge`
+    * implies `AlertsView` (`Action.implied`): a policy that granted the acknowledgement and withheld the
+    * read would still open this stream, and the case would then be asserting something it does not mean.
+    */
+  private val everythingButAlerts: RbacPolicy =
+    RbacPolicy(
+      Nil,
+      Some(DefaultRole(grantsFor(RbacResource.values.toList.filterNot(_ == RbacResource.Alerts))))
+    )
+
+  /** `ALERTS:VIEW`, and nothing else in the vocabulary. */
+  private val alertsViewOnly: RbacPolicy =
+    RbacPolicy(
+      Nil,
+      Some(DefaultRole(List(RbacPolicy.permission(RbacResource.Alerts, None, Set(Action.AlertsView)))))
+    )
+
+  private def grantsFor(resources: List[RbacResource]): List[Permission] =
+    resources.map(resource => RbacPolicy.allPermission(resource, None))
 }

@@ -84,6 +84,22 @@ kui:
         url: "http://kui-alerts:8080"
         timeout: "10s"
         maxConcurrent: 32
+      # The eighth address, and the tenth service KUI has. Every read is one call to a Connect
+      # worker's REST API and every write is one more, so ten seconds is the same budget the topic
+      # and consumer services get; the message service's sixty is for the one endpoint that holds a
+      # connection open while a broker decides whether it has anything to send, and nothing here
+      # does that. Connect publishes no change feed of its own, so unlike alerts this service has no
+      # stream to relay and there is nothing here that outlives a request.
+      #
+      # The three facts a service needs to be reachable are this address, a container in
+      # `docker-compose.yml`, and the contract in `ServiceContracts.byService`. `smoke.sh` reads all
+      # three before it starts anything -- and its failure message now says which of the three is
+      # missing, because in wave 6 it fired with the container and the address both present and
+      # named the two that were there.
+      connect:
+        url: "http://kui-connect:8080"
+        timeout: "10s"
+        maxConcurrent: 32
 
     # How often the gateway asks each service whether it is ready, to keep the capability registry
     # (and therefore the greyed-out parts of the UI) current.

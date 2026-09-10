@@ -107,6 +107,20 @@ final class AllInOneWiringSuite extends KuiIOSuite {
           paths.contains("/api/v1/clusters/alerts/stream"),
           s"the public alerts stream relay was not mounted; served $paths"
         )
+        // The tenth service, asserted by a path only it publishes, for the reason the alerts feed
+        // above is: adding an id to `Services` without wiring one changes nothing this list can see.
+        // `pathSegments` reads the FIXED segments off the input, so `clusters / {clusterId} /
+        // connect / connectors` renders as the string below, and no other contract has a `connect`
+        // segment at all.
+        //
+        // There is no `connect` STREAM to assert beside it and that is a decision rather than an
+        // omission: the Kafka Connect REST API publishes no change feed, so `services/connect` ships
+        // no ADR-035 endpoint, the gateway has nothing to relay, and the screens poll (ADR-054 §5).
+        // House rule 16 asks that a stream ship its relay; this is the other answer to it.
+        assert(
+          paths.contains("/api/v1/clusters/connect/connectors"),
+          s"the in-process connect service's connector list was not proxied; served $paths"
+        )
         assert(paths.contains("/api/v1/health/live"), s"the process's own probes are missing from $paths")
       }
     }
@@ -218,10 +232,10 @@ final class AllInOneWiringSuite extends KuiIOSuite {
         .map { entries =>
           val context = entries.headOption.map(_.context).getOrElse(Map.empty)
           assertEquals(context.get("deployment"), Some("all-in-one"))
-          // Nine services now, and this string broke the last time one was added -- which is what it is
-          // for. It is the first line of a KUI log and the one a reader checks against the roadmap to
-          // find out which milestone's services are actually in the binary they are running.
-          val expected = "alerts,cluster,consumer,identity,message,metrics,schema,topic"
+          // Ten services now, and this string has broken every time one was added -- which is what it
+          // is for. It is the first line of a KUI log and the one a reader checks against the roadmap
+          // to find out which milestone's services are actually in the binary they are running.
+          val expected = "alerts,cluster,connect,consumer,identity,message,metrics,schema,topic"
           assertEquals(context.get("services"), Some(expected))
         }
     }
@@ -300,11 +314,11 @@ final class AllInOneWiringSuite extends KuiIOSuite {
     // the ones somebody wrote -- so a cluster deliberately tuned to tolerate a migration starts opening
     // events again and nothing in the product says why.
     //
-    // This closes the slice half of the journey and only that half, which its name says. The other half is
-    // the argument `resource` passes to `services`, and it cannot be asserted here today: unlike
-    // `MetricsWiring`, `AlertsWiring` writes no start-up line naming what it was configured with, so a
-    // wiring that handed it `AlertsConfig.Default` produces a process indistinguishable from a correct one
-    // until a threshold is crossed against a real broker. That is filed rather than faked.
+    // This closes the slice half of the journey and only that half, which its name says. The other half --
+    // the argument `resource` passes to `services` -- is the case below, and it could not be written until
+    // `AllInOneWiring.logAlertThresholds` existed: `AlertsWiring` still writes no start-up line naming what
+    // it was configured with, so before that line a wiring that handed it `AlertsConfig.Default` produced a
+    // process indistinguishable from a correct one until a threshold was crossed against a real broker.
     val configured = AlertsConfig.Default.copy(
       retention = 36.hours,
       thresholds = AlertThresholds.Default.copy(diskUsedWarningPercent = 55)
@@ -314,6 +328,65 @@ final class AllInOneWiringSuite extends KuiIOSuite {
     // And the default is still the default, so a deployment that configured nothing is not made to look
     // like one that tuned something.
     assertEquals(AllInOneConfig.Default.alerts, AlertsConfig.Default)
+  }
+
+  test("theConfiguredAlertsSectionReachesTheAlertRulesAndNotJustTheSlice") {
+    // The seam, mounted rather than composed, and the twin of the metrics case above. `resource` is what
+    // the process runs, and the only thing between the operator's `kui.alerts` and the rules is the
+    // argument it passes to `services`. Replacing it with `AlertsConfig.Default` -- which is what this
+    // wiring did for a whole wave with nothing observing it -- leaves every other case in this file green,
+    // including the slice case above, because none of them mounts the wiring with a tuned section and then
+    // asks what the process made of it.
+    //
+    // EVERY FIELD OF THE LINE AND NOT ONE OF THEM. Asserting only the disk threshold was measured to
+    // leave the other six replaceable by a constant with `./mill apps.allinone.test` green -- which is the
+    // same shape of hole one level down as the one this case exists to close, and a threshold that reached
+    // the rules while `rebalanceDuration` did not is exactly as silent as the whole section being dropped.
+    // The fixture therefore moves all seven values off their defaults, so no default can satisfy any of
+    // them. `alerts.source` is asserted beside them, because a line that reported the right numbers under
+    // the wrong provenance would be the same defect again.
+    wire(configuredWithTunedAlertThresholds).use { (_, logger) =>
+      logger.entries.map { entries =>
+        def logged(field: String): List[String] = entries.flatMap(_.context.get(field))
+
+        assertEquals(logged("alerts.source"), List("kui.alerts"), clue = entries)
+        assertEquals(logged("alerts.retention"), List("36 hours"), clue = entries)
+        assertEquals(logged("alerts.evaluationInterval"), List("17 seconds"), clue = entries)
+        assertEquals(logged("alerts.offlinePartitions"), List("3"), clue = entries)
+        assertEquals(logged("alerts.underReplicatedPartitions"), List("7"), clue = entries)
+        assertEquals(logged("alerts.rebalanceDuration"), List("11 minutes"), clue = entries)
+        assertEquals(logged("alerts.diskUsedWarningPercent"), List("55"), clue = entries)
+        assertEquals(logged("alerts.diskUsedCriticalPercent"), List("66"), clue = entries)
+      }
+    }
+  }
+
+  test("aDeploymentThatTunedNothingIsNotMadeToLookLikeOneThatDid") {
+    // The other half, and the reason the case above cannot be satisfied by always claiming a tuned section:
+    // the default deployment -- the quickstart, the demonstration, every stack in this repository that
+    // writes no `kui.alerts` -- has to keep saying so. Both are true of `AlertsConfig.Default` and only one
+    // is true of a wiring that lost the section.
+    wire().use { (_, logger) =>
+      logger.entries.map { entries =>
+        def logged(field: String): List[String] = entries.flatMap(_.context.get(field))
+
+        assertEquals(logged("alerts.source"), List("shipped defaults"), clue = entries)
+        // The values are printed here too, and are asserted against the constants rather than against
+        // literals: an operator comparing a tuned deployment with an untuned one reads both lines, so a
+        // line that named the provenance and printed nothing would answer half the question.
+        assertEquals(logged("alerts.retention"), List(AlertsConfig.DefaultRetention.toString), clue = entries)
+        assertEquals(
+          logged("alerts.evaluationInterval"),
+          List(AlertsConfig.DefaultEvaluationInterval.toString),
+          clue = entries
+        )
+        assertEquals(
+          logged("alerts.diskUsedWarningPercent"),
+          List(AlertThresholds.DefaultDiskUsedWarningPercent.toString),
+          clue = entries
+        )
+      }
+    }
   }
 
   /** One cluster, so that the metrics service has a row to have an answer about.
@@ -341,6 +414,30 @@ final class AllInOneWiringSuite extends KuiIOSuite {
       metrics = MetricsConfig.Default.copy(
         sources = Map(
           unmeasuredCluster.id -> MetricsSourceSettings(SafeUrl.unsafe("http://exporter:9404/metrics"))
+        )
+      )
+    )
+
+  /** A deployment whose operator tuned the alert thresholds — the migration case ADR-053 describes.
+    *
+    * EVERY value is moved off its default, and that is the whole design of the fixture: a field left at
+    * `AlertsConfig.Default`'s value is a field the case above cannot tell apart from a wiring that dropped
+    * the section, so it would be asserted and gated by nothing. Each value is also inside the bounds
+    * `libs/config` enforces — 36h is within the 1h..90d retention window, 17s within 5s..1h, 11 minutes
+    * within 10s..1h, and 66 stays above the 55 warning, which the loader requires.
+    */
+  private val configuredWithTunedAlertThresholds: AllInOneConfig =
+    AllInOneConfig.Default.copy(
+      clusters = List(unmeasuredCluster),
+      alerts = AlertsConfig(
+        retention = 36.hours,
+        evaluationInterval = 17.seconds,
+        thresholds = AlertThresholds(
+          offlinePartitions = 3,
+          underReplicatedPartitions = 7,
+          rebalanceDuration = 11.minutes,
+          diskUsedWarningPercent = 55,
+          diskUsedCriticalPercent = 66
         )
       )
     )

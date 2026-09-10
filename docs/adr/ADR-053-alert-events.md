@@ -186,6 +186,12 @@ else, and reusing `AlertsAcknowledge` for "I have looked at the list" would mean
 operator could not clear their own unread mark either — a much worse consequence of §1 than the one
 §1 accepts. Widening the vocabulary is a change to a file this wave's partition gives to nobody.
 
+Because this is a parameter rather than an endpoint, dropping it between the route and the store is
+invisible in the response: what `markRead` changes is the *next* read, so every assertion about the
+document that comes back still holds. The claim is therefore made against what the store was handed —
+`AlertsRoutesSuite`'s *"a markRead=true query reaches the store rather than being decoded and thrown
+away"*, which reads the argument off the fixture on the far side of the route.
+
 The cost, stated plainly: **a GET with a side effect is unusual, and it carries no CSRF header.** The
 side effect is on KUI's own per-principal bookkeeping and never on a cluster; a forged request
 achieves nothing but clearing the caller's own unread dot; and no information is disclosed that the
@@ -249,8 +255,10 @@ topic and a replay, which is `libs/config`'s metadata store and a milestone of i
   paths, 68 operations and 154 component schemas. `./mill services.gateway.api.openApiCheck` keeps
   both generated views aligned with the endpoint values.
 - `ServiceContracts.byService` gains a ninth service, `AllInOneWiring` gains an entry and the compose
-  stack gains a container. All three are other packets' files and are named in W6-01's
-  `needsOutsideOwnership`.
+  stack gains a container — and there is a **fourth** edge, which belonged to none of the three and is
+  the reason the service was unroutable for a wave: `alerts.contract.jvm` in `services.gateway.api`'s
+  `moduleDeps` in `build.mill`. A service is reachable only when all four exist, and the first three
+  are each visible in a suite while the fourth is visible only in a compile that nobody was running.
 - **The change stream needs a hand-written gateway relay, and the endpoint is placed so that one can
   be written.** `ContractRouting.derive` decodes and re-encodes an upstream's JSON, which is the
   wrong thing to do to a stream, so every stream a browser reads has a relay of its own in
@@ -262,6 +270,34 @@ topic and a replay, which is `libs/config`'s metadata store and a milestone of i
   now rewrites that endpoint to `GET …/alerts/stream`, performs the edge authorization check, and
   relays the service's bytes to the browser without decoding the stream. The card and the bell use
   that change signal and fall back to polling `…/alerts/events` if the connection drops.
+- **The routing status of the stream, because it was 404 for the length of a wave and a green suite
+  said nothing.** The service shipped complete, imaged and contracted with no relay in front of it:
+  `AlertsStreamEndpoint` was in `ServiceContracts` reach and `ContractRouting.derive` cannot carry an
+  event stream, so every unit case passed and `GET …/alerts/stream` answered 404 through the gateway.
+  What closes that gap is `services/gateway/api/src/kui/gateway/api/AlertsStreamRoutes.scala`, added
+  after the fact, asserted by `AlertsStreamRoutesSuite`, and mounted by `AllInOneWiring` as well as by
+  the compose stack. Two things follow for anyone reading this document to build against: a contract
+  entry is **not** a route for a stream, and the only evidence that this one is reachable is a
+  `curl -N` through the gateway that prints a frame — no Scala suite in this repository can produce
+  it, because none of them binds the gateway and the service to one another.
+- **This wire has committed documents, and the SSE event name travels in one of them.**
+  `services/alerts/contract/test/resources/golden/*.json` holds six documents rendered by this
+  service's own encoders — the feed in three shapes, an acknowledgement, a change frame, and the SSE
+  frame with its event name beside its payload. `AlertResponsesSuite` asserts each against the encoder,
+  and `GoldenFilesSuite` reconciles the roster against the directory itself, by repository path rather
+  than off the classpath — because the path is what the browser reads and a classpath copy would let it
+  move. The event name is in the sixth document because it is the one field of this wire that is not a
+  DTO: the server writes frames under `AlertChangeDto.EventName`, the browser listens under a constant
+  of its own, and `tools/error-codes` writes the five SSE names by hand with no `SseEventName.Alerts`
+  for either side to read — so the two spellings are a hand-copied pair that nothing compares. The
+  server half of the comparison is landed here. The browser half is one assertion, and until it is
+  written the mirror is still a copy: `frontend/packages/kernel`'s `ALERTS_EVENT_NAME` must be asserted
+  against `alerts-stream-frame.json`'s `event` field, the way `overview/wire.golden.test.ts` reads the
+  metrics documents.
+- **`acknowledge` publishes on the change topic, and that is what the relay carries.** The store's
+  one write wakes every subscriber for that cluster; without it the stream would deliver only rule
+  passes, so a bell cleared on one tab would stay lit on every other until its next poll.
+  `InMemoryAlertStoreSuite` asserts the publication for both writers.
 - **The stream is not in the capability document's `features` list**, because that list is derived
   from `AlertsEndpoints.all` and the stream cannot be in it. A browser therefore learns the feed and
   the acknowledgement from the capability row and the stream's address from this document. It is a

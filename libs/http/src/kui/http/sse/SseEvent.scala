@@ -67,8 +67,13 @@ object SseEvent {
     * `SseSuite` asserts them here, so the two halves cannot drift apart.
     *
     * `data` is split on newlines and written as one `data:` line each, which is what the SSE format requires
-    * and what the browser rejoins with a newline. Compact JSON never contains one, so in practice this is a
-    * single line; it matters for a caller that hands over pretty-printed JSON.
+    * and what the browser rejoins with a newline. `payload` is `noSpaces`, which never contains a newline, so
+    * **the multi-line branch and the `case Nil` arm are both unreachable today** — there is no caller that
+    * hands over pretty-printed JSON and there cannot be one while this line renders compactly. They are kept
+    * as the correct handling of a payload that did contain one, not described as behaviour KUI relies on. The
+    * rule that keeps them unreachable is gated: `noSpaces` -> `spaces2` reddens six cases, of which
+    * `SseSuite`'s "a payload is always one data: line, because it is written compactly" is the one named for
+    * it.
     */
   def render(event: SseEvent): String = {
     val payload = event.data.noSpaces

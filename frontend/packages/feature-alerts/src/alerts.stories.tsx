@@ -2,14 +2,14 @@ import type { Meta, StoryObj } from "storybook-solidjs-vite";
 
 import { AlertsFeed } from "./AlertsFeed.jsx";
 import { RuleReports } from "./RuleReports.jsx";
-import { feedSection } from "./wire.js";
-import type { AlertsFeedPage } from "./model.js";
+import { FromDocument } from "./fixtures.jsx";
 import openDocument from "./documents/events-open.json" with { type: "json" };
 import pagedDocument from "./documents/events-paged.json" with { type: "json" };
 import emptyDocument from "./documents/events-empty.json" with { type: "json" };
 import neverEvaluatedDocument from "./documents/events-never-evaluated.json" with { type: "json" };
 import unknownDocument from "./documents/events-unknown-vocabulary.json" with { type: "json" };
 import darkRuleDocument from "./documents/events-dark-rule.json" with { type: "json" };
+import staleRuleDocument from "./documents/events-stale-rule.json" with { type: "json" };
 
 /**
  * The alerts card (`SCREENS-V4.md` §3.8), in every state it has.
@@ -19,9 +19,11 @@ import darkRuleDocument from "./documents/events-dark-rule.json" with { type: "j
  * all, a severity this build has never heard of, a page whose count is larger than its rows — and
  * those are the states this project's defects have always lived in.
  *
- * Every story renders a **document**, decoded by the same `feedSection` the product calls, rather
- * than a hand-built object. A story built from a literal is a drawing of what the author believed
- * the server sends.
+ * Every story renders a **document**, and it renders it through the same `@kui/kernel` store the
+ * shell drives rather than through a decoder of this package's own: the feature had a second reader
+ * of this wire until wave 7 and nothing in the product ever called it. A story built from a literal
+ * is a drawing of what the author believed the server sends; a story built from a second decoder is
+ * a drawing of what one of the two readers believed it.
  */
 const meta: Meta<typeof AlertsFeed> = {
   title: "Screens/Alerts",
@@ -39,12 +41,6 @@ type Story = StoryObj<typeof AlertsFeed>;
 const NOW = new Date("2026-03-04T09:41:00Z");
 const now = (): Date => NOW;
 
-function page(document: unknown): AlertsFeedPage {
-  const section = feedSection(document);
-  if (section.status !== "ok") throw new Error(`the fixture is ${section.status}, not ok`);
-  return section.data;
-}
-
 const noop = (): void => {};
 
 /**
@@ -55,19 +51,18 @@ const noop = (): void => {};
  */
 export const TheScreenshot: Story = {
   render: () => (
-    <AlertsFeed state={{ kind: "ready", value: page(openDocument) }} onAcknowledge={noop} now={now} />
+    <FromDocument document={openDocument}>
+      {(state) => <AlertsFeed state={state} onAcknowledge={noop} now={now} />}
+    </FromDocument>
   ),
 };
 
 /** The Alerts screen's layout: full width, the age at the far edge. Same rows, two layouts (§3.8). */
 export const FullWidth: Story = {
   render: () => (
-    <AlertsFeed
-      wide
-      state={{ kind: "ready", value: page(openDocument) }}
-      onAcknowledge={noop}
-      now={now}
-    />
+    <FromDocument document={openDocument}>
+      {(state) => <AlertsFeed wide state={state} onAcknowledge={noop} now={now} />}
+    </FromDocument>
   ),
 };
 
@@ -79,25 +74,33 @@ export const FullWidth: Story = {
  */
 export const CountLargerThanThePage: Story = {
   render: () => (
-    <AlertsFeed state={{ kind: "ready", value: page(pagedDocument) }} onAcknowledge={noop} now={now} />
+    <FromDocument document={pagedDocument}>
+      {(state) => <AlertsFeed state={state} onAcknowledge={noop} now={now} />}
+    </FromDocument>
   ),
 };
 
 /** The service answered and is holding nothing. A sentence about the source, and no count. */
 export const AnsweredAndEmpty: Story = {
-  render: () => <AlertsFeed state={{ kind: "ready", value: page(emptyDocument) }} now={now} />,
+  render: () => (
+    <FromDocument document={emptyDocument}>
+      {(state) => <AlertsFeed state={state} now={now} />}
+    </FromDocument>
+  ),
 };
 
 /**
  * The same empty card, over a cluster the rules have never run on.
  *
- * Hold it beside the story above: identical picture, opposite fact. One says the rules ran and found
- * nothing; this one says nobody has looked, and the pill says so rather than drawing a reassuring
- * zero. It is the whole of the product's central promise in two stories.
+ * Hold it beside the story above: identical picture, opposite fact. One says the rules ran and
+ * found nothing; this one says nobody has looked, and the pill says so rather than drawing a
+ * reassuring zero. It is the whole of the product's central promise in two stories.
  */
 export const NeverEvaluated: Story = {
   render: () => (
-    <AlertsFeed state={{ kind: "ready", value: page(neverEvaluatedDocument) }} now={now} />
+    <FromDocument document={neverEvaluatedDocument}>
+      {(state) => <AlertsFeed state={state} now={now} />}
+    </FromDocument>
   ),
 };
 
@@ -127,23 +130,38 @@ export const NotAnswering: Story = {
   ),
 };
 
-/** A principal who may read alerts and not acknowledge them. No retry: there is nothing to retry. */
+/**
+ * A principal who may read alerts and not acknowledge them.
+ *
+ * **No retry, and the handler is passed on purpose.** `forbidden` is not a read that might work
+ * next time; a Retry button here cannot work, and the story is drawn with `onRetry` given
+ * so that what it shows is the card refusing to offer one rather than the card not having
+ * been handed one.
+ */
 export const MayNotRead: Story = {
-  render: () => <AlertsFeed state={{ kind: "forbidden" }} now={now} />,
+  render: () => <AlertsFeed state={{ kind: "forbidden" }} onRetry={noop} now={now} />,
 };
 
 /** The last answer KUI received, with the reason above it and no invented code beside it. */
 export const Stale: Story = {
   render: () => (
-    <AlertsFeed
-      state={{
-        kind: "stale",
-        value: page(openDocument),
-        reason: "The alerts service has not answered since 09:38.",
-      }}
-      onAcknowledge={noop}
-      now={now}
-    />
+    <FromDocument document={openDocument}>
+      {(state) => (
+        <AlertsFeed
+          state={
+            state.kind === "ready"
+              ? {
+                  kind: "stale",
+                  value: state.value,
+                  reason: "The alerts service has not answered since 09:38.",
+                }
+              : state
+          }
+          onAcknowledge={noop}
+          now={now}
+        />
+      )}
+    </FromDocument>
   ),
 };
 
@@ -160,50 +178,66 @@ export const Reading: Story = {
  */
 export const AVocabularyThisBuildDoesNotKnow: Story = {
   render: () => (
-    <AlertsFeed state={{ kind: "ready", value: page(unknownDocument) }} onAcknowledge={noop} now={now} />
+    <FromDocument document={unknownDocument}>
+      {(state) => <AlertsFeed state={state} onAcknowledge={noop} now={now} />}
+    </FromDocument>
   ),
 };
 
 /** Acknowledgement refused for this principal: the control is disabled and says why. */
 export const MayNotAcknowledge: Story = {
   render: () => (
-    <AlertsFeed
-      state={{ kind: "ready", value: page(openDocument) }}
-      acknowledgeRefusal="You do not have permission to acknowledge alerts on this cluster."
-      now={now}
-    />
+    <FromDocument document={openDocument}>
+      {(state) => (
+        <AlertsFeed
+          state={state}
+          acknowledgeRefusal="This cluster is read-only, so nothing here can be acknowledged."
+          now={now}
+        />
+      )}
+    </FromDocument>
   ),
 };
 
-/** An acknowledgement the service refused, said above the rows it did not change. */
-export const AnAcknowledgementRefused: Story = {
+/**
+ * The same disabled control with **no** reason supplied by the caller.
+ *
+ * It still says why. A disabled button with an empty tooltip cannot be told from a broken build,
+ * and the card is mounted this way by anybody who draws it beside another card without threading a
+ * refusal through — which is exactly what the dashboard does.
+ */
+export const MayNotAcknowledgeWithNoReasonGiven: Story = {
   render: () => (
-    <AlertsFeed
-      state={{ kind: "ready", value: page(openDocument) }}
-      onAcknowledge={noop}
-      acknowledgeFailure={{
-        message: "This event is already closed, so it cannot be acknowledged.",
-        code: "KUI-INVALID-STATE",
-      }}
-      now={now}
-    />
+    <FromDocument document={openDocument}>
+      {(state) => <AlertsFeed state={state} now={now} />}
+    </FromDocument>
   ),
 };
 
-/** Every row filtered out by the reader's own filter — a different sentence from an empty feed. */
+/**
+ * Every row on the page removed by the reader's own filter.
+ *
+ * A different sentence from an empty feed, and the difference is whose doing it was: this page
+ * holds three events and the reader asked for resolved criticals, of which it holds none. Saying
+ * "the alerts service is holding no events for this cluster" would blame the service for a chip.
+ */
 export const FilteredToNothing: Story = {
   render: () => (
-    <AlertsFeed
-      state={{ kind: "ready", value: page(openDocument) }}
-      filter={{ severity: "warning", state: "resolved" }}
-      now={now}
-    />
+    <FromDocument document={pagedDocument}>
+      {(state) => (
+        <AlertsFeed state={state} filter={{ severity: "critical", state: "resolved" }} now={now} />
+      )}
+    </FromDocument>
   ),
 };
 
 /** What KUI checked, with every rule answering. */
 export const TheRulesThatRan: Story = {
-  render: () => <RuleReports reports={page(openDocument).rules} />,
+  render: () => (
+    <FromDocument document={openDocument}>
+      {(state) => <RuleReports reports={state.kind === "ready" ? state.value.rules : []} />}
+    </FromDocument>
+  ),
 };
 
 /**
@@ -214,5 +248,24 @@ export const TheRulesThatRan: Story = {
  * off a rule that has not looked at a disk all afternoon.
  */
 export const ARuleThatCouldNotLook: Story = {
-  render: () => <RuleReports reports={page(darkRuleDocument).rules} />,
+  render: () => (
+    <FromDocument document={darkRuleDocument}>
+      {(state) => <RuleReports reports={state.kind === "ready" ? state.value.rules : []} />}
+    </FromDocument>
+  ),
+};
+
+/**
+ * One rule whose figure is real and old.
+ *
+ * The third thing a rule row can be, and the one that reads most like the other two: a measured
+ * figure, kept, with a line saying it has not been refreshed. Neither *"Nothing open."* alone —
+ * which claims a fresh reading — nor *"KUI could not evaluate…"*, which throws the reading away.
+ */
+export const ARuleWhoseFigureIsOld: Story = {
+  render: () => (
+    <FromDocument document={staleRuleDocument}>
+      {(state) => <RuleReports reports={state.kind === "ready" ? state.value.rules : []} />}
+    </FromDocument>
+  ),
 };

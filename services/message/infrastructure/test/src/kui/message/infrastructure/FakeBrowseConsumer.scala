@@ -158,6 +158,47 @@ object FakeBrowseConsumer {
         .make(of(log))(_ => closed.set(true))
         .map(consumer => (consumer: BrowseConsumer[IO]).asRight[KuiError])
 
+  /** The consumer as it behaves in the first moments after an assignment: several polls that return
+    * nothing at all, and only then the records.
+    *
+    * This is not a pathological case. A real consumer returns empty polls while it discovers the leaders
+    * for its assignment, which is why `BrowseTuning.emptyPollsBeforeEnd` is not zero -- and why a suite
+    * whose fake answers on the first poll cannot see that constant being wrong.
+    */
+  def openingSilentAtFirst(
+      log: Map[PartitionId, Vector[RawRecord]],
+      closed: Ref[IO, Boolean],
+      silentPolls: Int
+  ): (ClusterId, IsolationLevel) => Resource[IO, Either[KuiError, BrowseConsumer[IO]]] =
+    (_, _) =>
+      Resource
+        .make(of(log).flatMap(consumer => Ref.of[IO, Int](0).map(silence(consumer, _, silentPolls))))(_ =>
+          closed.set(true)
+        )
+        .map(_.asRight[KuiError])
+
+  private def silence(
+      underlying: FakeBrowseConsumer,
+      polled: Ref[IO, Int],
+      silentPolls: Int
+  ): BrowseConsumer[IO] =
+    new BrowseConsumer[IO] {
+      def partitions(topic: TopicName) = underlying.partitions(topic)
+      def beginningOffsets(topic: TopicName, ids: List[PartitionId]) = underlying.beginningOffsets(topic, ids)
+      def endOffsets(topic: TopicName, ids: List[PartitionId]) = underlying.endOffsets(topic, ids)
+      def offsetsForTimes(topic: TopicName, ids: List[PartitionId], millis: Long) =
+        underlying.offsetsForTimes(topic, ids, millis)
+      def assign(topic: TopicName, ids: List[PartitionId]) = underlying.assign(topic, ids)
+      def seek(topic: TopicName, partition: PartitionId, offset: Long) =
+        underlying.seek(topic, partition, offset)
+
+      def poll(timeout: FiniteDuration): IO[Either[KuiError, List[RawRecord]]] =
+        polled.getAndUpdate(_ + 1).flatMap { before =>
+          if before < silentPolls then IO.pure(List.empty[RawRecord].asRight[KuiError])
+          else underlying.poll(timeout)
+        }
+    }
+
   /** The same thing over a log the test can still write to after the browse has started.
     *
     * A live tail cannot be tested against a fixed log: the records it exists to deliver are the ones written

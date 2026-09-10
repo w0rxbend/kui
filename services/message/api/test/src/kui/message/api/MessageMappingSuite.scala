@@ -13,7 +13,7 @@ import kui.kernel.serde.{PayloadKind, SerdeName, Target}
 import kui.kernel.{Offset, PartitionId}
 import kui.message.application.BrowseEvent
 import kui.message.contract.MessageDto
-import kui.message.domain.{DecodeError, Decoded, DecodedRecord, TimestampType}
+import kui.message.domain.{DecodeError, Decoded, DecodedRecord, RenderedHeader, TimestampType}
 
 /** The field-level rules `MessageMapping` argues for at length, and which nothing asserted.
   *
@@ -38,7 +38,10 @@ final class MessageMappingSuite extends FunSuite {
       value: Decoded,
       valueSize: Int,
       errors: List[DecodeError] = Nil,
-      stamped: TimestampType = TimestampType.CreateTime
+      stamped: TimestampType = TimestampType.CreateTime,
+      headers: List[RenderedHeader] = Nil,
+      keySize: Int = 0,
+      headersSize: Int = 0
   ): DecodedRecord =
     DecodedRecord(
       partition = PartitionId.unsafe(0),
@@ -47,10 +50,10 @@ final class MessageMappingSuite extends FunSuite {
       timestampType = stamped,
       key = Decoded.absent(serde),
       value = value,
-      headers = Nil,
-      keySize = 0,
+      headers = headers,
+      keySize = keySize,
       valueSize = valueSize,
-      headersSize = 0,
+      headersSize = headersSize,
       decodeErrors = errors
     )
 
@@ -132,6 +135,77 @@ final class MessageMappingSuite extends FunSuite {
 
     assertEquals(MessageMapping.message(unstamped).timestampType, MessageDto.TimestampType.CreateTime)
   }
+
+  test("a record's headers reach the wire, because a header is how a producer says what a record is") {
+    /*
+     * Ungated until now: `headers = Map.empty[String, String]` in `MessageMapping.message` left
+     * `./mill services.message.__.test` at 204/204 green. Headers are how the Spring, CloudEvents and
+     * dead-letter conventions carry a record's type, its origin and the reason it was rejected, so a
+     * browse that quietly dropped them would show a screen of payloads nobody could place.
+     */
+    val dto = MessageMapping.message(
+      record(
+        Decoded("hi", PayloadKind.Text, serde, Map.empty),
+        2,
+        headers = List(RenderedHeader("__TypeId__", "com.example.Order"), RenderedHeader("attempt", "3"))
+      )
+    )
+
+    assertEquals(dto.headers, Map("__TypeId__" -> "com.example.Order", "attempt" -> "3"))
+  }
+
+  test("the three sizes are the key's, the value's and the headers' own, and not each other's") {
+    /*
+     * Ungated until now: swapping `keySize` and `valueSize` in `MessageMapping.message` left the suite at
+     * 204/204. These are the figures the size column is sorted on when an operator is looking for the
+     * record that is filling a partition, and three fields of the same type are the easiest thing in this
+     * file to transpose.
+     */
+    val dto = MessageMapping.message(
+      record(Decoded("hi", PayloadKind.Text, serde, Map.empty), 2048, keySize = 16, headersSize = 64)
+    )
+
+    assertEquals(dto.keySize, 16)
+    assertEquals(dto.valueSize, 2048)
+    assertEquals(dto.headersSize, 64)
+    // The domain's own arithmetic, which the browse's byte budget is spent in.
+    assertEquals(dto.keySize.toLong + dto.valueSize.toLong + dto.headersSize.toLong, 2128L)
+  }
+
+  test("every browse frame carries its own event name, because the browser dispatches on the name") {
+    /*
+     * Ungated until now: rendering a `Phase` under `EventNames.Message` left the suite at 204/204, because
+     * every case here read `frame.data` and none read `frame.name`. An SSE client subscribes by name, so a
+     * phase announcement arriving as `event: message` is decoded as a record and the browse's progress is
+     * never drawn -- with the payload perfectly valid on both sides.
+     */
+    val phase = frameFor(BrowseEvent.Phase("seeking"))
+    val message =
+      frameFor(BrowseEvent.Record(record(Decoded("hi", PayloadKind.Text, serde, Map.empty), 2)))
+    val consumed = frameFor(
+      BrowseEvent.Consumed(
+        bytes = 1L,
+        read = 1L,
+        delivered = 1L,
+        filterErrors = 0L,
+        elapsed = FiniteDuration(1L, "millis"),
+        budget = PollBudget.unsafe(10, 10L, FiniteDuration(1, "seconds"))
+      )
+    )
+
+    assertEquals(phase.name, MessageMapping.EventNames.Phase)
+    assertEquals(message.name, MessageMapping.EventNames.Message)
+    assertEquals(consumed.name, MessageMapping.EventNames.Consumed)
+    // Three frames, three names: the set is what a client's three handlers bind to.
+    assertEquals(Set(phase.name, message.name, consumed.name).size, 3)
+  }
+
+  /** The frame the browser actually receives, so these assertions read the encoder's own output. */
+  private def frameFor(event: BrowseEvent): kui.http.sse.SseEvent =
+    MessageMapping.event(event) match {
+      case Some(frame) => frame
+      case None => fail("this event must render a frame")
+    }
 
   /** The frame the browser actually receives, so these assertions read the encoder's own output. */
   private def frameOf(event: BrowseEvent): Json =

@@ -12,14 +12,41 @@
  *
  * ## How the two halves fit together, which is the service's design and not this file's
  *
- * `AlertChangeDto`'s scaladoc
- * (`services/alerts/contract/src/kui/alerts/contract/dto/AlertDtos.scala:313-321`) settles it: the
- * stream frame carries **the open count and no events**, so that one principal's unread count never
+ * `AlertChangeDto`'s scaladoc in
+ * `services/alerts/contract/src/kui/alerts/contract/dto/AlertDtos.scala` settles it: the stream
+ * frame carries **the open count and no events**, so that one principal's unread count never
  * reaches another subscriber's socket and a dropped frame costs a fetch rather than a stale screen.
- * A subscriber that sees a count it does not hold re-reads the feed it is already authorized for.
- * So this store does exactly that, in that order: take the count off the frame *first* — it is the
- * number the bell and the danger pill both draw, and it is the same for every principal — and then
- * re-read for the rows.
+ * So this store takes the count off the frame *first* — it is the number the bell and the danger
+ * pill both draw, and it is the same for every principal — and then re-reads for the rows.
+ *
+ * Every citation into that file names a **symbol**, never a line. The four line numbers this file
+ * and `./events.ts` used to carry were each eleven lines above the type they named, because the
+ * Scala moved and nothing in this repository compares a comment to a line number. A symbol survives
+ * an edit above it, and the thing that actually holds the two sides together is
+ * `./wire.golden.test.ts`, which decodes the service's own committed documents through
+ * `./events.ts` and fails when a field is renamed.
+ *
+ * ## Why every frame costs a read, and what the count on the frame is therefore for
+ *
+ * The DTO's scaladoc argues that "a subscriber that sees a number it does not hold re-reads the
+ * feed". This store deliberately does **not** implement that comparison, and the sentence is not a
+ * description of the code: {@link Alerts} re-reads on every frame it accepts. The reason is that
+ * the count is not a summary of the page. One event can close while another opens in the same
+ * evaluation pass — the net `openCount` is unchanged and both the rows and this principal's unread
+ * state have moved — so a store that skipped the read on an equal count would leave the panel
+ * showing a resolved event and the bell showing the wrong unread mark. `store.test.ts`'s
+ * *"re-reads after a same-count change because the rows may have changed"* is that case.
+ *
+ * What the count on the frame buys is not a saved fetch, it is a **saved round trip**: the bell and
+ * the danger pill move at the instant the frame lands rather than when the read it triggered comes
+ * back. That is the whole reason the service puts it there, and `openCount()` reads it — see the
+ * note on `streamed` below.
+ *
+ * The cost is one feed read per accepted frame per open tab, and it is bounded by how often the
+ * service publishes rather than by how much is happening: `AlertsRoutes.changes` emits when
+ * `AlertStore.changes` says this cluster's feed moved, and a frame naming another cluster is
+ * dropped here before any read. If that ever becomes the wrong trade the fix is a smaller feed
+ * page, not a comparison that drops real changes on the floor.
  *
  * ## The rules, each of which is a defect this product has already paid for
  *
@@ -42,14 +69,39 @@
  * - **The stream is closed before another is opened, and `stop()` really stops.** The same rule, and
  *   the same shipped defect, as `../capabilities/store.ts`: an abandoned `EventSource` is
  *   unreachable through the store and retries for the life of the tab.
+ * - **A completed read supersedes the frame's hint, on every outcome.** The hint and the read are
+ *   the same number from the same source, one of them is older, and leaving both alive is how two
+ *   screens come to draw two figures. `applyRead()` drops it first thing; `store.test.ts`'s *"a
+ *   completed read supersedes the count the frame carried"* is the case that fails when it does
+ *   not.
+ *
+ * ## Which of these accessors the product reads, measured rather than assumed
+ *
+ * Counted over the shell's and every feature package's `src`, at wave 7, excluding test and story
+ * files: `feed`, `events`, `openCount`, `unread`, `markAllRead`, `refresh`, `start` and `stop`
+ * have production callers. {@link Alerts.unreadCount}, {@link Alerts.lastReadAt} and
+ * {@link Alerts.connection} have none.
+ *
+ * `openCount()` is **the** open count, and that was settled in wave 7 rather than assumed: the
+ * shell held a second derivation (`shell/src/data/alerts.ts`'s `openCountOf`) which read the same
+ * feed under its own `evaluatedAt` rule and had never heard of `streamed`, so the two agreed until
+ * a frame arrived and disagreed from then on. It is gone. The drawer's badge, the bell and the
+ * dashboard's alerts card all read this accessor, which is what §3.8 means by one number in three
+ * places that cannot disagree.
+ *
+ * The other three are kept rather than deleted, and this is a disclosure and not a defence: they
+ * are a public interface three packages implement — `shell/src/overview/harness.tsx`'s
+ * `staticAlerts` among them — so removing a member from {@link Alerts} is an edit in two packages
+ * this one does not own. `connection()` is additionally the only observable this store has of the
+ * stream's lifecycle, and is what the case pinning *a released stream moves nothing* reads;
+ * deleting it would take that assertion with it.
  *
  * ## Why there is no poller behind the stream
  *
  * The capability store has one because the navigation is drawn from it and a frozen navigation is
  * unusable. The feed is not that: when its stream drops, what is held is real and simply not
  * current, which is what `stale` says. A second fetch path would be a second decoder against the
- * same wire, which is the pair of half-contracts this file exists to avoid. The connection is
- * exposed so a screen can say so.
+ * same wire, which is the pair of half-contracts this file exists to avoid.
  */
 import type { ApiResult } from "@kui/api";
 import { decodeSection, userMessage } from "@kui/api";
@@ -79,8 +131,9 @@ export const ALERTS_EVENT_NAME = "alerts";
 /**
  * The key the feed's section hangs off in the read's body.
  *
- * `AlertFeedResponse` is `events: Section[AlertFeedDto]`, and M8's exit criterion greps
- * `.events.status` (`docs/plan/ROADMAP.md:470-474`).
+ * `AlertFeedResponse` is `events: Section[AlertFeedDto]`, and M8's exit criterion in
+ * `docs/plan/ROADMAP.md` greps `.events.status` and `.events.data.items` for it. Cited by document
+ * and not by line: the line range this used to name moved during wave 7 and the sentence stayed.
  */
 export const ALERTS_SECTION_KEY = "events";
 
@@ -156,6 +209,14 @@ export function createAlerts(options: AlertsOptions): Alerts {
    * count on the frame is so that the bell and the pill move together at that moment rather than a
    * round trip later. It is dropped the instant a read lands, because the read's count is the same
    * number from the same source and one of them has to win.
+   *
+   * Three places clear it and one deliberately does not. `applyRead()` clears it on every outcome
+   * and `stop()` clears it as part of ending this life of the store. `markStale()` — a terminal
+   * stream failure with no read behind it — leaves it, and that is correct: the count it holds is
+   * still the last thing the server said about this cluster, it is exactly as old as the rows being
+   * shown beside it, and the feed is badged `stale` while both are on screen. There is no state in
+   * which this hint outlives a refusal, because {@link knownOpenCount} answers `null` for every
+   * feed state that holds no document.
    */
   const [streamed, setStreamed] = createSignal<number | null>(null, { ownedWrite: true });
 
@@ -203,11 +264,27 @@ export function createAlerts(options: AlertsOptions): Alerts {
     },
   };
 
+  /**
+   * Detaches the current stream: forget it, stop following it, then close it.
+   *
+   * The close is itself an event, which is what all three lines are about. `SseHandle.close()`
+   * moves the handle's own connection to `closed / "closed by the client"`, and a watcher still
+   * following it would write that into {@link Alerts.connection} — a deliberate teardown read back
+   * by the frame's connectivity banner as an outage the operator is expected to do something about.
+   *
+   * `handle = undefined` and `disposeWatch?.()` are **two independent guards on the same write**,
+   * and wave 7 measured which of them carries it by deleting each. Neither alone: the watcher
+   * checks `handle === opened` before writing, so clearing the field is sufficient on its own, and
+   * disposing the computation is sufficient on its own. `store.test.ts`'s *"says the teardown was
+   * its own, and stops following the stream it released"* goes red when **both** are removed and
+   * stays green for either one, which is what redundant depth looks like when it is measured
+   * instead of assumed. Reordering `open?.close()` above the other two reddens nothing for the same
+   * reason. That is disclosed here rather than defended: the property the case pins is *a released
+   * stream moves nothing*, and the two lines are two ways of holding it, not two rules.
+   */
   function releaseHandle(): void {
     const open = handle;
     handle = undefined;
-    // The watcher goes before the close, so that the `closed by the client` the close produces is
-    // not read back as "the server went away" and shown to the user as an outage.
     disposeWatch?.();
     disposeWatch = undefined;
     open?.close();
@@ -227,10 +304,16 @@ export function createAlerts(options: AlertsOptions): Alerts {
    * A detached root, because the store has no component around it and Solid needs an owner for a
    * computation to be disposable — the capability store, one directory over, carries the same note
    * for the same reason.
+   *
+   * This used to open with `if (stopped) return;`, which could not fire: `start()` is the only
+   * caller and it assigns `stopped = false` on the line above the call. It is deleted rather than
+   * left, because an unreachable guard reads as a considered defence of a state that does not
+   * exist, and the next person to add a caller would trust it instead of thinking. `stop()` does
+   * not route through here — it calls {@link releaseHandle} directly — and the case *"a second stop
+   * changes nothing, and a stopped store opens nothing"* holds it to that.
    */
   function connect(): void {
     releaseHandle();
-    if (stopped) return;
     const opened = options.openStream(subscriber);
     handle = opened;
     disposeWatch = createRoot((dispose) => {
@@ -250,10 +333,23 @@ export function createAlerts(options: AlertsOptions): Alerts {
     return state.kind === "ready" || state.kind === "stale" ? state.value : undefined;
   }
 
-  /** The one open-count derivation used by every consumer of this store. */
+  /**
+   * The one open-count derivation used by every consumer of this store.
+   *
+   * Two guards, and each answers a different question.
+   *
+   * `evaluatedAt === undefined` is the honest-refusal rule: a feed the rules have never run against
+   * carries `openCount: 0`, and drawing that is the most reassuring possible rendering of the one
+   * thing nobody measured. It also covers every state that holds no feed at all — `forbidden`,
+   * `not-configured`, `failed`, `loading` — because `current()` answers `undefined` for all four,
+   * which is why a live hint can never outlive a refusal even for the instant before the read that
+   * caused the refusal lands.
+   *
+   * `streamed() ?? held.openCount` is the round trip the frame saves: between a frame arriving and
+   * the read it triggered coming back, the frame's count is the newer of the two.
+   */
   function knownOpenCount(): number | null {
     const held = current();
-    // A zero before the first evaluation is no measurement at all. The service has not looked yet.
     if (held?.evaluatedAt === undefined) return null;
     return streamed() ?? held.openCount;
   }
@@ -267,6 +363,21 @@ export function createAlerts(options: AlertsOptions): Alerts {
     setFeed({ kind: "stale", value: held, reason });
   }
 
+  /**
+   * Reads the feed, and drops the answer if the store has moved on by the time it arrives.
+   *
+   * Both halves of the guard are reachable and neither implies the other.
+   *
+   * `asked !== episode` is the ordinary race: two reads in flight, the older one answering last.
+   * `stop()` raises the episode too, so it also covers a read issued before a teardown.
+   *
+   * `stopped` covers the read issued *after* one — `stop()` followed by `refresh()`, which is a
+   * Retry click landing in the same tick as the frame unmounting, and is reachable from this
+   * store's own public surface with nothing else involved. Without it that read repopulates a feed
+   * and a bell the shell has already torn down, on a session the operator may have signed out of.
+   * `store.test.ts`'s *"a refresh issued after stop() is not applied"* is that case, and it fails
+   * when this clause is weakened rather than when the whole guard is deleted.
+   */
   function read(markRead: boolean): void {
     episode += 1;
     const asked = episode;
@@ -277,9 +388,12 @@ export function createAlerts(options: AlertsOptions): Alerts {
   }
 
   function applyRead(result: ApiResult<unknown>): void {
-    // A completed read supersedes the stream hint on every outcome. Keeping the hint beside a
-    // refusal or failure would let the bell display a live count while the feed says it cannot be
-    // read, which is two answers from one store.
+    // A completed read supersedes the stream hint on every outcome — including the ordinary one,
+    // where the read simply carries a newer count than the frame that triggered it. The two are the
+    // same number from the same source and one of them is older; leaving both alive is how two
+    // screens come to draw two figures, and on a refusal it is how a bell shows a live count beside
+    // a feed that says it cannot be read. Deleting this line reddens *"a completed read supersedes
+    // the count the frame carried"* in `store.test.ts`.
     setStreamed(null);
     if (!result.ok) {
       setFeed(apiFailure(result.error));
